@@ -336,7 +336,7 @@ class KeptWindows(PacketCase):
     BODY = "B" * 1400  # more than 300, less than 1,500
 
     def _args_line(self, name, inp):
-        return packet._call(name, inp)[0]
+        return packet._call(name, inp, packet._Ids())[0]
 
     def test_every_record_writing_call_keeps_a_1400_char_body_whole(self):
         # iterate the LIVE sets packet reads: a copied literal would pass here while sampler's sets moved on
@@ -792,7 +792,7 @@ class Blinding(PacketCase):
         for leaked in ids | {SID, self.MSG_B, self.TOOLU, "123e4567-e89b-12d3-a456-426614174000",
                              "2026-09-20T10:00:01.123Z", "2026-09-20"}:
             self.assertNotIn(leaked, p.text)
-        self.assertIn("RESULT path /home/x/<uuid>.jsonl at <timestamp> id <id> tool <id> uuid <uuid>", p.text)
+        self.assertIn("RESULT path /home/x/<uuid-1>.jsonl at <timestamp-1> id <id-1> tool <id-2> uuid <uuid-2>", p.text)
 
     def test_every_place_transcript_text_enters_the_packet_is_blinded(self):
         # One distinct uuid per entry point: the operator message, a context message's text, a context
@@ -809,7 +809,7 @@ class Blinding(PacketCase):
                 self.assertNotIn(uid, p.text)
         for own in s.ids():  # the fixture's own entry uuids, timestamps and message ids never surface either
             self.assertNotIn(own, p.text)
-        for shown in ("op <uuid>", "ctx text <uuid>", "ctx args <uuid>", "unit text <uuid>", "unit args <uuid>"):
+        for shown in ("op <uuid-1>", "ctx text <uuid-2>", "ctx args <uuid-3>", "unit text <uuid-4>", "unit args <uuid-5>"):  # render order
             self.assertIn(shown, p.text)
 
     def test_the_dispatch_prompt_is_blinded(self):
@@ -819,7 +819,7 @@ class Blinding(PacketCase):
         sub.user(f"dispatch {SID} at 2026-09-20T10:00:01Z")  # the hand-back path is a separate code site
         sub.asst("h1", "All done.", stop="end_turn")
         p = self.build(top, "h1", subagents={"w": sub}, kind="handback")
-        self.assertEqual(self.section(p.text, "Dispatch prompt").strip(), "dispatch <uuid> at <timestamp>")
+        self.assertEqual(self.section(p.text, "Dispatch prompt").strip(), "dispatch <uuid-1> at <timestamp-1>")
 
     def _result_body(self, content):
         s = Seq()
@@ -838,7 +838,7 @@ class Blinding(PacketCase):
         s.asst("m1", "Done.")
         p = self.build(s, "m1")
         op = self.section(p.text, "Operator's last message")
-        self.assertEqual(op.strip(), "see notes-2026-09-20.md dated 2026-09-20 and stamped <timestamp> "
+        self.assertEqual(op.strip(), "see notes-2026-09-20.md dated 2026-09-20 and stamped <timestamp-1> "
                                      "but 2026-09-20 10:11 stays")  # HH:MM without seconds is not a timestamp here
         self.assertIn("BARE calendar date is kept everywhere", packet.__doc__)  # the docstring says what the code does
 
@@ -846,13 +846,13 @@ class Blinding(PacketCase):
     def test_api_id_needs_exactly_twenty_characters_after_the_01_prefix(self):
         nineteen, twenty = "01" + "a" * 19, "01" + "a" * 20
         self.assertEqual(self._result_body(f"x msg_{nineteen} y toolu_{nineteen}"), f"x msg_{nineteen} y toolu_{nineteen}")
-        self.assertEqual(self._result_body(f"x msg_{twenty} y toolu_{twenty}"), "x <id> y <id>")
+        self.assertEqual(self._result_body(f"x msg_{twenty} y toolu_{twenty}"), "x <id-1> y <id-2>")
 
 
     def test_datetimes_are_blinded_in_iso_and_space_separated_forms(self):
         body = self._result_body("a 2026-09-20T10:00:01+02:00 b 2026-09-20 10:00:01 c "
                                  "2026-09-20 10:00:01.250 +0200 d 2026-09-20 10:00:01Z e")
-        self.assertEqual(body, "a <timestamp> b <timestamp> c <timestamp> d <timestamp> e")
+        self.assertEqual(body, "a <timestamp-1> b <timestamp-2> c <timestamp-3> d <timestamp-4> e")
 
     def test_dates_without_a_time_and_in_file_names_stay(self):
         text = "see docs/issues/2026-09-20-the-bug.md and 2026-09-20 only, or 2026-09-20 at noon"
@@ -863,10 +863,10 @@ class Blinding(PacketCase):
     # masked cases alone cannot catch: a pattern widened to eat any digit run would satisfy them).
 
     def test_a_timestamp_glued_to_a_word_character_is_blinded_and_a_lookalike_is_not(self):
-        self.assertEqual(self._result_body("run2026-09-30T12:00:00Z"), "run<timestamp>")
-        self.assertEqual(self._result_body("id_2026-09-30 12:00:00"), "id_<timestamp>")
-        self.assertEqual(self._result_body("2026-09-30T12:00:00Zabc"), "<timestamp>abc")
-        self.assertEqual(self._result_body("2026-09-30 12:00:00x"), "<timestamp>x")
+        self.assertEqual(self._result_body("run2026-09-30T12:00:00Z"), "run<timestamp-1>")
+        self.assertEqual(self._result_body("id_2026-09-30 12:00:00"), "id_<timestamp-1>")
+        self.assertEqual(self._result_body("2026-09-30T12:00:00Zabc"), "<timestamp-1>abc")
+        self.assertEqual(self._result_body("2026-09-30 12:00:00x"), "<timestamp-1>x")
         for lookalike in ("12026-09-30 12:00:00",   # a fifth digit before the year: not a calendar date
                           "2026-09-30 12:00:001"):  # a third digit of seconds: not HH:MM:SS
             with self.subTest(lookalike=lookalike):
@@ -874,9 +874,9 @@ class Blinding(PacketCase):
 
     def test_a_uuid_glued_to_a_word_character_is_blinded_and_a_lookalike_is_not(self):
         u = "11111111-2222-3333-4444-555555555555"
-        self.assertEqual(self._result_body(f"x{u}"), "x<uuid>")
-        self.assertEqual(self._result_body(f"sid_{u}"), "sid_<uuid>")
-        self.assertEqual(self._result_body(f"{u}x"), "<uuid>x")
+        self.assertEqual(self._result_body(f"x{u}"), "x<uuid-1>")
+        self.assertEqual(self._result_body(f"sid_{u}"), "sid_<uuid-1>")
+        self.assertEqual(self._result_body(f"{u}x"), "<uuid-1>x")
         for lookalike in (f"a{u}",                                   # hex glued on: a longer hex run, not this uuid
                           f"{u}a",                                   # same on the right
                           "11111111-2222-3333-4444-55555555555g"):   # a non-hex char inside the last group
@@ -885,11 +885,98 @@ class Blinding(PacketCase):
 
     def test_an_api_id_glued_to_a_word_character_is_blinded_and_a_lookalike_is_not(self):
         body = "01" + "A" * 20
-        self.assertEqual(self._result_body(f"idmsg_{body}"), "id<id>")
-        self.assertEqual(self._result_body(f"x_toolu_{body}"), "x_<id>")
-        self.assertEqual(self._result_body(f"msg_{body}_tail"), "<id>_tail")
+        self.assertEqual(self._result_body(f"idmsg_{body}"), "id<id-1>")
+        self.assertEqual(self._result_body(f"x_toolu_{body}"), "x_<id-1>")
+        self.assertEqual(self._result_body(f"msg_{body}_tail"), "<id-1>_tail")
         lookalike = "id msg_01" + "A" * 19  # nineteen after `_01`: the length bound still holds without `\b`
         self.assertEqual(self._result_body(lookalike), lookalike)
+
+
+class NumberedPlaceholders(PacketCase):
+    """Bug 6e9d80d2be97ff43 (operator ruling 2026-09-30: numbered per packet). `_blind` replaced every uuid,
+    timestamp and API id with one constant token, so two different values read as the same one and a labeller
+    could not tell reuse from a fresh value. Now one mapping per PACKET numbers each distinct value by its first
+    appearance in READING order (operator or dispatch, context oldest to newest, then the judged message), one
+    counter per kind. Cross-section tests are the point: a per-call mapping passes every single-string test."""
+
+    U1 = "11111111-2222-3333-4444-555555555555"
+    U2 = "66666666-7777-8888-9999-000000000000"
+    U3 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    T1 = "2026-09-30T12:00:00Z"
+    T2 = "2026-09-30T12:05:00Z"
+    A1 = "msg_01" + "A" * 20
+    A2 = "msg_01" + "B" * 20
+
+    def _text(self, operator, ctx_results=(), unit_text="The decision.", unit_tools=()):
+        s = Seq()
+        s.user(operator)
+        for i, result in enumerate(ctx_results):
+            (t,) = s.asst(f"c{i}", f"Ctx {i}.", tools=[("Read", {"file_path": "x"})])
+            s.result(t, result)
+        s.asst("m9", unit_text, tools=unit_tools)
+        return self.build(s, "m9").text
+
+    def test_one_value_keeps_one_number_across_sections_and_two_values_differ(self):
+        text = self._text(f"see {self.U1}", ctx_results=[f"{self.U1} then {self.U2}"])
+        self.assertEqual(self.section(text, "Operator's last message").strip(), "see <uuid-1>")
+        self.assertIn("RESULT <uuid-1> then <uuid-2>\n", text)
+
+    def test_numbers_follow_reading_order_not_build_order(self):
+        # the judged message is rendered LAST, so its first-seen value takes the LAST number even though
+        # a build that blinds the unit before the context would number it second
+        text = self._text(f"op {self.U2}", ctx_results=[f"ctx {self.U1}"], unit_text=f"unit {self.U3} and {self.U1}")
+        self.assertEqual(self.section(text, "Operator's last message").strip(), "op <uuid-1>")
+        self.assertIn("RESULT ctx <uuid-2>\n", text)
+        self.assertEqual(self.section(text, JUDGED).strip(), "unit <uuid-3> and <uuid-2>")
+
+    def test_each_kind_has_its_own_counter(self):
+        text = self._text(f"{self.U1} {self.T1} {self.A1}", ctx_results=[f"{self.T2} {self.T1} {self.A2} {self.A1}"])
+        self.assertEqual(self.section(text, "Operator's last message").strip(), "<uuid-1> <timestamp-1> <id-1>")
+        self.assertIn("RESULT <timestamp-2> <timestamp-1> <id-2> <id-1>\n", text)
+
+    def test_a_repeat_inside_one_string_and_in_call_arguments_shares_the_number(self):
+        text = self._text(f"{self.U1} and {self.U1}", unit_tools=[("run_command", {"command": f"echo {self.U1}"})])
+        self.assertEqual(self.section(text, "Operator's last message").strip(), "<uuid-1> and <uuid-1>")
+        self.assertIn('run_command({"command": "echo <uuid-1>"})', self.section(text, JUDGED))
+
+    def test_a_uuid_differing_only_by_case_is_the_same_value(self):
+        text = self._text(f"{self.U3.upper()}", ctx_results=[self.U3])
+        self.assertEqual(self.section(text, "Operator's last message").strip(), "<uuid-1>")
+        self.assertIn("RESULT <uuid-1>\n", text)
+
+    def test_the_dispatch_prompt_shares_the_packet_mapping(self):
+        top = Seq()
+        top.asst("t1", "top.")
+        sub = Seq()
+        sub.user(f"dispatch {self.U1}")  # the hand-back path is a separate call site of the blinder
+        (a,) = sub.asst("h0", "Looking.", tools=[("Read", {"file_path": "x"})])
+        sub.result(a, f"{self.U2} and {self.U1}")
+        sub.asst("h1", "All done.", stop="end_turn")
+        p = self.build(top, "h1", subagents={"w": sub}, kind="handback")
+        self.assertEqual(self.section(p.text, "Dispatch prompt").strip(), "dispatch <uuid-1>")
+        self.assertIn("RESULT <uuid-2> and <uuid-1>\n", p.text)
+
+    def test_numbers_past_nine_stay_distinct_and_inside_the_cap(self):
+        uuids = [f"{i:08d}-2222-3333-4444-555555555555" for i in range(1, 13)]
+        text = self._text(" ".join(uuids))
+        self.assertEqual(self.section(text, "Operator's last message").strip(),
+                         " ".join(f"<uuid-{i}>" for i in range(1, 13)))
+        self.assertLessEqual(len(text), 20000)
+
+    def test_a_value_only_in_a_dropped_context_message_still_holds_its_number(self):
+        # documented gap: blinding runs BEFORE any cut or cap, so numbers are handed out over everything the
+        # packet could show. The cap drops the oldest context message, and the id that only it held keeps
+        # number 1: a labeller sees <uuid-2> with no <uuid-1> anywhere, which is honest (it existed).
+        s = Seq()
+        s.user("go")
+        s.asst("c0", f"old {self.U1}" + "x" * 20500)  # oldest, alone over the 20,000 cap: dropped
+        s.asst("c1", f"newer {self.U2}")
+        s.asst("m9", "The decision.")
+        p = self.build(s, "m9")
+        self.assertEqual(p.n_context, 1)
+        self.assertNotIn("old", p.text)
+        self.assertIn("newer <uuid-2>", p.text)
+
 
 
 class Tokens(PacketCase):

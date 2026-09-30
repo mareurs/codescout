@@ -11,10 +11,16 @@ surrogate (a truncated
 emoji) becomes U+FFFD so the text can be hashed as UTF-8. The packet is at most PACKET_CHARS characters
 in total, always.
 
-A cut is never silent: a result's dropped head is marked `[… N earlier characters not shown]` before the kept
-tail, and a call's arguments or the operator/dispatch message's dropped end `[… N more characters not shown]`
-after the kept head (_dropped). A judged message with tool calls but no prose says so (NO_TEXT_NOTE), and its
-section is titled JUDGED_HEADING so a long context message cannot be mistaken for it.
+A cut is never silent: a result longer than RESULT_HEAD_CHARS + RESULT_TAIL_CHARS keeps its head and its tail
+with `[… N characters not shown]` between them, and a call's arguments or the operator/dispatch message's dropped
+end `[… N more characters not shown]` after the kept head (_dropped). A judged message with tool calls but no
+prose says so (NO_TEXT_NOTE), and its section is titled JUDGED_HEADING so a long context message cannot be
+mistaken for it.
+
+Blinded values are NUMBERED per packet (_Ids): each distinct uuid, timestamp and API id becomes `<uuid-N>`,
+`<timestamp-N>` or `<id-N>` by first appearance in reading order, so the same value reads the same everywhere in
+one packet and two different values never do. The numbers say nothing across packets.
+
 A token-shaped string refuses the build (TokenFound). The check is made on the SOURCE of every piece
 before any cut (a token half-cut by a tail/head/trim would otherwise render its secret body while the
 final text no longer matches the pattern): it refuses when a match OVERLAPS the range that is kept,
@@ -116,12 +122,37 @@ def _clean(s):
     return _SURROGATE_RE.sub("�", s)
 
 
-def _blind(s):
-    """Replace lone surrogates, then uuid-, timestamp- and API-id-shaped strings quoted inside transcript content."""
-    s = _clean(s)
-    s = _UUID_RE.sub("<uuid>", s)
-    s = _TIMESTAMP_RE.sub("<timestamp>", s)
-    return _API_ID_RE.sub("<id>", s)
+class _Ids:
+    """The numbering for ONE packet (bug 6e9d80d2be97ff43, operator ruling 2026-09-30). Every distinct uuid,
+    timestamp and API id becomes `<uuid-N>` / `<timestamp-N>` / `<id-N>`, N counting from 1 per kind in order of
+    first appearance, so the labeller can tell one value reused from two different ones without seeing either.
+    One instance is created per build_packet and passed to every piece, and the pieces must be blinded in the
+    order they are RENDERED (operator or dispatch prompt, context oldest to newest, the judged message): a
+    per-call instance, or another order, would number the same value differently in different sections.
+
+    Blinding runs before any cut or cap, so a value that only occurs in dropped material (the cut middle of a
+    result, a context message the cap removed) still holds its number and the packet can show `<uuid-2>` with no
+    `<uuid-1>`. That is deliberate: numbering only what survives would need the layout before the numbers,
+    and the layout depends on the numbers' width."""
+
+    def __init__(self):
+        self._seen = {"uuid": {}, "timestamp": {}, "id": {}}
+
+    def _number(self, kind, value):
+        seen = self._seen[kind]
+        return f"<{kind}-{seen.setdefault(value, len(seen) + 1)}>"
+
+    def blind(self, s):
+        """Replace lone surrogates, then uuid-, timestamp- and API-id-shaped strings quoted inside transcript
+        content. A uuid is the same value whatever its case; a timestamp or API id is the same value when its
+        text is."""
+        s = _clean(s)
+        s = _UUID_RE.sub(lambda m: self._number("uuid", m.group(0).lower()), s)
+        s = _TIMESTAMP_RE.sub(lambda m: self._number("timestamp", m.group(0)), s)
+        return _API_ID_RE.sub(lambda m: self._number("id", m.group(0)), s)
+
+
+
 
 
 def _overlaps(source, start, end):
@@ -160,11 +191,11 @@ def _writes_record(name, inp):
 
 
 
-def _call(name, inp):
+def _call(name, inp, ids):
     """('name(args)', leaked) with the JSON arguments cut to RECORD_ARGS_CHARS for a call that writes a record
-    and to ARGS_CHARS for any other, a cut marked."""
+    and to ARGS_CHARS for any other, a cut marked. `ids` is the packet's _Ids."""
     limit = RECORD_ARGS_CHARS if _writes_record(name, inp) else ARGS_CHARS
-    raw = _blind(json.dumps(inp, ensure_ascii=False, sort_keys=False))
+    raw = ids.blind(json.dumps(inp, ensure_ascii=False, sort_keys=False))
     args, leaked = _head(raw, limit)
     if len(raw) > len(args):
         args += _dropped(len(raw) - len(args), "more")
@@ -175,13 +206,14 @@ def _is_shell(name):
     return name.rsplit("__", 1)[-1] in sampler.SHELL_TOOLS
 
 
-def _result_line(result, shell):
+def _result_line(result, shell, ids):
     """('RESULT ...', leaked). The [exit N] prefix is for shell tools only. A result of more than
-    RESULT_HEAD_CHARS + RESULT_TAIL_CHARS keeps its head and its tail with the gap marked between them."""
+    RESULT_HEAD_CHARS + RESULT_TAIL_CHARS keeps its head and its tail with the gap marked between them.
+    `ids` is the packet's _Ids."""
     if result is None:
         return f"RESULT {NO_RESULT}", False
     text, is_error = result
-    text = _blind(text)
+    text = ids.blind(text)
     prefix = ""
     code = exit_code(text) if shell else None  # from the WHOLE text: the code is often in the dropped middle
     if code is not None:
@@ -233,16 +265,16 @@ def _results(entries):
     return out
 
 
-def _context_block(label, ents, results):
-    """(block text, leaked) for one context message."""
+def _context_block(label, ents, results, ids):
+    """(block text, leaked) for one context message. `ids` is the packet's _Ids."""
     lines = [f"### {label}"]
     leaked = False
-    text = _blind(sampler._text(ents))
+    text = ids.blind(sampler._text(ents))
     if text:
         lines.append(text)
     for tid, name, inp in _tool_calls(ents):
-        call, l1 = _call(name, inp)
-        res, l2 = _result_line(results.get(tid), _is_shell(name))
+        call, l1 = _call(name, inp, ids)
+        res, l2 = _result_line(results.get(tid), _is_shell(name), ids)
         lines.append(f"CALL {call}")
         lines.append(res)
         leaked = leaked or l1 or l2
@@ -387,29 +419,33 @@ def build_packet(corpus_dir, unit, case_id, cache=None):
         op_title = "Operator's last message"
         ops = transcripts.operator_messages(before)
         first = transcripts._message_text(ops[-1]) if ops else None
+    ids = _Ids()  # ONE per packet, and the pieces below are blinded in the order they are RENDERED
     if first:
-        blinded = _blind(first)
+        blinded = ids.blind(first)
         op_text, op_leak = _head(blinded, OPERATOR_CHARS)
         if len(blinded) > len(op_text):
             op_text += "\n" + _dropped(len(blinded) - len(op_text), "more")
     else:
         op_text, op_leak = NONE_BEFORE, False
 
-    unit_text = _blind(sampler._text(unit_ents))
+    kept = list(prior_ents)
+    # the context is blinded BEFORE the judged message: its values are numbered first, as a reader meets them
+    built = [_context_block(f"{MINUS}{len(kept) - i}", ents, results, ids) for i, ents in enumerate(kept)]
+    unit_text = ids.blind(sampler._text(unit_ents))
     calls = []
     for _, name, inp in _tool_calls(unit_ents):
-        call, leaked = _call(name, inp)
+        call, leaked = _call(name, inp, ids)
         calls.append((f"- {call}", leaked))
     full_body = _join_body(unit_text, [c for c, _ in calls])
 
-    kept = list(prior_ents)
     while True:
-        built = [_context_block(f"{MINUS}{len(kept) - i}", ents, results) for i, ents in enumerate(kept)]
         blocks = [b for b, _ in built]
         text = _render(op_title, op_text, blocks, full_body)
         if len(text) <= PACKET_CHARS or not kept:
             break
         kept.pop(0)  # oldest first; the unit itself is never dropped
+        # relabelled from the mapping the first pass completed: a rebuild changes no number
+        built = [_context_block(f"{MINUS}{len(kept) - i}", ents, results, ids) for i, ents in enumerate(kept)]
     leak = op_leak or any(l for _, l in built)
     # what is left of the budget once the operator section and the kept context are in; the unit
     # is whole when it fits, else trimmed to fit (its trim markers counted)
