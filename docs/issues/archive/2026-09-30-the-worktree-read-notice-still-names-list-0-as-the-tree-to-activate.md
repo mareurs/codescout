@@ -83,7 +83,7 @@ notice text above appeared on every unpinned call in this session. The function 
 
 Fixed in `5487b52f` (patch-id `d29ab890e40ccc067186143c5f880acf1987839b`, `git show <sha> | git patch-id --stable`). `worktree_read_notice` now aims `workspace(action='activate', path=…)` at `root`, the main repo, and offers the worktree list second for a caller who wants a linked tree, the same shape as `guard_worktree_write` (`fc6f5bb7`). The function is now `pub(super)` so the sibling `tests.rs` can drive it.
 
-**Not done, deliberately (follow-ups, not part of this fix):** (1) one shared helper for the prescription between `guard_worktree_write` and `worktree_read_notice`, so a third site cannot drift; the two sites are still separate format strings. (2) the doc comment's *"the condition is self-limiting"* paragraph is still written, and no longer holds while the mutation-probe pool keeps its slots. (3) whether a permanent probe pool should count as "linked worktrees" for this notice at all is a separate question.
+**Follow-ups from the first fix, since closed:** the prescription is now one function, `activate_main_repo_call` in `src/tools/core/guards.rs`, used by both `guard_worktree_write` and `worktree_read_notice`; one mutation of it reddens both notices' tests (checked with `scripts/mutation-probe.sh`). The doc comment's *"the condition is self-limiting"* paragraph is rewritten, since the mutation-probe pool keeps its slots. **Still not done:** whether a permanent probe pool should count as "linked worktrees" for this notice at all is a separate question and stays open.
 
 ## Tests added
 

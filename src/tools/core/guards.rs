@@ -2,6 +2,22 @@
 
 use super::types::{RecoverableError, ToolContext};
 
+/// The `workspace(action='activate', …)` call the two worktree notices prescribe, aimed at
+/// `root` — the main repo.
+///
+/// One function for both `guard_worktree_write` and `worktree_read_notice` because the
+/// **path argument** is the part that drifted: the write guard was repaired to name `root`
+/// (`fc6f5bb7`) while the read notice kept `list[0]`, since the two
+/// were separate format strings. Single-sourcing the call means a third site cannot
+/// prescribe a different tree, and a regression here reds the test on *both* notices.
+/// The surrounding prose stays per-site on purpose: it describes a write in one and a read
+/// in the other, and forcing them together would blur what each is asking for.
+///
+/// docs/issues/archive/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
+pub(crate) fn activate_main_repo_call(root: &std::path::Path) -> String {
+    format!("workspace(action='activate', path=\"{}\")", root.display())
+}
+
 /// Block write operations when git worktrees exist but the agent hasn't
 /// explicitly called `activate_project` to confirm which project to write to.
 ///
@@ -68,11 +84,11 @@ pub async fn guard_worktree_write(ctx: &ToolContext) -> anyhow::Result<()> {
     // it mid-task, which the pin cannot.
     // docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md
     let hint = format!(
-        "Call workspace(action='activate', path=\"{}\") to write to the main repo, or pass \
+        "Call {} to write to the main repo, or pass \
          workspace=\"<abs path>\" on this call to pin a single write without changing the \
          session. To write to a linked worktree instead, activate the one you mean from the \
          list above.",
-        root.display()
+        activate_main_repo_call(&root)
     );
     Err(RecoverableError::with_hint(
         format!(

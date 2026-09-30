@@ -165,12 +165,16 @@ tokio::task_local! {
 /// read after a ledger clear carried one. Six reconnects, zero notices; one clear,
 /// one notice.
 ///
-/// The condition is self-limiting, which is why emitting on every call is
-/// affordable: it requires linked worktrees to EXIST and no tree to have been
-/// chosen, so a repo without worktrees never sees it, and the two documented
-/// remedies — `workspace(action='activate')`, or passing `workspace=` per call —
-/// each silence it permanently. The correct path ends in a quiet state, so
-/// compliance leaves nothing armed.
+/// The condition is NOT self-limiting on a checkout that keeps linked worktrees
+/// permanently — the mutation-probe pool does here
+/// (`docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md`) —
+/// so every session that has not yet activated or pinned sees this on every unpinned
+/// call. Emitting per call is still right (see above: the one-shot was spent on the
+/// wrong episode), but it means the REMEDY carries the weight. The two documented
+/// remedies — `workspace(action='activate')`, or passing `workspace=` per call — each
+/// silence it for the rest of the session, so the correct path ends in a quiet state
+/// only if the prescription is itself correct: an `activate` aimed at a probe slot was
+/// the bug that made following this notice the wrong move.
 ///
 /// **A pinned call is silent**, because it already named the tree it meant.
 /// `workspace_override` is the per-call form of the choice `activate` makes for
@@ -245,12 +249,12 @@ pub(super) async fn worktree_read_notice(
         "Reads are resolving against \"{}\". This repo also has linked git \
          worktrees [{}] and no project has been explicitly activated, so results \
          describe the main checkout even if you are working in a worktree. Call \
-         workspace(action='activate', path=\"{}\") to pin the main repo, or pass \
+         {} to pin the main repo, or pass \
          workspace=\"<abs path>\" on a single call to pin the tree you mean. To work \
          in a linked worktree instead, activate the one you mean from the list above.",
         root.display(),
         list.join(", "),
-        root.display(),
+        super::guards::activate_main_repo_call(root),
     ))
 }
 
