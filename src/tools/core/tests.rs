@@ -977,6 +977,51 @@ async fn guard_worktree_write_hint_names_the_main_repo_not_an_arbitrary_worktree
         "the hint must not prescribe a worktree the caller never named; got: {hint}"
     );
 }
+/// The READ notice's remedy — the second site of the defect the test above pins on the
+/// write guard. `worktree_read_notice` prescribed `activate` on `list[0]`, the first
+/// worktree in `read_dir` order, which in a repo with a permanent mutation-probe pool is
+/// a probe slot, on every unpinned call.
+///
+/// The assertion is on the `path="…"` ARGUMENT of the `activate` clause, not on the
+/// whole message, and that is load-bearing: the notice's first sentence names `root`
+/// ("Reads are resolving against …") and its list names every worktree, so
+/// "message contains root" is satisfied by the broken text and "message does not contain
+/// the worktree" is false on correct text. Only the argument discriminates.
+///
+/// docs/issues/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
+#[tokio::test]
+async fn worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    // BESIDE `root`, never under it — see the write-guard test above.
+    let wt = seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+    let root = std::fs::canonicalize(&root).unwrap();
+    let wt = std::fs::canonicalize(&wt).unwrap();
+
+    let notice = worktree_read_notice(&ctx, Some(&root))
+        .await
+        .expect("linked worktree + no chosen project must produce the notice");
+
+    // The list is the disclosure half and must survive: a caller who genuinely wants
+    // the worktree needs it named somewhere. Guards the "fix" of deleting the list.
+    assert!(
+        notice.contains(&wt.display().to_string()),
+        "the worktree list is the disclosure and must stay in the notice; got: {notice}"
+    );
+    let marker = "workspace(action='activate', path=\"";
+    let start = notice
+        .find(marker)
+        .unwrap_or_else(|| panic!("the notice must still prescribe activate; got: {notice}"))
+        + marker.len();
+    let arg = &notice[start..start + notice[start..].find('"').expect("unterminated path arg")];
+    assert_eq!(
+        arg,
+        root.display().to_string(),
+        "activate must be aimed at the main repo, not a worktree the filesystem listed first; got: {notice}"
+    );
+}
 
 /// docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md
 ///

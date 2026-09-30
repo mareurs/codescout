@@ -277,6 +277,74 @@ eq "9 MINE was left unwritten too" "$(grep -c 'pub fn mine(  )' "$P/src/lib.rs")
 has "9 names mod-descent as the reason, not just the refusal" "$OUT" "descends into every"
 has "9 names the file it would have collaterally rewritten" "$OUT" "src/peer.rs"
 
+echo "== 10. rustfmt NEEDS TWO PASSES: the script reaches the fixed point, not just one pass =="
+# The construct is rustfmt 1.9.0-stable's non-idempotence, reproduced 2026-09-30: an
+# over-long string literal in a returned `format!` inside a match arm, INSIDE a `mod`.
+# docs/issues/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
+#
+# LOAD-BEARING FIXTURE DETAIL: the `mod m { ... }` wrapper is part of the reproduction.
+# The bare function, at column 0, formats to a fixed point in ONE pass — the bug file's own
+# fenced snippet omitted the wrapper and does not reproduce without it. Unwrap this and the
+# case still passes, and no longer discriminates single-pass from fixed-point.
+#
+# The assertion is on the BYTES (a fresh `rustfmt --check` on the result), not on the
+# script's success line: the success line is exactly the thing that lied. Exit 0 plus the
+# word "formatted" is what the single-pass script printed over a file still failing --check.
+P=$(newproj)
+cat > "$P/src/lib.rs" <<'RS'
+mod m {
+    fn check_prose(root: &Path, r: &Recipe) -> Option<String> {
+        let fm = match read_fm(&root.join(&r.target)) {
+            Ok(fm) => fm,
+            Err(e) => {
+                return Some(format!(
+                    "{}: routes {}-N writes to `{}`, which {e} — archived or moved? Update the row.",
+                    r.at(),
+                    r.id_prefix,
+                    r.target
+                ))
+            }
+        };
+        None
+    }
+}
+RS
+run "$P" "$MINE_STUB"
+eq "10 exits 0" "$RC" "0"
+has "10 says formatted" "$OUT" "formatted"
+( cd "$P" && rustfmt --check --edition 2021 src/lib.rs >/dev/null 2>&1 ); CHK=$?
+eq "10 the file is at a FIXED POINT: a fresh --check is clean" "$CHK" "0"
+
+echo "== 11. rustfmt that never settles: no 'formatted', exit 1, the file is named =="
+# A stand-in rustfmt that changes nothing on write and reports a diff on --check, forever
+# — the oscillation the pass bound exists for. Without this case the bound is unreachable
+# from any real input, so "gave up after N passes and said so" would be untested code.
+# `--version` is delegated because cargo-fmt probes it. Reached through PATH because the
+# script calls a bare `rustfmt`; an absolute-path override would need a new seam in the
+# script for the sake of one test.
+REAL_RUSTFMT=$(command -v rustfmt)
+mkdir -p "$WORK/fakebin"
+cat > "$WORK/fakebin/rustfmt" <<FAKE
+#!/usr/bin/env bash
+for a in "\$@"; do
+    [ "\$a" = "--version" ] && exec "$REAL_RUSTFMT" --version
+done
+for a in "\$@"; do
+    if [ "\$a" = "--check" ]; then
+        echo "Diff in \$(git rev-parse --show-toplevel)/src/lib.rs:1:"
+        exit 1
+    fi
+done
+exit 0
+FAKE
+chmod +x "$WORK/fakebin/rustfmt"
+P=$(newproj); deformed "$P"
+run "$P" "$MINE_STUB" env PATH="$WORK/fakebin:$PATH"
+eq "11 exits 1" "$RC" "1"
+has "11 says it is not a fixed point" "$OUT" "NOT a fixed point"
+has "11 names the file that will not settle" "$OUT" "src/lib.rs"
+hasnt "11 never claims 'formatted N file(s)'" "$OUT" "file(s) written by this session"
+
 echo
 echo "fmt-mine: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

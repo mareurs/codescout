@@ -183,7 +183,10 @@ tokio::task_local! {
 /// Ordered cheapest-check-first.
 ///
 /// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
-async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>) -> Option<String> {
+pub(super) async fn worktree_read_notice(
+    ctx: &ToolContext,
+    root: Option<&std::path::Path>,
+) -> Option<String> {
     if ctx.workspace_override.is_some() {
         // The call named its own tree. Nothing was resolved by default, so there
         // is no default to disclose.
@@ -230,15 +233,24 @@ async fn worktree_read_notice(ctx: &ToolContext, root: Option<&std::path::Path>)
         ));
     }
 
+    // Lead with `root`, and name NO worktree in the `activate` argument.
+    // `list_git_worktrees` pushes in `read_dir` order with no sort, so `list[0]`
+    // prescribed a path the FILESYSTEM chose — in a repo with a permanent
+    // mutation-probe pool that is a detached-HEAD probe slot, and activating it makes
+    // that tree the session's home project. The full list is already in the message
+    // for a caller who genuinely wants one of them. Same repair as
+    // `guard_worktree_write` (fc6f5bb7); this was the second site of the defect.
+    // docs/issues/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
     Some(format!(
         "Reads are resolving against \"{}\". This repo also has linked git \
          worktrees [{}] and no project has been explicitly activated, so results \
          describe the main checkout even if you are working in a worktree. Call \
-         workspace(action='activate', path=\"{}\") to pin the tree you mean, or \
-         pass workspace=\"<abs path>\" on a single call.",
+         workspace(action='activate', path=\"{}\") to pin the main repo, or pass \
+         workspace=\"<abs path>\" on a single call to pin the tree you mean. To work \
+         in a linked worktree instead, activate the one you mean from the list above.",
         root.display(),
         list.join(", "),
-        list[0],
+        root.display(),
     ))
 }
 

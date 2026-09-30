@@ -278,8 +278,41 @@ fi
 # and formatting the whole workspace is the thing being avoided. `--edition` is
 # required: rustfmt defaults to 2015 and would silently mangle 2021 syntax.
 # shellcheck disable=SC2086
-rustfmt --edition 2021 $MINE
-echo "fmt-mine: formatted $(printf '%s\n' "$MINE" | wc -l) file(s) written by this session."
+#
+# A bounded fixed-point loop, not one pass. rustfmt is NOT idempotent on every input:
+# reproduced on rustfmt 1.9.0-stable, a match arm `Err(e) => { return Some(format!(<over-long
+# literal>, ...)) }` inside a `mod` needs a SECOND pass before `rustfmt --check` is clean
+# (`--check` is itself a formatting pass, which is what re-expands the arm the first pass
+# collapsed). A single pass followed by "formatted" asserted a fixed point it never observed,
+# and the pre-commit `rustfmt --check` hook was what caught it, on a hunk this script had
+# just claimed to have formatted.
+# docs/issues/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
+#
+# The bound is small because a real fixed point arrives on pass 2; a construct still moving on
+# pass 3 is an oscillation, and looping further only hides it. That case is REPORTED and
+# exits non-zero rather than printing `formatted`.
+FMT_MAX_PASSES=3
+FMT_PASSES=0
+FMT_DIRTY=""
+while [ "$FMT_PASSES" -lt "$FMT_MAX_PASSES" ]; do
+    rustfmt --edition 2021 $MINE
+    FMT_PASSES=$((FMT_PASSES + 1))
+    # `if`, so a `--check` diff (rc 1) is a verdict rather than a `set -e` abort. rc > 1 is
+    # rustfmt failing outright, and reads as "still dirty" here, which is the safe direction:
+    # it can only withhold the word `formatted`, never grant it.
+    if FMT_DIRTY=$(rustfmt --check --edition 2021 $MINE 2>&1); then
+        FMT_DIRTY=""
+        break
+    fi
+done
+if [ -n "$FMT_DIRTY" ]; then
+    echo "fmt-mine: NOT a fixed point after $FMT_PASSES rustfmt pass(es) — refusing to report \"formatted\"." >&2
+    echo "  \`rustfmt --check\` still wants to change:" >&2
+    printf '%s\n' "$FMT_DIRTY" | sed -n 's@^Diff in \(.*\):[0-9][0-9]*:$@    \1@p' | sort -u >&2
+    echo "  rustfmt is oscillating on a construct in the file(s) above; formatting again will not settle it." >&2
+    exit 1
+fi
+echo "fmt-mine: formatted $(printf '%s\n' "$MINE" | wc -l) file(s) written by this session (fixed point after $FMT_PASSES pass(es))."
 
 # The refusal comes AFTER the write, not instead of it. Exit stays 1: this session's half
 # is done, the gate is still blocked, and the reader's remaining action is the one named
