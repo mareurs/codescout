@@ -84,7 +84,7 @@ This session was the only caller on its server, with no subagent running. Every 
 - That entry is the one shared by every caller, and the upgrade persists. So when the pinned root is resident read-only, one pinned write lifts the read-only state process-wide. Row 7 shows it directly: an unpinned write succeeds right after a pinned one, with no activate call in between.
 - The original sequence's step 4 (a pinned `create_file`) and this session's three pinned writes at 16:10–16:25Z are what cleared the refusal. So "unreproduced on retry" was the pin, not intermittency.
 
-Mechanism B is a separate defect, and the more consequential one: a pin is documented as per-call, yet it silently lifts a read-only guard that another caller set on purpose. It is filed on its own, `docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md`.
+Mechanism B is a separate defect, and the more consequential one: a pin is documented as per-call, yet it silently lifts a read-only guard that another caller set on purpose. It is filed on its own, `docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md`.
 
 ## Environment
 
@@ -92,7 +92,7 @@ codescout server pid 3289089, `git_sha 396f04c4` (dirty), profile `~/.claude-kat
 
 ## Root cause
 
-Settled by the 2026-09-28 probe (§ *Settled by probe*): **mechanism A** is the refusal, and it is what this file records. `Workspace::is_write` is true for `activate` because activation persists `.codescout/libraries.json` and must take the cross-process write lock, and `check_tool_access` refused every `is_write` call under a read-only activation, so the call the refusal itself prescribes was refused by the block it lifts. The `is_write` flag carried two meanings. **Mechanism B** (why the refusal cleared "on retry") is a separate defect, filed as `docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md`, and is NOT fixed by this file's fix.
+Settled by the 2026-09-28 probe (§ *Settled by probe*): **mechanism A** is the refusal, and it is what this file records. `Workspace::is_write` is true for `activate` because activation persists `.codescout/libraries.json` and must take the cross-process write lock, and `check_tool_access` refused every `is_write` call under a read-only activation, so the call the refusal itself prescribes was refused by the block it lifts. The `is_write` flag carried two meanings. **Mechanism B** (why the refusal cleared "on retry") is a separate defect, filed as `docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md`, and is NOT fixed by this file's fix.
 
 The earlier lead in this section ("unknown; activation runs through the write path") was right about the path and is superseded by the probe.
 
@@ -122,7 +122,7 @@ No longer needed for the refusal: an unpinned `workspace(action='activate', path
 
 ## Resume
 
-Closed by `acda6a40`. Only mechanism B remains, in `9c0e178a0b53bfc4`.
+Closed by `acda6a40`. Mechanism B, which this file split out, was fixed by `6b58c7b5` (archived as `56c71c86edd81060`).
 
 ## Fix provenance
 

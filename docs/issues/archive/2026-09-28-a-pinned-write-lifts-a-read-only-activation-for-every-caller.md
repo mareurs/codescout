@@ -1,7 +1,7 @@
 ---
-id: '9c0e178a0b53bfc4'
+id: 56c71c86edd81060
 kind: bug
-status: open
+status: fixed
 title: A pinned write lifts a read-only activation for every caller on the server, though a pin is documented as per-call
 tags:
 - workspace
@@ -51,10 +51,9 @@ None needed; the probe separated a pinned write from a pinned read and from read
 
 ## Fix
 
-Not designed. Candidates:
-- Scope writability to the pinned call: let `check_tool_access` accept the pin as consent for this call, without mutating the shared entry.
-- Or record the read-only CAUSE on the entry (default vs explicit), and let the upgrade lift only a default.
-Either way, an explicit `read_only=true` activation must survive another caller's pinned write.
+Fixed in `6b58c7b59b25285641f7adc0b8c89a2592ed7cab` (`git show <sha> | git patch-id --stable`) with **P1** from the Scope section below, chosen by the operator on 2026-09-30: a `workspace=` pin is consent for THAT call only, and nothing is written to the shared entry.
+
+`Agent::security_config_for_write` applies the consent (only when a pin is present) inside `project_security_config_with`, which lifts the read-only half and never a project's own `file_write_enabled = false`. The two places that decide a write use it: the server's access gate wrapper and `approve_write`. `ensure_resident` lost its `read_only` parameter and both upgrade blocks, so a pinned first touch is inserted read-only like any pinned read and nothing outside `activate` can change a resident entry's `read_only`. The `ensure_resident(root, Some(false))` call in `call_tool_inner` is gone.
 
 ## Scope (2026-09-30, read from HEAD `84a7f350`, nothing changed)
 
@@ -86,15 +85,22 @@ End to end on `call_tool_inner`, in the shape of `a_read_only_activation_can_be_
 
 ## Tests added
 
-None yet. Regression shape: activate read-only explicitly, make a pinned write (it succeeds), then assert an unpinned write is still refused. As a control, a workspace that is only resident by default still accepts the pinned write.
+In `src/server.rs`, on the real dispatch path: `a_pinned_write_does_not_lift_an_explicit_read_only_for_unpinned_callers` (probe rows 8, 5, 7: the control unpinned write is refused, the PINNED write succeeds, the UNPINNED write afterwards is refused again) and `a_pinned_approve_write_under_read_only_lifts_nothing_for_unpinned_callers`. Both were run RED on the unfixed code, failing only at their last assertion (the unpinned write returned `ok`), which shows the pin already worked and only its persistence was wrong. In `src/agent/mod.rs`: `a_write_pin_consents_for_the_call_and_records_nothing`, `no_pin_means_no_write_consent`, and `a_write_pin_does_not_lift_a_project_that_disables_writes_in_its_config`. `ensure_resident_upgrades_read_only_pin_to_writable` asserted the removed behaviour and was replaced. Existing controls that stayed green: a pinned write to a never-activated root succeeds; a pinned write to a config-disabled project is refused.
+
+**Mutations, one per site, `scripts/mutation-probe.sh`:** consent removed at the source KILLED (4 tests); the gate wrapper never asking for consent KILLED (3); consent widened to also lift a config-disabled project KILLED (2); the persistent upgrade reintroduced at `ensure_resident`'s first check KILLED (3). **`approve_write` back on the plain config SURVIVED at first**, which was a hole in my own test: `ApproveWrite` refuses through a `RecoverableError`, which arrives with `is_error == false` so sibling calls survive, so asserting `is_error != Some(true)` was satisfied by the refusal it meant to catch. The test now asserts on the refusal text, and the mutation is KILLED. **Still SURVIVES:** the upgrade reintroduced in `ensure_resident`'s RE-CHECK under the write lock. That branch runs only when another caller inserts the same root during the lock-free load, so no test reaches it without a concurrency seam. It is not a live defect (that branch no longer mutates anything), only an unguarded site.
 
 ## Workarounds
 
-Brief subagents that only scout to pin their reads with `workspace=` and never to call `workspace(activate)`. A pinned read passes `None` to `ensure_resident` and changes nothing. And a controller that pins a write should know it lifts any read-only activation of that root, its subagents' included.
+No longer needed. A `workspace=` pin on a write is consent for that call and lifts nothing for anyone else.
 
 ## Resume
 
-Open, and now the only read-only defect left from that probe. Mechanism A (the activate refusal, archived under id `df38c4ac3b9a64a5`) is fixed by `acda6a40`: an unpinned `activate(read_only=false)` works, so callers have less reason to reach for the pin. **Still to decide, and not decided here:** scope writability to the pinned call, or record why an entry is read-only (a default versus an explicit request) so the residency upgrade lifts only a default. Either way, an explicit `read_only=true` activation must survive another caller's pinned write. Note for whoever designs it: the same `is_write` predicate that A split is what feeds `ensure_resident(root, Some(false))` at `src/server.rs:~1404`, and A deliberately left that consumer on `is_write`.
+Closed by `6b58c7b5`. **Left open, outside this bug's flag:** `approve_write` appends to a per-project `session_write_roots` list that every caller of that root shares, so a pinned caller can widen what an unpinned one may write. Unverified whether that matters under a read-only guard; file it if it does.
+
+## Fix provenance
+
+- **SHA:** `6b58c7b59b25285641f7adc0b8c89a2592ed7cab` (`experiments`)
+- **patch-id:** `cfbe3f651fb10d43a70e5a7cf1d0b487a7392612`
 
 ## References
 

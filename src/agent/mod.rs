@@ -529,7 +529,7 @@ fn project_security_config(p: &ActiveProject) -> crate::util::path_security::Pat
 /// activation that another caller had made on purpose, for everyone, and the lift
 /// persisted. Here it is only an input to this derivation, so it cannot outlive the call
 /// that supplied it and there is nothing to restore.
-/// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+/// docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
 ///
 /// It lifts the READ-ONLY half only. A project whose own `project.toml` turns writes off
 /// stays `ConfiguredOff` under consent: that is the durable setting, not a session choice a
@@ -781,7 +781,7 @@ impl Agent {
     /// everyone, and the lift persisted — the opposite of a pin's documented "resolves that
     /// single call". The pin's consent to write is now applied per call, in
     /// [`Agent::security_config_for_write`], and nothing here records it.
-    /// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+    /// docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
     ///
     /// Still does not require a full `activate`, which would clear every other resident
     /// workspace — see `Agent::activate`.
@@ -874,7 +874,7 @@ impl Agent {
     ///
     /// Both places that decide a write — the server's access gate and `approve_write` — use
     /// this, so the two cannot disagree about what a pin means.
-    /// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+    /// docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
     pub async fn security_config_for_write(
         &self,
         workspace_override: Option<&Path>,
@@ -2680,7 +2680,7 @@ mod tests {
         // resident workspace). That is still required. It used to be met by
         // `ensure_resident(root, Some(false))` flipping the SHARED entry to writable, so one
         // pinned write lifted a read-only activation for every caller
-        // (docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md).
+        // (docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md).
         // It is met now by `security_config_for_write`, which applies the pin's consent to that
         // one derivation and writes nothing.
         let dir_a = tempdir().unwrap();

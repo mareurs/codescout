@@ -787,7 +787,7 @@ No new DWF or DCX sample was taken; the routine samples above stand. The interva
 
 - **A review of another session's measurement.** Four Opus review subagents, all read-only and on synthetic input only, reviewed session `3c5b02df`'s System 1 base-rate measurement. It adopted the verified findings as its spec Amendment 7. Because this review work fell inside that measurement's decision window, this session is now on its exclusion list (R106), which is the reason recorded here. Two of the review's own claims were corrected by the author: `review-catches:RC-55` and `RC-56`.
 - **An evidence note in the deep-agent design tracker** (`16267599`).
-- **A probe of the workspace read-only refusal** (`d4d3d0c9`). It found two mechanisms, and a new bug for the second: a pinned write lifts a read-only activation for every caller (`9c0e178a0b53bfc4`).
+- **A probe of the workspace read-only refusal** (`d4d3d0c9`). It found two mechanisms, and a new bug for the second: a pinned write lifts a read-only activation for every caller (`56c71c86edd81060`).
 - **The fix for `d59ef0849a8f45cb`** (`04973710`, archived `9b4f1e02`): archiving an unanchored fixed or mitigated bug is now refused.
 
 No new DWF or DCX sample was taken, and the routine samples above stand. Gap: the four review subagents' own tool calls were not inspected. The interval now ends about 19:40Z. Commits since the previous update: `de0dcae4`, `add2718d`, `54871686`, `16267599`, `d4d3d0c9`, `04973710`, `9b4f1e02` and the one carrying this update. Overhead for this update: about 2 tool calls.

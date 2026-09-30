@@ -1407,7 +1407,7 @@ impl CodeScoutServer {
         // caller, persistently. It is now applied to this call alone, inside
         // `check_tool_access` below (`Agent::security_config_for_write`), and nothing is
         // written to the registry. Residency itself is on demand, at the first touch.
-        // docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+        // docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
 
         // The gate asks a NARROWER question than the lock does. `is_write` is "takes the
         // cross-process write lock"; the gate refuses writes under a write block, except
@@ -8780,7 +8780,7 @@ mod tests {
             .unwrap_or_default()
     }
 
-    /// docs/issues/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
+    /// docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
     /// (mechanism B, probe rows 5, 7 and 8).
     ///
     /// A `workspace=` pin is documented as per-call, but a pinned WRITE ran
