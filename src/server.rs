@@ -1410,8 +1410,16 @@ impl CodeScoutServer {
             }
         }
 
+        // The gate asks a NARROWER question than the lock does. `is_write` is "takes the
+        // cross-process write lock"; the gate refuses writes under a write block, except
+        // the call that is the documented way out of one (`Tool::lifts_write_block`).
+        // Both are derived here, once, from the same tool and input, so the two answers
+        // cannot be derived from different inputs. The lock and the residency upgrade above
+        // and below keep `is_write`: an exempt call still serialises behind the lock.
+        let gated_as_write = is_write && !tool.lifts_write_block(&input);
+
         if let Err(err) = self
-            .check_tool_access(&req.name, is_write, workspace_override.as_deref())
+            .check_tool_access(&req.name, gated_as_write, workspace_override.as_deref())
             .await
         {
             return Ok(err);
@@ -7185,7 +7193,12 @@ mod tests {
             }
 
             for input in &inputs {
-                let is_write = tool.is_write(input);
+                // The oracle is the GATE's question, not the lock's: a write call is refused
+                // unless its tool declares it the documented exit (`lifts_write_block`). The
+                // exemption itself is pinned separately, by
+                // `only_the_documented_exit_is_exempt_from_the_write_block`, so this walk
+                // cannot be made green by quietly widening it.
+                let is_write = tool.is_write(input) && !tool.lifts_write_block(input);
                 let verdict =
                     crate::util::path_security::check_tool_access(&name, is_write, &blocked);
                 match (is_write, verdict.is_ok()) {
@@ -7217,6 +7230,68 @@ mod tests {
             reads_allowed > 0,
             "no read call was allowed through the write block — the gate is refusing reads too, \
              which would strand a caller inside a read-only project with no way out"
+        );
+    }
+    /// Pins the ONE exemption `every_write_call_is_refused_under_a_write_block` relies on.
+    ///
+    /// That walk's oracle is `is_write && !lifts_write_block`, so a tool that claimed the
+    /// exemption would drop out of it and the walk would stay green while a write went
+    /// unguarded — the same "two enumerations of what a write is" defect that test exists
+    /// to prevent, reintroduced through the exemption. This is the second source: it does
+    /// not ask whether writes are refused, it asks which calls are excused, and fails on any
+    /// addition. Widening the exemption then takes a deliberate edit HERE, in review.
+    ///
+    /// Exact-set, not "workspace is in it": a subset check is satisfied by an exemption that
+    /// also covers `memory`. The non-triviality bound is the usual one — a registry walk that
+    /// saw no writes would pass `exempt == [activate]` only by accident of an empty tool list
+    /// being impossible, so it is asserted rather than assumed.
+    #[tokio::test]
+    async fn only_the_documented_exit_is_exempt_from_the_write_block() {
+        let (_dir, server) = make_server().await;
+
+        let mut exempt: Vec<String> = Vec::new();
+        let mut writes_seen = 0usize;
+        for tool in &server.tools {
+            let mut inputs = vec![serde_json::json!({})];
+            if let Some(actions) = tool
+                .input_schema()
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(|e| e.as_array())
+            {
+                for a in actions.iter().filter_map(|x| x.as_str()) {
+                    inputs.push(serde_json::json!({ "action": a }));
+                }
+            }
+            for input in &inputs {
+                let is_write = tool.is_write(input);
+                if is_write {
+                    writes_seen += 1;
+                }
+                if tool.lifts_write_block(input) {
+                    assert!(
+                        is_write,
+                        "{} {input} claims to lift the write block but is not a write, so the \
+                         claim is meaningless and would hide a mistaken predicate",
+                        tool.name()
+                    );
+                    exempt.push(format!("{} {input}", tool.name()));
+                }
+            }
+        }
+
+        assert!(
+            writes_seen >= 10,
+            "only {writes_seen} write call(s) were walked — the registry is truncated and this \
+             pin would be vacuous"
+        );
+        assert_eq!(
+            exempt,
+            vec![r#"workspace {"action":"activate"}"#.to_string()],
+            "the set of calls exempt from the write block changed. `workspace(activate)` is the \
+             documented exit; anything else exempt is a write that a read-only activation no \
+             longer guards"
         );
     }
 
@@ -8551,6 +8626,136 @@ mod tests {
         assert!(
             text.contains(&root.display().to_string()),
             "the refusal must name the read-only project so the caller can pin past it: {text}"
+        );
+    }
+    /// docs/issues/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md
+    /// § *Mechanism A*: `workspace(action="activate")` is `is_write=true` (it persists
+    /// `.codescout/libraries.json`, so it must take the write lock), and the read-only gate
+    /// refused every `is_write` call — including the one call its own refusal text names as
+    /// the way out. A read-only activation guarded the only unpinned call that could lift it.
+    ///
+    /// The fixture is the probe table's rows 2, 5 and 8 on the real dispatch path, in the
+    /// order that makes each half falsifiable:
+    ///
+    /// * the CONTROL write is refused first, so the block is demonstrably armed. Without it,
+    ///   a lift that "succeeds" on a block that was never there proves nothing, and a gate
+    ///   gutted to allow everything satisfies the lift assertion (the two halves are
+    ///   monotone in opposite directions; only the pair discriminates);
+    /// * the lift is UNPINNED. A pinned activate always worked (it upgrades residency), so
+    ///   pinning it would test the workaround and not the defect;
+    /// * the write AFTER the lift must land. A lift that returns ok while leaving the block
+    ///   in place is a different defect and this is what catches it.
+    ///
+    /// `memory` rather than `doc` for the writes, for the same lean-lane reason as
+    /// `a_read_only_activation_refuses_an_unpinned_write_end_to_end`.
+    #[tokio::test]
+    async fn a_read_only_activation_can_be_lifted_by_an_unpinned_activate_end_to_end() {
+        let (_home, server) = make_server().await;
+        let browsed = tempdir().unwrap();
+        std::fs::create_dir_all(browsed.path().join(".codescout")).unwrap();
+        let root = std::fs::canonicalize(browsed.path()).unwrap();
+
+        async fn call(
+            server: &CodeScoutServer,
+            name: &str,
+            args: serde_json::Value,
+        ) -> CallToolResult {
+            let req = CallToolRequestParams::new(name.to_string())
+                .with_arguments(serde_json::from_value(args).unwrap());
+            server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap()
+        }
+        fn text(r: &CallToolResult) -> String {
+            r.content
+                .iter()
+                .find_map(|c| c.as_text().map(|t| t.text.clone()))
+                .unwrap_or_default()
+        }
+        let write = |topic: &'static str| serde_json::json!({ "action": "write", "topic": topic, "content": "probe" });
+
+        let armed = call(
+            &server,
+            "workspace",
+            serde_json::json!({
+                "action": "activate", "path": root.to_string_lossy(), "read_only": true
+            }),
+        )
+        .await;
+        assert_ne!(armed.is_error, Some(true), "precondition: {}", text(&armed));
+
+        // Control: the block is armed.
+        let blocked = call(&server, "memory", write("lift-probe-before")).await;
+        assert_eq!(
+            blocked.is_error,
+            Some(true),
+            "control: an unpinned write must be refused while read-only; got: {}",
+            text(&blocked)
+        );
+
+        // Treatment: the exit the refusal names, UNPINNED.
+        let lifted = call(
+            &server,
+            "workspace",
+            serde_json::json!({
+                "action": "activate", "path": root.to_string_lossy(), "read_only": false
+            }),
+        )
+        .await;
+        assert_ne!(
+            lifted.is_error,
+            Some(true),
+            "activate(read_only=false) is the remedy the write refusal prescribes; it must not \
+             be refused by the very block it lifts. Got: {}",
+            text(&lifted)
+        );
+
+        // The lift must have TAKEN EFFECT, not merely returned ok.
+        let after = call(&server, "memory", write("lift-probe-after")).await;
+        assert_ne!(
+            after.is_error,
+            Some(true),
+            "the block must be gone after the lift; got: {}",
+            text(&after)
+        );
+    }
+
+    /// The other observed shape of the same defect: the refusal also fired for an activate
+    /// of a DIFFERENT root ("the activate call is gated by the CURRENT activation's
+    /// read-only state, so a read-only activation guards … a call to a DIFFERENT root").
+    /// Moving on from a read-only project must not require lifting it first.
+    #[tokio::test]
+    async fn a_read_only_activation_does_not_block_activating_a_different_root() {
+        let (_home, server) = make_server().await;
+        let (first, second) = (tempdir().unwrap(), tempdir().unwrap());
+        for d in [&first, &second] {
+            std::fs::create_dir_all(d.path().join(".codescout")).unwrap();
+        }
+        let activate = |root: &std::path::Path, read_only: bool| {
+            let req = CallToolRequestParams::new("workspace").with_arguments(
+                serde_json::from_value(serde_json::json!({
+                    "action": "activate",
+                    "path": std::fs::canonicalize(root).unwrap().to_string_lossy(),
+                    "read_only": read_only,
+                }))
+                .unwrap(),
+            );
+            server.call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+        };
+
+        let armed = activate(first.path(), true).await.unwrap();
+        assert_ne!(armed.is_error, Some(true), "precondition");
+        let moved = activate(second.path(), false).await.unwrap();
+        assert_ne!(
+            moved.is_error,
+            Some(true),
+            "activating another root must not be refused by the first root's read-only \
+             state; got: {:?}",
+            moved
+                .content
+                .iter()
+                .find_map(|c| c.as_text().map(|t| t.text.clone()))
         );
     }
 

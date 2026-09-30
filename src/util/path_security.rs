@@ -2806,11 +2806,18 @@ mod tests {
         // intended; it is now covered by
         // `a_write_tool_outside_the_legacy_name_list_is_still_refused`.
         //
-        // `workspace` stays, and that is load-bearing rather than incidental: it
-        // does NOT override `Tool::is_write`, so it defaults to a read. If it ever
-        // gains a `true`, activate(read_only: false) — the documented escape from a
-        // read-only project — becomes unreachable from inside one, and the refusal
-        // messages above would all prescribe a call the gate refuses.
+        // `workspace` stays, but only for its pure-read actions (`status`, `list_projects`):
+        // this fixture hard-codes `is_write=false`, so it says NOTHING about
+        // `workspace(action="activate")`. That call IS `is_write=true` (it persists
+        // `.codescout/libraries.json` and takes the lock) — this comment used to claim
+        // `workspace` "does NOT override `Tool::is_write`", which stopped being true with
+        // the 2026-09-03 lock fix, and with it the fixture stopped guarding the exit it
+        // named. `activate` reaches the gate as a write and is let through by
+        // `Tool::lifts_write_block`; that path is covered end to end by
+        // `server::tests::a_read_only_activation_can_be_lifted_by_an_unpinned_activate_end_to_end`.
+        // If activate(read_only: false) — the documented escape from a read-only project —
+        // became unreachable from inside one, every refusal message above would prescribe a
+        // call the gate refuses.
         for tool in &["read_file", "tree", "grep", "symbols", "workspace"] {
             assert!(
                 check_tool_access(tool, false, &config).is_ok(),

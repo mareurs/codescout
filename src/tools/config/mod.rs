@@ -31,6 +31,13 @@ impl Tool for Workspace {
     fn is_write(&self, input: &Value) -> bool {
         input.get("action").and_then(Value::as_str) == Some("activate")
     }
+    /// `activate` is the exit from a write block, and the call every write refusal prescribes.
+    /// It stays `is_write` (it persists `.codescout/libraries.json` and takes the lock), but
+    /// must not be refused by the read-only state it exists to change. `status` and
+    /// `list_projects` are reads and never reach the write gate at all.
+    fn lifts_write_block(&self, input: &Value) -> bool {
+        input.get("action").and_then(Value::as_str) == Some("activate")
+    }
 
     /// Mixed: `status`/`list_projects` read, `activate` writes — it calls
     /// `auto_register_deps`, which persists `.codescout/libraries.json`

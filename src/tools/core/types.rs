@@ -1214,6 +1214,29 @@ pub trait Tool: Send + Sync {
     fn is_write(&self, _input: &Value) -> bool {
         false
     }
+    /// Returns true if this call is the DOCUMENTED WAY OUT of a write block, so the
+    /// read-only gate must let it through even though [`Tool::is_write`] is `true`.
+    ///
+    /// `is_write` answers "does this call take the cross-process write lock", and it had
+    /// grown a second job: the read-only gate (`check_tool_access`) refuses every
+    /// `is_write` call. For `workspace(action="activate")` the two answers legitimately
+    /// differ. It persists `.codescout/libraries.json`, so it must take the lock; and it is
+    /// the call every write refusal names as the exit ("call workspace(action='activate',
+    /// …, read_only: false)"), so refusing it under the block it exists to lift left a
+    /// read-only activation guarding the only unpinned call that could end it — including a
+    /// call to a DIFFERENT root.
+    /// docs/issues/2026-09-24-workspace-activate-read-only-false-refused-by-the-write-guard-it-lifts-unreproduced.md
+    ///
+    /// Defaults to `false`: a call is refused under a write block unless its tool says
+    /// otherwise, so a write tool added later is gated on the day it is added and an
+    /// exemption is something a tool must claim on purpose. Which calls claim it is pinned by
+    /// `server::tests::only_the_documented_exit_is_exempt_from_the_write_block`.
+    ///
+    /// Consulted ONLY by the gate. The write lock and the pinned-residency upgrade keep
+    /// reading `is_write`, so an exempt call still serialises behind the lock.
+    fn lifts_write_block(&self, _input: &Value) -> bool {
+        false
+    }
 
     /// Static MCP tool annotations advertised in `list_tools`.
     ///
@@ -1237,9 +1260,10 @@ pub trait Tool: Send + Sync {
     /// `TOOL_SURFACE_CHAR_BUDGET` is lower-only.
     ///
     /// **This is the PER-TOOL axis; [`Tool::is_write`] is PER-CALL, and neither derives
-    /// from the other.** `is_write` gates the cross-process write lock and nothing else:
+    /// from the other.** `is_write` drives the cross-process write lock, the pinned-residency
+    /// upgrade, and (narrowed by [`Tool::lifts_write_block`]) the read-only write gate:
     /// `run_command` has no override and reports `false` even for `rm -rf src`, while
-    /// `workspace` reports `false` yet `action="activate"` writes
+    /// `workspace` reports `true` for `action="activate"` because it writes
     /// `.codescout/libraries.json` (`src/library/auto_register.rs:64-65`). Classify from
     /// what the tool actually does, never by lifting `is_write`.
     ///
