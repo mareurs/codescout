@@ -1,11 +1,9 @@
 ---
 kind: bug
-status: taken
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
-claimed_at: 2026-09-30
-claimed_by: e41af068-cf07-4c83-867f-71be1ba7f586
-closed: null
+closed: 2026-09-30
 opened: 2026-09-28
 owner: marius
 related: []
@@ -141,9 +139,42 @@ Overlap to know about: session `3e2b9cc8` held uncommitted hunks in the same fil
 are theirs and were not touched or staged here. Their guard is a real backstop for
 `reindent=false` in Python: a body kept at a column that leaves an IndentationError is refused.
 
+Fixed in `9f89da99` on `experiments`. "Fixed" here means the caller now has the switch; the DEFAULT is unchanged on purpose (the operator chose option C), so a body that mixes levels and omits `reindent=false` is still re-based as before.
+
+Gate evidence, stated as observed: one `gate.sh` run gave `FMT=0 CLIPPY=0 DEFAULT=0` and `LEAN=101`, the last from a stale build-script artefact of a since-removed worktree (build.rs read a path under `port-28-test`); the lean lane was re-run alone after cleaning the leased slot's `codescout` artefacts: 3789 passed, 0 failed. No single four-lane run was green. The live binary does NOT yet contain this change, so no call through it has used the switch.
+
+## Fix provenance
+
+- **SHA:** `9f89da99` (`experiments`)
+- **patch-id:** `8cb325c45328f865f6fffa08a582ce9e84c11552`
+
 ## Tests added
 
-(pending)
+Six end-to-end cases in `src/tools/symbol/tests.rs`, each driving `EditCode.call` through a mock
+LSP so none can skip the way the rust-analyzer-gated insert tests do on a slow server:
+
+- `edit_code_insert_splices_the_body_as_written_when_reindent_is_false`
+- `edit_code_insert_rebases_by_default_so_the_switch_test_is_not_vacuous` (the control)
+- `edit_code_insert_keeps_the_callers_layout_through_the_escape_repair_too` (the second insert
+  site, with its own control, and a `note` assertion proving the repair closure was reached)
+- `edit_code_replace_splices_the_body_as_written_when_reindent_is_false` (with its control)
+- `edit_code_refuses_a_reindent_value_it_cannot_read_instead_of_ignoring_it`
+- `edit_code_reads_the_string_false_the_way_other_tools_do`
+
+Observed RED before the implementation (5 failed, the control passed), GREEN after.
+
+**Mutations**, run with `scripts/mutation-probe.sh`, nine, each killed by its own test: the
+helper ignoring the flag; each of the three re-base sites ignoring it (replace, insert main
+path, insert repair closure); an absent value meaning "keep"; an unreadable value defaulted
+instead of refused; the refusal not naming the parameter; and each of the two wiring lines in
+`call()` dropping the parsed flag. Three of those got no verdict on the first pass (the tests
+never ran) and were re-run. **One survived**: the refusal-names-the-parameter assertion read the
+error's displayed text, which also carries the hint, and the hint names the parameter, so the
+assertion passed with the message stripped. It now asserts on the message itself
+(`RecoverableError::message`) and was re-observed red.
+
+Not covered: no test exercises the Python-indentation refusal together with `reindent=false`;
+that guard belongs to `8c576c06` and is tested there.
 
 ## Workarounds
 

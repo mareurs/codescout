@@ -10297,7 +10297,7 @@ fn replace_syntax_broken_names_the_body_before_the_range() {
 // silently wrong for a body that mixes levels: a column-0 method plus a column-0 class, all
 // shifted, nests the class inside the enclosing one. Nothing in the text says which the
 // caller meant, so the caller gets a switch. `reindent=false` splices the body as written.
-// docs/issues/2026-09-28-edit-code-insert-rebases-a-mixed-level-body-silently-nesting-top-level-code.md
+// docs/issues/archive/2026-09-28-edit-code-insert-rebases-a-mixed-level-body-silently-nesting-top-level-code.md
 //
 // Every case is an end-to-end call through a MOCK LSP, so none of them can skip the way the
 // rust-analyzer-gated insert tests do when the server is slow: a skip reads as a pass.
