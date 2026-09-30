@@ -30,6 +30,8 @@ GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101
 The build script binary named in the error (`build/codescout-8ea9d4489ffec117/`) is the one both
 trees used.
 
+**Observed again 2026-09-30, by a gate run that followed the documented sequence.** `./scripts/gate.sh` leased the first free slot, whose `target/` still held a build script compiled in a peer session's detached worktree (used for that peer's own gate, then removed). The script binary was reused for this tree because its sources were older than the artifact, and it panicked at `build.rs:64`: `read <peer-worktree>/src/prompts/source.md: No such file or directory`. Result: `GATE EXITS -> FMT=0 CLIPPY=101 LEAN=101 DEFAULT=101` in about 25 seconds, all three cargo lanes red on a tree whose code had not been compiled at all. It reads exactly like a regression in the commits under test. The discriminator is the panic line naming a path that is not this tree.
+
 ## Reproduction
 Two worktrees at commits with byte-identical `build.rs`, one `CARGO_TARGET_DIR`. Build in A, then
 in B: B's generated surfaces come from A's `source.md`. Delete A and build B again: panic.
