@@ -112,8 +112,20 @@ In `src/util/text.rs::tests`:
   from the other side: a column-0 first line with a column-0 comment below must still
   be re-based.
 
-Not covered: no test drives `edit_code(replace)` end to end on this shape. The live
-binary was not rebuilt, so the original refusal was not re-run against the fix.
+No Rust test drives `edit_code` end to end on this shape.
+
+**Verified end to end 2026-09-30** on the rebuilt release binary (`./scripts/rb.sh`, then
+`/mcp`), against a scratch Python class, with the pre-fix refusal as the control:
+- The original input, a column-4 body with one column-0 comment, was refused before the
+  fix with the stale-range error and is accepted now. Bytes: `def a` at 4, its statements
+  at 8, the comment left at column 0, and the file parses.
+- The 09-28 insert shape (first line at the target, a column-0 class after it) lands the
+  method at 4 and `class B` at column 0, top-level. Inserted after the last method.
+  A first attempt inserted after a MIDDLE method and split the class, which is the
+  caller's own layout and not a defect; the check was mis-designed, not the tool.
+- Still shifted, by design: a body whose first line is NOT at the target. A column-0
+  method plus a column-0 class inserted after a method nests the class inside the
+  enclosing class and the file still parses. See the 09-28 bug.
 
 ## Workarounds
 

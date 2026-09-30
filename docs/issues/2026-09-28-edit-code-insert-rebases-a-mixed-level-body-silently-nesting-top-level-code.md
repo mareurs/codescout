@@ -46,6 +46,16 @@ shape. To reproduce, in a Python test file:
 
 Expected on this reading: `B` lands at column 4 or deeper, nested in `A`.
 
+
+**Reproduced 2026-09-30** on the rebuilt binary, against a scratch Python class, inserting
+after the class's last method. Two inputs, and they split the bug:
+- A body whose first line is at the target column, then a column-0 class: `class B` stays
+  at column 0. Fixed by `2da4e2fe`.
+- A body whose first line is at column 0, then a column-0 class: everything is shifted,
+  the method lands at column 4 and `class C` nests inside the enclosing class. The file
+  parses, so nothing refuses it. **This is what remains open**, and it is the case
+  option (a) in the Fix section still applies to.
+
 ## Environment
 
 codescout `experiments` circa 2026-09-28; the Python LSP; a shared checkout.
@@ -82,8 +92,9 @@ the shape reported here (a method at the target's column, then a column-0 class)
 shape needs no refusal: `reindent_to` now returns a body unchanged when its first code
 line is at the target column, so `class B` keeps column 0. See
 `docs/issues/archive/2026-09-30-edit-code-reindent-takes-its-base-from-the-shallowest-line-so-one-column-0-line-double-indents-a-pre-indented-body.md`.
-Verified at the `reindent_to` function only, with the shape from this report as a unit
-test. The `edit_code(insert)` path itself has NOT been re-run on it.
+Verified at the `reindent_to` function, and now end to end: on 2026-09-30, on the rebuilt
+binary, `edit_code(insert)` after the last method of a class with a body holding a method
+at the target column and a column-0 class placed the class at column 0, top-level.
 
 What stays open, and where option (a) still applies: a body whose first line is NOT at
 the target and which holds a shallower later line (a column-0 method plus a column-0
