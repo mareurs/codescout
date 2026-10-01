@@ -1,7 +1,7 @@
 ---
 id: '04e069162e1fb15f'
 kind: bug
-status: investigating
+status: mitigated
 title: 'BUG: staging a path by name records the stager as its owner, so a peer''s file you stage is yours on the record and foreign-index has nothing to refuse'
 owners:
 - marius
@@ -155,14 +155,36 @@ has; a stricter predicate over a wrong relation produces false refusals without 
 1. **Build the lookup into the recorder.** On the `named` route, if a codescout write to the path by another session is on record and none by the stager, record owner `-` with a new route (say `named-foreign`) so the guard refuses the bare commit. Covers instance 1's shape where the peer wrote through a tool with a path argument. Costs a change to the recorder, the guard's route handling, its remedy text and both suites, and it ships a guard narrower than its name unless the three limits above are stated at the refusal.
 2. **Accept the residual**, retitle (done in this update), and leave the entry-grain case to `docs/conventions/shared-checkout-commit-sequence.md`'s "state authorship in the message" resolution, which is what `c054113b` did.
 
-Nothing is built here. Status moves from `taken` to `investigating`: worked, no live owner.
+**Decision taken 2026-10-01: option 1, built.** See § *Shipped* below.
+
+### Shipped 2026-10-01 — option 1, and what a live check showed
+
+`scripts/post-index-change-stage-log.sh` gained `foreign_writer`. On the `named` route only, it asks `usage.db` whether a session other than the stager wrote the path through a codescout tool since the path's last commit while the stager did not. If so, the row's owner is **that session** and its route is `named-foreign`. `scripts/pre-commit-foreign-index.sh` needed no new decision, since an owner that is not you is already refused with the live/not-live lookup; it gained one paragraph saying the attribution is by write, not by staging.
+
+The lookup is `tool_calls` filtered to the last 50000 calls (41 ms with no match), successful calls only, `instr` rather than `LIKE`, `edit_file`/`edit_code`/`create_file` by `path` (relative or absolute) and `doc` `update`/`append_entry`/`update_entry`/`move`/`delete` by artifact id. It fails open: any failure to read the record returns the old `named` claim.
+
+**Live check against the real `usage.db`**, a temp repo with the real recorder and a made-up stager:
+
+- `src/librarian/tools/link_scan/mod.rs` was attributed to `3e2b9cc8`, the session that did write it, route `named-foreign`. The mechanism works on live data.
+- A path nothing wrote stayed `named`.
+- **`docs/trackers/bug-fix-session-log.md` stayed `named`, and that is the limit that matters.** Its ten `edit_file` rows are all `recoverable_error` (the ledger refuses direct edits, so nothing was written), and there is no successful `doc` write for its id since its last commit at 12:19 UTC, yet the file carries 44 uncommitted added lines. Whoever wrote them did so through something this record does not see: a shell command, or the `codescout` CLI, neither of which is an MCP call. **For that tracker, the file instance 2 was about, this change attributes nothing.**
+
+So the fix covers a peer's file written through a codescout MCP tool with a path or an artifact id. It does not cover shell or CLI writes, `doc create` (no id), or two sessions' entries inside one file. A stager who wrote a path by shell while a peer also wrote it through a tool is refused, deliberately.
+
+**Status is `mitigated`, not `fixed`:** the named-path mode reproduced on 2026-10-01 is closed for the tool-written case, and the structural claim (an owner field recording the stager where the decision needs the content's author) still holds for everything above.
 
 ## Tests added
 
-None. The mechanism claim is a read of three shipped scripts, and the incident was avoided rather
-than reproduced. A regression test would need a two-session fixture staging each other's untracked
-files, which `tests/hooks-discrimination.sh` has the machinery for — that is the place, and it is
-not done.
+`tests/hooks-discrimination.sh`, section "named route attributes a path by WRITE", cases 1-18 (206 passed and 0 failed for the file). The real recorder and guard are driven in throwaway repos with a fixture `usage.db` named by `CODESCOUT_USAGE_DB`, so no case reads the real one.
+
+Cases 1, 4b, 5a, 7, 10, 15 and 16-17 go red on the pre-change behaviour (18 assertions with the call site deleted); the "kept as named" cases pass on unchanged code and rest on mutation. Covered: foreign attribution and the guard's refusal and wording, a path both sessions wrote, no record, the time bound in both directions, each writing tool, each id-bearing `doc` action and a `doc` read, failed calls, two other writers, `_` as a non-wildcard, a longer path, an absolute path, an absent, unreadable and locked database, a blanket add, a read tool, the lookback bound, and carry-over of the row through an unrelated stage.
+
+**Mutation:** 25 sites, all killed except `.timeout 200`, which is tuning no case can distinguish and is annotated as such. Four guards (`[ -r db ]`, `command -v sqlite3`, `timeout 2`, and `|| return` on the query) survived their mutations as inert, since every failure ends with sqlite3 printing nothing, and were deleted; the whole set was then re-run. Not mutated: the `git rev-parse`/`git log` fallbacks, which a hook inside a repo cannot reach. The suite's known flaky precondition cases (`2026-09-16-three-hooks-discrimination-cases-failed-once-and-did-not-reproduce`) appeared in several mutation runs and are that bug, not this change.
+
+## Fix provenance
+
+- **SHA:** `3dea3b88419765714d96ba31c7671b85f165fd71` (`experiments`)
+- **patch-id:** `ba3c9f4e37fd4611e380ec5cc2e0c70dc188819a`
 
 ## Workarounds
 
