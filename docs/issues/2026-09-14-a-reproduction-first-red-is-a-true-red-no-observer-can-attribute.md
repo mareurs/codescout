@@ -127,6 +127,8 @@ Apply the marker on the next reproduction-first test written in this repo. If it
 few uses, propose it for `docs/templates/` or CLAUDE.md § *Testing Discipline*; one use is
 not evidence a convention holds.
 
+**Checked 2026-10-01 (doctor `open_bug_cited_from_source`) — live; the one source citation is rationale, not a fix.** `src/agent/build_check.rs:893-901` cites this file to explain why its test was observed red by mutation instead of by a pre-fix run, i.e. it describes the hazard and avoids it. Adoption of the prescribed marker is **zero**: a repo-wide search for `expected RED until the fix lands` finds nothing outside this file. The two later tests that call themselves reproductions (`src/librarian/tools/update_entry.rs:436`, `src/librarian/tools/mv.rs:920`) say so in a `///` doc comment, which an observer reading a red never sees, and neither assertion message carries the marker. So the convention has been written and has not been tried, which is what the Resume above asks for before proposing it anywhere durable.
+
 ## References
 
 - `docs/issues/archive/2026-09-08-an-armed-mutation-is-a-deliberate-red-no-observer-can-distinguish.md`
