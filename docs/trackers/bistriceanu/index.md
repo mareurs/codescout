@@ -86,7 +86,7 @@ deliberately avoided — the ledger is for defects we have seen, and B-4 is exac
 whole-file path never receives it and buffers unconditionally.
 
 **Status here: reproduced on `experiments`, 2026-08-15.** `read_full_file`
-(`src/tools/read_file.rs:643-752`) takes `(path, text, resolved, input, source_tag,
+(`src/tools/read_file.rs:643-752` when reproduced, before the fix; `:896-1037` on 2026-10-01) takes `(path, text, resolved, input, source_tag,
 ctx)` — no `force` parameter exists to discard. Its `if exceeds_inline_limit(text)`
 branch returns early, *before* `OutputGuard::from_input(input)` is reached at the
 bottom of the function, so neither `force` nor `detail_level` can influence it. For a
@@ -101,7 +101,7 @@ effect is identical, and it is the effect that matters: an agent that passes
 **Next:** decide whether `force` should mean force on this path, or whether the
 schema should say plainly that it is range-only. Either resolves it; silence does not.
 
-**Closed 2026-08-17 (`2703410e`, experiments).** Reproduced on this host first —
+**Closed 2026-08-17 (`2703410e`, experiments; patch-id `d2884053058cc4862ec8ce0c05b29140fab39718`).** Reproduced on this host first —
 `read_file("src/librarian/classify.rs", force=true)`, 10,559 bytes, returned `showing 0 of
 378` with no mention of `force`. His observation was exact.
 
@@ -117,7 +117,9 @@ does. The overflow hint now says so and names the call that works; the schema sa
 before the call is spent. Same fix shape as B-5's `Showing 400 of 400`: the tool's answer
 had to describe its own limits, not change.
 
-**Valid:** dated 2026-08-17
+**Re-checked 2026-10-01:** the fix is in place. `read_full_file`'s oversize branch reads `input["force"]` and passes it to `outline_hint`, which appends the *force=true had no effect on this read* note only when forced; `outline_hint_says_force_did_not_apply_when_forced` pins that half and `outline_hint_stays_silent_about_force_when_not_forced` the other. The schema now scopes `force` to line ranges and says an oversized whole-file read is summarised either way.
+
+**Valid:** dated 2026-10-01
 ## B-2 — the buffered full-read summary carries no incompleteness signal
 
 **Reported:** 2026-08-10, D2 in his design doc. He called this the defect that
