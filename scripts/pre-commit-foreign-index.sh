@@ -258,6 +258,10 @@ foreign_owners=()
 # unrecorded paths there are, so the branch that produced them has to be collected
 # separately or it is lost with the duplicates.
 unrecorded_routes=()
+# Owners attributed by a recorded WRITE (route `named-foreign`) rather than by staging. They
+# are refused like any other foreign owner, but the header "Staged by" would be false for
+# them, so the refusal says which relation produced the row.
+written_owners=()
 # path -> owner, for `--classify` only: the refusal below needs owners deduplicated, the
 # helper needs them per path.
 declare -A owner_of=()
@@ -274,6 +278,12 @@ while IFS=$'\t' read -r blob path; do
             *" $owner "*) ;;
             *) foreign_owners+=("$owner") ;;
         esac
+        if [ "$route" = "named-foreign" ]; then
+            case " ${written_owners[*]-} " in
+                *" $owner "*) ;;
+                *) written_owners+=("$owner") ;;
+            esac
+        fi
         if [ "$owner" = "-" ]; then
             # A row written before route recording has an empty $4; name that state
             # rather than letting it read as a recorded branch.
@@ -640,6 +650,16 @@ fi
             echo "          before concluding anything, and do not read an unreachable id"
             echo "          as permission to take the file."
         fi
+        case " ${written_owners[*]-} " in
+            *" $owner "*)
+                echo "          ATTRIBUTED BY WRITE, NOT BY STAGING: you staged these paths by"
+                echo "          name, but the write record shows THIS session wrote them through a"
+                echo "          codescout tool since their last commit and you did not. Re-staging"
+                echo "          does not change that while the record stands. The record sees"
+                echo "          codescout tool writes only: if you wrote a path yourself some other"
+                echo "          way, that is the case it cannot see, and the refusal is deliberate."
+                ;;
+        esac
     done
     echo
     echo "ASK before assuming. scripts/peer-sessions.sh lists every live session,"

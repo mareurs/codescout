@@ -332,6 +332,77 @@ $_NAMED
 EOF
     return 1
 }
+
+# WHO ELSE WROTE THIS PATH? Prints the session, other than $me, that last wrote $1 through
+# a codescout tool since $1's last commit -- and prints nothing when $me wrote it through
+# one too, or when no such write is on record, or when the record cannot be read.
+#
+# WHY THE RECORDER ASKS. `git add <path>` names a path, and the `named` route has always
+# made the stager its owner. A peer's untracked file is exactly as nameable as your own, so
+# naming it made it yours on the record and the guard then had nothing to refuse
+# (docs/issues/2026-09-07-the-stage-log-records-the-stager-so-git-add--A-makes-you-the-owner.md,
+# reproduced 2026-10-01: a bare commit carried the peer's file). The stager is who STAGED;
+# the decision needs whose CONTENT it is, and the working tree cannot say.
+#
+# THE ANSWER COMES FROM usage.db, NOT file-provenance.py. That script scans every profile's
+# transcripts (about 7s a file by the companion hook's own estimate) and this hook fires on
+# every index change. `tool_calls` already records the session, tool, outcome, time and the
+# arguments of every MCP call, and an id-bounded `instr` over it measured 41 ms with no match.
+#
+# WHAT IT CAN SEE, so nobody reads silence as "nobody else wrote it":
+#   * edit_file / edit_code / create_file, by the `path` argument (relative or absolute);
+#   * doc update / append_entry / update_entry / move / delete, by the artifact id, which is
+#     the first 16 hex of sha256 of the absolute path (verified against a live artifact);
+#   * only calls that SUCCEEDED -- a refused edit wrote nothing.
+# WHAT IT CANNOT: a shell write (`run_command`, a native editor) leaves no path in the
+# record, and the grain is the FILE. Two sessions' entries in one tracker stay one path, so
+# when the stager wrote through a tool as well this prints nothing and the legacy `named`
+# claim stands. That is the entry-grain case the bug file records as unreachable here.
+#
+# FAILS OPEN, to the old claim: no sqlite3, no database, a locked one, a path whose JSON
+# spelling differs from its plain one. The answer is a refinement of `named`, so every
+# failure to refine returns exactly what the hook did before (cases 11 and 18).
+foreign_writer() {
+    local rel="$1" db root abs ct id sql out sid
+    root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+    db="${CODESCOUT_USAGE_DB:-$root/.codescout/usage.db}"
+    abs="$root/$rel"
+    ct="$(git log -1 --format=%ct -- "$rel" 2>/dev/null)"
+    case "${ct:-0}" in *[!0-9]*) ct=0 ;; esac
+    id="$(printf '%s' "$abs" | sha256sum | cut -c1-16)"
+    # `instr`, not LIKE: `_` is a LIKE wildcard and is in half the paths here. The closing
+    # quote is part of the needle, so `docs/x.md` does not match `docs/x.md.bak`.
+    local q_rel="${rel//\'/\'\'}" q_abs="${abs//\'/\'\'}"
+    sql="SELECT cc_session_id FROM tool_calls
+         WHERE id > (SELECT max(id) - 50000 FROM tool_calls)
+           AND outcome = 'success'
+           AND called_at >= datetime(${ct:-0}, 'unixepoch')
+           AND cc_session_id IS NOT NULL AND cc_session_id != ''
+           AND ((tool_name IN ('edit_file','edit_code','create_file')
+                 AND (instr(input_json, '\"path\":\"$q_rel\"') > 0
+                      OR instr(input_json, '\"path\":\"$q_abs\"') > 0))
+             OR (tool_name = 'doc' AND instr(input_json, '\"id\":\"$id\"') > 0
+                 AND (instr(input_json, '\"action\":\"update\"') > 0
+                      OR instr(input_json, '\"action\":\"append_entry\"') > 0
+                      OR instr(input_json, '\"action\":\"update_entry\"') > 0
+                      OR instr(input_json, '\"action\":\"move\"') > 0
+                      OR instr(input_json, '\"action\":\"delete\"') > 0)))
+         ORDER BY id DESC;"
+    # No `[ -r db ]`, `command -v sqlite3`, `timeout` or `|| return` guards, on purpose: each
+    # was removed in turn and the suite stayed green, because a missing database, a missing
+    # binary and a locked file all end the same way -- sqlite3 prints nothing -- and the loop
+    # below then has no row to read. `.timeout 200` is tuning, not a guard: it lets a writer's
+    # commit in progress finish instead of refusing at once, and no case can tell the two apart.
+    out="$(sqlite3 -readonly -cmd '.timeout 200' "$db" "$sql" 2>/dev/null)"
+    local other=""
+    while IFS= read -r sid; do
+        [ -n "$sid" ] || continue
+        [ "$sid" = "$me" ] && return 0
+        [ -n "$other" ] || other="$sid"
+    done <<< "$out"
+    printf '%s' "$other"
+}
+
 if staging_op; then
     claimant="$me"
     _NAMED="$(argv_paths)"
@@ -389,8 +460,17 @@ while IFS=$'\t' read -r blob path; do
         # label a pre-route row as such instead of guessing a branch for it.
         [ -n "$route" ] || route="pre-route"
     elif [ "$claimant" != "-" ] && names_path "$path"; then
-        owner="$claimant"
-        route="named"
+        # Naming a path is the stager's act, but whose CONTENT it is can be answered from the
+        # write record. `named-foreign` carries the OTHER writer as owner, so the guard's
+        # existing machinery (refuse, name them, say whether they are live) applies unchanged.
+        peer="$(foreign_writer "$path")"
+        if [ -n "$peer" ]; then
+            owner="$peer"
+            route="named-foreign"
+        else
+            owner="$claimant"
+            route="named"
+        fi
     elif [ -z "${_NAMED:-}" ] || under_named "$path"; then
         owner="-"
         # Argv named nothing (a `-A`/`-u` form, a prefix-less patch, or a pathspec-less

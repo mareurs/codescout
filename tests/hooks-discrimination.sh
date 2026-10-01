@@ -130,6 +130,35 @@ owner_of() {
     awk -F'\t' -v p="$1" '$3 == p { print $1; exit }' .git/session-stage-log
 }
 
+# Same absent-vs-empty guard as `owner_of`, for the same reason. § 7's cases reach this
+# after a `git add`, which writes the index unconditionally, so the non-firing path that
+# hit § 2b is not known to reach here: this guards the SHAPE, and is not evidence of a
+# second observed failure.
+route_of() {
+    [ -f .git/session-stage-log ] || { printf 'NO-LOG'; return; }
+    awk -F'\t' -v p="$1" '$3 == p { print $4; exit }' .git/session-stage-log
+}
+# The ABBREVIATED blob `git diff --raw` emits. A full 40-char sha never matches the log,
+# so a legacy-row fixture built from `git hash-object` is silently re-derived rather than
+# carried over — a case that passes while testing nothing. Cost this suite's author one
+# wrong green.
+blob_of() {
+    git diff --cached --raw |
+        awk -F'\t' -v p="$1" '$2 == p { split($1, x, " "); print x[4]; exit }'
+}
+# A usage.db with only the columns post-index-change-stage-log.sh's `foreign_writer` reads.
+# The recorder takes the path from CODESCOUT_USAGE_DB, so no case here touches the real one.
+mkdb() {
+    rm -f "$1"
+    sqlite3 "$1" "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_name TEXT, called_at TEXT, outcome TEXT, cc_session_id TEXT, input_json TEXT);"
+}
+# wrote <db> <sid> <tool> <input_json> [outcome] [called_at]. `called_at` defaults to now,
+# in the `YYYY-MM-DD HH:MM:SS.mmm` form the real table uses. No single quote may appear in
+# the arguments.
+wrote() {
+    sqlite3 "$1" "INSERT INTO tool_calls(tool_name, called_at, outcome, cc_session_id, input_json) VALUES ('$3', COALESCE(NULLIF('${6:-}', ''), strftime('%Y-%m-%d %H:%M:%f', 'now')), '${5:-success}', '$2', '$4');"
+}
+
 A="aaaaaaaa-0000-0000-0000-aaaaaaaaaaaa"
 B="bbbbbbbb-1111-1111-1111-bbbbbbbbbbbb"
 
@@ -785,6 +814,194 @@ eq "a patch on stdin over-refuses (no filename in argv)" "$(owner_of s.txt)" "-"
 # EVERY case below asserts the path is FOREIGN before calling the guard. Without that the
 # hook can exit 0 for entirely the wrong reason — an unmatched log key reads as "all mine"
 # and passes silently, which is the false green that cost a probe upstream.
+echo "== named route attributes a path by WRITE when the record shows a peer wrote it"
+# docs/issues/2026-09-07-the-stage-log-records-the-stager-so-git-add--A-makes-you-the-owner.md
+# `git add <peer's untracked file>` used to record the stager as its owner (route `named`),
+# and the guard then had nothing to refuse. The recorder now asks usage.db whether another
+# session wrote the path through a codescout tool since its last commit, and if the stager
+# did not, records THAT session with route `named-foreign`.
+#
+# Every "kept as named" case below is an input the legacy rule already handled, so each one
+# passes on unchanged code. Their evidence is the mutations that make them fail, not this
+# run; the cases that go RED on unchanged code are 1, 4b, 5a, 7, 10 and 15.
+C="cccccccc-2222-2222-2222-cccccccccccc"
+add_as() { CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$1" git add -- "${@:2}"; }
+DB="$(mktemp -u "${TMPDIR:-/tmp}/usage-XXXXXX.db")"
+
+# 1. the reproduced bug, and the guard's side of it.
+new_repo; mkdb "$DB"
+echo "peer is mid-write" > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt","new_string":"x"}'
+add_as "$A" f.txt
+eq "1: staging a path a peer wrote records the PEER as owner" "$(owner_of f.txt)" "$B"
+eq "1: and says why" "$(route_of f.txt)" "named-foreign"
+out="$(guard "$A")"
+has "1: the stager's bare commit is refused" "$out" "EXIT=1"
+has "1: the refusal names the writer" "$out" "$B"
+has "1: and says the attribution is by write, not by staging" "$out" "ATTRIBUTED BY WRITE"
+has "1: the writer may commit it" "$(guard "$B")" "EXIT=0"
+# 15. the row is a fact about the pair and survives an unrelated stage.
+echo o > other.txt
+add_as "$A" other.txt
+eq "15: a later unrelated add leaves the foreign row's owner" "$(owner_of f.txt)" "$B"
+eq "15: and its route" "$(route_of f.txt)" "named-foreign"
+rm -rf "$T"
+
+# 2. the stager wrote it too: a mixed file is not refused, which is the entry-grain case this
+# lookup cannot separate and must not over-refuse.
+new_repo; mkdb "$DB"
+echo mixed > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+wrote "$DB" "$A" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "2: a path BOTH sessions wrote stays the stager's" "$(owner_of f.txt)" "$A"
+eq "2: on the legacy route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+# 3. control: no record at all is the old behaviour exactly.
+new_repo; mkdb "$DB"
+echo mine > f.txt
+add_as "$A" f.txt
+eq "3: no write on record keeps the legacy claim" "$(owner_of f.txt)" "$A"
+eq "3: and the legacy route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+# 4. the time bound: a write BEFORE the path's last commit is history, not a pending claim.
+new_repo; mkdb "$DB"
+echo v1 > g.txt; git add g.txt; git commit -qm g
+echo v2 > g.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success '2000-01-01 00:00:00.000'
+add_as "$A" g.txt
+eq "4a: a peer's write older than the last commit is ignored" "$(owner_of g.txt)" "$A"
+git reset -q -- g.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}'
+add_as "$A" g.txt
+eq "4b: the same path with a write AFTER the last commit is the peer's" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
+# 5. doc writes carry the artifact id (first 16 hex of sha256 of the absolute path).
+new_repo; mkdb "$DB"
+echo h > h.txt; echo i > i.txt
+hid="$(printf '%s' "$(git rev-parse --show-toplevel)/h.txt" | sha256sum | cut -c1-16)"
+iid="$(printf '%s' "$(git rev-parse --show-toplevel)/i.txt" | sha256sum | cut -c1-16)"
+wrote "$DB" "$B" doc "{\"action\":\"update\",\"id\":\"$hid\",\"patch\":{}}"
+wrote "$DB" "$B" doc "{\"action\":\"find\",\"id\":\"$iid\"}"
+add_as "$A" h.txt i.txt
+eq "5a: a doc update by id is a write to that path" "$(owner_of h.txt)" "$B"
+eq "5b: a doc READ of an id is not" "$(owner_of i.txt)" "$A"
+rm -rf "$T"
+
+# 6. a refused or failed call wrote nothing.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}' recoverable_error
+add_as "$A" f.txt
+eq "6: a write that did not succeed is ignored" "$(owner_of f.txt)" "$A"
+rm -rf "$T"
+
+# 7. two other writers: the most recent one is named.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+wrote "$DB" "$C" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "7: with two other writers the newest is the owner" "$(owner_of f.txt)" "$C"
+rm -rf "$T"
+
+# 8-9. the match is exact: `_` is not a wildcard and a longer path is not this one.
+new_repo; mkdb "$DB"
+echo a > axb.txt; echo k > k.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"a_b.txt"}'
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"k.txt.bak"}'
+add_as "$A" axb.txt k.txt
+eq "8: a_b.txt (underscore) does not match axb.txt" "$(owner_of axb.txt)" "$A"
+eq "9: k.txt.bak does not match k.txt" "$(owner_of k.txt)" "$A"
+rm -rf "$T"
+
+# 10. an absolute `path` argument names the same file.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"$(git rev-parse --show-toplevel)/f.txt\"}"
+add_as "$A" f.txt
+eq "10: an absolute path argument matches" "$(owner_of f.txt)" "$B"
+rm -rf "$T"
+
+# 11. every failure to read the record falls back to the legacy claim.
+new_repo
+echo f > f.txt
+CODESCOUT_USAGE_DB=/nonexistent/usage.db CLAUDE_CODE_SESSION_ID="$A" git add -- f.txt
+eq "11a: an absent database keeps the legacy claim" "$(owner_of f.txt)" "$A"
+git reset -q -- f.txt
+echo "this is not a database" > "$DB"
+add_as "$A" f.txt
+eq "11b: an unreadable database keeps the legacy claim" "$(owner_of f.txt)" "$A"
+rm -rf "$T"
+
+# 12. a blanket add never consults the record: it names no path to ask about.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+CODESCOUT_USAGE_DB="$DB" CLAUDE_CODE_SESSION_ID="$A" git add .
+eq "12: a blanket add still records unnamed" "$(route_of f.txt)" "unnamed"
+rm -rf "$T"
+
+# 13. only writing tools count.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" read_file '{"path":"f.txt"}'
+add_as "$A" f.txt
+eq "13: a peer's READ of the path is not a write" "$(owner_of f.txt)" "$A"
+rm -rf "$T"
+
+# 14. the lookback is bounded: a write more than 50000 calls ago is out of reach, so the
+# lookup stays cheap on a table that only grows.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+sqlite3 "$DB" "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<50001) INSERT INTO tool_calls(tool_name, called_at, outcome, cc_session_id, input_json) SELECT 'grep', strftime('%Y-%m-%d %H:%M:%f','now'), 'success', 'zz', '{}' FROM n;"
+add_as "$A" f.txt
+eq "14: a write older than the lookback window is not seen" "$(owner_of f.txt)" "$A"
+rm -rf "$T" "$DB"
+
+# 16-17. every writing tool counts, one case each: a tool dropped from the list is a hole the
+# edit_file cases above cannot see.
+new_repo; mkdb "$DB"
+echo c > c.txt; echo d > d.txt
+wrote "$DB" "$B" create_file '{"path":"c.txt","content":"x"}'
+wrote "$DB" "$B" edit_code '{"action":"replace","path":"d.txt","symbol":"s","body":"x"}'
+add_as "$A" c.txt d.txt
+eq "16: a create_file by a peer is a write" "$(owner_of c.txt)" "$B"
+eq "17: an edit_code by a peer is a write" "$(owner_of d.txt)" "$B"
+rm -rf "$T" "$DB"
+
+# 5c. every id-bearing doc action that writes, one case each (5a covers `update`).
+new_repo; mkdb "$DB"
+for act in append_entry update_entry move delete; do
+    echo x > "doc-$act.txt"
+    did="$(printf '%s' "$(git rev-parse --show-toplevel)/doc-$act.txt" | sha256sum | cut -c1-16)"
+    wrote "$DB" "$B" doc "{\"action\":\"$act\",\"id\":\"$did\"}"
+done
+add_as "$A" doc-append_entry.txt doc-update_entry.txt doc-move.txt doc-delete.txt
+for act in append_entry update_entry move delete; do
+    eq "5c: doc $act by id is a write to that path" "$(owner_of "doc-$act.txt")" "$B"
+done
+rm -rf "$T" "$DB"
+
+# 18. a database another process holds locked must not stall or fail the add: the answer is
+# a refinement of `named`, so being unable to refine returns the old claim.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+{ echo "BEGIN EXCLUSIVE;"; sleep 2; } | sqlite3 "$DB" >/dev/null 2>&1 &
+sleep 0.5
+_t0=$SECONDS
+add_as "$A" f.txt
+_took=$((SECONDS - _t0))
+wait
+eq "18: a locked database keeps the legacy claim" "$(owner_of f.txt)" "$A"
+[ "$_took" -le 1 ] && ok "18: and the add did not wait on the lock" || no "18: and the add did not wait on the lock" "took ${_took}s"
+rm -rf "$T" "$DB"
+
 echo "== sequencer stand-down"
 
 # Ownership lookup that survives a linked worktree, where `.git` is a file, not a dir.
@@ -953,22 +1170,6 @@ rm -rf "$T"
 #
 # ONE CASE PER BRANCH. A route is written at four sites; a kill at one says nothing
 # about the other three.
-# Same absent-vs-empty guard as `owner_of`, for the same reason. § 7's cases reach this
-# after a `git add`, which writes the index unconditionally, so the non-firing path that
-# hit § 2b is not known to reach here: this guards the SHAPE, and is not evidence of a
-# second observed failure.
-route_of() {
-    [ -f .git/session-stage-log ] || { printf 'NO-LOG'; return; }
-    awk -F'\t' -v p="$1" '$3 == p { print $4; exit }' .git/session-stage-log
-}
-# The ABBREVIATED blob `git diff --raw` emits. A full 40-char sha never matches the log,
-# so a legacy-row fixture built from `git hash-object` is silently re-derived rather than
-# carried over — a case that passes while testing nothing. Cost this suite's author one
-# wrong green.
-blob_of() {
-    git diff --cached --raw |
-        awk -F'\t' -v p="$1" '$2 == p { split($1, x, " "); print x[4]; exit }'
-}
 
 S_A=route-sess-A
 
