@@ -450,10 +450,11 @@ pub const GUIDE_TOPICS: &[&str] = &[
 /// agent's view*. Measured 2026-08-16: 7 of 10 topics, 47,343 of 75,441 bytes — 63% of the
 /// guide corpus — fired for nothing.
 ///
-/// Being on this list is a **decision**, not a default. `every_guide_topic_is_triggered_or_declared_pull_only`
+/// Being on this list is a **decision**, not a default. `every_guide_topic_is_triggered_xor_declared_pull_only`
 /// (`src/server.rs`) fails the build for any topic that is neither triggered nor listed
 /// here, which is what stops the omission recurring silently. It also fails on a stale
-/// entry — a topic listed here that later gains a trigger, or that no longer exists.
+/// entry — a topic listed here that later gains a trigger — while
+/// `pull_only_guide_topics_are_registered_with_real_reasons` fails on one that no longer exists.
 ///
 /// Entries marked `PENDING BL-25` are honest about the current state rather than
 /// retrofitting a rationale: they are candidates for a trigger whose wiring is blocked on
