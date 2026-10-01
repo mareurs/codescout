@@ -152,6 +152,63 @@ CLAUDE_CODE_SESSION_ID="$A" CODESCOUT_INDEX_ACK="$B,-" git commit -q -F "$T/m.tx
 eq "a mixed list keeps the real sid" "$(parsed Co-Authored-Session-Id)" "$B "
 rm -rf "$T"
 
+echo "== a Session-Id outside the final paragraph is named, never rewritten"
+# Bug f47274c1. git reads ONLY the final paragraph as trailers, so a hand-written `Session-Id:`
+# above the `Co-Authored-By` block is prose to every query, and `--if-exists doNothing` — scoped
+# to that same final paragraph — never sees it, so the hook stamps a SECOND one beside it. The
+# hook must not edit what the author wrote (that is the contested option in the bug file); it
+# says so on stderr, which is the committing session's own output.
+hand() {
+    printf 'subject line\n\nbody paragraph\n\nSession-Id: %s\n\nCo-Authored-By: Someone <x@y>\n' "$1" > "$T/m.txt"
+}
+# Raw lines, not the parser: the question is what the TEXT carries beside what the parser reads.
+n_raw() { git log -1 --format=%B | grep -c '^Session-Id:'; }
+
+new_repo
+echo x > a.txt
+git add a.txt
+hand "$B"
+CLAUDE_CODE_SESSION_ID="$A" git commit -q -F "$T/m.txt" 2> "$T/err"
+eq "the commit still succeeds"                        "$?" "0"
+case "$(cat "$T/err")" in *"outside its final paragraph"*) ok "the hand-written line is named on stderr" ;; *) no "the hand-written line is named on stderr" "stderr: $(cat "$T/err")" ;; esac
+case "$(cat "$T/err")" in *"$B"*) ok "and its value is quoted, so the reader can find it" ;; *) no "and its value is quoted, so the reader can find it" "stderr: $(cat "$T/err")" ;; esac
+eq "the committer's own id is the one the parser reads" "$(parsed Session-Id)" "$A "
+eq "the author's line is left where they put it"       "$(n_raw)" "2"
+
+# THE SILENCE CONTROLS. Without them every assertion above passes against a hook that warns on
+# every commit, and a warning nobody can trust is read as noise by the one session it was for.
+echo y > b.txt
+git add b.txt
+msg
+CLAUDE_CODE_SESSION_ID="$A" git commit -q -F "$T/m.txt" 2> "$T/err"
+eq "a clean message produces no warning" "$(cat "$T/err")" ""
+
+# A Session-Id already INSIDE the final block is the normal re-run (--amend, rebase). It is
+# visible to the parser, so there is nothing to warn about; a check that counts raw lines
+# without asking where they sit would warn here on every amend.
+CLAUDE_CODE_SESSION_ID="$A" git commit -q --amend --no-edit 2> "$T/err"
+eq "an --amend re-run of a stamped message is silent" "$(cat "$T/err")" ""
+
+# The same VALUE written by hand is still invisible to queries, so it still warns: the
+# defect is where the line sits, not whose id it is.
+echo z > c.txt
+git add c.txt
+hand "$A"
+CLAUDE_CODE_SESSION_ID="$A" git commit -q -F "$T/m.txt" 2> "$T/err"
+case "$(cat "$T/err")" in *"outside its final paragraph"*) ok "a hand-written line carrying our own id still warns" ;; *) no "a hand-written line carrying our own id still warns" "stderr: $(cat "$T/err")" ;; esac
+
+# `Co-Authored-Session-Id:` is a DIFFERENT key, written by the hook itself into the final block
+# for an acked commit. Counted as a Session-Id it would make every acked commit, and every
+# amend of one, warn about a line the hook put in the right place.
+echo q > d.txt
+git add d.txt
+msg
+CLAUDE_CODE_SESSION_ID="$A" CODESCOUT_INDEX_ACK="$B" git commit -q -F "$T/m.txt" 2> "$T/err"
+eq "an acked commit (a Co-Authored-Session-Id in its final block) is silent" "$(cat "$T/err")" ""
+CLAUDE_CODE_SESSION_ID="$A" CODESCOUT_INDEX_ACK="$B" git commit -q --amend --no-edit 2> "$T/err"
+eq "and so is an --amend of it" "$(cat "$T/err")" ""
+rm -rf "$T"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" = "0" ]

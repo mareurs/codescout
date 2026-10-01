@@ -73,6 +73,31 @@ msg_file="${1:-}"
 session_id="${CLAUDE_CODE_SESSION_ID:-}"
 [ -n "$session_id" ] || exit 0
 
+# A `Session-Id:` LINE THE PARSER CANNOT SEE. git reads only the message's FINAL paragraph as
+# trailers, and `--if-exists doNothing` below is scoped to that same paragraph. A `Session-Id:`
+# an author wrote by hand ABOVE the final block is therefore prose to every query, and invisible
+# to the guard, so the stamp below lands beside it: the text carries two, the parser reads one.
+# Measured on 48 of 802 commits between 2026-09-01 and 2026-09-06
+# (docs/issues/2026-09-06-a-hand-written-trailer-above-the-final-block-defeats-if-exists-donothing.md).
+#
+# This NAMES it and changes nothing. Stripping the line would be a larger act than stamping an
+# absent field -- it edits a message the author wrote, which the bug file keeps as the contested
+# option -- while stderr here is the committing session's own output, so the one party who can
+# act on it (amend the message) is the one who reads it. Raw lines minus parsed lines, rather
+# than a search for "the line above the block": the parser is the authority on where the block
+# starts, so this cannot disagree with it. A stamped message re-run by --amend has equal counts
+# and stays silent.
+raw_ids="$(grep '^Session-Id:' "$msg_file" | sed 's/^Session-Id:[[:space:]]*//' | paste -sd, -)"
+raw_n="$(grep -c '^Session-Id:' "$msg_file")"
+parsed_n="$(git interpret-trailers --parse "$msg_file" | grep -c '^Session-Id:')"
+if [ "$raw_n" -gt "$parsed_n" ]; then
+    echo "prepare-commit-msg-session-id: this message has $raw_n Session-Id line(s) ($raw_ids) but only" \
+        "$parsed_n in its final paragraph, which is the only place git reads trailers from -- the" \
+        "rest is invisible to every query. A Session-Id sits outside its final paragraph; this hook" \
+        "is stamping $session_id there. Delete the hand-written line (git commit --amend): the hook" \
+        "writes it for you." >&2
+fi
+
 # `interpret-trailers` rather than an append: this repo's commits already carry a
 # Co-Authored-By trailer, and appending after a blank line would open a SECOND
 # trailer block, which `git log --format='%(trailers:key=...)'` does not read as one.
