@@ -68,7 +68,7 @@ entry_high_water_W: 6
 | F-1 | 2026-08-29 | high | infra-diagnosis | fixed-verified | Asserted VRAM-contention root cause before measuring; real cause was a host reboot |
 | F-2 | 2026-08-29 | high | monitoring | fixed-verified | Docker reported the whole GPU stack healthy for 15 hours while every inference request hung |
 | F-3 | 2026-09-15 | high | tooling | open | `/code-review` given a PR number reviewed the local working tree instead, returning 14 findings about peers' uncommitted code and none about the PR |
-| F-4 | 2026-09-15 | med | shared-checkout | open | The foreign-index guard's remedy ("re-stage by explicit path") is a git no-op after a blanket add, and only the action it warns against clears it |
+| F-4 | 2026-09-15 | med | shared-checkout | fixed-verified | The foreign-index guard's remedy ("re-stage by explicit path") is a git no-op after a blanket add, and only the action it warns against clears it |
 | F-5 | 2026-09-15 | high | ledger-integrity | open | Merging a ledger-touching PR leaves the local id allocator stale, so the next append mints a colliding id rather than erroring |
 | F-6 | 2026-09-15 | high | build-provenance | open | A rebuild is not a rebuild of what you merged — `cargo rb` on a tree behind origin exits 0, updates mtime, and ships the old binary |
 | F-7 | 2026-09-16 | high | claim-scope | open | A value that is CORRECT about a question you were not asked — re-verification returns the same correct value, so "verify harder" is a no-op |
@@ -433,7 +433,7 @@ Ran exactly that — `git add` naming all four paths. **The refusal was identica
 
 **Cost:** two refused commits and a full re-stage cycle. Low in isolation; the concern is that a session reading the remedy and seeing it fail has no reason to suspect the remedy rather than themselves, and `--no-verify` is one keystroke away and explicitly the wrong habit.
 
-**Status:** open. Owed a bug file against the remedy text — a candidate wording is to branch on whether the index is shared: private worktree → say `git reset` then re-add by name; shared index → say a pathspec commit, and say that a blanket add cannot be reclaimed in place.
+**Status:** fixed-verified 2026-10-01 by `32ced364f1509e4b22063223059fb96c96509221` (patch-id `1b7e4b083b6e093e1530621781159791e25f3490`); bug file `docs/issues/archive/2026-09-24-the-foreign-index-guards-re-stage-remedy-is-a-no-op-for-an-already-staged-blob.md`. The remedy text now says why a plain re-add records nothing and gives the unstage-then-add step, limited to paths the reader wrote; one rule covers the shared and private index instead of the branch proposed here.
 
 ## F-5 — Merging a PR that touches a ledger leaves the local id allocator stale, and it mints a colliding id
 
