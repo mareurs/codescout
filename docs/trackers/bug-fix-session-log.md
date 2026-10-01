@@ -2612,10 +2612,10 @@ different clocks.
 
 ## F-33 — Relocated the mux lock dir before verifying nothing discovers those files by directory scan
 
-**Observed:** 2026-07-28, fixing the lock-file leak in `src/retrieval/index_lock.rs`
-and `src/lsp/mux/mod.rs`. Recon was invoked *after* both edits were written and
 **Valid:** dated 2026-07-28
 
+**Observed:** 2026-07-28, fixing the lock-file leak in `src/retrieval/index_lock.rs`
+and `src/lsp/mux/mod.rs`. Recon was invoked *after* both edits were written and
 `cargo clippy --all-targets -- -D warnings` was already green.
 
 **When:** Mid-fix. The `index_lock` half used parameter injection
