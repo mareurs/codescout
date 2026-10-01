@@ -239,8 +239,8 @@ Two changes to `foreign_writer` in `scripts/post-index-change-stage-log.sh`, bot
 2. `doc(create)` is read by its `rel_path`, restricted to the `create` action because `find` carries the
    same key as a shorthand. Cases 23a-23c.
 
-A third defect, found in the same pass and not fixed, has its own record:
-`docs/issues/2026-10-01-the-recorders-write-lookup-matches-a-relative-path-from-a-call-made-in-another-tree.md`.
+A third defect, found in the same pass, was fixed afterwards (SHA `65d4e5dd512bd6e2184016e00ec23963a4c8a238`, patch-id `892b172ceb8ec395699d8d5ca798a00751c01716`) and has its own record:
+`docs/issues/archive/2026-10-01-the-recorders-write-lookup-matches-a-relative-path-from-a-call-made-in-another-tree.md`.
 
 Fix SHA `6e6dc887c9420aee73efd60fe0bb02f806ad5aad` (`experiments`), patch-id `797557b820bdcd32fd9733355adc0bcd210480be`
 (`git show <sha> | git patch-id --stable`). Suite 224 passed and 0 failed; 41 mutation sites, 40 killed, the survivor being

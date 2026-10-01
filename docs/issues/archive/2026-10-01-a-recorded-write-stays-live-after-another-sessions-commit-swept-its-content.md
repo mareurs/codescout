@@ -58,7 +58,7 @@ An earlier reading in this record's parent (`dd7b1590`) put the two failure dire
 
 B misses one genuinely uncommitted write (`src/symbol/edit.rs`, 139 minutes before the commit, label `ABSENT`) and one `NOPROBE`: that is the defect `dd7b1590` fixed. C closes 16 of A's 20 false refusals and keeps all 4 captures and all 7 unlanded writes live. C0 closes only 2 of the 20, because a later edit by the same session rewrites the words an earlier one added: on the reported ledger two of the writer's six live rows named text its own later edits had changed.
 
-The 4 false refusals C leaves: three are writes whose only text is a divider comment the file already held, which proves nothing and stays live on purpose; one ran in a linked worktree (`981d0c717f6ce61f`, whose population this measurement enlarges: the writer's 25 of 26 rows on that path ran in worktrees).
+The 4 false refusals C leaves: three are writes whose only text is a divider comment the file already held, which proves nothing and stays live on purpose; one ran in a linked worktree (`3094869ba182deab`, whose population this measurement enlarges: the writer's 25 of 26 rows on that path ran in worktrees).
 
 **Time bounds were measured and rejected.** The lag between a write and the commit that took it, in minutes: `CAPTURED` 0, 22, 1121, 1234; `PRE-COMMITTED` 23, 45, 53, 65, 121, 123, 161, then 1148 to 2164. The ranges overlap, so no threshold separates them.
 
@@ -87,7 +87,7 @@ The refusal in `scripts/pre-commit-foreign-index.sh` said *"since their last com
 - **SHA:** `17b06d4692817939c7a6dce502fb4541a4e7b635` (`experiments`)
 - **patch-id:** `791238e8e3b956ece6e15eecb893782c53283e80`
 
-Gate FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; `tests/commit-mine.sh` 53/0, `tests/install-hooks-check-population.sh` 33/0, `tests/pre-push-foreign-session-guard.sh` 136/0. Residual: a writer whose newest write carries no distinctive text, or whose text was edited since, stays live (conservative, as before); the worktree population is `981d0c717f6ce61f`; a flaky precondition found on the way is `59d7bf0baf6f4b83`.
+Gate FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; `tests/commit-mine.sh` 53/0, `tests/install-hooks-check-population.sh` 33/0, `tests/pre-push-foreign-session-guard.sh` 136/0. Residual: a writer whose newest write carries no distinctive text, or whose text was edited since, stays live (conservative, as before); the worktree population is `3094869ba182deab`; a flaky precondition found on the way is `931c28128081ad46`.
 
 ## References
 

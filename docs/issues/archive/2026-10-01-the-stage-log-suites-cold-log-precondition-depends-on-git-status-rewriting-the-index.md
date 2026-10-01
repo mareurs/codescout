@@ -1,7 +1,7 @@
 ---
-id: '59d7bf0baf6f4b83'
+id: 931c28128081ad46
 kind: bug
-status: open
+status: fixed
 title: The stage-log suite's cold-log precondition depends on git status rewriting the index, which git does not always do, so four assertions fail together at random
 tags:
 - cluster/unclassified
@@ -28,27 +28,24 @@ involved.
 
 ## Reproduction
 
-Not reproduced on demand. Observed 2026-10-01 while working on the stage-log recorder: 1 of 8 runs of
-the unmutated suite failed exactly these four assertions (the next three runs on the same bytes were
-green, 269 passed), and the same four names appear in the failure list of 9 of the 156 mutation runs
-made that day. The mutation script prints at most four failing names per run, so that second count is
-a floor, and the mutation runs are the loaded case.
+Reproduced on demand 2026-10-01 outside the suite (`flake_probe`: the suite's setup, 150 iterations in throwaway repos with the real recorder as the `post-index-change` hook): the log was not recreated 8 times, 5.3%. The earlier "not reproduced on demand" in this record was true of the suite and false of the setup.
 
 ## Root cause
 
-Read from the suite and from git's documented behaviour, not isolated by experiment: the test
-assumes `git status` writes the index, and git writes it only when entries need refreshing. I did not
-capture the index mtime against the add to confirm the same-tick reading.
+Confirmed by measurement rather than by reading: moving the staged file's mtime before the `git status` (`touch -d '2 hours ago'`), so its index entry is stale and `status` has something to refresh and therefore write, took the miss rate from 8 of 150 to 0 of 550. The same-tick reading of the cause (the add and the status inside one timestamp tick give the entry nothing to refresh) fits the numbers and the fix; the index mtime was not captured against the add.
 
 ## Fix
 
-Not done. The precondition should not depend on a git side effect: trigger the recorder directly, or
-make the index stale first (`touch` the staged file after the add, so `status` has an entry to
-refresh), and keep the existing `log_recreated` assertion as the guard that says the setup worked.
+In `tests/hooks-discrimination.sh` § "stager wins": `touch -d '2 hours ago' s1.txt` before the cold-log `git status`, with the measurement in a comment on the line; the `log_recreated` assertion stays as the guard that says the setup worked. Done in the commit that fixes `981d0c717f6ce61f`, which edits the same file.
 
 ## Tests added
 
-None.
+No new assertion: the evidence is the loop above (8 of 150 before, 0 of 550 after) and three consecutive green runs of the suite (284 passed). A suite-level red cannot be observed on demand, which is why the probe ran outside it.
+
+## Fix provenance
+
+- **SHA:** `65d4e5dd512bd6e2184016e00ec23963a4c8a238` (`experiments`)
+- **patch-id:** `892b172ceb8ec395699d8d5ca798a00751c01716`
 
 ## References
 
