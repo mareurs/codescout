@@ -1,5 +1,5 @@
 ---
-id: 5cb675fc547b97c6
+id: '5cb675fc547b97c6'
 kind: bug
 status: fixed
 title: 'BUG: cli doctor passes an empty args map, so no fix mode or sample paging is reachable — and its doc comment says the scanner takes no input'
@@ -14,7 +14,7 @@ owner: marius
 related:
 - d4b61746950b86b7
 severity: low
-unverified: TRACKED b161f5ed9b7bfbd9 — Seven of the scanner's eight params are wired; `--scope` is deliberately omitted (declared in SCANNER_PARAMS_THE_CLI_OMITS) because its selector is still broken — d4b61746950b86b7. Tests are librarian-gated, so they do not run in the lean lane.
+unverified: 'Tests are librarian-gated, so they do not run in the lean lane. The `--scope` omission this caveat first named is CLOSED: every one of the scanner''s params is now wired, `--scope` having been added in 49d08af335a1caad21c2c7d2e9b067bf65033724 (patch-id 6665082ae5cbe264bdeafe4a85186a697947415c).'
 ---
 
 > **Cluster:** `cluster/doc-contradicted-by-code` (`IC-11`, n=32, verdict *clears both
