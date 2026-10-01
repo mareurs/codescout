@@ -19,9 +19,9 @@ topic: issue clusters and rule promotion
 **Blind party:** the gate itself, and therefore every reader of its output. The server process cannot see a compaction, a dead hook, a `/clear`, or what a parent session already holds; each of those is a *conversation*-scoped or *harness*-scoped event, and the gate is process-scoped.
 **Promotes to:** `OB-6` — *a gate collapses "cannot observe" into the confident answer*, `docs/trackers/observer-blindness.md`, promoted 2026-09-01 at `n=16`. **The `OB-4` reference this field used to carry was loose and is corrected here**: `OB-4` is about the `.worktrees/bench` liveness marker and never mentions the rendezvous gate, so it was never "this class's rendezvous half". The two are siblings on one axis — `OB-4` asks *why a proxy is trusted* (an accuracy record it later spends), `OB-6` asks *what the proxy does when wrong* (returns the confident value rather than admitting it cannot tell) — and their remedies differ, so neither subsumes the other.
 **Mechanism status:** `designed`, with a shipped exemplar rather than a sketch. `b9cc75b4` (patch-id `5a5c761072c44b54dc80f224d89355dd2d31e498`) closed one member and demonstrates the three moves `OB-6` prescribes: a **third state** for *indeterminate* rather than defaulting to the strong claim; **omit rather than zero** an unmeasured quantity; and **extract the proxy→claim mapping into a pure function**, which is the check itself — the hardcoded `"up_to_date"` survived because its arm sat behind a live client constructor no test could reach, and a pure function admits a table test whose `None` row is the one that was missing. Nothing yet applies the pattern corpus-wide.
-**Valid:** dated 2026-08-31
+**Valid:** dated 2026-10-01
 
-Every member is one substitution. `workspace(post_compact=true)` cannot check that a compaction happened, so it trusts the caller's flag and clears the whole ledger on a mistaken `/mcp` reconnect. The rendezvous gate cannot check that the companion hook is still alive, so it trusts a monotone stamp that nothing can un-set — and its twin defect is the same stamp never landing, which leaves the gate shut for the life of the process. The subagent ledger cannot see what the parent holds, so 84% of measured subagent sessions re-receive a topic their parent already has. `get_guide` cannot see which section a caller needs, so it serves the topic — or, since section grain shipped, serves the section attached to the response of the call it was meant to inform.
+Every member is one substitution. `workspace(post_compact=true)` cannot check that a compaction happened, so it trusts the caller's flag and clears the whole ledger on a mistaken `/mcp` reconnect. The rendezvous gate cannot check that the companion hook is still alive, so it trusts a monotone stamp that nothing can un-set — and its twin defect is the same stamp never landing, which leaves the gate shut for the life of the process. The subagent ledger cannot see what the parent holds, so 84% of measured subagent sessions re-receive a topic their parent already has. `get_guide` cannot see which section a caller needs, so it serves the topic — or, since section grain shipped, serves the section attached to the response of the call it was meant to inform. Since then `post_compact` has stopped clearing the ledger on a mistaken `/mcp` reconnect: it keeps it unless the last SessionStart was a compaction (`ba3a787e`, patch-id `538f3a2a525265310386d375197898931d7033db`, 2026-09-24). The subagent re-delivery case is not closed: `docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md` is open. `python3 scripts/probe-cluster-census.py` now counts 57 tagged bug files, and the split above has not been re-derived over them.
 
 The unifying property is that **none of these fail loudly**. A wrong proxy produces a plausible delivery: an extra guide body, an open gate, a closed gate, a re-cleared ledger. Nothing throws, so nothing downstream fires either. That is what makes the class survive review chains that catch louder bugs, and it is why `rendezvous-slot-never-stamped` could be closed `wontfix` on the reasoning that the failure is invisible — correct about the observation, and exactly the property that should have counted against it.
 
@@ -29,13 +29,13 @@ Note the shape shared with `cluster/blast-radius-exceeds-visibility`: both are *
 
 **Falsified by** a member whose proxy failure surfaced as an error rather than a plausible result; that would belong to an ordinary-correctness class instead.
 
-**The 16 members split on one question, and the split predicts their fate: does the substrate
+**As of 2026-09-01 the 16 members split on one question, and the split predicts their fate: does the substrate
 that would answer the gate exist at all?** **Filesystem/repo-scoped (7)** — git sync, index
 coverage, lock state, an external checkout, a `build.rs` snapshot, a worktree flag, a test-mode
 env var — are cases where the process *could* have looked and did not. **All seven are closed**
 (six fixed, one wontfix). **Harness/peer-scoped (9)** — a compaction, a `/clear`, an `/mcp`
 reconnect, what a parent session holds, whether a companion hook is alive — are cases where the
-process holds no channel to the fact. **Five of those nine are still live**, including all four
+process holds no channel to the fact. **Five of those nine were live on 2026-09-01**, including all four
 open members and the one `investigating`.
 
 That asymmetry is the argument for `OB-6`'s first move rather than an excuse for the backlog.
