@@ -38,7 +38,21 @@ resolver and could turn every citation of it into a dangling one.
 
 ## What is deliberately not declared
 
-`KT`, `O`, `SEP` and `DRV` are also reported by `doctor`, and are not here: what those ids are, and
-whether any file owns them, has not been established. `DRV` in particular is the id set of a
-probe's scratch ledger that no longer exists, so no owning file could honestly be named. Add a
-prefix to this page only after confirming its owner file holds ids of that prefix.
+`KT`, `O`, `SEP` and `DRV` are also reported by `doctor`. None is declared, each for its own
+reason, established 2026-10-01 by reading every citation:
+
+- `SEP` is the MCP specification's proposal numbering (a SEP-<n> in the guide-ledger design spec and
+  in the resume-tool-surface page). It is an external standard's namespace, not this corpus's, and
+  no file here owns it, so declaring one as its owner would be false.
+- `O` is a set of option labels (O-<n>) inside one archived design document, cited by that
+  document's session log. That is document-local labelling, not a namespace; the volume-gate bug
+  `docs/issues/archive/2026-09-01-citation-volume-gate-selects-for-the-prose-it-excludes.md`
+  already files it as "option labels — borderline".
+- `KT` has two unrelated uses: a table of Kotlin test cases (KT-<n>, up to four rows) in
+  `docs/superpowers/specs/2026-04-20-impl-block-symbol-cluster-fix.md`, and a larger KT-<n> in the
+  prompt-surface measurement log that no file in the repo defines. One declaration would
+  misattribute the other.
+- `DRV` is the id set of a probe's scratch ledger that no longer exists anywhere.
+
+Add a prefix to this page only after confirming its owner file holds ids of that prefix and that
+the prefix has one meaning.
