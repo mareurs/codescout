@@ -1,13 +1,13 @@
 ---
+kind: bug
 status: open
-opened: 2026-09-13
-closed:
-severity: medium
-owner: marius
-related: []
 tags:
 - cluster/gate-keyed-on-unobservable-event
-kind: bug
+closed: null
+opened: 2026-09-13
+owner: marius
+related: []
+severity: medium
 ---
 
 # The worktree guard's `cd`-chain remedy is stripped before the guard can see it
@@ -40,6 +40,27 @@ so the hook judges a bare `git push` and refuses again.
 - **Unexplained, and not investigated: the 2026-09-22 recurrence below came through `Bash`,** after the 2026-09-20
   deny date `CLAUDE.md` gives. When the deny actually took effect was not established.
 - **If `Bash` is re-allowed,** re-probe the strip before trusting the remedy text.
+
+## Picked up 2026-10-01 (session `3e2b9cc8`) — still unreachable, so no fix attempted
+
+Taken to fix; stopped at the reproduction step because the reproduction cannot be run from here.
+
+- **No `Bash` to drive.** The guard matches `tool_name === 'Bash'` only (`git-worktree-guard.mjs:87`), and
+  this session's tool list has no `Bash` at all. `settings.json` `permissions.deny` is `["Bash","Write","Edit"]` in
+  all three profiles (read from each file this session, not recalled). Whether a subagent is denied too was not tried.
+  `run_command` is not in the guard's path, and the strip, if real, happens in the harness upstream of any hook.
+- **Hook unchanged where it matters.** The remedy line was last touched by `15fa367` (2026-07-13); the later commits
+  (`7a95dff`, `579b9c1`) are matcher fixes. `claude-plugins` HEAD `b3c5558`.
+- **Only one place prints the remedy.** `grep` for the text finds it in this hook and in this bug file, nowhere in
+  this repo — so the repair, when it is justified, is a one-line change in `claude-plugins`, not here.
+- **Why I did not edit the text anyway.** Deleting the `cd` form is right only if the strip is unconditional, and
+  the PWD-conditional reading in *What is NOT established* is still live: under it the remedy works exactly when it
+  is needed and the text wants a caveat, not a deletion. The two repairs are opposite, and nothing observed
+  separates them.
+
+**Recommendation, not a status change:** `mitigated` fits better than `open` while `Bash` stays denied, since the
+cause is untouched but unreachable. Left `open` for the owner to rule on. If `Bash` is re-allowed, run the
+discriminating test first, against a worktree whose index is known empty.
 
 ## Reproduction
 
