@@ -1,7 +1,7 @@
 ---
-id: '47e0fa9d1b438046'
+id: 3edba321dcc159c8
 kind: bug
-status: open
+status: archived
 title: 'BUG: the markdown citation scanner has no ignore marker, so a prose mention is exempted by a line coordinate any insertion above it falsifies'
 tags:
 - cluster/addressing-without-an-escape-hatch
@@ -192,33 +192,36 @@ The exemption is a `continue` in the finding loop, matching `*file == c.file && 
 
 ## Fix
 
-Instance fixed — `70e6c1ad`, patch-id `e922d74466b4a5e71f1fbdc9b5c73371b319700f`, on `experiments`: the entry re-pointed 201 → 202 with the failure mode written beside it.
+Fixed on `experiments`.
 
-**The class is unaddressed and this bug stays open.** One exemption was re-pointed; the other three carry the same fragility.
+- **SHA:** `d2aaf0bd534ba52e6d6eff69eef41890687b44e2`
+- **patch-id:** `0b49bdc2ab990b79cf8b7044a1ba09b7b961041c`
 
-Three remedies, **none costed, none run, all open** — and the first two are complementary rather than alternatives, because they buy different things:
+Content-anchoring plus the self-check, the two remedies this section had named as complementary. `ANCHOR_FALSE_POSITIVES` is now a list of `AnchorFalsePositive { file, tool, snippet }`, with the snippet matched against the WHOLE citing line (`Cite::source`; `Cite::text` is cut at 110 characters and the `docs/PROBES.md` mention sits far past it). Inserting a row above a mention no longer touches its exemption, and a different line landing on an exempted coordinate is no longer waved through.
 
-- **Commit-time prevention.** Run the doc guards in the pre-commit path for markdown-touching commits. The only candidate that stops the red, in front of the person still holding the change. Cost is a doc scan on every markdown commit. Does **not** see the silent false negative.
-- **A self-check asserting each entry still finds its token at its named line.** Does not prevent the red; changes **what it says**. Today a drifted entry fails as *"`docs/PROBES.md:202` documents a call to `sorted`, which is not live"* — true, and misleading about the cause. The self-check fails as *"the exemption (`docs/PROBES.md`, 201, `sorted`) no longer finds its token at 201"*, which names it. Attribution was the measured expense here, and this is also the only listed remedy that catches the silent direction.
-- **Content-anchoring: key on `(file, tool, snippet)`** where snippet is a substring of the citation line. Central and reviewed like today, immune to insertion like the marker. **Its failure polarity inverts correctly**: when the text genuinely changes, the snippet stops matching and the guard **reds** — loud, at the site, naming a real edit — instead of silently exempting whatever now occupies the coordinate. Data is present and the predicate is local (`Cite.text` at `:477`, one closure at `:883`), which is a feasibility note and **not** a cost estimate.
+`exemption_defects` keeps each entry honest and is run over the real corpus by `every_anchor_exemption_still_names_exactly_one_citation_site`. It reds an entry whose snippet matches no line (the text was edited, which was formerly a silent dead entry), more than one line (refused rather than first-matched, the disambiguator half of `IC-6` that a snippet key would otherwise reproduce), or is empty (the bare-word key the list must not have).
 
-**The marker is a trade, not a win.** The triple lives in **guard code**: adding an exemption is a diff to the test, reviewed as test code, and the constant's doc says *"Measured here: 4, all verified by hand"* — affordable precisely because the list is central and small. A line-local marker **distributes suppression into the docs**, where any author silences the guard on their own line and no guard maintainer sees it. The sidecar scan already pays a version of this. So: **coordinate = drift-prone but reviewed; marker = drift-proof but unreviewed.**
-
-**Content-anchoring's own counter, which must travel with it.** A snippet is itself a parser-over-a-namespace problem: too short and it matches twice, too long and ordinary rewording reds it. `docs/PROBES.md` rows are enormous, which cuts both ways. **Non-uniqueness must be a refusal, not a first-match** — otherwise the fix for `IC-6`'s *escape* half reproduces `IC-6`'s *disambiguator* half inside itself.
-
-**One question is genuinely open.** `docs/PROBES.md:202` is a `|`-delimited **table row**. Whether an HTML comment can address a citation inside one is unresolved: the bare form silences a whole section (`parser.rs:614`), far too coarse for a table, and the scoped form's placement relative to a row was not tested. The `:163` precedent sits at section level rather than inside a row, which suggests placement may be workable — a conjecture, not a verification. The wiring was checked; this was not.
+Not adopted. A pre-commit doc scan costs every markdown commit, and the red it would prevent no longer arises from this cause. A line-local ignore marker distributes suppression into the docs, where no guard maintainer sees it. The earlier instance fix `70e6c1ad` (patch-id `e922d74466b4a5e71f1fbdc9b5c73371b319700f`) re-pointed one coordinate and is superseded by this.
 
 ## Tests added
 
-None. The instance fix is a constant edit covered by the existing guard; the class has no test because no remedy is adopted. Naming this rather than excusing it: nothing currently prevents recurrence, in either direction.
+Eight, in `tests/doc_tool_refs.rs`, all run in both gate lanes:
+
+- `an_exemption_follows_its_text_when_the_line_moves` — the defect itself: one text at three line numbers, all exempt. Its snippet sits past the 110-character cut, so it also separates `source` from `text`.
+- `a_different_line_at_the_same_coordinate_is_not_exempt` — the silent direction.
+- `an_exemption_requires_the_file_and_the_tool_to_agree_as_well` — each case agrees with the fixture on every other field.
+- `a_healthy_exemption_names_exactly_one_site_and_is_not_a_defect`, `an_exemption_whose_text_is_gone_is_named_not_silently_dead`, `an_exemption_matching_two_lines_is_refused_rather_than_first_matched`, `an_empty_snippet_is_refused_even_when_it_would_match_one_site` — the detector is tested to FIRE, since the corpus assertion is an `is_empty()`, which is monotone under a detector that returns nothing.
+- `every_anchor_exemption_still_names_exactly_one_citation_site` — the standing check on the real corpus.
+
+Mutation sweep, one mutation per guarded site against the committed bytes: 13 of 14 killed. The survivor is the sidecar scan's `Cite::source`, which is semantically inert (`covers` tests `file` first, and a sidecar's file is `<yaml>#prompt`, which no exemption names); it is annotated as inert at the site.
 
 ## Workarounds
 
-When the suite reds at `a_documented_call_names_a_live_tool` on a docs line you did not write, check `ANCHOR_FALSE_POSITIVES` for an entry naming that file with a nearby line number before reading your own diff. A one-line offset is the tell.
+None needed. An edit to an exempted mention now reds `every_anchor_exemption_still_names_exactly_one_citation_site`, which names the entry and says whether its text is gone or has a twin.
 
 ## Resume
 
-Open on the class. The table-row question decides whether a marker can replace the coordinate for this member or only for the other three; content-anchoring sidesteps it entirely but owes a uniqueness rule first.
+None; fixed. Adding an exemption is now a `snippet` long enough to name one line; the corpus check refuses one that matches none or several.
 
 ## References
 

@@ -1135,7 +1135,7 @@ const FIXTURE: AnchorFalsePositive = AnchorFalsePositive {
     snippet: FIXTURE_SNIPPET,
 };
 
-/// The defect itself (`docs/issues/2026-09-21-docs-commit-stales-a-line-keyed-exemption.md`):
+/// The defect itself (`docs/issues/archive/2026-09-21-docs-commit-stales-a-line-keyed-exemption.md`):
 /// the exemption must survive the mention MOVING. Two sites at different line numbers, one
 /// text. Under the old `(file, line, tool)` key only the one at the keyed coordinate was
 /// covered, and every row inserted above it reddened the gate for the whole checkout.
