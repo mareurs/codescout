@@ -1,5 +1,7 @@
 # L-01 — Port `memory.*` from sqlite-vec to Qdrant `memories` collection
 
+**Valid:** dated 2026-05-13
+
 **Status:** draft v2 — decisions proposed, awaiting review · **Opened:** 2026-05-13 · **Owner:** TBD
 
 ## Why

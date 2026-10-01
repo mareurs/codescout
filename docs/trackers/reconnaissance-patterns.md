@@ -1816,6 +1816,8 @@ stronger version of the same fix.
 the first to separate misplaced-data from wrong-numbers.
 ## R-53 — A corpus's composition is a seam; census it by producer before measuring
 
+**Valid:** invariant
+
 **Status:** open — verdict `miss → rule` (Index row), lifted 2026-08-20 by the verify-open sweep; this entry carried no `**Status:**` line. `→ rule` records that it fed a distilled law, not that it reached the skill: not back-cited in the served `SKILL.md`. Datapoint count not re-assessed here.
 
 **Class:** input-validity — the analysed corpus vs. the corpus you believe you
@@ -3249,6 +3251,8 @@ filed root cause is a hypothesis), R-99 (the convention lives where authors look
 law G (the answer may already be on record).
 
 ## R-101 — A test that DISTINGUISHES two hypotheses is not confirmation of one — check which way it points
+
+**Valid:** invariant
 
 **Observed:** 2026-08-17, filing
 `docs/issues/2026-08-17-audit-doc-refs-misreads-include-str-arg-as-doc-relative.md`. A

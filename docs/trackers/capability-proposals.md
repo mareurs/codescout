@@ -661,6 +661,8 @@ authors look is not a convention).
 
 ## CAP-7 — Make record decay detectable — three doctor checks so corrections travel
 
+**Valid:** dated 2026-08-19
+
 **Status:** **COMPLETE — all three checks shipped 2026-08-19.**
 
 | check | commit | patch-id |

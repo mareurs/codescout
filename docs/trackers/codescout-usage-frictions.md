@@ -449,6 +449,8 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 
 ### U-17 — audit_doc_refs classifies instructional placeholder + reader-side paths as missing files (39 FPs)
 
+**Valid:** dated 2026-05-23
+
 **When:** 2026-05-23, same exploratory pass that produced U-16. Ran `librarian audit_doc_refs` across the full doc tree (551 files); hi-sev count was 40 — but breakdown showed 39 of them concentrated in two files: `docs/agents/copilot.md` (25) and `docs/agents/claude-code.md` (14). Only 1 was in a historical ADR.
 
 **Iron Law / pattern:** audit-tool correctness — same family as U-15, but a new false-positive class. H-5 (audit_doc_refs CI gate) cannot promote past warn-stage while these FPs dominate the hi-sev signal.
@@ -1752,6 +1754,8 @@ taught readers to skip the warning. Still inert in a live MCP session until `car
 reconnect.
 
 ### U-40 — A multi-line `old_string` failed as "not found" on text that was verbatim present, and the error cannot tell a bad needle from a bad haystack
+
+**Valid:** dated 2026-08-17
 
 **Observed:** 2026-08-17, adding a paragraph to `src/prompts/guides/iron-laws-detail.md`
 after the "Bounded LHS is allowed" block.

@@ -265,6 +265,8 @@ not just a recon-saves-the-day story is the substantive complaint.
 
 ### SKF-22 — the trigger condition was observed, said out loud, and the skill still went uninvoked
 
+**Valid:** dated 2026-09-01
+
 **When:** 2026-09-01, a full session of cross-session coordination on a shared checkout
 (codescout-17). `ListAgents` was called three times and reported 2–3 peers. A peer's
 `file-provenance.py` run named two writing sessions that were **not in that list**. I stated

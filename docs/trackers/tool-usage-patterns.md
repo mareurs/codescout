@@ -38,6 +38,8 @@ alternative (via `/codescout-companion:explore-project`) before updating verdict
 ## grep observations
 
 ### T-001 — Multi-symbol property scan across constraint directory
+
+**Valid:** dated 2026-05-03
 **Session:** 64618681 (Kotlin backend, 2026-05-03)  
 **Pattern:** `isManual|isPinned|isStage|lessonType|LessonType|manual|stage.*lesson|MANUAL|PINNED`  
 **Path:** `ktor-server/.../solver/constraints` (directory)
@@ -249,6 +251,8 @@ reports the highest non-zero exit in a chain, or the gate's documented form carr
 marker-read instruction with it.
 
 ### T-013 — `cargo test 2>&1 | tail -25`, then grepping that 25-line buffer as proof of a clean 3400-test suite
+
+**Valid:** dated 2026-07-28
 
 **Tool:** `run_command` · **Verdict:** wrong-tool (IL3 violation) · **Observed:** 2026-07-28,
 self-inflicted by the assistant while gating a commit.

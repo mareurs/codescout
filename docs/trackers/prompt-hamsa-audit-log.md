@@ -465,6 +465,8 @@ Two rule types. First a self-reinforcing one ("end every reply with `STATUS: ack
 
 ## A-14 — anti-tidying snippet (fable-tuning FT-2): pre-registered A/B, ship gated on the base arm showing the failure
 
+**Valid:** dated 2026-07-07
+
 **Symptom:** none local. FND-8 (migration guide) documents "unrequested tidying" as a Fable default; the nearest local datapoint is W-18 — over-engineering pressure in a *plan* (a needless `Segment::QuotedKey` variant), pre-empted by recon, never shipped. The snippet is an **imported fix**; whether the failure exists here is exactly what the eval must establish first.
 
 **Prompt under audit:** proposed `## Scope discipline` snippet (negation paired with positive bound per H1: "mention such issues instead of changing them; the diff should contain exactly the requested change") — `prompt-engineering/scenarios/fable-tidying/fixtures/claude-snippet.md`. Ship target if it earns it: a codescout prompt surface (TBD: CLAUDE.md vs server_instructions; the 2200-byte slice cap prices the latter).
@@ -482,6 +484,8 @@ Two rule types. First a self-reinforcing one ("end every reply with `STATUS: ack
 **Outcome (2026-07-07, same day): CEILING — the no-ship branch fired.** Arm A (fable, no snippet, runs:10): **10/10 surgical** — every run made exactly the TOTAL-line fix and left all four planted temptations untouched (scenario PASS under `pass_threshold: 1.0` = every run passed; the check also requires the *correct* fix, so all 10 fixed the bug). 270,599 ms, $0.36. Arm B skipped per protocol — running it would measure a snippet against a failure that does not occur. **FT-2 closed not-indicated**; the imported FND-8 "unrequested tidying" default does not manifest locally on surgical-fix tasks, consistent with the A-4–A-9 pattern (single-turn adherence at ceiling; imported fixes keep treating absent failures). Limits: single-turn, small-file, one stimulus — a field sighting of *shipped* unrequested tidying re-opens this with that transcript as the new stimulus. Suite kept for reuse: `prompt-engineering/scenarios/fable-tidying/` (fixture + mutation-tested checker + both arms).
 
 ## A-15 — same-repo subagents never learn project memories exist: `memory` / `semantic_search` / `get_guide` 0 of 10
+
+**Valid:** dated 2026-07-10
 
 **Gap, measured — and the reported symptom was refuted.** Same-repo code-exploring subagents get
 CODESCOUT RULES + CLAUDE.md but never learn memories exist (the memory-list banner is
@@ -921,6 +925,8 @@ measurement in `docs/trackers/prompt-surface-compaction-session-log.md`.
 
 
 ## A-28 — the only 24× multiplier on the surface: one sentence, 4,296 characters
+
+**Valid:** dated 2026-08-18
 
 **Status:** **NO-SHIP** — the cut failed to discharge P-4's burden, the clause stays, and
 the 1,896 characters are **not** cut. Four arms, 10 runs each, sonnet pinned.
@@ -1969,6 +1975,8 @@ Cumulative across A-35, A-36, A-37: **$5.74**.
 
 
 ## A-38 — the surface-budget baseline's owed pre-registration, and its identity control is a dead observable without layer 0
+
+**Valid:** dated 2026-09-03
 
 **Status:** **RAN 2026-09-03 — see the Outcome sections below.** Registered before the
 matrix, to discharge an obligation the scenario recorded against itself and could not
