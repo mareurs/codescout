@@ -31,20 +31,54 @@ topic: issue clusters and rule promotion
 **Mechanism status:** `shipped (partial)` — `scripts/build-windows.sh` (`4816d64f`) prints this box's `wine --version` and names where CI's is decided, at the top of every `test` run, so a local green and a lane green are comparable rather than conflatable. *This field read `none yet`, and proposed asserting the CI version "at ~3 lines", until 2026-09-02. Both halves were stale, and the second was **refuted** rather than merely superseded: the script deliberately does NOT assert a version, because `ubuntu-latest`'s wine moves and a hardcoded `9.0` "would be a constant that decays while still reading as fact — the shape docs/trackers/issue-clusters.md files as IC-11". The code declines this ledger's proposal by citing this ledger's own class.* Probed with `git log -S` per `IC-11`'s inclusion test rather than assumed: the field was written at `351836a8` (08-31 22:39) when no mechanism existed, and the script shipped at `4816d64f` (09-01 00:44) — **true when written, decayed two hours later**, which is an `IC-11` instance and not an authoring error. ***The CI half SHIPPED, and this clause was false when written — corrected 2026-09-12.*** It landed in two commits naming this entry in their own subject lines: `58d85263` (02:06) pinned the lane's wine to the local loop's version via the WineHQ apt repo — *IC-5 pass 1 of 2* — and `c06ecc28` (04:25) dropped nine of the fifteen group-6 skips and re-measured — *IC-5 pass 2 of 2* — keeping six that are **not** wine-version questions (permanent cross-compilation and emulator artifacts). The sentence this replaces was written at **20:56 the same day, 16.5 hours after both passes completed**. So it is *not* the `IC-11` shape this field's own history records two paragraphs up: it was wrong at authoring time rather than true-then-decayed, and that is the harder half, because decay has a window in which a re-read would catch it and this had none — the field was authored into a world where its claim had already been falsified. `WINE_PIN` has since been re-bumped to 11.17 (`ebc0f6bc`, 2026-09-08) to keep matching this box. **A second copy of the stale claim survives one file away:** `.github/workflows/ci.yml`'s install-step comment still reads *"nine tests in group 6 below are skipped"*, falsified by pass 2 in the very file it sits in.
 **Valid:** conditional — a member's remedy is not expressible as a per-axis `CLAUDE.md` sentence, forcing the class-level rule this ruling declined to write
 
-**Checked 2026-09-18 — PARTIAL, and the scope is stated because the verdict is only worth
-its sample.** Read the **5 most recently updated** members of the 27 carrying this tag;
-**22 were not read.** None of the five forces a class-level rule: the default-build /
-embedding-model and feature-lane members sit on the lane axis, the locale-stdin and
-Windows write-guard-holder members on the Windows axis, and
-`a-gate-script-edited-in-the-worktree-has-already-shipped` — the least obviously per-axis of
-them — still reduces to one sentence on the hook axis (*an edit to a dispatched hook script
-is live for every session immediately, so build it in a copy first*).
+**Checked 2026-10-01 — has NOT fired, over all 28 members tagged, which is the whole population and not a
+sample.** The criterion: a member FORCES the class-level rule only if its remedy cannot be said as
+a sentence for ONE axis's reader, so that acting correctly needs the cross-axis claim itself. Three
+read-only reviewers each read the Root cause and Fix of eight members (24 in all), told to look for
+a counterexample and to write the per-axis sentence rather than assert one existed. The other four
+are the members the 2026-09-18 pass named and read: `a-gate-script-edited-in-the-worktree-has-already-shipped`,
+`the-default-build-cannot-run-the-default-embedding-model`,
+`the-ledger-hook-reads-stdin-with-the-locale-encoding` and
+`the-write-guard-holder-tests-fail-on-every-windows-lane`; those four were not re-read.
 
-So on this sample the condition has **not** fired and the per-member ruling holds. **This is
-not an adjudication of the class** — that means reading all 27 remedies, and the member most
-likely to force the class-level rule is by construction the one nobody has looked at. Recorded
-as a partial rather than rounded up to a verdict, because a sampled *no* published as a
-settled *no* is this ledger's own `IC-13` — a capped result presented as complete.
+Result over the 24, from the reviewers' tables: **0 force the class-level rule**; 14 reduce to a
+per-axis sentence, 6 are fixed by a mechanism that needs no reader-facing sentence, and 4 are
+probably not members at all (below). The members that came closest, and why they stop short: the
+newest, `a-python-only-task-under-scripts-published-a-red-rust-gate`, whose own root cause is
+written in this class's words, but whose remedy is one sentence for one axis (*a file committed
+under `scripts/`, Markdown included, is input to the Rust test `committed_paths`*) and was
+copied into the next plan; and `windows-gnu-wine-20-test-failures`, which sorted 20 reds into real
+defects and wine artifacts, but against an axis-specific oracle (the real MSVC lane), as two
+separate per-axis halves.
+
+**Probably not members, listed and NOT retagged** (the 2026-09-24 retag to `IC-18` is the
+precedent, and a retag changes this class's counts, so it is its own decision). One I verified
+myself: `rendezvous-windows-ppid-test-asserted-a-wine-specific-zero-as-windows-by-design`, whose
+root cause (*a wine-specific zero*) is refuted — the literal `#[cfg(windows)] fn parent_pid() -> u32`
+returning `0` is in `src/tools/rendezvous.rs` at `4824dfe3^`, and the fix `748f34c1` is not an
+ancestor of `4824dfe3` but is of `3a70166c`, so the zero came from code on a history line without
+the fix. Three rest on a reviewer's judgement only: `the-shell-suites-lane-is-flaky-and-ci-endpoint-sampling-misattributes-it`
+(superseded; its "not reproducible locally" premise was refuted by a record tagged
+`cluster/gate-keyed-on-unobservable-event`), `wine-lane-flakes-under-load-on-three-tests` (one local
+flake, mechanism inferred, never seen on CI) and `ci-never-ran-codescout-embed-tests` (local gate
+and CI ran the same bare commands and shared one blind spot; `IC-18` fits better). One more,
+`the-unpushed-ledger-guard-allowed-an-append-it-documents-as-refused`, has a membership the reviewer
+could neither confirm nor refute: its mechanism was never established.
+
+**A finding that is not the condition firing:** the per-axis sentences are expressible but several
+are not written where the 2026-09-12 ruling says they live. `CLAUDE.md` § *Development Commands*
+carries no Windows or wine sentence (a search of the file for `wine`, `windows`, `build-windows` and
+`cross-target` matches only the unrelated word "windows" on line 25); the Windows-axis sentences
+live in bug files' Workarounds, and the ambient-environment one in
+`docs/conventions/test-env-isolation.md`. The condition asks whether a sentence CAN be written, so
+this does not fire it, but it is a placement gap in the very rule this entry promoted.
+
+**What this verdict rests on and does not.** Whether a remedy "reduces to one sentence" is a
+judgement, made here by the reviewers against one stated criterion; I confirmed the claims listed
+above as verified and spot-checked the rest of what I relied on, not every verdict. The reviewers
+did not open `scripts/build-windows.sh` or `.github/workflows/ci.yml` and relied on the bug files'
+account of them. One member's file (~600 lines of observations) was read only in part. Overturned by
+showing any member's remedy cannot be stated for one axis.
 
 `scripts/build-windows.sh` exists precisely so Windows failures are reproducible without CI round-trips, and that purpose holds only while the two wines behave alike. They do not: `ubuntu-latest` packages wine 9.0, a current dev box runs wine 11.16, and in a single day the gap produced two divergences — one costing a CI cycle, one still costing a skipped test.
 
