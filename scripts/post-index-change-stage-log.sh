@@ -406,6 +406,32 @@ write_in_head() {
     return 1
 }
 
+# WHERE THE USAGE DATABASE LIVES for the tree rooted at $1: the MAIN checkout's `.codescout/usage.db`.
+# Codescout files a call made in a linked worktree in the main checkout's database, tagged with the
+# worktree's own `project_root`, because a worktree is deleted at the end of its life and takes its own
+# `.codescout/` with it (`worktree_main_root`, src/util/path_security.rs, read by src/usage/mod.rs). The
+# recorder has to agree with that WRITER, so it reads the same pointer the same way: a worktree's `.git` is
+# a FILE holding `gitdir: <main>/.git/worktrees/<name>`, and the main root is what precedes the first `.git`
+# component. (`git rev-parse --git-common-dir` names the same place on every layout seen here, but the
+# writer's rule is the one that decides where the rows are.) Anything else -- an ordinary checkout, a pointer
+# with no absolute `.git` component -- is the tree itself, which is what this did for every tree before.
+# Measured 2026-10-02: the two linked worktrees on this machine carry no `usage.db`, so the default of
+# `<show-toplevel>/.codescout/usage.db` named a file that is not there, the open failed, and a staging in a
+# worktree was always the legacy claim (docs/issues/archive/2026-10-02-the-stage-log-recorder-run-in-a-linked-
+# worktree-reads-a-usage-db-that-does-not-exist.md). Only the DATABASE moves: `root`, `abs`, a doc id and the
+# `project_root` predicate stay the tree being staged, because its relative paths are its own.
+main_checkout_root() {
+    local gd=""
+    [ -f "$1/.git" ] && gd="$(sed -n 's/^gitdir:[[:space:]]*//p' "$1/.git" 2>/dev/null)"
+    # ABSOLUTE only: git writes an absolute pointer unless asked for `--relative-paths`, and a relative one
+    # is relative to the worktree, while the writer would resolve it against the SERVER's working directory,
+    # so where its rows went is not knowable here. That is left as the tree itself, which is what it was.
+    case "$gd" in
+        /*/.git/*) printf '%s' "${gd%%/.git/*}" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
 # WHO ELSE WROTE THIS PATH? Prints the session, other than $me, whose most recent write to $1
 # through a codescout tool is still live -- a write is live until its own writer commits $1
 # after it, or until its own text is already in HEAD (write_in_head, above) -- and prints
@@ -457,7 +483,7 @@ write_in_head() {
 foreign_writer() {
     local rel="$1" db root abs id sql out sid epoch ct sids s parts
     root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
-    db="${CODESCOUT_USAGE_DB:-$root/.codescout/usage.db}"
+    db="${CODESCOUT_USAGE_DB:-$(main_checkout_root "$root")/.codescout/usage.db}"
     abs="$root/$rel"
     id="$(printf '%s' "$abs" | sha256sum | cut -c1-16)"
     # A top-level key of the call's JSON, read AS JSON, not a substring of its text: an edit whose

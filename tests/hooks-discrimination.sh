@@ -1505,6 +1505,121 @@ eq "25i: on a table without project_root a relative path still names its writer"
 eq "25i: and a doc id" "$(owner_of h.txt)" "$B"
 rm -rf "$T" "$DB"
 
+# 26. The recorder run INSIDE a linked worktree. Codescout files a call made in a worktree in the MAIN
+# checkout's `.codescout/usage.db`, tagged with the worktree's own `project_root` (`worktree_main_root`,
+# src/usage/mod.rs), and a worktree carries no `usage.db` of its own, so the recorder's default of
+# `<show-toplevel>/.codescout/usage.db` named a file that does not exist there: the open failed, printed
+# nothing, and every staging in a worktree was the legacy claim. Every case in this suite until here handed
+# the recorder its database through CODESCOUT_USAGE_DB, which cannot see that, so these cases do NOT set it
+# (`env -u`) and build REAL linked worktrees. Measured 2026-10-02 over the 30 days of usage.db: 10 worktree
+# roots, 165 (worktree, relative path) pairs written, 5 of them by two sessions (one worktree, shared).
+# What a staging in worktree W means: `root`, `abs` and a doc id are W's own (the tree being staged); the
+# database is the main checkout's; the `project_root` predicate compares against W.
+# Red on unchanged code: 26a, 26c, 26d-in-tree (each layout). The rest pass there and rest on mutation.
+mkwt() { # mkwt sibling|nested: a repo with a linked worktree; sets RT (main root), W (worktree root), MDB
+    new_repo
+    mkdir -p .codescout; MDB="$T/.codescout/usage.db"; mkdb "$MDB"
+    echo base > f.txt; echo base > h.txt; git add f.txt h.txt; git commit -qm base
+    RT="$(git rev-parse --show-toplevel)"
+    if [ "$1" = nested ]; then W="$RT/.worktrees/n"; else W="$RT.worktrees/n"; fi
+    git worktree add -q --detach "$W"
+    W="$(cd "$W" && git rev-parse --show-toplevel)"
+}
+wt_add() { # wt_add <dir> <sid> <path>: stage by name in <dir>, with NO database override
+    ( cd "$1" && env -u CODESCOUT_USAGE_DB CLAUDE_CODE_SESSION_ID="$2" git add -- "$3" )
+}
+wt_owner() { # wt_owner <dir> <path>: the recorded owner of <path> in <dir>'s own stage log
+    awk -F'\t' -v p="$2" '$3 == p { print $1; exit }' "$(cd "$1" && git rev-parse --absolute-git-dir)/session-stage-log" 2>/dev/null
+}
+for layout in sibling nested; do
+    # a. a peer wrote THIS worktree's f.txt (a relative path, in a call made in the worktree).
+    mkwt "$layout"
+    echo mine >> "$W/f.txt"
+    wrote "$MDB" "$B" edit_file '{"action":"edit","path":"f.txt"}'; in_tree "$MDB" "$W"
+    wt_add "$W" "$A" f.txt
+    eq "26a ($layout): in a worktree, a peer's write of its relative path names the peer" "$(wt_owner "$W" f.txt)" "$B"
+    eq "26a ($layout): by write, not by staging" "$(awk -F'\t' '$3 == "f.txt" { print $4; exit }' "$(cd "$W" && git rev-parse --absolute-git-dir)/session-stage-log")" "named-foreign"
+    rm -rf "$T" "$T.worktrees"
+
+    # b. a peer wrote f.txt in the MAIN checkout: a different file from the worktree's.
+    mkwt "$layout"
+    echo mine >> "$W/f.txt"
+    wrote "$MDB" "$B" edit_file '{"action":"edit","path":"f.txt"}'; in_tree "$MDB" "$RT"
+    wt_add "$W" "$A" f.txt
+    eq "26b ($layout): a relative path written in the main checkout is not a write to the worktree's" "$(wt_owner "$W" f.txt)" "$A"
+    rm -rf "$T" "$T.worktrees"
+
+    # c. an ABSOLUTE path under the worktree, from a call made in the main checkout, names the worktree's file.
+    mkwt "$layout"
+    echo mine >> "$W/f.txt"
+    wrote "$MDB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"$W/f.txt\"}"; in_tree "$MDB" "$RT"
+    wt_add "$W" "$A" f.txt
+    eq "26c ($layout): an absolute path under the worktree names its writer" "$(wt_owner "$W" f.txt)" "$B"
+    rm -rf "$T" "$T.worktrees"
+
+    # d. a doc id is the sha256 of an absolute path: the worktree's file has the worktree's id, and the
+    # main checkout's file, which a write from a worktree session can also reach, has another.
+    mkwt "$layout"
+    echo mine >> "$W/h.txt"; echo mine >> "$W/f.txt"
+    wid="$(printf '%s' "$W/h.txt" | sha256sum | cut -c1-16)"
+    mid="$(printf '%s' "$RT/f.txt" | sha256sum | cut -c1-16)"
+    wrote "$MDB" "$B" doc "{\"action\":\"update\",\"id\":\"$wid\",\"patch\":{}}"; in_tree "$MDB" "$W"
+    wrote "$MDB" "$B" doc "{\"action\":\"update\",\"id\":\"$mid\",\"patch\":{}}"; in_tree "$MDB" "$W"
+    wt_add "$W" "$A" h.txt; wt_add "$W" "$A" f.txt
+    eq "26d ($layout): the worktree file's own doc id names its writer" "$(wt_owner "$W" h.txt)" "$B"
+    eq "26d ($layout): the main checkout file's doc id does not name the worktree's file" "$(wt_owner "$W" f.txt)" "$A"
+    rm -rf "$T" "$T.worktrees"
+
+    # e. the reverse direction: the stager is in the MAIN checkout, the peer wrote the same relative path in
+    # the worktree. Another tree, so not this one's write (65d4e5dd), now with a real worktree and no override.
+    mkwt "$layout"
+    echo mine >> "$RT/f.txt"
+    wrote "$MDB" "$B" edit_file '{"action":"edit","path":"f.txt"}'; in_tree "$MDB" "$W"
+    wt_add "$RT" "$A" f.txt
+    eq "26e ($layout): from the main checkout, a peer's write in a worktree is not this tree's" "$(wt_owner "$RT" f.txt)" "$A"
+    rm -rf "$T" "$T.worktrees"
+done
+
+# f. the override still wins inside a worktree: a database named by CODESCOUT_USAGE_DB is read, not the main one.
+mkwt sibling
+echo mine >> "$W/f.txt"
+ODB="$T/override.db"; mkdb "$ODB"
+wrote "$ODB" "$B" edit_file '{"action":"edit","path":"f.txt"}'; in_tree "$ODB" "$W"
+( cd "$W" && CODESCOUT_USAGE_DB="$ODB" CLAUDE_CODE_SESSION_ID="$A" git add -- f.txt )
+eq "26f: CODESCOUT_USAGE_DB wins over the main checkout's database inside a worktree" "$(wt_owner "$W" f.txt)" "$B"
+rm -rf "$T" "$T.worktrees"
+
+# i. a RELATIVE pointer (`git worktree add --relative-paths`, git 2.48 and later) is not guessed at: the writer
+# would resolve it against the server's working directory, so where its rows went is not knowable, and the
+# staging stays the legacy claim as it was. Skipped, visibly and not counted, where git cannot make one.
+mkwt sibling
+rm -rf "$W"; git worktree prune
+if git worktree add -q --relative-paths --detach "$RT.worktrees/rel" 2>/dev/null; then
+    W="$(cd "$RT.worktrees/rel" && git rev-parse --show-toplevel)"
+    echo mine >> "$W/f.txt"
+    wrote "$MDB" "$B" edit_file '{"action":"edit","path":"f.txt"}'; in_tree "$MDB" "$W"
+    wt_add "$W" "$A" f.txt
+    eq "26i: a relative gitdir pointer is not guessed at, so the staging is the legacy claim" "$(wt_owner "$W" f.txt)" "$A"
+else
+    echo "  SKIP  26i: this git cannot make a --relative-paths worktree"
+fi
+rm -rf "$T" "$T.worktrees"
+
+# g/h. fail open, exactly as before: a main database that is absent or is not a database is the legacy claim.
+mkwt sibling
+echo mine >> "$W/f.txt"
+wrote "$MDB" "$B" edit_file '{"action":"edit","path":"f.txt"}'; in_tree "$MDB" "$W"
+rm -f "$MDB"
+wt_add "$W" "$A" f.txt
+eq "26g: with no database in the main checkout the staging is the legacy claim" "$(wt_owner "$W" f.txt)" "$A"
+rm -rf "$T" "$T.worktrees"
+mkwt sibling
+echo mine >> "$W/f.txt"
+echo "this is not a database" > "$MDB"
+wt_add "$W" "$A" f.txt
+eq "26h: with an unreadable database the staging is the legacy claim" "$(wt_owner "$W" f.txt)" "$A"
+rm -rf "$T" "$T.worktrees"
+
 echo "== sequencer stand-down"
 
 # Ownership lookup that survives a linked worktree, where `.git` is a file, not a dir.
