@@ -474,7 +474,13 @@ struct Cite {
     /// their `references(name_path=` is wrong when the page says `references(name_path,` sends
     /// them looking for a string that is not there.
     bare: bool,
+    /// The first 110 characters of the citing line, for a failure message to quote.
     text: String,
+    /// The WHOLE citing line, trimmed. Separate from `text` because an exemption's snippet
+    /// can sit anywhere in it: one `docs/PROBES.md` row runs to hundreds of characters, and
+    /// matching a snippet against the truncated `text` would never find a mention past
+    /// character 110.
+    source: String,
 }
 
 /// One call found on one line: what it names, what it claims, and whether the scanner could
@@ -656,6 +662,7 @@ fn anchored_cites() -> Vec<Cite> {
                         param,
                         bare: is_bare,
                         text: line.trim().chars().take(110).collect(),
+                        source: line.trim().to_string(),
                     });
                 }
             }
@@ -739,6 +746,9 @@ fn json_payload_cites() -> PayloadScan {
                                     param: key.clone(),
                                     bare: false,
                                     text: format!("{{\"tool\": \"{tool}\", \"arguments\": {{…}}}}"),
+                                    source: format!(
+                                        "{{\"tool\": \"{tool}\", \"arguments\": {{…}}}}"
+                                    ),
                                 });
                             }
                         }
@@ -827,38 +837,108 @@ fn a_documented_tool_parameter_exists_on_that_tool() {
     );
 }
 
+/// One exempted prose mention: the file it sits in, the word [`CALL_OPEN`] mistook for a tool, and
+/// a `snippet` that identifies the citing LINE by what it says.
+///
+/// A struct rather than a `(&str, &str, &str)` tuple because all three fields are strings, so a
+/// transposed tuple compiles and then exempts nothing — or the wrong thing.
+struct AnchorFalsePositive {
+    file: &'static str,
+    tool: &'static str,
+    /// A substring of the WHOLE citing line ([`Cite::source`]) — content, not coordinate. A
+    /// line number is falsified by any insertion above it, and a falsified coordinate fails in
+    /// two directions: loud when the shifted mention is reported, SILENT when a different
+    /// line lands on the exempted coordinate and is quietly waved through. A snippet that
+    /// stops matching reds instead, at the exemption, naming a real edit to the text.
+    snippet: &'static str,
+}
+
+impl AnchorFalsePositive {
+    fn covers(&self, c: &Cite) -> bool {
+        self.file == c.file && self.tool == c.tool && c.source.contains(self.snippet)
+    }
+}
+
+/// One finding per exemption that does not name exactly ONE citation site in `cites`.
+///
+/// The other half of keying on content. A snippet that matches nothing means the mention was
+/// edited or deleted, so the exemption is dead weight that still reads as protection. A snippet
+/// that matches two lines means the second is waved through unseen — the disambiguator half of
+/// `issue-clusters:IC-6`, which a first-match exemption would reproduce inside the repair for
+/// its escape half. An empty snippet is refused outright: it covers every call to that tool in
+/// that file, which is the bare-word key this list deliberately does not have.
+///
+/// Counts distinct LINES, not cites: one line carrying two named arguments is one site.
+fn exemption_defects(list: &[AnchorFalsePositive], cites: &[Cite]) -> Vec<String> {
+    list.iter()
+        .filter_map(|e| {
+            if e.snippet.is_empty() {
+                return Some(format!(
+                    "  ({}, `{}`): the snippet is EMPTY, so it covers every `{}(…)` in that file",
+                    e.file, e.tool, e.tool
+                ));
+            }
+            let sites: BTreeSet<usize> = cites
+                .iter()
+                .filter(|c| e.covers(c))
+                .map(|c| c.line)
+                .collect();
+            match sites.len() {
+                1 => None,
+                0 => Some(format!(
+                    "  ({}, `{}`, {:?}): no longer finds its text on any line — the mention was \
+                     edited or removed, so this entry exempts nothing",
+                    e.file, e.tool, e.snippet
+                )),
+                n => Some(format!(
+                    "  ({}, `{}`, {:?}): matches {n} different lines ({sites:?}) — the extras are \
+                     exempted unseen; lengthen the snippet until it names one",
+                    e.file, e.tool, e.snippet
+                )),
+            }
+        })
+        .collect()
+}
+
 /// Anchored-call false positives: [`CALL_OPEN`] matched `word(` in prose that is not a tool
 /// call at all — code quoted as a worked example, or an action name used as shorthand for
 /// `doc(action="…")`. **Not** `ALIAS_ALLOWLIST`: that constant is for a live tool cited under
-/// another name, and every entry here names no tool, live or dead. Keyed on the exact
-/// `(file, line, tool)` triple, never on the bare word, so a real dead-tool call that happens
-/// to share one of these words elsewhere is still caught — widening this to a bare-word
-/// denylist would silently blind the guard to that case.
+/// another name, and every entry here names no tool, live or dead. Keyed on `(file, tool, snippet)`
+/// — the file, the word, and a piece of the citing line's own text — never on the bare word,
+/// so a real dead-tool call that happens to share one of these words elsewhere is still caught;
+/// widening this to a bare-word denylist would silently blind the guard to that case. Never on a
+/// line number either, which any row inserted above the mention falsifies (see
+/// [`AnchorFalsePositive::snippet`]). [`exemption_defects`] keeps each entry honest.
 ///
 /// Surfaced 2026-09-19 when `stale_tool_call_findings` stopped skipping every single-word
 /// (no-underscore) citation — see `docs/issues/2026-09-02-both-doc-citation-guards-skip-
 /// half-the-corpus-without-saying-so.md` § Fix: *"decide what to do with the unrecognised
 /// bucket… its size is unknown until measured."* Measured here: 4, all verified by hand; 3
 /// remain, since the tracker-conventions `find(…)` mention was rewritten into a real
-/// `doc(action="find", …)` call on 2026-09-24 rather than re-keyed to its moved line.
-const ANCHOR_FALSE_POSITIVES: &[(&str, usize, &str)] = &[
+/// `doc(action="find", …)` call on 2026-09-24.
+const ANCHOR_FALSE_POSITIVES: &[AnchorFalsePositive] = &[
     // `for(i=3;i<=n;i++) if(a[i]~/^[A-Z]+$/) print a[i]` — an awk one-liner quoted verbatim
     // as a worked example. `for` is awk syntax, not a codescout tool.
-    ("docs/TAXONOMY.md", 41, "for"),
+    AnchorFalsePositive {
+        file: "docs/TAXONOMY.md",
+        tool: "for",
+        snippet: "for(i=3;i<=n;i++)",
+    },
     // "a test that reaches a `#[cfg(feature = \"librarian\")]` item" — a Rust attribute
     // quoted in prose, not a call.
-    ("CONTRIBUTING.md", 167, "cfg"),
-    // "`sorted(x, key=f)` counts" — Python's builtin, quoted as a worked example of a
-    // callback shape in a probe's own doc row. Line-keyed, so ANY row inserted above it in
-    // PROBES.md moves the mention and reds this guard for every session until the number
-    // here is bumped: 201 -> 202 when `ffeada30` added the probe-predicate-candidates row,
-    // then 202 -> 203 when `50986419` (2026-09-21) added the ledger-entry-loss row.
-    // TWICE NOW, and the second time the red sat at HEAD redding the gate for every session
-    // in this checkout — so read this recurrence as the cost estimate it is, not as a chore.
-    // The durable repair is an ignore marker the mention can carry itself, filed as
-    // docs/issues/2026-09-21-docs-commit-stales-a-line-keyed-exemption.md; until that ships,
-    // any PROBES.md row inserted above line 203 re-arms this.
-    ("docs/PROBES.md", 203, "sorted"),
+    AnchorFalsePositive {
+        file: "CONTRIBUTING.md",
+        tool: "cfg",
+        snippet: "#[cfg(feature = \"librarian\")]",
+    },
+    // "`sorted(x, key=f)` counts" — Python's builtin, quoted as a worked example of a callback
+    // shape in a probe's own doc row. The row is hundreds of characters long, which is why the
+    // match runs against `Cite::source` and not the 110-character `Cite::text`.
+    AnchorFalsePositive {
+        file: "docs/PROBES.md",
+        tool: "sorted",
+        snippet: "`sorted(x, key=f)` counts",
+    },
 ];
 
 /// Findings for [`a_documented_call_names_a_live_tool`], deduplicated by `(file, line, tool)` —
@@ -882,10 +962,7 @@ fn stale_tool_call_findings(
         if names.contains(&c.tool) || allowed.contains(c.tool.as_str()) {
             continue;
         }
-        if ANCHOR_FALSE_POSITIVES
-            .iter()
-            .any(|(file, line, tool)| *file == c.file && *line == c.line && *tool == c.tool)
-        {
+        if ANCHOR_FALSE_POSITIVES.iter().any(|e| e.covers(c)) {
             continue;
         }
         if !seen.insert((c.file.clone(), c.line, c.tool.clone())) {
@@ -941,6 +1018,7 @@ fn a_stale_call_is_reported_once_regardless_of_argument_count() {
         param: param.to_string(),
         bare: false,
         text: "`artifact_event(action=\"list\", artifact_id=X)`".to_string(),
+        source: "`artifact_event(action=\"list\", artifact_id=X)`".to_string(),
     };
     let cites = vec![cite("action"), cite("artifact_id")];
     let names = tool_names();
@@ -983,6 +1061,7 @@ fn a_retired_single_word_tool_name_is_reported_not_skipped() {
         param: "action".to_string(),
         bare: false,
         text: "`artifact(action=\"get\")`".to_string(),
+        source: "`artifact(action=\"get\")`".to_string(),
     };
     let allowed: HashSet<&str> = ALIAS_ALLOWLIST.iter().copied().collect();
 
@@ -1015,6 +1094,7 @@ fn the_anchor_false_positive_list_is_keyed_on_the_citation_site_not_the_word() {
         param: String::new(),
         bare: false,
         text: "`for(…)` pretending to be a tool at a different site".to_string(),
+        source: "`for(…)` pretending to be a tool at a different site".to_string(),
     };
     let bad = stale_tool_call_findings(&[cite], &names, &allowed);
 
@@ -1023,6 +1103,169 @@ fn the_anchor_false_positive_list_is_keyed_on_the_citation_site_not_the_word() {
         1,
         "the same word at a citation site NOT in ANCHOR_FALSE_POSITIVES must still be \
          reported: {bad:?}"
+    );
+}
+/// A citation as the scanner would emit it: `text` is the truncated quote, `source` the whole
+/// line. The truncation is real, not decorative — the exemption tests below depend on a snippet
+/// that sits PAST it, which is the shape of the `docs/PROBES.md` row this mechanism exists for.
+fn cite_at(file: &str, line: usize, tool: &str, source: &str) -> Cite {
+    Cite {
+        file: file.to_string(),
+        line,
+        tool: tool.to_string(),
+        param: String::new(),
+        bare: false,
+        text: source.chars().take(110).collect(),
+        source: source.to_string(),
+    }
+}
+
+/// The snippet the fixture exemption looks for, and a line carrying it AFTER 110 characters.
+/// The padding is what makes `Cite::text` (110 chars) unable to contain the snippet, so an
+/// implementation that matched against `text` instead of `source` fails
+/// `an_exemption_follows_its_text_when_the_line_moves`. The padding's content is irrelevant;
+/// its LENGTH is load-bearing — shorten it under 110 and that mutation survives.
+const FIXTURE_SNIPPET: &str = "`sorted(x, key=f)` counts";
+fn fixture_line() -> String {
+    format!("| probe | {} {FIXTURE_SNIPPET} | more |", "z".repeat(150))
+}
+const FIXTURE: AnchorFalsePositive = AnchorFalsePositive {
+    file: "docs/P.md",
+    tool: "sorted",
+    snippet: FIXTURE_SNIPPET,
+};
+
+/// The defect itself (`docs/issues/2026-09-21-docs-commit-stales-a-line-keyed-exemption.md`):
+/// the exemption must survive the mention MOVING. Two sites at different line numbers, one
+/// text. Under the old `(file, line, tool)` key only the one at the keyed coordinate was
+/// covered, and every row inserted above it reddened the gate for the whole checkout.
+#[test]
+fn an_exemption_follows_its_text_when_the_line_moves() {
+    let src = fixture_line();
+    assert!(
+        !src.chars()
+            .take(110)
+            .collect::<String>()
+            .contains(FIXTURE_SNIPPET),
+        "fixture precondition: the snippet must sit past the 110-char `text` cut, or this \
+         test cannot tell `source` from `text`"
+    );
+    for line in [203, 204, 9999] {
+        assert!(
+            FIXTURE.covers(&cite_at("docs/P.md", line, "sorted", &src)),
+            "line {line}: the same mention must stay exempt wherever it moves to"
+        );
+    }
+}
+
+/// The other direction, and the reason content is the right key rather than merely a stable
+/// one: the SAME coordinate, different text. A coordinate key waves this through silently; a
+/// content key reds it. Same file, same tool, same line number as the exempted mention.
+#[test]
+fn a_different_line_at_the_same_coordinate_is_not_exempt() {
+    let c = cite_at(
+        "docs/P.md",
+        203,
+        "sorted",
+        "| a different row | `sorted(items)` quoted for another reason |",
+    );
+    assert!(
+        !FIXTURE.covers(&c),
+        "text that no longer carries the snippet must not inherit the exemption by position"
+    );
+}
+
+/// Each of the three fields must discriminate on its own: every case below agrees with the
+/// fixture on the other two, so only the field under test can refuse it.
+#[test]
+fn an_exemption_requires_the_file_and_the_tool_to_agree_as_well() {
+    let src = fixture_line();
+    assert!(
+        !FIXTURE.covers(&cite_at("docs/OTHER.md", 203, "sorted", &src)),
+        "the same word and text in another file is a different site"
+    );
+    assert!(
+        !FIXTURE.covers(&cite_at("docs/P.md", 203, "reversed", &src)),
+        "another tool word on the same line is a different citation"
+    );
+}
+
+/// `exemption_defects` is the half of this mechanism that does the work the line number used
+/// to do, so it is tested to FIRE, not only to be quiet: the real-corpus assertion below is an
+/// `is_empty()`, monotone under a detector that returns nothing.
+#[test]
+fn a_healthy_exemption_names_exactly_one_site_and_is_not_a_defect() {
+    let src = fixture_line();
+    // One line, two named arguments: two cites, ONE site. Counting cites would call this two.
+    let cites = vec![
+        cite_at("docs/P.md", 7, "sorted", &src),
+        cite_at("docs/P.md", 7, "sorted", &src),
+    ];
+    assert!(
+        exemption_defects(&[FIXTURE], &cites).is_empty(),
+        "one line is one site however many cites it carries"
+    );
+}
+
+#[test]
+fn an_exemption_whose_text_is_gone_is_named_not_silently_dead() {
+    let cites = vec![cite_at("docs/P.md", 7, "sorted", "an unrelated row")];
+    let d = exemption_defects(&[FIXTURE], &cites);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].contains("no longer finds its text"),
+        "the zero-site branch must say THAT, not the ambiguity message: {d:?}"
+    );
+    assert!(
+        d[0].contains(FIXTURE_SNIPPET),
+        "the finding must quote the snippet so the reader can find the entry: {d:?}"
+    );
+}
+
+#[test]
+fn an_exemption_matching_two_lines_is_refused_rather_than_first_matched() {
+    let src = fixture_line();
+    let cites = vec![
+        cite_at("docs/P.md", 7, "sorted", &src),
+        cite_at("docs/P.md", 90, "sorted", &src),
+    ];
+    let d = exemption_defects(&[FIXTURE], &cites);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].contains("matches 2 different lines"),
+        "the many-site branch must say THAT, not the dead-entry message: {d:?}"
+    );
+}
+
+#[test]
+fn an_empty_snippet_is_refused_even_when_it_would_match_one_site() {
+    let empty = AnchorFalsePositive {
+        snippet: "",
+        ..FIXTURE
+    };
+    // Exactly one cite, so the site count alone would pass it — only the explicit refusal can
+    // catch the bare-word key this list must not have.
+    let cites = vec![cite_at("docs/P.md", 7, "sorted", "anything at all")];
+    let d = exemption_defects(&[empty], &cites);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].contains("EMPTY"), "{d:?}");
+}
+
+/// The standing check on the real corpus: every shipped exemption still finds its text on
+/// exactly one line. This is what turns a drifted or edited mention from a silent dead entry
+/// (or a silently wrong exemption) into a red that names the entry.
+#[test]
+fn every_anchor_exemption_still_names_exactly_one_citation_site() {
+    let defects = exemption_defects(ANCHOR_FALSE_POSITIVES, &anchored_cites());
+    assert!(
+        defects.is_empty(),
+        "{} exemption(s) in ANCHOR_FALSE_POSITIVES no longer name exactly one citation site:\n\n\
+         {}\n\n\
+         The prose they exempted was edited, moved to a file they do not name, or now has a \
+         twin. Re-point the entry at the mention's current text, or delete it if the mention \
+         is gone.",
+        defects.len(),
+        defects.join("\n")
     );
 }
 
@@ -1649,6 +1892,12 @@ fn prompt_cites_from(paths: &[PathBuf], root: &std::path::Path) -> PromptScan {
                         param,
                         bare: is_bare,
                         text: line.trim().chars().take(110).collect(),
+                        // INERT for the exemption list, and annotated so nobody credits it
+                        // with coverage: `covers` tests `file` first, and this file is
+                        // `<yaml>#prompt`, which no exemption names, so `source` is never read
+                        // for a sidecar cite. Emptying it survives the mutation sweep
+                        // (2026-10-01). It is plumbing the struct requires, not a guard.
+                        source: line.trim().to_string(),
                     });
                 }
             }
