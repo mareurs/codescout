@@ -19,7 +19,22 @@ The TAXONOMY recipe gate (`every_taxonomy_append_entry_recipe_is_one_the_code_ac
 
 ## Fix
 
-Not started. Reuse the gate's scanner and checks with a second input per surface. The sidecar prompts are YAML strings, not table rows, so the row scanner does not apply there as-is; the call walker and the three checks do.
+Partly done. Surfaces, as of 2026-10-01:
+
+| Surface | State |
+|---|---|
+| Augmentation-sidecar prompts (`docs/augmentations/*.yaml`) | Gated by `66cf3b49`, authored by a session that ended before committing it and committed by `a520c25a`. Its mutations were not re-run by the committer. |
+| Ledgers' own recipes (`docs/trackers/*.md`) | Gated by `b9cf290d16ed2b180f2c8135cc0782f14e173604`, patch-id `adc734b3971c7c8dcf5e2774a53348e375b1f87b`. 85 ledgers, 35 prose + 2 params + 1 mention of the form = the 38 above, none refused. 21 guarded sites mutated once each, all killed. |
+| TAXONOMY outside *Main taxonomy* (resume-queue table, work-stream ledgers table) | **Not done.** Needs a second row grammar (see the second bullet under *Reproduction*), not a second input. |
+| `CLAUDE.md` | **Not done.** Not measured either: the 2026-09-30 reproduction did not scan it. |
+
+How the ledger-recipe surface was scoped, because the bug's own wording would have led elsewhere:
+
+- **Whole body, not the template section.** Only 18 of the 38 calls sit under `## Template for new entries`; the rest are under how-to headings, a code-fence comment line and the preamble.
+- **Raw, not rendered.** The template's own call is inside an HTML comment.
+- **A bare mention is counted, not skipped.** `doc(action="append_entry", …)` in a how-to line (one in `bug-fix-session-log.md`) has no `id_prefix` and is not a recipe. The rule is exact: a call whose arguments, after the opener, are only an ellipsis. Any other call with no `id_prefix` is a finding.
+- **A call is judged against the ledger it is written in.** A ledger documenting another ledger's call would be refused. None does today.
+- **Reproduced the gap at the corpus level:** corrupting the template call in `bug-fix-session-log.md` (`id_prefix="F"` to `"Q"`) left the TAXONOMY and sidecar tests green, and only the new test went red.
 
 
 ## Reproduction (2026-09-30)

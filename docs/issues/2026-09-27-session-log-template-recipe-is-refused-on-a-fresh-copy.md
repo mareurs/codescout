@@ -21,6 +21,16 @@ tags:
 
 Not started, and a decision rather than a patch. Shipping the template declared closes the window, but ends its deliberate "directly editable until declared" property, which the reconnaissance skill also states.
 
+
+## Picked up 2026-10-01 (session `3e2b9cc8`) — not fixed; the decision is still the user's, and its cost changed
+
+The fix remains a decision (ship the template declared, or keep "directly editable until declared"), so nothing here was patched. Two facts bear on it:
+
+- **The undeclared-copy window now has a second test.** `b9cf290d16ed2b180f2c8135cc0782f14e173604` (patch-id `adc734b3971c7c8dcf5e2774a53348e375b1f87b`) gates every recipe written in `docs/trackers/*.md`. The template carries two `id_prefix="F"` calls (`docs/templates/session-log.md` lines 12 and 272) and no frontmatter, so by that check a fresh copy is refused ("does not declare an entry_prefix") until `entry_prefix` includes `F`, in addition to `template_check`. **Derived from the template text and the check, not run on a fresh copy.**
+- **That test needs no exemption list.** The five `TEMPLATE_EXEMPT` logs contain no `append_entry` text (a glob over the five names finds all five files and `grep` finds the string in none), so they never reach the new check, and it adds nothing to the shrink-only list. A sixth undeclared log containing a recipe would red it.
+
+Whichever way the decision goes, the repair for a fresh copy is the same one the refusal already names: declare `entry_prefix: [F, W]`.
+
 ## References
 
 - `docs/superpowers/specs/2026-09-27-taxonomy-append-recipes-test-design.md` — § *Out of scope*
