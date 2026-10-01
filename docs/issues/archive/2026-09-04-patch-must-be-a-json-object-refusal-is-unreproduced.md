@@ -117,7 +117,7 @@ same id, same intent, no intervening change to the artifact.
    it, and the fix would then be an object twin of `optional_array_param`.
    Found while chasing a sibling report (`codescout-lessons.md` § 6.5, non-ASCII escapes through
    the edit tools), filed as
-   `docs/issues/2026-09-24-edit-tools-collapse-unicode-escapes-in-tool-arguments.md`.
+   `docs/issues/archive/2026-09-24-edit-tools-collapse-unicode-escapes-in-tool-arguments.md`.
 ## Fix
 **WONTFIX — not a code defect; root cause found 2026-09-24** (open-bug sweep, `deep-agent-workflow-observations:DWF-7`). The refusal was accurate. In `usage.db`, 15 `doc`/`artifact` calls since this file was opened carry a `patch` whose `json_type` is `text` — a string, not an object. All 15 failed, and **14 of the 15 strings are not valid JSON**. One of the two calls this file reports (row 104000, 00:39:45 UTC) ends in `…"}]` with its closing `}` missing. Against that, 1893 object-typed patches went through in the same window. So the caller produced malformed JSON, the client passed it on as a string, and `update.rs:448-454` correctly refused it. "Transport mangling" in this file was close, but the origin is the caller, not the server.
 
