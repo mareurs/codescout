@@ -866,18 +866,84 @@ eq "3: no write on record keeps the legacy claim" "$(owner_of f.txt)" "$A"
 eq "3: and the legacy route" "$(route_of f.txt)" "named"
 rm -rf "$T"
 
-# 4. the time bound: a write BEFORE the path's last commit is history, not a pending claim.
+# 4. liveness: a write is live until its OWN writer commits the path after it. Rows carry
+# explicit times so no case depends on two events landing in different seconds.
+hrs() { date -u -d "$1" '+%Y-%m-%d %H:%M:%S.000'; }
+giso() { date -u -d "$1" '+%Y-%m-%dT%H:%M:%SZ'; }
+commit_as() { # commit_as <sid> <path> [committer date]: a commit whose Session-Id trailer names <sid>
+    git add -- "$2" && env ${3:+"GIT_COMMITTER_DATE=$3"} git commit -q -m "touch $2" -m "Session-Id: $1"
+}
 new_repo; mkdb "$DB"
 echo v1 > g.txt; git add g.txt; git commit -qm g
 echo v2 > g.txt
-wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success '2000-01-01 00:00:00.000'
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour ago')"
+commit_as "$B" g.txt
+echo v3 > g.txt
 add_as "$A" g.txt
-eq "4a: a peer's write older than the last commit is ignored" "$(owner_of g.txt)" "$A"
+eq "4a: a peer's write is not live once the PEER has committed the path since" "$(owner_of g.txt)" "$A"
 git reset -q -- g.txt
-wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}'
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour')"
 add_as "$A" g.txt
-eq "4b: the same path with a write AFTER the last commit is the peer's" "$(owner_of g.txt)" "$B"
+eq "4b: the same peer writing AFTER that commit is live again" "$(owner_of g.txt)" "$B"
 rm -rf "$T"
+
+# 4c. the case the old commit-time bound got wrong, from a measured tracker: B wrote, then a
+# DIFFERENT session committed the file from a blob that predates B's write, so B's lines are
+# still uncommitted. Someone else's commit must not clear B.
+new_repo; mkdb "$DB"
+echo v1 > g.txt; git add g.txt; git commit -qm g
+echo v2 > g.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour ago')"
+echo v1-and-more > g.txt
+commit_as "$C" g.txt
+echo v3 > g.txt
+add_as "$A" g.txt
+eq "4c: a third session's commit does not clear a peer's still-uncommitted write" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
+# 4d. the stager's own earlier write, since committed, is no claim on the file: staging the
+# path again because a PEER has since written it must name the peer.
+new_repo; mkdb "$DB"
+echo v1 > g.txt; git add g.txt; git commit -qm g
+echo v2 > g.txt
+wrote "$DB" "$A" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '2 hours ago')"
+commit_as "$A" g.txt
+echo v3 > g.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour')"
+add_as "$A" g.txt
+eq "4d: the stager's own write, already committed by the stager, is not live" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
+# 4e. the lookback: a write older than three days is out of reach, however uncommitted.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}' success "$(hrs '4 days ago')"
+add_as "$A" f.txt
+eq "4e: a write older than the lookback is not seen" "$(owner_of f.txt)" "$A"
+rm -rf "$T"
+
+# 4f. a session that commits the path more than once is judged by its NEWEST commit: B commits,
+# then writes, then commits again, so the write is cleared by the second commit, not kept live
+# by the first.
+new_repo; mkdb "$DB"
+echo v1 > g.txt; git add g.txt; git commit -qm g
+echo v2 > g.txt; commit_as "$B" g.txt "$(giso '3 hours ago')"
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '2 hours ago')"
+echo v3 > g.txt; commit_as "$B" g.txt "$(giso '1 hour ago')"
+echo v4 > g.txt
+add_as "$A" g.txt
+eq "4f: a write is cleared by its writer's newest commit, not held live by an older one" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+
+# 4g. one commit may name several sessions, and each is taken as having committed.
+new_repo; mkdb "$DB"
+echo v1 > g.txt; git add g.txt; git commit -qm g
+echo v2 > g.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour ago')"
+git add g.txt && git commit -q -m "joint" --trailer "Session-Id: $C" --trailer "Session-Id: $B"
+echo v3 > g.txt
+add_as "$A" g.txt
+eq "4g: a commit naming two sessions clears both" "$(owner_of g.txt)" "$A"
 
 # 5. doc writes carry the artifact id (first 16 hex of sha256 of the absolute path).
 new_repo; mkdb "$DB"
@@ -1000,6 +1066,42 @@ _took=$((SECONDS - _t0))
 wait
 eq "18: a locked database keeps the legacy claim" "$(owner_of f.txt)" "$A"
 [ "$_took" -le 1 ] && ok "18: and the add did not wait on the lock" || no "18: and the add did not wait on the lock" "took ${_took}s"
+rm -rf "$T" "$DB"
+
+# 19. a path quoted inside an edit's TEXT is not a write to that path. The record is read as JSON by
+# its top-level `path`, so a peer editing another file whose body mentions "path":"f.txt" (as a
+# bug file about this lookup does) is not named as f.txt's writer.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"other.txt","new_string":"{\"path\":\"f.txt\"}"}'
+add_as "$A" f.txt
+eq "19: a path quoted in another file's edit text is not a write to it" "$(owner_of f.txt)" "$A"
+rm -rf "$T" "$DB"
+
+# 20. one malformed row must not blind the lookup to the valid ones: SQLite raises on the first
+# malformed JSON it evaluates, which would fail the whole query and silently fall back to the
+# legacy claim for every path. The malformed row is NEWER than the valid one on purpose: rows are
+# read newest first, so the error arrives before any row has been printed. With the valid row
+# newer the CLI prints it first and the error costs nothing, which is how this case once passed
+# under the very mutation it exists to kill.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+wrote "$DB" "$C" edit_file 'this is not json'
+add_as "$A" f.txt
+eq "20: a malformed row beside a valid one does not hide the valid one" "$(owner_of f.txt)" "$B"
+rm -rf "$T" "$DB"
+
+# 21. a doc move writes its DESTINATION, whose own id appears in no call: the id a move carries
+# is the source's, so only `new_rel_path` names the file. A move to another path is not a write
+# to this one.
+new_repo; mkdb "$DB"
+mkdir -p archive; echo moved > archive/m.txt; echo other > archive/n.txt
+oid="$(printf '%s' "$(git rev-parse --show-toplevel)/m.txt" | sha256sum | cut -c1-16)"
+wrote "$DB" "$B" doc "{\"action\":\"move\",\"id\":\"$oid\",\"new_rel_path\":\"archive/m.txt\"}"
+add_as "$A" archive/m.txt archive/n.txt
+eq "21a: a doc move's destination is attributed to the mover" "$(owner_of archive/m.txt)" "$B"
+eq "21b: a path the move did not name is not" "$(owner_of archive/n.txt)" "$A"
 rm -rf "$T" "$DB"
 
 echo "== sequencer stand-down"

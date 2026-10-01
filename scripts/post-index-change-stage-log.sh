@@ -333,9 +333,10 @@ EOF
     return 1
 }
 
-# WHO ELSE WROTE THIS PATH? Prints the session, other than $me, that last wrote $1 through
-# a codescout tool since $1's last commit -- and prints nothing when $me wrote it through
-# one too, or when no such write is on record, or when the record cannot be read.
+# WHO ELSE WROTE THIS PATH? Prints the session, other than $me, whose most recent write to $1
+# through a codescout tool is still live -- a write is live until its own writer commits $1
+# after it -- and prints nothing when $me has a live write too, or when no such write is on
+# record, or when the record cannot be read.
 #
 # WHY THE RECORDER ASKS. `git add <path>` names a path, and the `named` route has always
 # made the stager its owner. A peer's untracked file is exactly as nameable as your own, so
@@ -353,6 +354,9 @@ EOF
 #   * edit_file / edit_code / create_file, by the `path` argument (relative or absolute);
 #   * doc update / append_entry / update_entry / move / delete, by the artifact id, which is
 #     the first 16 hex of sha256 of the absolute path (verified against a live artifact);
+#   * doc move, ALSO by its `new_rel_path` (only a move carries one), because the id it carries
+#     is the SOURCE's: an archive move writes a destination whose own id appears in no call
+#     (measured: 63 of 194 committed paths with no recorded writer were move destinations);
 #   * only calls that SUCCEEDED -- a refused edit wrote nothing.
 # WHAT IT CANNOT: a shell write (`run_command`, a native editor) leaves no path in the
 # record, and the grain is the FILE. Two sessions' entries in one tracker stay one path, so
@@ -363,30 +367,27 @@ EOF
 # spelling differs from its plain one. The answer is a refinement of `named`, so every
 # failure to refine returns exactly what the hook did before (cases 11 and 18).
 foreign_writer() {
-    local rel="$1" db root abs ct id sql out sid
+    local rel="$1" db root abs id sql out sid epoch ct sids s parts
     root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
     db="${CODESCOUT_USAGE_DB:-$root/.codescout/usage.db}"
     abs="$root/$rel"
-    ct="$(git log -1 --format=%ct -- "$rel" 2>/dev/null)"
-    case "${ct:-0}" in *[!0-9]*) ct=0 ;; esac
     id="$(printf '%s' "$abs" | sha256sum | cut -c1-16)"
-    # `instr`, not LIKE: `_` is a LIKE wildcard and is in half the paths here. The closing
-    # quote is part of the needle, so `docs/x.md` does not match `docs/x.md.bak`.
+    # A top-level key of the call's JSON, read AS JSON, not a substring of its text: an edit whose
+    # body merely quotes `"path":"docs/x.md"` (a bug file about this very lookup does) is not a
+    # write to docs/x.md. The CASE guards json_valid because SQLite raises on the first malformed
+    # row it evaluates, which would fail the query for every row.
+    jx() { printf "CASE WHEN json_valid(input_json) THEN json_extract(input_json, '\$.%s') END" "$1"; }
     local q_rel="${rel//\'/\'\'}" q_abs="${abs//\'/\'\'}"
-    sql="SELECT cc_session_id FROM tool_calls
+    sql="SELECT cc_session_id || '|' || CAST(strftime('%s', called_at) AS INTEGER) FROM tool_calls
          WHERE id > (SELECT max(id) - 50000 FROM tool_calls)
            AND outcome = 'success'
-           AND called_at >= datetime(${ct:-0}, 'unixepoch')
+           AND called_at >= datetime('now', '-3 days')
            AND cc_session_id IS NOT NULL AND cc_session_id != ''
            AND ((tool_name IN ('edit_file','edit_code','create_file')
-                 AND (instr(input_json, '\"path\":\"$q_rel\"') > 0
-                      OR instr(input_json, '\"path\":\"$q_abs\"') > 0))
-             OR (tool_name = 'doc' AND instr(input_json, '\"id\":\"$id\"') > 0
-                 AND (instr(input_json, '\"action\":\"update\"') > 0
-                      OR instr(input_json, '\"action\":\"append_entry\"') > 0
-                      OR instr(input_json, '\"action\":\"update_entry\"') > 0
-                      OR instr(input_json, '\"action\":\"move\"') > 0
-                      OR instr(input_json, '\"action\":\"delete\"') > 0)))
+                 AND $(jx path) IN ('$q_rel', '$q_abs'))
+             OR (tool_name = 'doc' AND $(jx id) = '$id'
+                 AND $(jx action) IN ('update','append_entry','update_entry','move','delete'))
+             OR $(jx new_rel_path) = '$q_rel')
          ORDER BY id DESC;"
     # No `[ -r db ]`, `command -v sqlite3`, `timeout` or `|| return` guards, on purpose: each
     # was removed in turn and the suite stayed green, because a missing database, a missing
@@ -394,9 +395,34 @@ foreign_writer() {
     # below then has no row to read. `.timeout 200` is tuning, not a guard: it lets a writer's
     # commit in progress finish instead of refusing at once, and no case can tell the two apart.
     out="$(sqlite3 -readonly -cmd '.timeout 200' "$db" "$sql" 2>/dev/null)"
+    [ -n "$out" ] || return 0
+    # When each session last COMMITTED this path, from the Session-Id trailer. A write is live
+    # until its own writer commits after it, and no one else's commit clears it: a commit takes
+    # whatever blob it was handed, which can predate a peer's later write (measured 2026-10-01:
+    # a tracker's HEAD lacked two entries a peer appended 25 minutes before another session's
+    # commit of the same file, so "since the path's last commit" excluded writes that were
+    # still uncommitted).
+    #
+    # Three days, not longer: a write nobody has committed under the writer's own id stays
+    # live until the window ends (its lines may have been taken by someone else's commit),
+    # and a long window would name a stale session against a stager who wrote the path some
+    # way the record cannot see.
+    local -A lastc=()
+    while IFS=$'\t' read -r ct sids; do
+        [ -n "$ct" ] || continue
+        IFS=, read -ra parts <<< "$sids"
+        for s in "${parts[@]}"; do
+            [ -n "$s" ] || continue
+            [ "${lastc[$s]:-0}" -ge "$ct" ] || lastc[$s]="$ct"
+        done
+    done < <(git log -n 300 \
+        --format='%ct%x09%(trailers:key=Session-Id,valueonly,separator=%x2C)' -- "$rel" 2>/dev/null)
     local other=""
-    while IFS= read -r sid; do
+    while IFS='|' read -r sid epoch; do
         [ -n "$sid" ] || continue
+        # A strict `>`: a write in the same second as its writer's commit is taken as committed,
+        # which errs toward not naming a peer.
+        [ "$epoch" -gt "${lastc[$sid]:-0}" ] 2>/dev/null || continue
         [ "$sid" = "$me" ] && return 0
         [ -n "$other" ] || other="$sid"
     done <<< "$out"
