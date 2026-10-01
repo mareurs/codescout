@@ -403,7 +403,9 @@ build/test/clippy. Those are genuine long work, not hand-rolled waiting — but 
 
 **Status:** shipped · **Opened:** 2026-08-17 · **Updated:** 2026-08-26
 
-**Valid:** dated 2026-08-26
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: the shipped design is in place. `a_written_section_gets_a_def_re_conformant_heading_at_the_ledgers_own_level` and `allocate_entry_id` exist in `src/librarian/catalog/augmentation.rs`; `undefined_in_body` is emitted by both `append_entry` and `update_entry`; `append_section` does not exist anywhere in `src/`, as the entry's rejected-alternative argument implies; `540c29c3` and `d3c1e6ed` resolve with matching subjects; F-63, W-52 and W-53 are in `bug-fix-session-log` and the three archived bug files exist. The `append_entry.rs:91` cite further down is positional as of the 2026-08-17 analysis and was not re-pointed.*
 
 > **Closed 2026-08-26 — the conditional fired.** Defect class 2, the last one open, is
 > closed, and in the exact shape this entry argued for: *"extend `append_entry` rather
@@ -661,7 +663,9 @@ authors look is not a convention).
 
 ## CAP-7 — Make record decay detectable — three doctor checks so corrections travel
 
-**Valid:** dated 2026-08-19
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: all three checks are in place — `archived_fix_sha_unresolvable` (`b34bf10e`), `terminal_status_with_caveat` (`067ced2c`) and `declared_root_missing` (`f632e7ef`) resolve with matching subjects, and `scan_archived_fix_sha_unresolvable`, `scan_terminal_status_with_caveat` and `scan_declared_project_roots` exist in `src/librarian/tools/doctor.rs`; `resolve_head_sha` and `probe_has_git_remote` are in `src/agent/mod.rs`. The `file:line` cites in the 2026-08-19 investigation notes below (`doctor.rs:1501`, `config/workspace.rs`, `tools/config/mod.rs`) describe that day's code and were not re-pointed.*
 
 **Status:** **COMPLETE — all three checks shipped 2026-08-19.**
 
