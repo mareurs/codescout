@@ -39,7 +39,7 @@ alternative (via `/codescout-companion:explore-project`) before updating verdict
 
 ### T-001 — Multi-symbol property scan across constraint directory
 
-**Valid:** dated 2026-05-03
+**Valid:** dated 2026-10-01
 **Session:** 64618681 (Kotlin backend, 2026-05-03)  
 **Pattern:** `isManual|isPinned|isStage|lessonType|LessonType|manual|stage.*lesson|MANUAL|PINNED`  
 **Path:** `ktor-server/.../solver/constraints` (directory)
@@ -50,7 +50,7 @@ Initial assessment flagged this as debatable (suggested semantic_search instead)
 **Verified 2026-05-03 via live exploration:** `semantic_search("constraint checks manual or
 pinned lesson")` returned test files, loaders, docs — missed the core constraint files.
 `grep` with scoped path gave 48 directly actionable hits. **grep was correct.**  
-**Verdict:** legitimate — no prompt gap.
+**Verdict:** legitimate — no prompt gap. *Re-checked 2026-10-01: the always-loaded quickref (`src/prompts/source.md:22-23`) still routes a concept to `semantic_search` and an exact string/regex to `grep`, which is the choice made here. The `semantic_search` miss and the 48 hits are a 2026-05-03 observation of another repository and were not re-run.*
 
 ### T-002 — Access-pattern refinement via boundary regex
 **Session:** 64618681 (Kotlin backend, 2026-05-03)  
@@ -110,7 +110,9 @@ directory to look in. "How does the solver handle room conflicts?" with no known
 
 ### T-005 — `npm run build 2>&1 | grep` × 7 in one session
 
-**Valid:** dated 2026-05-03
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: the prompt gap below is still open — `src/prompts/guides/iron-laws-detail.md` carries no build-output example (no `npm run build`, `cargo test` or `2>&1` anywhere in it), and the always-loaded Iron Law 3 has only the generic `grep "ERROR" @cmd_abc`. The 7-call count and the session are facts about that transcript and were not re-derived.*
 
 An observation of one session (`c5daabbe`, eduplanner-ui): the same piped-build pattern run
 7 times, at those specific call indices. The count and the session are fixed facts about
@@ -252,7 +254,7 @@ marker-read instruction with it.
 
 ### T-013 — `cargo test 2>&1 | tail -25`, then grepping that 25-line buffer as proof of a clean 3400-test suite
 
-**Valid:** dated 2026-07-28
+**Valid:** dated 2026-10-01
 
 **Tool:** `run_command` · **Verdict:** wrong-tool (IL3 violation) · **Observed:** 2026-07-28,
 self-inflicted by the assistant while gating a commit.
@@ -274,7 +276,7 @@ tell (the run has 18 binaries), and it was not noticed until a later check happe
 `docker logs | tail` — with a clear message. It did not block this one, because the pipe was
 constructed inside a `run_command` whose left-hand side was `cargo test` **and** the whole thing
 was launched with `run_in_background: true`, so the string reaching the gate differed. Worth
-checking whether backgrounded commands bypass the IL3 check.
+checking whether backgrounded commands bypass the IL3 check. **Checked 2026-10-01:** `run_command("cargo --version | head -1", run_in_background=true)` is refused with `IL3 violation`, so that form no longer bypasses the gate (one probe of one form, not a sweep; the commit that closed it was not identified).
 
 **Correct pattern**, which the same session used successfully afterwards:
 
@@ -295,7 +297,7 @@ list names the `cargo test 2>&1 | grep FAILED` shape specifically. What neither 
 *sufficient* green-gate assertion looks like. A reader who internalises "don't pipe" can still
 write `grep -c FAILED @buffer` and stop there. Suggested addition to the
 progressive-disclosure guide's run_command section: when asserting a suite is clean, assert
-completeness (binary count, terminal marker), not just absence of failures.
+completeness (binary count, terminal marker), not just absence of failures. **Still open 2026-10-01:** no guide under `src/prompts/guides/` carries that advice (a case-insensitive search for *completeness*, *Doc-tests*, *terminal marker* and *binaries reported* finds nothing).
 
 
 ### T-15 — A throwaway printing test beat reading the source, for an internal pure function
