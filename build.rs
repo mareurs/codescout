@@ -58,7 +58,13 @@ fn bake_git_sha() {
 }
 
 fn emit_prompt_surfaces() {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Read at RUN time, not with `env!`: that macro expands when the build script is COMPILED,
+    // and cargo reuses one compiled script across checkouts that share a target directory, so
+    // the baked path named whichever tree built first (e76df396,
+    // tests/build_rs_reads_its_own_tree.rs). Cargo sets this variable for every run.
+    let manifest = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo"),
+    );
     let source_path = manifest.join("src/prompts/source.md");
     let source = std::fs::read_to_string(&source_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", source_path.display()));
