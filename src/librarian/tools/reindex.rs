@@ -329,6 +329,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut total_unchanged = 0usize;
     let mut all_unknown_ids: Vec<String> = Vec::new();
     let mut backfill_errors: Vec<String> = Vec::new();
+    // Roots the walk deliberately did NOT enter, with the reason. Without this the response for
+    // such a root is `added: 0, updated: 0, removed: 0, unchanged: 0` and
+    // `unknown_sample_note: "complete"`, the same bytes as an empty root, and a file created
+    // there stays unfindable with nothing saying why (f4f0929b). Always emitted, empty when
+    // nothing was skipped, so "no skips" is distinguishable from a build that predates it.
+    let mut skipped_roots: Vec<Value> = Vec::new();
     // Reported in the response envelope. Without it, `unchanged: N` renders
     // identically whether N files legitimately needed no work or N files were
     // skipped by mistake — which is exactly how the `reembed` no-op stayed
@@ -373,6 +379,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         total_updated += report.updated;
         total_removed += report.removed;
         total_unchanged += report.unchanged;
+        if let Some(reason) = report.skipped {
+            skipped_roots.push(json!({
+                "root": abs_root.display().to_string(),
+                "reason": reason,
+            }));
+        }
         if let Some(n) = report.vectorless {
             total_vectorless = Some(total_vectorless.unwrap_or(0) + n);
         }
@@ -636,6 +648,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "removed": total_removed,
         "unchanged": total_unchanged,
         "embedded": total_embedded,
+        "skipped_roots": skipped_roots,
         "vectorless": total_vectorless,
         "vectorless_note": match total_vectorless {
             None => "not measured -- embeddings are disabled for this run".to_string(),
@@ -1991,6 +2004,72 @@ mod tests {
         let v = call(&ctx, json!({})).await.unwrap();
         assert_eq!(v["scope"].as_str().unwrap(), "all");
         assert_eq!(v["added"].as_u64().unwrap(), 1);
+    }
+    #[tokio::test]
+    async fn a_reindex_of_a_linked_worktree_names_the_root_it_skipped() {
+        // f4f0929b: the tool answered `added: 0, updated: 0, removed: 0, unchanged: 0` with
+        // `unknown_sample_note: "complete"` for a root it had deliberately not walked, which
+        // reads exactly like an empty root and made a file created in a worktree permanently
+        // unfindable with nothing saying why. The response must name the skipped root.
+        let tmp = TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+        std::fs::write(wt.join("a.md"), "# A\n").unwrap();
+        let ctx = mk_ctx(wt.clone(), "");
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            v["added"].as_u64().unwrap(),
+            0,
+            "the worktree is not walked"
+        );
+        let skipped = v["skipped_roots"]
+            .as_array()
+            .expect("the response must carry skipped_roots, even when it is the only evidence");
+        assert_eq!(
+            skipped.len(),
+            1,
+            "exactly the one root was skipped: {skipped:?}"
+        );
+        assert_eq!(
+            skipped[0]["root"].as_str().unwrap(),
+            wt.display().to_string()
+        );
+        assert!(
+            skipped[0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("linked git worktree"),
+            "the entry must say why: {:?}",
+            skipped[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reindex_that_walks_every_root_reports_no_skipped_roots() {
+        // Control for the test above, and the guard for the opposite change: an always-populated
+        // field would satisfy it. Present and EMPTY, so a caller can tell "nothing skipped" from
+        // a build that predates the field.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("a.md"), "# A\n").unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf(), "");
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            v["added"].as_u64().unwrap(),
+            1,
+            "the root really was walked"
+        );
+        assert_eq!(v["skipped_roots"], json!([]));
     }
 
     #[tokio::test]

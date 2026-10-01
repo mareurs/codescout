@@ -12,6 +12,11 @@ use crate::librarian::frontmatter;
 
 #[derive(Debug, Default)]
 pub struct IndexReport {
+    /// Why this root was NOT walked, or `None` when it was. An all-zero report is otherwise
+    /// the same bytes whether a root held nothing or was deliberately skipped, and the
+    /// skip used to reach only `tracing::warn!`, which no caller reads
+    /// (`docs/issues/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`).
+    pub skipped: Option<String>,
     pub added: usize,
     pub updated: usize,
     pub unchanged: usize,
@@ -289,10 +294,20 @@ pub fn index_repo_sync(
     // when the worktree is itself the walk root, so without this guard every
     // worktree file is indexed as a separate artifact (32b58e13).
     if crate::librarian::current_project::is_linked_worktree(abs_root) {
-        tracing::warn!(
-            "skipping index of linked git worktree {} — index its main worktree instead",
-            abs_root.display()
-        );
+        // Where the files ARE indexed, when the `.git` pointer says: the one concrete next
+        // step a caller can take. A pointer that does not resolve still reports the skip.
+        let reason = match crate::librarian::current_project::worktree_main_root(abs_root) {
+            Some(main) => format!(
+                "linked git worktree: its files are indexed through the main checkout ({}), \
+                 never as separate artifacts",
+                main.display()
+            ),
+            None => "linked git worktree: its files are indexed through the main checkout, \
+                     never as separate artifacts"
+                .to_string(),
+        };
+        tracing::warn!("skipping index of {} — {reason}", abs_root.display());
+        report.skipped = Some(reason);
         return Ok((report, Vec::new()));
     }
 
@@ -2403,6 +2418,47 @@ kind = "memory"
             .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0, "no artifact rows created for the worktree");
+    }
+    #[test]
+    fn index_repo_sync_says_why_it_skipped_a_linked_worktree() {
+        // The skip above is deliberate, but it used to be silent: the report was all zeros, the
+        // same bytes as an empty root, and the reason reached only `tracing::warn!`
+        // (f4f0929b). The report itself must now carry it, naming where the files ARE indexed.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let main = tmp.path().join("main");
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", main.display()),
+        )
+        .unwrap();
+        std::fs::write(wt.join("docs/a.md"), "# a\n").unwrap();
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules: Vec<CompiledRule> = Vec::new();
+        let ignore = globset::GlobSet::empty();
+        let (report, _) = index_repo_sync(&cat, &rules, &wt, &ignore, false, false, false).unwrap();
+        let why = report.skipped.expect("a skipped root must say so");
+        assert!(
+            why.contains("linked git worktree"),
+            "the reason should name what was detected: {why}"
+        );
+        assert!(
+            why.contains(&main.display().to_string()),
+            "the reason should name where the files are indexed instead: {why}"
+        );
+
+        // Control, and the guard against the opposite change: an ordinary root that was walked
+        // reports no skip, or a reason attached to every report would satisfy the above.
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("a.md"), "# a\n").unwrap();
+        let (walked, _) =
+            index_repo_sync(&cat, &rules, &plain, &ignore, false, false, false).unwrap();
+        assert_eq!(walked.skipped, None);
+        assert_eq!(walked.added, 1, "the control root really was walked");
     }
 
     #[test]
