@@ -1,3 +1,8 @@
+---
+entry_prefix:
+  - F
+  - W
+---
 # Session Log — Template
 
 > **Purpose:** Two-sided observation log for a multi-session work stream.
@@ -61,13 +66,14 @@
 > section does not. The warning is about a row you type yourself ahead of
 > the append — that one still consumes the id it names.
 >
-> **`edit_markdown` is not the append path**, though it works at first.
-> This template ships without frontmatter, so a fresh copy is directly
-> editable — but once you declare `entry_prefix` to make the ledger
-> guarded (which `get_guide("tracker-conventions")` tells you to do), the
-> librarian guard refuses direct edits and only `append_entry` writes.
-> Reach for `edit_markdown` for the prose sections and the index tables,
-> never for allocating an entry.
+> **A copy of this file is a ledger from its first moment.** The frontmatter
+> above declares `entry_prefix: [F, W]`, which is why the recipe at the top
+> is accepted on a fresh copy with nothing to declare first — and, because
+> a declared file is a ledger, the librarian guard refuses direct edits to
+> it from the start (`edit_file` says so by name). Retitle it and edit its
+> prose and index tables with `doc(action="update", id=<the copy's artifact
+> id>, patch={body_edits: [...]})` once the copy is catalogued; add entries
+> only with `append_entry`, never by hand.
 >
 > **Lifecycle:**
 > - Created at the start of a multi-session work stream.

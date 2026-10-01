@@ -3242,6 +3242,31 @@ mod taxonomy_recipes {
 
     const SIDECAR_R_CALL: &str = r###"doc(action="append_entry", id="x", id_prefix="R", anchor_heading="## T", title=…, body=…)"###;
 
+    /// A fresh copy of the shipped session-log template, dropped in `docs/trackers/` untouched,
+    /// must pass BOTH recipe gates the moment it exists. Until it did, the window between copying
+    /// it and declaring `entry_prefix` redded every session's run in a shared tree, correctly: the
+    /// recipe it teaches would really have been refused (bug 4d25c5b2).
+    #[test]
+    fn a_fresh_copy_of_the_session_log_template_passes_the_recipe_gates() {
+        let real = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let template = std::fs::read_to_string(real.join("docs/templates/session-log.md"))
+            .expect("docs/templates/session-log.md");
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(root, "docs/trackers/fresh-session-log.md", &template);
+
+        let scan = scan_ledger_recipes(root);
+        assert!(
+            scan.prose > 0,
+            "the template teaches a prose recipe; a scan that sees none proves nothing: {scan:?}"
+        );
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        // The F-N row's own shape: every `<topic>-session-log.md` must declare F and W.
+        let f_row = recipe("docs/trackers/<topic>-session-log.md", "F", Shape::Template);
+        let failures = check_template(root, &f_row, &[]);
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
     #[test]
     fn only_yaml_files_in_the_sidecar_dir_are_sidecars() {
         // Load-bearing: `notes.txt` would NOT read as a sidecar (it is not valid YAML), so a scan

@@ -4662,11 +4662,10 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let md = dir.path().join("session-log.md");
-        std::fs::write(
-            &md,
-            format!("---\nkind: tracker\nentry_prefix:\n  - F\n  - W\n---\n\n{template_body}"),
-        )
-        .unwrap();
+        // The template exactly as shipped, with nothing prepended: its own frontmatter must declare
+        // F and W, or the first allocation below is refused on a fresh copy (bug 4d25c5b2). A
+        // fixture that supplied the declaration itself would pass whatever the template said.
+        std::fs::write(&md, &template_body).unwrap();
 
         let mut cat = Catalog::open_in_memory().unwrap();
         let mut art = sample_art("art1");
