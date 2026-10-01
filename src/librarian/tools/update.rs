@@ -1264,6 +1264,79 @@ mod tests {
         v["id"].as_str().unwrap().to_string()
     }
 
+    /// docs/issues/archive/2026-09-04-doc-update-stamps-the-content-hash-without-rebuilding-chunks.md
+    ///
+    /// The `doc(update)` STAMP entrance into the trap state `file_sha256 == disk &&
+    /// embedded_sha256 != disk` — the entrance that parent bug's caveat said had NO guard.
+    /// The sibling `index_repo_sync_embeds_content_stamped_by_a_run_that_did_not_embed_it`
+    /// enters via a non-embedding RUN; this enters via the production `update` path, which
+    /// writes `file_sha256` itself. Both produce the same state and the same escape releases
+    /// both, but that was an argument and only one entrance was observed: an `update.rs`
+    /// that ALSO stamped `embedded_sha256` would have restored the bug with the suite green,
+    /// because content stamped as embedded is never queued again by any automatic caller.
+    ///
+    /// The precondition is asserted, not assumed: without it a refactor that stopped
+    /// stamping `file_sha256` at all would pass this by never reaching the trap state. The
+    /// assertion is about the SEQUENCE (update, then an ordinary run), not either step's
+    /// outcome, so both force levers are false, exactly as `index_repo` calls it.
+    #[tokio::test]
+    async fn a_doc_update_leaves_its_new_content_embeddable_by_an_ordinary_run() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_doc(&ctx).await;
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body": "REWRITTEN-BY-THE-UPDATE"}}),
+        )
+        .await
+        .unwrap();
+
+        // Precondition: the row is stamped with what is on disk (the update did its job) and
+        // that content has never been embedded — the trap state, reached by the STAMP.
+        let on_disk = crate::librarian::util::sha_of_bytes(
+            &std::fs::read(tmp.path().join("doc.md")).unwrap(),
+        );
+        {
+            let cat = ctx.catalog.lock();
+            let row = artifact::get(&cat, &id).unwrap().unwrap();
+            assert_eq!(
+                row.file_sha256, on_disk,
+                "precondition: `update` stamps `file_sha256` with the new disk content"
+            );
+            assert_ne!(
+                artifact::embedded_sha256(&cat, &id).unwrap().as_deref(),
+                Some(on_disk.as_str()),
+                "precondition: `update` must not claim content it never embedded"
+            );
+        }
+
+        let rules = crate::librarian::classify::load_rules(
+            "[[rule]]\nglob = \"**/*.md\"\nkind = \"spec\"\n",
+        )
+        .unwrap();
+        let ignore = globset::GlobSet::empty();
+        let (_report, queue) = {
+            let cat = ctx.catalog.lock();
+            crate::librarian::indexer::index_repo_sync(
+                &cat,
+                &rules,
+                tmp.path(),
+                &ignore,
+                true,
+                false,
+                false,
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            queue.len(),
+            1,
+            "content stamped by `doc(update)` must be queued by an ordinary embedding run: \
+             `file_sha256` means 'written to the catalog', never 'embedded'"
+        );
+    }
+
     /// `doc(update, id, status=...)` is the exact call `lift_top_level_param!` was
     /// written to repair — twice, after the same defect shipped twice. Until `patch`
     /// gained `#[serde(default)]` the repair was unreachable by the call shape that needs
