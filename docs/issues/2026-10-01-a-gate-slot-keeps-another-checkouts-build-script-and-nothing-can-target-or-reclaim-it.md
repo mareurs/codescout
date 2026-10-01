@@ -67,12 +67,12 @@ The fix `c8c2b18b` is correct for any checkout that has it and does not protect 
 - The dep-info line above, and `build.rs` line 64 at HEAD being a comment (`git log -- build.rs` shows `c8c2b18b` as its latest change, working tree clean for that file).
 - `with-slot.sh` usage text: `usage: scripts/with-slot.sh <command> [args...]`, with no slot selector.
 - `slot-pool.sh`: `SLOT_CEILING_MB_DEFAULT=49152`; `slot_tend ... CODESCOUT_GATE_POOL_KEEP 3`.
-- Cost, measured: 17.6 GiB of an unrelated slot removed (its next lessee builds cold), one failed gate run of about two minutes, one rerun owed.
+- Cost, measured: 17.6 GiB of an unrelated slot removed (its next lessee builds cold), one failed gate run of about two minutes, one rerun owed. **Cleaning the right slot afterwards** (`slot-0`, once it was free) removed another 16.9 GiB: `cargo clean -p codescout` clears the whole root package, so even a correctly targeted repair costs a cold rebuild of roughly 17 GiB, against the few MB of the one poisoned directory. That asymmetry is the case for option 1 above.
 
 ## Hypotheses tried
 
 - **A stale `build.rs` in my tree:** refuted. The file is unchanged and committed, and its line 64 cannot be the panic site.
-- **A peer's red in my code:** that is the shape it presents as, and the panic path is the evidence against it. It names a tree that is not this one.
+- **A peer's red in my code:** that is the shape it presents as, and the panic path is the evidence against it. It names a tree that is not this one. **Confirmed afterwards:** the same working tree, unchanged, gated `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` once the slot holding the fault was cleaned, so the cause was the slot and not the diff.
 
 ## Fix
 
