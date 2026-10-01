@@ -1104,6 +1104,68 @@ eq "21a: a doc move's destination is attributed to the mover" "$(owner_of archiv
 eq "21b: a path the move did not name is not" "$(owner_of archive/n.txt)" "$A"
 rm -rf "$T" "$DB"
 
+# 22. usage.db files a SUBAGENT's calls under `<parent session id>/<agent id>` (a third of the rows of
+# a three-day window, measured 2026-10-01), while the stager's CLAUDE_CODE_SESSION_ID and every
+# commit's Session-Id trailer name the PARENT alone. Read whole, the composite never equals the
+# stager, so a session's own subagent's file was named as a PEER's (and its owner column held a
+# string nobody can be asked), and never matched a trailer, so its writer's own commit could not
+# clear it. The agent suffix is stripped on read; the parent is the only party that can answer or commit.
+# Red on unchanged code: 22a's owner, 22b (both assertions), 22c, 22d. 22a's ROUTE assertion passes on
+# unchanged code and rests on mutation.
+AG="a0b1c2d3e4f5a6b7c"
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B/$AG" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "22a: a peer's SUBAGENT write names the peer's session, not the agent" "$(owner_of f.txt)" "$B"
+eq "22a: on the by-write route" "$(route_of f.txt)" "named-foreign"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$A/$AG" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "22b: the stager's OWN subagent wrote it: the stager's, not a peer's" "$(owner_of f.txt)" "$A"
+eq "22b: on the legacy route" "$(route_of f.txt)" "named"
+rm -rf "$T"
+
+# 22c. the parent's commit clears its subagent's write, as it clears its own: the trailer names
+# the parent. Mirrors 4a with the writer filed the way the real table files it.
+new_repo; mkdb "$DB"
+echo v1 > g.txt; git add g.txt; git commit -qm g
+echo v2 > g.txt
+wrote "$DB" "$B/$AG" edit_file '{"action":"edit","path":"g.txt"}' success "$(hrs '1 hour ago')"
+commit_as "$B" g.txt
+echo v3 > g.txt
+add_as "$A" g.txt
+eq "22c: the parent's commit clears its subagent's earlier write" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+
+# 22d. a peer's parent and subagent both wrote it: one writer, named once and by its parent.
+new_repo; mkdb "$DB"
+echo f > f.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+wrote "$DB" "$B/$AG" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "22d: a peer and its subagent are one writer, named by the peer's session" "$(owner_of f.txt)" "$B"
+rm -rf "$T" "$DB"
+
+# 23. `doc(create)` writes a NEW file and addresses it by `rel_path`: the artifact has no id until the
+# call returns, so the id clause cannot see it, and the bug files and trackers sessions file are
+# mostly created this way. A `doc` READ may carry the same key (`find` takes `rel_path` as a
+# shorthand), so only the `create` action counts. Red on unchanged code: 23a. 23b and 23c pass on
+# unchanged code, so their evidence is the mutations that make them fail.
+new_repo; mkdb "$DB"
+echo c > c.txt; echo d > d.txt; echo e > e.txt
+wrote "$DB" "$B" doc '{"action":"create","kind":"bug","rel_path":"c.txt","title":"t"}'
+wrote "$DB" "$B" doc '{"action":"create","kind":"bug","rel_path":"elsewhere.txt","title":"t"}'
+wrote "$DB" "$B" doc '{"action":"find","rel_path":"e.txt"}'
+add_as "$A" c.txt d.txt e.txt
+eq "23a: a doc create of this path is a write to it" "$(owner_of c.txt)" "$B"
+eq "23b: a create of ANOTHER path is not" "$(owner_of d.txt)" "$A"
+eq "23c: a doc READ carrying rel_path is not" "$(owner_of e.txt)" "$A"
+rm -rf "$T" "$DB"
+
 echo "== sequencer stand-down"
 
 # Ownership lookup that survives a linked worktree, where `.git` is a file, not a dir.

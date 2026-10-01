@@ -357,11 +357,19 @@ EOF
 #   * doc move, ALSO by its `new_rel_path` (only a move carries one), because the id it carries
 #     is the SOURCE's: an archive move writes a destination whose own id appears in no call
 #     (measured: 63 of 194 committed paths with no recorded writer were move destinations);
+#   * doc create, by its `rel_path`: the file has no id until the call returns. Only the
+#     `create` action, since a `find` carries the same key as a shorthand. The tool name is not
+#     tested: `doc` is the only live tool whose calls carry both keys, so a `tool_name = 'doc'`
+#     conjunct could not be false on any input (a mutation of it survived, and it was deleted);
 #   * only calls that SUCCEEDED -- a refused edit wrote nothing.
+# A SUBAGENT's rows are filed under `<parent session id>/<agent id>` and read as the PARENT
+# (the stager's id and every commit trailer name the parent alone; the suffix is stripped).
 # WHAT IT CANNOT: a shell write (`run_command`, a native editor) leaves no path in the
 # record, and the grain is the FILE. Two sessions' entries in one tracker stay one path, so
 # when the stager wrote through a tool as well this prints nothing and the legacy `named`
 # claim stands. That is the entry-grain case the bug file records as unreachable here.
+# Transcript provenance would reach the shell and native writers; it was measured and not
+# built into the guard (the bug file's § *Measured 2026-10-01 (second pass)* has the numbers).
 #
 # FAILS OPEN, to the old claim: no sqlite3, no database, a locked one, a path whose JSON
 # spelling differs from its plain one. The answer is a refinement of `named`, so every
@@ -387,6 +395,7 @@ foreign_writer() {
                  AND $(jx path) IN ('$q_rel', '$q_abs'))
              OR (tool_name = 'doc' AND $(jx id) = '$id'
                  AND $(jx action) IN ('update','append_entry','update_entry','move','delete'))
+             OR ($(jx action) = 'create' AND $(jx rel_path) = '$q_rel')
              OR $(jx new_rel_path) = '$q_rel')
          ORDER BY id DESC;"
     # No `[ -r db ]`, `command -v sqlite3`, `timeout` or `|| return` guards, on purpose: each
@@ -420,6 +429,11 @@ foreign_writer() {
     local other=""
     while IFS='|' read -r sid epoch; do
         [ -n "$sid" ] || continue
+        # A subagent's calls are filed as `<parent session id>/<agent id>`, while the stager's id
+        # and every commit trailer name the PARENT alone. Read whole, a session's own subagent was
+        # a peer, and nothing its parent committed could clear it. The parent is the writer: it is
+        # the party the registry resolves and a person can be asked.
+        sid="${sid%%/*}"
         # A strict `>`: a write in the same second as its writer's commit is taken as committed,
         # which errs toward not naming a peer.
         [ "$epoch" -gt "${lastc[$sid]:-0}" ] 2>/dev/null || continue
