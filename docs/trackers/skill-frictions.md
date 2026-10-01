@@ -265,7 +265,7 @@ not just a recon-saves-the-day story is the substantive complaint.
 
 ### SKF-22 — the trigger condition was observed, said out loud, and the skill still went uninvoked
 
-**Valid:** dated 2026-09-01
+**Valid:** dated 2026-10-01
 
 **When:** 2026-09-01, a full session of cross-session coordination on a shared checkout
 (codescout-17). `ListAgents` was called three times and reported 2–3 peers. A peer's
@@ -307,10 +307,9 @@ moment it matters is the `ListAgents` response itself. Have the companion's post
 annotate that response with the socket-scoped profile count whenever it exceeds the returned row
 count — e.g. `[cs-hint] ListAgents is per-profile: 2 shown, 16 live across 3 profiles; run
 /codescout-companion:reaching-peer-sessions`. That converts a trigger the model must remember
-into a fact the response carries. Tracked as a candidate `H-N` in
-`docs/trackers/codescout-usage-hookify.md`.
+into a fact the response carries. **Not built, and not filed as an `H-N` either (re-checked 2026-10-01):** no file under the companion's `hooks/` mentions `ListAgents`, and `docs/trackers/codescout-usage-hookify.md` holds no candidate for it — its two `SKF-22` citations belong to a different entry. What shipped instead is a standing instruction: `CLAUDE.md` § *Reaching a Peer Session*, which names this entry as its reason.
 
-**Secondary fix idea (cheap, partial):** the skill's own § *Two readings to get right* already
+**Secondary fix idea (cheap, partial) — still open 2026-10-01: the skill's `description` carries the trigger *"or when ListAgents returns fewer peers than expected"* but not the per-profile caveat itself.** The skill's own § *Two readings to get right* already
 says *"report the scope you actually searched … say which profile it covered rather than
 presenting it as the population."* That is the right rule and it is inside the skill — i.e.
 reachable only after invoking it. Consider hoisting one line of it into the `description`, so the

@@ -254,13 +254,15 @@ is cheap to unwind if a second stream disagrees.
 **Promoted-to:** `~/.claude-sdd/CLAUDE.md` § *Subagent Dispatch — Model Floor + Review Escalation*
 **Promoted-to:** `~/.claude-kat/CLAUDE.md` § *Subagent Dispatch — Model Floor + Review Escalation*
 
-**Verification:** all three profiles byte-identical at md5 `ca9421bb556db7b76d61b10c376daefa`
+**Verification at promotion, 2026-08-20 (superseded — see the re-check below):** all three profiles byte-identical at md5 `ca9421bb556db7b76d61b10c376daefa`
 (176 lines), and `grep -c 'statement-validity-session-log:W-3'` returns 1 in each — the
 promoted text back-cites this entry, so verification survives any rewording.
 
-**Status:** promoted-to-permanent-docs
+**Re-checked 2026-10-01 — the promotion is not in place.** The three profiles are still byte-identical to one another (md5 `dd6284c8f5c649c9d187dd2e737d452f`, 80 lines) and each still has a *Subagent Dispatch* section, but `grep -c 'statement-validity-session-log:W-3'` returns **0** in each and no *Mutation-apply discipline* paragraph exists in any of them. The back-cite meant to make verification survive rewording did not survive the paragraph's removal. Whether to re-promote is the operator's call; these are their private global files, so nothing was edited there.
 
-**Valid:** dated 2026-08-20
+**Status:** validated
+
+**Valid:** dated 2026-10-01
 
 **Rests on:** `~/.claude/CLAUDE.md` § *Subagent Dispatch* — "Mutation-apply discipline —
 reasoning about a mutation lens is not the same as applying one."
@@ -340,7 +342,7 @@ up, and the branch's own subject matter is exactly this failure:
 1. **`art_upsert`.** Task 7's implementer reported "`sample_art`/`art_upsert` don't exist" —
    true of `src/librarian/tools/doctor.rs`'s test module, where they had just been burned by a
    brief that hallucinated them. Restated in the fix round 1 brief as an absolute, it was false:
-   `art_upsert` is imported at `src/librarian/tools/doctor.rs:3197`. See `W-4`.
+   `art_upsert` is imported in `doctor.rs`'s test module (`:3197` when written, `:7902` on 2026-10-01 — the line is positional, the import is the claim). See `W-4`.
 2. **The impossible date, across the parser/check boundary.** Task 2's review deferred
    `dated 2026-99-99` as "accepted — shape-only, spec-compliant", correct **about the
    parser**. Task 6 then wrote a silent `continue` when the conversion fails, correct
@@ -353,10 +355,10 @@ up, and the branch's own subject matter is exactly this failure:
 3. **The `2026-02-30` skip test.** `dated_stale_skips_a_shape_valid_but_calendar_invalid_date`
    keeps passing after round 3 — `scan_dated_stale` still returns empty — but its comment
    ("these all pass the regex and reach `iso_to_epoch_days`") went false, because the value
-   is now rejected earlier. A green test whose stated reason has rotted.
+   is now rejected earlier. A green test whose stated reason has rotted. **Repaired since (checked 2026-10-01):** the test's comment now says these dates never reach `iso_to_epoch_days`, and cross-names `validity_unparseable_reports_the_calendar_invalid_dates_dated_stale_skips` for the positive half.
 4. **The guide's own repaired sentence.** `tracker-conventions.md` now says an undeclared
    entry "already means `dated <its last commit>` by default" — true of the spec, while that
-   clock is **unimplemented** (`resolve_validity` has zero production callers). The next
+   clock is **unimplemented** (`resolve_validity` has zero production callers; re-checked 2026-10-01, still true — defined at `src/librarian/statements.rs:294` and called only from that file's tests). The next
    sentence corrects it ("what actually decides… **today** is exposure"), so a careful reader
    lands right, but the pattern recurred inside the fix for the pattern.
 
@@ -373,7 +375,7 @@ downstream catch is `W-4`'s required report field.
 
 **Status:** open
 
-**Valid:** dated 2026-08-20
+**Valid:** dated 2026-10-01
 
 **Rests on:** the spec's own thesis — a claim that was true when written and false when read is
 the decay this feature exists to surface;

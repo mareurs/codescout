@@ -222,9 +222,9 @@ construction.
 `cfac211d37020aa4815ce7e0277c15704559ea13`.
 ### BL-48 — `edit_markdown`'s frontmatter write never touches the catalog
 
-**Status:** done — fixed 2026-08-30 (`518549d6`, patch-id `c424f89f…`); bug file archived. Residual, already tracked in that file's `unverified:` and not work owed here: the server-side install at `src/server.rs:374` is covered by no test.
+**Status:** done — fixed 2026-08-30 (`518549d6`, patch-id `c424f89f…`); bug file archived. Residual, already tracked in that file's `unverified:` and not work owed here: the server-side install at `src/server.rs:443` (`CodeScoutServer::from_parts_with_env`; it was `:374` when filed) is covered by no test.
 
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-10-01
 
 `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`. Filed by a peer
 session after two independent hits on one afternoon, one of them mine: a bug archived with
@@ -267,7 +267,7 @@ are covered:
 
 | link | covered? |
 |---|---|
-| `server.rs:374` installs the syncer | **no** |
+| `server.rs:443` installs the syncer | **no** |
 | `edit_markdown` calls the sync when frontmatter changed | yes — two mutations |
 | `sync_after_frontmatter_write` reaches the installed hook | yes — integration test, real global path |
 | the syncer moves the catalog row | yes — real `Catalog`, mutation-checked |
