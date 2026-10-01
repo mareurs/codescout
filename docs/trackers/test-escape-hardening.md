@@ -144,7 +144,9 @@ as deferred: mutation testing (I-3) dominates it on coverage-per-value.
 
 ### I-7 — Deprecated-tool-name gate over the `get_guide` bodies (gate-scope)
 
-**Valid:** dated 2026-08-16
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: the gate is `guide_bodies_contain_no_deprecated_tool_names` (`src/prompts/mod.rs:3018`); it iterates `GUIDE_TOPICS`, there are still ten guide topics, and its failure text reads `get_guide body '<topic>' references deprecated tool name: <name>` as quoted below. The two `file:line` cites in this entry have moved — `prompt_surfaces_reference_only_real_tools` is at `src/server.rs:5468` and the denylist-over-allowlist comment at `src/prompts/mod.rs:2061-2062` — and are left as written because they describe the day it shipped. The 179-token census is a 2026-08-16 measurement and was not re-run.*
 
 The entry's load-bearing sentence is a census of a moment: *the ten `get_guide` bodies were
 the only prose surface with no drift gate*, with `prompt_surfaces_reference_only_real_tools`
@@ -283,7 +285,9 @@ differ — merging them yields a bigger number and a vaguer instruction.
 family run finds a blind sibling when the diff-scoped run is already green.
 That needs a deliberate sweep neither of us has run.
 
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: every artifact named here resolves. The fix `61476cb5` (patch-id `f459ee93c80aba7eab5c3f922d1a6982b0b02f24`; the entry recorded the SHA only) and the archived bug file exist; both `..._chunk_fits_the_threshold_it_is_measured_against` tests are in `src/tools/read_file.rs`; `eval_matches_compile_on_fixture` is in `src/librarian/filter.rs`; `a_uniform_fixture_cannot_tell_the_arms_apart` and the `front.len() * 2 >= whole.len()` premise assertion are in `src/util/shrink_guard.rs`; the `widest > crate::tools::INLINE_BYTE_BUDGET` premise assertion is in `read_file_buffer_single_oversized_line_still_fits_the_threshold`; and `W-73` is in `bug-fix-session-log`. The 2 passed / 1 failed family run is a 2026-08-29 measurement and was not re-run.*
 
 ### I-9 — Standing detector for stale-after-move citations (archive-citation-forward)
 
