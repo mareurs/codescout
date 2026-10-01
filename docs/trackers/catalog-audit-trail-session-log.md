@@ -165,9 +165,10 @@ Add a new category by writing it as a kebab-case string; no central registry nee
 ## F-N entry template
 
 Pass this block as `append_entry`'s `body` (without the `## F-N — <title>`
-line — the server writes the heading from `title`). Add the matching Index
-row afterwards, using the id the call returned. Do not allocate the id
-yourself; see *How to use* above.
+line — the server writes the heading from `title`). Put the matching Index
+row in the same call, as `index_row` (see *How to use* above); writing it
+afterwards is the second write that call exists to remove. Do not allocate the id
+yourself.
 
 ```markdown
 ## F-N — <one-line title>
