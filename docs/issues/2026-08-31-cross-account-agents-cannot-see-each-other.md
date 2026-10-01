@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: investigating
+status: mitigated
 tags:
 - cluster/blast-radius-exceeds-visibility
 - multi-account
@@ -8,6 +8,7 @@ tags:
 - peer-discovery
 - concurrency
 - shared-checkout
+closed: 2026-09-25
 opened: 2026-08-31
 owner: marius
 related: []
@@ -129,3 +130,18 @@ gets *more* important once the peer set widens beyond one profile.
 Whether the three profiles should exist at all. They are deliberate (separate accounts,
 separate rate limits, separate plugin sets) and this issue takes that as given. The defect
 is that agents inside them are blind to each other while sharing a filesystem.
+
+## Closed 2026-09-25 — mitigated via skill, not via code
+
+Host-scoped discovery (need 1), cross-account messaging (need 2), and checkout-scoped
+presence (need 3) are now served procedurally by `/codescout-companion:reaching-peer-sessions`
+plus the "Reaching a Peer Session" and "Observer Blindness" sections in `CLAUDE.md` — the
+socket-scoped enumeration table, the profile-routed `SendMessage` addressing forms, and the
+LAUNCH-CWD occupancy question in the skill's Step 4.
+
+**This is a mitigation, not a fix at the tool level** — `ListAgents` itself is unchanged and
+still scopes discovery to the caller's `CLAUDE_CONFIG_DIR` (confirmed in the 2026-09-24
+re-measurement above); the skill is a mechanism for whoever runs it, not a change to the
+tool's default behavior. Needs 4 (advisory claim on a checkout under measurement) and 5
+(stale-socket reaping) remain unaddressed — no mechanism today marks a checkout as
+mid-campaign, and liveness still relies on a caller doing the `kill -0` walk by hand.

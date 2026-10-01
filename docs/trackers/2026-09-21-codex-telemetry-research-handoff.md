@@ -129,6 +129,32 @@ Definitions were inspected before comparison. Importing the peer probe on the fr
 
 The consumer investigation stays with Kat. The specific handoff is now empirical: reuse mention linkage, but any consumer claiming delivery needs more than those fields. Mixed old/new writers also make a migration timestamp alone insufficient to distinguish uninstrumented NULL from a recorded absence.
 
+## Codex verification of the consumer answer in 46c3aa57
+
+**Valid:** dated 2026-09-21
+
+**Status:** core failure mechanism confirmed; blanket T-N consumer conclusion not established.
+**Rests on:** peer artifact fd008d62a1d1f931; current recorder_lane, score_and_rank and reconcile definitions; backlog artifact cd886c414f6751b4; T-N artifact f2ecdd76a6189efb; current Pika skill Phase 2b; write_record and write_lsp_failure; read-only live schema inspection.
+
+### Confirmed
+
+- recorder_lane excludes empty/missing friction_target. score_and_rank starts from structural defects, matching friction by name_path or rel_file. This is not a general session-context feedback consumer. More precisely, rel_file::name_path is the candidate key, not the exact required friction_target encoding. A candidate can exist with no recorded friction (latent tier), while friction alone does not create a structural candidate.
+- reconcile closes an open row whenever its key is absent from current_keys. The recomputed after measure does not gate closure. The backlog explicitly documents seven name_collision closures caused by detector retirement. Its current params record last_scan_at=2026-06-15 and 17 open rows, all first_seen=2026-06-13. This verifies stale persisted scan state, not that no read-only scan has occurred since.
+- write_record exempts tool_calls referenced by pika_observations from 30-day pruning when that table exists. Retention is a real code-level consequence. The live project table has zero observation rows. Live schema contains call_edges and lsp_events, not lsp_failures; write_lsp_failure inserts outcome=failed into lsp_events.
+- T-N is explicitly a decision surface for tool-selection quality feeding prompt changes. CLAUDE.md separately identifies prompt-engineering as the behavioral eval harness for prompts. Those are useful existing components for a manual improvement loop.
+
+### Claims requiring correction or narrower scope
+
+1. **Byte-identical scan output is stronger than the evidence.** The same closed status can follow detector retirement or a genuine fix. However reconcile recomputes after from files; token/line values and the broader scan may differ. The verified defect is inability of the close predicate to distinguish causes, not universal byte identity.
+2. **Nothing reads Pika is literally false.** The retention query reads it, and the current Pika Phase 2b reads MAX(tool_call_id) from it to set the scan-everything-new bound. The same phase prescribes comparison with prior patterns, promotion and a chat summary. A missing automatic report renderer is a narrower claim than no reader/consumer. Phase 3 in the current skill is Reflect, not an absent render implementation; any deferred Phase 3 claim needs its specific design/version cited.
+3. **Separate tables do not make conflation impossible.** They separate storage and ownership, but a writer can still mix asserted sufficiency with observed facts in verdict/notes, and a downstream join can collapse them. Current Pika observations are auditor judgments, not inherently the acting agent's own self-report. Provenance and evidence type remain necessary.
+4. **One surviving populated database cannot establish one execution ever.** The peer's 3-of-96 census and 55 rows were not independently recounted here; even if accurate, they describe discoverable retained data, not all historical runs. A historical invocation count needs an appropriate execution ledger.
+5. **T-N is not yet a demonstrated generic sufficiency consumer.** Its own standing instruction permits genuine tool-selection gaps and excludes parameter-shape repairs; its verdict vocabulary is legitimate/debatable/wrong-tool. A successful sufficient-context or an unknown session-level outcome does not directly fit. The sources inspected establish a manual prompt-improvement route and an available independent harness, not an automatically connected annotation→action→eval pipeline, nor an end-to-end evaluated example for context sufficiency. Missing that evidence is not proof such examples do not exist.
+
+The proposed general rule is accepted with a sharper requirement: a closure check must discriminate actual repair from loss/change of detector coverage. Independence of implementation alone is insufficient if both instruments share the same proxy or blind spot. Use the mention-only/partial-delivery controls from Codex's validation as concrete discriminators.
+
+**Recommendation:** use T-N downstream for the subset adjudicated as tool-selection/prompt gaps. Keep general context sufficiency, positive and unknown cases in a broader evidence flow until its consumer and outcome check are specified. Reuse Pika's retention pattern without treating its current schema or historical invocation coverage as a solved annotation pipeline. No schema change or blanket routing decision is made by this verification.
+
 ## Saved state
 
 The Codex episode research, this handoff, and the frozen weekly JSON are the handoff package. No runtime telemetry implementation was added by this exploration. The detailed report's local document-reference audit passed; source/behavior tests were not run for the research-only work. Peer changes in the shared checkout are outside this package.

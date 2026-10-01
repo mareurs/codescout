@@ -1,12 +1,13 @@
 ---
 id: ad69bec0f2cfc31d
 kind: bug
-status: open
+status: superseded
 title: buddy plugin's reload-payload from= field can name an unrelated peer session, via last-writer-wins .buddy/.current_session_id
 owners:
 - marius
 tags:
 - cluster/transient-shared-state-lies-to-readers
+closed: 2026-09-27
 opened: 2026-09-03
 severity: low
 ---

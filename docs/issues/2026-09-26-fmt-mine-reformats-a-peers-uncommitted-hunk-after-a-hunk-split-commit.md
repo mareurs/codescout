@@ -1,11 +1,11 @@
 ---
 id: '736c88123dd2b852'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: fmt-mine.sh reformats a live peer''s uncommitted hunk after a hunk-split commit of the same file'
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-09-28
 opened: 2026-09-26
 owner: marius
 related:
@@ -62,15 +62,27 @@ N/A. The mechanism is the one `d567a429109f6fd8` already diagnosed, reached by a
 
 ## Fix
 
-Not fixed. Candidates, from `d567a429109f6fd8`'s deferred items:
-- **Item 3, the narrowest:** downgrade `MINE` to `SHARED` whenever the path is dirty and any other session has a write outside the window. `fmt-mine.sh` then refuses, which is its existing and correct behaviour for `SHARED`.
-- **Item 1, the honest default:** an unbounded window by default, keeping `--since` for callers who want one.
+**Fixed 2026-09-28** (`f0387de5`, patch-id `cf6d6a115fa3dabd2f0fa5486737cd95d9b0c00f`) -- item 3.
+In `main()`, when the would-be verdict is `MINE`, check whether any window-excluded
+record belongs to another session and the path is currently dirty (`worktree_is_dirty`);
+if so, downgrade to `SHARED`, which `fmt-mine.sh` already refuses to touch. Gated on
+dirtiness specifically so a hidden write against an already-clean (baked-into-HEAD) path
+does not spuriously downgrade a real MINE.
 
-Either closes this trigger. Item 3 is enough for `fmt-mine.sh`'s safety.
+`fmt-mine.sh` itself needed no change -- its existing case 6 ("SHARED is refused too")
+already covers the consumption side; only the verdict computation in `file-provenance.py`
+was wrong.
 
 ## Tests added
 
-None yet. The regression to write: in `tests/file-provenance.sh`, a peer write before a later commit of the same dirty path gives `SHARED`, not `MINE`. Then a `fmt-mine.sh` case showing it refuses that path.
+`tests/file-provenance.sh`: a new case reproducing the bug's exact scenario -- a peer
+write that predates the derived window, on a path that is genuinely dirty on disk (unlike
+the pre-existing "dirty-state author" fixture, which only ever carries synthetic
+transcript records and never touches the file, so it stays git-clean and is unaffected by
+the new gate). Asserts the verdict is `SHARED`, not `MINE`, and that the existing
+"predates the window" caveat still names the hidden write. Gate green: 164/0
+(`file-provenance.sh`), 43/0 (`fmt-mine.sh`, unchanged, confirming case 6 already covered
+the consumption side).
 
 ## Workarounds
 

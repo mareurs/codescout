@@ -125,6 +125,23 @@ lost for a file still present, across the whole window. The same response carrie
 writer appears as `unknown` — it is still recorded, which is what this check needs. Stays `zombie`.
 Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
 
+### 2026-09-26 — re-open trigger checked again, NOT met
+
+`audit_log(tbl="artifact", op="delete", since=2026-09-24T00:00Z)` → **50** deletes
+(`filtered_total=50`, `truncated=false`). 48 are `doc.move`, excluded by the trigger's own
+definition. The remaining 2 are `doc.delete`:
+
+| abs_path | on disk now? |
+|---|---|
+| `docs/issues/2026-09-25-on-windows-the-ledger-count-hook-finds-no-members-for-two-classes.md` | no |
+| `docs/issues/2026-09-24-partial-test-selection-reads-a-shell-redirect-as-a-test-filter.md` | no |
+
+Both files are gone from disk too (checked directly, not via the catalog) — so these are
+ordinary deletes of files that were themselves removed, not a row lost for a file still
+present. `librarian(action="doctor", scope="repo")` the same day reports `missing_file: 0`,
+the complementary direction. Stays `zombie`. Checked by sessionId
+`c3e7701b-142f-44d5-a762-8bfb419ee1ce`.
+
 ## Environment
 
 - codescout `experiments`, main checkout `/home/marius/work/claude/codescout`
