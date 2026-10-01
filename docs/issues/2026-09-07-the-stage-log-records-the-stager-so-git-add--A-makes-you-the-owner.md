@@ -167,15 +167,90 @@ has; a stricter predicate over a wrong relation produces false refusals without 
 2. **Substring matching.** The first version matched the `"path":"x"` text anywhere in a call, so an edit whose body merely quoted a path (a bug file about this lookup does) was named as that path's writer. Keys are now read as JSON (`json_extract` of the top-level `path`, `id`, `action`), guarded by `json_valid` inside a `CASE` because SQLite raises on the first malformed row it evaluates.
 3. **Moves.** `doc(move)` carries the *source's* id, so an archive destination's own id appears in no call. 63 of the 194 committed paths with no recorded writer were move destinations; a move now also matches its `new_rel_path`.
 
-**What the record still cannot see, measured.** Over the same three days, 589 committed `(commit, path)` pairs from trailer-named sessions; 395 (67%) have an earlier recorded write by a session the commit names. Of the 194 without one, the move destinations are now covered, and about 100 come from **one session that has no `tool_calls` rows at all** in that window, so it does not write through this project's codescout. **No recording inside codescout can see such a session, `run_command` windows included**; the only source that reaches it is transcript provenance (`scripts/file-provenance.py`, about 7 s a file), which is too slow for the recorder. I did not isolate how much of the rest is shell writes from sessions that do use codescout, and so did not build a `run_command` observer: its payoff is unmeasured.
+**What the record still cannot see, measured.** Over the same three days, 589 committed `(commit, path)` pairs from trailer-named sessions; 395 (67%) have an earlier recorded write by a session the commit names. Of the 194 without one, the move destinations are now covered, and about 100 were attributed to **one session with no `tool_calls` rows at all**. **That reading was wrong, and so was the conclusion drawn from it: see § *Measured 2026-10-01 (second pass)* below.** I did not isolate how much of the rest is shell writes from sessions that do use codescout, and so did not build a `run_command` observer: its payoff is unmeasured.
 
-**Limits, stated rather than implied:** a session outside codescout's reach (above); a `run_command` shell write or a `codescout doc` CLI write by a session that does log (unmeasured, never observed to matter); `doc create`, which carries no id; and the grain, which is the file, so two sessions' entries in one tracker stay one path. A stager who wrote a path by shell while a peer also has a live recorded write is refused, deliberately.
+**Limits, stated rather than implied:** a session outside codescout's reach (above); a `run_command` shell write or a `codescout doc` CLI write by a session that does log (unmeasured, never observed to matter); `doc create` (until the second pass; it carries no id, and is now read by its `rel_path`); and the grain, which is the file, so two sessions' entries in one tracker stay one path. A stager who wrote a path by shell while a peer also has a live recorded write is refused, deliberately.
 
 **Status is `mitigated`, not `fixed`:** the named-path mode reproduced on 2026-10-01 is closed for sessions that write through codescout, and the structural claim (an owner field recording the stager where the decision needs the content's author) still holds for the rest.
 
+### Measured 2026-10-01 (second pass), what the first pass got wrong and why the transcript fallback was not built
+
+**Retraction.** The paragraph above said about 100 unrecorded pairs came from one session with no
+`tool_calls` rows at all, which no recording inside codescout could see. **Both halves were false.**
+That session (`3c5b02df`) has rows. `usage.db` files a SUBAGENT's calls under
+`cc_session_id = "<parent session id>/<agent id>"` (3312 of 9706 rows of the last three days; the
+`agent_id` column holds the suffix), and the lookup compared that column whole against the stager's id
+and the commit trailers, which name the parent alone. Its subagents' writes therefore never matched
+anything. That is its own defect, with its own record
+(`docs/issues/archive/2026-10-01-the-stage-log-recorder-reads-a-subagents-composite-session-id-as-a-peer.md`),
+and it was worse than a blind spot: a session's own subagent file was named as a PEER's.
+
+**Population, unit, instant, tree.** Non-merge commits with a `Session-Id` trailer over the three days
+to 2026-10-01 17:00 UTC, at tree `8bfd3253`: 218 commits, 636 `(commit, path)` pairs. A pair counts as
+recorded when a session the commit names has a successful write to the path in `usage.db` before the
+commit. Each row below adds one reading to the one above it:
+
+| reading | recorded | of 636 |
+|---|---|---|
+| the lookup as it stood in `dd7b1590` | 490 | 77.0% |
+| agent suffix stripped | 587 | 92.3% |
+| + `doc create` read by its `rel_path` | 605 | 95.1% |
+| + `run_command` targets, by `file-provenance.py`'s own write heuristics | 607 | 95.4% |
+
+The second and third rows are fixed in the recorder (see § *Fixed 2026-10-01, second pass*). The fourth is
+not built: it adds 2 pairs.
+
+**What is left (29 pairs) and what transcript provenance adds to it.** 24 have no write by any session in
+the transcripts: the audit log and memory anchors the server writes, `.buddy/memory` files, data and script
+files from other harnesses, and the two files of a peer that landed 11 seconds before the commit that took
+them (below), whose `doc create` row the fixed lookup does see. The other 5 are pairs where provenance
+names only OTHER sessions, and all 5 are operator-instructed sweeps whose commit messages say so and name
+the author (`7b68d7e3` four paths, `66cf3b49` one). **On this population provenance finds no unintended
+capture the recorder missed.**
+
+**Cost.** `scripts/file-provenance.py --all <one path>` took 28.3 s real; the in-process `scan()` over
+the 1004 transcript files took 25 to 29 s however many paths were asked about. So the "about 7 s a
+file" figure above was a per-invocation overhead and not a per-file one, and a guard that scanned on every
+commit would add roughly half a minute to each, to flag deliberate sweeps. **Not built.** A cached or
+mtime-bounded scan is the only shape that could pay, and the population above gives it nothing to catch.
+
+**What this does not establish.** One checkout and three days. A 14-day run was discarded: two script-written
+data commits (624 and 588 paths) dominated it, so it measures a different population. The one sample path I
+traced, a bug file that very session created with `doc(create)`, has a write in its transcript and `scan()`
+returned no owner for it; the likely reason (`scan()` credits a RELATIVE codescout call to neither tree once
+the session has activated another) was not isolated. So provenance may not have reached that session either.
+
+**An instance found by the measurement, and it is the author's own.** Commit `4adb0675` (this
+session's) carries two paths nobody who committed it wrote: a 72-line bug file under `docs/issues/archive/`
+that session `a520c25a` created through `doc(create)` at 13:26:52 UTC, 11 seconds before the commit, and a
+one-line change to `docs/trackers/issue-clusters/IC-11-doc-contradicted-by-code.md` adding that same bug as
+a cluster member (the diff names it). The commit message names neither. The `doc create` row is in
+`usage.db` (checked), so had the file been staged by name the fixed lookup would have named `a520c25a` as
+its owner and the guard would have refused the bare commit; the lookup as it stood could not see a
+`doc create` at all.
+
+### Fixed 2026-10-01, second pass
+
+Two changes to `foreign_writer` in `scripts/post-index-change-stage-log.sh`, both in
+`tests/hooks-discrimination.sh` (cases 22a-22d and 23a-23c):
+
+1. The agent suffix is stripped from a row's session id, so a subagent is the session that dispatched
+   it (the registry resolves it, the trailer names it, a person can be asked). Cases 22a-22d.
+2. `doc(create)` is read by its `rel_path`, restricted to the `create` action because `find` carries the
+   same key as a shorthand. Cases 23a-23c.
+
+A third defect, found in the same pass and not fixed, has its own record:
+`docs/issues/2026-10-01-the-recorders-write-lookup-matches-a-relative-path-from-a-call-made-in-another-tree.md`.
+
+Fix SHA `6e6dc887c9420aee73efd60fe0bb02f806ad5aad` (`experiments`), patch-id `797557b820bdcd32fd9733355adc0bcd210480be`
+(`git show <sha> | git patch-id --stable`). Suite 224 passed and 0 failed; 41 mutation sites, 40 killed, the survivor being
+the SQLite busy timeout (tuning). Gate FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. **Status stays `mitigated`:** the lookup now reaches
+sessions that write through codescout, subagents included; a native or shell writer remains unseen, and the one measured
+population says provenance would not have caught anything there.
+
 ## Tests added
 
-`tests/hooks-discrimination.sh`, section "named route attributes a path by WRITE", cases 1-21 (215 passed and 0 failed for the file). The real recorder and guard are driven in throwaway repos with a fixture `usage.db` named by `CODESCOUT_USAGE_DB`, so no case reads the real one. Cases carry explicit times, and commits carry `Session-Id` trailers (`commit_as`), so no case depends on two events landing in different seconds.
+`tests/hooks-discrimination.sh`, section "named route attributes a path by WRITE", cases 1-21 (215 passed and 0 failed for the file at that commit), then cases 22a-22d (a subagent's composite session id) and 23a-23c (`doc create` by `rel_path`) in the second pass (224 passed). The real recorder and guard are driven in throwaway repos with a fixture `usage.db` named by `CODESCOUT_USAGE_DB`, so no case reads the real one. Cases carry explicit times, and commits carry `Session-Id` trailers (`commit_as`), so no case depends on two events landing in different seconds.
 
 Cases 1, 4b, 5a, 7, 10, 15, 16-17 and 21 go red on the pre-change behaviour (22 assertions with the call site deleted); the "kept as named" cases pass on unchanged code and rest on mutation. Covered: foreign attribution and the guard's refusal and wording; a path both sessions wrote; no record; liveness (a peer's own commit clears it, a third session's commit does not, the stager's own committed write is not live, the newest of a session's commits wins, one commit naming two sessions clears both, a write past the lookback is unseen); each writing tool; each id-bearing `doc` action, a `doc` read and a move's destination; failed calls; two other writers; exact path matching (`_`, a longer path, a path quoted in another edit's text); an absolute path; an absent, unreadable, locked and partly malformed database; a blanket add; a read tool; the call-count lookback; and carry-over of the row through an unrelated stage.
 
