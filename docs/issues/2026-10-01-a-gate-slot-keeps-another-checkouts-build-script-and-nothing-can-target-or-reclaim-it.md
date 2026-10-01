@@ -1,7 +1,7 @@
 ---
 id: a61fab68e4fd71f3
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a gate slot keeps a build script compiled for another checkout, and the pool cannot detect, target or reclaim it'
 owners:
 - marius
@@ -46,7 +46,9 @@ slot-0/debug/build/codescout-44aaac7f8f18797c/build_script_build-44aaac7f8f18797
 - That `.d` records the build script as compiled with `CARGO_MANIFEST_DIR` set to a checkout under another session's scratchpad. That is the `env!` form `c8c2b18b` removed from `build.rs`.
 - **HEAD's `build.rs` line 64 is a comment line**, so HEAD's source cannot produce a panic at `build.rs:64:29`. The binary that ran was built from a different revision of the file.
 
-**Not established:** which session compiled it, and why cargo judged it fresh for a different `CARGO_MANIFEST_DIR` even though the dep-info records the variable. Both need a controlled reproduction: build a checkout carrying the old `build.rs` into a slot, then lease that slot from a checkout at HEAD.
+**Why cargo judged it fresh: established afterwards, by reproduction.** Two throwaway crates with the same `build.rs` reading `env!("CARGO_MANIFEST_DIR")`, one shared `CARGO_TARGET_DIR`, tree B's `build.rs` dated 2020. Built A, then B: B printed A's marker, and the dep-info beside the compiled script recorded A's path. Cargo calls the script fresh by modification time and never reads the `env-dep` line. The same thing now runs inside the suite as `tests/gate-slot.sh` case M: with the eviction's call site deleted, B prints A's marker.
+
+**Still not established:** which session compiled the script in `slot-0` that day. That the failing tree's `build.rs` was no newer than the compiled copy is inferred from the freshness rule above, not read from that tree's mtime.
 
 ## Environment
 
@@ -76,18 +78,29 @@ The fix `c8c2b18b` is correct for any checkout that has it and does not protect 
 
 ## Fix
 
-Not started. Options, with what each costs; none is chosen here:
+Option 1 shipped, in `7865b9515a45340240d7dacc9beb1009780bc1f5`: `slot_evict_foreign_build_scripts` in `scripts/slot-pool.sh`, called from `lease_gate_target`, so `gate.sh` and `with-slot.sh` both take it. Under the lease it reads each `build_script_build-*.d`'s `# env-dep:CARGO_MANIFEST_DIR=` line and removes that `build/<pkg>-<hash>` directory when the recorded directory is neither inside the lessee's git toplevel nor inside `$CARGO_HOME`. A removal costs one script recompile, not the 17 GiB the other options cost.
 
-1. **Detect the poisoned directory, and remove only that.** The `.d` file is already a machine-readable owner field: `# env-dep:CARGO_MANIFEST_DIR=<tree>`. At lease time, compare it with the leaseholder's tree and remove just the `codescout-<hash>` directories that disagree. Cheapest and most targeted. It covers `env!`-baked scripts only, which is the one cross-checkout hazard actually observed.
-2. **Record the writer, and clean by cause.** Write the checkout root into the slot when a lease ends. If the next lessee differs, run `cargo clean -p codescout` there. Broader, and it costs a rebuild of the root package on every checkout switch.
-3. **Give the repair a target.** A slot selector on `with-slot.sh`, and a gate message that recognises this panic signature (a `read <path>` in `build.rs` naming a tree other than the checkout) and prints the slot and the exact command. Fixes the 17.6 GiB mistake without preventing the fault.
-4. **Key slots by checkout.** `slot-N/<hash of toplevel>`, so nothing crosses checkouts. Removes the class, but multiplies disk by the number of distinct checkouts (the pool is already 71G).
+Two exemptions, both needed. A registry or git dependency records a path under `$CARGO_HOME` and is meant to be shared (`libsqlite3-sys` is in all three slots). And the checkout test carries a slash, because `<checkout>.worktrees/x` is a sibling that a bare prefix would call the lessee's own, and that was the shape the pool held.
 
-Not independent of `e76df396`: that fix is only as strong as the oldest `build.rs` still building into the pool.
+**Limits.** It catches the `env!` form only. With no git toplevel (a cwd outside a repo) nothing is evicted. A preset `CARGO_TARGET_DIR` and a hand-typed tree with no lock file are not tended, as before.
+
+**First use in the wild.** This change's own gate run evicted `release/build/codescout-f24fdc5f6ca94cff` from `slot-0`, compiled for `.../codescout.worktrees/bfdfeebd-repro`. A scan before the change had found a second foreign-checkout script in `slot-2` (`port-28-test`), which the next lease of that slot will evict.
+
+**Not done: option 3.** The repair still cannot name a slot: `with-slot.sh cargo clean -p codescout` cleans whichever slot is free. Its trigger is gone for this fault, not for others. Options 2 and 4 were not taken.
 
 ## Tests added
 
-None yet.
+`tests/gate-slot.sh`, 67 passed and 0 failed.
+
+- **Case L** reads fixtures. It evicts a script compiled for another checkout, one for a sibling that shares the prefix, and one in a `--target <triple>` layout. It keeps the lessee's own, a workspace member's, a registry dependency's, one under a different `CARGO_HOME`, and one that records no manifest dir. It leaves a same-named dep-info under `deps/` and everything beside it. It checks that `with-slot.sh` evicts too, that nothing is evicted outside a git tree or from a preset target dir, and that a lease with nothing to evict is silent.
+- **Case N** calls the function directly: an empty cargo-home, an empty checkout, and a stdout that carries only the command's own output.
+- **Case M** runs real cargo. Tree A prints its marker (the control), then tree B, leasing A's slot, prints its own. This is the half only cargo can answer, and it is the case that shows the removal makes cargo compile the script again.
+
+**Mutation:** 17 sites, all killed, by `scripts/mutation-probe.sh` in an isolated tree. With the call site deleted, 11 assertions fail, M among them. Removing only the dep-info and not its directory fails 4, M among them. One guard, an explicit empty-checkout `return`, survived and was deleted as inert: the pattern `/*` already matches every path, and case N pins that. The `^# ` anchor of the dep-info grep was not mutated. The kept-script and silent-lease cases hold on unchanged code, so their evidence is those mutations.
+
+## Fix provenance
+
+- SHA `7865b9515a45340240d7dacc9beb1009780bc1f5`, patch-id `d4e3612b2c7014988589cf96b3dcc7040dedc0db` (`git show <sha> | git patch-id --stable`).
 
 ## Workarounds
 
@@ -95,7 +108,7 @@ Lease the slot that holds the fault and clean it, which `with-slot.sh` cannot be
 
 ## Resume
 
-Nothing in flight on this. Found while gating an unrelated test change in `tests/issue_clusters.rs`, whose own result is unaffected: the failing run never reached a test.
+Nothing in flight. Left: option 3 (a slot selector, or a message naming the slot) and the unestablished question of which session compiled the script. Status is `mitigated`, not `fixed`, because the pool still cannot be told which slot to clean.
 
 ## References
 
