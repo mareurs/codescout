@@ -92,7 +92,7 @@ Filing a bug earlier today, a worktree-scoped `doc(action="find", kind="bug")` r
 an open severity-high bug covering the same class nor two 2026-09-02 precedents. A near-
 duplicate was written and discarded only because `librarian(action="doctor")` was run for an
 unrelated reason. That was a different mechanism (worktree row scoping —
-`docs/issues/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`), and it
+`docs/issues/archive/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`), and it
 is cited here because it is the same *consequence*: a ledger query that returns a quietly short
 list, and a duplicate filing as the cost.
 

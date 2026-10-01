@@ -1,13 +1,13 @@
 ---
-status: open
+kind: bug
+status: fixed
+tags:
+- cluster/selector-narrower-than-its-population
+closed: 2026-10-01
 opened: 2026-09-03
-closed:
-severity: medium
 owner: marius
 related: []
-tags: ["cluster/selector-narrower-than-its-population"]
-kind: bug
-unverified: 'root cause not established — the mechanism that makes THIS worktree different from .worktrees/tool-collapse, which does have catalog rows, is not identified'
+severity: medium
 ---
 
 # BUG: `librarian(action="reindex")` walks zero files in a worktree and reports success, so a file created there is permanently unfindable
@@ -88,21 +88,15 @@ across sessions in this checkout.
 
 ## Root cause
 
-**Unknown — see Hypotheses tried.** What is established:
-
-- It is not "worktrees cannot hold catalog rows." `librarian(action="doctor")` reports 13
-  `worktree_scoped_row` violations, and **9 of them are bug files under the sibling worktree
-  `/home/marius/work/claude/codescout/.worktrees/tool-collapse`**. That worktree's files were
-  indexed. This one's are not.
-- It is not a scope or target-resolution error. `targets` echoes the correct absolute path,
-  and `scope="project"`, `scope="repo"` and `force=true` all behave identically.
-- It is not a `declared_root_missing` condition — `doctor` reports 0 for that check.
-
-The difference between the two worktrees is therefore the thing to find, and it is not yet
-found — but it is **not registration**: creating an artifact here through `doc(action="create")`
-gave this worktree a catalog row, and `reindex` still walked zero files (hypothesis 5). Per
-`docs/conventions/` practice this is recorded as *inferred from tool output, not measured at the
-source* — no `src/librarian/indexer.rs` line has been read for this bug.
+**Established 2026-10-01, at the source.** `index_repo_sync` skips a linked git worktree on purpose
+(`indexer.rs`, `is_linked_worktree(abs_root)`, added in `9d84f347` and pinned by
+`index_repo_sync_skips_linked_worktree`): a worktree's files are indexed through the main checkout,
+not as separate artifacts. The skip returned a default, all-zero `IndexReport` and disclosed itself
+only through `tracing::warn!`. The tool's response had no field that could express a skip, so it
+answered `added: 0, updated: 0, removed: 0, unchanged: 0` with `unknown_sample_note: "complete"`:
+the same bytes as an empty root. The earlier "root cause unknown" and hypotheses 5 and 6 were
+about a mechanism that does not exist; the difference between the two worktrees in the original
+observation was not registration but which one had been written to through `doc`.
 
 ## Evidence
 
@@ -205,6 +199,27 @@ workaround above.
    **Not tested** — needs `src/librarian/indexer.rs` `index_repo_sync` read at the source.
 
 ## Fix
+**Fixed 2026-10-01.** The skip stays; the report now says so. `IndexReport` gained
+`skipped: Option<String>`, set where the skip happens with the reason and the main checkout it
+points at, and `reindex` emits `skipped_roots`: one `{root, reason}` per skipped target, always
+present and empty when nothing was skipped, so "none skipped" is distinguishable from a build that
+predates the field.
+
+**Only production consumer.** `reindex` is the only production caller that consumes an
+`IndexReport`. The other callers of `index_repo_sync` and `index_repo` are tests, including
+`reindex_cli`, which is `#[cfg(test)]`. **Correction:** the message of the fix commit says the
+`codescout index` CLI summary still drops the reason. That is wrong. The function it was read from is
+test-only, not a CLI; there is no second site. Left in place rather than amended, because amending
+rewrites a commit on a shared checkout.
+
+**Not covered, and not claimed.** The other two facets recorded under *Evidence* are separate from
+the all-zero report and this fix does not touch them:
+- `find`'s `unindexed_files` hint absent in a worktree: **not reproduced**. The hint appears only when
+  an unindexed file exists, and a 2026-10-01 comparison of `find` from a worktree and from the main
+  checkout had none in either, so it said nothing about the claim.
+- `scope.abs_path` naming the worktree while every row names the main checkout: **confirmed again**
+  2026-10-01, and not adjudicated: it may be the overlay design (fork-on-first-write) and not a
+  defect.
 ### Root cause found 2026-09-24 — a deliberate skip that reports itself only to the log
 
 Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence at HEAD `436a8ff6`. **This file's "root cause unknown" and hypothesis 6 are out of date.** The zero-file walk is intentional:
@@ -218,8 +233,8 @@ It is pinned by the test `index_repo_sync_skips_linked_worktree` and was added i
 
 **What remains is the reporting half, and it is this file's defect exactly.** The skip is disclosed only through `tracing::warn`, which no caller sees. The tool response is an all-zero report carrying `unknown_sample_note: "complete"`, with nothing in the response path naming the skip. Remedy direction: put the skip in the report itself (a field naming the root that was skipped and why), per `docs/adrs/2026-08-27-negative-results-name-their-scope.md`. No live reindex was run for this check, since it would write to the catalog.
 
-*Not yet fixed, and the root cause is not established — do not write a fix before testing
-hypothesis 5.*
+*Superseded 2026-10-01: fixed, and the root cause is established. See the text at the top of this
+section; the paragraphs below are the history that led there.*
 
 The reporting defect is separately actionable and does not wait on the root cause: when a
 reindex walks zero files under a root that exists and is non-empty, that is not a success. It
@@ -227,13 +242,28 @@ should either name the scope it examined and why it was empty, or refuse. Per
 `docs/adrs/2026-08-27-negative-results-name-their-scope.md`, a suspicious zero names its scope;
 `unchanged: 0` against a 1516-file root is the canonical suspicious zero.
 
-SHA: *pending.* patch-id: *pending.*
+SHA and patch-id: see *Fix provenance*.
 
 ## Tests added
 
-None. A regression test needs the root cause first. If hypothesis 5 holds, the test is that
-`reindex` on an unregistered linked worktree either indexes it or returns a `RecoverableError`
-naming the registration requirement — never all-zero.
+In `src/librarian/indexer.rs` and `src/librarian/tools/reindex.rs`:
+`index_repo_sync_says_why_it_skipped_a_linked_worktree` (the report carries the reason and names the
+main checkout; a walked root is the control), `a_reindex_of_a_linked_worktree_names_the_root_it_skipped`
+(the tool's response names the root) and `a_reindex_that_walks_every_root_reports_no_skipped_roots`
+(the control: the field is present and empty). Red before the change on each assertion, green after.
+Mutated one per site on the final bytes, each killed by the intended test: the indexer not recording
+the reason kills the indexer test and the tool test; the tool not collecting it kills the tool test
+alone; the response emitting an empty list kills the tool test alone; attaching a reason to every
+walked root kills only the control. Librarian tests run only in the default lane, so the names were
+read out of that lane, once each.
+
+## Fix provenance
+
+- **SHA:** `3259a5f51116c0f5590cef46fba04ed1d6b61e95` (`experiments`)
+- **patch-id:** `f989f9d902499b92e54f10a5708e75ec77014b2a` (`git show <sha> | git patch-id --stable`)
+
+Verified on `experiments` 2026-10-01: gate `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, with the three tests
+read by name out of the default lane, and four mutations observed killed on the final bytes.
 
 ## Workarounds
 
@@ -251,12 +281,9 @@ there picked up both new files (`added: 2`) and their `cluster/` tags immediatel
 
 ## Resume
 
-Read `src/librarian/indexer.rs` `index_repo_sync` and find where the candidate list is built —
-specifically whether it walks the filesystem under `targets` or enumerates a catalog-derived
-root set. Hypothesis 5 (registration-gated) is already refuted by probe, so the remaining lead
-is hypothesis 6: the root set resolves through the main checkout, in which this worktree does
-not appear. The tell to confirm at the source is that `targets` is echoed from the *request*
-rather than from whatever collection the walk actually iterates.
+Closed. The reporting defect is fixed; the two facets under *Fix*, *Not covered*, are open questions
+and have no bug file of their own, deliberately, because one is unreproduced and the other is
+unadjudicated.
 
 ## References
 

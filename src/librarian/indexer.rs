@@ -15,7 +15,7 @@ pub struct IndexReport {
     /// Why this root was NOT walked, or `None` when it was. An all-zero report is otherwise
     /// the same bytes whether a root held nothing or was deliberately skipped, and the
     /// skip used to reach only `tracing::warn!`, which no caller reads
-    /// (`docs/issues/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`).
+    /// (`docs/issues/archive/2026-09-03-reindex-walks-zero-files-in-a-worktree-and-reports-success.md`).
     pub skipped: Option<String>,
     pub added: usize,
     pub updated: usize,
