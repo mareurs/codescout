@@ -9,7 +9,7 @@ tags:
 - cluster/guard-narrower-than-its-name
 opened: 2026-09-30
 severity: low
-unverified: 'STANDING: `sudo -n cat` was run only by session a520c25a (refused, on the tip binary); the author of 8614aebf never ran sudo (privilege escalation). `ionice`, `doas`, `find -exec`, `parallel`, `bash -c`, `$(...)` are MEASURED open bypasses on the build before the tip; the tip rebuild did not touch them and they were re-run here on it (still open), deliberately not closed by a head rule; see Resume.'
+unverified: 'STANDING: `sudo -n cat` was run only by session a520c25a (refused, on the tip binary); the author of 8614aebf never ran sudo (privilege escalation). `ionice` and `doas` were closed by 98c6d798 and are verified by unit tests only: the live binary (built 08:00) predates that commit (08:47), so neither has been re-run on a binary that contains it. `find -exec`, `parallel`, `bash -c`, `$(...)` are MEASURED open bypasses, deliberately not closed by a head rule and named in the Known limits docstring; see Resume.'
 ---
 
 ## Summary
@@ -136,6 +136,16 @@ The live binary was rebuilt at 08:00 on 2026-10-01, after the pushed tip `611595
 
 Still reading the file, deliberately not closed by a head rule: `ionice cat build.rs`, `find build.rs -maxdepth 0 -exec cat {} +`, `parallel cat ::: build.rs` (each 107 lines), `bash -c 'cat build.rs'` (107), `echo $(cat build.rs)` (the file went through the substitution, 1 line out). `doas cat build.rs` passes both gates and `doas` refuses itself (no `/etc/doas.conf`), so `wc` prints 0: a gate bypass, not a disclosure. `sudo` was not run by the author of `8614aebf`. Session `a520c25a` (the author of `4d392858`) ran the closed rows on the same rebuilt binary and reports the same results, including `sudo -n cat build.rs` **refused** and the allowed controls `echo ok |& wc -l` and `ls Cargo.toml 2>&1 | wc -l`; it did not re-run the still-open rows. Attribution is by session id, resolved from the socket the report arrived on, not by name: that session has been registered under three different names during this work.
 
+
+### Closed after the re-measurement: `ionice` and `doas` (2026-10-01)
+
+Session `a520c25a` added both to `producer_index`'s wrapper arm as `98c6d798`, with option lists keyed by wrapper name because `-n` is a plain flag for `doas` and a valued option for `ionice`. It reports tests written RED first, 6 of 6 mutations killed, and a gate of FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 on an isolated worktree. Not re-derived here.
+
+What the author of `8614aebf` re-ran, and what it does and does not show:
+- The three tests that commit added (`il3_sees_through_doas_and_ionice`, `source_file_access_allows_doas_and_ionice_around_a_non_reader`, `source_file_access_blocks_a_read_run_through_doas_or_ionice`) pass on the current tree: `3 passed; 0 failed`, via `scripts/with-slot.sh cargo test --lib`. The slot was already built, so that run compiled nothing.
+- **The live binary is not evidence either way.** `target/release/codescout` was built 08:00 and `98c6d798` is dated 08:47 the same day, so the binary predates the fix. On it, `ionice cat build.rs | wc -l` printed 113 (the file has grown from 107 lines) and `doas cat build.rs | wc -l` printed 0 with `doas: doas is not enabled`: both still passed the gate, as expected for a binary without the fix. Those two lines say the binary is old, not that the fix fails.
+- The live-binary row therefore stays unmeasured until a rebuild. It was not rebuilt here: `cargo rb` replaces the binary every session on every profile is serving.
+
 ## Tests added
 
 Landed with `5d39e0d8` (the `&` half): `a_lone_ampersand_splits_but_redirections_and_quoted_ones_do_not`, `source_file_access_blocks_a_read_after_a_background_ampersand`, `source_file_access_does_not_let_a_backgrounded_cd_move_the_shell` and the over-block partner `source_file_access_allows_a_quoted_ampersand_before_a_reader_word`, all run RED first.
@@ -153,9 +163,10 @@ Open, in order:
 
 1. **`|&`** in the source gate and IL-3, plus IL-3's own lone `&` (`echo x & rg -c zzz f | tail -1` ran; `rg … & echo b | tail -1` was refused, a false positive): codescout-d7: **FIXED and pushed** as `8614aebf` (patch-id `72c450e8519e3836168a6c1700dcb1e76de49623`, gated as `162ec65e`: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0; the pushed tip `6115958f` was gated too), and **verified on the live binary** 2026-10-01 (see the re-measurement table).
 2. **Mechanism 3** (`$(…)`, backticks, `bash -c`, `eval`): documented, not closable by a head rule.
-3. **`find -exec`, `parallel`, `ionice`, `doas`**: MEASURED bypasses, see the table above. `ionice` and `doas` are one-line wrapper-list entries like `sudo`; `find -exec` and `parallel` are not closable name by name, and the remedy for those is the Known-limits docstring.
-4. **DONE 2026-10-01:** the table was re-run on a binary containing `4d392858` and `8614aebf`; it is in the re-measurement subsection above. What remains is a decision, not a measurement: whether to add `ionice` and `doas` to the wrapper list, and to name `find -exec`, `parallel`, `bash -c` and `$(...)` in the gate's Known limits.
+3. **`ionice`, `doas`: FIXED** as `98c6d798` (patch-id `53ba8308b85637e267ecf6d71994c56c47218fc6`, session `a520c25a`), see "Closed after the re-measurement" below. **`find -exec`, `parallel`**: MEASURED bypasses, see the table above; not closable name by name (their command is not in head position), and now named in the gate's Known limits as measured.
+4. **DONE 2026-10-01:** the table was re-run on a binary containing `4d392858` and `8614aebf`; it is in the re-measurement subsection above. The wrapper-list decision was taken by `98c6d798` (`ionice`, `doas` added; `find -exec` and `parallel` named in Known limits). What stays open is `bash -c`, `eval`, backticks and `$(...)` (mechanism 3), which the docstring documents; and one measurement owed: re-run `ionice cat <file> | wc -l` and `doas cat <file> | wc -l` on a binary built at or after `98c6d798`.
 
 ## References
 - PR #29 (merged head classification for IL-3 and this gate); its independent review listed the first four.
 - `src/util/path_security.rs`: `check_source_file_access`, `split_outside_quotes`, `producer_index`.
+- `98c6d798` (`ionice`, `doas`; patch-id `53ba8308b85637e267ecf6d71994c56c47218fc6`).
