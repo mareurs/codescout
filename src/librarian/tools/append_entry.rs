@@ -3285,4 +3285,460 @@ mod taxonomy_recipes {
         assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
         assert!(scan.failures[0].contains("call 1"), "{:?}", scan.failures);
     }
+    // ── Surface three: the recipes the ledgers carry themselves ───────────────────────────────
+    //
+    // `docs/trackers/*.md` holds each ledger's own `## Template for new entries` and the how-to
+    // prose above it, and teaches the same literal call. Bug fc491a58's reproduction found 38 calls
+    // in 28 ledgers and only 18 of them under that heading, so the scan reads the WHOLE body, not a
+    // section — and raw, because the template's own call sits inside an HTML comment. A call is
+    // judged against the ledger it is WRITTEN IN: a ledger that documents another ledger's call
+    // is refused here, and today none does.
+
+    const LEDGER_DIR: &str = "docs/trackers";
+
+    #[derive(Debug, Default)]
+    struct LedgerScan {
+        /// Ledgers that read, recipe or not.
+        ledgers: usize,
+        prose: usize,
+        params: usize,
+        /// Calls written as a sentence about the form, not as a recipe. See `is_form_mention`.
+        mentions: usize,
+        failures: Vec<String>,
+    }
+
+    /// A call whose arguments, after the opener's own `action="append_entry"` / `append_entry`, are
+    /// only an ellipsis is a sentence ABOUT the form, not a recipe anyone could follow:
+    /// `doc(action="append_entry", …)` in a ledger's how-to line. It is counted, never skipped, and
+    /// the rule is exact — a call with ANY other argument and no `id_prefix` is still a finding.
+    fn is_form_mention(args: &str) -> bool {
+        let args = args.trim();
+        let rest = args
+            .strip_prefix("action=\"append_entry\"")
+            .or_else(|| args.strip_prefix("append_entry"));
+        matches!(
+            rest.and_then(|r| r.trim_start().strip_prefix(','))
+                .map(str::trim),
+            Some("…" | "...")
+        )
+    }
+
+    /// Reads every `docs/trackers/*.md` directly under `root` and checks each `append_entry` call in
+    /// its body against the two conditions that make the code refuse it. Nothing is skipped: a
+    /// ledger that does not read, a call that does not close, and a call with no `id_prefix` are each
+    /// a finding; only a bare mention of the form (`is_form_mention`) is set aside, and it is counted.
+    fn scan_ledger_recipes(root: &Path) -> LedgerScan {
+        let mut scan = LedgerScan::default();
+        let mut names: Vec<String> = std::fs::read_dir(root.join(LEDGER_DIR))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".md"))
+            .collect();
+        names.sort();
+        for name in names {
+            let rel = format!("{LEDGER_DIR}/{name}");
+            let text = match std::fs::read_to_string(root.join(&rel)) {
+                Ok(t) => t,
+                Err(e) => {
+                    scan.failures.push(format!("`{rel}` cannot be read ({e})"));
+                    continue;
+                }
+            };
+            let (fm, body) = match frontmatter::parse(&text) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    scan.failures
+                        .push(format!("`{rel}` has frontmatter that does not parse ({e})"));
+                    continue;
+                }
+            };
+            scan.ledgers += 1;
+            let declared = declared_prefixes_from_frontmatter(fm.as_ref());
+            // The collection the ledger's own sidecar declares; a ledger naming none declares None.
+            let collection = fm.as_ref().and_then(|fm| {
+                match fm.extra.get("expects_augmentation").map(parse_declaration) {
+                    Some(Declaration::Declared {
+                        sidecar: Some(side),
+                    }) => augmentation_sidecar::read(&root.join(side))
+                        .ok()
+                        .and_then(|s| s.entry_collection),
+                    _ => None,
+                }
+            });
+            // `body` is a slice of `text`, so its offset converts a position in it to a file line.
+            let body_at = body.as_ptr() as usize - text.as_ptr() as usize;
+            let mut found: Vec<(usize, Option<&str>)> = Vec::new();
+            for (opener, paren) in SIDECAR_OPENERS {
+                for (at, _) in body.match_indices(opener) {
+                    found.push((at, call_args(body, at + paren)));
+                }
+            }
+            found.sort_by_key(|(at, _)| *at);
+            for (at, args) in found {
+                let line = text[..body_at + at].matches('\n').count() + 1;
+                let here = format!("`{rel}:{line}`");
+                let Some(args) = args else {
+                    scan.failures.push(format!(
+                        "{here}: the append_entry call never closes its `(`"
+                    ));
+                    continue;
+                };
+                if is_form_mention(args) {
+                    scan.mentions += 1;
+                    continue;
+                }
+                let Some(prefix) = top_level_arg(args, "id_prefix") else {
+                    scan.failures.push(format!(
+                        "{here}: the append_entry call passes no id_prefix=\"…\", so nothing says which \
+                     ledger namespace it writes"
+                    ));
+                    continue;
+                };
+                if !is_citable_entry_prefix(&prefix) {
+                    scan.failures.push(format!(
+                        "{here}: id_prefix=\"{prefix}\" is refused by append_entry before either branch — \
+                     an entry token is `[A-Z]{{1,3}}-<n>`. Correct the recipe."
+                    ));
+                    continue;
+                }
+                match top_level_arg(args, "entry_collection") {
+                    Some(c) => {
+                        scan.params += 1;
+                        if collection.as_deref() != Some(c.as_str()) {
+                            scan.failures.push(format!(
+                                "{here}: names entry_collection=\"{c}\", but this ledger's sidecar declares \
+                             {collection:?} — append_entry refuses a collection the augmentation does \
+                             not declare, so an agent following this recipe is refused. Repair ONE \
+                             side: the recipe, or the sidecar's entry_collection."
+                            ));
+                        }
+                    }
+                    None => {
+                        scan.prose += 1;
+                        if declared.is_empty() {
+                            scan.failures.push(format!(
+                                "{here}: prose call for id_prefix=\"{prefix}\" is refused — \
+                             allocate_entry_id: `{rel}` does not declare an entry_prefix. Repair ONE \
+                             side: declare it (doc(action=\"update\", id=<artifact id of {rel}>, \
+                             patch={{extra: {{\"entry_prefix\": \"{prefix}\"}}}})), or correct the recipe."
+                            ));
+                        } else if !declared.contains(&prefix) {
+                            // `extra` keys are upserted, so the remedy restates the existing namespaces.
+                            let all: Vec<String> = declared
+                                .iter()
+                                .chain(std::iter::once(&prefix))
+                                .map(|d| format!("\"{d}\""))
+                                .collect();
+                            scan.failures.push(format!(
+                                "{here}: prose call for id_prefix=\"{prefix}\" is refused — \
+                             allocate_entry_id: `{prefix}` is not declared by this ledger (it declares \
+                             {}). Repair ONE side: declare it (doc(action=\"update\", id=<artifact id \
+                             of {rel}>, patch={{extra: {{\"entry_prefix\": [{}]}}}})), or correct the \
+                             recipe.",
+                                declared.join(", "),
+                                all.join(", ")
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        scan
+    }
+
+    fn ledger_report(failures: &[String], population: &str) -> String {
+        format!(
+            "{} ledger append_entry finding(s) — each would be refused, or the gate cannot read \
+         it:\n  {}\n\nThis test reads the WORKING TREE of a shared checkout. If a file a finding names \
+         is not yours — a peer's in-progress ledger — attribute it (python3 \
+         scripts/file-provenance.py <path>) and tell its owner; do not repair it for them. If it is \
+         yours, apply the repair its line names.\n\n{population}",
+            failures.len(),
+            failures.join("\n  ")
+        )
+    }
+
+    /// Asserts, per `append_entry` call written in `docs/trackers/*.md`, the two conditions that make
+    /// the code refuse it: a prose call's prefix must be declared by the ledger it is written in,
+    /// and a params call must name the collection that ledger's sidecar declares.
+    #[test]
+    fn every_ledger_append_entry_recipe_is_one_the_code_accepts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let scan = scan_ledger_recipes(&root);
+        let population = format!(
+            "examined {} ledger(s) under `{LEDGER_DIR}`: {} prose call(s), {} params call(s), {} mention(s) of the form",
+            scan.ledgers, scan.prose, scan.params, scan.mentions
+        );
+        assert!(
+            scan.ledgers > 0 && scan.prose > 0 && scan.mentions > 0,
+            "the scanner found no ledger, or lost a whole call shape — this is not a clean corpus. \
+         {population}"
+        );
+        assert!(
+            scan.failures.is_empty(),
+            "{}",
+            ledger_report(&scan.failures, &population)
+        );
+    }
+
+    /// A ledger `docs/trackers/l.md` carrying `fm_extra` and `body`; with `collection`, also naming
+    /// the sidecar `docs/augmentations/l.yaml` that declares it.
+    fn ledger_fixture(root: &Path, fm_extra: &str, body: &str, collection: Option<&str>) {
+        let aug = if collection.is_some() {
+            "expects_augmentation: docs/augmentations/l.yaml\n"
+        } else {
+            ""
+        };
+        put(
+            root,
+            "docs/trackers/l.md",
+            &format!("---\nkind: tracker\n{aug}{fm_extra}---\n{body}"),
+        );
+        if let Some(c) = collection {
+            put(
+                root,
+                "docs/augmentations/l.yaml",
+                &format!("prompt: p\nentry_collection: {c}\n"),
+            );
+        }
+    }
+
+    fn ledger_scan_of(fm_extra: &str, body: &str, collection: Option<&str>) -> LedgerScan {
+        let dir = tempfile::tempdir().unwrap();
+        ledger_fixture(dir.path(), fm_extra, body, collection);
+        scan_ledger_recipes(dir.path())
+    }
+
+    const LEDGER_F_CALL: &str = r###"doc(action="append_entry", id="x", id_prefix="F", anchor_heading="## T", title=…, body=…)"###;
+
+    #[test]
+    fn a_ledger_recipe_whose_prefix_the_ledger_declares_is_clean() {
+        let scan = ledger_scan_of("entry_prefix: [F, W]\n", LEDGER_F_CALL, None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!((scan.ledgers, scan.prose, scan.params), (1, 1, 0));
+    }
+
+    #[test]
+    fn a_ledger_recipe_may_use_any_declared_prefix_not_only_the_first() {
+        // Load-bearing: W is the SECOND declared prefix, so a check that reads only the first
+        // declared prefix passes every fixture that uses F and refuses this one.
+        let call = LEDGER_F_CALL.replace(r#"id_prefix="F""#, r#"id_prefix="W""#);
+        let scan = ledger_scan_of("entry_prefix: [F, W]\n", &call, None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.prose, 1);
+    }
+
+    #[test]
+    fn a_ledger_recipe_is_refused_when_the_ledger_declares_another_prefix() {
+        let scan = ledger_scan_of("entry_prefix: Q\n", LEDGER_F_CALL, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        let f = &scan.failures[0];
+        assert!(
+            f.contains("is not declared by this ledger") && f.contains("declares Q"),
+            "{f}"
+        );
+    }
+
+    #[test]
+    fn a_ledger_recipe_is_refused_when_the_ledger_declares_no_prefix() {
+        let scan = ledger_scan_of("", LEDGER_F_CALL, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("does not declare an entry_prefix"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_ledger_params_call_naming_its_sidecars_collection_is_clean() {
+        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"###;
+        let scan = ledger_scan_of("", call, Some("issues"));
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!((scan.prose, scan.params), (0, 1));
+    }
+
+    #[test]
+    fn a_ledger_params_call_naming_another_collection_is_refused() {
+        let call = r###"doc(action="append_entry", id="x", entry_collection="tasks", id_prefix="WIN", entry={a})"###;
+        let scan = ledger_scan_of("", call, Some("issues"));
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        let f = &scan.failures[0];
+        assert!(
+            f.contains(r#"entry_collection="tasks""#) && f.contains("issues"),
+            "{f}"
+        );
+    }
+
+    #[test]
+    fn a_ledger_params_call_with_no_sidecar_is_refused() {
+        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"###;
+        let scan = ledger_scan_of("", call, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("declares None"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_call_that_is_only_an_ellipsis_is_a_counted_mention_not_a_finding() {
+        let scan = ledger_scan_of(
+            "",
+            r#"Append with ONE doc(action="append_entry", …) call."#,
+            None,
+        );
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!((scan.mentions, scan.prose, scan.params), (1, 0, 0));
+        // The ASCII spelling is the same sentence.
+        let ascii = ledger_scan_of(
+            "",
+            r#"Append with ONE doc(action="append_entry", ...) call."#,
+            None,
+        );
+        assert!(ascii.failures.is_empty(), "{:?}", ascii.failures);
+        assert_eq!(ascii.mentions, 1);
+    }
+    #[test]
+    fn a_mention_in_the_second_spelling_is_counted_too() {
+        // Load-bearing: `doc(append_entry, …)` carries no `action="…"` prefix, so a mention rule that
+        // strips only that spelling files this sentence as a call with no `id_prefix`.
+        let scan = ledger_scan_of("", "Append with ONE doc(append_entry, …) call.", None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!((scan.mentions, scan.prose, scan.params), (1, 0, 0));
+    }
+
+    #[test]
+    fn a_call_with_other_arguments_and_no_id_prefix_is_a_finding_not_a_mention() {
+        // Load-bearing: the mention rule is EXACT. Widened to "no id_prefix", this real recipe
+        // would be swallowed as a sentence about the form and pass unchecked.
+        let scan = ledger_scan_of(
+            "entry_prefix: F\n",
+            r#"doc(action="append_entry", id="x", title="t")"#,
+            None,
+        );
+        assert_eq!(scan.mentions, 0);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("passes no id_prefix"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_ledger_call_with_an_uncitable_prefix_is_refused_before_either_branch() {
+        // Declared, so the declared-prefix arm would ACCEPT it: only the shape check refuses.
+        let call = LEDGER_F_CALL.replace(r#"id_prefix="F""#, r#"id_prefix="toolong""#);
+        let scan = ledger_scan_of("entry_prefix: toolong\n", &call, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("[A-Z]{1,3}"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_ledger_call_that_never_closes_is_a_finding() {
+        let scan = ledger_scan_of(
+            "entry_prefix: F\n",
+            r#"doc(action="append_entry", id="x", id_prefix="F""#,
+            None,
+        );
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("never closes"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn the_second_spelling_is_read_in_a_ledger_too() {
+        // A wrong prefix, so a clean parse cannot satisfy this: only a READ call can fail.
+        let scan = ledger_scan_of(
+            "entry_prefix: F\n",
+            r#"Call doc(append_entry, id_prefix="Q", title=…) to add."#,
+            None,
+        );
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn a_call_inside_an_html_comment_is_read() {
+        // The shipped template keeps its own recipe in a comment, so a scan of the RENDERED text
+        // would see none of the 18 calls that live there.
+        let body =
+            format!("<!-- Insert above this line with ONE call:\n\n   {LEDGER_F_CALL}\n-->\n");
+        let scan = ledger_scan_of("entry_prefix: Q\n", &body, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn every_call_in_a_ledger_is_checked_and_a_finding_names_its_line() {
+        // Load-bearing: the FIRST call is in the second spelling and is the bad one; the second
+        // is also bad. Order is by position, and both are reported.
+        // Lines: 1-4 frontmatter, 5 heading, 6 blank, 7 the second-spelling call, 8 the other.
+        let body = "# t\n\ndoc(append_entry, id_prefix=\"Q\", title=…)\ndoc(action=\"append_entry\", id=\"x\", id_prefix=\"Z\", title=…)\n";
+        let scan = ledger_scan_of("entry_prefix: F\n", body, None);
+        assert_eq!(scan.failures.len(), 2, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("docs/trackers/l.md:7"),
+            "{:?}",
+            scan.failures
+        );
+        assert!(
+            scan.failures[1].contains("docs/trackers/l.md:8"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn only_markdown_files_directly_under_the_ledger_dir_are_ledgers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ledger_fixture(root, "entry_prefix: F\n", "no calls here\n", None);
+        // Both would be findings if read; neither is a ledger.
+        put(root, "docs/trackers/notes.txt", LEDGER_F_CALL);
+        put(root, "docs/trackers/sub/deeper.md", LEDGER_F_CALL);
+        let scan = scan_ledger_recipes(root);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.ledgers, 1);
+    }
+
+    #[test]
+    fn a_ledger_that_does_not_read_is_a_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Frontmatter that opens and never parses.
+        put(
+            root,
+            "docs/trackers/broken.md",
+            "---\nkind: [unclosed\n---\nbody\n",
+        );
+        // A directory named like a ledger: listed by read_dir, unreadable as text.
+        std::fs::create_dir_all(root.join("docs/trackers/dir.md")).unwrap();
+        let scan = scan_ledger_recipes(root);
+        assert_eq!(scan.failures.len(), 2, "{:?}", scan.failures);
+        assert!(
+            scan.failures
+                .iter()
+                .any(|f| f.contains("broken.md") && f.contains("does not parse")),
+            "{:?}",
+            scan.failures
+        );
+        assert!(
+            scan.failures
+                .iter()
+                .any(|f| f.contains("dir.md") && f.contains("cannot be read")),
+            "{:?}",
+            scan.failures
+        );
+        assert_eq!(scan.ledgers, 0);
+    }
 }
