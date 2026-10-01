@@ -31,7 +31,8 @@ use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::{find as cat_find, links};
 use crate::util::fs::RepoPath;
 
-/// Cap on artifacts scanned per run (same spirit as audit_doc_refs's file cap).
+/// Cap on artifacts per run (same spirit as audit_doc_refs's file cap): the default `limit`,
+/// and the floor of the population fetched to resolve against.
 // cap-class: RESULT_CAP link_scan.artifacts — probed
 const MAX_ARTIFACTS_DEFAULT: usize = 10_000;
 /// Caps on findings carried inline in the response.
@@ -46,14 +47,15 @@ struct Args {
     /// `cites` edges.
     #[serde(default)]
     write: bool,
-    /// Cap on artifacts scanned.
+    /// Cap on artifacts WALKED for citations. Resolution still runs against every artifact
+    /// in scope, so a narrowed scan reports what the full scan reports for those sources.
     #[serde(default)]
     limit: Option<usize>,
     /// Skip this many findings per array before filling it. Default 0.
     ///
     /// Named `findings_*` rather than the bare `offset`/`limit` the bug file proposed,
     /// because `limit` on this action is already taken and means something else entirely
-    /// — the cap on *artifacts scanned*. A bare `limit` meaning "artifacts" for one
+    /// — the cap on *artifacts walked*. A bare `limit` meaning "artifacts" for one
     /// caller and "findings" for the next is a silent misread, not an error: both are
     /// integers, both plausible, and the response shape is identical either way.
     #[serde(default)]
@@ -349,20 +351,28 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &cat.conn,
         chrono::Utc::now().timestamp_millis(),
     )?;
-    // Overfetch limit+1 to signal when the artifact scan itself was capped
-    // (silent-cap family).
+    // `limit` bounds the artifacts WALKED, never the population that resolves what they
+    // cite. A definition index or id corpus built from the window calls every citation whose
+    // destination lies outside it dangling (89 of 100 on this tree at `limit=10`), and
+    // resolves a token that is ambiguous across the corpus to its one in-window definer,
+    // which `write=true` then records as an edge. So every artifact in scope is fetched and
+    // parsed, and only the first `source_count` of them are walked and reported.
+    // Overfetch one past the cap to signal when the scan itself was capped (silent-cap
+    // family).
+    let population_cap = limit.max(MAX_ARTIFACTS_DEFAULT);
     let mut rows = cat_find::find(
         &cat,
         &cat_find::FindOpts {
             filter: scoped_filter,
-            limit: limit + 1,
+            limit: population_cap + 1,
             offset: 0,
         },
         cutoff_ms,
     )?;
     rows.retain(|r| !shadowed_mains.contains(r.id.as_str()));
     let scan_truncated = rows.len() > limit;
-    rows.truncate(limit);
+    rows.truncate(population_cap);
+    let source_count = limit.min(rows.len());
 
     // ---- extraction pass (one body parse per artifact) ----
     // `entry_sections` is computed HERE, beside `extract`, because this is the only
@@ -380,6 +390,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             Err(_) => unreadable.push(row.id.clone()),
         }
     }
+
+    // The artifacts this scan WALKS: the window, as opposed to `extracts`, which is every
+    // artifact the resolver can see. Extract indices are row indices, and rows are ordered.
+    let sources = || extracts.iter().filter(|(i, _, _)| *i < source_count);
 
     // Artifact id -> slug. `ArtifactRow` does not carry `slug`, and `entry_cite`
     // is keyed by it on both sides (`src_slug` FKs `artifact(slug)`), so the map is
@@ -532,7 +546,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `<dst_slug>:R-43`, so one entry citing both records one edge and two attributions.
     let mut edges_attributed = 0usize;
 
-    for (i, ex, sections) in &extracts {
+    for (i, ex, sections) in sources() {
         let row = &rows[*i];
         let rel_dir = git_root
             .as_ref()
@@ -783,10 +797,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     // ---- diff (and apply, in write mode) ----
-    let prunable: HashSet<String> = extracts
-        .iter()
-        .map(|(i, _, _)| rows[*i].id.clone())
-        .collect();
+    let prunable: HashSet<String> = sources().map(|(i, _, _)| rows[*i].id.clone()).collect();
     let existing = links::by_rel(&cat, diff::CITES_REL)?;
     let d = diff::diff(&existing, &desired, &prunable, &corpus.ids);
     let (added, pruned) = if args.write {
@@ -815,8 +826,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
     let mut entry_pruned = 0usize;
     if args.write {
-        let scanned_slugs: std::collections::BTreeSet<String> = extracts
-            .iter()
+        let scanned_slugs: std::collections::BTreeSet<String> = sources()
             .filter_map(|(i, _, _)| id_to_slug.get(&rows[*i].id).cloned())
             .collect();
         let now = chrono::Utc::now().timestamp_millis();
@@ -882,7 +892,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "scope": applied.to_json(),
         "write": args.write,
         "counts": {
-            "artifacts_scanned": extracts.len(),
+            "artifacts_scanned": sources().count(),
             "scan_truncated": scan_truncated,
             "unreadable": unreadable.len(),
             "citations": citations_total,
@@ -1890,6 +1900,270 @@ mod tests {
                 umbrella: None,
             }))
             .build()
+    }
+
+    /// Fixture for the narrowed-scan tests: four artifacts, newest first, so `limit` picks
+    /// which of them the scan WALKS.
+    ///
+    /// - `src` (newest) cites `F-1`, `F-2`, a live artifact id, and an id nothing holds. It
+    ///   defines `F-9` itself, which is what makes the `F` prefix *known* and so makes an
+    ///   unresolved `F-n` dangling instead of unrecognised prose (reported nowhere).
+    /// - `ledger-a` defines `F-1` and `F-2`; `ledger-b` defines `F-2` again, so `F-2` is
+    ///   ambiguous across the corpus and `F-1` is not. `ledger-b` also cites an id nothing
+    ///   holds, which only a scan that walks `ledger-b` may report.
+    /// - `dest` is the artifact `src` cites by id.
+    fn narrowed_corpus(tmp: &std::path::Path) -> ToolContext {
+        let cat = Catalog::open_in_memory().unwrap();
+        let files: [(&str, &str, i64, &str); 4] = [
+            ("0123456789abcdef", "dest", 50, "plain body\n"),
+            (
+                "bbbbbbbbbbbbbbbb",
+                "ledger-b",
+                100,
+                "## F-2 — second (b)\n\nSee fedcba9876543210.\n",
+            ),
+            (
+                "aaaaaaaaaaaaaaaa",
+                "ledger-a",
+                200,
+                "## F-1 — first\n\nbody\n\n## F-2 — second (a)\n\nbody\n",
+            ),
+            (
+                "cccccccccccccccc",
+                "src",
+                300,
+                "## F-9 — own entry\n\nCites F-1, F-2, 0123456789abcdef and ffffffffffffffff.\n",
+            ),
+        ];
+        for (id, slug, updated_at, body) in files {
+            let path = tmp.join(format!("{slug}.md"));
+            std::fs::write(&path, body).unwrap();
+            let row = TestArtifactRowBuilder::new(id)
+                .with_abs_path(&path)
+                .with_updated_at(updated_at)
+                .build();
+            art_upsert(&cat, &row).unwrap();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET slug=?1 WHERE id=?2",
+                    rusqlite::params![slug, id],
+                )
+                .unwrap();
+        }
+        let root = tmp.to_path_buf();
+        TestToolContextBuilder::new(cat)
+            .with_root(Root {
+                name: "r".into(),
+                path: root.clone(),
+            })
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: root.clone(),
+                git_root: root,
+                main_root: None,
+                umbrella: None,
+            }))
+            .build()
+    }
+
+    /// The `raw` text of every finding in one array, sorted.
+    fn raws(out: &Value, array: &str) -> Vec<String> {
+        let mut v: Vec<String> = out[array]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["raw"].as_str().unwrap().to_string())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// A narrowed scan must report what the full scan reports for the sources it walked
+    /// (`2026-09-24-a-narrowed-link-scan-reports-citations-dangling-whose-destination-it-never-scanned`).
+    ///
+    /// `limit` bounds the artifacts WALKED. The population that resolves their citations is
+    /// every artifact in scope, so a destination or definer outside the window is still
+    /// found. Measured on this tree with `limit=10`: 89 of 100 reported `dangling` resolved
+    /// in the full scan, 68 entry tokens and 21 artifact ids.
+    ///
+    /// The window here is `src` alone. `F-1` and the id of `dest` are defined outside it, so
+    /// both must resolve; `ffffffffffffffff` is held by nobody and must stay dangling, which
+    /// is what stops "report nothing" from passing.
+    ///
+    /// Mutations that must kill this: build the corpus or the definition index from the
+    /// window again (`F-1` and the live id come back as dangling).
+    #[tokio::test]
+    async fn a_narrowed_scan_resolves_citations_whose_destination_is_outside_the_window() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = narrowed_corpus(tmp.path());
+
+        let out = call(&ctx, json!({ "write": false, "limit": 1 }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            out["counts"]["artifacts_scanned"],
+            json!(1),
+            "control: the window is one artifact, or the rest proves nothing: {out:#?}"
+        );
+        assert_eq!(
+            raws(&out, "dangling"),
+            vec!["ffffffffffffffff".to_string()],
+            "only the id nothing holds is dangling; `F-1` and the live id resolve outside \
+             the window: {out:#?}"
+        );
+    }
+
+    /// An ambiguous token must stay ambiguous when only some of its definers are in the
+    /// window. With `limit=2`, `src` and `ledger-a` are in and `ledger-b` is out, so a
+    /// window-built index sees ONE definer of `F-2` and resolves it to an edge: a citation
+    /// the full scan refuses, written as a `cites` edge under `write=true`.
+    ///
+    /// Mutation that must kill this: build the definition index from the window.
+    #[tokio::test]
+    async fn a_narrowed_scan_keeps_a_token_ambiguous_when_one_definer_is_outside_the_window() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = narrowed_corpus(tmp.path());
+
+        let out = call(&ctx, json!({ "write": false, "limit": 2 }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            raws(&out, "ambiguous"),
+            vec!["F-2".to_string()],
+            "`F-2` has two definers across the corpus, whatever the window: {out:#?}"
+        );
+    }
+
+    /// The window still bounds what is REPORTED. `ledger-b` cites an id nothing holds; it is
+    /// outside `limit=1`, so a narrowed scan must not report it, and the full scan must.
+    ///
+    /// Without this, "resolve against everything" could be implemented as "walk everything",
+    /// and the two tests above would still pass.
+    ///
+    /// Mutation that must kill this: walk every extract rather than the window.
+    #[tokio::test]
+    async fn a_narrowed_scan_reports_only_the_sources_it_walked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = narrowed_corpus(tmp.path());
+
+        let narrowed = call(&ctx, json!({ "write": false, "limit": 1 }))
+            .await
+            .unwrap();
+        let full = call(&ctx, json!({ "write": false })).await.unwrap();
+
+        assert!(
+            !raws(&narrowed, "dangling").contains(&"fedcba9876543210".to_string()),
+            "ledger-b is outside the window and must not be walked: {narrowed:#?}"
+        );
+        assert_eq!(
+            raws(&full, "dangling"),
+            vec![
+                "fedcba9876543210".to_string(),
+                "ffffffffffffffff".to_string()
+            ],
+            "control: the full scan walks both and reports both: {full:#?}"
+        );
+        assert_eq!(
+            narrowed["counts"]["scan_truncated"],
+            json!(true),
+            "a narrowed scan still says it is narrowed: {narrowed:#?}"
+        );
+    }
+
+    /// A source the scan did not walk keeps its `cites` edges. Resolution now reads every
+    /// artifact, so an unwalked source is *parsed* but its citations are not turned into
+    /// `desired`; pruning against the whole population would call every one of its edges
+    /// stale. The edge `ledger-a -> dest` has no prose behind it, so it is the full scan's
+    /// to remove and never a narrowed one's: under `write=true` the catalog has no undo.
+    ///
+    /// The full scan is the control. Without it, "kept" is what a scan that prunes nothing
+    /// also reports.
+    ///
+    /// Mutation that must kill this: bound the prune's sources by every extract instead of
+    /// the window.
+    #[tokio::test]
+    async fn a_narrowed_scan_never_reports_stale_the_edges_of_a_source_it_did_not_walk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = narrowed_corpus(tmp.path());
+        links::insert_with(
+            &ctx.catalog.lock().conn,
+            &links::LinkRow {
+                src_id: "aaaaaaaaaaaaaaaa".into(),
+                dst_id: "0123456789abcdef".into(),
+                rel: diff::CITES_REL.into(),
+                created_at: 0,
+            },
+        )
+        .unwrap();
+
+        let narrowed = call(&ctx, json!({ "write": false, "limit": 1 }))
+            .await
+            .unwrap();
+        let full = call(&ctx, json!({ "write": false })).await.unwrap();
+
+        assert_eq!(
+            full["counts"]["edges_stale"],
+            json!(1),
+            "control: with both ends in scope and no prose behind it the edge IS stale: {full:#?}"
+        );
+        assert_eq!(
+            narrowed["counts"]["edges_stale"],
+            json!(0),
+            "`ledger-a` was not walked, so nothing was looked at that could contradict its \
+             edge: {narrowed:#?}"
+        );
+    }
+
+    /// The entry-grain twin, and the one that deletes: `write=true` prunes every
+    /// scanner-origin `entry_cite` row whose source slug was scanned, then re-derives. A
+    /// slug the scan only parsed has nothing re-derived, so pruning it loses the rows.
+    ///
+    /// Control as above: the full write scan must remove `ledger-b`'s row, or "still there"
+    /// proves only that nothing was pruned.
+    ///
+    /// Mutation that must kill this: derive `scanned_slugs` from every extract.
+    #[tokio::test]
+    async fn a_narrowed_write_scan_leaves_the_entry_rows_of_a_source_it_did_not_walk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = narrowed_corpus(tmp.path());
+        ctx.catalog
+            .lock()
+            .conn
+            .execute(
+                "INSERT INTO entry_cite (src_slug, src_local, dst_ref, rel, origin, created_at) \
+                 VALUES ('ledger-b', 'F-2', 'dest', ?1, ?2, 0)",
+                rusqlite::params![diff::CITES_REL, entry_cite::ORIGIN_SCAN],
+            )
+            .unwrap();
+        let rows_of_ledger_b = || -> i64 {
+            ctx.catalog
+                .lock()
+                .conn
+                .query_row(
+                    "SELECT count(*) FROM entry_cite WHERE src_slug='ledger-b'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+
+        call(&ctx, json!({ "write": true, "limit": 1 }))
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_of_ledger_b(),
+            1,
+            "`ledger-b` was not walked; its scanner rows are not this scan's to prune"
+        );
+
+        call(&ctx, json!({ "write": true })).await.unwrap();
+        assert_eq!(
+            rows_of_ledger_b(),
+            0,
+            "control: the full scan walks `ledger-b`, finds no prose behind the row, and \
+             prunes it"
+        );
     }
 
     /// Paging reaches the WHOLE population, and each page is disjoint from the last.
