@@ -14,8 +14,8 @@ entry_prefix:
 - DWF
 - DCS
 snapshot_anchor: '| ID | Date UTC | Kind | Sampling | Capture key |'
-entry_high_water_DWF: 14
-entry_high_water_DCS: 14
+entry_high_water_DWF: 15
+entry_high_water_DCS: 15
 ---
 
 # Deep-agent workflow observations and session coverage
@@ -113,6 +113,8 @@ Use the frozen baseline query and declared UTC bounds for new usage aggregates; 
 | DCS-13 | 2026-09-27 | coverage | session-receipt | b4de6398:session |
 | DWF-14 | 2026-09-28 | workflow | routine-first (retrospective) | 82cff72e/phase1b-s2-step3-4 |
 | DCS-14 | 2026-09-28 | coverage | session-receipt | 82cff72e/fork-2026-09-26-to-28 |
+| DWF-15 | 2026-10-01 | workflow | routine-first | 2e3f6b65-pr30-review |
+| DCS-15 | 2026-10-01 | coverage | session-receipt | 2e3f6b65-pr30-review |
 
 ## DWF-1 — Historical seed — discriminate an edit-miss hypothesis
 
@@ -791,6 +793,64 @@ No new DWF or DCX sample was taken; the routine samples above stand. The interva
 - **The fix for `d59ef0849a8f45cb`** (`04973710`, archived `9b4f1e02`): archiving an unanchored fixed or mitigated bug is now refused.
 
 No new DWF or DCX sample was taken, and the routine samples above stand. Gap: the four review subagents' own tool calls were not inspected. The interval now ends about 19:40Z. Commits since the previous update: `de0dcae4`, `add2718d`, `54871686`, `16267599`, `d4d3d0c9`, `04973710`, `9b4f1e02` and the one carrying this update. Overhead for this update: about 2 tool calls.
+
+## DWF-15 — Review of external PR #30 (doctor --scope): duplicate of unpushed local work found by a local-HEAD grep; tests, three mutants, fmt and clippy checked (retrospective)
+
+**Status:** observed
+**Valid:** dated 2026-10-01
+
+**Sampling / capture mode:** `routine-first`, selected after the outcome was known, so **`retrospective`**. Pre-action facts below are limited to what the conversation held before the review's dependent steps; nothing is reconstructed from later findings.
+
+**Selection note:** the session opened with an intake lookup (workspace activate, `gh pr list`, `gh pr view 30`). It is treated here as the intake of this case, not as a separate sample. A reviewer may judge that lookup to have been the first eligible task instead. The choice was made retrospectively.
+
+**Identity / key / times:** key `2e3f6b65-pr30-review`. Actor and collector: the coordinating host agent, no delegates. Provider/model: Anthropic Sonnet 5.5 (`claude-sonnet-5-5`), from the session's system prompt. Start: unknown (not timed). Captured 2026-10-01, after 11:55:17Z. Finish: unknown; the written review report to the operator follows this entry.
+
+**Task / authority / substrate:** Objective: review external PR #30 (`bounty/doctor-scope`, by `sdumitr3`) against issue #24 for the operator. Authority as instructed: review only. The operator's mid-task instruction was "we don't fix but we tell him how the review went". No edits to the PR, no comments posted, no pushes, no commits. Writes to the shared checkout: tracker entries `bug-fix-session-log:F-189` and `W-150` and this entry, all uncommitted. Workspace `/home/marius/work/claude/codescout`, branch `experiments`, HEAD `88abe4bb`, 33 commits ahead of `origin/experiments` `108b1097` at the time of the first check. Dirty state at session start: untracked `AI` only; later modified files in the tree belong to peer sessions. Target paths: `src/cli/doctor.rs`, `docs/trackers/bug-fix-session-log.md`.
+
+**Pre-action evidence:** `gh pr list` and one `gh pr view 30` showed: title "Commit for issue #24", base `experiments`, 2 files, +147/-59, `mergeable: CONFLICTING`, no checks, no review decision, and the first 600 characters of the body ("Adds the `--scope` flag to the `codescout doctor` CLI."). Not yet known: the issue text, the diff, the PR's test claims, and the state of `doctor.rs` in the local tree. Uncertainty: why no CI ran, and whether the local tree differed from origin.
+
+**Initial next action / completion check:** Intended, and stated to the operator before the go-ahead: read the PR diff against issue #24, and check out the branch and run the gate. Completion check as stated: diff reviewed against the issue's acceptance criteria and the tests run. Not stated in advance: mutation runs, trial merges and the lint checks, which were added during the work.
+
+**Trajectory (actual, in order; handles are not durable):**
+1. `gh issue view 24`, `gh pr view 30`, `gh pr diff 30` in one batch. The diff came back truncated ("283 lines omitted").
+2. `git fetch origin pull/30/head` into a local review ref; merge-base and behind-count (319 commits behind).
+3. `git diff` of `src/cli/doctor.rs`, read in two slices from a buffer.
+4. `grep SCANNER_PARAMS_THE_CLI_OMITS` on the working tree returned an **empty list**, which the PR's base did not have. This was the unplanned finding. Followed by `git log` on the file (`49d08af3`, `08012755`), `git merge-tree` against `origin/experiments` and against local HEAD, and a grep of the scanner's scope handling.
+5. Isolated worktree at `ae45438c` in a leased target slot: `cargo test --lib cli::doctor`, 6 passed.
+6. Three mutants (M1 forwarding, M2 consumption, M3 effect), each run and reverted.
+7. Authorship dates (`git show -s`), the author's PR history, and a second worktree for `cargo fmt --check` and `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`.
+8. A grep for stale references to the renamed test.
+
+**Failed attempts and guidance:** a piped `git status | head` was blocked by the pipe gate and rerun bare; `sed` on a script was blocked by the source gate and `read_file` was used; a whole-file `git show` of a 17k-line tracker returned a wall of omitted lines when a diff was the right call; `git checkout -- .` was held for acknowledgement and dropped as unnecessary; M3 failed to compile once (a private enum path) and was corrected.
+
+**Effects / recovery:** no repository change beyond the trackers. Two scratch worktrees were created and removed, one local review ref was created and deleted, and `slot-0` was leased (no shared `target/`). Each mutant was reverted before the next. A human redirected the work twice: the "review properly" go-ahead, and the "we don't fix" instruction.
+
+**Outcome / basis:** `good` (collector's own reading, provisional) / `partial`. Established by named checks at PR head `ae45438c`: 6 `cli::doctor` lib tests pass; M1 killed by 3 tests, M2 by 1, M3 by 1 at the population assertion; `cargo fmt --check` exit 0; the long clippy form exit 0; trial merges conflict in `doctor.rs` and the tracker against local HEAD and in the tracker only against `origin/experiments`. Not established: either full test lane (only `cli::doctor` ran) and CI (none ran on the fork PR). Against the stated check, the diff review and targeted tests are complete; "run the gate" was met only in part (fmt, clippy, one module).
+
+**Delegation candidate (proposal only):** the deterministic spine is a drift check (for each symbol a PR edits or removes, grep local HEAD and origin and compare), two `git merge-tree` trial merges, targeted tests and a per-site mutation in a leased worktree, and a lint pass. The judgement stays with the host. The finding that mattered came from which symbol the grep happened to name, not from a rule, so a worker would need that check made explicit. Authorship-date ordering was also checked only late and by hand.
+
+**Rests on / grouping:** PR #30 head `ae45438c`, issue #24, local `49d08af3` and `08012755`, `origin/experiments` `108b1097`. Canonical incident records `bug-fix-session-log:F-189` and `bug-fix-session-log:W-150` are linked, not duplicated. Grouped with this session's DCS receipt. Capture overhead: not timed; roughly a dozen tool calls to read the two ledgers' recipes and the receipt protocol (an estimate).
+
+## DCS-15 — Session coverage receipt, session 2e3f6b65, 2026-10-01: PR #30 review (partial, routine sample retrospective)
+
+**Status:** observed
+**Valid:** dated 2026-10-01
+
+| Field | Record |
+|---|---|
+| Session / principal / collector | Harness session `2e3f6b65-1c8d-49ac-896d-ffceae46ece6` (taken from the scratchpad path). Coordinating host agent, Anthropic Sonnet 5.5; the collector is the same agent. |
+| Observed interval (UTC) | Start unknown (not timed). End: the capture of this receipt, 2026-10-01 after 11:55:17Z. The session was still running, so this receipt is updated in place rather than a second one counted. |
+| Workspace | `/home/marius/work/claude/codescout`, branch `experiments`. |
+| Coverage | `partial`. The protocol was not applied from the start of the session: its recipes were read only at capture time, which is why the routine sample is retrospective. |
+| DWF routine | `DWF-15`, `retrospective`. The pre-action section is limited to what was known before the review's dependent steps. |
+| DWF enrichment | none selected. |
+| DCX routine | `missed-capture`. An eligible opportunity existed (a manual lookup of the issue and diff immediately before the first substantive conclusion), and no pre-action context fields were frozen. No DCX entry was written. |
+| DCX enrichment | none selected. |
+| Native / delegated / unobserved gaps | No subagents. One native `Read` of a skill reference file, which `usage.db` does not record. Native `Bash`, `Write` and `Edit` are harness-denied, so all shell work went through `run_command`, whose calls are in `usage.db`. GitHub side effects: none beyond a fetch of the PR's head ref (no comment, label, push or closure). |
+| Collection overhead | Not timed. Estimated at roughly a dozen tool calls to read the ledger recipes and protocol, plus the entry writes (`DWF-15`, this receipt, and the separate `F-189` and `W-150` session-log entries). Nothing was displaced from the review itself. |
+| Unresolved pending entries | None in this ledger. `bug-fix-session-log:F-189` is open and tracked there. The written review report to the operator was still to be delivered at capture time. |
+
+**Notes:** the operator's instruction changed mid-session from "review properly" to "we don't fix; tell the author how it went". That changes the task authority recorded in `DWF-15`, not the sampling. This observation is collected under study instructions that can change behavior, so it is not a before/after comparison.
 
 ## Template for new entries
 

@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 188
-entry_high_water_W: 149
+entry_high_water_F: 189
+entry_high_water_W: 150
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,6 +65,7 @@ entry_high_water_W: 149
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-189 | 2026-10-01 | med | plan-drift | open | **An open issue and an open PR both described `--scope` as outstanding while local `experiments` had already shipped it, unpushed** - found only by grepping local HEAD; the PR conflicts in `doctor.rs` and collides on `W-146`. |
 | F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
 | F-188 | 2026-09-30 | med | doc-vs-code | open | **A bug file's mechanism claim ("the gate skips a closed wrapper list") was false: the gate never calls `producer_index`, so `env`/`FOO=1`/`time cat` all bypass, and PR #29 it leaned on was unmerged** - measured on the live binary before any code; only the `&` half fixed. |
 | F-186 | 2026-09-30 | med | cross-session | open | **Five packet bug files read `status: open` while a live session held three of them, and only a red baseline said so** - 7 of 776 red before my first edit; provenance named the writer; none of the bugs was `taken`. |
@@ -262,6 +263,7 @@ entry_high_water_W: 149
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-150 | 2026-10-01 | med | **Three mutants at three sites separated "the label says repo" from "the population is repo", and only the third reached the population assertion.** Reading which assertion killed each mutant, not how many died. | Inferred: M2's kill would have been reported as covering the whole property while the population assertion behind the label check stayed unexercised. Observed: M3 failed at `:427` alone, with the label still `repo`. | validated |
 | W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
 | W-149 | 2026-09-30 | med | **A comment predicting the exact regression sat beside a fixture that could not see it.** Reading what the fixture PASSES (`is_write=false` hard-coded for `"workspace"`), not what it asserts, exposed the gap. | Inferred: an exemption fix with both old guards green and the exemption unguarded. Observed: widening it was caught by the new exact-set pin alone. | validated |
 | W-147 | 2026-09-30 | med | size the fixture to the limit rather than re-derive boundaries | ~8 hand-derived literals avoided, each a chance for a still-green off-by-N | validated |
@@ -17351,6 +17353,44 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 **Cost:** had I implemented the filed fix (add `sudo`/`xargs` to `producer_index`) the wrapper bypass would have stayed open for the most common wrappers, and the change would have forked the head rule #29 exists to unify and conflicted with it. Instead only the `&` mechanism was fixed, the wrapper half deferred with its test table.
 
 **Status:** open until #29 lands and the `sudo`/`xargs` follow-up is done.
+
+## F-189 — An open issue and an open PR both described work as outstanding that local `experiments` had already shipped, unpushed
+
+**Valid:** dated 2026-10-01
+
+**Observed:** 2026-10-01, reviewing PR #30 (bounty for issue #24 / `BL-65`: add `--scope` to `codescout doctor`). The issue and the PR are both written against `origin/experiments` (`108b1097`), where `SCANNER_PARAMS_THE_CLI_OMITS` still holds a `scope` entry. The local tree (HEAD `88abe4bb`, 33 commits ahead of `origin/experiments` at that instant) does not: `49d08af3` already adds the flag with a clap `value_parser`, deletes the omission and adds parse/args-map tests, and `08012755` archives the bug. It surfaced only because a working-tree `grep` for `SCANNER_PARAMS_THE_CLI_OMITS` returned an empty-list definition that the PR's diff base did not contain. Neither the issue text nor the PR diff contains any hint that the work exists.
+
+**Effects, measured by `git merge-tree` and a grep of the tracker:** merging the PR head onto local HEAD conflicts in `src/cli/doctor.rs` and in `docs/trackers/bug-fix-session-log.md`; onto `origin/experiments` it conflicts only in the tracker. The PR's hand-added `W-146` collides with `W-146`..`W-149` already on `experiments` (the PR sets `entry_high_water_W: 146`; the ledger is at 149).
+
+**What the local work lacked:** no test calls `doctor::call` with two different scopes and compares what each scans, which is the issue's own second acceptance criterion. The PR's test does; see the W entry recorded with this one.
+
+**Rule for next time:** before reviewing an external PR against an issue, `grep` local HEAD for the thing the issue says is missing. Origin-versus-local lag is invisible from the issue and the PR, because both are written against origin. Do the cheap local check before the expensive build.
+
+**Status:** open. The decision is the operator's: push the local commits (33 ahead, not all this session's), or close/redirect the PR.
+
+**Correction, 2026-10-01 (same day, after reading the authorship dates):** the title and the first paragraph read as if the PR were the latecomer. The dates say the opposite. The contributor's commit `ae45438c` was authored 2026-09-28 and PR #30 was opened 2026-09-30T11:33Z; the local `49d08af3` was authored 2026-10-01T10:26+03:00, after the PR already existed. So the duplicate sits on the local side: the bounty issue was implemented locally while an open PR addressed it. The record does not show whether the session that wrote `49d08af3` looked for an open PR. The rule for next time is therefore stronger than the one above: before implementing a `bounty-hunting` issue locally, search for an open PR that names it (`gh pr list --search "<issue number>"`), because the issue itself stays open and says nothing.
+
+**Rests on:** `git rev-parse HEAD origin/experiments` (`88abe4bb` / `108b1097`), `git log origin/experiments..HEAD -- src/cli/doctor.rs`, `git merge-tree --write-tree` against both, and a grep of this ledger's `## W-14x` headings. The 33-ahead count belongs to that instant and that tree.
+
+## W-150 — Three mutants at three sites separated "the label says repo" from "the population is repo"
+
+**Valid:** dated 2026-10-01
+
+**Observed:** 2026-10-01, reviewing PR #30. Its new test `scope_flag_reaches_the_scanner_and_changes_its_population` was mutated in an isolated worktree at PR head `ae45438c` (leased target slot, shared checkout untouched), one mutant at a time, each reverted before the next:
+
+| mutant | site | result |
+|---|---|---|
+| M1 | `to_tool_args` stops inserting `scope` | killed by 3 tests, including the new one |
+| M2 | scanner's `resolve_scope` is passed `None` instead of `args.scope` | killed by the new test **only**, at `src/cli/doctor.rs:426` (`applied` label: `project` != `repo`) |
+| M3 | `DoctorScope::new` is given `Scope::Project` regardless, label still `repo` | killed at `:427`, the **population** assertion |
+
+**Pattern:** for a "flag reaches the scanner" test, mutate at three different sites and read WHICH assertion kills each: the forwarding site, the consuming site, and the effect site where a label and a population can disagree. A test with several assertions in sequence is killed by the first one that fires, so one kill is not evidence about the assertions behind it.
+
+**Counterfactual:** M2 alone would have been enough to report the test as killing "the scanner ignores scope", and it would have credited the population assertion with coverage it had not shown, because the label check at `:426` fires first. The issue names exactly that defect (a report that asserts a scope it did not apply). M3 is the only mutant that reaches `:427`, and it was written specifically to bypass the label.
+
+**Status:** validated, one datapoint. This is the one-mutation-per-SITE law from CLAUDE.md § Testing Discipline applied to assertion order within a single test.
+
+**Rests on:** the bytes of `ae45438c`. The verdict measures those bytes, so a rewrite of the test or of `to_tool_args` invalidates it. Mutants were reverted and the worktree removed; only the 6 `cli::doctor` lib tests were run, not the full gate.
 
 ## Template for new entries
 
