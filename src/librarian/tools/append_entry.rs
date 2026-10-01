@@ -3240,6 +3240,62 @@ mod taxonomy_recipes {
         );
     }
 
+    const SIDECAR_R_CALL: &str = r###"doc(action="append_entry", id="x", id_prefix="R", anchor_heading="## T", title=…, body=…)"###;
+
+    #[test]
+    fn only_yaml_files_in_the_sidecar_dir_are_sidecars() {
+        // Load-bearing: `notes.txt` would NOT read as a sidecar (it is not valid YAML), so a scan
+        // that lists every file in the directory reports it as a finding.
+        let dir = tempfile::tempdir().unwrap();
+        sidecar_fixture(dir.path(), "entry_prefix: [R]\n", SIDECAR_R_CALL, None);
+        put(
+            dir.path(),
+            "docs/augmentations/notes.txt",
+            "prompt: [unclosed\n",
+        );
+        let scan = scan_sidecar_prompts(dir.path());
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.sidecars, 1);
+    }
+
+    #[test]
+    fn only_markdown_files_can_own_a_sidecar() {
+        // Load-bearing: the stray file declares the SAME sidecar the real ledger does. Read as an
+        // owner it makes the sidecar's ownership two artifacts, which is a finding.
+        let dir = tempfile::tempdir().unwrap();
+        sidecar_fixture(dir.path(), "entry_prefix: [R]\n", SIDECAR_R_CALL, None);
+        put(
+            dir.path(),
+            "docs/notes.txt",
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/l.yaml\nentry_prefix: R\n---\nx\n",
+        );
+        let scan = scan_sidecar_prompts(dir.path());
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.calls.len(), 1);
+    }
+
+    #[test]
+    fn a_prose_call_in_an_orphan_sidecar_reports_the_orphan_and_nothing_else() {
+        // Load-bearing: with no owning ledger there is no declaration to compare against. Treated
+        // as an empty one, the same call is ALSO reported as refused for a ledger named ``.
+        let dir = tempfile::tempdir().unwrap();
+        put(
+            dir.path(),
+            "docs/augmentations/l.yaml",
+            &format!(
+                "prompt: {}\n",
+                serde_json::to_string(SIDECAR_R_CALL).unwrap()
+            ),
+        );
+        let scan = scan_sidecar_prompts(dir.path());
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("no artifact under docs/"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
     #[test]
     fn a_sidecar_that_does_not_read_is_a_finding() {
         let dir = tempfile::tempdir().unwrap();
