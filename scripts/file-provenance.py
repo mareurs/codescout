@@ -542,6 +542,27 @@ def write_targets(name: str, inp: dict, root: Path):
             yield from python_write_targets(cmd)
 
 
+# The active tree after a `workspace(action="activate")` whose path this script cannot resolve.
+# A bare token with no separator is a workspace PROJECT ID, the server's own rule for telling an id
+# from a path, and only the workspace manifest can map an id to a root. That manifest is
+# gitignored, per machine, and not exhaustive (auto-discovered projects are absent from it), so
+# the script does not guess: a relative codescout write made while the tree is this value is
+# credited to nobody, which is the answer `fmt-mine` refuses on rather than acts on. Compared by
+# IDENTITY and never resolved, joined or normalised: it is not a path.
+UNKNOWN_TREE = Path("<unresolvable workspace id>")
+
+
+def is_workspace_id(value: str) -> bool:
+    """True when `value` is a bare token the server reads as a project id, not a path.
+
+    The server's rule (get_guide `workspace-state`): no `/` means a project id, anything else a
+    path. `.` and `..` are spelled without a separator and are unmistakably paths, so they are
+    carved out; an empty string is not a token at all.
+    """
+    return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
+
+
+
 def write_base(name, inp, active: Path | None, cwd: Path | None) -> Path | None:
     """The directory a relative path in this tool call was written against.
 
@@ -555,6 +576,7 @@ def write_base(name, inp, active: Path | None, cwd: Path | None) -> Path | None:
         if isinstance(inp, dict) and isinstance(inp.get("workspace"), str):
             base = Path(inp["workspace"])
         if (name == "mcp__codescout__run_command" and base is not None
+                and base is not UNKNOWN_TREE
                 and isinstance(inp, dict) and isinstance(inp.get("cwd"), str)):
             base = base / inp["cwd"]
         return base
@@ -579,17 +601,25 @@ def activated_tree(name, inp, active: Path | None) -> Path | None:
     """`active` after this call: a `workspace(action="activate", path=...)` moves it.
 
     Read from the REQUEST; a refused activation would be misread as a move. Accepted:
-    activation is rarely refused, and a wrong base only ever mis-files a relative path
-    between two trees -- it never invents a write.
+    activation is rarely refused.
+
+    The tool takes a project path OR a workspace project id, and an id is not a directory, so
+    reading every value as a path credited a later relative write to `<active>/<id>`: a path
+    that exists in no tree. An id yields `UNKNOWN_TREE` instead, and so does a relative path
+    taken from a tree that is already unknown. Anything else moves the tree as it always did,
+    so a wrong base here can still mis-file a relative path between two trees, but it no longer
+    names a tree that is not there.
     """
     if name != "mcp__codescout__workspace" or not isinstance(inp, dict):
         return active
     if inp.get("action") != "activate" or not isinstance(inp.get("path"), str):
         return active
     target = Path(inp["path"])
-    if not target.is_absolute() and active is not None:
-        target = active / target
-    return target
+    if target.is_absolute():
+        return target
+    if is_workspace_id(inp["path"]) or active is UNKNOWN_TREE:
+        return UNKNOWN_TREE
+    return active / target if active is not None else target
 
 
 def transcript_files(root: Path) -> list[Path]:
@@ -681,9 +711,19 @@ def session_activations(files: list[Path]) -> dict[str, dict]:
             if root_of is None and isinstance(rec.get("cwd"), str):
                 root_of = checkout_root(rec["cwd"])
             for b in blocks:
-                target = activated_tree(b.get("name"), b.get("input"), None)
-                if target is None:
+                # `activated_tree` returns `None` for a call that is NOT an activation, but only
+                # when it is given no active tree: handed one, it returns that tree unchanged,
+                # which this loop would read as an activation of it. So ask once with None to
+                # decide WHETHER this is an activation, then again with the checkout root to
+                # decide WHERE it points: a relative PATH activation (`.`, `crates/x`) names a
+                # tree under that root, and `target.resolve()` below would otherwise read it from
+                # wherever this script is started. An id comes back as UNKNOWN_TREE, a path under
+                # the script's cwd that never equals the root, so `resolve()` reads it as a move
+                # without a special case: an explicit `is UNKNOWN_TREE` clause here was inert, no
+                # input distinguishing it from the comparison, and was deleted.
+                if activated_tree(b.get("name"), b.get("input"), None) is None:
                     continue
+                target = activated_tree(b.get("name"), b.get("input"), root_of)
                 fs = facts.setdefault(record_session(rec, fallback),
                                       {"parent_activated": False, "sub_activated_at": None})
                 if is_sub:
@@ -738,8 +778,11 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                 name, inp = b.get("name"), b.get("input")
                 base = write_base(name, inp, active, cwd)
                 relative_cs = isinstance(name, str) and name.startswith("mcp__codescout__")
+                # The base is UNKNOWN_TREE after an id activation, unless this call pins an
+                # absolute `workspace=`, which write_base reads in preference to the active tree.
+                tree_unknown = base is UNKNOWN_TREE
                 for raw in write_targets(name, inp, root):
-                    if unknowable and relative_cs and not Path(raw).is_absolute():
+                    if (unknowable or tree_unknown) and relative_cs and not Path(raw).is_absolute():
                         continue
                     rel = normalize(raw, root, base)
                     if rel:

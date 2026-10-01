@@ -50,6 +50,15 @@ hasnt() { # hasnt <label> <haystack> <needle>
     fi
 }
 
+eq() { # eq <label> <actual> <expected>  -- the WHOLE value, where has/hasnt look for a fragment
+    if [ "$2" = "$3" ]; then
+        PASS=$((PASS + 1)); echo "  ok   $1"
+    else
+        FAIL=$((FAIL + 1)); echo "  FAIL $1 -- expected exactly: '$3'"
+        printf '       got: %s\n' "$2" | head -5
+    fi
+}
+
 ME="11111111-aaaa-bbbb-cccc-000000000001"
 PEER="22222222-aaaa-bbbb-cccc-000000000002"
 
@@ -1172,6 +1181,114 @@ ts_tool_use "$MDIR/$S10.jsonl" "$MAIN" $S10 2026-09-20T10:00:00Z mcp__codescout_
 ts_tool_use "$MDIR/$S10.jsonl" "$MAIN" $S10 2026-09-20T10:01:00Z mcp__codescout__run_command '{"command":"echo x > via_cwd.rs","cwd":"sub"}'
 has   "run_command cwd= resolves under the active worktree" \
       "$(run_in "$WT" sub/via_cwd.rs)" "aaaaaaaa"
+
+echo
+echo "== a workspace project id is not a path (046f3106) =="
+# `workspace(action="activate", path=...)` takes a project path OR a workspace project id, and
+# an id is not a directory: `activated_tree` read it as one and joined it onto the active tree,
+# so every later relative write was credited to `<active>/<id>`, a path that exists in no tree.
+# The script cannot resolve an id (the manifest lists only declared projects, and this repo's
+# lists one of its two), so after an id activation the active tree is UNKNOWABLE and a relative
+# write is credited to nobody -- the same answer the subagent cases above give, and the safe one
+# for fmt-mine. Each `hasnt` below has a `has` control that differs only in how the activation is
+# spelled, so a tool that ignores every write cannot pass the pair.
+mkdir -p "$MAIN/crates/emb/src"
+ACT_ID='{"action":"activate","path":"emb-id"}'
+# An id whose name is NOT its root directory's, which is the only case where `<active>/<id>` is
+# visibly wrong; an id equal to its directory name works by accident.
+
+# credited_to <root> <session-prefix>: EVERY path scan() credits to that session, sorted, one per
+# line. The CLI answers about one path at a time, so `hasnt <the old phantom path>` cannot tell
+# "credited nowhere" from "credited somewhere else": a fix that only renamed the garbage path
+# would pass it. This asks the whole question. The script is imported, not run (it has a
+# __main__ guard).
+credited_to() {
+    HOME="$H" python3 - "$TOOL" "$1" "$2" <<'PY'
+import importlib.util, sys
+from pathlib import Path
+tool, root, prefix = sys.argv[1:4]
+spec = importlib.util.spec_from_file_location("fp", tool)
+fp = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fp)
+print("\n".join(sorted(p for p, ws in fp.scan(Path(root)).items()
+                       if any(w.startswith(prefix) for w, _ in ws))))
+PY
+}
+
+# (A) activate by id, then write relatively.
+SA=b1b1b1b1-aaaa-bbbb-cccc-0000000000a1
+ts_tool_use "$MDIR/$SA.jsonl" "$MAIN" $SA 2026-09-21T10:00:00Z mcp__codescout__workspace "$ACT_ID"
+ts_tool_use "$MDIR/$SA.jsonl" "$MAIN" $SA 2026-09-21T10:01:00Z mcp__codescout__create_file '{"path":"src/lib.rs","content":"x"}'
+hasnt "an id activation does not credit a path that exists in no tree" \
+      "$(run_in "$MAIN" emb-id/src/lib.rs)" "b1b1b1b1"
+hasnt "and the real file is not guessed either: the tree is unknowable, not the checkout" \
+      "$(run_in "$MAIN" crates/emb/src/lib.rs)" "b1b1b1b1"
+eq    "an id activation credits this session with no path at all, under any name" \
+      "$(credited_to "$MAIN" b1b1b1b1)" ""
+
+# CONTROL for (A): the same project activated by ABSOLUTE path is credited.
+SB=b2b2b2b2-aaaa-bbbb-cccc-0000000000a2
+ts_tool_use "$MDIR/$SB.jsonl" "$MAIN" $SB 2026-09-21T10:00:00Z mcp__codescout__workspace "{\"action\":\"activate\",\"path\":\"$MAIN/crates/emb\"}"
+ts_tool_use "$MDIR/$SB.jsonl" "$MAIN" $SB 2026-09-21T10:01:00Z mcp__codescout__create_file '{"path":"src/lib.rs","content":"x"}'
+has   "the same project activated by absolute path IS credited" \
+      "$(run_in "$MAIN" crates/emb/src/lib.rs)" "b2b2b2b2"
+eq    "and credited with exactly that one path" \
+      "$(credited_to "$MAIN" b2b2b2b2)" "crates/emb/src/lib.rs"
+
+# Unknowable ends at the next absolute activation, or the fix would skip every later write.
+SC=b3b3b3b3-aaaa-bbbb-cccc-0000000000a3
+ts_tool_use "$MDIR/$SC.jsonl" "$MAIN" $SC 2026-09-21T10:00:00Z mcp__codescout__workspace "$ACT_ID"
+ts_tool_use "$MDIR/$SC.jsonl" "$MAIN" $SC 2026-09-21T10:01:00Z mcp__codescout__workspace "{\"action\":\"activate\",\"path\":\"$MAIN/crates/emb\"}"
+ts_tool_use "$MDIR/$SC.jsonl" "$MAIN" $SC 2026-09-21T10:02:00Z mcp__codescout__create_file '{"path":"src/recovered.rs","content":"x"}'
+has   "an absolute activation after an id restores a known tree" \
+      "$(run_in "$MAIN" crates/emb/src/recovered.rs)" "b3b3b3b3"
+eq    "and only the write made after it is credited" \
+      "$(credited_to "$MAIN" b3b3b3b3)" "crates/emb/src/recovered.rs"
+
+# A call pinned with an absolute `workspace=` does not depend on the active tree at all.
+SD=b4b4b4b4-aaaa-bbbb-cccc-0000000000a4
+ts_tool_use "$MDIR/$SD.jsonl" "$MAIN" $SD 2026-09-21T10:00:00Z mcp__codescout__workspace "$ACT_ID"
+ts_tool_use "$MDIR/$SD.jsonl" "$MAIN" $SD 2026-09-21T10:01:00Z mcp__codescout__create_file "{\"path\":\"src/pinned_after_id.rs\",\"workspace\":\"$WT\",\"content\":\"x\"}"
+has   "a call pinned to an absolute workspace= is still credited after an id activation" \
+      "$(run_in "$WT" src/pinned_after_id.rs)" "b4b4b4b4"
+eq    "and credited with exactly that path, in the pinned tree" \
+      "$(credited_to "$WT" b4b4b4b4)" "src/pinned_after_id.rs"
+
+# A relative PATH taken off a tree that is already unknown is unknown too. The old reading
+# joined it onto whatever came before, so this sequence credited a path built from garbage.
+SF=b6b6b6b6-aaaa-bbbb-cccc-0000000000a6
+ts_tool_use "$MDIR/$SF.jsonl" "$MAIN" $SF 2026-09-21T10:00:00Z mcp__codescout__workspace "$ACT_ID"
+ts_tool_use "$MDIR/$SF.jsonl" "$MAIN" $SF 2026-09-21T10:01:00Z mcp__codescout__workspace '{"action":"activate","path":"crates/emb"}'
+ts_tool_use "$MDIR/$SF.jsonl" "$MAIN" $SF 2026-09-21T10:02:00Z mcp__codescout__create_file '{"path":"src/off_unknown.rs","content":"x"}'
+eq    "a relative path activation off an unknown tree credits nothing" \
+      "$(credited_to "$MAIN" b6b6b6b6)" ""
+
+# The parent activated by id, then a SUBAGENT wrote relatively: unknowable, like any other
+# activation of a tree other than the root. An id may be the home project or not.
+SG=b7b7b7b7-aaaa-bbbb-cccc-0000000000a7
+ts_tool_use "$MDIR/$SG.jsonl" "$MAIN" $SG 2026-09-21T10:00:00Z mcp__codescout__workspace "$ACT_ID"
+mkdir -p "$MDIR/$SG/subagents"
+ts_tool_use "$MDIR/$SG/subagents/agent-sg.jsonl" "$MAIN" $SG 2026-09-21T10:01:00Z mcp__codescout__create_file '{"path":"src/by_sub_after_id.rs","content":"x"}'
+eq    "a subagent write after the parent's id activation credits nothing" \
+      "$(credited_to "$MAIN" b7b7b7b7)" ""
+
+# run_command's cwd= is a subdirectory of the active tree; of an unknown one it is unknown.
+SH=b8b8b8b8-aaaa-bbbb-cccc-0000000000a8
+ts_tool_use "$MDIR/$SH.jsonl" "$MAIN" $SH 2026-09-21T10:00:00Z mcp__codescout__workspace "$ACT_ID"
+ts_tool_use "$MDIR/$SH.jsonl" "$MAIN" $SH 2026-09-21T10:01:00Z mcp__codescout__run_command '{"command":"echo x > via_id_cwd.rs","cwd":"sub"}'
+eq    "run_command cwd= after an id activation credits nothing" \
+      "$(credited_to "$MAIN" b8b8b8b8)" ""
+
+# (B) the path half: a relative PATH activation must resolve against the checkout root. The
+# subagent-timing code resolved it against the SCRIPT's cwd, so activating `.` read as "moved
+# to a tree other than the root" whenever the script ran from a subdirectory. Asked by absolute
+# path so the question is about the file, not about how the script reads its own argument.
+SE=b5b5b5b5-aaaa-bbbb-cccc-0000000000a5
+ts_tool_use "$MDIR/$SE.jsonl" "$MAIN" $SE 2026-09-21T10:00:00Z mcp__codescout__workspace '{"action":"activate","path":"."}'
+mkdir -p "$MDIR/$SE/subagents"
+ts_tool_use "$MDIR/$SE/subagents/agent-se.jsonl" "$MAIN" $SE 2026-09-21T10:01:00Z mcp__codescout__create_file '{"path":"src/dot_sub.rs","content":"x"}'
+has   "activating the root by relative path does not make a subagent's writes unknowable" \
+      "$(run_in "$MAIN/docs" "$MAIN/src/dot_sub.rs")" "b5b5b5b5"
 
 echo
 echo "passed=$PASS failed=$FAIL"
