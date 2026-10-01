@@ -3741,4 +3741,560 @@ mod taxonomy_recipes {
         );
         assert_eq!(scan.ledgers, 0);
     }
+
+    // ── Surface four: TAXONOMY's own other recipe-bearing tables ──────────────────────────────
+    //
+    // `## Work-stream-specific prefixes` carries two tables the Main-taxonomy gate never reads: the
+    // resume queues (`| Prefix | Tracker | Stream |`, every row prose, the recipe written once below
+    // the table) and the work-stream ledgers (`| Prefix | Ledger | Captures | Entries | Append |`,
+    // the shape in the last column). Both name a tracker by bare filename under `docs/trackers/`.
+    // The checks are the existing ones, so only the row grammar is new. Tables are recognised by
+    // their EXACT header, because `### Measured drift` sits inside this section and holds a table
+    // whose first header cell is also `Prefix`; a row that mentions append_entry in a table this
+    // scanner does not read is a finding, so a third layout cannot pass unchecked.
+
+    const WORK_STREAM_SECTION: &str = "## Work-stream-specific prefixes";
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Table {
+        ResumeQueue,
+        WorkStream,
+    }
+
+    #[derive(Debug, Default)]
+    struct WorkStreamScan {
+        resume_rows: usize,
+        work_stream_rows: usize,
+        recipes: Vec<Recipe>,
+        unparseable: Vec<String>,
+    }
+
+    /// The cells of a table line, trimmed. A row's own `|` inside a code span is not escaped in this
+    /// file, so only the first cells and the LAST are trusted by callers.
+    fn table_cells(line: &str) -> Vec<&str> {
+        line.trim_start_matches('|')
+            .trim_end()
+            .trim_end_matches('|')
+            .split(" | ")
+            .map(str::trim)
+            .collect()
+    }
+
+    fn header_kind(cells: &[&str]) -> Option<Table> {
+        match cells {
+            ["Prefix", "Tracker", "Stream"] => Some(Table::ResumeQueue),
+            ["Prefix", "Ledger", "Captures", "Entries", "Append"] => Some(Table::WorkStream),
+            _ => None,
+        }
+    }
+
+    /// First backticked `*.md` token of `cell`, as a repo-relative path under `docs/trackers/`.
+    fn bare_tracker_path(cell: &str) -> Option<String> {
+        cell.split('`')
+            .skip(1)
+            .step_by(2)
+            .find(|s| s.ends_with(".md"))
+            .map(|s| format!("docs/trackers/{s}"))
+    }
+
+    fn scan_work_stream_tables(text: &str) -> WorkStreamScan {
+        let mut scan = WorkStreamScan::default();
+        let mut fence = FenceState::new();
+        let mut in_section = false;
+        // The table the current run of `|` lines belongs to; `None` between tables and inside one
+        // whose header this scanner does not read.
+        let mut table: Option<Table> = None;
+        for (idx, line) in text.lines().enumerate() {
+            if fence.feed(line) || fence.in_fence() {
+                continue;
+            }
+            if line.starts_with("## ") {
+                in_section = line.starts_with(WORK_STREAM_SECTION);
+                table = None;
+                continue;
+            }
+            if !in_section {
+                continue;
+            }
+            if !line.starts_with('|') {
+                table = None;
+                continue;
+            }
+            let cells = table_cells(line);
+            if let Some(kind) = header_kind(&cells) {
+                table = Some(kind);
+                continue;
+            }
+            let row = idx + 1;
+            let mentions = line.contains("append_entry");
+            let Some(kind) = table else {
+                if mentions {
+                    scan.unparseable.push(format!(
+                        "{}: a table row mentions append_entry but sits in a table \
+                     whose header this scanner does not read, so no recipe is read from it",
+                        at(row, cells[0].trim_matches('*'))
+                    ));
+                }
+                continue;
+            };
+            if !line.starts_with("| **") {
+                if mentions {
+                    scan.unparseable.push(format!(
+                        "{}: a row mentions append_entry but has no bold `| **X-N** |` \
+                     label, so no recipe is read from it",
+                        at(row, cells[0].trim_matches('*'))
+                    ));
+                }
+                continue;
+            }
+            let label = cells[0].trim_matches('*').to_string();
+            let want_cells = match kind {
+                Table::ResumeQueue => 3,
+                Table::WorkStream => 5,
+            };
+            match kind {
+                Table::ResumeQueue => scan.resume_rows += 1,
+                Table::WorkStream => scan.work_stream_rows += 1,
+            }
+            if cells.len() < want_cells {
+                scan.unparseable.push(format!(
+                    "{}: the row has {} cell(s), the table's header has {want_cells}",
+                    at(row, &label),
+                    cells.len()
+                ));
+                continue;
+            }
+            let Some(id_prefix) = label.strip_suffix("-N") else {
+                scan.unparseable.push(format!(
+                    "{}: the label is not `PREFIX-N`, so no id_prefix is read from it",
+                    at(row, &label)
+                ));
+                continue;
+            };
+            let Some(target) = bare_tracker_path(cells[1]) else {
+                scan.unparseable.push(format!(
+                    "{}: the tracker cell names no backticked `*.md` file",
+                    at(row, &label)
+                ));
+                continue;
+            };
+            let shape = match kind {
+                Table::ResumeQueue => Shape::Prose,
+                Table::WorkStream => {
+                    let append = cells[cells.len() - 1].trim_matches('`');
+                    match top_level_arg(append, "entry_collection") {
+                        Some(collection) => Shape::Params { collection },
+                        None if append == "prose" => Shape::Prose,
+                        None => {
+                            scan.unparseable.push(format!(
+                                "{}: the Append cell `{append}` is neither `prose` nor \
+                             `entry_collection=\"…\"`, so a third spelling is not read and would pass \
+                             unchecked",
+                                at(row, &label)
+                            ));
+                            continue;
+                        }
+                    }
+                }
+            };
+            scan.recipes.push(Recipe {
+                line: row,
+                label: label.clone(),
+                id_prefix: id_prefix.to_string(),
+                target,
+                shape,
+            });
+        }
+        scan
+    }
+
+    /// Each recipe against the check for its shape. A work-stream row is never a template: the
+    /// scanner only builds `Prose` and `Params`, so that arm reports rather than panics and is
+    /// otherwise unreachable.
+    fn check_work_stream_recipes(root: &Path, recipes: &[Recipe]) -> Vec<String> {
+        recipes
+            .iter()
+            .filter_map(|r| match &r.shape {
+                Shape::Prose => check_prose(root, r),
+                Shape::Params { collection } => check_params(root, r, collection),
+                Shape::Template => Some(format!(
+                    "{}: a work-stream row cannot be a template recipe",
+                    r.at()
+                )),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_work_stream_taxonomy_recipe_is_one_the_code_accepts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let text =
+            std::fs::read_to_string(root.join("docs/TAXONOMY.md")).expect("docs/TAXONOMY.md");
+        let scan = scan_work_stream_tables(&text);
+        let params = scan
+            .recipes
+            .iter()
+            .filter(|r| matches!(r.shape, Shape::Params { .. }))
+            .count();
+        let population = format!(
+            "examined {} resume-queue row(s) and {} work-stream row(s): {} prose, {params} params",
+            scan.resume_rows,
+            scan.work_stream_rows,
+            scan.recipes.len() - params
+        );
+        assert!(
+            scan.resume_rows > 0 && scan.work_stream_rows > 0 && params > 0,
+            "the scanner lost a whole table or a whole shape — this is not a clean corpus. {population}"
+        );
+        assert!(
+            scan.unparseable.is_empty(),
+            "{}",
+            report(&scan.unparseable, &population)
+        );
+        let failures = check_work_stream_recipes(&root, &scan.recipes);
+        assert!(failures.is_empty(), "{}", report(&failures, &population));
+    }
+
+    const WS_FIXTURE: &str = "\
+## Main taxonomy
+| Prefix | Tracker | Stream |
+| **ZZ-N** | `before.md` | before the section |
+
+## Work-stream-specific prefixes (not durable taxonomy slots)
+
+| Prefix | Tracker | Stream |
+|---|---|---|
+| **SV-N** | `resume-a.md` (`abc123`) | stream a |
+| **GG-N** | `resume-b.md` | stream b |
+
+### Measured drift
+| Prefix | Files | Why no row |
+|---|---:|---|
+| `C` | 10 | local |
+
+| Prefix | Ledger | Captures | Entries | Append |
+|---|---|---|---:|---|
+| **AA-N** | `aa.md` (`id`) | a thing | 21 | prose |
+| **FND-N** | `fnd.md` | findings | 18 | `entry_collection=\"findings\"` |
+
+## Next section
+| Prefix | Tracker | Stream |
+| **QQ-N** | `after.md` | after the section |
+";
+
+    #[test]
+    fn the_work_stream_scanner_reads_both_tables_and_only_inside_the_section() {
+        let scan = scan_work_stream_tables(WS_FIXTURE);
+        assert!(scan.unparseable.is_empty(), "{:?}", scan.unparseable);
+        assert_eq!((scan.resume_rows, scan.work_stream_rows), (2, 2));
+        let got: Vec<(&str, &str, &str, Shape)> = scan
+            .recipes
+            .iter()
+            .map(|r| {
+                (
+                    r.label.as_str(),
+                    r.id_prefix.as_str(),
+                    r.target.as_str(),
+                    r.shape.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("SV-N", "SV", "docs/trackers/resume-a.md", Shape::Prose),
+                ("GG-N", "GG", "docs/trackers/resume-b.md", Shape::Prose),
+                ("AA-N", "AA", "docs/trackers/aa.md", Shape::Prose),
+                (
+                    "FND-N",
+                    "FND",
+                    "docs/trackers/fnd.md",
+                    Shape::Params {
+                        collection: "findings".into()
+                    }
+                ),
+            ]
+        );
+        // The row's line is a 1-based line of the file, so a finding points at the row.
+        let sv = &scan.recipes[0];
+        assert_eq!(
+            WS_FIXTURE
+                .lines()
+                .nth(sv.line - 1)
+                .unwrap()
+                .split(" | ")
+                .next(),
+            Some("| **SV-N**")
+        );
+    }
+
+    #[test]
+    fn a_third_append_spelling_is_a_finding_not_a_skip() {
+        let text = WS_FIXTURE.replace("| prose |", "| sometimes prose |");
+        let scan = scan_work_stream_tables(&text);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("AA-N"),
+            "{:?}",
+            scan.unparseable
+        );
+        assert!(
+            !scan.recipes.iter().any(|r| r.label == "AA-N"),
+            "an unread row must not also be checked as prose"
+        );
+    }
+
+    #[test]
+    fn a_row_that_is_not_a_prefix_dash_n_label_is_a_finding() {
+        let text = WS_FIXTURE.replace("**GG-N**", "**GG**");
+        let scan = scan_work_stream_tables(&text);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(scan.unparseable[0].contains("GG"), "{:?}", scan.unparseable);
+    }
+
+    #[test]
+    fn a_short_row_is_a_finding_not_a_panic() {
+        let text = WS_FIXTURE.replace(
+            "| **FND-N** | `fnd.md` | findings | 18 | `entry_collection=\"findings\"` |",
+            "| **FND-N** | `fnd.md` |",
+        );
+        let scan = scan_work_stream_tables(&text);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("FND-N"),
+            "{:?}",
+            scan.unparseable
+        );
+    }
+
+    #[test]
+    fn a_row_naming_no_tracker_file_is_a_finding() {
+        let text = WS_FIXTURE.replace("`resume-b.md`", "no backticked file");
+        let scan = scan_work_stream_tables(&text);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("GG-N"),
+            "{:?}",
+            scan.unparseable
+        );
+    }
+
+    #[test]
+    fn a_row_in_a_table_whose_header_is_not_read_is_a_finding_only_if_it_mentions_append_entry() {
+        // Load-bearing: this table's header is one the scanner does not read, and its row is
+        // bold-labelled like the real ones. Silence here would mean a third table layout passes
+        // unchecked; but the `### Measured drift` table in the real file must stay quiet.
+        let quiet = format!(
+            "{WS_FIXTURE}\n## Work-stream-specific prefixes again\n| Prefix | Other |\n|---|---|\n| **XX-N** | nothing here |\n"
+        );
+        assert!(
+            scan_work_stream_tables(&quiet).unparseable.is_empty(),
+            "{:?}",
+            scan_work_stream_tables(&quiet).unparseable
+        );
+        let loud = format!(
+            "{WS_FIXTURE}\n## Work-stream-specific prefixes again\n| Prefix | Other |\n|---|---|\n| **XX-N** | `doc(action=\"append_entry\")` |\n"
+        );
+        let scan = scan_work_stream_tables(&loud);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("XX-N"),
+            "{:?}",
+            scan.unparseable
+        );
+    }
+
+    #[test]
+    fn a_row_without_a_bold_label_is_a_finding_only_if_it_mentions_append_entry() {
+        // In a table the scanner DOES read, so only the label rule can decide: the row below is
+        // otherwise a perfectly good resume-queue row.
+        let quiet = WS_FIXTURE.replace("| **GG-N** |", "| GG-N |");
+        let scan = scan_work_stream_tables(&quiet);
+        assert!(scan.unparseable.is_empty(), "{:?}", scan.unparseable);
+        assert_eq!(
+            scan.resume_rows, 1,
+            "an unlabelled row is not a row of the table"
+        );
+        let loud = WS_FIXTURE.replace(
+            "| **GG-N** | `resume-b.md` | stream b |",
+            "| GG-N | `resume-b.md` | `doc(action=\"append_entry\")` |",
+        );
+        let scan = scan_work_stream_tables(&loud);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("GG-N"),
+            "{:?}",
+            scan.unparseable
+        );
+    }
+
+    #[test]
+    fn a_table_kind_does_not_leak_into_the_next_table_or_the_next_heading() {
+        // Load-bearing: both rows are bold-labelled and mention append_entry. Were the previous
+        // table's kind still in force they would be READ as that table's rows (and counted), not
+        // reported as rows of a table whose header the scanner does not know.
+        let after_blank = format!(
+            "{WS_FIXTURE}\n## Work-stream-specific prefixes again\n| Prefix | Tracker | Stream |\n|---|---|---|\n| **A-N** | `a.md` | s |\n\n| Prefix | Other |\n|---|---|\n| **XX-N** | `doc(action=\"append_entry\")` |\n"
+        );
+        let scan = scan_work_stream_tables(&after_blank);
+        assert_eq!(scan.resume_rows, 3, "the A-N row is a real resume row");
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("XX-N"),
+            "{:?}",
+            scan.unparseable
+        );
+        let after_heading = format!(
+            "{WS_FIXTURE}\n## Work-stream-specific prefixes again\n| Prefix | Tracker | Stream |\n|---|---|---|\n| **A-N** | `a.md` | s |\n## Work-stream-specific prefixes once more\n| **XX-N** | `doc(action=\"append_entry\")` |\n"
+        );
+        let scan = scan_work_stream_tables(&after_heading);
+        assert_eq!(scan.resume_rows, 3, "the A-N row is a real resume row");
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("XX-N"),
+            "{:?}",
+            scan.unparseable
+        );
+    }
+
+    #[test]
+    fn a_row_short_of_its_tables_cells_is_a_finding_for_each_table() {
+        // Load-bearing: each is ONE cell short of its own table, so a count that is right for the
+        // other table (3 for the work-stream table, 5 for the resume queue) cannot refuse both.
+        let resume = WS_FIXTURE.replace(
+            "| **SV-N** | `resume-a.md` (`abc123`) | stream a |",
+            "| **SV-N** | `resume-a.md` (`abc123`) |",
+        );
+        let scan = scan_work_stream_tables(&resume);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("SV-N"),
+            "{:?}",
+            scan.unparseable
+        );
+        let work_stream = WS_FIXTURE.replace(
+            "| **AA-N** | `aa.md` (`id`) | a thing | 21 | prose |",
+            "| **AA-N** | `aa.md` (`id`) | a thing | prose |",
+        );
+        let scan = scan_work_stream_tables(&work_stream);
+        assert_eq!(scan.unparseable.len(), 1, "{:?}", scan.unparseable);
+        assert!(
+            scan.unparseable[0].contains("AA-N"),
+            "{:?}",
+            scan.unparseable
+        );
+    }
+
+    #[test]
+    fn the_tracker_is_the_first_md_file_not_the_first_backticked_token() {
+        // Load-bearing: an artifact id is backticked BEFORE the file here.
+        let text = WS_FIXTURE.replace("`resume-a.md` (`abc123`)", "(`abc123`) `resume-a.md`");
+        let scan = scan_work_stream_tables(&text);
+        assert!(scan.unparseable.is_empty(), "{:?}", scan.unparseable);
+        assert_eq!(scan.recipes[0].target, "docs/trackers/resume-a.md");
+    }
+
+    #[test]
+    fn a_backticked_prose_append_cell_is_still_prose() {
+        let text = WS_FIXTURE.replace("| 21 | prose |", "| 21 | `prose` |");
+        let scan = scan_work_stream_tables(&text);
+        assert!(scan.unparseable.is_empty(), "{:?}", scan.unparseable);
+        let aa = scan.recipes.iter().find(|r| r.label == "AA-N").unwrap();
+        assert_eq!(aa.shape, Shape::Prose);
+    }
+
+    #[test]
+    fn the_append_cell_is_the_last_cell_even_when_an_earlier_cell_holds_a_pipe() {
+        // Load-bearing: the Captures cell holds ` | `, which this file does not escape, so the row
+        // splits into SIX cells and the Append cell is not the fifth.
+        let text = WS_FIXTURE.replace("| a thing | 21 |", "| a | b thing | 21 |");
+        let scan = scan_work_stream_tables(&text);
+        assert!(scan.unparseable.is_empty(), "{:?}", scan.unparseable);
+        let aa = scan.recipes.iter().find(|r| r.label == "AA-N").unwrap();
+        assert_eq!(aa.shape, Shape::Prose);
+    }
+
+    #[test]
+    fn a_work_stream_table_inside_a_fence_is_not_read() {
+        let text = format!("```\n{WS_FIXTURE}```\n");
+        let scan = scan_work_stream_tables(&text);
+        assert_eq!(scan.recipes.len(), 0, "{:?}", scan.recipes);
+        assert_eq!((scan.resume_rows, scan.work_stream_rows), (0, 0));
+    }
+
+    /// Ledgers `docs/trackers/{aa,fnd}.md`: `aa` declares `AA`; `fnd` names a sidecar whose collection
+    /// is `findings`.
+    fn work_stream_tree(root: &Path) {
+        put(
+            root,
+            "docs/trackers/aa.md",
+            "---\nkind: tracker\nentry_prefix: AA\n---\n# aa\n",
+        );
+        put(
+            root,
+            "docs/trackers/fnd.md",
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/fnd.yaml\n---\n# fnd\n",
+        );
+        put(
+            root,
+            "docs/augmentations/fnd.yaml",
+            "prompt: p\nentry_collection: findings\n",
+        );
+    }
+
+    fn ws_recipe(label: &str, target: &str, shape: Shape) -> Recipe {
+        Recipe {
+            line: 7,
+            label: label.into(),
+            id_prefix: label.trim_end_matches("-N").into(),
+            target: target.into(),
+            shape,
+        }
+    }
+
+    #[test]
+    fn work_stream_recipes_are_checked_with_the_checks_for_their_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        work_stream_tree(root);
+        let clean = [
+            ws_recipe("AA-N", "docs/trackers/aa.md", Shape::Prose),
+            ws_recipe(
+                "FND-N",
+                "docs/trackers/fnd.md",
+                Shape::Params {
+                    collection: "findings".into(),
+                },
+            ),
+        ];
+        let failures = check_work_stream_recipes(root, &clean);
+        assert!(failures.is_empty(), "{failures:?}");
+        // A prose row whose ledger declares another prefix: only the PROSE check can refuse it.
+        let wrong_prefix = [ws_recipe("ZZ-N", "docs/trackers/aa.md", Shape::Prose)];
+        let failures = check_work_stream_recipes(root, &wrong_prefix);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("is not declared by this ledger"),
+            "{failures:?}"
+        );
+        // A params row naming another collection: only the PARAMS check can refuse it.
+        let wrong_collection = [ws_recipe(
+            "FND-N",
+            "docs/trackers/fnd.md",
+            Shape::Params {
+                collection: "tasks".into(),
+            },
+        )];
+        let failures = check_work_stream_recipes(root, &wrong_collection);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("declares Some(\"findings\")"),
+            "{failures:?}"
+        );
+        // A row whose tracker is gone is named, with the row's line.
+        let gone = [ws_recipe("AA-N", "docs/trackers/missing.md", Shape::Prose)];
+        let failures = check_work_stream_recipes(root, &gone);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(failures[0].contains("docs/TAXONOMY.md:7"), "{failures:?}");
+    }
 }
