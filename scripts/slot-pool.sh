@@ -19,7 +19,7 @@
 # A third bound is by cause, not by size or count: `slot_evict_foreign_build_scripts` removes
 # a compiled build script whose recorded CARGO_MANIFEST_DIR is another checkout's, because
 # cargo shares one script across checkouts and a 4 MB stale one is invisible to a size rule
-# (bug a61fab68e4fd71f3).
+# (bug f1162428494d0ad1).
 #
 # THE LOCK IS THE ONLY PROOF A TREE IS IDLE, which is why the pruning lives here and not
 # in a cron job or a warning. `flock -n` succeeding is the one observation that no leased
@@ -47,7 +47,7 @@ slot_lease() {
     SLOT=0
     if [ -n "$only" ]; then
         # A named slot is for repairing or inspecting THAT tree, so it is never swapped for
-        # another: bug a61fab68e4fd71f3 cleaned the wrong slot because the lease picked
+        # another: bug f1162428494d0ad1 cleaned the wrong slot because the lease picked
         # whichever was free. Held, absent and malformed are three refusals, each naming itself.
         case "$only" in *[!0-9]*) echo "$who: --slot wants a whole slot number, got '$only'" >&2; return 2 ;; esac
         [ -d "$pool/$prefix$only" ] || { echo "$who: no slot $prefix$only in $pool" >&2; return 2; }
@@ -130,7 +130,7 @@ slot_remove_dir() { rm -rf -- "$1"; }
 # when the lessee's build.rs is no newer than the compiled copy. It never reads the
 # `# env-dep:CARGO_MANIFEST_DIR=` line rustc wrote into the script's dep-info, which is
 # where an `env!`-baked path lives. Measured with two throwaway crates in one target dir:
-# the second printed the first's marker (bug a61fab68e4fd71f3). That line is the only owner
+# the second printed the first's marker (bug f1162428494d0ad1). That line is the only owner
 # field a slot carries, and nothing compared it with the lessee until this.
 #
 # TWO EXEMPTIONS, BOTH NEEDED. A path under <cargo-home> is a registry or git dependency,

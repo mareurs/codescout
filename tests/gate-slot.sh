@@ -18,7 +18,7 @@
 # 097aa5ca2222a91d).
 #
 # Cases L-N cover the last bound, by cause rather than size: a lease evicts a compiled build
-# script recorded as built for another checkout (bug a61fab68e4fd71f3). L and N read fixtures
+# script recorded as built for another checkout (bug f1162428494d0ad1). L and N read fixtures
 # and pin which scripts go and which stay; M is the half only cargo can answer, that the
 # eviction makes cargo compile the script again for the lessee.
 #
@@ -244,7 +244,7 @@ eq "a failed lease exits 2" "$?" "2"
 eq "and never runs the command" "$(state "$WORK/ran-k7")" "gone"
 
 echo "O. with-slot.sh --slot N leases exactly that slot, or refuses"
-# bug a61fab68e4fd71f3: a repair meant for one tree was run in whichever slot happened to be
+# bug f1162428494d0ad1: a repair meant for one tree was run in whichever slot happened to be
 # free, and 17.6 GiB of the wrong one went.
 POOL="$WORK/pool-o"; mkdir -p "$POOL/slot-0" "$POOL/slot-1"
 run_with o1 bash "$WITH" --slot 1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-o1"
@@ -285,7 +285,7 @@ fi
 rm -f "$WORK/hold-o7"; wait "$PO" 2>/dev/null
 
 echo "L. a lease evicts a build script compiled for another checkout, and nothing else"
-# bug a61fab68e4fd71f3. Cargo shares one compiled build script across checkouts and never
+# bug f1162428494d0ad1. Cargo shares one compiled build script across checkouts and never
 # reads the manifest dir baked into it, so a lessee can run a script built for someone else.
 # The only owner field a slot carries is the `# env-dep:CARGO_MANIFEST_DIR=` line in the
 # script's dep-info; the lease compares it with the lessee's git toplevel.

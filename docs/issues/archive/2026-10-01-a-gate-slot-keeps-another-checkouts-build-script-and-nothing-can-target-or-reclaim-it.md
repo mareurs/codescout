@@ -1,7 +1,7 @@
 ---
-id: a61fab68e4fd71f3
+id: f1162428494d0ad1
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: a gate slot keeps a build script compiled for another checkout, and the pool cannot detect, target or reclaim it'
 owners:
 - marius
@@ -86,7 +86,9 @@ Two exemptions, both needed. A registry or git dependency records a path under `
 
 **First use in the wild.** This change's own gate run evicted `release/build/codescout-f24fdc5f6ca94cff` from `slot-0`, compiled for `.../codescout.worktrees/bfdfeebd-repro`. A scan before the change had found a second foreign-checkout script in `slot-2` (`port-28-test`), which the next lease of that slot will evict.
 
-**Not done: option 3.** The repair still cannot name a slot: `with-slot.sh cargo clean -p codescout` cleans whichever slot is free. Its trigger is gone for this fault, not for others. Options 2 and 4 were not taken.
+**Option 3, the selector half, shipped in `138eb3b6a8d9f2f50ceadb39f7d98a9403d0721d`:** `scripts/with-slot.sh --slot N <command>` leases exactly `slot-N`, for a repair such as `--slot 0 cargo clean -p codescout`. It refuses, running nothing and falling back to nothing, when the slot is held, absent or not a whole number, and against a preset `CARGO_TARGET_DIR`. The whole-number check is load-bearing: `0/../slot-1` is a directory that exists and a lock path that resolves, so without it a named slot can reach another one.
+
+**Not done: the message half of option 3**, a gate line recognising the `build.rs` panic and printing the slot. Eviction removes that fault's cause, and a message for a cause that no longer occurs would be untested prose. Options 2 and 4 were not taken.
 
 ## Tests added
 
@@ -94,13 +96,17 @@ Two exemptions, both needed. A registry or git dependency records a path under `
 
 - **Case L** reads fixtures. It evicts a script compiled for another checkout, one for a sibling that shares the prefix, and one in a `--target <triple>` layout. It keeps the lessee's own, a workspace member's, a registry dependency's, one under a different `CARGO_HOME`, and one that records no manifest dir. It leaves a same-named dep-info under `deps/` and everything beside it. It checks that `with-slot.sh` evicts too, that nothing is evicted outside a git tree or from a preset target dir, and that a lease with nothing to evict is silent.
 - **Case N** calls the function directly: an empty cargo-home, an empty checkout, and a stdout that carries only the command's own output.
+- **Case O** (`--slot`) leases a named slot even when a lower one is free; refuses a held, absent, malformed, path-spelled or preset-contradicted one without running the command; and reports a missing command as a usage error. Measured: 11 mutation sites, all killed. Two of its cases were wrong when first written and measurement showed it: the usage-error case passed under its mutation because the previous case's holder still held `slot-0`, and a held slot also exits 2 (the first refusal owned the input); and the path-spelled slot resolved to no directory. Both were rewritten and the mutations re-run. A failed-lease fd close survived as inert, since the process exits at once, and was deleted. The suite is now 84 passed and 0 failed.
 - **Case M** runs real cargo. Tree A prints its marker (the control), then tree B, leasing A's slot, prints its own. This is the half only cargo can answer, and it is the case that shows the removal makes cargo compile the script again.
 
 **Mutation:** 17 sites, all killed, by `scripts/mutation-probe.sh` in an isolated tree. With the call site deleted, 11 assertions fail, M among them. Removing only the dep-info and not its directory fails 4, M among them. One guard, an explicit empty-checkout `return`, survived and was deleted as inert: the pattern `/*` already matches every path, and case N pins that. The `^# ` anchor of the dep-info grep was not mutated. The kept-script and silent-lease cases hold on unchanged code, so their evidence is those mutations.
 
 ## Fix provenance
 
-- SHA `7865b9515a45340240d7dacc9beb1009780bc1f5`, patch-id `d4e3612b2c7014988589cf96b3dcc7040dedc0db` (`git show <sha> | git patch-id --stable`).
+- **SHA:** `138eb3b6a8d9f2f50ceadb39f7d98a9403d0721d` (`experiments`)
+- **patch-id:** `73d60f68455ac9ef756a5e282bd6f5ecb229a11b`
+
+That pair is the `--slot` selector. The eviction half is a separate commit: SHA `7865b9515a45340240d7dacc9beb1009780bc1f5`, patch-id `d4e3612b2c7014988589cf96b3dcc7040dedc0db` (`git show <sha> | git patch-id --stable`).
 
 ## Workarounds
 
@@ -108,7 +114,7 @@ Lease the slot that holds the fault and clean it, which `with-slot.sh` cannot be
 
 ## Resume
 
-Nothing in flight. Left: option 3 (a slot selector, or a message naming the slot) and the unestablished question of which session compiled the script. Status is `mitigated`, not `fixed`, because the pool still cannot be told which slot to clean.
+Nothing in flight. Closed as fixed: the cause is evicted at lease time and a repair can name its slot. Still unknown, and not worth a reproduction: which session compiled the stale script in `slot-0` that day.
 
 ## References
 
