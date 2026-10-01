@@ -177,6 +177,23 @@ mod tests {
         assert_eq!(decode_literal_escapes("plain text"), None);
     }
     #[test]
+    fn decode_literal_escapes_leaves_a_unicode_escape_as_written() {
+        // `\uXXXX` is not on the decode list under either tier: a caller writing Python, JSON or
+        // Rust source means those six characters, and the bug that asked whether codescout
+        // decodes them (d40b30a3) found it does not. An added `\u` arm would turn every such
+        // string literal into its character, so this pins the arm that keeps them.
+        let lit = "don\\u2019t";
+        assert_eq!(decode_literal_escapes(lit), None);
+        assert_eq!(decode_literal_escapes_incl_quotes(lit), None);
+        // Alongside a decoding escape the unicode one still survives, which is the shape the
+        // repair path actually sees.
+        assert_eq!(
+            decode_literal_escapes("a\\nb\\u2019").as_deref(),
+            Some("a\nb\\u2019")
+        );
+    }
+
+    #[test]
     fn decode_incl_quotes_decodes_escaped_quotes() {
         // The quote-inclusive variant decodes \" and \' ...
         assert_eq!(

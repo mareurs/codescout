@@ -4824,6 +4824,80 @@ async fn edit_file_stays_silent_on_a_python_edit_that_indents_cleanly() {
 
     assert_eq!(result, json!("ok"), "a clean edit returns the bare ok");
 }
+#[tokio::test]
+async fn edit_file_writes_a_literal_unicode_escape_as_written_in_every_argument_form() {
+    // d40b30a3: a typed backslash-u arrived on disk as the decoded character. Driving the
+    // server over stdio with the six characters correctly JSON-escaped showed it writes them
+    // literally, so the decode happens upstream of codescout. This pins the server's half in
+    // the three shapes `edit_file` accepts, so a decode added on any of those paths reds here.
+    // The third form is `optional_array_param`'s re-parse of an array that arrives as a JSON
+    // string: one decode is JSON's own, and a second would be this bug.
+    const LIT: &str = "\\u2019";
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("lit.txt");
+    std::fs::write(&path, "A: x\nB: x\nC: x\n").unwrap();
+    let p = path.to_str().unwrap();
+
+    EditFile
+        .call(
+            json!({"path": p, "old_string": "A: x", "new_string": format!("A: don{LIT}t")}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    EditFile
+        .call(
+            json!({"path": p, "edits": [{"old_string": "B: x", "new_string": format!("B: don{LIT}t")}]}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let stringified =
+        json!([{"old_string": "C: x", "new_string": format!("C: don{LIT}t")}]).to_string();
+    EditFile
+        .call(json!({"path": p, "edits": stringified}), &ctx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        format!("A: don{LIT}t\nB: don{LIT}t\nC: don{LIT}t\n")
+    );
+}
+
+#[tokio::test]
+async fn edit_file_escape_repair_decodes_a_newline_but_leaves_a_unicode_escape() {
+    // The one place codescout decodes `new_string` at all: an edit that introduces a parse
+    // error is retried with its escapes decoded. The over-escaped `\n` between the two
+    // statements is what makes this one a parse error, so the repair really runs (asserted
+    // through the note and through the decoded newline). The unicode escape inside the string
+    // literal is Python source the caller meant, and must come through the repair untouched.
+    const LIT: &str = "\\u2019";
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("rep.py");
+    std::fs::write(&path, "x = 0\n").unwrap();
+
+    let result = EditFile
+        .call(
+            json!({
+                "path": path.to_str().unwrap(),
+                "old_string": "x = 0",
+                "new_string": format!(r#"x = "don{LIT}t"\ny = 2"#)
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        result.get("note").is_some(),
+        "the repair path did not run, so this case guards nothing: {result}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "x = \"don\\u2019t\"\ny = 2\n"
+    );
+}
 
 // ── EditFile — batch edits ────────────────────────────────────────────────
 
