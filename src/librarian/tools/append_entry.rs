@@ -3769,7 +3769,7 @@ mod taxonomy_recipes {
         );
     }
 
-    // ---- the index-row gate (bug 47d5ae6a2b23f87a) ----
+    // ---- the index-row gate (bug fd6e59eac80544f9) ----
 
     /// A ledger body that keeps F rows in a table.
     const F_ROWS: &str = "| ID | Title |\n|----|-------|\n| F-1 | first |\n";

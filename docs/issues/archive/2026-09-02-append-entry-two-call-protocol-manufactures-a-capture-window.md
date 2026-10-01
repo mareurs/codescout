@@ -1,5 +1,5 @@
 ---
-id: 4d55d26204282497
+id: '4d55d26204282497'
 kind: bug
 status: fixed
 title: 'BUG: append_entry''s two-call protocol guarantees an interval where a ledger entry exists on disk without its index row'
@@ -15,7 +15,7 @@ owner: marius
 related:
 - docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
 severity: medium
-unverified: 'TRACKED 47d5ae6a2b23f87a — The window is closed for callers who USE the new parameters; it is not closed for callers who do not. `index_row` + `index_after_line` are opt-in, so any ledger whose appends omit them keeps the original two-call window unchanged. Nothing migrates the 21 table-keeping ledgers'' callers, and no gate requires the parameters — a recipe in docs/TAXONOMY.md or get_guide("tracker-conventions") that still prescribes the second call will keep producing the window. The original file''s other unverified: also still stands — the window is now observed on a second ledger (bug-fix-session-log:F-118, this session) but "every table-keeping ledger has it" remains reasoned from the protocol rather than measured per ledger.'
+unverified: 'CLEARED 2026-10-01 on the recipe side: `index_row` is now required of every prose recipe whose ledger keeps rows for its prefix (gate `862ea3fe`), 28 recipes were migrated (`744ec80d`) and the tracker-conventions guide and eight ledger copies stopped saying to write the row afterwards (`7cd664dd`); see `docs/issues/archive/2026-09-24-residual-table-ledger-recipes-pass-index-row.md`. NOT answered: that every table-keeping ledger has the window is still reasoned from the protocol, not measured per ledger. Was — The window is closed for callers who USE the new parameters; it is not closed for callers who do not. `index_row` + `index_after_line` are opt-in, so any ledger whose appends omit them keeps the original two-call window unchanged. Nothing migrates the 21 table-keeping ledgers'' callers, and no gate requires the parameters — a recipe in docs/TAXONOMY.md or get_guide("tracker-conventions") that still prescribes the second call will keep producing the window.'
 ---
 
 ## Summary
