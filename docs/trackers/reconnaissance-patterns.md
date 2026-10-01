@@ -3862,7 +3862,9 @@ provenance tail.
 
 **Status:** promoted — SKILL.md bullet widened this session.
 
-**Valid:** dated 2026-08-27
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: the mechanism the scout found still holds. `managed_roots` is now at `src/librarian/tools/mod.rs:270` (it was `:215`) and still returns the active project's `git_root` and `abs_path` followed by the legacy `workspace.roots`, never another repo; `check_outside_managed_roots` is at `src/librarian/tools/doctor.rs:2714` with its `containing_root(...).is_some()` early return at `:2715`. The doctor has since gained a scoping module (`doctor/scope.rs`, with `umbrella_roots` and `known_elsewhere_row_is_relevant`) that was not examined here, and the 401/402-row and 359/33/10 bucket counts are a 2026-08-27 measurement that was not re-run. `bug-fix-session-log:F-74` and `R-106` exist. The skill's reference file and `SKILL.md` each mention a population once; I did not read them closely enough to confirm the widened bullet's wording.*
 
 The three bucket counts are facts about this machine's catalog on this date; the
 mechanism (a named population may be empty, and that failure is green) is
@@ -7762,7 +7764,9 @@ long task. A tool that resolves the name is not a tool that resolves the author.
 
 ## R-170 — A coverage ratio is a scope question before it is a drift finding — and the scope lived in the enforcement layer
 
-**Valid:** dated 2026-09-01
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: the structural fix this entry asks for has landed for this instance. The roster (`docs/trackers/issue-clusters.md`) now states the population bound at the point of reading — *re-running the query refreshes the count and never widens the population; read `tests/issue_clusters.rs`'s module header before proposing any retro-tagging pass* — and cites this entry. The sentence quoted below ("Trust the query; re-run it before trusting the count") has been reworded to "Trust the query; run the probe before trusting any figure". The test header still says what is quoted (416 archived files, "Forcing a fit would corrupt the counts"). The 563/34/156/529 ratios are a 2026-09-02 measurement and were not re-run. Status stays open: its promote-when condition (a second case) is unmet.*
 
 **Verdict:** near-miss (caught before any write) → rule · **Observed:** 2026-09-02, auditing `docs/issues/` for bug files missing a `cluster/<slug>` tag
 

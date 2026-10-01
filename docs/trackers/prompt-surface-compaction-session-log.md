@@ -1613,7 +1613,9 @@ Recorded here so a second instance has something to join.
 
 ## F-9 — Three promoted rules are in force in zero of three profiles, and the session that promoted them is the one observer that cannot see it
 
-**Valid:** dated 2026-08-20
+**Valid:** dated 2026-10-01
+
+*Re-probed 2026-10-01 at the served bytes, the probe this entry prescribes. The caches have moved on from `1.16.12` to `1.20.15` in all three profiles, so the tables below are the 2026-08-20 measurement and are not restated. At `1.20.15` the reconnaissance skill is 14036 bytes and `references/seam-classes.md` is 22525 bytes in each of the three profile caches and in the repo source — byte-identical in all four. The promoted three-axis rule (`build, process, and distribution` / `three independent axes`) is no longer in `SKILL.md`, which now delegates its case law to `references/seam-classes.md`; it matches once there, in all four copies. All four `claude-plugins` commits named here (`23a11c3`, `23ca288`, `dbc8982`, `a5df5bd`) resolve with matching subjects. Not re-checked: the install records' `installPath` values.*
 
 A count of a live state — three promoted rules in force in zero of three profiles — taken
 the day the entry was observed. Both halves decay: a version bump or a cache refresh moves
