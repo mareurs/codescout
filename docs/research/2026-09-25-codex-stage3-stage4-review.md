@@ -15,7 +15,7 @@ Scope: `d643c001..805c2a83`, including the freeze correction, train_arm.py, phas
 
 `tests/test_stage2_synthetic.py:109` invokes unittest.main before FreezeMenuGuard is defined. Direct execution exits 0 with 16 tests; import-based discovery reaches all 21. One in-memory mutation removed the under-target rejection: discovery ran 21 tests and produced four failures, zero errors (one mutation applied, zero survivors). This confirms the regression tests work when reached; it does not contradict the reported earlier 21-test pass.
 
-Filed: docs/issues/2026-09-25-codex-freeze-tests-after-main.md (`5d4e9ab75d686fed`). Move the entry point after the definitions. No fix applied.
+Filed: docs/issues/archive/2026-09-25-codex-freeze-tests-after-main.md (`9502666fed5b53a2`). Move the entry point after the definitions. No fix applied.
 
 ## Freeze correction
 

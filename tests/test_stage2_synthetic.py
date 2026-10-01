@@ -138,6 +138,6 @@ class FreezeMenuGuard(unittest.TestCase):
 
 
 # Last, after every TestCase: a direct run stops defining tests at this line
-# (docs/issues/2026-09-25-codex-freeze-tests-after-main.md).
+# (docs/issues/archive/2026-09-25-codex-freeze-tests-after-main.md).
 if __name__ == "__main__":
     unittest.main()

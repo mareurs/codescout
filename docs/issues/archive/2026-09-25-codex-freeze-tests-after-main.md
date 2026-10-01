@@ -1,7 +1,7 @@
 ---
-id: '5d4e9ab75d686fed'
+id: 9502666fed5b53a2
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: direct test runner skips FreezeMenuGuard regressions'
 tags:
 - cluster/declared-not-wired
@@ -9,7 +9,6 @@ closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 severity: low
-unverified: no guard fails when a direct run and test discovery disagree on the test count; only a comment keeps unittest.main() below the last TestCase.
 ---
 
 # Direct execution skips the new freeze regressions
@@ -37,11 +36,14 @@ Move the existing `if __name__ == '__main__': unittest.main()` after all test de
 - **Observed after:** the direct run gives `Ran 21 tests ... OK`, and `python3 -m pytest tests/test_stage2_synthetic.py -q` gives `21 passed`.
 - Class: IC-3, `declared-not-wired`, whose members line names this file.
 
-**Not added:** a guard that fails when a direct run and discovery disagree on the test count. The fix makes the two agree today; nothing stops a future class being appended below the guard again, apart from the comment.
+**Guard added 2026-10-01** in `5605ff50f4fa46e3ebec5e00104bf9bbeeb076b7` (`tests/python_test_entry_guard.rs`), as a Rust test so that it runs in the gate, which no Python test does. It checks the mechanism (nothing at column 0 below the first entry guard) and not the count disagreement this note first named; that file's module header states what it does not reach.
 
 ## Fix provenance
 
 - **SHA:** `f0125e0e` (`experiments`)
 - **patch-id:** `f57b7cf16581abab25e3ae878ee25dc8cd7fe146`
 
-**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `f0125e0e` and matches. The direct run still reaches every test: `python3 -m pytest tests/test_stage2_synthetic.py` reported `21 passed` at HEAD (`fd0b4181`). **Not archived**, because the guard named under *Not added* above still does not exist, so nothing but a comment prevents a recurrence. The frontmatter `unverified:` carries that caveat where a query can read it.
+**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `f0125e0e` and matches. The direct run still reaches every test: `python3 -m pytest tests/test_stage2_synthetic.py` reported `21 passed` at HEAD (`fd0b4181`). The regression guard is the second pair below. It was observed red on the real defect (a second guard re-created above `FreezeMenuGuard` in this file made the corpus test name this file at the class line), and each of its ten guarded sites was killed by a mutation.
+
+- **SHA:** `5605ff50f4fa46e3ebec5e00104bf9bbeeb076b7` (`experiments`), the regression guard
+- **patch-id:** `d176a55a57ee1c133eac5caddab11cec83f94b16`
