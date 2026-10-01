@@ -449,7 +449,7 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 
 ### U-17 — audit_doc_refs classifies instructional placeholder + reader-side paths as missing files (39 FPs)
 
-**Valid:** dated 2026-05-23
+**Valid:** dated 2026-10-01
 
 **When:** 2026-05-23, same exploratory pass that produced U-16. Ran `librarian audit_doc_refs` across the full doc tree (551 files); hi-sev count was 40 — but breakdown showed 39 of them concentrated in two files: `docs/agents/copilot.md` (25) and `docs/agents/claude-code.md` (14). Only 1 was in a historical ADR.
 
@@ -470,7 +470,7 @@ The 1 remaining hi-sev finding is a cross-repo reference to the sibling `claude-
 
 **Severity:** med — was about to mis-report 39 hi-sev findings as drift in a Pika exploration pass (Conclude-Last caught the misread). For real CI use, H-5 deny-stage promotion would falsely fail the build on every change. The bug is in the audit, not in the docs.
 
-**Status:** **closed — fully shipped 2026-05-24.** Three patches landed:
+**Status:** **closed — fully shipped 2026-05-24.** Three patches landed. *Patch-ids recorded 2026-10-01 (`git patch-id --stable`): `956c080f` `c14c856b0fd2d3eee857c401761f7821b6b8fbc0`, `7a1f2a11` `33ec534851ba05308d340e97e5e8c622585d3558`, `0ad00251` `d33041ca1e82be762683524a7fcd7674a8562a01`, `5c51f01d` `17b23c7f55e37ab950fc266ed7401ecfbc1a9be3`. The fixes are in place: `looks_like_path` rejects a `path/to/` prefix (`parser.rs:962`) and `DEFAULT_AUDIT_EXCLUDES` names `docs/agents/**` (`audit_doc_refs/mod.rs:484`). The measurement tables below cite `01ec2890` and `9fa04f0b`, which resolve to no commit in this repository today (rebased away); the four SHAs above are the surviving ones, and the 40 → 1 figures are a 2026-05-24 measurement that was not re-run.*
 - `experiments:956c080f` — `path/to/` placeholder filter (caught Class C of the FP breakdown, ~6 refs).
 - `experiments:7a1f2a11` — Class B resolver fix: `../`-relative links now anchor at `md_file.parent()` instead of `repo_root` (8 cross-doc refs in agent docs flipped from `missing/high` to `resolved/low`).
 - `experiments:0ad00251` — H-6 (C) shipped: `docs/agents/**` excluded from `DEFAULT_AUDIT_EXCLUDES` (handles Class A reader-side paths + Class D tool-method-name-mis-classification, ~30 refs).
@@ -1755,7 +1755,7 @@ reconnect.
 
 ### U-40 — A multi-line `old_string` failed as "not found" on text that was verbatim present, and the error cannot tell a bad needle from a bad haystack
 
-**Valid:** dated 2026-08-17
+**Valid:** dated 2026-10-01
 
 **Observed:** 2026-08-17, adding a paragraph to `src/prompts/guides/iron-laws-detail.md`
 after the "Bounded LHS is allowed" block.
@@ -1808,7 +1808,7 @@ follows the response boilerplate writes a heading inconsistent with every siblin
 generic hint should defer to the ledger's own convention, or say "match the surrounding
 entries".
 
-**The heading half is fixed — `bf485a00` (experiments).** `allocate_entry_id` now returns
+**The heading half is fixed — `bf485a00` (experiments, patch-id `c38669e53483eae178d772e0ec84a03df2c68792`).** `allocate_entry_id` now returns
 the level the ledger's own entries use — the *mode* of `^#{1,6} PREFIX-N` over the body it
 already scans for `body_max`, so a stray heading at another depth cannot decide the level
 for every future entry — and `append_entry` phrases the hint with it. Where the body heads
@@ -1816,6 +1816,8 @@ nothing there is no level to observe, and the hint now says its suggestion is a 
 instead of sounding certain. Promoted to a standing rule the same day: Anti-Pattern 5,
 *Asserting a Convention the Tool Never Read*, in `docs/PROGRESSIVE_DISCOVERABILITY.md` —
 the file `CLAUDE.md` requires reading before adding or modifying any tool.
+
+**Re-checked 2026-10-01 — the `no_close` half is narrower than this status says, and not closed.** `diagnose_scoped_miss` (`src/tools/markdown/edit_markdown.rs`) now gives each cause its own tier and wording: `visible_drift` (a `want`/`have` diff headed *did it change since you read it?*), `whitespace_invisible`, `no_similar_match` (*nothing scored above 0.5 similarity*), `old_string_empty`, `old_string_too_large`, `old_string_longer_than_section`, and the two section caps. Of these, `visible_drift` and `no_similar_match` were observed in a live session the same day. So "a malformed needle and a moved haystack in identical words" is no longer true, and `no_close` is now spelled `no_similar_match`. What is still absent is the case this entry was bitten by: nothing detects literal two-character `\n` sequences in `old_string` (a search of that file for backslash or escaped-newline handling finds none), so that needle lands in `no_similar_match`, whose hint still says to verify the heading or re-read the section. `scoped_miss_tier` remains undocumented to the caller.
 
 **Status:** open — the heading half is fixed; the `no_close` half, which is the primary
 friction above, is not. `edit_markdown` still reports a malformed needle and a moved

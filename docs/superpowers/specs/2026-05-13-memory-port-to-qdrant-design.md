@@ -1,8 +1,8 @@
 # L-01 — Port `memory.*` from sqlite-vec to Qdrant `memories` collection
 
-**Valid:** dated 2026-05-13
+**Valid:** dated 2026-10-01
 
-**Status:** draft v2 — decisions proposed, awaiting review · **Opened:** 2026-05-13 · **Owner:** TBD
+**Status:** shipped 2026-05-13 — steps 1–8 landed that day (the parent tracker's L-01 ✅ row; the legacy deletion is `66db4c70`; the implementation is `src/memory/semantic_store.rs`, `src/retrieval/memory.rs` and `src/migrate/memories.rs`). Step 8's end state was later amended: the 2026-06-15 decision *retained* the `sqlite-vec` dependency, and `local-embed` is back in `default` since 2026-09-17, so "flip `local-embed` default off" no longer describes the tree. Everything below is the design as drafted, kept as the record of the reasoning; its present-tense statements ("the last load-bearing consumer of `src/embed/index.rs`", "awaiting review") describe the pre-L-01 state and are not current · **Opened:** 2026-05-13 · **Owner:** TBD
 
 ## Why
 
