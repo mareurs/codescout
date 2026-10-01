@@ -1289,6 +1289,19 @@ ts_tool_use "$MDIR/$SI.jsonl" "$MAIN" $SI 2026-09-21T10:01:00Z mcp__codescout__c
 eq    "an id that happens to name a real directory does not credit that directory's file" \
       "$(credited_to "$MAIN" b9b9b9b9)" ""
 
+# A relative PATH taken off a KNOWN tree resolves under it. The `crates/emb` below has a separator,
+# which is the whole of what tells it from an id, so this is the only case in the file where
+# reading it as an id (dropping the `/` test in `is_workspace_id`) changes the answer: the case
+# above (SF) starts from an UNKNOWN tree, where both readings give "nothing" and so cannot tell
+# them apart. The root is activated first, by absolute path, so the base is a real tree rather
+# than the unset one.
+SJ=c1c1c1c1-aaaa-bbbb-cccc-0000000000b1
+ts_tool_use "$MDIR/$SJ.jsonl" "$MAIN" $SJ 2026-09-21T10:00:00Z mcp__codescout__workspace "{\"action\":\"activate\",\"path\":\"$MAIN\"}"
+ts_tool_use "$MDIR/$SJ.jsonl" "$MAIN" $SJ 2026-09-21T10:01:00Z mcp__codescout__workspace '{"action":"activate","path":"crates/emb"}'
+ts_tool_use "$MDIR/$SJ.jsonl" "$MAIN" $SJ 2026-09-21T10:02:00Z mcp__codescout__create_file '{"path":"src/rel_from_known.rs","content":"x"}'
+eq    "a relative path activation off a known tree resolves under it, and is credited" \
+      "$(credited_to "$MAIN" c1c1c1c1)" "crates/emb/src/rel_from_known.rs"
+
 # (B) the path half: a relative PATH activation must resolve against the checkout root. The
 # subagent-timing code resolved it against the SCRIPT's cwd, so activating `.` read as "moved
 # to a tree other than the root" whenever the script ran from a subdirectory. Asked by absolute
