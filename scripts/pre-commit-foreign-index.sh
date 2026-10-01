@@ -321,7 +321,7 @@ fi
 # each refusal's remedy naming the other party, who is themselves refused.
 #
 # Measured from both sides on six files, 2026-09-16:
-# `docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md`
+# `docs/issues/archive/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md`
 #
 # WHY THE PAIR IS RECOVERED HERE RATHER THAN BY DROPPING `--no-renames` ABOVE. That flag
 # is load-bearing and its removal reintroduces an archived defect: with rename detection
@@ -553,7 +553,7 @@ fi
         echo "is a real two-party commit, and passing it silently would file their work"
         echo "under your name with nothing anywhere saying so."
         echo
-        echo "Class: docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md"
+        echo "Class: docs/issues/archive/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md"
     fi
     if ((ack_has_dash)); then
         echo

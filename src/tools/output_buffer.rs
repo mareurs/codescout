@@ -869,7 +869,7 @@ impl OutputBuffer {
     /// LIVE one was silently rewritten to a temp path inside the content being written
     /// (exit 0, no warning), which is the same corruption `mask_heredoc_bodies` was written
     /// for one scanner over. See
-    /// `docs/issues/2026-09-21-a-buffer-handle-mentioned-in-a-heredoc-body-is-resolved-as-an-argument.md`
+    /// `docs/issues/archive/2026-09-21-a-buffer-handle-mentioned-in-a-heredoc-body-is-resolved-as-an-argument.md`
     /// and `CLAUDE.md` § *Parsers Over a Namespace*.
     ///
     /// Masking alone would have closed neither direction: `String::replace` rewrites
@@ -1818,7 +1818,7 @@ mod tests {
     // four. Each also names the DIRECTION it is monotone under, because the loud half of this
     // bug (a refusal) and the silent half (a rewrite) are satisfied by opposite mutations.
     //
-    // Bug: docs/issues/2026-09-21-a-buffer-handle-mentioned-in-a-heredoc-body-is-resolved-as-an-argument.md
+    // Bug: docs/issues/archive/2026-09-21-a-buffer-handle-mentioned-in-a-heredoc-body-is-resolved-as-an-argument.md
 
     #[test]
     fn an_expired_handle_mentioned_in_a_quoted_heredoc_body_is_not_refused() {

@@ -1,7 +1,7 @@
 ---
-id: b19632b2291e3894
+id: 8c067bb1dd5853ac
 kind: bug
-status: fixed
+status: archived
 title: 'Codex: System1 judge gate relaunch overwrites vote evidence'
 owners:
 - codex

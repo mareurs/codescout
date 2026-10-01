@@ -173,7 +173,7 @@ These are decisions about the supplied passages, not endorsements of the control
 
 **Cross-tab with the gate's control majorities (development only).** Of the 17 controls the judge flagged (`is_mistake` true), 5 are labelled intervene here, 10 N and 2 U. Before the extended bar the split was 11 / 4 / 2. This is agreement between two model-derived judgements with different targets, not accuracy, and neither labeller was blind to the gate's results.
 
-**One label verified in practice.** Performing CTL3-7's suggested check showed that the passage's premise was stale at the controls' own tree. `CLAUDE.md` listed three default features, while `Cargo.toml` has four (including `local-embed`, since 2026-09-17). The conclusion held: no default feature enables `server-stack`. Fixed in `c67f4552`; bug `96745f0ce9636580`. So at least one never-corrected control was not a correct sentence.
+**One label verified in practice.** Performing CTL3-7's suggested check showed that the passage's premise was stale at the controls' own tree. `CLAUDE.md` listed three default features, while `Cargo.toml` has four (including `local-embed`, since 2026-09-17). The conclusion held: no default feature enables `server-stack`. Fixed in `c67f4552`; bug `1ed9de299994381e`. So at least one never-corrected control was not a correct sentence.
 
 ## Next use and unresolved context
 

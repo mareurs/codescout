@@ -1,12 +1,13 @@
 ---
-id: '4a6dad0c09f62967'
+id: fbdd9b22aaf0fb44
 kind: bug
-status: fixed
+status: archived
 title: 'BUG: a buffer handle mentioned inside a quoted heredoc body is resolved as if it were an argument'
 tags:
 - cluster/addressing-without-an-escape-hatch
 claimed_at: 2026-09-27
 claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
+closed: 2026-09-27
 opened: 2026-09-21
 owner: marius
 related: []

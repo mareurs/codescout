@@ -1,5 +1,5 @@
 ---
-id: 6f6d9b39f862be9e
+id: '6f6d9b39f862be9e'
 kind: bug
 status: fixed
 title: probe_guide_section_use.py's MECHANISM_TOOLS omits the renamed doc tool and goes blind monotonically
@@ -10,7 +10,7 @@ opened: 2026-09-03
 owner: marius
 related: []
 severity: medium
-unverified: 'TRACKED b36761478b125b35 — No regression test. `scripts/` has no test harness in this repo, so nothing gates `MECHANISM_TOOLS` against the next rename — the same defect can recur exactly as it did here, and the fix''s evidence is an observed before/after rather than a guard. The union is also unbounded in principle: a THIRD name would go undetected the same way, and the durable remedy named in the Fix section (derive the list from the served registry) is NOT implemented. Separately, the documented `"doc"` substring greediness is recorded at the site but not enforced — a future `mcp__codescout__docs_*` tool would be silently counted as mechanism operation, and only a reader of the comment would know.'
+unverified: 'STANDING — the residual closed 2026-09-27 and moved the existence and boundedness of MECHANISM_TOOLS from recited to checked against the live registry (tests/test_probe_mechanism_tools_registry.py, 3 cases, which also pins the ''doc'' substring greediness). Two limits remain, both checked 2026-10-01: that test is run BY HAND only, since no CI job, gate lane or Rust test invokes it (grep of .github/workflows/ci.yml and the repo for its name), so a rename can still land green; and membership, which names belong in the list, has no registry surface and stays a hand judgement.'
 ---
 
 # BUG: `MECHANISM_TOOLS` omits `doc`, so the section-use probe goes blind as the rename propagates

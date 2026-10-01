@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: fixed
+status: archived
 tags:
 - cluster/shared-resource-carries-no-owner
 closed: 2026-09-16

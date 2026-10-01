@@ -1,13 +1,13 @@
 ---
-id: b36761478b125b35
+id: '80a62d2b87683852'
 kind: bug
-status: fixed
+status: archived
 title: 'RESIDUAL: Derive MECHANISM_TOOLS in scripts/probe_guide_section_use.py from the served tool registry instead of a hand list'
 tags:
 - cluster/selector-narrower-than-its-population
 claimed_at: 2026-09-27
 claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
-closed: null
+closed: 2026-09-27
 opened: 2026-09-24
 owner: marius
 related:

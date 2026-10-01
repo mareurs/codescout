@@ -120,7 +120,7 @@ PROFILES = [".claude", ".claude-sdd", ".claude-kat"]
 # ever added, tighten `is_mechanism_tool` to match the full `mcp__codescout__<name>` form
 # rather than widening this tuple further -- widening is what made this defect possible,
 # and the check below will say so instead of staying silent the way it did the first time.
-# docs/issues/2026-09-24-residual-mechanism-tools-from-served-registry.md
+# docs/issues/archive/2026-09-24-residual-mechanism-tools-from-served-registry.md
 MECHANISM_TOOLS = (
     "doc",
     "librarian",
@@ -722,7 +722,7 @@ def main() -> int:
     # REFUSE rather than trust a hand list nobody re-checked. Skipped (not refused) when
     # there is no live binary to ask -- see `live_tool_names`'s docstring for why offline
     # transcript analysis, this script's actual job, must not be blocked by a missing build.
-    # docs/issues/2026-09-24-residual-mechanism-tools-from-served-registry.md
+    # docs/issues/archive/2026-09-24-residual-mechanism-tools-from-served-registry.md
     live = live_tool_names()
     if live is not None:
         problems = mechanism_tools_registry_problems(live)

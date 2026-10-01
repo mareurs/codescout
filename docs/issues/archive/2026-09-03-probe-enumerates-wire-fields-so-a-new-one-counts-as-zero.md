@@ -1,5 +1,5 @@
 ---
-id: 1d5af6a4a915308d
+id: '1d5af6a4a915308d'
 kind: bug
 status: fixed
 title: probe_tool_surface enumerates wire fields, so annotations counted as zero
@@ -14,7 +14,6 @@ topic: measurement instruments
 closed: 2026-09-03
 opened: 2026-09-03
 severity: medium
-unverified: 'TRACKED a11cf095b81c1c5d — no CI-level guard: the unmodelled-field alarm fires only on a probe run, never in the test lane'
 ---
 
 ## Summary

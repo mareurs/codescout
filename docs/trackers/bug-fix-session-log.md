@@ -16892,7 +16892,7 @@ routing decision and a report to an operator. They disclosed theirs unprompted, 
 only reason I went back and checked mine.
 
 **The two answers diverge by construction, not by accident — and on exactly this session's
-shape.** `docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md`
+shape.** `docs/issues/archive/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md`
 measures a case where all six files were AUTHORED by `9403d62d` and STAGED by `9e022ef0`, and
 the guard called them `9403d62d`'s — correctly, by its own rule. Writer and stager pointed at
 different sessions in the very deadlock I spent the afternoon reading.
@@ -17224,7 +17224,7 @@ At that point `df` showed 64G free, and no process was still building into a leg
 
 **Status:** fixed-verified in working tree; integration pending.
 
-**Resolution:** Exclusive reservations before model work, plus tests for legacy evidence, failed attempts, dry runs and two contenders. Six applied mutants were all caught by assertions (zero errors). No model calls. Review: `docs/research/2026-09-29-codex-system1-judge-review.md`; bug: `docs/issues/2026-09-29-codex-judge-gate-relaunch-overwrites-evidence.md`.
+**Resolution:** Exclusive reservations before model work, plus tests for legacy evidence, failed attempts, dry runs and two contenders. Six applied mutants were all caught by assertions (zero errors). No model calls. Review: `docs/research/2026-09-29-codex-system1-judge-review.md`; bug: `docs/issues/archive/2026-09-29-codex-judge-gate-relaunch-overwrites-evidence.md`.
 
 **Lesson:** Location safety is not evidence preservation. Test re-entry and races against prior bytes, not only a fresh successful directory.
 

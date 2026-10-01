@@ -1,7 +1,7 @@
 ---
-id: '96745f0ce9636580'
+id: 1ed9de299994381e
 kind: bug
-status: fixed
+status: archived
 title: CLAUDE.md copied Cargo.toml's default feature list, and the copy went stale
 tags:
 - cluster/doc-contradicted-by-code

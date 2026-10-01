@@ -1,13 +1,13 @@
 ---
-id: a11cf095b81c1c5d
+id: '0196f888599e92c3'
 kind: bug
-status: fixed
+status: archived
 title: 'RESIDUAL: Run the probe''s unmodelled-wire-field check in the test lane/CI'
 tags:
 - cluster/selector-narrower-than-its-population
 claimed_at: 2026-09-27
 claimed_by: 48d1f0c8-9f60-43bb-a15e-17ec7995813a
-closed: null
+closed: 2026-09-27
 opened: 2026-09-24
 owner: marius
 related:

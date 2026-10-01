@@ -469,7 +469,7 @@ has "no GIT_INDEX_FILE -> silent, not an empty-index refusal" "$out" "EXIT=0"
 rm -rf "$T"
 
 # ------------------------------- 5. the JOINT predicate and CODESCOUT_INDEX_ACK
-# docs/issues/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md
+# docs/issues/archive/2026-09-16-archiving-a-peers-bug-file-refuses-both-parties-from-opposite-sides.md
 #
 # BACKFILL. `b37b888a` shipped the `joint` predicate and the ack arm with NO coverage at
 # all -- `grep -rn "CODESCOUT_INDEX_ACK\|joint" tests/` returned nothing -- and was reported

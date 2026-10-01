@@ -1,7 +1,7 @@
 ---
-id: b4b7a133612c0236
+id: dbef854a58e8da36
 kind: bug
-status: fixed
+status: archived
 title: git subprocess output decoded as strict UTF-8 crashes on a real commit's non-UTF-8 diff bytes
 owners:
 - marius
@@ -12,6 +12,7 @@ tags:
 - subprocess
 topic: scripts/measure -- Stage 2 correction miner
 time_scope: '2026-09-28'
+closed: 2026-09-28
 ---
 
 ## Summary

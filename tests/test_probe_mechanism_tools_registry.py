@@ -1,6 +1,6 @@
 """Regression coverage for scripts/probe_guide_section_use.py's registry-vs-MECHANISM_TOOLS check.
 
-docs/issues/2026-09-24-residual-mechanism-tools-from-served-registry.md /
+docs/issues/archive/2026-09-24-residual-mechanism-tools-from-served-registry.md /
 docs/issues/archive/2026-09-03-probe-mechanism-filter-omits-the-renamed-doc-tool.md: MECHANISM_TOOLS
 was a hand list with no connection to the served MCP registry, so the 2026-09-02 `artifact` -> `doc`
 rename went unnoticed for days -- a rename elsewhere silently desynchronised a selector here
