@@ -579,13 +579,20 @@ fi
                 case "$_r" in
                     unnamed)
                         echo "            • blanket add — the staging command did not NAME"
-                        echo "              these paths: \`git add\` with -A, -u, \`.\`, or a"
-                        echo "              directory, or a patch carrying no default prefix."
+                        echo "              these paths: \`git add\` with -A, -u, \`.\`, a"
+                        echo "              directory, \`--pathspec-from-file\`, or a patch"
+                        echo "              carrying no default prefix."
                         echo "              THIS IS PROBABLY YOUR OWN STAGING, and it is the"
                         echo "              case this guard exists for — a blanket add followed"
                         echo "              by a bare commit is exactly how a peer's work gets"
-                        echo "              filed under your message. Re-stage by explicit path"
-                        echo "              and the bare commit passes."
+                        echo "              filed under your message. To make a path yours on"
+                        echo "              the record: a plain re-add of content already staged"
+                        echo "              records nothing, so unstage it first"
+                        echo "              (\`git reset -q -- <path>\`: index only, the file stays),"
+                        echo "              then \`git add -- <path>\`. Only for paths YOU wrote:"
+                        echo "              re-staging a peer's path makes it yours by the"
+                        echo "              recorder's rule, which is attribution by stager, not"
+                        echo "              approval. If unsure whose it is, commit by pathspec."
                         ;;
                     pre-staged)
                         echo "            • already staged when a later command ran — that"

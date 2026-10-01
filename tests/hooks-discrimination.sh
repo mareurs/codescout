@@ -1097,6 +1097,45 @@ eq "a blanket add still records unnamed, not pre-staged" "$(route_of sub/b.txt)"
 has "guard still names the blanket form for it" "$(guard other-session)" "blanket add"
 rm -rf "$T"
 
+# The remedy the `unnamed` refusal prints must be one that WORKS (0cbb244c). It used to say
+# "Re-stage by explicit path and the bare commit passes", which is false for the common case:
+# the refused session has just staged that content, so a re-add is not an index change and the
+# recorder writes nothing. The first two assertions are the PREMISE, measured, so the text can
+# change back only if the behaviour does. The next two are the step that works, and the last
+# pair pins the text: it must say that step and no longer promise the one that fails.
+new_repo
+mkdir -p sub
+echo b > sub/b.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add sub/
+remedy_out="$(guard "$S_A")"
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- sub/b.txt
+eq "a plain re-add of already staged content does not re-claim it" \
+    "$(owner_of sub/b.txt)" "-"
+has "...so the bare commit is still refused" "$(guard "$S_A")" "EXIT=1"
+CLAUDE_CODE_SESSION_ID="$S_A" git reset -q -- sub/b.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add -- sub/b.txt
+eq "unstaging first and then adding by explicit path claims it" \
+    "$(owner_of sub/b.txt)" "$S_A"
+has "...and the bare commit then passes" "$(guard "$S_A")" "EXIT=0"
+has "the blanket-add remedy says why a plain re-add fails" "$remedy_out" "records nothing"
+has "the blanket-add remedy limits the unstage to the reader's own paths" \
+    "$remedy_out" "Only for paths YOU wrote"
+hasnt "the blanket-add remedy no longer promises a plain re-add works" \
+    "$remedy_out" "Re-stage by explicit path"
+rm -rf "$T"
+
+# `--pathspec-from-file` is a blanket form to the recorder: it never reads the list, so the
+# paths are not named on argv. The cause line must name it, or a reader whose staging used it
+# cannot tell from the text that theirs was the cause.
+new_repo
+mkdir -p sub
+echo d > sub/d.txt
+echo sub/d.txt > list.txt
+CLAUDE_CODE_SESSION_ID="$S_A" git add --pathspec-from-file=list.txt
+eq "--pathspec-from-file is recorded as unnamed" "$(route_of sub/d.txt)" "unnamed"
+has "the blanket-add cause names --pathspec-from-file" "$(guard "$S_A")" "pathspec-from-file"
+rm -rf "$T"
+
 # ---------------------------------------------------------------------------
 # 9. OWNERSHIP SURVIVES A TRANSIENTLY EMPTY INDEX
 #
