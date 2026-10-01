@@ -672,11 +672,12 @@ defended only freshness.
 **Valid:** conditional — reopens if any gate form documented in `CLAUDE.md`
 § *Development Commands* writes `target/debug/codescout` anywhere but last
 
-**Re-checked 2026-09-18 — has NOT fired.** Both documented forms leave the shared binary
-correct at rest: the four commands still end on the default lane, which rewrites
-`target/debug/codescout` after the lean lane has replaced it; and `./scripts/gate.sh` — now
-the leading form in that section — keys `CARGO_TARGET_DIR` on `$CLAUDE_CODE_SESSION_ID` and
-therefore never writes the shared path at all. **What this condition does NOT cover, said
+**Re-checked 2026-10-01 — has NOT fired.** Both documented forms leave the shared binary
+correct at rest: the four commands still end on the default lane (`scripts/gate.sh:107-114`,
+in the order FMT, CLIPPY, LEAN, DEFAULT), which rewrites `target/debug/codescout` after the
+lean lane has replaced it; and `./scripts/gate.sh` — the leading form in that section — leases
+`CARGO_TARGET_DIR` from a pool of slots outside the repo (`:67-71`) and therefore never
+writes the shared path at all. **What this condition does NOT cover, said
 because the two are easy to conflate:** the concurrency hole in that same guarantee — a
 peer's lean-lane build landing inside your own lane's run phase — is a separate live record
 (`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`), and is
@@ -719,8 +720,8 @@ Two limits kept deliberately, because an overstated fix is its own `OB`:
 
 **A second form shipped 2026-09-15, and it reaches the safe state by different means.**
 `CLAUDE.md`'s headline is now `./scripts/gate.sh`, which runs the same four commands in the
-same order (`scripts/gate.sh:69-75`) but exports `CARGO_TARGET_DIR` to a per-session path
-outside the repo (`:61`). **Neither of its lanes writes `target/debug/codescout`.** The
+same order (`scripts/gate.sh:107-114`) but runs them in a `CARGO_TARGET_DIR` leased for the run
+from a pool of slots outside the repo (`:67-71`). **Neither of its lanes writes `target/debug/codescout`.** The
 ordering guarantee above is untouched and still governs the four-command fallback, which
 still shares `target/` — so the two documented forms are now safe for unrelated reasons: the
 fallback by *sequence*, the script by *isolation*.

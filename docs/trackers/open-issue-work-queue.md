@@ -1144,6 +1144,14 @@ and tests `status_token_present` over that one field; the middle one's own doc c
 still reads *"Ids only, never statuses"*. Nothing compares any other field, in either
 direction. Checked by reading the scans, not this entry's prose.
 
+**Re-checked 2026-10-01 — has NOT fired.** Read, not matched by name: `scan_params_status_drift`
+(`src/librarian/tools/doctor.rs:5766`) still compares only `status`, by enum token over the
+entry's body region, and skips any ledger whose `params_schema` declares no status enum. The
+other two body/params scans are the id-set ones, `scan_snapshot_drift` (`:4735`) and
+`scan_params_behind_body` (`:5547`). A check added since that sounds adjacent does not close the
+gap: `row_behind_file` compares a whole-file hash against the catalog row
+(`check_row_behind_file(id, abs_path, stored_sha)`), not a field against a field.
+
 Surfaced while executing BL-42's data repair: diffing `windows-platform-support.md`'s body table against `params` field-by-field (not just by id) found 7 rows present on both sides with different content — `WIN-1`, `WIN-4`, `WIN-5`, `WIN-20`, `WIN-27` had a stale pre-archive `ref`; `WIN-28` and `WIN-29` were worse, `params` held an earlier `open` snapshot with a superseded root-cause summary while the body already carried the resolved `fixed` story. This tracker's own `entry_filter={"status":{"eq":"open"}}` convention would have returned two closed issues as open, with the wrong explanation.
 
 `doctor`'s `params_behind_body` (BL-40) does not cover this: it computes set difference on ids, so a row present on both sides with disagreeing fields passes it silently. `update_entry` already warns one direction (`snapshot_stale`, params-changed/body-didn't) but nothing scans the other direction — a body edit that never touches params leaves no trace.
@@ -1281,6 +1289,12 @@ caller to patch the body via `body_edits`. Writing was added BESIDE reporting, n
 of it, so the `rather than` is unsatisfied and the entry stands. Worth stating explicitly
 because a reader checking only *"can append_entry write the body?"* would answer yes and
 retire this entry on a question it does not ask.
+
+**Re-checked 2026-10-01 — has NOT fired.** Same state at the bytes. `append_entry` still reports:
+`snapshot_missing` plus `snapshot_hint` (`src/librarian/tools/append_entry.rs:431-440`). It writes
+only beside that report — `src/librarian/catalog/augmentation.rs:917-919` drops the new id from
+`snapshot_missing` only when the caller passed `index_row`. Without one, the report is still the
+whole answer.
 
 ***The previous condition was a transcription artifact, withdrawn 2026-09-12.*** It read *"until the
 snapshot gate reaches majority coverage"* — an event that had already happened before the sentence

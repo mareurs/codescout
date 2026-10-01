@@ -53,18 +53,27 @@ previous world.
 
 **Valid:** conditional — the fully-served share at the 1000 B cap falls below ~90%
 
-**Re-checked 2026-09-18 — has NOT fired, and it is the closest of this corpus's conditionals
-to its own line.** The standing value is the **94%** in the re-measure table below
-(2026-09-12, shipped 1000 B cap) against a ~90% trigger: a four-point margin that moved
-98% → 94% in three weeks while the corpus grew. Falling, not stable.
+**Re-measured 2026-10-01 — has NOT fired, and it is still the closest of this corpus's
+conditionals to its own line.** Fully served at the shipped 1000 B cap: **93.1%** over the 1439
+project-scoped anchors that resolve and carry at least one edge row (93.0% over the 1413 with at
+least one resolved neighbour), against a ~90% trigger. The trend is 98% → 94% → 93.1% across
+2026-08-21, 2026-09-12 and now — a three-point margin, with the second step much smaller than
+the first (one point in 19 days, against four in 22) while the corpus kept growing: 25
+neighbourhoods of 17 or more (22 on 09-12), mean 3.70 resolved neighbours (3.69), 41.7% of
+anchors needing the excerpt pass.
 
-**Deliberately NOT re-measured today, and the reason is this entry's own method note.** The
-sweep is a re-implementation of the two-pass packer in `src/librarian/tools/context.rs`, and
-the section below records that its FIRST version disagreed with the shipped packer by one
-neighbour on `R-3` — caught only by cross-checking against the real thing on two anchors
-spanning both branches. A quick re-run that skipped that cross-check would produce a number
-with no claim on being right, which is worse here than a number six days old. Stated so the
-next reader knows which it is holding.
+**Method, and the cross-check this entry's own method note demands.** A Python re-implementation
+of `pack_entry_anchor` and `entry_sections` over a read-only open of the catalog's `entry_cite`
+table, not the shipped packer. Checked against the live `librarian(action="context")` envelope on
+five anchors spanning every branch, all exact on `candidates` / `included` / `omitted` /
+`packing`: `reconnaissance-patterns:R-3` (50 / 12 / 38, excerpted), `open-issue-work-queue-bl-n:BL-42`
+(16 / 16 / 0, excerpted, 1 unresolved), `fable-tuning-findings-fnd-n:FND-16` (10 / 10 / 0, whole),
+`a-record-asserts-a-completed-action-that-nothing:IC-8` (8 / 7 / 1, excerpted) and
+`a-truncated-window-is-ordered-by-a-key-unrelated:IC-19` (8 / 6 / 2, excerpted). Five exact
+matches bound the logic, not the other 1434 anchors, so read the figure as 93% give or take a
+point, not as 93.1 to the decimal. The script was not committed, so the next re-measure repeats
+this work; the populations differ slightly from the 09-12 table (edge-row anchors, not
+resolved-neighbour anchors), which is why the comparisons above are to the point, not the digit.
 
 **Status:** applied
 
