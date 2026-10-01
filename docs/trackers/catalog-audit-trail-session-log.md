@@ -2,16 +2,18 @@
 kind: tracker
 status: active
 title: Session Log — Catalog Audit Trail
-owners: [marius]
+owners:
+- marius
 tags:
-  - session-log
-  - audit-trail
-  - librarian
-entry_prefix:
-  - F
-  - W
+- session-log
+- audit-trail
+- librarian
 entry_high_water_F: 5
 entry_high_water_W: 3
+entry_prefix:
+- F
+- W
+snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 ---
 
 # Session Log — Catalog Audit Trail (SRI-1 → SRI-13 → SRI-7)
@@ -27,15 +29,18 @@ entry_high_water_W: 3
 > ```
 > doc(action="append_entry", id="<artifact id>", id_prefix="F",
 >          anchor_heading="## Template for new entries",
->          title="<one-line title>", body="**Observed:** ...")
+>          title="<one-line title>", body="**Observed:** ...",
+>          index_row="| {id} | <date> | <sev> | <cat> | open | **<title>** — … |")
 > ```
 >
 > One call, one write: the server allocates the next id, formats the
 > heading as `## F-N — <title>` (the only shape `link_scan` accepts as a
 > definition), records the ledger's high-water mark, and stamps
-> `**Valid:** dated <today>` unless your body declares a class. **Then**
-> add the Index / Wins Index row, using the id the call returned — the
-> indexes are the eval surface, the sections are the evidence.
+> `**Valid:** dated <today>` unless your body declares a class. **The
+> Index row rides the same call** (`index_row`; `{id}` becomes the id just
+> allocated, and the row lands at the end of the Index table this ledger declares
+> as `snapshot_anchor`), so no commit can capture the section with its row still
+> unwritten. The indexes are the eval surface, the sections are the evidence.
 >
 > **Do not hand-allocate ids, and do not pre-write index rows.** A max-id
 > is a fact about an instant, and a peer session in the same checkout can
@@ -702,9 +707,11 @@ F-4's counterfactual and is not independent evidence of it.
 
      doc(action="append_entry", id="<artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
-              title="<one-line title>", body="**Observed:** ...")
+              title="<one-line title>", body="**Observed:** ...",
+              index_row="| {id} | <date> | <sev> | <cat> | open | **<t>** — … |")
 
      The server allocates the id, writes `## F-N — <title>` at the ledger's
      own level, records the high-water mark and stamps `**Valid:** dated
-     <today>` — one write. Then add the Index / Wins Index row with the id
-     it returned. Do not hand-allocate; do not pre-write the row. -->
+     <today>` AND writes the Index row
+     (`index_row`, `{id}` filled in) at the end of the declared `snapshot_anchor`
+     table — one write. Do not hand-allocate; do not pre-write the row. -->

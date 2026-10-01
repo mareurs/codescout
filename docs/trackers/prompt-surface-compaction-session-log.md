@@ -13,6 +13,7 @@ entry_high_water_W: 18
 entry_prefix:
 - F
 - W
+snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 ---
 
 > **Work stream:** began as an audit of codescout's four prompt surfaces (`tools/list`,
@@ -46,8 +47,13 @@ entry_prefix:
 > **This is a guarded ledger** — `entry_prefix: [F, W]` is declared in frontmatter,
 > so `edit_file` is refused. Append via
 > `doc(action="append_entry", id_prefix="F"|"W", title=…, body=…,
-> anchor_heading="## Template for new entries")` and let the server write the
-> heading. Status vocabulary is the one in `docs/templates/session-log.md`.
+> anchor_heading="## Template for new entries",
+> index_row="| {id} | <date> | <sev> | <cat> | open | **<title>** — … |")` and let
+> the server write the heading and, for an F-N, the Index row in the same write
+> (it lands at the end of the Index table, which this ledger declares as
+> `snapshot_anchor`). A W-N row cannot ride along, since a ledger declares one
+> `snapshot_anchor`; add it to the Wins Index in a second write. Status vocabulary is
+> the one in `docs/templates/session-log.md`.
 > **Wins Index rows are ascending** — append after the last row; prepending to a
 > named row put W-7 above W-6 and then W-8 above W-7, twice in one session.
 >
@@ -2266,6 +2272,8 @@ to the party the guard refused.** Filed as
 
 <!-- Appends land above this line. Use:
      doc(action="append_entry", id="<this artifact id>", id_prefix="F"|"W",
-              title="...", body="...", anchor_heading="## Template for new entries")
-     The server writes a def_re-conformant `## <ID> — <title>` heading. Add the
-     matching Index / Wins Index row in the same session. -->
+              title="...", body="...", anchor_heading="## Template for new entries",
+              index_row="| {id} | <date> | <sev> | <cat> | open | **<t>** — … |")
+     The server writes a def_re-conformant `## <ID> — <title>` heading and, for an
+     F-N, the Index row in the same write. A W-N Wins Index row is still a second
+     write (one snapshot_anchor per ledger). -->

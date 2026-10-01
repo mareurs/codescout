@@ -12,8 +12,9 @@ tags:
 - promotion
 - mineable
 topic: issue clusters and rule promotion
-entry_prefix: IC
 entry_high_water_IC: 23
+entry_prefix: IC
+snapshot_anchor: '| id | class | slug | promotes to |'
 ---
 
 > **Prefix:** `IC-N` — one **defect class** the bug corpus instantiates. Declared ledger; the

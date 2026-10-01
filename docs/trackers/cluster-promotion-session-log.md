@@ -11,11 +11,12 @@ tags:
 - observer-blindness
 - mechanism-design
 topic: cluster promotion and mechanism design
+entry_high_water_F: 8
+entry_high_water_W: 3
 entry_prefix:
 - F
 - W
-entry_high_water_F: 8
-entry_high_water_W: 3
+snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 ---
 
 # Session Log — Cluster Promotion (IC-N → OB-N)
@@ -30,10 +31,12 @@ entry_high_water_W: 3
 > ```
 > doc(action="append_entry", id="<this artifact id>", id_prefix="F",
 >          anchor_heading="## Template for new entries",
->          title="<one-line title>", body="**Observed:** ...")
+>          title="<one-line title>", body="**Observed:** ...",
+>          index_row="| {id} | <date> | <sev> | <cat> | open | **<title>** — … |")
 > ```
 >
-> **Then** add the Index / Wins Index row with the id the call returned. Never
+> **The Index row rides the same call** (`index_row`; `{id}` becomes the id just
+> allocated, at the end of the Index table this ledger declares as `snapshot_anchor`). Never
 > hand-allocate, never pre-write the row — a pre-written row consumes the id it names.
 >
 > Status vocabularies, category conventions and the full F-N / W-N entry templates are
@@ -765,8 +768,10 @@ this is a wording fix or a member.
 
      doc(action="append_entry", id="<this artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
-              title="<one-line title>", body="**Observed:** ...")
+              title="<one-line title>", body="**Observed:** ...",
+              index_row="| {id} | <date> | <sev> | <cat> | open | **<t>** — … |")
 
      The server allocates the id, writes `## F-N — <title>` at the ledger's own level,
-     records the high-water mark and stamps `**Valid:** dated <today>` — one write.
-     Then add the Index / Wins Index row with the id it returned. -->
+     records the high-water mark and stamps `**Valid:** dated <today>` — one write,
+     and the Index row (`index_row`) lands in that same write, at the end of the declared
+     `snapshot_anchor` table. -->

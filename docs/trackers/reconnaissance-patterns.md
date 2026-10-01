@@ -8783,7 +8783,9 @@ The same scout found the plan's Step 6 positive control ("the correction commits
                      "<narrative>\n\n"
                      "**Promote-when:** <falsifiable criterion>\n\n"
                      "**Status:** open — <N datapoints>\n\n"
-                     "**Kin:** R-x, R-y\n")
+                     "**Kin:** R-x, R-y\n",
+                index_row="| {id} | <date> | <verdict> | **<pattern>** — … | <evidence> |",
+                index_after_line="|----|------|---------|---------|------------------------|")
 
      No `entry_collection`: entries here are `## R-N` body sections, not params
      rows. Passing `anchor_heading` + `title` + `body` TOGETHER is what makes the
@@ -8811,8 +8813,10 @@ The same scout found the plan's Step 6 positive control ("the correction commits
      landed. An augmentation being present does not push this ledger off the
      section-writing path; `append_entry`'s own `seed_prose` test pins that.
 
-  2. ADD THE INDEX ROW — a SECOND call, after the entry lands, using the id
-     `append_entry` returned. Five columns, matching the header:
+  2. THE INDEX ROW RIDES THE SAME CALL — `index_row`, with `{id}` filled in with the
+     id just allocated, and `index_after_line` naming this table's separator line, so
+     the section and its row are ONE write. The table is newest-first, so the row
+     lands at the top. Five columns, matching the header:
 
        | R-N | YYYY-MM-DD | verdict | pattern | evidence |
 
@@ -8822,8 +8826,8 @@ The same scout found the plan's Step 6 positive control ("the correction commits
                 <(grep -o '^| R-[0-9]*b\?' <file> | sed 's/^| //'  | sort -u)
 
      Empty output = clean. This check found 13 orphaned bodies on 2026-08-16.
-     Write the row AFTER the section exists, never before: the allocator counts an
-     id claimed by an index row, so a pre-written row consumes the id it names.
+     Never write a row BEFORE the call: the allocator counts an id claimed by an
+     index row, so a pre-written row consumes the id it names.
 
   REQUIRED FIELDS — `**Status:**` IS NOT OPTIONAL. It is the disposition field,
   and it is the only thing that makes a fired `Promote-when` harvestable. Its

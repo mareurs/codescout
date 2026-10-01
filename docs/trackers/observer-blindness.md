@@ -20,7 +20,10 @@ entry_prefix: OB
 
 **Declared ledger.** `entry_prefix: OB`. Entries are `## OB-N — <title>` body sections;
 allocate with `doc(action="append_entry", id=<this artifact>, id_prefix="OB",
-anchor_heading="## Template for new entries", title=…, body=…)`. Never hand-allocate.
+anchor_heading="## Template for new entries", title=…, body=…,
+index_row="| {id} | <date> | **<class>** — <one line> | <blind party> | <vigilance> | <mechanism status> |",
+index_after_line="|---|---|---|---|---|---|")`, which writes the Index row in the same call
+(newest first, so at the top of the table). Never hand-allocate.
 `edit_file` is refused.
 
 ## What this ledger is for

@@ -1,19 +1,19 @@
 ---
 kind: tracker
 status: active
-title: "Session Log — Context Injection & Principal Identity"
-owners: []
+title: Session Log — Context Injection & Principal Identity
 tags:
-  - engines
-  - guide-ledger
-  - subagents
-  - session-log
+- engines
+- guide-ledger
+- subagents
+- session-log
 topic: context-injection
-entry_prefix:
-  - F
-  - W
 entry_high_water_F: 18
 entry_high_water_W: 6
+entry_prefix:
+- F
+- W
+snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 ---
 
 # Session Log — Context Injection & Principal Identity
@@ -1623,9 +1623,11 @@ True of the `guide_ledger.rs` / `server.rs` / `guide_rearm.rs` shape at `HEAD` o
 
      doc(action="append_entry", id="<artifact id>", id_prefix="F",
               anchor_heading="## Template for new entries",
-              title="<one-line title>", body="**Observed:** ...")
+              title="<one-line title>", body="**Observed:** ...",
+              index_row="| {id} | <date> | <sev> | <cat> | open | **<t>** — … |")
 
      The server allocates the id, writes `## F-N — <title>` at the ledger's
      own level, records the high-water mark and stamps `**Valid:** dated
-     <today>` — one write. Then add the Index / Wins Index row with the id
-     it returned. Do not hand-allocate; do not pre-write the row. -->
+     <today>` AND writes the Index row
+     (`index_row`, `{id}` filled in) at the end of the declared `snapshot_anchor`
+     table — one write. Do not hand-allocate; do not pre-write the row. -->

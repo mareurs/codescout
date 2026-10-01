@@ -7,8 +7,9 @@ tags:
 - operator-rules
 - engine-5
 - ledger
-entry_prefix: OP
 entry_high_water_OP: 6
+entry_prefix: OP
+snapshot_anchor: '| ID | Binding | Covers | Evidence | Status |'
 ---
 
 # Operator Rules (OP-N)
@@ -272,4 +273,5 @@ its own non-overlap argument.
 
 ## Template for new entries
 
-<!-- Insert new OP-N entries above this line. Use doc(action="append_entry", id=<this artifact>, id_prefix="OP", anchor_heading="## Template for new entries", title=…, body=…) — never hand-format the heading. -->
+<!-- Insert new OP-N entries above this line. Use doc(action="append_entry", id=<this artifact>, id_prefix="OP", anchor_heading="## Template for new entries", title=…, body=…,
+     index_row="| {id} | <binding> | <covers> | <evidence> | active |") — never hand-format the heading; the row lands at the end of the Index table, which this ledger declares as `snapshot_anchor`. -->
