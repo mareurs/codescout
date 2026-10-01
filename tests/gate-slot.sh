@@ -17,6 +17,11 @@
 # session reused a path the gate printed and grew a tree outside the lease (bug
 # 097aa5ca2222a91d).
 #
+# Cases L-N cover the last bound, by cause rather than size: a lease evicts a compiled build
+# script recorded as built for another checkout (bug a61fab68e4fd71f3). L and N read fixtures
+# and pin which scripts go and which stay; M is the half only cargo can answer, that the
+# eviction makes cargo compile the script again for the lessee.
+#
 # The real gate.sh is driven here, not a copy of its logic: `cargo` is a stub on PATH that
 # records the CARGO_TARGET_DIR each lane saw, `./scripts/fmt-mine.sh` is a stub in a fake
 # checkout (gate.sh calls it relative to its cwd), and HOME plus CODESCOUT_GATE_POOL point
@@ -209,7 +214,7 @@ echo "K. with-slot.sh runs one command inside a leased slot"
 WITH="$(dirname "$GATE")/with-slot.sh"
 run_with() { # run_with <tag> [VAR=value ...] bash "$WITH" <command...>
     local tag="$1"; shift
-    ( cd "$WORK/repo" && exec env -u CARGO_TARGET_DIR HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
+    ( cd "${WITH_CWD:-$WORK/repo}" && exec env -u CARGO_TARGET_DIR HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
         CODESCOUT_GATE_POOL="$POOL" "$@" ) > "$WORK/out-$tag" 2>&1
 }
 POOL="$WORK/pool-k"
@@ -237,6 +242,128 @@ eq "the ceiling applies to a with-slot.sh lease too" "$(state "$POOL/slot-0/stal
 run_with k7 CODESCOUT_GATE_POOL_KEEP=x bash "$WITH" sh -c ': > "$1"' _ "$WORK/ran-k7"
 eq "a failed lease exits 2" "$?" "2"
 eq "and never runs the command" "$(state "$WORK/ran-k7")" "gone"
+
+echo "L. a lease evicts a build script compiled for another checkout, and nothing else"
+# bug a61fab68e4fd71f3. Cargo shares one compiled build script across checkouts and never
+# reads the manifest dir baked into it, so a lessee can run a script built for someone else.
+# The only owner field a slot carries is the `# env-dep:CARGO_MANIFEST_DIR=` line in the
+# script's dep-info; the lease compares it with the lessee's git toplevel.
+git init -q "$WORK/repo"
+REPO="$WORK/repo"
+# A compiled build script as cargo leaves it: its dep-info, the binary, and (when the third
+# argument is `-`) no env-dep line at all, which is what a script that reads the variable at
+# run time records.
+script_for() { # script_for <slot dir> <name> <manifest dir | ->
+    local d="$1/debug/build/$2"; mkdir -p "$d"
+    { echo "$d/build_script_build-${2##*-}: build.rs"
+      [ "$3" = - ] || echo "# env-dep:CARGO_MANIFEST_DIR=$3"; } > "$d/build_script_build-${2##*-}.d"
+    : > "$d/build_script_build-${2##*-}"
+}
+fixture_l() { # fixture_l <slot dir>
+    script_for "$1" own-1111     "$REPO"
+    script_for "$1" member-2222  "$REPO/crates/codescout-embed"
+    script_for "$1" sibling-3333 "$REPO.worktrees/other"
+    script_for "$1" foreign-4444 "/elsewhere/checkout"
+    script_for "$1" registry-5555 "$WORK/home/.cargo/registry/src/idx/libsqlite3-sys-0.37.0"
+    script_for "$1" plain-6666   -
+    # Cross-compiled layout: one level deeper, same rule.
+    script_for "$1/x86_64-unknown-linux-gnu" triple-8888 "/elsewhere/checkout"
+    # The same file name outside build/<pkg>-<hash> must never take its directory with it.
+    mkdir -p "$1/debug/deps"
+    echo "# env-dep:CARGO_MANIFEST_DIR=/elsewhere/checkout" > "$1/debug/deps/build_script_build-9999.d"
+    : > "$1/debug/deps/neighbour.rlib"
+    # The run unit's directory beside a foreign script's: only the compiled script goes.
+    : > "$1/debug/build/foreign-4444/output"
+}
+slot_script() { state "$POOL/slot-0/debug/build/$1/build_script_build-${1##*-}.d"; }
+POOL="$WORK/pool-l"; fixture_l "$POOL/slot-0"
+run_gate l1 sid-l1
+eq "a script compiled for another checkout is evicted" "$(slot_script foreign-4444)" "gone"
+eq "and its whole build/<pkg>-<hash> directory goes with it" "$(state "$POOL/slot-0/debug/build/foreign-4444")" "gone"
+eq "a script compiled for a sibling that merely shares the prefix is evicted" "$(slot_script sibling-3333)" "gone"
+eq "a script compiled for the lessee's own tree is kept" "$(slot_script own-1111)" "kept"
+eq "a script compiled for a workspace member under the lessee is kept" "$(slot_script member-2222)" "kept"
+eq "a script in a --target <triple> layout is evicted too" \
+    "$(state "$POOL/slot-0/x86_64-unknown-linux-gnu/debug/build/triple-8888")" "gone"
+eq "the same file name outside build/<pkg>-<hash> is left alone" "$(state "$POOL/slot-0/debug/deps/build_script_build-9999.d")" "kept"
+eq "and so is everything else in that directory" "$(state "$POOL/slot-0/debug/deps/neighbour.rlib")" "kept"
+eq "a registry dependency's script is kept" "$(slot_script registry-5555)" "kept"
+eq "a script that records no manifest dir is kept" "$(slot_script plain-6666)" "kept"
+eq "the eviction is named on stderr, with the checkout it was compiled for" \
+    "$(grep -c 'evicting .*foreign-4444.*compiled for /elsewhere/checkout' "$WORK/out-l1")" "1"
+eq "and nothing else was reported" "$(grep -c 'evicting' "$WORK/out-l1")" "3"
+run_gate l2 sid-l2
+eq "a lease with nothing foreign to evict says nothing" "$(grep -c 'evicting' "$WORK/out-l2")" "0"
+
+POOL="$WORK/pool-l3"; fixture_l "$POOL/slot-0"
+script_for "$POOL/slot-0" cargohome-7777 "$WORK/cargohome/registry/src/idx/dep-1.0.0"
+run_gate l3 sid-l3 CARGO_HOME="$WORK/cargohome"
+eq "a script under \$CARGO_HOME is kept" "$(slot_script cargohome-7777)" "kept"
+eq "and a path under the default ~/.cargo is no longer exempt once CARGO_HOME names another" \
+    "$(slot_script registry-5555)" "gone"
+
+POOL="$WORK/pool-l4"; fixture_l "$POOL/slot-0"
+run_with l4 bash "$WITH" true
+eq "with-slot.sh evicts on its lease too" "$(slot_script foreign-4444)" "gone"
+
+POOL="$WORK/pool-l5"; fixture_l "$POOL/slot-0"; mkdir -p "$WORK/nogit"
+WITH_CWD="$WORK/nogit" run_with l5 bash "$WITH" true
+eq "outside a git tree there is no lessee, so nothing is evicted" "$(slot_script foreign-4444)" "kept"
+
+POOL="$WORK/pool-l6"; fixture_l "$WORK/preset-l"
+run_gate l6 sid-l6 CARGO_TARGET_DIR="$WORK/preset-l"
+eq "a preset CARGO_TARGET_DIR is not ours to tend" \
+    "$(state "$WORK/preset-l/debug/build/foreign-4444/build_script_build-4444.d")" "kept"
+
+echo "N. the function's own edge cases, called directly"
+POOLDIR="$(dirname "$GATE")"
+POOL="$WORK/pool-n1"; fixture_l "$POOL/slot-0"
+( . "$POOLDIR/slot-pool.sh"; slot_evict_foreign_build_scripts direct "$POOL/slot-0" "$REPO" "" ) 2>/dev/null
+# An empty cargo-home would otherwise make the exemption `/*`, which matches every path and
+# switches eviction off without a word, the way a mistyped ceiling would.
+eq "an empty cargo-home does not exempt everything" "$(slot_script foreign-4444)" "gone"
+eq "and the lessee's own script is still kept" "$(slot_script own-1111)" "kept"
+POOL="$WORK/pool-n2"; fixture_l "$POOL/slot-0"
+( . "$POOLDIR/slot-pool.sh"; slot_evict_foreign_build_scripts direct "$POOL/slot-0" "" "$WORK/home/.cargo" ) 2>/dev/null
+eq "with no checkout nothing is evicted" "$(slot_script foreign-4444)$(slot_script sibling-3333)" "keptkept"
+# The command's stdout is the command's: with-slot.sh sits in front of things like
+# `cargo metadata | jq`, so a lease may speak only on stderr.
+POOL="$WORK/pool-n3"; fixture_l "$POOL/slot-0"
+got="$( cd "$WORK/repo" && env -u CARGO_TARGET_DIR HOME="$WORK/home" PATH="$WORK/bin:$PATH" \
+    CODESCOUT_GATE_POOL="$POOL" bash "$WITH" echo hi 2>/dev/null )"
+eq "an eviction is reported on stderr only" "$got" "hi"
+eq "and the eviction did happen in that run" "$(slot_script foreign-4444)" "gone"
+
+echo "M. with real cargo, the second checkout builds from its own tree"
+# Everything above reads a fixture. This is the half only cargo can answer: that removing
+# the directory makes cargo compile the script again, and that cargo would otherwise have
+# run the first checkout's. Tree B's build.rs is older than anything in the slot, which is a
+# checkout whose build.rs has not changed in a while.
+REAL_CARGO="$(PATH="$PATH" command -v cargo)"
+if [ -z "$REAL_CARGO" ]; then
+    echo "  SKIP  no cargo on PATH"
+else
+    toy() { # toy <dir> <marker>
+        mkdir -p "$1/src"
+        printf '[package]\nname = "probe"\nversion = "0.0.0"\nedition = "2021"\nbuild = "build.rs"\n\n[workspace]\n' > "$1/Cargo.toml"
+        printf 'fn main() {\n    let p = concat!(env!("CARGO_MANIFEST_DIR"), "/marker.txt");\n    let s = std::fs::read_to_string(p).unwrap_or_else(|e| panic!("read {p}: {e}"));\n    println!("cargo:rustc-env=MARK={}", s.trim());\n}\n' > "$1/build.rs"
+        printf 'fn main() { println!("{}", env!("MARK")); }\n' > "$1/src/main.rs"
+        echo "$2" > "$1/marker.txt"
+        git init -q "$1"
+    }
+    toy "$WORK/toy-a" marker-A; toy "$WORK/toy-b" marker-B
+    touch -d 2020-01-01 "$WORK/toy-b/build.rs"
+    POOL="$WORK/pool-m"
+    # HOME points at the temp dir, so hand rustup and cargo the real ones.
+    real() { WITH_CWD="$1" run_with "$2" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" \
+        RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" PATH="$PATH" \
+        bash "$WITH" cargo run --offline -q; }
+    real "$WORK/toy-a" m1
+    eq "control: tree A prints its own marker" "$(grep -c '^marker-A$' "$WORK/out-m1")" "1"
+    real "$WORK/toy-b" m2
+    eq "tree B, leasing A's slot, prints its own marker" "$(grep -c '^marker-B$' "$WORK/out-m2")" "1"
+    eq "and not A's" "$(grep -c 'marker-A' "$WORK/out-m2")" "0"
+fi
 
 echo
 echo "  $PASS passed, $FAIL failed"

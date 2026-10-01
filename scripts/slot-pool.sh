@@ -16,6 +16,11 @@
 # run builds cold. And the high-water mark never fell, so free slots numbered KEEP or
 # higher are removed by the next run to come along.
 #
+# A third bound is by cause, not by size or count: `slot_evict_foreign_build_scripts` removes
+# a compiled build script whose recorded CARGO_MANIFEST_DIR is another checkout's, because
+# cargo shares one script across checkouts and a 4 MB stale one is invisible to a size rule
+# (bug a61fab68e4fd71f3).
+#
 # THE LOCK IS THE ONLY PROOF A TREE IS IDLE, which is why the pruning lives here and not
 # in a cron job or a warning. `flock -n` succeeding is the one observation that no leased
 # run is inside a slot, so every removal happens under that lock. A tree with no lock
@@ -95,12 +100,60 @@ slot_tend() {
 
 slot_remove_dir() { rm -rf -- "$1"; }
 
+# slot_evict_foreign_build_scripts <who> <tree> <checkout> <cargo-home>
+# Call it holding a lease. Removes each compiled build script in <tree> whose recorded
+# CARGO_MANIFEST_DIR is neither inside <checkout> nor inside <cargo-home>, so cargo
+# compiles that script again for the lessee. Nothing is removed when <checkout> is empty:
+# the pattern `/*` then matches every absolute path. That is relied on, not guarded: a
+# `return` ahead of it would refuse exactly what the pattern already skips, so no test could
+# tell it from its absence. The direct call in tests/gate-slot.sh case L pins the behaviour.
+#
+# WHY THIS IS NOT SIZE OR COUNT. Cargo keeps no checkout path in a path package's hash, so
+# checkouts share one compiled build script per feature set, and it calls that script fresh
+# when the lessee's build.rs is no newer than the compiled copy. It never reads the
+# `# env-dep:CARGO_MANIFEST_DIR=` line rustc wrote into the script's dep-info, which is
+# where an `env!`-baked path lives. Measured with two throwaway crates in one target dir:
+# the second printed the first's marker (bug a61fab68e4fd71f3). That line is the only owner
+# field a slot carries, and nothing compared it with the lessee until this.
+#
+# TWO EXEMPTIONS, BOTH NEEDED. A path under <cargo-home> is a registry or git dependency,
+# which is meant to be shared (libsqlite3-sys, measured in all three slots), and removing it
+# would recompile C on every lease. A path under <checkout> is the lessee's own, workspace
+# members included. The test is `<dir>/` against `<checkout>/*`, with the slash, because a
+# bare prefix would call `<checkout>.worktrees/x` the lessee's own: that sibling shape is
+# exactly what the pool held when this was written.
+#
+# SCOPE. It catches the `env!` form only, which is the one cross-checkout hazard observed.
+# A script that bakes a path some other way records nothing here, and stays shared.
+slot_evict_foreign_build_scripts() {
+    local who="$1" tree="$2" checkout="$3" cargo_home="$4" dep line manifest
+    # The whole directory holding the dep-info is removed, so `-path` confines the search to
+    # a directory cargo named build/<pkg>-<hash>; the same file name under deps/ would
+    # otherwise take deps/ with it. Depth 5 reaches a `--target <triple>` layout.
+    while IFS= read -r dep; do
+        line="$(grep -m1 '^# env-dep:CARGO_MANIFEST_DIR=' "$dep" 2>/dev/null)" || continue
+        manifest="${line#*CARGO_MANIFEST_DIR=}"
+        case "$manifest/" in "$checkout"/*) continue ;; esac
+        # An empty <cargo-home> would make the pattern `/*`, which matches every path.
+        if [ -n "$cargo_home" ]; then
+            case "$manifest/" in "$cargo_home"/*) continue ;; esac
+        fi
+        echo "$who: evicting ${dep%/*}: its build script was compiled for $manifest, not for $checkout" >&2
+        rm -rf -- "${dep%/*}"
+        done < <(find "$tree" -maxdepth 5 -path '*/build/*' -name 'build_script_build-*.d' 2>/dev/null)
+}
+
 # lease_gate_target <who> — lease a cargo target dir from the pool gate.sh and
-# with-slot.sh share, tend it, and export CARGO_TARGET_DIR. Sets GATE_POOL.
+# with-slot.sh share, tend it, evict build scripts compiled for another checkout, and
+# export CARGO_TARGET_DIR. Sets GATE_POOL.
 lease_gate_target() {
     GATE_POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
     slot_lease "$GATE_POOL" slot- "$1" || return 2
     # Three is the most concurrent gate runs observed on this machine.
     slot_tend "$1" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2
+    # The lessee is whichever checkout the command will build, which is the cwd's, not the
+    # one this script lives in. Outside a git tree there is none, and nothing is evicted.
+    slot_evict_foreign_build_scripts "$1" "$SLOT_DIR" \
+        "$(git rev-parse --show-toplevel 2>/dev/null)" "${CARGO_HOME:-$HOME/.cargo}"
     export CARGO_TARGET_DIR="$SLOT_DIR"
 }
