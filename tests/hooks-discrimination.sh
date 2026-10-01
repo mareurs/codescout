@@ -150,7 +150,19 @@ blob_of() {
 # The recorder takes the path from CODESCOUT_USAGE_DB, so no case here touches the real one.
 mkdb() {
     rm -f "$1"
+    sqlite3 "$1" "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_name TEXT, called_at TEXT, outcome TEXT, cc_session_id TEXT, input_json TEXT, project_root TEXT);"
+}
+# The same table as an OLDER build wrote it, before `project_root` existed. `open_db` migrates the column
+# in when a codescout opens the file, so a database nothing has opened since is real. Cases that name this
+# are about the lookup surviving its absence; every other case runs against the current shape, where
+# `wrote` leaves `project_root` NULL (a row from before the column was filled).
+mkdb_old() {
+    rm -f "$1"
     sqlite3 "$1" "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_name TEXT, called_at TEXT, outcome TEXT, cc_session_id TEXT, input_json TEXT);"
+}
+# in_tree <db> <root>: the newest row was made by a call whose active project was <root>.
+in_tree() {
+    sqlite3 "$1" "UPDATE tool_calls SET project_root = '${2//\'/\'\'}' WHERE id = (SELECT max(id) FROM tool_calls);"
 }
 # wrote <db> <sid> <tool> <input_json> [outcome] [called_at]. `called_at` defaults to now,
 # in the `YYYY-MM-DD HH:MM:SS.mmm` form the real table uses. No single quote may appear in
@@ -245,6 +257,13 @@ eq "peer's git status does not steal an edit" "$(owner_of s1.txt)" "$A"
 eq "peer's git status does not steal a deletion" "$(owner_of del.txt)" "$A"
 
 rm -f .git/session-stage-log
+# `git status` writes the index, which is what fires the recorder, only when an entry needs refreshing: a
+# staged file whose stat data still matches its entry (the add and the status landing in one timestamp tick)
+# gives it nothing to write, the hook never fires and the log stays absent. Measured 8 of 150 times with
+# this setup alone, 0 of 150 with the file's mtime moved first, which makes the entry stale on purpose.
+# The `log_recreated` assertion below stays as the guard that says the setup worked.
+# docs/issues/archive/2026-10-01-the-stage-log-suites-cold-log-precondition-depends-on-git-status-rewriting-the-index.md
+touch -d '2 hours ago' s1.txt
 CLAUDE_CODE_SESSION_ID="$B" git status --short > /dev/null
 log_recreated "precondition: peer status recreated the stage log"
 eq "cold log + peer status -> unknown, not the passer-by" "$(owner_of s1.txt)" "-"
@@ -1381,6 +1400,109 @@ eq "24i: a pair still staged keeps its row, which is why the refusal says to uns
 git reset -q -- g.txt
 add_as "$A" g.txt
 eq "24i: and unstaging then re-adding by name asks again" "$(owner_of g.txt)" "$A"
+rm -rf "$T" "$DB"
+
+# 25. A relative path names a file in the tree the call RAN IN, and `usage.db` records that tree in
+# `project_root` (already resolved through the call's own `workspace` pin: 4405 of 4405 rows that carried
+# one agreed with it, measured 2026-10-01). A worktree session's edit of `src/x.rs` is a relative `src/x.rs`
+# byte-identical to the main checkout's, so the lookup named it as the owner of the main checkout's path
+# for three days: 4 of the 18 refusals the lookup would have made over those days named a writer whose rows
+# were all in a worktree. Equality, not prefix: a worktree can sit UNDER the checkout's own directory.
+# An absolute path and a doc id name this checkout unambiguously and match whatever tree the call ran in.
+# A row with no recorded tree (NULL, empty), or a table with no such column, is read as it always was.
+WT="/elsewhere/repo.worktrees/feature"
+wrote_in() { # wrote_in <root> <sid> <tool> <json>
+    wrote "$DB" "$2" "$3" "$4"; in_tree "$DB" "$1"
+}
+# Red on unchanged code: 25a, 25f-other, 25g-other, 25j, 25k. The rest pass there and rest on mutation.
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt
+wrote_in "$WT" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "25a: a relative path written in a worktree is not a write to this checkout's path" "$(owner_of f.txt)" "$A"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt
+wrote_in "$RT" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "25b: the same row made in THIS checkout still is" "$(owner_of f.txt)" "$B"
+rm -rf "$T"
+
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt; echo g > g.txt
+wrote_in "" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt"}'
+add_as "$A" f.txt g.txt
+eq "25c: an empty project_root is read as this checkout" "$(owner_of f.txt)" "$B"
+eq "25c: and so is a NULL one, the row of a build that did not fill it" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
+# 25e. an ABSOLUTE path under this checkout is this checkout's whichever tree the call ran in, and so is
+# a doc id (the sha256 of the absolute path).
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt; echo h > h.txt
+hid="$(printf '%s' "$RT/h.txt" | sha256sum | cut -c1-16)"
+wrote_in "$WT" "$B" edit_file "{\"action\":\"edit\",\"path\":\"$RT/f.txt\"}"
+wrote_in "$WT" "$B" doc "{\"action\":\"update\",\"id\":\"$hid\",\"patch\":{}}"
+add_as "$A" f.txt h.txt
+eq "25e: an absolute path written from another tree is still a write here" "$(owner_of f.txt)" "$B"
+eq "25e: and so is a doc id" "$(owner_of h.txt)" "$B"
+rm -rf "$T"
+
+# 25f/g. the other two relative spellings: a doc create's `rel_path` and a move's `new_rel_path`.
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo c1 > c1.txt; echo c2 > c2.txt; echo m1 > m1.txt; echo m2 > m2.txt
+wrote_in "$WT" "$B" doc '{"action":"create","kind":"bug","rel_path":"c1.txt","title":"t"}'
+wrote_in "$RT" "$B" doc '{"action":"create","kind":"bug","rel_path":"c2.txt","title":"t"}'
+wrote_in "$WT" "$B" doc '{"action":"move","id":"0000000000000000","new_rel_path":"m1.txt"}'
+wrote_in "$RT" "$B" doc '{"action":"move","id":"0000000000000000","new_rel_path":"m2.txt"}'
+add_as "$A" c1.txt c2.txt m1.txt m2.txt
+eq "25f-other: a doc create made in a worktree is not a write here" "$(owner_of c1.txt)" "$A"
+eq "25f-this: one made in this checkout is" "$(owner_of c2.txt)" "$B"
+eq "25g-other: a move into a path, made in a worktree, is not a write here" "$(owner_of m1.txt)" "$A"
+eq "25g-this: one made in this checkout is" "$(owner_of m2.txt)" "$B"
+rm -rf "$T"
+
+# 25j. a tree UNDER this checkout's directory is another tree: equality, not a prefix.
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt
+wrote_in "$RT/.worktrees/feature" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "25j: a worktree nested under this checkout is another tree" "$(owner_of f.txt)" "$A"
+rm -rf "$T"
+
+# 25k. the stager's own write in a worktree is not a write here, so it must not clear a peer's real one
+# (the recorder returns at once when the stager has a live row of its own).
+new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt
+wrote_in "$WT" "$A" edit_file '{"action":"edit","path":"f.txt"}'
+wrote_in "$RT" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "25k: the stager's worktree write does not mask a peer's write in this checkout" "$(owner_of f.txt)" "$B"
+rm -rf "$T"
+
+# 25q. a checkout whose path holds an apostrophe: the root is quoted into the query as the path is, or the
+# query is a syntax error, which prints nothing and reads as "nobody else wrote it".
+QDIR="$(mktemp -d)"; mkdir -p "$QDIR/it's here"
+TMPDIR="$QDIR/it's here" new_repo; mkdb "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt
+wrote_in "$RT" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+add_as "$A" f.txt
+eq "25q: a checkout path holding an apostrophe still matches its own rows" "$(owner_of f.txt)" "$B"
+rm -rf "$T" "$QDIR"
+
+# 25i. a database that predates the column. The lookup must read it as it did before the column existed,
+# not stop working: a SQL error prints nothing, which reads as "nobody else wrote it", so a predicate on a
+# missing column would switch the whole lookup off with every case that carries the column still green.
+new_repo; mkdb_old "$DB"; RT="$(git rev-parse --show-toplevel)"
+echo f > f.txt; echo h > h.txt
+hid="$(printf '%s' "$RT/h.txt" | sha256sum | cut -c1-16)"
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"f.txt"}'
+wrote "$DB" "$B" doc "{\"action\":\"update\",\"id\":\"$hid\",\"patch\":{}}"
+add_as "$A" f.txt h.txt
+eq "25i: on a table without project_root a relative path still names its writer" "$(owner_of f.txt)" "$B"
+eq "25i: and a doc id" "$(owner_of h.txt)" "$B"
 rm -rf "$T" "$DB"
 
 echo "== sequencer stand-down"

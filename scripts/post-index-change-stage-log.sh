@@ -352,8 +352,8 @@ EOF
 # the text, all 7 that did not, and the 3 whose writes carry no text to find;
 # asking every row separately closed 2, because a later edit rewrites the words an earlier one added.
 # Of the 4 left, three are writes whose only text is a divider line the file already held, which
-# proves nothing, and one ran in a worktree (docs/issues/2026-10-01-the-recorders-write-lookup-
-# matches-a-relative-path-from-a-call-made-in-another-tree.md). The lag between a write and the
+# proves nothing, and one ran in a worktree (docs/issues/archive/2026-10-01-the-recorders-write-
+# lookup-matches-a-relative-path-from-a-call-made-in-another-tree.md). The lag between a write and the
 # commit that took it overlaps between the cases that landed and those that did not (0 to 1234 min
 # against 23 to 2164), so no time bound separates them
 # (docs/issues/archive/2026-10-01-a-recorded-write-stays-live-after-another-sessions-commit-
@@ -438,6 +438,12 @@ write_in_head() {
 #   * only calls that SUCCEEDED -- a refused edit wrote nothing.
 # A SUBAGENT's rows are filed under `<parent session id>/<agent id>` and read as the PARENT
 # (the stager's id and every commit trailer name the parent alone; the suffix is stripped).
+# A RELATIVE path (`path`, `rel_path`, `new_rel_path`) counts only for a call whose `project_root` column
+# is THIS checkout (NULL or empty is read as this checkout, and a table without the column gets no
+# predicate): the same `src/x.rs` written in a linked worktree is not a write to this one. Measured over
+# three days to 2026-10-01 at tree 3d3d2b45, 4 of the 18 refusals the lookup would have made named a writer
+# whose rows were all in a worktree (docs/issues/archive/2026-10-01-the-recorders-write-lookup-matches-a-
+# relative-path-from-a-call-made-in-another-tree.md). An absolute path and a doc id match from any tree.
 # WHAT IT CANNOT: a shell write (`run_command`, a native editor) leaves no path in the
 # record, and the grain is the FILE. Two sessions' entries in one tracker stay one path, so
 # when the stager wrote through a tool as well this prints nothing and the legacy `named`
@@ -459,18 +465,29 @@ foreign_writer() {
     # write to docs/x.md. The CASE guards json_valid because SQLite raises on the first malformed
     # row it evaluates, which would fail the query for every row.
     jx() { printf "CASE WHEN json_valid(input_json) THEN json_extract(input_json, '\$.%s') END" "$1"; }
-    local q_rel="${rel//\'/\'\'}" q_abs="${abs//\'/\'\'}"
+    local q_rel="${rel//\'/\'\'}" q_abs="${abs//\'/\'\'}" q_root="${root//\'/\'\'}"
+    # A RELATIVE path names a file in the tree the call RAN IN, so it is a write to this checkout's
+    # path only when that tree is this checkout. `project_root` records it, already resolved through
+    # the call's own `workspace` pin. EQUALITY, not a prefix: a worktree can sit under this checkout's
+    # own directory. An absolute path and a doc id name this checkout whatever tree the call ran in,
+    # and a row with no recorded tree is read as this checkout, as every row was before the column.
+    # A table WITHOUT the column (a database no codescout has opened since it was added) gets no
+    # predicate at all: a SQL error prints nothing, which reads as "nobody else wrote it", so naming a
+    # missing column would switch the whole lookup off.
+    local here="1"
+    [ "$(sqlite3 -readonly -cmd '.timeout 200' "$db" "SELECT count(*) FROM pragma_table_info('tool_calls') WHERE name = 'project_root';" 2>/dev/null)" = "1" ] &&
+        here="(project_root IS NULL OR project_root = '' OR project_root = '$q_root')"
     sql="SELECT cc_session_id || '|' || CAST(strftime('%s', called_at) AS INTEGER) || '|' || id FROM tool_calls
          WHERE id > (SELECT max(id) - 50000 FROM tool_calls)
            AND outcome = 'success'
            AND called_at >= datetime('now', '-3 days')
            AND cc_session_id IS NOT NULL AND cc_session_id != ''
            AND ((tool_name IN ('edit_file','edit_code','create_file')
-                 AND $(jx path) IN ('$q_rel', '$q_abs'))
+                 AND ($(jx path) = '$q_abs' OR ($(jx path) = '$q_rel' AND $here)))
              OR (tool_name = 'doc' AND $(jx id) = '$id'
                  AND $(jx action) IN ('update','append_entry','update_entry','move','delete'))
-             OR ($(jx action) = 'create' AND $(jx rel_path) = '$q_rel')
-             OR $(jx new_rel_path) = '$q_rel')
+             OR ($(jx action) = 'create' AND $(jx rel_path) = '$q_rel' AND $here)
+             OR ($(jx new_rel_path) = '$q_rel' AND $here))
          ORDER BY id DESC;"
     # No `[ -r db ]`, `command -v sqlite3`, `timeout` or `|| return` guards, on purpose: each
     # was removed in turn and the suite stayed green, because a missing database, a missing
