@@ -95,9 +95,10 @@ def norm(s: str) -> str:
 def window(text: str, sentence: str, width: int = 1500) -> str:
     """`width` characters of `text` CENTRED on `sentence`. A prefix cut from the start of the
     hunk left the positive outside its own context in 147 of 940 rows, every one of them
-    at the cap. A sentence not found in `text` (should not happen) falls back to the prefix."""
+    at the cap. A sentence not found in `text` (should not happen) falls back to the prefix.
+    Text no longer than `width` comes back whole through the clamp below, so it has no case of its own."""
     i = text.find(sentence)
-    if i < 0 or len(text) <= width:
+    if i < 0:
         return text[:width]
     start = max(0, min(i - (width - len(sentence)) // 2, len(text) - width))
     return text[start:start + width]
@@ -257,6 +258,22 @@ def held_out() -> dict[str, set]:
     return src
 
 
+def overlapping_group_pairs(by_group: dict[str, set]) -> set[tuple[str, str]]:
+    """EVERY pair of document groups that share at least one shingle.
+
+    Keeping one owner per shingle recorded A-B and A-C for a shingle held by A, B and C and never
+    B-C: 20 star edges published as 25 pairs
+    (docs/issues/archive/2026-09-24-codex-miner-shingle-pair-undercount.md). The star edges do
+    preserve connected components, so the fold build can use either; this counts pairs. Each pair
+    is a sorted tuple, so it is counted once however many shingles it shares."""
+    owners = collections.defaultdict(set)
+    for g, ss in by_group.items():
+        for s in ss:
+            owners[s].add(g)
+    return {p for gs in owners.values() if len(gs) > 1
+            for p in itertools.combinations(sorted(gs), 2)}
+
+
 def main() -> int:
     rows, first_seen, n_commits = mine(HERE / "gitlog.patch")
     found = len(rows)
@@ -315,16 +332,7 @@ def main() -> int:
     by_group = collections.defaultdict(set)
     for r in kept:
         by_group[r["doc_group"]] |= shingles(r["positive"]) | shingles(r["twin"] or "")
-    # EVERY pair of groups sharing a shingle. Keeping one owner per shingle recorded A-B and
-    # A-C for a shingle held by A, B and C and never B-C: 20 star edges published as 25
-    # pairs (docs/issues/2026-09-24-codex-miner-shingle-pair-undercount.md). The star edges
-    # do preserve connected components, so the fold build can use either; this counts pairs.
-    owners = collections.defaultdict(set)
-    for g, ss in by_group.items():
-        for s in ss:
-            owners[s].add(g)
-    collide = {p for gs in owners.values() if len(gs) > 1
-               for p in itertools.combinations(sorted(gs), 2)}
+    collide = overlapping_group_pairs(by_group)
 
     out = HERE / "mined-candidates.jsonl"
     with out.open("w") as fh:
