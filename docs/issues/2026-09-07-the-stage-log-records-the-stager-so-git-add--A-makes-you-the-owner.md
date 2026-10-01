@@ -248,6 +248,10 @@ the SQLite busy timeout (tuning). Gate FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. **Status
 sessions that write through codescout, subagents included; a native or shell writer remains unseen, and the one measured
 population says provenance would not have caught anything there.
 
+### Fixed 2026-10-01, third pass: liveness reads the write's text
+
+`6e6dc887` was followed by a false refusal: a session was refused over its own two-line change to a ledger whose four entries by another session were already in HEAD under a third session's commit. `dd7b1590`'s rule (closed only by the writer's own commit) never closed it. The recorder now also closes a write whose own newest text is all in HEAD and was not in the copy before the write. Measurement, the rules compared, the label's circularity and the residual are in `docs/issues/archive/2026-10-01-a-recorded-write-stays-live-after-another-sessions-commit-swept-its-content.md`; fix SHA `17b06d4692817939c7a6dce502fb4541a4e7b635`, patch-id `791238e8e3b956ece6e15eecb893782c53283e80`. The refusal text no longer says *"since their last commit"*, names what was examined, and tells a stager whose diff is their own how to ask the record again.
+
 ## Tests added
 
 `tests/hooks-discrimination.sh`, section "named route attributes a path by WRITE", cases 1-21 (215 passed and 0 failed for the file at that commit), then cases 22a-22d (a subagent's composite session id) and 23a-23c (`doc create` by `rel_path`) in the second pass (224 passed). The real recorder and guard are driven in throwaway repos with a fixture `usage.db` named by `CODESCOUT_USAGE_DB`, so no case reads the real one. Cases carry explicit times, and commits carry `Session-Id` trailers (`commit_as`), so no case depends on two events landing in different seconds.
