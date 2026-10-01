@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md
 severity: medium
-unverified: '`git commit -p` / `--interactive` were not probed: they need a TTY, and a scripted `script(1)` probe hung on the prompt. They likely take `index.lock` (the -a/-i route), which the guard now examines, but that is unmeasured.'
+unverified: 'STANDING — `git commit -p` / `--interactive` were not probed: they need a TTY, and a scripted `script(1)` probe hung on the prompt. They likely take `index.lock` (the -a/-i route), which the guard now examines, but that is unmeasured.'
 ---
 
 # BUG: `git commit -a` sweeps a peer's unstaged edit into your commit, and both ownership guards pass it

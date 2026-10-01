@@ -1,15 +1,15 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-09-02
+tags:
+- cluster/doc-contradicted-by-code
 closed: 2026-09-02
-severity: low
+opened: 2026-09-02
 owner: marius
 related:
-  - docs/issues/2026-09-02-index-description-omits-the-verify-action.md
-tags:
-  - cluster/doc-contradicted-by-code
-kind: bug
-unverified: TRACKED a230df10e15016de — the long_docs() half has no regression test — the gate reads description() only, so a future long_docs drift is uncaught
+- docs/issues/2026-09-02-index-description-omits-the-verify-action.md
+severity: low
+unverified: 'RESOLVED — the long_docs() half is now gated: `tool_descriptions_name_every_action_they_claim_to_enumerate` (src/server.rs) also checks `long_docs()`, in b990f177 (patch-id 18a55c33641f988e37aeab08c9500be739952268). The work was tracked in, and closed by, docs/issues/archive/2026-09-24-residual-memory-tool-doc-gate-reads-long-docs.md (52926c4f251df5c2); the id this caveat used to name was that file''s pre-archive id.'
 ---
 
 # BUG: `memory`'s description enumerates seven actions; the enum, the dispatcher and 35 calls have eight

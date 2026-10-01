@@ -14,7 +14,7 @@ owner: marius
 related:
 - d4b61746950b86b7
 severity: low
-unverified: 'Tests are librarian-gated, so they do not run in the lean lane. The `--scope` omission this caveat first named is CLOSED: every one of the scanner''s params is now wired, `--scope` having been added in 49d08af335a1caad21c2c7d2e9b067bf65033724 (patch-id 6665082ae5cbe264bdeafe4a85186a697947415c).'
+unverified: 'STANDING — Tests are librarian-gated, so they do not run in the lean lane. The `--scope` omission this caveat first named is CLOSED: every one of the scanner''s params is now wired, `--scope` having been added in 49d08af335a1caad21c2c7d2e9b067bf65033724 (patch-id 6665082ae5cbe264bdeafe4a85186a697947415c).'
 ---
 
 > **Cluster:** `cluster/doc-contradicted-by-code` (`IC-11`, n=32, verdict *clears both

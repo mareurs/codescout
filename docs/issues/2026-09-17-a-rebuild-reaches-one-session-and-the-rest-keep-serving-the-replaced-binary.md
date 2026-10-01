@@ -11,7 +11,7 @@ closed: 2026-09-27
 opened: 2026-09-17
 related: []
 severity: medium
-unverified: 'The librarian has no stale-binary write guard, so a server on a replaced binary still runs old code for doc(move) and every other librarian write. Adding one is an open policy decision for the operator: right after a rebuild it would refuse most sessions'' writes.'
+unverified: 'STANDING — The librarian has no stale-binary write guard, so a server on a replaced binary still runs old code for doc(move) and every other librarian write. Adding one is an open policy decision for the operator: right after a rebuild it would refuse most sessions'' writes.'
 ---
 
 ## Summary

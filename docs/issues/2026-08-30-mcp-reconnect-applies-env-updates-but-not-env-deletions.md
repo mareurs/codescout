@@ -15,7 +15,7 @@ no_fix_commit: 'The fix is not ours: the harness builds the MCP spawn environmen
 opened: 2026-08-30
 owner: marius
 severity: high
-unverified: 'Reproduced 2026-09-24 on Claude Code 2.1.282, but LAYER-SPECIFIC: settings.json § env drops a deletion on /mcp (in-phase control observed), while .claude.json mcpServers.<name>.env applies one. The process.env-merge mechanism is a hypothesis the data fits and does not test — no non-codescout child spawned after a phase-1 load was read. Whether a full restart clears the stale key is untested. Claude Code''s source is not in this repo.'
+unverified: 'STANDING — Reproduced 2026-09-24 on Claude Code 2.1.282, but LAYER-SPECIFIC: settings.json § env drops a deletion on /mcp (in-phase control observed), while .claude.json mcpServers.<name>.env applies one. The process.env-merge mechanism is a hypothesis the data fits and does not test — no non-codescout child spawned after a phase-1 load was read. Whether a full restart clears the stale key is untested. Claude Code''s source is not in this repo.'
 ---
 
 # BUG: `/mcp` reconnect applies a CHANGED env var from `settings.json` but not a REMOVED one

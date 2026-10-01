@@ -13,8 +13,6 @@ opened: 2026-08-27
 owner: marius
 related: []
 severity: low
-unverified:
-  __delete__: true
 ---
 
 # BUG: `references` answers a warming LSP with `symbol not found` — a resolution error, which the false-zero guard cannot see

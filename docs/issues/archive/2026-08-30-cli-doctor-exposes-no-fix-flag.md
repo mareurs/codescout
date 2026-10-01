@@ -13,7 +13,7 @@ opened: 2026-08-30
 owner: marius
 related: []
 severity: medium
-unverified: '`to_tool_args` is doctor-local, so marshalling is still duplicated per subcommand: only the guard generalises. Tests are librarian-gated and absent from the lean lane. The `--scope` omission this caveat first named is CLOSED: the flag was added in 49d08af335a1caad21c2c7d2e9b067bf65033724 (patch-id 6665082ae5cbe264bdeafe4a85186a697947415c).'
+unverified: 'STANDING — `to_tool_args` is doctor-local, so marshalling is still duplicated per subcommand: only the guard generalises. Tests are librarian-gated and absent from the lean lane. The `--scope` omission this caveat first named is CLOSED: the flag was added in 49d08af335a1caad21c2c7d2e9b067bf65033724 (patch-id 6665082ae5cbe264bdeafe4a85186a697947415c).'
 ---
 
 # BUG: the CLI's `doctor` exposes no `--fix`, so every repair is MCP-only

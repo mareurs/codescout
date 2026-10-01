@@ -1,5 +1,5 @@
 ---
-id: 72531c93a788c413
+id: '72531c93a788c413'
 kind: bug
 status: mitigated
 title: 'BUG: a deliberately-red commit on a shared checkout exports a red only its author can interpret'
@@ -7,7 +7,7 @@ tags:
 - cluster/transient-shared-state-lies-to-readers
 closed: 2026-09-24
 severity: high
-unverified: 'the masked population is now MEASURED (36 binaries, 5730 sum, 356 masked, --no-fail-fast at d5f2b736). What remains unestablished: which of this plan''s five reported ''N passed'' figures (9351, 5323, 5370, 3438, 5374) were lib-target lines and which were sums — 5374 is confirmed lib-only, the other four are not'
+unverified: 'STANDING — the masked population is now MEASURED (36 binaries, 5730 sum, 356 masked, --no-fail-fast at d5f2b736). What remains unestablished: which of this plan''s five reported ''N passed'' figures (9351, 5323, 5370, 3438, 5374) were lib-target lines and which were sums — 5374 is confirmed lib-only, the other four are not'
 ---
 
 # BUG: a deliberately-red commit on a shared checkout exports a red only its author can interpret

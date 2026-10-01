@@ -12,7 +12,7 @@ closed: 2026-09-25
 opened: 2026-09-25
 owner: marius
 severity: low
-unverified: The leak itself is the harness's (Claude Code) and is unaddressed. An upstream report is drafted in § Upstream report and NOT filed, pending the operator. Only the codescout-side instrument half is fixed.
+unverified: STANDING — The leak itself is the harness's (Claude Code) and is unaddressed. An upstream report is drafted in § Upstream report and NOT filed, pending the operator. Only the codescout-side instrument half is fixed.
 ---
 
 # BUG: `/mcp` can replace a server without closing the old one's stdin, so the old process lives on — and `stale-servers.sh` calls it `current`
