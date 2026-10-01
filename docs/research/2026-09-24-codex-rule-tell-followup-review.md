@@ -19,7 +19,7 @@ The controlling Stages 2–4 amendment selects C1 on validation instead of T, ma
 
 ### Miner overlap census undercounts: 20 reported, 25 measured
 
-Same 946 rows, same document keys, same positive/twin eight-word shingles. The one-owner map creates a star rather than all pairwise links; five document pairs are missing. Filed in docs/issues/2026-09-24-codex-miner-shingle-pair-undercount.md. Star edges still preserve components, so this does not itself demonstrate broken fold isolation.
+Same 946 rows, same document keys, same positive/twin eight-word shingles. The one-owner map creates a star rather than all pairwise links; five document pairs are missing. Filed in docs/issues/archive/2026-09-24-codex-miner-shingle-pair-undercount.md. Star edges still preserve components, so this does not itself demonstrate broken fold isolation.
 
 ### Positive-example context is the post-correction hunk
 

@@ -1,14 +1,13 @@
 ---
-id: '6e17aec199b30604'
+id: c7221fe9ece40e50
 kind: bug
-status: fixed
+status: archived
 title: 'Codex review: mined-pair shingle census omits document pairs'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 opened: 2026-09-24
 owner: marius
 severity: medium
-unverified: 'no regression test pins the pair count: mine_pairs.py has no test suite, and no file under tests/ names it (re-checked 2026-09-28).'
 ---
 
 # Codex review: mined-pair shingle census omits document pairs
@@ -37,11 +36,14 @@ No folds or training are asserted to exist. This is a wrong published census, no
 
 **Class `cluster/value-correct-in-a-frame-its-name-does-not-state` (IC-24).** The 20 is exactly right as the number of *star edges* that connect the overlapping documents, which is enough for grouping them into folds. It was published under the name "document pairs sharing a shingle", a different frame. Not `IC-20`: nothing stopped early, and the true count was always computable.
 
-**Not archived:** no regression test pins the pair count; the script is a candidate-build tool with no test suite.
+**Regression tests added 2026-10-01** in `b3f08301`: `tests/test_stage2_mine_pairs.py::OverlappingGroupPairs`, over a new seam `overlapping_group_pairs` (the counting was inline in `main()`, beside file I/O, so no test could reach it). The three-owner case is the defect's own shape; the committed candidates give 25 through it, tied to the number printed in `summary.txt`. A mutation that pairs only the first two owners of a shingle, which is this bug's class, fails three tests.
 
 ## Fix provenance
 
 - **SHA:** `a63adc78` (`experiments`)
 - **patch-id:** `2c568203f402597d7f6958b8dd616225a1646772`
 
-**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `a63adc78` and matches. **Still not archived**, for the reason above: no file under `tests/` names `mine_pairs.py` or its pair count (re-checked the same day). The frontmatter `unverified:` carries that caveat where a query can read it.
+**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `a63adc78` and matches. The regression tests are the second pair below (re-derived through a file; both SHAs are ancestors of `HEAD`).
+
+- **SHA:** `b3f083014d85a11691a47f17d7d8176ac3412624` (`experiments`), the regression tests
+- **patch-id:** `4aa25a7319165b1ec16036734e47b9cce7f10414`

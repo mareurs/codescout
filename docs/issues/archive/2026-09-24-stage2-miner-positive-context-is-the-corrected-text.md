@@ -1,13 +1,13 @@
 ---
 kind: bug
-status: fixed
+status: archived
 title: Stage 2 miner stored the corrected text as the positive sentence's context
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 opened: 2026-09-24
 owner: marius
 severity: high
-unverified: 'no regression test, and two residuals are open: 147 positives lie outside their context_before, and 6 rows already carry the twin on the old side (re-checked 2026-09-28: no file under tests/ names mine_pairs.py or context_before).'
+unverified: TRACKED eb9014f896a48715 — 10 mined rows already carry the twin inside context_before and nothing flags or excludes them; none reached a frozen set (measured 2026-10-01, with a control).
 ---
 
 # Stage 2 miner stored the corrected text as the positive sentence's context
@@ -37,20 +37,23 @@ If used as model input, the context would put the answer, the correction, next t
 - twin inside `context_after`: 601;
 - twin inside `context_before`: 6.
 
-**Residuals, open:**
+**Residuals, as of 2026-10-01:**
 
-- **147 positives are not inside their `context_before`**, cut by the 1,500-character cap or the prose-line filter. The context builder needs to centre on the positive.
-- **In 6 rows the twin already appears on the old side,** so the "correction" pre-existed and those pairs are weak.
-
-Both must be handled before any fold is built.
+- **147 positives not inside their `context_before`: closed** by `98dbd016`, which centres the window on the sentence. Re-measured on the committed rows: positive inside `context_before` in 944 of 944.
+- **The twin already on the old side: still open, now 10 rows, and split out** as `docs/issues/2026-10-01-residual-mined-rows-with-the-twin-already-in-context-before.md` (`eb9014f896a48715`). Measured there: none of the 10 reached a frozen set as a positive.
 
 **Class `cluster/value-correct-in-a-frame-its-name-does-not-state` (IC-24).** The paragraph was exactly right for the corrected sentence, the twin. It was stored under a name, beside the positive, that states the positive's frame.
 
-**Not archived:** no regression test, and the two residuals are open.
+**Regression tests added 2026-10-01** in `b3f08301`: `tests/test_stage2_mine_pairs.py::ChangeBlocks`, `Window`, `MineKeepsEachSidesContext` and `MineKeepsNoteContext`. A mutation that builds the old-side context from the new side, which is this bug, fails between one and four tests at each of the seven sites that could reintroduce it (both side-selecting list comprehensions in `change_blocks`, and the four context assignments and the old-side paragraph in `mine()`).
 
 ## Fix provenance
 
 - **SHA:** `a63adc78` (`experiments`)
 - **patch-id:** `2c568203f402597d7f6958b8dd616225a1646772`
 
-**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `a63adc78` and matches. **Still not archived**, for the reasons above: no file under `tests/` names `mine_pairs.py` or `context_before` (re-checked the same day), and both residuals are unaddressed. The frontmatter `unverified:` carries that caveat where a query can read it.
+**Recorded 2026-09-28** by session `82cff72e`; the patch-id was re-derived from `a63adc78` and matches. Two further pairs. The second is the commit that closed the first residual; the third is the regression tests (re-derived through a file; both SHAs are ancestors of `HEAD`).
+
+- **SHA:** `98dbd0166a80b9bb915961d3739d3e4b24998746` (`experiments`), residual 1: the window centred on its sentence
+- **patch-id:** `5130236a08fb26cf3c7cbace5077329f4f01f7a4`
+- **SHA:** `b3f083014d85a11691a47f17d7d8176ac3412624` (`experiments`), the regression tests
+- **patch-id:** `4aa25a7319165b1ec16036734e47b9cce7f10414`
