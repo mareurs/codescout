@@ -1279,6 +1279,16 @@ ts_tool_use "$MDIR/$SH.jsonl" "$MAIN" $SH 2026-09-21T10:01:00Z mcp__codescout__r
 eq    "run_command cwd= after an id activation credits nothing" \
       "$(credited_to "$MAIN" b8b8b8b8)" ""
 
+# The case this bug file marked "derived by reading, not reproduced": an id whose `<active>/<id>`
+# IS a real directory holding a real file. The old reading credited that REAL file to a session
+# that never wrote it, which is worse than a phantom path: it names a file someone may own.
+mkdir -p "$MAIN/proj-real/src"
+SI=b9b9b9b9-aaaa-bbbb-cccc-0000000000a9
+ts_tool_use "$MDIR/$SI.jsonl" "$MAIN" $SI 2026-09-21T10:00:00Z mcp__codescout__workspace '{"action":"activate","path":"proj-real"}'
+ts_tool_use "$MDIR/$SI.jsonl" "$MAIN" $SI 2026-09-21T10:01:00Z mcp__codescout__create_file '{"path":"src/lib.rs","content":"x"}'
+eq    "an id that happens to name a real directory does not credit that directory's file" \
+      "$(credited_to "$MAIN" b9b9b9b9)" ""
+
 # (B) the path half: a relative PATH activation must resolve against the checkout root. The
 # subagent-timing code resolved it against the SCRIPT's cwd, so activating `.` read as "moved
 # to a tree other than the root" whenever the script ran from a subdirectory. Asked by absolute
