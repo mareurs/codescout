@@ -1037,7 +1037,7 @@ fn the_ledger_parsers_agree_on_a_fixture() {
     let ledger = "\
 ## IC-1 — first
 **Slug:** `cluster/alpha`
-| IC-1 | first | `cluster/alpha` | 7 | not yet — **10 share one layer** | none yet |
+| IC-1 | first | `alpha` | 7 | not yet — **10 share one layer** | none yet |
 **Members:** `filter={...}` — n=7, 2026-09-01. The backfill took it from `n=2` to `n=27`.
 **Promotes to:** `not yet` — n=7, below the bar. This field read `n=4` until today.\n\
 **Promotes to:** `not yet` — n=7 again. `The backfill took it from n=98 to n=99` overnight.
@@ -1051,7 +1051,7 @@ fn the_ledger_parsers_agree_on_a_fixture() {
 
 ## IC-4 — fourth
 **Slug:** `cluster/gamma`
-| IC-4 | fourth | `cluster/gamma` | 2 | not yet | none yet |
+| IC-4 | fourth | `gamma` | 2 | not yet | none yet |
 **Members:** `filter={...}` — n=2, by query.
 **Promotes to:** A stray ` backtick opens here, and a stale n=42 follows it.
 ";
@@ -1087,6 +1087,23 @@ fn the_ledger_parsers_agree_on_a_fixture() {
         parse_index_counts(ledger, &valid),
         theirs_declared,
         "`declared` disagrees on the adversarial fixture"
+    );
+    // Agreement is not enough here: both sides can agree on NOTHING. An Index row carries the BARE
+    // slug while a `**Slug:**` declaration is `cluster/<slug>`, and a fixture row written with
+    // the declaration's spelling is skipped by BOTH parsers, so `declared` came back `{}` from
+    // each and the comparison above passed over an empty population. The Python
+    // `parse_index_counts` was then covered by no test with a non-empty answer at all. Pinned to
+    // KNOWN answers so that agreeing with Rust is also agreeing with the right cells: the IC-1 row
+    // carries digits in its mechanism cell, which a parser reading the wrong cell turns into a
+    // different number or an absent row.
+    let known: BTreeMap<String, usize> = [("alpha".to_owned(), 7), ("gamma".to_owned(), 2)]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        theirs_declared, known,
+        "the script's `declared` is not the known answer for the fixture — if it is EMPTY the \
+         fixture's Index rows no longer name a valid slug (rows carry the BARE slug, not \
+         `cluster/<slug>`), and this test is comparing nothing to nothing"
     );
 
     let theirs_claimed: Vec<(String, String, usize)> =
@@ -1804,8 +1821,20 @@ fn the_bare_n_claim_parser_discriminates() {
 /// now use, which is what the substrate-matching requirement below actually asks for — it was
 /// never tied to a specific substrate, only to the two sides agreeing.
 ///
-/// Mutation that must kill this: change `parse_index_counts` to read `cells[i + 2]`, or drop
-/// the inline-`[a, b]` arm from `cluster_tags`, in EITHER language.
+/// **What this test is evidence for — measured 2026-10-01 by mutation, not read off the code.**
+/// Only the `actual` comparison carries signal. On the live corpus `declared` and `claimed` come
+/// back EMPTY from both sides, because they are what `no_index_row_stores_a_count` and
+/// `no_class_field_states_a_bare_n` hold at zero, so those two assertions are equalities over
+/// nothing: mutating either parser's count cell, or either `parse_bare_n_claims` field, in either
+/// language, SURVIVES this test (6 of 6). Those parsers are held by
+/// `the_ledger_parsers_agree_on_a_fixture` (both languages, known answers pinned) and, for the
+/// Rust twins, by `the_index_count_parser_discriminates` and
+/// `the_bare_n_claim_parser_discriminates`. What does kill THIS test is a change to the `actual`
+/// derivation: dropping the inline-`[a, b]` arm from the Python `cluster_tags` did, though corpus
+/// coverage of that arm is incidental and `the_hook_script_agrees_on_both_yaml_tag_styles` is what
+/// holds it unconditionally. An earlier version of this comment named a `parse_index_counts`
+/// mutation as one that must kill this test; it does not, and a reader who trusted it would credit
+/// this test with coverage of a parser it never exercises.
 #[test]
 fn the_hook_script_agrees_on_the_cluster_parsers() {
     let out = Command::new("python3")
@@ -1829,6 +1858,10 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
 
     let valid = valid_slugs();
 
+    // INERT on the live corpus: `claimed` is empty on both sides (the ledger states no bare `n=`;
+    // `no_class_field_states_a_bare_n` requires exactly that), so this is nothing equals nothing.
+    // It reds only if ONE side starts producing output. The parsers themselves are held by
+    // `the_ledger_parsers_agree_on_a_fixture`, not by this assertion.
     let theirs_claimed: Vec<(String, String, usize)> =
         serde_json::from_value(got["claimed"].clone()).expect("list of [slug, field, n]");
     assert_eq!(
@@ -1837,6 +1870,9 @@ fn the_hook_script_agrees_on_the_cluster_parsers() {
         "`claimed` disagrees between this gate and scripts/pre-commit-ledger-counts.py"
     );
 
+    // `declared` is INERT here for the same reason as `claimed` above: the Index table stores no
+    // count (`no_index_row_stores_a_count`), so both sides return `{}`. `actual` is the arm that
+    // carries this test; `declared` is held by `the_ledger_parsers_agree_on_a_fixture`.
     for (field, mine) in [
         ("declared", declared_counts(&valid)),
         ("actual", actual_counts(&valid)),
