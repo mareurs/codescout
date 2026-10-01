@@ -30,9 +30,14 @@ Accidental relaunch loses first-run evidence and repeats model spend. A failed r
 
 Fixed in commit `fa034d42` on `experiments`, patch-id `e4359491931dc7b0608ae1895a78d4d1686463f0`. It was integrated 2026-09-29 by the SDD controller, session 3c5b02df-b6ce-45f5-9d03-1194e38465c0, after all nine measure suites passed with a codex stub, including the new reservation and run-output tests. `run_gate` now reserves a fresh log directory before constructing the channel; an exclusive marker handles racing contenders and survives failed attempts. `run.py::_gate` also exclusively reserves distinct text/JSON destinations before any model calls, preventing overwrite and late discovery of unusable destinations. Dry runs do not reserve live log directories, but their report destinations must also be fresh.
 
-Verification: 66 judge tests and 5 CLI output tests pass; six applied in-memory mutations produce six assertion failures, zero errors and zero survivors. See `docs/research/2026-09-29-codex-system1-judge-review.md` and its counts-only evidence. Full Rust gate not rerun for these Python-only changes. Keep status investigating until the integrating session records the fix commit and verification.
+Verification: 66 judge tests and 5 CLI output tests pass; six applied in-memory mutations produce six assertion failures, zero errors and zero survivors. See `docs/research/2026-09-29-codex-system1-judge-review.md` and its counts-only evidence. Full Rust gate not rerun for these Python-only changes.
 
 Scope: per-directory/per-destination protection, not a global ban on deliberately naming a fresh attempt. Mid-write filesystem failures and durable archive policy remain separate concerns.
+
+## Fix provenance
+
+- **SHA:** `fa034d42a97a782f77ae1ec1b46de66c15c7efb9` (`experiments`)
+- **patch-id:** `e4359491931dc7b0608ae1895a78d4d1686463f0`
 
 ## References
 

@@ -7,6 +7,7 @@ owners:
 - marius
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+no_fix_commit: 'Operator ruling 2026-09-30: leave `diagnose_run.py` as it is, so no code changed and there is nothing to cite. The defect stands and is contained, which is why the status is `mitigated` and not `fixed`: the misnamed field is still written into `stage1/*.json`, and no consuming script reads it (`stage1_summary.py` and `step4.py` use `cal_own_negatives_fired`, a different calibration-fold field; `measure_own_negative_firing.py` reads it only as the control for its own recount). Reopen if a script starts reading it. Declared 2026-10-01 during a doctor terminal_status_without_fix_anchor sweep.'
 opened: 2026-09-25
 severity: low
 ---

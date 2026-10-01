@@ -136,6 +136,13 @@ introduces `miner.py`.
 
 N/A -- fixed, not left open.
 
+## Fix provenance
+
+- **SHA:** `0931fe009f19633a9276846e55b4c8724be4fab6` (`experiments`)
+- **patch-id:** `86725027e3a4b34ddafbbdcd8ec99878355f1de0`
+
+The `errors="replace"` decode shipped inside the commit that introduced `scripts/measure/miner.py` (the bug was found and fixed before it was ever committed without the flag). Its test suite was rewritten afterwards in `62215894` (Task 8 fix round 1), which also wrote the correction under *Tests added* retracting three claims the first suite made.
+
 ## References
 
 - `scripts/measure/miner.py` (`_git`, `_blame_shas`)

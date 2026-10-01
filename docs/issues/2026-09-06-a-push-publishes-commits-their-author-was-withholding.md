@@ -947,7 +947,9 @@ than declared unilaterally by one session.
 
 ## Fix provenance
 
-- **Mitigated in** `a3dcff72` (`experiments`), patch-id `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
+- **SHA:** `a3dcff7213b60a3141261c54f58785763c62a36e` (`experiments`)
+- **patch-id:** `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
+- **Mitigated by** that commit
   — the author-side convention this section proposed, adopted by the operator 2026-09-24 and
   written into `CLAUDE.md` § *Git Workflow* (the surface this file's and its sibling's Resume
   both named). It encodes the sibling's Resolution rather than this section's first bullet as

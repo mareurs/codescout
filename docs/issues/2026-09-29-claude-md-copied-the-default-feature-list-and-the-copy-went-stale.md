@@ -59,6 +59,11 @@ None. Nothing is copied any more, so there is no value for a test to compare. Th
 itself stays guarded by `every_declared_feature_has_a_lane_or_a_reason` (`tests/feature_lanes.rs`)
 and CI's `test-server-stack` job.
 
+## Fix provenance
+
+- **SHA:** `c67f4552ffbe8a59e1c11373832155a5b4d97c84` (`experiments`)
+- **patch-id:** `05a947cd94029f7bfa9fc2df9b45b22ef34bc4ca`
+
 ## References
 
 - `docs/evals/rule-tell-controls.md`, passage CTL3-7 (frozen at the controls' tree; not edited).

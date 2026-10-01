@@ -11,6 +11,7 @@ tags:
 - stale-env
 - false-confirmation
 - not-codescout-source
+no_fix_commit: 'The fix is not ours: the harness builds the MCP spawn environment by merging over the previous one rather than replacing it, so a removed key survives (§ Fix reads ''Not ours'', § Tests added ''None''). The mitigation is a choice of settings layer, namely keeping a key that may need removing in `.claude.json`, which applies a deletion where `settings.json` drops it. That lives in the operator''s per-profile config outside this repo, so no commit exists and none can. Reopen condition and the re-check procedure are in § Disposition 2026-09-25. Declared 2026-10-01 during a doctor terminal_status_without_fix_anchor sweep.'
 opened: 2026-08-30
 owner: marius
 severity: high

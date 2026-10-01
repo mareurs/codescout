@@ -129,8 +129,15 @@ Two halves, independent.
    child the lexical `/proc` glob visited last, so session 1194273 read `cs REPLACED` while its live server was
    current. It now reports the newest child by start time, plus `+N superseded`.
 
-Fix SHA: `59c10059` (experiments; the instrument half)
-Patch-id: `2df2498830a27ec70f56658b71b4fac5b51ff524`
+
+
+## Fix provenance
+
+- **SHA:** `59c100590acca16015e16ccf0b4be54a74cf0b6d` (`experiments`)
+- **patch-id:** `2df2498830a27ec70f56658b71b4fac5b51ff524`
+
+This is the instrument half only (`scripts/stale-servers.sh`'s `CONN` axis and the matching `scripts/peer-sessions.sh` fix). The harness half, closing the replaced server's stdio, is not ours and has no commit.
+
 
 
 ## Upstream report (draft, NOT filed)

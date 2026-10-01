@@ -186,8 +186,14 @@ unguarded. Adding that guard is a policy decision, not a drive-by: right after a
 stale (26 of 27 on 2026-09-25), so it would refuse most sessions' librarian writes until they reconnect. It is left
 to the operator.
 
-Fix SHA: `775181db` (experiments; the reporting half)
-Patch-id: `e597166601ff9b1396b32b766cbaa3c6a0ecdd01`
+
+## Fix provenance
+
+- **SHA:** `775181db78996c54ca7924b0e3a69f015f110ac0` (`experiments`)
+- **patch-id:** `e597166601ff9b1396b32b766cbaa3c6a0ecdd01`
+
+This is the reporting half only (`scripts/rb.sh` printing the fleet after a successful build). The split itself cannot be fixed, and the librarian stale-binary write guard is an open operator decision, so neither has a commit.
+
 
 ## Tests added
 

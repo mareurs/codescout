@@ -265,7 +265,9 @@ Directions if a mechanism is wanted, none free and none yet chosen:
 
 ## Fix provenance
 
-- **Mitigated in** `a3dcff72` (`experiments`), patch-id `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
+- **SHA:** `a3dcff7213b60a3141261c54f58785763c62a36e` (`experiments`)
+- **patch-id:** `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
+- **Mitigated by** that commit
   — the two-states rule, placed in `CLAUDE.md` § *Git Workflow* as § *Resume* asked, with the
   operator's agreement (2026-09-24). It carries this file's Resolution forward: publication
   *without a decision* is the failure, so unpushed work stays committable and only a HELD change
