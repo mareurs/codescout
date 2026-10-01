@@ -330,7 +330,9 @@ One case was worse than the residual described. `docs/trackers/claim-decay.md` w
 
 Evidence is the probe, not the export's own count: `scripts/probe_augmentation_restore.py` reports **23/23 restored into a catalog that never held them, 23 distinct prompts, `params={}` throughout** (baseline 9/9). Distinct prompts is the discriminator a count cannot be — N artifacts restoring ONE sidecar still counts N. Gate green: fmt, clippy, lean 3418/0, default 4985/0.
 
-**Valid:** dated 2026-08-29
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: every commit named in this section resolves, and the four patch-ids recorded here (`1ec456a4`, `c2039a16`, `5f88be65` and their ids) match `git patch-id --stable`; `scripts/probe_augmentation_restore.py` and both sidecar test names exist. The corpus reads 23 sidecars as of 2026-08-31 and 25 files under `docs/augmentations/` on 2026-10-01; the 23/23 restore probe result was not re-run.*
 
 `docs/issues/archive/2026-08-28-augmentation-declaration-records-existence-not-shape.md`. A boolean tells
 a fresh clone that an augmentation is missing and nothing tells it what the augmentation WAS. The
@@ -660,7 +662,7 @@ adjacent in one session and got conflated; BL-48's evidence should point at that
 
 **Status:** partial — root cause still blocked upstream (harness, not this repo), but the local mitigation SHIPPED: `scripts/peer-sessions.sh` plus a `docs/PROBES.md` row, so it fires at the moment of use rather than when someone opens the bug file.
 
-**Valid:** dated 2026-08-31
+**Valid:** dated 2026-10-01
 
 *(Not a new judgement — the author's own class, relocated 2026-09-01. It was written
 mid-line at the end of the `**Status:**` sentence above, and detection is line-anchored at
@@ -820,8 +822,8 @@ That closes the mechanism instead of its next instance. BL-60's Resume argues th
 *(Moved out of the queue table 2026-09-13. The section above ends at the remedy two findings pointed AT; this is the record that it shipped, which existed nowhere but that cell.)*
 ### BL-66 — `probe_ollama` is the one TLS site that installs no crypto provider
 
-**Status:** done-archived — fixed 2026-08-30, patch-id `90c1612bcd948c09e0fd373be2e754134bf9a463`. Verified at the bytes 2026-08-31: `probe_ollama` installs the provider before any client construction (`crates/codescout-embed/src/remote.rs:619`), guarded by its own single-test binary — and that binary is now reached by the gate (see BL-68).
-**Valid:** dated 2026-08-30
+**Status:** done-archived — fixed 2026-08-30 (`1909e5f0`, patch-id `90c1612bcd948c09e0fd373be2e754134bf9a463`). Verified at the bytes 2026-10-01: `probe_ollama` installs the provider before any client construction (`crates/codescout-embed/src/remote.rs:688`; `:619` when first verified), guarded by its own single-test binary `crates/codescout-embed/tests/ollama_probe_installs_its_own_crypto_provider.rs`, and the process-wide install is at `src/main.rs:261` (`:253` when written). That binary is reached by the gate: its test `probing_a_dead_port_reports_it_rather_than_aborting_the_process` printed `ok` in the 2026-10-01 gate run.
+**Valid:** dated 2026-10-01
 **Rests on:** `docs/issues/archive/2026-08-30-probe-ollama-is-the-one-tls-site-that-installs-no-crypto-provider.md` (`a7af9964a16e8056`).
 
 Found by taking up a peer's recommendation to audit other root/crate pairs for the
@@ -844,7 +846,7 @@ handshake, and with `rustls-no-provider` it fails. The caller then reports *"Oll
 reachable … Start Ollama"*, which misdiagnoses the cause and prescribes a remedy that
 cannot work.
 
-codescout's own binary is immune because `main.rs:253` installs the provider at startup,
+codescout's own binary is immune because `main.rs:261` installs the provider at startup,
 process-globally. That immunity is the *mechanism*, not a mitigation: root's behaviour is
 what hides the gap, so the crate ships it to every external consumer while the one caller
 that would notice is shielded — the same structure as the other two instances.
@@ -855,7 +857,7 @@ three instances found on 2026-08-30 have the crate as the deficient side, so the
 bidirectional and ET-4's "audit each pair before deleting" caveat is the load-bearing part
 of it rather than a footnote.
 
-**Next:** run the reproduction (a consumer binary depending only on the crate, no provider
+**Next (historical — done, see Status; this was the plan before the fix):** run the reproduction (a consumer binary depending only on the crate, no provider
 install of its own, `OLLAMA_HOST=https://…`) before choosing between (a), (b) and (c) — it
 decides whether rustls surfaces a distinguishable provider error at all.
 
@@ -1262,9 +1264,9 @@ commit's? Option 3 is spent; do not re-raise it.
 **done**
 
 ### BL-25 — the byte cap evicts rules into get_guide topics nothing triggers
-**done** — 7 of 10 guides (~46 KB) had no trigger at all.
+**done** — 7 of 10 guides (~46 KB) had no trigger at all. *Re-checked 2026-10-01: the recurrence gate is `every_guide_topic_is_triggered_xor_declared_pull_only` (`src/server.rs`), with the no-longer-exists half in `pull_only_guide_topics_are_registered_with_real_reasons` (`src/prompts/mod.rs`); the earlier name was a deleted test (`docs/issues/archive/2026-10-01-prompts-readme-cites-a-guide-guard-test-that-was-deleted.md`, fix `a49c3c1e`, patch-id `df6a1d9366f51dc0772ae3eed613aeeae163cf63`). The 7-of-10 figure is a 2026-08-16 measurement and was not re-run.*
 
-**Valid:** dated 2026-08-18
+**Valid:** dated 2026-10-01
 
 ### BL-26 — get_guide("librarian-runtime") said a move preserves the id
 **done** — one fact in four files; an earlier pass repaired three and missed this one.
