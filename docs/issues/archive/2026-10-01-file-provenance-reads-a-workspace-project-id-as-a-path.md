@@ -1,15 +1,15 @@
 ---
-id: '046f3106e9d7baaf'
+id: 8f400a7f3a988172
 kind: bug
-status: open
+status: fixed
 title: 'BUG: file-provenance.py reads a workspace project id as a path, so relative writes after an id activation are credited to a directory that does not exist'
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-10-01
 opened: 2026-10-01
 severity: low
-unverified: 'STANDING: the misattribution of a REAL file (an id whose `<active>/<id>` is a real directory) is derived by reading, not reproduced. Everything in the table was measured.'
 ---
 
 ## Summary
@@ -65,23 +65,72 @@ The table above; the live activation response quoted in Reproduction; the two ca
 ## Hypotheses tried
 - *Is it only the first call site?* No: case C isolates the second. The subagent file carries no activation of its own, so `scan()`'s base is correct there and the `UNKNOWN` can only come from `parent_activated`.
 - *Does "fails safe" hold?* Partly. The real file reads `UNKNOWN`, the direction `fmt-mine.sh` refuses on. The phantom `MINE` and the over-reach in case C are not "mis-filing between two trees".
-- *Can a phantom collide with a real file?* If an id's `<active>/<id>` happens to be a real directory holding a real file, that file would be credited to a session that never wrote it. Derived by reading, **not reproduced**: no such layout exists in this repo.
+- *Can a phantom collide with a real file?* **Reproduced 2026-10-01.** With an id `proj-real` whose `<active>/<id>` is a real directory holding `src/lib.rs`, the old script credited that REAL file to a session that activated the id and wrote `src/lib.rs` relatively. That is worse than the phantom path: it names a file someone may own.
 
 ## Fix
-Open. Directions, none tried:
-1. **Mirror the server's rule.** No `/` in the value means a project id; otherwise a path. An id cannot be resolved without the workspace manifest, which is gitignored and per machine, so the script must degrade, not guess: treat an id activation as **unknowable**. In `scan()` that means relative codescout writes after it are skipped, exactly as the existing `unknowable` branch skips them, until a later absolute activation. In `session_activations()` it means an id activation must not set `parent_activated` from a `resolve()` against the wrong directory.
-2. **Pass the checkout root, not `None`,** as `active` in `session_activations()`, so a relative PATH is at least resolved against the right tree. Fixes the path half of consequence 2 only.
-3. **Read the manifest when it exists** and resolve the id to its root, falling back to (1). Adds a per-machine dependency to a script whose point is to work on any clone.
-Whatever is chosen needs both directions in the test: each id case above with its absolute-path control, and a bare-token path that IS a real directory.
+
+Direction 1 and the path half of direction 2, chosen 2026-10-01; direction 3 rejected on evidence.
+
+- After an id activation the active tree is `UNKNOWN_TREE`, a sentinel compared by identity and
+  never joined or resolved. A relative codescout write made while the base is that sentinel is
+  credited to nobody, which is what `fmt-mine` refuses on. A relative path taken off an unknown
+  tree stays unknown; an absolute activation, or a call pinned to an absolute `workspace=`,
+  restores a known tree. The id test is the server's own rule (no separator means an id), with
+  `.` and `..` carved out as paths.
+- `session_activations` resolves a relative PATH activation against the checkout root instead of
+  the script's cwd, so activating `.` is no longer read as a move when the script runs from a
+  subdirectory.
+- **Why not read the manifest (direction 3).** It cannot resolve the id this bug is about: this
+  repository's `.codescout/workspace.toml` declares one `[[project]]`, `codescout`, while
+  `codescout-embed` is auto-discovered at runtime and absent from it, and the file is gitignored
+  and per machine. An id the script cannot resolve is unknowable, not guessed.
+
+**What this does not change, stated so the next reader does not assume otherwise.** The real file
+after an id activation still reads UNKNOWN, as it did, and so does a subagent write after the
+parent activated the home project by id (case C): both need the id resolved, which this script
+cannot do. The fix removes the phantom `MINE` and the cwd-dependent misread, not that loss of
+recall. A bare relative directory name (`docs`) is read as an id too, because the server reads it
+that way.
 
 ## Tests added
-N/A: open, no fix written. A fix belongs in `tests/file-provenance.sh` next to the worktree-activation cases, using the fixture helpers it already has.
+
+In `tests/file-provenance.sh`, section *a workspace project id is not a path*, each id case with an
+absolute-path control. A helper imports the script and prints EVERY path `scan()` credits to a
+session, so "credited nowhere" is an exact assertion: the first draft asserted on the old phantom
+path alone, which a fix that merely renamed the garbage path would pass. Cases: id then relative
+write (phantom and exact set); absolute activation of the same project (credited, exactly one path);
+absolute after id (recovers); an absolute `workspace=` pin after an id (honoured); a relative path
+activation off an unknown tree; a subagent write after the parent's id activation;
+`run_command cwd=` after an id; an id naming a real directory (the previously derived case,
+reproduced); and `activate "."` with the script run from a subdirectory.
+
+Red against the script as it stood: 5 failures, then 6 with the real-directory case. 196 passed and
+0 failed after. The suite had no `eq` helper, so seven new assertions first errored with `command not
+found` and the run carried on; the total not growing is what showed it. Eight mutations on the final
+bytes, one per site, each killed by its own assertions: the id predicate, its `.` carve-out, unknown
+propagation to a relative path, the scan-level skip, the pin override, the `run_command cwd=` join,
+the checkout-root argument, and the absolute short-circuit. A ninth clause I had written,
+`target is UNKNOWN_TREE` in `session_activations`, was inert (no input distinguishes it from the
+existing comparison) and was deleted rather than tested.
+
+The other consumers' suites are unchanged: `attribute-red` 41/0, `fmt-mine` 50/0, `git-safe-reset`
+35/0. The suite runs in CI as its own job; the local four-command gate does not.
+
+## Fix provenance
+
+- **SHA:** `43bf4053af506cf71701b04d10ad0733ca544b8d` (`experiments`)
+- **patch-id:** `32251b655253f9539dfbd4a0011be25967f5fcb5` (`git show <sha> | git patch-id --stable`)
+
+A follow-up commit, `f21be9895c3c8992974e3ccfa623916934d11d85`, adds the real-directory case to the
+tests. Verified on `experiments` 2026-10-01 by running `tests/file-provenance.sh` directly (196
+passed, 0 failed) and the mutations above. No Rust changed, so the four-command gate was not run.
 
 ## Workarounds
 Activate with an absolute path, or pin a single call with `workspace=<absolute path>`; `write_base` reads that as a path, which it is.
 
 ## Resume
-Pick direction 1 or 3 and write the cases from the table first (the id cases should fail before the fix). Re-run the reproduction on the then-current script, because the same file is edited by other sessions.
+
+Closed.
 
 ## References
 - PR #29's independent review, note 1, which found the first call site and called the behaviour "fail safe"; this file adds the second call site and the phantom `MINE`.
