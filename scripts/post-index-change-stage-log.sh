@@ -333,10 +333,84 @@ EOF
     return 1
 }
 
+# IS THIS RECORDED WRITE ALREADY IN HEAD? Succeeds when the new text the call at usage.db row $2
+# put into $4 is found in HEAD's copy of $4 and was NOT already in the copy as of just before the
+# write ($3, epoch seconds). Fails -- the write stays live, which is what every earlier version
+# of the lookup did -- whenever it cannot show that: no distinctive text, an unreadable row, a
+# path HEAD does not hold, a line missing from HEAD, or text that predates the write.
+#
+# WHY THE TEXT AND NOT A COMMIT. A write is live until a commit carries it, and "a commit of the
+# path after the write" is too weak (a commit can take an older staged blob, so it can postdate
+# the write and still lack it: measured 2026-10-01, a tracker's HEAD missing two entries a peer
+# had appended 25 minutes before another session's commit) while "its own writer's commit" is too
+# strong (a session that ends before committing, or a "commit all", leaves the work in HEAD under
+# another trailer and the write live for three days). Only the write's own words say whether it
+# landed. Measured over three days to 2026-10-01 at tree 32a54dad, 34 (commit, path, writer) triples
+# had a foreign writer live under the own-commit rule alone; 20 of them were on text already in HEAD
+# (false refusals), 4 were commits that took the writer's text, 7 were writes the commit did not
+# take. Asking only the writer's newest live write closed 16 of the 20 and kept live all 4 that took
+# the text, all 7 that did not, and the 3 whose writes carry no text to find;
+# asking every row separately closed 2, because a later edit rewrites the words an earlier one added.
+# Of the 4 left, three are writes whose only text is a divider line the file already held, which
+# proves nothing, and one ran in a worktree (docs/issues/2026-10-01-the-recorders-write-lookup-
+# matches-a-relative-path-from-a-call-made-in-another-tree.md). The lag between a write and the
+# commit that took it overlaps between the cases that landed and those that did not (0 to 1234 min
+# against 23 to 2164), so no time bound separates them
+# (docs/issues/archive/2026-10-01-a-recorded-write-stays-live-after-another-sessions-commit-
+# swept-its-content.md).
+#
+# THE TEXT: the longest three lines of at least 16 characters, trimmed, from every key a codescout
+# write carries new text in (`new_string`, `body`, `content`, `title`, `patch.body`, and the
+# same keys of each `edits[]` / `patch.body_edits[]` item). `old_string` is deliberately absent: it is
+# the text the write REMOVED. EVERY line must be in HEAD, so a write only part of whose words landed
+# stays live, and a line already present before the write proves nothing, so a move or a reorder
+# stays live. A short or empty write has no line to find and stays live.
+write_in_head() {
+    local db="$1" rowid="$2" epoch="$3" rel="$4" text probes head pre rev line
+    local tab=$'\t'
+    # The new text of each item of an array-valued argument. `json_type` guards it because json_each over
+    # a scalar yields a row whose `value` is not JSON, and json_extract on that raises for the whole row.
+    items() {
+        printf "COALESCE(CASE WHEN json_type(input_json,'%s') = 'array' THEN
+            (SELECT group_concat(COALESCE(json_extract(e.value,'\$.new_string'),'') || char(10)
+                                 || COALESCE(json_extract(e.value,'\$.content'),''), char(10))
+             FROM json_each(input_json,'%s') e) END,'')" "$1" "$1"
+    }
+    # No guard on `text`, on `git show` or on `pre`, and no `json_valid` around the query: each ends the same
+    # way with the guard absent, because a malformed row (sqlite raises), an unreadable row or a path HEAD does
+    # not hold leaves a copy that is empty, and no probe is found in an empty copy. `.timeout 200` is the
+    # same tuning as in foreign_writer: no case can tell it from its absence. The `probes` guard IS load-bearing: an empty list would make the loops below match
+    # the empty pattern, which `grep -F` finds in everything.
+    text="$(sqlite3 -readonly -cmd '.timeout 200' "$db" "SELECT
+        COALESCE(json_extract(input_json,'\$.new_string'),'') || char(10)
+        || COALESCE(json_extract(input_json,'\$.body'),'') || char(10)
+        || COALESCE(json_extract(input_json,'\$.content'),'') || char(10)
+        || COALESCE(json_extract(input_json,'\$.title'),'') || char(10)
+        || COALESCE(json_extract(input_json,'\$.patch.body'),'') || char(10)
+        || $(items '$.edits') || char(10)
+        || $(items '$.patch.body_edits')
+        FROM tool_calls WHERE id = $rowid;" 2>/dev/null)"
+    probes="$(printf '%s\n' "$text" | awk '{ sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "");
+            if (length($0) >= 16) print length($0) "\t" $0 }' | sort -u | sort -t "$tab" -k1,1nr | head -n 3 | cut -f2-)"
+    [ -n "$probes" ] || return 1
+    head="$(git show "HEAD:$rel" 2>/dev/null)"
+    while IFS= read -r line; do
+        grep -qF -e "$line" <<< "$head" || return 1
+    done <<< "$probes"
+    rev="$(git rev-list -1 --before="$epoch" HEAD -- "$rel" 2>/dev/null)"
+    [ -n "$rev" ] || return 0
+    pre="$(git show "$rev:$rel" 2>/dev/null)"
+    while IFS= read -r line; do
+        grep -qF -e "$line" <<< "$pre" || return 0
+    done <<< "$probes"
+    return 1
+}
+
 # WHO ELSE WROTE THIS PATH? Prints the session, other than $me, whose most recent write to $1
 # through a codescout tool is still live -- a write is live until its own writer commits $1
-# after it -- and prints nothing when $me has a live write too, or when no such write is on
-# record, or when the record cannot be read.
+# after it, or until its own text is already in HEAD (write_in_head, above) -- and prints
+# nothing when $me has a live write too, or when no such write is on record, or when the
+# record cannot be read.
 #
 # WHY THE RECORDER ASKS. `git add <path>` names a path, and the `named` route has always
 # made the stager its owner. A peer's untracked file is exactly as nameable as your own, so
@@ -386,7 +460,7 @@ foreign_writer() {
     # row it evaluates, which would fail the query for every row.
     jx() { printf "CASE WHEN json_valid(input_json) THEN json_extract(input_json, '\$.%s') END" "$1"; }
     local q_rel="${rel//\'/\'\'}" q_abs="${abs//\'/\'\'}"
-    sql="SELECT cc_session_id || '|' || CAST(strftime('%s', called_at) AS INTEGER) FROM tool_calls
+    sql="SELECT cc_session_id || '|' || CAST(strftime('%s', called_at) AS INTEGER) || '|' || id FROM tool_calls
          WHERE id > (SELECT max(id) - 50000 FROM tool_calls)
            AND outcome = 'success'
            AND called_at >= datetime('now', '-3 days')
@@ -426,8 +500,9 @@ foreign_writer() {
         done
     done < <(git log -n 300 \
         --format='%ct%x09%(trailers:key=Session-Id,valueonly,separator=%x2C)' -- "$rel" 2>/dev/null)
-    local other=""
-    while IFS='|' read -r sid epoch; do
+    local other="" rowid
+    local -A asked=()
+    while IFS='|' read -r sid epoch rowid; do
         [ -n "$sid" ] || continue
         # A subagent's calls are filed as `<parent session id>/<agent id>`, while the stager's id
         # and every commit trailer name the PARENT alone. Read whole, a session's own subagent was
@@ -438,7 +513,24 @@ foreign_writer() {
         # which errs toward not naming a peer.
         [ "$epoch" -gt "${lastc[$sid]:-0}" ] 2>/dev/null || continue
         [ "$sid" = "$me" ] && return 0
-        [ -n "$other" ] || other="$sid"
+        [ -n "$other" ] && continue
+        # A live write is still not proof it is UNCOMMITTED: when a DIFFERENT session's commit
+        # carries the writer's work (a session that ended before committing, a "commit all"),
+        # the writer's own trailer never appears and the write would stay live for the whole
+        # lookback. So ask whether the write's own text is already in HEAD.
+        #
+        # ONLY THE WRITER'S NEWEST LIVE WRITE IS ASKED, and the reason is not thrift. A commit
+        # takes a snapshot of the file, so one that holds a writer's newest write holds the
+        # earlier ones too; and asking each row separately cannot close a writer who kept
+        # working in one place, because a later edit rewrites the words an earlier one added
+        # (measured on the reported ledger: two of a session's six live rows named text its own
+        # later edits had since changed, so a per-row rule left that session live). The
+        # exception is a hunk-split commit that takes a later hunk and not an earlier one,
+        # which this reads as closed; a writer whose newest write is NOT in HEAD stays live.
+        [ -n "${asked[$sid]:-}" ] && continue
+        asked[$sid]=1
+        write_in_head "$db" "$rowid" "$epoch" "$rel" && continue
+        other="$sid"
     done <<< "$out"
     printf '%s' "$other"
 }

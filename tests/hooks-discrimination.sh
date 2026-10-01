@@ -839,6 +839,12 @@ out="$(guard "$A")"
 has "1: the stager's bare commit is refused" "$out" "EXIT=1"
 has "1: the refusal names the writer" "$out" "$B"
 has "1: and says the attribution is by write, not by staging" "$out" "ATTRIBUTED BY WRITE"
+# What the refusal sends the stager to do, and what it says was examined: a stager whose staged diff is
+# their own change has to be told the row can be stale and how to ask again, and a reader has to be told
+# the window and the closing rule the lookup used, not left to assume "ever".
+has "1: names what the lookup examined" "$out" "WHAT WAS EXAMINED"
+has "1: and how a stale row is asked again" "$out" "asks the record again"
+has "1: and that re-adding a pair still staged does not" "$out" "still staged"
 has "1: the writer may commit it" "$(guard "$B")" "EXIT=0"
 # 15. the row is a fact about the pair and survives an unrelated stage.
 echo o > other.txt
@@ -1164,6 +1170,217 @@ add_as "$A" c.txt d.txt e.txt
 eq "23a: a doc create of this path is a write to it" "$(owner_of c.txt)" "$B"
 eq "23b: a create of ANOTHER path is not" "$(owner_of d.txt)" "$A"
 eq "23c: a doc READ carrying rel_path is not" "$(owner_of e.txt)" "$A"
+rm -rf "$T" "$DB"
+
+# 24. A write is closed when its TEXT is already committed, whoever committed it. The liveness rule of
+# case 4 closes a write only when its own writer commits the path, which never happens when a DIFFERENT
+# session's commit sweeps the writer's work (a session that ends before committing, a "commit all"):
+# the write stayed live for the whole lookback and named a writer whose work was in HEAD. Measured on
+# the live ledger 2026-10-01: four entries by one session, committed under another's trailer, named
+# that session as the owner of the next stager's two-line change. The opposite direction is case 4c's:
+# a commit by anyone is NOT proof the write was taken, since it can carry an older staged blob, so the
+# test is the write's own new text, found in HEAD and not already in the version before the write.
+LINE="a distinctive sentence the writer put in, longer than sixteen characters"
+BUL="- **Status:** a bullet shaped line that begins with a dash and a star"
+old() { giso '3 hours ago'; }
+# swept_case <tool> <json> <swept|pending>: B wrote <json> an hour ago; in `swept` C then commits the file
+# carrying B's text, in `pending` nobody has; then A edits and stages the path by name.
+swept_case() {
+    new_repo; mkdb "$DB"
+    gid="$(printf '%s' "$(git rev-parse --show-toplevel)/g.txt" | sha256sum | cut -c1-16)"
+    echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+    printf '%s\n%s\n' "$LINE" "$BUL" >> g.txt
+    wrote "$DB" "$B" "$1" "${2//GID/$gid}" success "$(hrs '1 hour ago')"
+    [ "$3" = swept ] && commit_as "$C" g.txt
+    echo mine >> g.txt
+    add_as "$A" g.txt
+}
+# One swept/pending pair per place the writer's text can sit in a call. The `swept` half is the one that
+# goes red when extraction is broken (no text found, so nothing closes); the `pending` half guards the
+# other direction and passes on unchanged code, so its evidence is the mutation that always closes.
+while IFS='|' read -r label tool json; do
+    swept_case "$tool" "$json" swept
+    eq "24 $label: a write whose text another session committed is closed" "$(owner_of g.txt)" "$A"
+    rm -rf "$T"
+    swept_case "$tool" "$json" pending
+    eq "24 $label: a write whose text is still uncommitted stays live" "$(owner_of g.txt)" "$B"
+    rm -rf "$T"
+done <<EOF
+edit_file new_string|edit_file|{"action":"edit","path":"g.txt","old_string":"base","new_string":"$LINE"}
+edit_file edits[]|edit_file|{"path":"g.txt","edits":[{"old_string":"base","new_string":"$LINE"}]}
+edit_file edits[] content|edit_file|{"path":"g.txt","edits":[{"heading":"## X","action":"replace","content":"$LINE"}]}
+edit_file body|edit_file|{"path":"g.txt","heading":"## X","action":"replace","body":"$LINE"}
+edit_file bullet line|edit_file|{"action":"edit","path":"g.txt","new_string":"$BUL"}
+edit_code body|edit_code|{"action":"replace","path":"g.txt","symbol":"f","body":"$LINE"}
+create_file content|create_file|{"path":"g.txt","content":"$LINE"}
+doc append_entry title|doc|{"action":"append_entry","id":"GID","id_prefix":"F","title":"$LINE","body":"x"}
+doc append_entry body|doc|{"action":"append_entry","id":"GID","id_prefix":"F","title":"t","body":"$LINE"}
+doc update patch.body|doc|{"action":"update","id":"GID","patch":{"body":"$LINE"}}
+doc update body_edits content|doc|{"action":"update","id":"GID","patch":{"body_edits":[{"heading":"## X","action":"replace","content":"$LINE"}]}}
+doc update body_edits new_string|doc|{"action":"update","id":"GID","patch":{"body_edits":[{"heading":"## X","action":"edit","old_string":"base","new_string":"$LINE"}]}}
+doc create body|doc|{"action":"create","kind":"bug","rel_path":"g.txt","body":"$LINE"}
+EOF
+
+# 24n. What must NOT close a write, each a way to read "committed" off too little.
+# a. no distinctive line: nothing to find, so the lookup cannot say the write landed.
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+echo ok >> g.txt
+wrote "$DB" "$B" edit_file '{"action":"edit","path":"g.txt","new_string":"ok"}' success "$(hrs '1 hour ago')"
+commit_as "$C" g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-a: a write with no distinctive line stays live even when its text is in HEAD" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+# b. only part of the text landed: every line must.
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+echo "$LINE" >> g.txt
+commit_as "$C" g.txt
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE\\nthis second line was written and never reached any commit\"}" success "$(hrs '1 hour ago')"
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-b: a write only part of whose text is in HEAD stays live" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+# c. the text was ALREADY in the file before the write (a move, a reorder): its presence in HEAD says
+# nothing about whether the write landed.
+new_repo; mkdb "$DB"
+printf 'base\n%s\n' "$LINE" > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE\"}" success "$(hrs '1 hour ago')"
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-c: text already in the version before the write is not evidence it landed" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+# d. a path HEAD does not hold has no committed text to find.
+new_repo; mkdb "$DB"
+echo "$LINE" > g.txt
+wrote "$DB" "$B" create_file "{\"path\":\"g.txt\",\"content\":\"$LINE\"}" success "$(hrs '1 hour ago')"
+add_as "$A" g.txt
+eq "24n-d: a path HEAD does not hold stays the writer's" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+# e. the writer's own commit still closes a write whose text is NOT found (case 4a's rule, kept).
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+echo "$LINE" >> g.txt
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE\"}" success "$(hrs '1 hour ago')"
+echo other > g.txt
+commit_as "$B" g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-e: the writer's own later commit still closes it, text found or not" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+
+# f. only the writer's NEWEST live write is asked, so a writer who kept working in one place and whose
+# later edit rewrote the words of an earlier one is still closed once the newest is in HEAD. (Asking
+# each row separately leaves this writer live: the first row's line is gone from HEAD.)
+LINE2="a second distinctive sentence the same writer put in later on"
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE\"}" success "$(hrs '2 hours ago')"
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE2\"}" success "$(hrs '1 hour ago')"
+printf 'base\n%s\n' "$LINE2" > g.txt
+commit_as "$C" g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-f: a later write that rewrote an earlier one's words closes the writer once it is in HEAD" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+# g. and the other way: the older write is in HEAD, the NEWEST is not, so the writer is live.
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE\"}" success "$(hrs '2 hours ago')"
+printf 'base\n%s\n' "$LINE" > g.txt
+commit_as "$C" g.txt
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE2\"}" success "$(hrs '1 hour ago')"
+printf '%s\n' "$LINE2" >> g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-g: an older write in HEAD does not close a writer whose NEWEST write is not" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+
+# h/i. THREE lines are asked, the longest three, and every one must be in HEAD.
+H1="the longest of the four lines, which is a fairly long sentence indeed"
+H2="the second line in length, a little shorter than the first"
+H3="the third line, shorter again"
+H4="the fourth short line"
+for variant in lacks-fourth lacks-third; do
+    new_repo; mkdb "$DB"
+    echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+    wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$H1\\n$H2\\n$H3\\n$H4\"}" success "$(hrs '1 hour ago')"
+    if [ "$variant" = lacks-fourth ]; then printf 'base\n%s\n%s\n%s\n' "$H1" "$H2" "$H3" > g.txt
+    else printf 'base\n%s\n%s\n%s\n' "$H1" "$H2" "$H4" > g.txt; fi
+    commit_as "$C" g.txt
+    echo mine >> g.txt
+    add_as "$A" g.txt
+    if [ "$variant" = lacks-fourth ]; then
+        eq "24n-h: the fourth-longest line is not asked, so a write whose longest three landed is closed" "$(owner_of g.txt)" "$A"
+    else
+        eq "24n-i: the third-longest line is asked, so a write missing it stays live" "$(owner_of g.txt)" "$B"
+    fi
+    rm -rf "$T"
+done
+# j. a line repeated in the text counts once, or three copies of it would stand in for lines never found.
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$H1\\n$H1\\n$H1\\n$H2\"}" success "$(hrs '1 hour ago')"
+printf 'base\n%s\n' "$H1" > g.txt
+commit_as "$C" g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-j: a repeated line is one line, so the shorter one still has to be found" "$(owner_of g.txt)" "$B"
+rm -rf "$T"
+# k. whitespace around a line is not part of it: an editor re-indents and strips trailing spaces.
+new_repo; mkdb "$DB"
+echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"    $LINE   \"}" success "$(hrs '1 hour ago')"
+printf 'base\n%s\n' "$LINE" > g.txt
+commit_as "$C" g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-k: leading and trailing whitespace does not stop a line being found" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+# l. a file whose FIRST commit is the sweep has no earlier version to hold the text, and is closed.
+new_repo; mkdb "$DB"
+echo base > other.txt; git add other.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+echo "$LINE" > g.txt
+wrote "$DB" "$B" create_file "{\"path\":\"g.txt\",\"content\":\"$LINE\"}" success "$(hrs '1 hour ago')"
+commit_as "$C" g.txt
+echo mine >> g.txt
+add_as "$A" g.txt
+eq "24n-l: a path first committed by the sweeping commit is closed" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+
+# 24h. A stale foreign row heals when the pair is asked again. The recorder keeps a row for a pair that
+# left the index ("retained") and drops it when a NAMED add puts the pair back, so the lookup runs again
+# with the rule as it now stands. A pair that never left the index keeps its row: unstage it first.
+# Built the way the measured one arose: A staged B's pending write (row B), unstaged it, and the text
+# reached HEAD by someone else's commit while the working-tree blob stayed the same.
+sweep_head() { # commit B's text to HEAD under C's trailer without touching the index or worktree
+    bh="$(printf 'base\n%s\n' "$LINE" | git hash-object -w --stdin)"
+    tre="$(printf '100644 blob %s\tg.txt\n' "$bh" | git mktree)"
+    cm="$(GIT_COMMITTER_DATE="$(giso '30 minutes ago')" git commit-tree "$tre" -p HEAD -m sweep -m "Session-Id: $C")"
+    git update-ref HEAD "$cm"
+}
+stale_repo() {
+    new_repo; mkdb "$DB"
+    echo base > g.txt; git add g.txt; GIT_COMMITTER_DATE="$(old)" git commit -qm base
+    printf '%s\nmine\n' "$LINE" >> g.txt   # `mine` keeps the working-tree blob different from the swept one
+    wrote "$DB" "$B" edit_file "{\"action\":\"edit\",\"path\":\"g.txt\",\"new_string\":\"$LINE\"}" success "$(hrs '1 hour ago')"
+    add_as "$A" g.txt
+}
+stale_repo
+eq "24h: precondition, B's write is pending so A staging it records B" "$(owner_of g.txt)" "$B"
+git reset -q -- g.txt
+sweep_head
+add_as "$A" g.txt
+eq "24h: a pair that left the index is asked again, and B's text is now in HEAD" "$(owner_of g.txt)" "$A"
+rm -rf "$T"
+stale_repo
+sweep_head
+add_as "$A" g.txt
+eq "24i: a pair still staged keeps its row, which is why the refusal says to unstage first" "$(owner_of g.txt)" "$B"
+git reset -q -- g.txt
+add_as "$A" g.txt
+eq "24i: and unstaging then re-adding by name asks again" "$(owner_of g.txt)" "$A"
 rm -rf "$T" "$DB"
 
 echo "== sequencer stand-down"

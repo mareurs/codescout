@@ -654,10 +654,16 @@ fi
             *" $owner "*)
                 echo "          ATTRIBUTED BY WRITE, NOT BY STAGING: you staged these paths by"
                 echo "          name, but the write record shows THIS session wrote them through a"
-                echo "          codescout tool since their last commit and you did not. Re-staging"
-                echo "          does not change that while the record stands. The record sees"
-                echo "          codescout tool writes only: if you wrote a path yourself some other"
-                echo "          way, that is the case it cannot see, and the refusal is deliberate."
+                echo "          codescout tool and you did not."
+                echo "          WHAT WAS EXAMINED: successful codescout tool writes in the last 3 days."
+                echo "          A write counts until its own writer commits the path after it, or its"
+                echo "          newest text is found in HEAD; one whose text cannot be found stays counted."
+                echo "          IF THE STAGED DIFF IS ONLY YOUR OWN CHANGE this row is stale: their text"
+                echo "          may have reached HEAD under someone else's commit since it was recorded."
+                echo "          \`git reset -q -- <path>\` then \`git add -- <path>\` asks the record again"
+                echo "          against today's HEAD; re-adding a pair that is still staged does not."
+                echo "          The record sees codescout tool writes only: if you wrote a path yourself"
+                echo "          some other way, that is the case it cannot see, and the refusal is deliberate."
                 ;;
         esac
     done
