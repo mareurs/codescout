@@ -60,7 +60,7 @@ The repair widens the corpus that `ea151a39` bounds the prune's destination by, 
 
 The advertised `limit` description changed from "scanned" to "walked", one character shorter. The tool surface sits at its budget with no slack, and a longer wording failed `tool_surface_under_budget` by 147 characters; the full semantics are in the Rust doc comment on `Args::limit`.
 
-**Not verified live:** the running MCP server predates this change. Re-run `link_scan(limit=10, write=false)` after a rebuild; `dangling` should fall from 100 toward the 11 that are dangling in both scans.
+**Verified live 2026-10-01 on the rebuilt binary**, `link_scan(limit=10, write=false)` against the full scan, both at `findings_limit=1000`: `dangling` fell from 100 to 23, and `ambiguous` rose from 0 to 13, which is the ambiguity the window had been hiding. For the sources the narrowed scan reported on, its `dangling`, `ambiguous` and `cross_repo` findings equal the full scan's findings for those sources exactly (no narrowed-only, no full-only), and the per-source counts match. **Scope of that equality:** the response does not name the ten artifacts walked, so a walked source with zero narrowed findings is not in the comparison; the unit tests, not this check, cover that.
 
 ## Tests added
 
