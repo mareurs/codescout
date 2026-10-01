@@ -230,12 +230,7 @@ mod tests {
                 "doctor",
                 "merge_worktree",
             ],
-            // Both are `doctor`'s, both read through untyped accessors, so no value is
-            // ill-typed for them. Admissions of blindness, not passes — and both are a softer
-            // instance of this very class: `doctor(fix=[])` runs a read-only scan and reports
-            // success rather than refusing. A typed `Args` for `doctor` would let the probe
-            // reach them.
-            accepts_any_json: &["fix", "offset"],
+            accepts_any_json: &[],
             required,
         };
 
