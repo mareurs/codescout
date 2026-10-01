@@ -9,7 +9,7 @@ tags:
 - cluster/guard-narrower-than-its-name
 opened: 2026-09-30
 severity: low
-unverified: 'STANDING: `sudo cat` was reported refused by the author of 4d392858 and was never run by the session that re-measured (privilege escalation). `ionice`, `doas`, `find -exec`, `parallel`, `bash -c`, `$(...)` are MEASURED open bypasses, deliberately not closed by a head rule; see Resume.'
+unverified: 'STANDING: `sudo -n cat` was run only by session a520c25a (refused, on the tip binary); the author of 8614aebf never ran sudo (privilege escalation). `ionice`, `doas`, `find -exec`, `parallel`, `bash -c`, `$(...)` are MEASURED open bypasses on the build before the tip; the tip rebuild did not touch them and they were re-run here on it (still open), deliberately not closed by a head rule; see Resume.'
 ---
 
 ## Summary
@@ -134,7 +134,7 @@ The live binary was rebuilt at 08:00 on 2026-10-01, after the pushed tip `611595
 | `rg -c zzz Cargo.toml 2>&1 \| tail -1` (control: a redirection stays whole) | refused | refused |
 | `env cat build.rs`, `echo build.rs \| xargs cat` | refused | refused |
 
-Still reading the file, deliberately not closed by a head rule: `ionice cat build.rs`, `find build.rs -maxdepth 0 -exec cat {} +`, `parallel cat ::: build.rs` (each 107 lines), `bash -c 'cat build.rs'` (107), `echo $(cat build.rs)` (the file went through the substitution, 1 line out). `doas cat build.rs` passes both gates and `doas` refuses itself (no `/etc/doas.conf`), so `wc` prints 0: a gate bypass, not a disclosure. `sudo` was not run.
+Still reading the file, deliberately not closed by a head rule: `ionice cat build.rs`, `find build.rs -maxdepth 0 -exec cat {} +`, `parallel cat ::: build.rs` (each 107 lines), `bash -c 'cat build.rs'` (107), `echo $(cat build.rs)` (the file went through the substitution, 1 line out). `doas cat build.rs` passes both gates and `doas` refuses itself (no `/etc/doas.conf`), so `wc` prints 0: a gate bypass, not a disclosure. `sudo` was not run by the author of `8614aebf`. Session `a520c25a` (the author of `4d392858`) ran the closed rows on the same rebuilt binary and reports the same results, including `sudo -n cat build.rs` **refused** and the allowed controls `echo ok |& wc -l` and `ls Cargo.toml 2>&1 | wc -l`; it did not re-run the still-open rows. Attribution is by session id, resolved from the socket the report arrived on, not by name: that session has been registered under three different names during this work.
 
 ## Tests added
 
