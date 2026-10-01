@@ -2612,7 +2612,9 @@ different clocks.
 
 ## F-33 — Relocated the mux lock dir before verifying nothing discovers those files by directory scan
 
-**Valid:** dated 2026-07-28
+**Valid:** dated 2026-10-01
+
+*Re-checked 2026-10-01: the assumption still holds, with one change to the evidence. The `read_dir`/`glob` search is no longer zero: `sweep_dead_test_mux_dirs` (`src/lsp/mux/mod.rs:80-99`, `cfg(all(test, unix))`) does a `read_dir` of the mux directory to remove dead test processes' scratch dirs, and its own doc comment says it is cleanup and not discovery, so relocating the directory is still safe. `mux_dir()` is at `src/lsp/mux/mod.rs:44` and still returns a per-process scratch subdirectory under `cfg(test)`. Positions have moved: the production callers of the mux path helpers are `src/lsp/manager.rs:578` (`count_mem_kill_marker`, a third site that did not exist when this was written; it computes an exact path, not a scan) and `:908-909` (`get_or_start_via_mux`), with test callers at `:1961` and `:2508`, where the entry cites `:831-832` and `:2350-2351`. The peer discovery functions are at `src/socket_discovery.rs:43` and `:51` and are consumed by `src/peer/{launch,registry,server}.rs` (and `src/main.rs:527`); `peer_socket_differs_from_mux_and_shares_dir` is at `:75` with its explaining comment at `:63`, no longer `:64`. The `docs/superpowers/plans/2026-06-01-peer-delegation-phase1.md:105` cite and `W-25` still resolve. The 18-binary, 3307-lib-test figure is a 2026-07-28 gate result and was not re-run.*
 
 **Observed:** 2026-07-28, fixing the lock-file leak in `src/retrieval/index_lock.rs`
 and `src/lsp/mux/mod.rs`. Recon was invoked *after* both edits were written and
