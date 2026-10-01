@@ -71,9 +71,21 @@ pub struct DoctorArgs {
     /// `abs_path`, so pages are stable and disjoint.
     #[arg(long)]
     pub offset: Option<usize>,
+
+    /// How wide the scan runs: `project`, `repo` (the enclosing git repo), `umbrella` (every
+    /// repo in the configured umbrella) or `all`. `umbrella` and `all` are refused by the scanner
+    /// when no umbrella is configured, rather than quietly narrowed. Omit to take the scanner's
+    /// own default, which is deliberately not restated here.
+    #[arg(long, value_parser = ["project", "repo", "umbrella", "all"])]
+    pub scope: Option<String>,
 }
 
 /// Scanner params `codescout doctor` deliberately does not expose, each with the reason.
+///
+/// **Empty since `--scope` was added** (the last entry's stated reason, a broken selector, had
+/// been fixed; see `docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md`).
+/// Kept as the mechanism, not deleted: it is what makes the NEXT omission an admission with a
+/// reason instead of a silent gap.
 ///
 /// This list is an **admission, not a pass** — the same contract as `param_probe`'s
 /// `accepts_any_json`. `every_scanner_param_is_reachable_from_the_cli_or_named_as_omitted`
@@ -81,25 +93,7 @@ pub struct DoctorArgs {
 /// the defect; `every_declared_omission_names_a_real_param_and_gives_a_reason` is what
 /// stops it going stale in the other direction.
 #[cfg(test)]
-const SCANNER_PARAMS_THE_CLI_OMITS: &[(&str, &str)] = &[(
-    "scope",
-    "The scanner accepts `scope`, validates it against an enum, and — since the \
-     per-project isolation work landed on `experiments` 2026-09-10 — genuinely narrows \
-     the scanned population with it through the shared `DoctorScope::admit` gate. **The \
-     original reason for this omission is therefore SPENT, and this entry is retained as \
-     an omission that is now owed rather than justified.** It read, until that date: \
-     *never widens the scanned population with it, `effective_scope` has exactly two \
-     uses, exposing `--scope` would give the CLI a flag whose only observable effect is \
-     making the report ASSERT a scope it did not apply* — all true on 2026-09-09, all \
-     false now, and it closed with *add the flag in the same commit that wires the \
-     selector, not before*. The selector is wired; the flag is the outstanding half, \
-     tracked as `BL-65` in `docs/trackers/open-issue-work-queue.md`. Note what did NOT \
-     catch this: `every_declared_omission_names_a_real_param_and_gives_a_reason` checks \
-     that a reason EXISTS, never that it is still TRUE, so a justification the codebase \
-     has since invalidated stays green here indefinitely — found only by re-reading this \
-     string while re-pointing a citation in it. Fix history: \
-     docs/issues/archive/2026-09-09-doctor-accepts-a-scope-argument-and-never-reads-it.md.",
-)];
+const SCANNER_PARAMS_THE_CLI_OMITS: &[(&str, &str)] = &[];
 
 /// The `--fail-on-violations` decision, extracted from [`run`] because `run` ends in
 /// `std::process::exit(1)`, which no in-process test can observe. Inlined, the exit path
@@ -130,8 +124,7 @@ fn fails_the_gate(report: &Value, fail_on_violations: bool) -> bool {
 /// `Map::new()`: all eight of the scanner's typed params were unreachable from the command
 /// line while the module doc claimed "the scanner takes no input".
 ///
-/// **`scope` is deliberately NOT emitted, and that is not an oversight** — see
-/// `SCANNER_PARAMS_THE_CLI_OMITS`.
+/// Every scanner param is now emitted; `scope` joined last, once its selector was wired.
 fn to_tool_args(args: &DoctorArgs) -> Map<String, Value> {
     let mut out = Map::new();
 
@@ -160,6 +153,11 @@ fn to_tool_args(args: &DoctorArgs) -> Map<String, Value> {
     }
     if let Some(v) = args.offset {
         out.insert("offset".into(), json!(v));
+    }
+    // Only when set, for the same reason as `limit`: the scanner owns its default, and a value
+    // sent here would assert a scope the caller never chose.
+    if let Some(v) = &args.scope {
+        out.insert("scope".into(), json!(v));
     }
 
     out
@@ -286,6 +284,7 @@ mod tests {
             new_root: Some("/tmp/c".into()),
             limit: Some(10),
             offset: Some(20),
+            scope: Some("umbrella".into()),
         };
         let emitted = to_tool_args(&all);
 
@@ -338,9 +337,11 @@ mod tests {
             new_root: Some("/new".into()),
             limit: None,
             offset: Some(7),
+            scope: Some("repo".into()),
         };
         let out = to_tool_args(&args);
 
+        assert_eq!(out.get("scope"), Some(&json!("repo")));
         assert_eq!(out.get("fix"), Some(&json!("rehome")));
         assert_eq!(out.get("old_root"), Some(&json!("/old")));
         assert_eq!(out.get("new_root"), Some(&json!("/new")));
@@ -355,6 +356,61 @@ mod tests {
             !out.contains_key("confirm"),
             "`--confirm` unset must not send `confirm: false` — a fix is a dry run by \
              default, and sending the field asserts a choice the caller did not make"
+        );
+    }
+
+    /// A wrapper that lets the real `clap` derive parse `DoctorArgs` from a command line, so the
+    /// flag is tested through the parser a user hits and not by building the struct by hand.
+    #[derive(clap::Parser)]
+    struct Cli {
+        #[command(flatten)]
+        doctor: DoctorArgs,
+    }
+
+    fn parse(argv: &[&str]) -> Result<DoctorArgs, clap::Error> {
+        use clap::Parser;
+        Cli::try_parse_from(std::iter::once("doctor").chain(argv.iter().copied())).map(|c| c.doctor)
+    }
+
+    /// `--scope` through the real parser, for every value the scanner accepts. Asserted at the
+    /// args map, which is what `doctor::call` receives: parsing alone would pass a flag that
+    /// `to_tool_args` then dropped, the exact shape of the omission this closes.
+    #[test]
+    fn scope_is_parsed_from_the_command_line_and_reaches_the_args_map() {
+        for scope in ["project", "repo", "umbrella", "all"] {
+            let args = parse(&["--scope", scope]).expect("an accepted scope parses");
+            assert_eq!(
+                to_tool_args(&args).get("scope"),
+                Some(&json!(scope)),
+                "`--scope {scope}` must reach the scanner unchanged"
+            );
+        }
+    }
+
+    /// The absent half, and the reason this is not just "always send a default": an unset
+    /// `--scope` must send nothing, so the scanner's own default stays the only one.
+    #[test]
+    fn an_unset_scope_is_absent_from_the_args_map() {
+        let args = parse(&[]).expect("no flags parses");
+        assert!(
+            !to_tool_args(&args).contains_key("scope"),
+            "an unset `--scope` must not be sent: it would assert a scope the caller never chose"
+        );
+    }
+
+    /// A typo is refused where the user typed it, naming what they typed, instead of travelling
+    /// to the scanner and coming back as a serde error about an enum they have never seen.
+    #[test]
+    fn an_unknown_scope_is_refused_at_the_command_line() {
+        let err = parse(&["--scope", "galaxy"]).expect_err("`galaxy` is not a scope");
+        let text = err.to_string();
+        assert!(
+            text.contains("galaxy"),
+            "the refusal must echo the bad value: {text}"
+        );
+        assert!(
+            text.contains("umbrella"),
+            "the refusal must list what IS accepted: {text}"
         );
     }
 }
