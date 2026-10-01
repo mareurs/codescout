@@ -78,7 +78,7 @@ session_id="${CLAUDE_CODE_SESSION_ID:-}"
 # an author wrote by hand ABOVE the final block is therefore prose to every query, and invisible
 # to the guard, so the stamp below lands beside it: the text carries two, the parser reads one.
 # Measured on 48 of 802 commits between 2026-09-01 and 2026-09-06
-# (docs/issues/2026-09-06-a-hand-written-trailer-above-the-final-block-defeats-if-exists-donothing.md).
+# (docs/issues/archive/2026-09-06-a-hand-written-trailer-above-the-final-block-defeats-if-exists-donothing.md).
 #
 # This NAMES it and changes nothing. Stripping the line would be a larger act than stamping an
 # absent field -- it edits a message the author wrote, which the bug file keeps as the contested
@@ -117,7 +117,7 @@ git interpret-trailers \
 # git parses ONLY the message's final paragraph as trailers, so a line placed above an
 # existing `Co-Authored-By` block is readable prose and invisible to every query. Three
 # instances are filed in
-# docs/issues/2026-09-06-a-hand-written-trailer-above-the-final-block-defeats-if-exists-donothing.md,
+# docs/issues/archive/2026-09-06-a-hand-written-trailer-above-the-final-block-defeats-if-exists-donothing.md,
 # and in one of them (`7a986ac3`) a third party's content was committed with no attribution
 # surface at all -- `git blame` hands an auditor one session, confidently, and nothing in
 # the commit contradicts it.

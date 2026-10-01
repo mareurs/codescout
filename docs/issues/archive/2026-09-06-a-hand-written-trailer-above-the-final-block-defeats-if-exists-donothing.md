@@ -1,7 +1,7 @@
 ---
-id: f47274c162774e8e
+id: 8ac90d8c2e865f5c
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a hand-written Session-Id above the Co-Authored-By block defeats the hook''s --if-exists doNothing, so the trailer is written twice'
 owners:
 - marius
@@ -244,12 +244,26 @@ Open-bug sweep (`deep-agent-workflow-observations:DWF-7`). Verifier evidence; re
 Not choosing between them here: the ongoing rate is one author's habit, and it is theirs to
 change. Recorded so the next reader does not re-derive the mechanism.
 
+### Mitigated 2026-10-01 — the duplicate is now named at commit time; it is still written
+
+**Reproduced first, against the hook itself** (a throwaway message file, no commit): a message with a hand-written `Session-Id` above the `Co-Authored-By` paragraph ends `raw=2 parsed=1` with the hook's id appended after the hand-written one; the clean control is `raw=1 parsed=1`. That is the mechanism in *Root cause*, observed on the current hook, not inferred.
+
+**What changed.** The hook compares the raw `Session-Id:` lines with the ones `git interpret-trailers --parse` reads, and when raw exceeds parsed it prints a warning to stderr that quotes the hand-written value and names the id it stamped. The parser is the authority on where the block starts, so the check cannot disagree with it. It never edits the message and never blocks the commit.
+
+**Why warn rather than strip.** Stripping is the option this file kept as contested, because it rewrites what the author wrote. Warning needs no such decision: stderr is the committing session's own output (git folds a hook's stdout into stderr, observed), so the one party who can act on it — by amending — is the party who reads it. That is the answer to *who is the observer*, which a guard that prints to nobody cannot give.
+
+**Left unchosen, deliberately.** The duplicate is still written. Whether to strip it, or to leave it as a habit change, is still the operator's. The `pre-commit-foreign-index.sh` guidance drift recorded above is untouched and still a design choice. This mitigation leaves `Co-Authored-Session-Id` (mode b) alone, which `05c6f153` already fixed.
+
 ## Tests added
 
-**None.** Nothing in-tree consumes the raw duplicate, so there is no behaviour to regress:
-a test would assert on message cosmetics, and would fail for every historical commit rather
-than for a defect. The 48/802 measurement above is the record; re-derive it with the
-command in *Symptom* if the rate matters later.
+`tests/prepare-commit-msg-session-id.sh`, now 21 assertions, 10 of them new (CI runs this suite; the local gate does not). Three assert the warning (it appears, it quotes the hand-written value, it still fires when the hand-written value equals the hook's own). The rest are **silence controls and pinning cases**, which pass on the unchanged hook and are therefore evidenced by mutation, not by their red: the commit still succeeds, the committer's id is the parsed one, the author's line stays where they put it, a clean message is silent, an `--amend` of a stamped message is silent, and an acked commit carrying a `Co-Authored-Session-Id` in its final block is silent, with its `--amend`. Without the silence controls every warning assertion passes against a hook that warns on every commit.
+
+Mutated once per guarded site, 8 sites: 6 killed by the assertion naming each. Two survive and are left: `-gt` against `-ne` (parsed lines are a subset of raw lines on any realistic message, so they are equivalent) and `>&2` (git folds a hook's stdout into stderr, so at the level of `git commit` the two streams cannot be told apart).
+
+## Fix provenance
+
+- **SHA:** `0c82632494280fa79e4503fb1a570b0bf31615ed` (`experiments`)
+- **patch-id:** `9a79a26f8d4bc646ca52b778e64cf11585972c04`
 
 ## Workarounds
 
