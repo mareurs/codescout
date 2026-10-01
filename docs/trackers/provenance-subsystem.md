@@ -1043,7 +1043,9 @@ Full detail for every entry stays in params: `artifact(action="get", id="e12cd7e
 
 #### PV-9 — DONE — M6 measured: spec churn is same-session, not long-horizon drift
 
-**Valid:** dated 2026-08-28
+**Valid:** dated 2026-10-01
+
+*Re-run 2026-10-01 with `~/.local/share/provenance-probe/git_measure.py`, as a copy that writes to a scratch path so `round2_git.json` was left intact, over the same eight repos: 18,961 commits and 5,779 derivation events, up from 11,608 and 2,743. Followed by a later spec change: 61.0% (3,527 of 5,779). At more than 30 days: 3.96%; at more than 90 days: 1.33%; pooled median lag 0.25 d; the outlier repo `eduplanner-ui` at 27.6% (was 31.2%). The conclusion holds and the long-horizon tail is smaller. The 2026-08 figures were also recomputed the same day from the stored `round2_git.json`: the 11,608 commits, 5.7%, 2.1%, 0.67 d and 31.2% reproduce, but the 58.4% headline does not — pooling that file gives 59.5% (1,632 of 2,743), and of the 247 subsets of two or more repos only two land within 0.06 point of 58.4%, neither a natural population. `PV-24`'s detail still quotes the 2026-08 figures including the 58.4% and was not edited here, being a catalog `params` row. Both runs use the same derivation proxy (a commit touching a spec file and a code file), so they bound how often specs are revised, not whether the revisions were warranted.*
 
 M6 is a measurement — spec churn observed to be same-session rather than long-horizon — and
 is true of the corpus as measured on that date. Worth noting at the class line rather than
