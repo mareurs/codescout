@@ -159,7 +159,7 @@ instant in thirteen days was the pair consistent, and at no instant did anything
 
 - *"The peer mis-ran the mutation."* — Falsified: re-derived independently here, same three numbers.
 - *"The peer extended a **vacuity** result (`claimed` / `declared` compare empty to empty, filed at
-  `docs/issues/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md`) to `actual`, a member
+  `docs/issues/archive/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md`) to `actual`, a member
   it does not cover — `CLAUDE.md`'s population-vs-member law run backwards."* — **Superseded, and it
   was the first account both sessions reached.** It is a clean story and the bytes do not support
   it: the near-verbatim match above says the claim was copied from `:805`, not derived from the
@@ -246,7 +246,7 @@ Open. Filed on notice during a peer exchange; not scheduled.
 - `scripts/pre-commit-ledger-counts.py` — `cluster_tags` (`:331`), the incidental-exercise note (`:853`)
 - `3be0088e` — the commit that wrote both halves
 - `07b7819c`, `81416a3e`, `9f5c1785` — the three filings that moved the corpus
-- `docs/issues/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md` — the vacuity result
+- `docs/issues/archive/2026-09-13-two-of-three-parity-arms-compare-empty-to-empty.md` — the vacuity result
   this was wrongly extended from
 - `docs/issues/archive/2026-09-14-the-append-entry-recipes-still-teach-the-two-call-form-the-fix-replaced.md`
   — § Fix, where the withdrawn claim was recorded and then flipped

@@ -1,13 +1,13 @@
 ---
-status: open
-opened: 2026-09-13
-closed:
-severity: medium
-owner: marius
-related: []
+kind: bug
+status: fixed
 tags:
 - cluster/assertion-that-cannot-fail
-kind: bug
+closed: null
+opened: 2026-09-13
+owner: marius
+related: []
+severity: medium
 ---
 
 # Two of three cross-language parity arms compare empty to empty
@@ -72,24 +72,34 @@ The cost is therefore false confidence rather than a hole — but false confiden
 `..._agrees_on_the_cluster_parsers` is the shape that stops the next person looking, which
 `CLAUDE.md` names as the more expensive direction.
 
+### Corrected 2026-10-01 — the reassurance above was wrong for one parser
+
+The paragraph above says the two parsers are not unguarded because `the_ledger_parsers_agree_on_a_fixture` drives both across the language boundary with known non-empty answers. **For `declared` that was false.** That fixture wrote its Index rows with the slug spelled `cluster/alpha`, which is how a `**Slug:**` *declaration* is spelled, while an Index row carries the *bare* slug. Both parsers skip a row whose slug is not in the valid set, so `declared` came back `{}` from each and the fixture's comparison was also empty to empty. The Python `parse_index_counts` was covered by **no test with a non-empty answer anywhere**: a mutation reading the wrong cell survived the entire `issue_clusters` file. So the cost was not only false confidence; there was a real hole behind it.
+
 ## Suggested fix
 
-Not started. In rough order of value:
+Fixed 2026-10-01. What was done, and what was not:
 
-1. **Annotate the arms as inert**, on the assertion line, saying which sibling actually holds each
-   parser. `CLAUDE.md` asks for exactly this — *"annotate an inert fixture as inert, so nobody
-   credits it with coverage it does not provide."* Cheapest, and it fixes the misleading half.
-2. **Assert the emptiness deliberately** rather than incidentally: `assert!(declared.is_empty())`
-   with a message saying the roster stores no counts, which turns two vacuous comparisons into one
-   real (if weak) claim, and reds if the column ever returns.
-3. Drop the two arms and let the fixture test own them. Loses nothing measurable; loses the
-   ability to notice a Python-only regression against real data, which is what the test was for.
+- **Done, and bigger than the file expected:** the fixture's two Index rows now carry the bare slug and `declared` is pinned to the known answers (`alpha: 7`, `gamma: 2`), so the Python parser is held by a non-empty assertion for the first time. The live-corpus test's doc comment is rewritten from the measurement and the two inert arms are annotated inert at the assertion lines. This is option 1 below plus the repair the file did not know it needed.
+- **Not done, deliberately:** asserting the emptiness (option 2). Equality already reds if either side starts producing output, and `no_index_row_stores_a_count` and `no_class_field_states_a_bare_n` own the claim that the corpus stores no counts, so a third copy would red twice on one cause.
+- **Not done, deliberately:** dropping the arms (option 3). It would lose the ability to notice a Python-only regression against real data on a column that could return.
 
-Option 1 and 2 compose and are probably both right.
+The original options, for the record:
+
+1. Annotate the arms as inert, on the assertion line, saying which sibling holds each parser.
+2. Assert the emptiness deliberately.
+3. Drop the two arms and let the fixture test own them.
 
 ## Tests added
 
-None yet.
+`the_ledger_parsers_agree_on_a_fixture` now asserts `declared` equals the known answers for its fixture, which is red against the old fixture (`left: {}`, `right: {alpha: 7, gamma: 2}`). Measured by mutation, one per site, six mutations (each parser's count cell, each `parse_bare_n_claims` field, in both languages): against the **live-corpus parity test alone** all six survive. Against the whole file, before the repair, five are killed by siblings and the Python `parse_index_counts` survives. After the repair all six are killed, the Python one by `the_ledger_parsers_agree_on_a_fixture` alone. The `actual` arm was also measured: dropping the inline-tag arm of the Python `cluster_tags` kills the live-corpus test.
+
+The mutation runs were made on the code as committed; the doc-comment edits after them changed no code.
+
+## Fix provenance
+
+- **SHA:** `fcd2758cc2e4750ae7a6544cc38b5d5130783f2b` (`experiments`)
+- **patch-id:** `9e85209f787eeca6daea5e3db512d70cdb75e376`
 
 ## Resume
 
