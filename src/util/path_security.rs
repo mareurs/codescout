@@ -1494,7 +1494,7 @@ fn grep_is_counting(stage: &str) -> bool {
 /// Index of the token that names the program a pipeline segment actually runs, skipping what
 /// the shell or a wrapper consumes first: leading `NAME=value` assignments, a closed set of
 /// wrappers that exec their argument — `env` (plus its own assignments/flags), `nice [-n N]`,
-/// `timeout [flags] DURATION`, `nohup`, `time`, `command`, `stdbuf`, `sudo [flags]` — and the
+/// `timeout [flags] DURATION`, `nohup`, `time`, `command`, `stdbuf`, `sudo [flags]`, `doas [flags]`, `ionice [flags]` — and the
 /// compound-command
 /// keywords that introduce a command (`if`, `while`, `until`, `do`, `then`, `else`, `elif`,
 /// `!`). Grouping (`(`, `{`)
@@ -1564,6 +1564,23 @@ fn producer_index(tokens: &[String]) -> usize {
                 "--command-timeout",
                 "--other-user",
             ],
+            // doas takes `-a style`, `-C config`, `-u user`; its `-n` is a plain flag (non-interactive).
+            "doas" => &["-a", "-C", "-u"],
+            // ionice's `-n` IS valued (priority level), the opposite of doas's: the lists are keyed
+            // by wrapper name for exactly that reason. -p/-P/-u adjust a running process and run no
+            // command, but are skipped with their value all the same.
+            "ionice" => &[
+                "-c",
+                "-n",
+                "-p",
+                "-P",
+                "-u",
+                "--class",
+                "--classdata",
+                "--pid",
+                "--pgid",
+                "--uid",
+            ],
             _ => &[],
         };
         valued.contains(&opt)
@@ -1580,7 +1597,8 @@ fn producer_index(tokens: &[String]) -> usize {
             continue;
         }
         match t {
-            "env" | "nohup" | "time" | "command" | "nice" | "timeout" | "stdbuf" | "sudo" => {
+            "env" | "nohup" | "time" | "command" | "nice" | "timeout" | "stdbuf" | "sudo"
+            | "doas" | "ionice" => {
                 i += 1;
                 while let Some(opt) = tokens.get(i).filter(|o| o.starts_with('-')) {
                     i += if takes_value(t, opt) { 2 } else { 1 };
@@ -1963,10 +1981,11 @@ const SOURCE_GATE_STAGE_SEPARATORS: &[&str] = &["|&", "|", "&"];
 ///   arrive on stdin, so the segment names none and a path-based verdict has nothing to check
 ///   (`find . -name '*.rs' | xargs cat`); `ls docs | xargs cat` is refused too, because the gate
 ///   cannot tell the two apart. `acknowledge_risk: true` is the exit.
-/// - **A wrapper the head rule does not skip** still reads as its own name: `parallel`,
-///   `find -exec cat {} +`, `doas`, `ionice`, a shell function. `sudo` and `xargs` were closed
-///   here; `env`, `nohup`, `time`, keywords and groups by [`executed_command`] (PR #29).
-///   Unmeasured: the list above is what the code says, not a run of each on the live binary.
+/// - **A wrapper the head rule does not skip** still reads as its own name: `parallel` and
+///   `find -exec cat {} +` (both measured bypasses on the live binary, 2026-09-30: their command
+///   is not in head position, so no skip-list can express it), and a shell function. `sudo`,
+///   `doas`, `ionice` and `xargs` were closed here; `env`, `nohup`, `time`, keywords and groups
+///   by [`executed_command`] (PR #29).
 /// - Heredocs (`cat <<'EOF'`) read stdin, not a file; any source extension appearing
 ///   inside the heredoc body is not a filename argument. The body is removed by
 ///   [`strip_heredoc_bodies`] before the segment split, so it cannot contribute
@@ -4615,6 +4634,64 @@ mod tests {
     #[test]
     fn il3_sees_through_sudo() {
         assert!(detect_il3_violation("sudo cargo test | tail -5").is_some());
+    }
+
+    // ── Source gate: `doas`, `ionice` ────────────────────────────────────
+    //
+    // Measured as bypasses on the live binary 2026-09-30 (a703b36d): `doas cat build.rs` and
+    // `ionice cat build.rs` were not refused by either gate. Same mechanism as `sudo`, so the same
+    // fix at the same site. The option lists are keyed by wrapper NAME, which is the trap: `-n`
+    // takes a value for `ionice` (priority level) and is a plain flag for `doas` (non-interactive),
+    // so a list shared between them reads one of the two wrong.
+
+    #[test]
+    fn source_file_access_blocks_a_read_run_through_doas_or_ionice() {
+        for cmd in [
+            "doas cat src/main.rs",
+            "doas -u root cat src/main.rs",
+            // `-n` is a FLAG for doas: if it were taken as valued, `cat` would be swallowed as
+            // its value and this read would be allowed.
+            "doas -n cat src/main.rs",
+            "doas -C /etc/doas.conf -u root cat src/main.rs",
+            "ionice cat src/main.rs",
+            // `-c` and `-n` take their value as the NEXT token for ionice: unhandled, `3` (or
+            // `7`) is read as the command and the read is allowed.
+            "ionice -c 3 cat src/main.rs",
+            "ionice -c 2 -n 7 cat src/main.rs",
+            // A glued value is one token and needs no handling.
+            "ionice -c3 cat src/main.rs",
+            "doas ionice -c 3 cat src/main.rs",
+        ] {
+            assert!(
+                check_source_file_access_at_root(cmd).is_some(),
+                "`{cmd}` runs `cat` on project source through a wrapper"
+            );
+        }
+    }
+
+    /// The over-block partners. A user may be called `cat`, so `doas -u cat ls …` must not read
+    /// the option's value as the command; and a wrapper around a non-reader reads nothing.
+    #[test]
+    fn source_file_access_allows_doas_and_ionice_around_a_non_reader() {
+        for cmd in [
+            "doas ls src/main.rs",
+            "doas -u cat ls src/main.rs",
+            "ionice ls src/main.rs",
+            "ionice -c 3 ls src/main.rs",
+        ] {
+            assert_eq!(
+                check_source_file_access_at_root(cmd),
+                None,
+                "`{cmd}` runs no reader"
+            );
+        }
+    }
+
+    /// Like `sudo`, both joined the shared head rule, so IL-3 sees through them too.
+    #[test]
+    fn il3_sees_through_doas_and_ionice() {
+        assert!(detect_il3_violation("doas cargo test | tail -5").is_some());
+        assert!(detect_il3_violation("ionice -c 3 cargo test | tail -5").is_some());
     }
 
     #[test]
