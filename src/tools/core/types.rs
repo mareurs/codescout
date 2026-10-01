@@ -165,10 +165,12 @@ tokio::task_local! {
 /// read after a ledger clear carried one. Six reconnects, zero notices; one clear,
 /// one notice.
 ///
-/// The condition is NOT self-limiting on a checkout that keeps linked worktrees
-/// permanently — the mutation-probe pool does here
-/// (`docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md`) —
-/// so every session that has not yet activated or pinned sees this on every unpinned
+/// The condition is self-limiting on THIS checkout only because the permanent
+/// mutation-probe pool is not counted (`list_git_worktrees` skips `mutation-slot-N`;
+/// `docs/issues/archive/2026-09-24-mutation-probe-worktrees-are-never-reclaimed.md` is why
+/// it was ever a problem). Where a REAL linked worktree exists — a peer's scratch tree, a
+/// branch worktree — it is not self-limiting: every session that has not yet activated or
+/// pinned sees this on every unpinned
 /// call. Emitting per call is still right (see above: the one-shot was spent on the
 /// wrong episode), but it means the REMEDY carries the weight. The two documented
 /// remedies — `workspace(action='activate')`, or passing `workspace=` per call — each

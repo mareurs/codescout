@@ -920,6 +920,92 @@ async fn guard_worktree_write_allows_when_no_worktrees_exist() {
     );
 }
 
+/// A linked worktree whose ROOT is `<repo>.worktrees/mutation-slot-N`, the mutation-probe pool's
+/// own layout. `seed_linked_worktree` cannot make one: it names its roots `wt-<name>`.
+fn seed_probe_pool_slot(root: &std::path::Path, n: u32) -> std::path::PathBuf {
+    let slot = root
+        .parent()
+        .unwrap()
+        .join("main.worktrees")
+        .join(format!("mutation-slot-{n}"));
+    std::fs::create_dir_all(&slot).unwrap();
+    let entry = root
+        .join(".git")
+        .join("worktrees")
+        .join(format!("mutation-slot-{n}"));
+    std::fs::create_dir_all(&entry).unwrap();
+    std::fs::write(entry.join("gitdir"), format!("{}/.git\n", slot.display())).unwrap();
+    slot
+}
+
+/// docs/issues/archive/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
+/// (its closing "still not done": should a permanent probe pool count as linked worktrees)
+///
+/// The pool is permanent, so counting it armed the notice in EVERY session of this checkout and,
+/// after each `/mcp` reconnect, refused every write until `activate` — with no worktree that
+/// anybody works in. Asserted at the notice, not only at `list_git_worktrees`, because what
+/// changes for a user is that the envelope goes quiet.
+#[tokio::test]
+async fn a_checkout_whose_only_worktrees_are_probe_pool_slots_gets_no_read_notice() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_probe_pool_slot(&root, 0);
+    seed_probe_pool_slot(&root, 1);
+    let ctx = rooted_ctx(&root).await;
+
+    let text = echo_once(&ctx).await;
+    assert!(
+        !text.contains("_workspace_notice"),
+        "probe slots are tooling, not workspaces; got: {text}"
+    );
+}
+
+/// The write half of the same quiet: this is the refusal that interrupted every post-reconnect
+/// write ("git worktrees detected but workspace(action='activate') has not been called").
+#[tokio::test]
+async fn guard_worktree_write_allows_when_only_probe_pool_slots_exist() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_probe_pool_slot(&root, 0);
+    let ctx = rooted_ctx(&root).await;
+
+    assert!(
+        guard_worktree_write(&ctx).await.is_ok(),
+        "only the probe pool exists, so there is no worktree to confuse a write with"
+    );
+}
+
+/// The partner, and the reason the skip is not "worktrees are noise": a REAL worktree beside the
+/// pool must still arm both guards, and the notice must name it without listing the slots.
+#[tokio::test]
+async fn a_real_worktree_beside_probe_pool_slots_still_arms_both_guards() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("main");
+    std::fs::create_dir_all(&root).unwrap();
+    let slot = seed_probe_pool_slot(&root, 0);
+    let wt = seed_linked_worktree(&root, "feat");
+    let ctx = rooted_ctx(&root).await;
+
+    let first = echo_once(&ctx).await;
+    let parsed: serde_json::Value = serde_json::from_str(&first)
+        .unwrap_or_else(|e| panic!("echo output is JSON: {e}: {first}"));
+    let notice = parsed["_workspace_notice"].as_str().unwrap_or_default();
+    assert!(
+        notice.contains(&wt.display().to_string()),
+        "the real worktree must still be disclosed, got: {notice}"
+    );
+    assert!(
+        !notice.contains(&slot.display().to_string()),
+        "the pool slot must not pad the list, got: {notice}"
+    );
+    assert!(
+        guard_worktree_write(&ctx).await.is_err(),
+        "a real worktree still makes an unchosen write ambiguous"
+    );
+}
+
 /// The refusal's REMEDY, which the three cases above do not touch — they assert
 /// `is_err()` / `is_ok()` and nothing about what the caller is told to do.
 ///

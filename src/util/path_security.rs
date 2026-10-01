@@ -532,11 +532,36 @@ pub fn validate_approve_path(
     Ok(resolved)
 }
 
+/// Whether `worktree_root` is a slot of the mutation-probe / gate pool: its FINAL path component
+/// is exactly `mutation-slot-` followed by one or more digits, the naming
+/// `scripts/mutation-probe.sh` gives its slots (prefix passed to `slot_lease`, number appended).
+///
+/// Deliberately narrow, and read from the worktree ROOT rather than git's admin entry name (which
+/// git de-duplicates with a numeric suffix and so says nothing about the tree). A looser rule —
+/// "contains `slot`", or a prefix match — would hide a real scratch worktree that merely mentions
+/// the pool, which is exactly the tree the read notice exists to disclose.
+fn is_probe_pool_slot(worktree_root: &Path) -> bool {
+    worktree_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix("mutation-slot-"))
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// List the root paths of all linked git worktrees for `project_root`.
 ///
 /// Reads `.git/worktrees/<name>/gitdir` files, which contain absolute paths
 /// like `/path/to/worktree/.git`. Returns the parent (the worktree root).
 /// Returns an empty vec if no worktrees exist (the common case).
+///
+/// **The mutation-probe pool is not counted.** `scripts/mutation-probe.sh` keeps
+/// `<repo>.worktrees/mutation-slot-N` trees PERMANENTLY, so on this checkout the list was never
+/// empty: every session's unpinned reads carried the worktree notice and, after each reconnect,
+/// every write was refused until `activate` was called, when no worktree anybody works in existed.
+/// Both guards exist to stop a caller reading or writing the wrong TREE, and a probe slot is
+/// tooling no one opens as a workspace. A real scratch worktree is still listed, whatever it is
+/// called; see [`is_probe_pool_slot`] for how narrow the skip is.
+/// docs/issues/archive/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
 pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
     let worktrees_dir = project_root.join(".git").join("worktrees");
     if !worktrees_dir.is_dir() {
@@ -566,6 +591,9 @@ pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
                 continue;
             }
             if let Some(worktree_root) = worktree_git.parent() {
+                if is_probe_pool_slot(worktree_root) {
+                    continue;
+                }
                 paths.push(worktree_root.to_path_buf());
             }
         }
@@ -3312,6 +3340,80 @@ mod tests {
 
         let result = list_git_worktrees(dir.path());
         assert!(result.is_empty(), "null byte path should be rejected");
+    }
+
+    /// A worktree whose admin entry is `name` and whose root is `<parent>/<root_name>`.
+    fn linked_worktree(repo: &Path, name: &str, parent: &Path, root_name: &str) -> PathBuf {
+        let root = parent.join(root_name);
+        let entry = repo.join(".git").join("worktrees").join(name);
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::write(entry.join("gitdir"), format!("{}/.git\n", root.display())).unwrap();
+        root
+    }
+
+    /// The mutation-probe pool keeps `mutation-slot-N` worktrees PERMANENTLY, so counting them
+    /// made every session's reads carry the worktree notice and every post-reconnect write be
+    /// refused ("git worktrees detected but workspace(activate) has not been called") when no
+    /// worktree anybody works in existed. They are tooling, not workspaces.
+    #[test]
+    fn list_git_worktrees_skips_the_mutation_probe_pool() {
+        let repo = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        linked_worktree(
+            repo.path(),
+            "mutation-slot-0",
+            parent.path(),
+            "mutation-slot-0",
+        );
+        linked_worktree(
+            repo.path(),
+            "mutation-slot-12",
+            parent.path(),
+            "mutation-slot-12",
+        );
+        let feat = linked_worktree(repo.path(), "feat", parent.path(), "feat");
+
+        assert_eq!(list_git_worktrees(repo.path()), vec![feat]);
+    }
+
+    /// The over-exclusion partners: the skip is the exact pool naming and nothing wider, because a
+    /// real scratch worktree that merely MENTIONS the pool must still be seen (the notice exists
+    /// for exactly such a tree). Each name here is one a looser rule would swallow.
+    #[test]
+    fn list_git_worktrees_still_lists_worktrees_that_only_resemble_a_pool_slot() {
+        let repo = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let near_misses = [
+            "mutation-slot-x",
+            "mutation-slot-",
+            "my-mutation-slot-0",
+            "mutation-slot-0-wip",
+            "slot-0",
+        ];
+        let mut expected: Vec<PathBuf> = near_misses
+            .iter()
+            .map(|n| linked_worktree(repo.path(), n, parent.path(), n))
+            .collect();
+        expected.sort();
+
+        let mut got = list_git_worktrees(repo.path());
+        got.sort();
+        assert_eq!(got, expected);
+    }
+
+    /// The name is read from the worktree ROOT, which is what the notice prints and what a user
+    /// would `activate`; the admin entry's name under `.git/worktrees/` is git's own choice and
+    /// is deduplicated with a numeric suffix (`feat1`), so it must not decide this.
+    #[test]
+    fn the_probe_pool_skip_reads_the_worktree_root_not_the_admin_entry() {
+        let repo = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        // Admin entry named like a slot, root a real tree: must be LISTED.
+        let real = linked_worktree(repo.path(), "mutation-slot-0", parent.path(), "feature");
+        // Admin entry named like a real tree, root a pool slot: must be SKIPPED.
+        linked_worktree(repo.path(), "feat1", parent.path(), "mutation-slot-1");
+
+        assert_eq!(list_git_worktrees(repo.path()), vec![real]);
     }
 
     // ── Dangerous command detection ──────────────────────────────────────
