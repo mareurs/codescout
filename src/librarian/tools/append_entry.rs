@@ -2102,6 +2102,143 @@ mod taxonomy_recipes {
         ))
     }
 
+    /// Does `body` keep a table row for `prefix`: a line outside any fence whose first cell is
+    /// `<prefix>-<digits>`?
+    ///
+    /// This is what makes a ledger "table-keeping" for the gate below, because the bug it serves
+    /// (`docs/issues/archive/2026-09-02-append-entry-two-call-protocol-manufactures-a-capture-window.md`)
+    /// is about a second WRITE, and the second write is a row. Measured 2026-09-07: 21 of 49
+    /// guarded ledgers keep rows. A row whose first cell is wrapped (`**F-1**`, a link) is not
+    /// recognised, which errs toward NOT requiring `index_row`; no ledger here writes one.
+    fn keeps_index_rows(body: &str, prefix: &str) -> bool {
+        let mut fence = FenceState::new();
+        body.lines().any(|line| {
+            if fence.feed(line) || fence.in_fence() {
+                return false;
+            }
+            let Some(rest) = line.trim_start().strip_prefix('|') else {
+                return false;
+            };
+            let cell = rest.split('|').next().unwrap_or_default().trim();
+            cell.strip_prefix(prefix)
+                .and_then(|r| r.strip_prefix('-'))
+                .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+        })
+    }
+
+    /// The finding for a PROSE recipe aimed at a ledger that keeps rows for its prefix, when the
+    /// recipe leaves the row to a second call.
+    ///
+    /// `append_entry` writes the section, the high-water mark and the Index row in ONE `fs::write`
+    /// when it is handed `index_row`; without it the section lands and the row is a separate write,
+    /// a window in which a peer's commit captures one without the other (measured: the second
+    /// ledger to show it was `bug-fix-session-log:F-118`). The parameters are opt-in, so a recipe
+    /// that omits them keeps the window for every agent that follows it, and nothing migrated the
+    /// recipes when the parameters shipped. A row also needs a place to go: `index_after_line` per
+    /// call, or a `snapshot_anchor` the ledger declares once, and `append_entry` refuses a row with
+    /// neither.
+    ///
+    /// `here` names the recipe, `rel` the ledger it writes, and `body` is that ledger's body.
+    fn index_row_finding(
+        here: &str,
+        rel: &str,
+        fm: Option<&Frontmatter>,
+        body: &str,
+        prefix: &str,
+        args: &str,
+    ) -> Option<String> {
+        if !keeps_index_rows(body, prefix) {
+            return None;
+        }
+        if top_level_arg(args, "index_row").is_none() {
+            return Some(format!(
+                "{here}: the recipe for id_prefix=\"{prefix}\" passes no index_row=\"…\", but `{rel}` keeps \
+             {prefix}-N rows in a table, so an agent following it writes the section and then the row in a \
+             SECOND write, the window another session's commit can capture. Repair the recipe: pass \
+             index_row=\"| {{id}} | … |\" in this call, plus index_after_line=\"<the table's separator \
+             line>\" or declare the table once (doc(action=\"update\", id=<artifact id of {rel}>, \
+             patch={{extra: {{\"snapshot_anchor\": \"<the table's header line, verbatim>\"}}}}))."
+            ));
+        }
+        let anchored = top_level_arg(args, "index_after_line").is_some()
+            || crate::librarian::catalog::augmentation::declared_snapshot_anchor(fm).is_some();
+        (!anchored).then(|| {
+            format!(
+                "{here}: the recipe for id_prefix=\"{prefix}\" passes index_row but nothing says where the \
+             row goes: no index_after_line in the call, and `{rel}` declares no snapshot_anchor, so \
+             append_entry refuses it by name. Repair ONE side: add index_after_line=\"<the table's \
+             separator line>\" to the recipe, or declare the table once \
+             (doc(action=\"update\", id=<artifact id of {rel}>, patch={{extra: {{\"snapshot_anchor\": \
+             \"<the table's header line, verbatim>\"}}}}))."
+            )
+        })
+    }
+
+    /// `index_row_finding` for a TAXONOMY recipe. A `Recipe` keeps no arguments, so this re-reads
+    /// the recipe's own row for its calls, and the ledger it routes to. Nothing here is silent: an
+    /// unreadable target is `check_prose`'s finding and a call that never closes is the scanner's,
+    /// so each is skipped here only because it is already reported.
+    fn taxonomy_index_row_findings(root: &Path, r: &Recipe) -> Vec<String> {
+        let Ok(tax) = std::fs::read_to_string(root.join("docs/TAXONOMY.md")) else {
+            return Vec::new();
+        };
+        let Some(line) = tax.lines().nth(r.line.saturating_sub(1)) else {
+            return vec![format!(
+                "{}: the row is past the end of docs/TAXONOMY.md",
+                r.at()
+            )];
+        };
+        let Ok(text) = std::fs::read_to_string(root.join(&r.target)) else {
+            return Vec::new();
+        };
+        let Ok((fm, body)) = frontmatter::parse(&text) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (open, _) in line.match_indices(CALL_OPENER) {
+            let Some(args) = call_args(line, open + "doc".len()) else {
+                continue;
+            };
+            out.extend(index_row_finding(
+                &r.at(),
+                &r.target,
+                fm.as_ref(),
+                body,
+                &r.id_prefix,
+                args,
+            ));
+        }
+        out
+    }
+
+    /// Every Main-table recipe against the check for its shape, plus the index-row gate for a
+    /// prose one. A function rather than the body of the corpus test, so a test can hand it a
+    /// fixture and see that the gate is wired in: the corpus test reads the real docs, which stay
+    /// clean, so deleting the call from it would otherwise pass.
+    fn check_main_taxonomy_recipes(root: &Path, recipes: &[Recipe]) -> Vec<String> {
+        let mut failures = Vec::new();
+        for r in recipes {
+            if !is_citable_entry_prefix(&r.id_prefix) {
+                failures.push(format!(
+                    "{}: id_prefix=\"{}\" is refused by append_entry before either branch — an entry \
+                     token is `[A-Z]{{1,3}}-<n>`. Correct the TAXONOMY row.",
+                    r.at(),
+                    r.id_prefix
+                ));
+                continue;
+            }
+            match &r.shape {
+                Shape::Prose => {
+                    failures.extend(check_prose(root, r));
+                    failures.extend(taxonomy_index_row_findings(root, r));
+                }
+                Shape::Params { collection } => failures.extend(check_params(root, r, collection)),
+                Shape::Template => failures.extend(check_template(root, r, TEMPLATE_EXEMPT)),
+            }
+        }
+        failures
+    }
+
     /// The params path checks no declaration; it refuses when no augmentation declares the
     /// collection. Offline, the committed sidecar is what a fresh clone re-attaches.
     fn check_params(root: &Path, r: &Recipe, collection: &str) -> Option<String> {
@@ -2291,22 +2428,7 @@ mod taxonomy_recipes {
         );
 
         let mut failures = scan.unparseable.clone();
-        for r in &scan.recipes {
-            if !is_citable_entry_prefix(&r.id_prefix) {
-                failures.push(format!(
-                    "{}: id_prefix=\"{}\" is refused by append_entry before either branch — an entry \
-                 token is `[A-Z]{{1,3}}-<n>`. Correct the TAXONOMY row.",
-                    r.at(),
-                    r.id_prefix
-                ));
-                continue;
-            }
-            match &r.shape {
-                Shape::Prose => failures.extend(check_prose(&root, r)),
-                Shape::Params { collection } => failures.extend(check_params(&root, r, collection)),
-                Shape::Template => failures.extend(check_template(&root, r, TEMPLATE_EXEMPT)),
-            }
-        }
+        failures.extend(check_main_taxonomy_recipes(&root, &scan.recipes));
         assert!(failures.is_empty(), "{}", report(&failures, &population));
     }
 
@@ -2772,8 +2894,9 @@ mod taxonomy_recipes {
         failures: Vec<String>,
     }
 
-    /// One call read out of a prompt: `(id_prefix, entry_collection)`, or why it could not be read.
-    type PromptCall = Result<(Option<String>, Option<String>), String>;
+    /// One call read out of a prompt: `(id_prefix, entry_collection, argument text)`, or why it
+    /// could not be read.
+    type PromptCall = Result<(Option<String>, Option<String>, String), String>;
 
     /// Every call in `prompt` written in a `SIDECAR_OPENERS` spelling, in source order, as
     /// (id_prefix, entry_collection). An `Err` is a call that never closes its `(`.
@@ -2785,6 +2908,7 @@ mod taxonomy_recipes {
                     Some(args) => Ok((
                         top_level_arg(args, "id_prefix"),
                         top_level_arg(args, "entry_collection"),
+                        args.to_string(),
                     )),
                     None => Err(format!(
                         "the append_entry call at byte {at} never closes its `(`"
@@ -2898,7 +3022,7 @@ mod taxonomy_recipes {
             let owner = owner.unwrap_or_default();
             for (n, call) in calls.into_iter().enumerate() {
                 let at = format!("`{rel}` prompt, call {}", n + 1);
-                let (id_prefix, collection) = match call {
+                let (id_prefix, collection, args) = match call {
                     Ok(c) => c,
                     Err(why) => {
                         scan.failures.push(format!("{at}: {why}"));
@@ -2961,6 +3085,14 @@ mod taxonomy_recipes {
                                 declared.join(", "),
                                 all.join(", ")
                             ));
+                        } else if let Some(f) = std::fs::read_to_string(root.join(&owner))
+                            .ok()
+                            .and_then(|text| {
+                                let (fm, body) = frontmatter::parse(&text).ok()?;
+                                index_row_finding(&at, &owner, fm.as_ref(), body, &prefix, &args)
+                            })
+                        {
+                            scan.failures.push(f);
                         }
                     }
                 }
@@ -3521,6 +3653,10 @@ mod taxonomy_recipes {
                                 declared.join(", "),
                                 all.join(", ")
                             ));
+                        } else if let Some(f) =
+                            index_row_finding(&here, &rel, fm.as_ref(), body, &prefix, args)
+                        {
+                            scan.failures.push(f);
                         }
                     }
                 }
@@ -3631,6 +3767,240 @@ mod taxonomy_recipes {
             "{:?}",
             scan.failures
         );
+    }
+
+    // ---- the index-row gate (bug 47d5ae6a2b23f87a) ----
+
+    /// A ledger body that keeps F rows in a table.
+    const F_ROWS: &str = "| ID | Title |\n|----|-------|\n| F-1 | first |\n";
+    const F_ROW_CALL: &str = r###"doc(action="append_entry", id="x", id_prefix="F", anchor_heading="## T", title=…, body=…, index_row="| {id} | … |")"###;
+
+    #[test]
+    fn a_ledger_keeps_rows_for_a_prefix_only_when_a_table_row_starts_with_that_prefix_and_a_number()
+    {
+        assert!(keeps_index_rows("| F-1 | a |\n", "F"));
+        assert!(
+            keeps_index_rows("  | F-12 | a |\n", "F"),
+            "leading spaces are not part of the cell"
+        );
+        // Each of these is a near miss that a looser match would count.
+        assert!(
+            !keeps_index_rows("| FX-1 | a |\n", "F"),
+            "a longer prefix is another namespace"
+        );
+        assert!(
+            !keeps_index_rows("| F-1x | a |\n", "F"),
+            "a suffixed id is no entry token"
+        );
+        assert!(!keeps_index_rows("| F- | a |\n", "F"), "no number, no row");
+        assert!(
+            !keeps_index_rows("F-1 | a |\n", "F"),
+            "no leading pipe is no table"
+        );
+        assert!(
+            !keeps_index_rows("| W-1 | a |\n", "F"),
+            "another prefix's row"
+        );
+        assert!(
+            !keeps_index_rows("```\n| F-1 | a |\n```\n", "F"),
+            "a fenced example is not the ledger's own table"
+        );
+        // A KNOWN limit, pinned so it is not mistaken for coverage: a wrapped first cell is
+        // not recognised, which errs toward not requiring `index_row`.
+        assert!(!keeps_index_rows("| **F-1** | a |\n", "F"));
+    }
+
+    #[test]
+    fn a_ledger_recipe_with_no_index_row_is_a_finding_when_the_ledger_keeps_rows() {
+        let body = format!("{F_ROWS}\n{LEDGER_F_CALL}");
+        let scan = ledger_scan_of("entry_prefix: F\n", &body, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        let f = &scan.failures[0];
+        assert!(
+            f.contains("docs/trackers/l.md") && f.contains("passes no index_row"),
+            "the finding must name the ledger and the omission: {f}"
+        );
+        assert!(
+            f.contains("snapshot_anchor") && f.contains("index_after_line"),
+            "and offer both ways to place the row, or the reader has no next step: {f}"
+        );
+    }
+
+    #[test]
+    fn a_ledger_recipe_is_clean_when_the_ledger_keeps_no_row_for_its_prefix() {
+        // F's recipe, W's rows: the check is per prefix, not per ledger.
+        let body = format!("| W-1 | a |\n\n{LEDGER_F_CALL}");
+        let scan = ledger_scan_of("entry_prefix: [F, W]\n", &body, None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn a_ledger_recipe_with_an_index_row_and_its_anchor_is_clean() {
+        let call = F_ROW_CALL.replace(
+            r#"index_row="| {id} | … |")"#,
+            r#"index_row="| {id} | … |", index_after_line="|----|-------|")"#,
+        );
+        let body = format!("{F_ROWS}\n{call}");
+        let scan = ledger_scan_of("entry_prefix: F\n", &body, None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn an_index_row_alone_is_clean_only_when_the_ledger_declares_a_snapshot_anchor() {
+        let body = format!("{F_ROWS}\n{F_ROW_CALL}");
+        let declared = ledger_scan_of(
+            "entry_prefix: F\nsnapshot_anchor: '| ID | Title |'\n",
+            &body,
+            None,
+        );
+        assert!(declared.failures.is_empty(), "{:?}", declared.failures);
+
+        let undeclared = ledger_scan_of("entry_prefix: F\n", &body, None);
+        assert_eq!(undeclared.failures.len(), 1, "{:?}", undeclared.failures);
+        assert!(
+            undeclared.failures[0].contains("nothing says where the row goes"),
+            "{}",
+            undeclared.failures[0]
+        );
+    }
+
+    #[test]
+    fn a_form_mention_and_a_params_call_are_not_judged_for_an_index_row() {
+        let mention = format!("{F_ROWS}\ndoc(action=\"append_entry\", …)");
+        let scan = ledger_scan_of("entry_prefix: F\n", &mention, None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+
+        // A params ledger's rows are rendered from params, not typed into the call.
+        let params = format!(
+            "{F_ROWS}\ndoc(action=\"append_entry\", id=\"x\", entry_collection=\"c\", id_prefix=\"F\", entry={{a}})"
+        );
+        let scan = ledger_scan_of("entry_prefix: F\n", &params, Some("c"));
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn an_undeclared_prefix_is_reported_once_not_again_for_its_missing_index_row() {
+        // The call is refused outright, so a second finding about its row would send the reader
+        // to repair a recipe that the first finding says is wrong for another reason.
+        let body = format!("{F_ROWS}\n{LEDGER_F_CALL}");
+        let scan = ledger_scan_of("entry_prefix: Q\n", &body, None);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(scan.failures[0].contains("is not declared by this ledger"));
+    }
+
+    /// A TAXONOMY recipe is re-read from its own row, so the row's line number must reach it.
+    #[test]
+    fn a_taxonomy_recipe_for_a_table_keeping_ledger_must_pass_index_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(
+            root,
+            "docs/trackers/l.md",
+            &format!("---\nkind: tracker\nentry_prefix: F\n---\n{F_ROWS}"),
+        );
+        let row =
+            |call: &str| format!("| h |\n| **F-N** | `docs/trackers/l.md` | x | `{call}` |\n");
+        let r = Recipe {
+            line: 2,
+            label: "F-N".into(),
+            id_prefix: "F".into(),
+            target: "docs/trackers/l.md".into(),
+            shape: Shape::Prose,
+        };
+
+        put(root, "docs/TAXONOMY.md", &row(LEDGER_F_CALL));
+        let out = taxonomy_index_row_findings(root, &r);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(
+            out[0].contains("docs/TAXONOMY.md:2") && out[0].contains("passes no index_row"),
+            "{out:?}"
+        );
+
+        put(root, "docs/TAXONOMY.md", &row(F_ROW_CALL));
+        let out = taxonomy_index_row_findings(root, &r);
+        assert_eq!(
+            out.len(),
+            1,
+            "an index_row with no anchor anywhere still refuses: {out:?}"
+        );
+        assert!(
+            out[0].contains("nothing says where the row goes"),
+            "{out:?}"
+        );
+
+        // The line must be the recipe's own, not the first row's.
+        let far = Recipe {
+            line: 99,
+            ..r.clone()
+        };
+        let out = taxonomy_index_row_findings(root, &far);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(out[0].contains("past the end"), "{out:?}");
+    }
+
+    /// The gate is wired into BOTH TAXONOMY checks, not only defined. The corpus tests read the
+    /// real docs and stay clean, so each wiring needs a fixture that goes red when the call is
+    /// dropped from it.
+    #[test]
+    fn both_taxonomy_checks_run_the_index_row_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(
+            root,
+            "docs/trackers/l.md",
+            &format!("---\nkind: tracker\nentry_prefix: F\n---\n{F_ROWS}"),
+        );
+        put(
+            root,
+            "docs/TAXONOMY.md",
+            &format!("| h |\n| **F-N** | `docs/trackers/l.md` | x | `{LEDGER_F_CALL}` |\n"),
+        );
+        let r = Recipe {
+            line: 2,
+            label: "F-N".into(),
+            id_prefix: "F".into(),
+            target: "docs/trackers/l.md".into(),
+            shape: Shape::Prose,
+        };
+        let main = check_main_taxonomy_recipes(root, std::slice::from_ref(&r));
+        assert!(
+            main.iter().any(|f| f.contains("passes no index_row")),
+            "the Main-table check dropped the index-row gate: {main:?}"
+        );
+        let ws = check_work_stream_recipes(root, std::slice::from_ref(&r));
+        assert!(
+            ws.iter().any(|f| f.contains("passes no index_row")),
+            "the work-stream check dropped the index-row gate: {ws:?}"
+        );
+    }
+
+    /// The same gate over a sidecar prompt, read against the ledger that declares the sidecar.
+    #[test]
+    fn a_sidecar_prose_recipe_for_a_table_keeping_owner_must_pass_index_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let prompt = format!("To add: {LEDGER_F_CALL}");
+        sidecar_fixture(root, "entry_prefix: F\n", &prompt, None);
+        // `sidecar_fixture` writes an empty ledger body; give the owner its rows.
+        put(
+            root,
+            "docs/trackers/l.md",
+            &format!(
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/l.yaml\nentry_prefix: F\n---\n{F_ROWS}"
+            ),
+        );
+        let scan = scan_sidecar_prompts(root);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("passes no index_row"),
+            "{:?}",
+            scan.failures
+        );
+
+        // And with no rows in the owner there is nothing to keep, so the same prompt is clean.
+        sidecar_fixture(root, "entry_prefix: F\n", &prompt, None);
+        let scan = scan_sidecar_prompts(root);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
     }
 
     #[test]
@@ -3995,13 +4365,18 @@ mod taxonomy_recipes {
     fn check_work_stream_recipes(root: &Path, recipes: &[Recipe]) -> Vec<String> {
         recipes
             .iter()
-            .filter_map(|r| match &r.shape {
-                Shape::Prose => check_prose(root, r),
-                Shape::Params { collection } => check_params(root, r, collection),
-                Shape::Template => Some(format!(
+            .flat_map(|r| match &r.shape {
+                Shape::Prose => check_prose(root, r)
+                    .into_iter()
+                    .chain(taxonomy_index_row_findings(root, r))
+                    .collect::<Vec<_>>(),
+                Shape::Params { collection } => check_params(root, r, collection)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                Shape::Template => vec![format!(
                     "{}: a work-stream row cannot be a template recipe",
                     r.at()
-                )),
+                )],
             })
             .collect()
     }
