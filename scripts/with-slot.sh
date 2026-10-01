@@ -21,16 +21,27 @@ set -u
 
 if [ $# -eq 0 ]; then
     cat >&2 <<'EOF'
-usage: scripts/with-slot.sh <command> [args...]
+usage: scripts/with-slot.sh [--slot N] <command> [args...]
   Runs the command with CARGO_TARGET_DIR set to a build tree leased from the gate's pool
   (~/.cache/codescout-gate). The lease ends when the command exits.
+  --slot N leases exactly slot-N, to repair or inspect that tree (for example
+  `--slot 0 cargo clean -p codescout`). It refuses, running nothing, when slot-N is held
+  or does not exist, rather than falling back to another slot.
 EOF
     exit 2
+fi
+
+slot=
+if [ "$1" = "--slot" ]; then
+    [ $# -ge 3 ] || { echo "with-slot.sh: --slot wants a slot number and a command" >&2; exit 2; }
+    slot="$2"; shift 2
+    # Honouring the preset would run the command in a tree the caller did not ask for.
+    [ -z "${CARGO_TARGET_DIR:-}" ] || { echo "with-slot.sh: --slot contradicts the preset CARGO_TARGET_DIR" >&2; exit 2; }
 fi
 
 [ -n "${CARGO_TARGET_DIR:-}" ] && exec "$@"
 
 . "$(dirname "${BASH_SOURCE[0]}")/slot-pool.sh" || exit 2
-lease_gate_target with-slot.sh || exit 2
+lease_gate_target with-slot.sh "$slot" || exit 2
 echo "with-slot.sh: CARGO_TARGET_DIR=$CARGO_TARGET_DIR (leased until this command exits)" >&2
 exec "$@"

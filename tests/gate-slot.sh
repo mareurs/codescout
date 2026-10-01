@@ -243,6 +243,47 @@ run_with k7 CODESCOUT_GATE_POOL_KEEP=x bash "$WITH" sh -c ': > "$1"' _ "$WORK/ra
 eq "a failed lease exits 2" "$?" "2"
 eq "and never runs the command" "$(state "$WORK/ran-k7")" "gone"
 
+echo "O. with-slot.sh --slot N leases exactly that slot, or refuses"
+# bug a61fab68e4fd71f3: a repair meant for one tree was run in whichever slot happened to be
+# free, and 17.6 GiB of the wrong one went.
+POOL="$WORK/pool-o"; mkdir -p "$POOL/slot-0" "$POOL/slot-1"
+run_with o1 bash "$WITH" --slot 1 sh -c 'echo "$CARGO_TARGET_DIR" > "$1"' _ "$WORK/tdir-o1"
+eq "a named slot is leased even when a lower one is free" "$(cat "$WORK/tdir-o1" 2>/dev/null)" "$POOL/slot-1"
+if hold_lock o2 "$POOL/slot-0.lock"; then
+    run_with o2 bash "$WITH" --slot 0 sh -c ': > "$1"' _ "$WORK/ran-o2"; eq "a held slot is refused with exit 2" "$?" "2"
+    eq "and the command does not fall back to another slot" "$(state "$WORK/ran-o2")" "gone"
+    eq "and the refusal names the slot" "$(grep -c 'slot-0 is held by another run' "$WORK/out-o2")" "1"
+else
+    no "the slot-0 holder took its lock" "it never did"
+fi
+rm -f "$WORK/hold-o2"
+run_with o3 bash "$WITH" --slot 7 sh -c ': > "$1"' _ "$WORK/ran-o3"; eq "an absent slot is refused with exit 2" "$?" "2"
+eq "and the command never runs" "$(state "$WORK/ran-o3")" "gone"
+eq "and the pool grows no slot-7" "$(state "$POOL/slot-7.lock")" "gone"
+run_with o4 bash "$WITH" --slot x sh -c ': > "$1"' _ "$WORK/ran-o4"; eq "a malformed slot is refused with exit 2" "$?" "2"
+eq "and the command never runs" "$(state "$WORK/ran-o4")" "gone"
+# `slot-0/../slot-1` is a directory that exists and a lock path that resolves, so only the
+# whole-number check stands between a named slot and a path that names another one.
+run_with o4b bash "$WITH" --slot '0/../slot-1' sh -c ': > "$1"' _ "$WORK/ran-o4b"; eq "a slot spelled as a path is refused with exit 2" "$?" "2"
+eq "and the command never runs" "$(state "$WORK/ran-o4b")" "gone"
+# slot-1 and not slot-0: the o2 holder above may not have released slot-0 yet, and a held
+# slot is refused with the same exit 2, so a usage error here would pass for the wrong reason.
+run_with o5 bash "$WITH" --slot 1; eq "--slot with no command is a usage error" "$?" "2"
+eq "and it is the usage error, not a refusal of the slot" "$(grep -c 'wants a slot number and a command' "$WORK/out-o5")" "1"
+run_with o6 CARGO_TARGET_DIR="$WORK/mine-o" bash "$WITH" --slot 1 sh -c ': > "$1"' _ "$WORK/ran-o6"
+eq "--slot against a preset CARGO_TARGET_DIR is refused" "$?" "2"
+eq "and says why" "$(grep -c 'contradicts the preset' "$WORK/out-o6")" "1"
+eq "and the command never runs" "$(state "$WORK/ran-o6")" "gone"
+: > "$WORK/hold-o7"
+run_with o7 bash "$WITH" --slot 1 sh -c ': > "$1"; while [ -e "$2" ]; do sleep 0.1; done' _ \
+    "$WORK/started-o7" "$WORK/hold-o7" & PO=$!; PIDS+=("$PO")
+if wait_for "$WORK/started-o7"; then
+    run_with o8 bash "$WITH" --slot 1 true; eq "a second --slot 1 while it runs is refused" "$?" "2"
+else
+    no "the named-slot command started" "it never did: $(cat "$WORK/out-o7")"
+fi
+rm -f "$WORK/hold-o7"; wait "$PO" 2>/dev/null
+
 echo "L. a lease evicts a build script compiled for another checkout, and nothing else"
 # bug a61fab68e4fd71f3. Cargo shares one compiled build script across checkouts and never
 # reads the manifest dir baked into it, so a lessee can run a script built for someone else.

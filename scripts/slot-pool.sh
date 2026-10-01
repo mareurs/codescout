@@ -38,13 +38,30 @@
 # the gate pool near 144G.
 SLOT_CEILING_MB_DEFAULT=49152
 
-# slot_lease <pool> <prefix> <who> — take the lowest free slot and hold it on an fd every
-# child inherits. Sets SLOT, SLOT_FD and SLOT_DIR. Returns 2, holding nothing, when flock
-# cannot run.
+# slot_lease <pool> <prefix> <who> [slot] — take the lowest free slot, or exactly <slot>,
+# and hold it on an fd every child inherits. Sets SLOT, SLOT_FD and SLOT_DIR. Returns 2,
+# holding nothing, when flock cannot run, or when a named slot is held, absent or malformed.
 slot_lease() {
-    local pool="$1" prefix="$2" who="$3" rc
+    local pool="$1" prefix="$2" who="$3" only="${4:-}" rc
     mkdir -p "$pool" || return 2
     SLOT=0
+    if [ -n "$only" ]; then
+        # A named slot is for repairing or inspecting THAT tree, so it is never swapped for
+        # another: bug a61fab68e4fd71f3 cleaned the wrong slot because the lease picked
+        # whichever was free. Held, absent and malformed are three refusals, each naming itself.
+        case "$only" in *[!0-9]*) echo "$who: --slot wants a whole slot number, got '$only'" >&2; return 2 ;; esac
+        [ -d "$pool/$prefix$only" ] || { echo "$who: no slot $prefix$only in $pool" >&2; return 2; }
+        SLOT="$only"
+        exec {SLOT_FD}>"$pool/$prefix$SLOT.lock" || return 2
+        flock -n "$SLOT_FD"; rc=$?
+        if [ "$rc" -ne 0 ]; then
+            if [ "$rc" -eq 1 ]; then echo "$who: $prefix$only is held by another run; nothing was run" >&2
+            else echo "$who: flock failed with exit $rc" >&2; fi
+            return 2
+        fi
+        SLOT_DIR="$pool/$prefix$SLOT"
+        return 0
+    fi
     while :; do
         exec {SLOT_FD}>"$pool/$prefix$SLOT.lock" || return 2
         flock -n "$SLOT_FD"; rc=$?
@@ -143,12 +160,12 @@ slot_evict_foreign_build_scripts() {
         done < <(find "$tree" -maxdepth 5 -path '*/build/*' -name 'build_script_build-*.d' 2>/dev/null)
 }
 
-# lease_gate_target <who> — lease a cargo target dir from the pool gate.sh and
-# with-slot.sh share, tend it, evict build scripts compiled for another checkout, and
-# export CARGO_TARGET_DIR. Sets GATE_POOL.
+# lease_gate_target <who> [slot] — lease a cargo target dir from the pool gate.sh and
+# with-slot.sh share (the lowest free one, or exactly <slot>), tend it, evict build scripts
+# compiled for another checkout, and export CARGO_TARGET_DIR. Sets GATE_POOL.
 lease_gate_target() {
     GATE_POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
-    slot_lease "$GATE_POOL" slot- "$1" || return 2
+    slot_lease "$GATE_POOL" slot- "$1" "${2:-}" || return 2
     # Three is the most concurrent gate runs observed on this machine.
     slot_tend "$1" "$GATE_POOL" slot- CODESCOUT_GATE_POOL_KEEP 3 "$SLOT_DIR" slot_remove_dir || return 2
     # The lessee is whichever checkout the command will build, which is the cwd's, not the
