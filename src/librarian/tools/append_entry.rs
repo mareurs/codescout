@@ -2735,4 +2735,554 @@ mod taxonomy_recipes {
          the log instead (if it is a live peer's log, ask them)."
         );
     }
+
+    // ── The second surface: append_entry recipes inside committed augmentation-sidecar prompts ──
+    //
+    // `docs/augmentations/*.yaml` carries each augmented ledger's `prompt`, which `doc(action="get")`
+    // serves to every agent and which teaches a literal call. Nothing read it: a prompt could
+    // instruct a call its own ledger refuses (bug fc491a58, whose parent found exactly that).
+    // Only the conditions that REFUSE a call are checked — the same two as the TAXONOMY gate.
+    // The call's literal `id="…"` is not: whether an artifact id resolves needs the catalog, and
+    // that liveness is owned by the commit-time hook (spec § Out of scope).
+
+    use crate::librarian::augmentation_sidecar::{self, SIDECAR_DIR};
+    use std::collections::BTreeMap;
+
+    /// Spellings of a call this gate reads, as (opener, byte offset of its `(`). `doc(append_entry,`
+    /// is real — review-catches writes it. A bare `append_entry(…)` is deliberately NOT read: today
+    /// it occurs only outside `prompt`, as a fragment in schema text, where reading it would check
+    /// a sentence as if it were an instruction. A prompt whose only recipe is spelled some unread
+    /// way is caught per sidecar instead (`scan_sidecar_prompts`), never skipped.
+    const SIDECAR_OPENERS: [(&str, usize); 2] =
+        [("doc(action=\"append_entry\"", 3), ("doc(append_entry", 3)];
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct SidecarCall {
+        sidecar: String,
+        id_prefix: String,
+        collection: Option<String>,
+    }
+
+    #[derive(Debug, Default)]
+    struct SidecarScan {
+        /// Sidecars that read, recipe or not.
+        sidecars: usize,
+        /// Calls that parsed with a citable `id_prefix`.
+        calls: Vec<SidecarCall>,
+        failures: Vec<String>,
+    }
+
+    /// One call read out of a prompt: `(id_prefix, entry_collection)`, or why it could not be read.
+    type PromptCall = Result<(Option<String>, Option<String>), String>;
+
+    /// Every call in `prompt` written in a `SIDECAR_OPENERS` spelling, in source order, as
+    /// (id_prefix, entry_collection). An `Err` is a call that never closes its `(`.
+    fn prompt_calls(prompt: &str) -> Vec<PromptCall> {
+        let mut found = Vec::new();
+        for (opener, paren) in SIDECAR_OPENERS {
+            for (at, _) in prompt.match_indices(opener) {
+                let call = match call_args(prompt, at + paren) {
+                    Some(args) => Ok((
+                        top_level_arg(args, "id_prefix"),
+                        top_level_arg(args, "entry_collection"),
+                    )),
+                    None => Err(format!(
+                        "the append_entry call at byte {at} never closes its `(`"
+                    )),
+                };
+                found.push((at, call));
+            }
+        }
+        found.sort_by_key(|(at, _)| *at);
+        found.into_iter().map(|(_, call)| call).collect()
+    }
+
+    /// Sidecar (repo-relative) -> the artifacts under `docs/` whose `expects_augmentation` names it.
+    /// A sidecar belongs to exactly one ledger; the prose check reads that ledger's prefixes.
+    fn sidecar_owners(root: &Path) -> BTreeMap<String, Vec<String>> {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "md") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&root.join("docs"), &mut files);
+        files.sort();
+        let mut owners: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for p in files {
+            let Ok(Some(fm)) = read_fm(&p) else { continue };
+            if let Some(Declaration::Declared { sidecar: Some(rel) }) =
+                fm.extra.get("expects_augmentation").map(parse_declaration)
+            {
+                let owner = p
+                    .strip_prefix(root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                owners.entry(rel).or_default().push(owner);
+            }
+        }
+        owners
+    }
+
+    /// Reads every `docs/augmentations/*.yaml` under `root` and checks each `append_entry` call in
+    /// its prompt against the two conditions that make the code refuse it. Nothing is skipped: a
+    /// sidecar that does not read, a call that does not close, a recipe with no owning ledger and a
+    /// prompt that mentions the tool in no readable spelling are each a finding.
+    fn scan_sidecar_prompts(root: &Path) -> SidecarScan {
+        let mut scan = SidecarScan::default();
+        let mut names: Vec<String> = std::fs::read_dir(root.join(SIDECAR_DIR))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".yaml"))
+            .collect();
+        names.sort();
+        let owners = sidecar_owners(root);
+        for name in names {
+            let rel = format!("{SIDECAR_DIR}/{name}");
+            let sidecar = match augmentation_sidecar::read(&root.join(&rel)) {
+                Ok(s) => s,
+                Err(e) => {
+                    scan.failures.push(format!("`{rel}` does not read: {e:#}"));
+                    continue;
+                }
+            };
+            scan.sidecars += 1;
+            let calls = prompt_calls(&sidecar.prompt);
+            if calls.is_empty() {
+                if sidecar.prompt.contains("append_entry") {
+                    let spellings = SIDECAR_OPENERS.map(|(o, _)| format!("`{o}…`")).join(" or ");
+                    scan.failures.push(format!(
+                        "`{rel}`'s prompt mentions append_entry but holds no call in a spelling this gate \
+                     reads ({spellings}), so its recipe would pass unchecked. Write the call in one of \
+                     them, or add the new spelling to SIDECAR_OPENERS \
+                     (src/librarian/tools/append_entry.rs)."
+                    ));
+                }
+                continue;
+            }
+            let owner = match owners.get(&rel).map(Vec::as_slice) {
+                Some([one]) => Some(one.clone()),
+                Some(many) => {
+                    scan.failures.push(format!(
+                        "`{rel}` is declared by {} artifacts ({}); a sidecar belongs to exactly one \
+                     ledger, and the prose check cannot tell which one's prefixes to read. Keep one \
+                     `expects_augmentation` and remove the rest.",
+                        many.len(),
+                        many.join(", ")
+                    ));
+                    None
+                }
+                None => {
+                    scan.failures.push(format!(
+                        "`{rel}` holds an append_entry recipe but no artifact under docs/ declares \
+                     `expects_augmentation: {rel}`, so the prompt is served to nobody and nothing can \
+                     follow it. Declare it in its ledger's frontmatter (doc(action=\"update\", \
+                     id=<the ledger's artifact id>, patch={{extra: {{\"expects_augmentation\": \
+                     \"{rel}\"}}}})), or delete the orphan sidecar."
+                    ));
+                    None
+                }
+            };
+            let declared = owner
+                .as_ref()
+                .and_then(|o| read_fm(&root.join(o)).ok())
+                .map(|fm| declared_prefixes_from_frontmatter(fm.as_ref()));
+            let owner = owner.unwrap_or_default();
+            for (n, call) in calls.into_iter().enumerate() {
+                let at = format!("`{rel}` prompt, call {}", n + 1);
+                let (id_prefix, collection) = match call {
+                    Ok(c) => c,
+                    Err(why) => {
+                        scan.failures.push(format!("{at}: {why}"));
+                        continue;
+                    }
+                };
+                let Some(prefix) = id_prefix else {
+                    scan.failures.push(format!(
+                        "{at}: the append_entry call passes no id_prefix=\"…\", so nothing says which \
+                     ledger namespace it writes"
+                    ));
+                    continue;
+                };
+                if !is_citable_entry_prefix(&prefix) {
+                    scan.failures.push(format!(
+                        "{at}: id_prefix=\"{prefix}\" is refused by append_entry before either branch — \
+                     an entry token is `[A-Z]{{1,3}}-<n>`. Correct the prompt."
+                    ));
+                    continue;
+                }
+                scan.calls.push(SidecarCall {
+                    sidecar: rel.clone(),
+                    id_prefix: prefix.clone(),
+                    collection: collection.clone(),
+                });
+                match collection {
+                    Some(c) => {
+                        if sidecar.entry_collection.as_deref() != Some(c.as_str()) {
+                            scan.failures.push(format!(
+                                "{at}: names entry_collection=\"{c}\", but `{rel}` declares {:?} — \
+                             append_entry refuses a collection the augmentation does not declare, so an \
+                             agent following this prompt is refused. Repair ONE side: the call in this \
+                             prompt, or the sidecar's entry_collection.",
+                                sidecar.entry_collection
+                            ));
+                        }
+                    }
+                    None => {
+                        let Some(declared) = &declared else { continue };
+                        if declared.is_empty() {
+                            scan.failures.push(format!(
+                                "{at}: prose call for id_prefix=\"{prefix}\" is refused — \
+                             allocate_entry_id: `{owner}` does not declare an entry_prefix. Repair ONE \
+                             side: declare it (doc(action=\"update\", id=<artifact id of {owner}>, \
+                             patch={{extra: {{\"entry_prefix\": \"{prefix}\"}}}})), or correct the prompt."
+                            ));
+                        } else if !declared.contains(&prefix) {
+                            // `extra` keys are upserted, so the remedy restates the existing namespaces.
+                            let all: Vec<String> = declared
+                                .iter()
+                                .chain(std::iter::once(&prefix))
+                                .map(|d| format!("\"{d}\""))
+                                .collect();
+                            scan.failures.push(format!(
+                                "{at}: prose call for id_prefix=\"{prefix}\" is refused — \
+                             allocate_entry_id: `{prefix}` is not declared by this ledger (it declares \
+                             {}). Repair ONE side: declare it (doc(action=\"update\", id=<artifact id \
+                             of {owner}>, patch={{extra: {{\"entry_prefix\": [{}]}}}})), or correct the \
+                             prompt.",
+                                declared.join(", "),
+                                all.join(", ")
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        scan
+    }
+
+    fn sidecar_report(failures: &[String], population: &str) -> String {
+        format!(
+            "{} sidecar-prompt append_entry finding(s) — each would be refused, or the gate cannot read \
+         it:\n  {}\n\nThis test reads the WORKING TREE of a shared checkout. If a file a finding names \
+         is not yours — a peer's in-progress sidecar or ledger — attribute it (python3 \
+         scripts/file-provenance.py <path>) and tell its owner; do not repair it for them. If it is \
+         yours, apply the repair its line names.\n\n{population}",
+            failures.len(),
+            failures.join("\n  ")
+        )
+    }
+
+    /// Asserts, per call in every sidecar prompt, the two conditions that make `append_entry`
+    /// refuse: a params call must name the collection its own sidecar declares, and a prose call's
+    /// prefix must be declared by the ledger that owns the sidecar.
+    #[test]
+    fn every_sidecar_prompt_append_entry_call_is_one_the_code_accepts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let scan = scan_sidecar_prompts(&root);
+        let params = scan.calls.iter().filter(|c| c.collection.is_some()).count();
+        let prose = scan.calls.len() - params;
+        let population = format!(
+            "examined {} sidecar(s) under `{SIDECAR_DIR}`: {} call(s), {prose} prose, {params} params",
+            scan.sidecars,
+            scan.calls.len()
+        );
+        assert!(
+            scan.sidecars > 0 && prose > 0 && params > 0,
+            "the scanner found no sidecar, or lost a whole call shape — this is not a clean corpus. \
+         {population}"
+        );
+        assert!(
+            scan.failures.is_empty(),
+            "{}",
+            sidecar_report(&scan.failures, &population)
+        );
+    }
+
+    /// A ledger `docs/trackers/l.md` whose frontmatter declares `fm_extra` and names the sidecar
+    /// `docs/augmentations/l.yaml`, which holds `prompt` and, if given, `entry_collection`.
+    fn sidecar_fixture(root: &Path, fm_extra: &str, prompt: &str, collection: Option<&str>) {
+        put(
+            root,
+            "docs/trackers/l.md",
+            &format!(
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/l.yaml\n{fm_extra}---\n# l\n"
+            ),
+        );
+        // A JSON string is a valid YAML scalar, so no prompt text needs escaping by hand.
+        let mut y = format!("prompt: {}\n", serde_json::to_string(prompt).unwrap());
+        if let Some(c) = collection {
+            y.push_str(&format!("entry_collection: {c}\n"));
+        }
+        put(root, "docs/augmentations/l.yaml", &y);
+    }
+
+    fn scan_of(fm_extra: &str, prompt: &str, collection: Option<&str>) -> SidecarScan {
+        let dir = tempfile::tempdir().unwrap();
+        sidecar_fixture(dir.path(), fm_extra, prompt, collection);
+        scan_sidecar_prompts(dir.path())
+    }
+
+    #[test]
+    fn a_params_call_naming_its_sidecars_collection_is_clean() {
+        let scan = scan_of(
+            "",
+            r##"To add: doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"##,
+            Some("issues"),
+        );
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(
+            scan.calls,
+            vec![SidecarCall {
+                sidecar: "docs/augmentations/l.yaml".into(),
+                id_prefix: "WIN".into(),
+                collection: Some("issues".into())
+            }]
+        );
+        assert_eq!(scan.sidecars, 1);
+    }
+
+    #[test]
+    fn a_params_call_naming_another_collection_is_refused() {
+        let scan = scan_of(
+            "",
+            r##"doc(action="append_entry", id="x", entry_collection="tasks", id_prefix="WIN", entry={a})"##,
+            Some("issues"),
+        );
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        let f = &scan.failures[0];
+        assert!(
+            f.contains(r#"entry_collection="tasks""#) && f.contains("issues"),
+            "{f}"
+        );
+    }
+
+    #[test]
+    fn a_params_call_against_a_sidecar_declaring_no_collection_is_refused() {
+        let scan = scan_of(
+            "",
+            r##"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"##,
+            None,
+        );
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("declares None"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_prose_call_whose_prefix_the_owner_declares_is_clean() {
+        let scan = scan_of(
+            "entry_prefix: [R, W]\n",
+            r###"doc(action="append_entry", id="x", id_prefix="R", anchor_heading="## T", title=…, body=…)"###,
+            None,
+        );
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.calls.len(), 1);
+    }
+
+    #[test]
+    fn a_prose_call_is_refused_when_the_owner_declares_another_prefix_or_none() {
+        let call = r###"doc(action="append_entry", id="x", id_prefix="R", anchor_heading="## T", title=…, body=…)"###;
+        let other = scan_of("entry_prefix: Q\n", call, None);
+        assert_eq!(other.failures.len(), 1, "{:?}", other.failures);
+        assert!(
+            other.failures[0].contains("is not declared by this ledger")
+                && other.failures[0].contains("declares Q"),
+            "{:?}",
+            other.failures
+        );
+        let none = scan_of("", call, None);
+        assert_eq!(none.failures.len(), 1, "{:?}", none.failures);
+        assert!(
+            none.failures[0].contains("does not declare an entry_prefix"),
+            "{:?}",
+            none.failures
+        );
+    }
+
+    #[test]
+    fn the_second_spelling_doc_append_entry_is_read() {
+        // A wrong collection, so a clean parse cannot satisfy this: only a READ call can fail.
+        let scan = scan_of(
+            "",
+            r##"Call doc(append_entry, entry_collection="tasks", id_prefix="RC", entry={a}) to add."##,
+            Some("catches"),
+        );
+        assert_eq!(scan.calls.len(), 1, "{:?}", scan.calls);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn a_prompt_mentioning_append_entry_with_no_readable_call_is_a_finding() {
+        // A real recipe in a spelling nobody reads would otherwise pass unchecked.
+        let scan = scan_of("", r##"Add one with append_entry(id_prefix="Z")."##, None);
+        assert!(scan.calls.is_empty());
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("mentions append_entry"),
+            "{:?}",
+            scan.failures
+        );
+        // No mention, no recipe, no finding: 10 of today's 25 sidecars are like this.
+        let quiet = scan_of("", "A plain ledger with no recipe.", None);
+        assert!(quiet.failures.is_empty() && quiet.calls.is_empty());
+        assert_eq!(quiet.sidecars, 1);
+    }
+
+    #[test]
+    fn a_mention_beside_a_readable_call_is_not_a_finding() {
+        // Load-bearing: the mention rule is per SIDECAR. Reconnaissance-patterns mentions
+        // append_entry three times around one call; a per-mention rule would red on the prose.
+        let scan = scan_of(
+            "entry_prefix: R\n",
+            r##"append_entry allocates ids. doc(action="append_entry", id="x", id_prefix="R", title=…) is the call; append_entry is atomic."##,
+            None,
+        );
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.calls.len(), 1);
+    }
+
+    #[test]
+    fn a_call_with_no_id_prefix_or_an_uncitable_one_is_a_finding() {
+        let none = scan_of("", r##"doc(action="append_entry", id="x", title=…)"##, None);
+        assert_eq!(none.failures.len(), 1, "{:?}", none.failures);
+        assert!(
+            none.failures[0].contains("no id_prefix"),
+            "{:?}",
+            none.failures
+        );
+        let bad = scan_of(
+            "entry_prefix: toolong\n",
+            r##"doc(action="append_entry", id="x", id_prefix="toolong", title=…)"##,
+            None,
+        );
+        assert_eq!(bad.failures.len(), 1, "{:?}", bad.failures);
+        assert!(
+            bad.failures[0].contains("refused by append_entry before either branch"),
+            "{:?}",
+            bad.failures
+        );
+        assert!(none.calls.is_empty() && bad.calls.is_empty());
+    }
+
+    #[test]
+    fn every_call_in_a_prompt_is_checked_not_only_the_first() {
+        let scan = scan_of(
+            "entry_prefix: R\n",
+            r##"doc(action="append_entry", id="x", id_prefix="R", title=…) then doc(action="append_entry", id="x", id_prefix="Q", title=…)"##,
+            None,
+        );
+        assert_eq!(scan.calls.len(), 2, "{:?}", scan.calls);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(scan.failures[0].contains("call 2"), "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn an_unclosed_call_is_a_finding_not_a_skip() {
+        let scan = scan_of(
+            "",
+            r##"doc(action="append_entry", id="x", id_prefix="R""##,
+            None,
+        );
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("never closes"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_sidecar_with_a_recipe_needs_exactly_one_owner() {
+        let call = r##"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"##;
+        // No ledger declares it.
+        let dir = tempfile::tempdir().unwrap();
+        put(
+            dir.path(),
+            "docs/augmentations/l.yaml",
+            &format!(
+                "prompt: {}\nentry_collection: issues\n",
+                serde_json::to_string(call).unwrap()
+            ),
+        );
+        let orphan = scan_sidecar_prompts(dir.path());
+        assert_eq!(orphan.failures.len(), 1, "{:?}", orphan.failures);
+        assert!(
+            orphan.failures[0].contains("no artifact"),
+            "{:?}",
+            orphan.failures
+        );
+        // Two ledgers declare it.
+        let dir = tempfile::tempdir().unwrap();
+        sidecar_fixture(dir.path(), "", call, Some("issues"));
+        put(
+            dir.path(),
+            "docs/trackers/l2.md",
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/l.yaml\n---\n# l2\n",
+        );
+        let twice = scan_sidecar_prompts(dir.path());
+        assert_eq!(twice.failures.len(), 1, "{:?}", twice.failures);
+        assert!(
+            twice.failures[0].contains("2 artifacts"),
+            "{:?}",
+            twice.failures
+        );
+    }
+
+    #[test]
+    fn a_sidecar_that_does_not_read_is_a_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        put(
+            dir.path(),
+            "docs/augmentations/broken.yaml",
+            "prompt: [unclosed\n",
+        );
+        let scan = scan_sidecar_prompts(dir.path());
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("does not read"),
+            "{:?}",
+            scan.failures
+        );
+        assert_eq!(scan.sidecars, 0);
+    }
+
+    #[test]
+    fn a_prose_call_may_use_any_declared_prefix_not_only_the_first() {
+        // Load-bearing: W is the SECOND declared prefix. A check that compares only the first
+        // declared prefix passes every fixture that uses R and refuses this one.
+        let scan = scan_of(
+            "entry_prefix: [R, W]\n",
+            r###"doc(action="append_entry", id="x", id_prefix="W", anchor_heading="## T", title=…, body=…)"###,
+            None,
+        );
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert_eq!(scan.calls.len(), 1);
+    }
+
+    #[test]
+    fn calls_are_numbered_in_source_order_across_spellings() {
+        // Load-bearing: the FIRST call in the text is in the second spelling, and it is the bad one.
+        // Numbered by spelling instead of by position, the good call would come first and the
+        // finding would say `call 2`, sending a reader to the wrong sentence of the prompt.
+        let scan = scan_of(
+            "entry_prefix: R\n",
+            r##"doc(append_entry, id_prefix="Q", title=…) then doc(action="append_entry", id="x", id_prefix="R", title=…)"##,
+            None,
+        );
+        assert_eq!(scan.calls.len(), 2, "{:?}", scan.calls);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(scan.failures[0].contains("call 1"), "{:?}", scan.failures);
+    }
 }
