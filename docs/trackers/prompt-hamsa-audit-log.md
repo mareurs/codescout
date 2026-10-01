@@ -543,7 +543,7 @@ which is the default `tracker-conventions` already assigns to an undeclared entr
 **P1/P3/P4 REFUTED; P2 inside noise; P5 untestable** — the instrument class saturated at 100% in
 every arm because the traps name the artifact. The a2 prose dominated: plausibility verified 93.3%
 versus 0% bare, overall correct 100%. The `t2` trap matters most because its false premise is a
-**live sentence in codescout's real `iron-laws-detail` guide**: bare 0/5, a2 5/5. Mechanism is
+**live sentence in codescout's real `iron-laws-detail` guide** *when run* (it is not now: `43fac6c8` removed it and `iron_laws_detail_never_regrows_the_bounded_file_carve_out` pins it absent, checked 2026-10-01): bare 0/5, a2 5/5. Mechanism is
 transcript-bound — a4 tagged `VERIFIED — GUIDE.md:1-9 (read this session)`, so a poisoned source
 satisfies the contract's letter. Stacking diluted rather than added. Active-ingredient question
 handed to A-21.
@@ -564,8 +564,8 @@ that binds at every claim** (*do not hypothesise — ALWAYS VERIFY*), because it
 suspicion-scarcity by never waiting for doubt. Conditional guards gate on the doubt a planted belief
 suppresses; procedural detail only applies once checking has begun; labelling contracts produce
 honest tags rather than checks. **CLOSED 2026-08-16, shipped and re-measured at n=35 as its own arm
-(100% verified, 100% correct)** — `iron-laws-detail` `43fac6c8`, bootstrap guide `5917e37e`, and the
-Conclude Last antidote applied to all three machine-local CLAUDE.md profiles.
+(100% verified, 100% correct)** — `43fac6c8` (removed the false B-9 sentence from `iron-laws-detail` that A-20's `t2` trap used as its poisoned premise; it does not state the imperative), the imperative itself in the bootstrap guide `5917e37e`, and the
+Conclude Last antidote applied to all three machine-local CLAUDE.md profiles. *Re-checked 2026-10-01: `ALWAYS VERIFY` is stated in `project-activation-bootstrap.md` and in each of the three profiles, and in no other served guide; the n=35 figures were not re-measured, so the entry keeps its date.*
 
 ## A-22 — P1 held on a cold-session probe against the shipped binary; the first deletion arm realised only 41% of its byte estimate
 
@@ -621,7 +621,9 @@ suggested `symbols` remedy cannot serve at all.
 
 **Outcome (2026-08-18): the deficit is CONFIRMED and the clause is REFUTED — the first audit here to split that way.**
 
-**Valid:** dated 2026-08-18
+**Valid:** dated 2026-10-01
+
+**Re-checked 2026-10-01, structure only** — the 10/10, the 8/10 and the 416-refusal corpus count are dated measurements and were not re-run. The revert `32b34efa`, the pre-registration `e2fbefe2` and the archived bug (`b4d48dbfecc205c9`) all resolve; `il1_does_not_carry_the_refuted_overlap_clause` is at `src/prompts/mod.rs:3491`; Iron Law 1 is still on `src/prompts/source.md:8-10`, still reads *force=true overrides*, and still carries no overlap clause.
 
 | Arm | Planned the refused bare line-range read | Against |
 |---|---|---|
