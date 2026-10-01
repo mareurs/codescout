@@ -1,8 +1,8 @@
 ---
 id: '04e069162e1fb15f'
 kind: bug
-status: open
-title: 'BUG: the stage log records who STAGED, not who authored, so `git add -A` makes you the recorded owner of every peer''s file and foreign-index has nothing to refuse'
+status: investigating
+title: 'BUG: staging a path by name records the stager as its owner, so a peer''s file you stage is yours on the record and foreign-index has nothing to refuse'
 owners:
 - marius
 tags:
@@ -135,6 +135,27 @@ Not fixed. Three directions, cheapest first, none costed:
 
 **Do not "fix" this by making `foreign-index` stricter.** It is behaving correctly on the data it
 has; a stricter predicate over a wrong relation produces false refusals without closing this.
+
+### Measured 2026-10-01 — what a write-side channel would cost, and the decision it leaves
+
+**Reproduced by me, not read from the verifier.** A temp repo with the real `post-index-change-stage-log.sh` and `pre-commit-foreign-index.sh` installed: a peer's untracked `peer_file.txt` exists; `CLAUDE_CODE_SESSION_ID=sessA-0000 git add peer_file.txt` wrote the row `sessA-0000  8b04b90  peer_file.txt  named`, and the following **bare** `git commit` exited 0 and carried the peer's file. The named-path mode stands exactly as the 2026-09-24 note says.
+
+**Direction 2 and 3's obvious source is too slow for the recorder.** `scripts/file-provenance.py --help` alone exceeded 30 s and timed out when I ran it (measured once, cause not investigated), and the companion hook's own advisory quotes about 7 s per file. Either is far over what a post-index hook can pay, because that hook fires on every index change.
+
+**A cheaper write-side record already exists.** `usage.db`'s `tool_calls` carries `cc_session_id`, `tool_name`, `input_json`, `called_at` and `effect_class` for every MCP call. An id-bounded lookup of the last writers of `docs/trackers/bug-fix-session-log.md` (`WHERE id > max(id)-30000 AND tool_name IN ('edit_file','edit_code','create_file','doc') AND input_json LIKE '%<path>%' ORDER BY id DESC LIMIT 6`) took 6 ms and returned three sessions in order. So a hook could ask "did a session other than the stager write this path through a codescout tool?" at a cost it can afford.
+
+**What that lookup cannot see, each a limit on any fix built on it:**
+
+- A `doc(...)` write carries an artifact id in `input_json`, not a path, and trackers are written mostly that way. The three `doc` rows above matched; I did not establish that they matched on a write's path rather than on the path being mentioned in a body, so id-to-path resolution would be owed.
+- A `run_command` shell write is recorded as a call, not as the files it touched.
+- It is path-grained. Instance 2 above is entry-grained inside one file the stager legitimately wrote to, so a last-writer-per-file lookup cannot separate `F-168`/`F-170` from `F-169`/`F-171`. **No file-grain fix reaches instance 2.**
+
+**The decision this leaves is the operator's, not mine to take by building:**
+
+1. **Build the lookup into the recorder.** On the `named` route, if a codescout write to the path by another session is on record and none by the stager, record owner `-` with a new route (say `named-foreign`) so the guard refuses the bare commit. Covers instance 1's shape where the peer wrote through a tool with a path argument. Costs a change to the recorder, the guard's route handling, its remedy text and both suites, and it ships a guard narrower than its name unless the three limits above are stated at the refusal.
+2. **Accept the residual**, retitle (done in this update), and leave the entry-grain case to `docs/conventions/shared-checkout-commit-sequence.md`'s "state authorship in the message" resolution, which is what `c054113b` did.
+
+Nothing is built here. Status moves from `taken` to `investigating`: worked, no live owner.
 
 ## Tests added
 
