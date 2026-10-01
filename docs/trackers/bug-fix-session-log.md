@@ -17180,7 +17180,7 @@ At that point `df` showed 64G free, and no process was still building into a leg
 
 **Valid:** dated 2026-09-28
 
-**Observed:** 2026-09-28. I proposed archiving the eight bugs the review-catches ledger lists as `outcome: fixed` (RC-4, 5, 7, 19, 21, 36, 37, 40). Before any write I read each file's own `## Fix` section. Two (`6e17aec199b30604`, `75fa59bbda9c1ce1`) say **"Not archived: no regression test"**, one of them with two open residuals; a third (`5d4e9ab75d686fed`) names a recurrence guard it did not add. `git grep` over `tests/` for `mine_pairs.py` and `context_before` found nothing, so no later commit had changed that.
+**Observed:** 2026-09-28. I proposed archiving the eight bugs the review-catches ledger lists as `outcome: fixed` (RC-4, 5, 7, 19, 21, 36, 37, 40). Before any write I read each file's own `## Fix` section. Two (`6e17aec199b30604`, `75fa59bbda9c1ce1`) say **"Not archived: no regression test"**, one of them with two open residuals; a third (`9502666fed5b53a2`) names a recurrence guard it did not add. `git grep` over `tests/` for `mine_pairs.py` and `context_before` found nothing, so no later commit had changed that.
 
 **Expected:** the ledger's `outcome: fixed` would mean "ready to archive".
 

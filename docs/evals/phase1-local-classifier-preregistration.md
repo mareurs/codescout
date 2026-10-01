@@ -1202,7 +1202,7 @@ Run from commit `2a600b5d` on the RTX A5000. Transcripts and every row's probabi
 
 **What it confirmed offline:** the saved losses and thresholds reproduce; L1's gate is 1/8 and L2's is 3/8; and even at a flat 0.5 threshold both arms fire on all five clean texts. It also confirmed that the freeze correction fixes the reported defect. **Stopping the route stands.**
 
-**One defect, fixed:** `docs/issues/2026-09-25-codex-freeze-tests-after-main.md`, class IC-3.
+**One defect, fixed:** `docs/issues/archive/2026-09-25-codex-freeze-tests-after-main.md`, class IC-3.
 - `tests/test_stage2_synthetic.py` defined the five `FreezeMenuGuard` regressions below its `unittest.main()` guard. So `python3 tests/test_stage2_synthetic.py` ran 16 tests and exited 0.
 - The 21 passes and mutation kills recorded earlier came from pytest discovery, which reaches all 21, and they stand.
 - The guard now comes last. A direct run reports 21 tests, and pytest reports 21 passed.
