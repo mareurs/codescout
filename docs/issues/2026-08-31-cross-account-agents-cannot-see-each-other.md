@@ -9,6 +9,7 @@ tags:
 - concurrency
 - shared-checkout
 closed: 2026-09-25
+no_fix_commit: 'Mitigated procedurally, not by a code change in this repo: the reaching-peer-sessions skill lives in the separate claude-plugins repo, and the CLAUDE.md sections ''Reaching a Peer Session'' and ''Observer Blindness'' are prose. ListAgents itself is unchanged and still scopes discovery to the caller''s CLAUDE_CONFIG_DIR (see the closing section). Needs 4 and 5 remain unaddressed.'
 opened: 2026-08-31
 owner: marius
 related: []

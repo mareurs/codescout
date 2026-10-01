@@ -1,5 +1,5 @@
 ---
-id: '736c88123dd2b852'
+id: a001f73e6c561618
 kind: bug
 status: fixed
 title: 'BUG: fmt-mine.sh reformats a live peer''s uncommitted hunk after a hunk-split commit of the same file'
@@ -90,10 +90,16 @@ After committing part of a shared file, do not run `./scripts/gate.sh` or `fmt-m
 
 ## Resume
 
-Implement item 3 in `scripts/file-provenance.py`, then add the two tests above.
+Nothing owed: item 3 shipped (see Fix). Items 1 (an unbounded window by default) was not taken and is not needed for this trigger.
 
 ## References
 
 - `docs/issues/archive/2026-09-13-file-provenance-reads-a-commit-time-as-proof-the-writes-are-in-head.md`: the deferred items.
 - `docs/conventions/shared-checkout-commit-sequence.md` § *The entangled single file*: the procedure that triggers it.
 - `docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`: the incident `fmt-mine.sh` exists to prevent.
+
+
+## Fix provenance
+
+- **SHA:** `f0387de52a1b0d9e72728c2469b89f4cfb3cafe3` (`experiments`)
+- **patch-id:** `cf6d6a115fa3dabd2f0fa5486737cd95d9b0c00f`
