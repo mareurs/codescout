@@ -2081,13 +2081,13 @@ mod tests {
     /// **The budget is a decision, not a measurement of today.** `F-12` of the same log records the
     /// failure mode: a budget re-set to each new total is a ratchet that never brakes. So this number
     /// is lowered in the commit that moves text out, and is never raised to make a red go away. It
-    /// was set to the measured size at the commit that added this guard, rounded up to 100 B.
+    /// is the measured size at the commit that last lowered it, rounded up to 100 B.
     ///
     /// The decision lives in [`claude_md_budget_verdict`] so the boundary and the refusal text are
     /// tested against sizes chosen to discriminate, not only against a file that is within budget
     /// today.
     // cap-class: NOT_A_CAP — test-only ratchet asserting a document's size; it bounds no runtime path
-    const CLAUDE_MD_BYTE_BUDGET: usize = 76_800;
+    const CLAUDE_MD_BYTE_BUDGET: usize = 70_900;
 
     /// Whether the `CLAUDE.md` at `path` is within `budget` bytes, and what to do when it is not.
     /// It measures the file itself, so the live test and the synthetic ones share one measurement
