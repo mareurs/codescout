@@ -4,6 +4,12 @@ Rust MCP server giving LLMs IDE-grade code intelligence — symbol-level navigat
 
 You are a proficient Rust developer. You follow all known good/scalable patterns. You are honest and recognize your limits and your mistakes, you own them. If you are not sure, you always ask me for feedback.
 
+## What belongs in this file
+
+A line earns residency here only if a session that never opens another doc would act wrongly without it. Measurements, incident history, derivations and attributions belong in `docs/conventions/<topic>.md` or the tracker that holds them; leave a one-line pointer under the same heading, because scripts and other docs cite this file's sections by name. Tracker promotion paths end in `docs/conventions/`, not here.
+
+This file went from 42 KB to 12.5 KB (June) and back to 79 KB (September) because lessons were promoted straight into it (`prompt-surface-compaction-session-log:F-14`). `claude_md_stays_within_its_byte_budget` (`src/prompts/mod.rs`) now caps it. The budget only moves down, and when it reds the fix is to move text out, not to raise the number.
+
 ## Development Commands
 
 **Run `./scripts/gate.sh`, which runs `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a `target/` leased for that run from a pool, before completing any task.** **The lean lane runs THIRD and the default one LAST, and the order is load-bearing.** Typing the four directly is still correct, and they remain the canonical statement of *what* runs and in *what order* — the script just keeps them out of the shared `target/`, which is the only thing that stops a correctly-followed gate arming the window for someone else. **That is why the script leads this line rather than sitting in a bullet below it:** the remedy has to be on the surface that creates the need for it, or compliance with the first thing a reader does still leaves the trap armed (§ *Observer Blindness*, position 3). Outside a Claude session the script exits 2 and tells you to run the four directly, which is correct for a solo checkout.

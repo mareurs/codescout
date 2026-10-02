@@ -2073,6 +2073,95 @@ mod tests {
             );
         }
     }
+    /// `CLAUDE.md` rides into every session, so its size is a cost every session pays on every
+    /// turn. It was cut from 42 KB to 12.5 KB on 2026-06-21 and grew back to 79 KB by September
+    /// because three tracker promotion paths ended in it and nothing priced an addition
+    /// (`prompt-surface-compaction-session-log:F-14`).
+    ///
+    /// **The budget is a decision, not a measurement of today.** `F-12` of the same log records the
+    /// failure mode: a budget re-set to each new total is a ratchet that never brakes. So this number
+    /// is lowered in the commit that moves text out, and is never raised to make a red go away. It
+    /// was set to the measured size at the commit that added this guard, rounded up to 100 B.
+    ///
+    /// The decision lives in [`claude_md_budget_verdict`] so the boundary and the refusal text are
+    /// tested against sizes chosen to discriminate, not only against a file that is within budget
+    /// today.
+    // cap-class: NOT_A_CAP — test-only ratchet asserting a document's size; it bounds no runtime path
+    const CLAUDE_MD_BYTE_BUDGET: usize = 76_800;
+
+    /// Whether the `CLAUDE.md` at `path` is within `budget` bytes, and what to do when it is not.
+    /// It measures the file itself, so the live test and the synthetic ones share one measurement
+    /// and the live test cannot be hollowed out by passing a convenient length.
+    ///
+    /// The refusal names the next action a session adding text can actually perform — move the
+    /// text out, or pay for it with equal bytes in the same commit — because the party who meets
+    /// this red is exactly the one holding the new text. Raising the budget is named as the
+    /// move NOT to make.
+    fn claude_md_budget_verdict(path: &std::path::Path, budget: usize) -> Result<(), String> {
+        let len = std::fs::metadata(path)
+            .map_err(|e| format!("cannot stat {}: {e}", path.display()))?
+            .len() as usize;
+        if len == 0 {
+            return Err(format!(
+                "{} is empty, so a budget over it would hold of nothing",
+                path.display()
+            ));
+        }
+        if len <= budget {
+            return Ok(());
+        }
+        Err(format!(
+            "CLAUDE.md is {len} bytes, {over} over its {budget}-byte budget.\n\n\
+         It is injected into every session, so every byte is paid on every turn. Move the new \
+         text's measurements, incident history and derivations to docs/conventions/<topic>.md \
+         and leave a one-line pointer under the same heading (CLAUDE.md § What belongs in this \
+         file). If the rule truly must be resident, remove at least as many bytes from this \
+         file in the same commit. Do not raise CLAUDE_MD_BYTE_BUDGET to make this pass: it \
+         only moves down.",
+            over = len - budget
+        ))
+    }
+
+    #[test]
+    fn claude_md_stays_within_its_byte_budget() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("CLAUDE.md");
+        if let Err(msg) = claude_md_budget_verdict(&path, CLAUDE_MD_BYTE_BUDGET) {
+            panic!("{msg}");
+        }
+    }
+
+    /// The boundary is `<=`, and a refusal carries the numbers and the destination. Pinned on
+    /// synthetic sizes: against the real file, an off-by-one in the comparison is invisible
+    /// unless the file happens to sit exactly on the line.
+    #[test]
+    fn claude_md_budget_verdict_is_exact_at_the_boundary_and_names_the_remedy() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_of = |name: &str, bytes: usize| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, vec![b'x'; bytes]).unwrap();
+            p
+        };
+
+        assert!(
+            claude_md_budget_verdict(&file_of("at", 1_000), 1_000).is_ok(),
+            "a file exactly at its budget is within it"
+        );
+
+        let msg = claude_md_budget_verdict(&file_of("over", 1_001), 1_000)
+            .expect_err("one byte over its budget must be refused");
+        for needle in ["1001", "1000", "docs/conventions/"] {
+            assert!(
+                msg.contains(needle),
+                "the refusal must carry {needle:?}, got: {msg}"
+            );
+        }
+
+        // An empty or absent file is a refusal, not a pass: both are what a broken read looks like,
+        // and "within budget" must never be the answer to "I measured nothing".
+        assert!(claude_md_budget_verdict(&file_of("empty", 0), 1_000).is_err());
+        assert!(claude_md_budget_verdict(&dir.path().join("absent"), 1_000).is_err());
+    }
+
     /// The `tracker-conventions` guide must state every token `doctor`'s fix-anchor check
     /// enforces, because a session writing a bug record reads the guide and never the check.
     ///

@@ -79,7 +79,7 @@ entry_prefix:
 > - Created at the start of a multi-session work stream.
 > - Appended-to across every session that touches the work.
 > - Entries with `Status: open` carry forward across sessions.
-> - Promotion to permanent surfaces (CLAUDE.md, ADRs, formal bug
+> - Promotion to permanent surfaces (`docs/conventions/`, ADRs, formal bug
 >   trackers) happens when the entry's `Promote-when` / `Fix idea`
 >   criteria fire.
 > - File archived (moved to `docs/trackers/archive/`) when the work
@@ -230,7 +230,7 @@ piece of evidence.
 
 **Impact:** low | med | high
 
-**Promote-when:** <criterion for graduating into permanent docs (CLAUDE.md, ADR, etc.)>
+**Promote-when:** <criterion for graduating into permanent docs (`docs/conventions/<topic>.md`, ADR, etc.)>
 
 **Promoted-to:** <surface + section, one per line, line-start — omit until it lands>
 
@@ -267,7 +267,7 @@ Codified so the Index column means the same thing across sessions.
 |---|---|
 | `validated` | Pattern confirmed by ≥1 counterfactual data point. Default for entries with evidence. |
 | `promotion-due` | `Promote-when` has **fired** and the text is not yet on the target surface. An action item, not a resting state. Exists because `validated` cannot distinguish "criterion not yet met" from "criterion met, nobody harvested it" — and both read as healthy, which is how a lesson sits unpromoted while the failure it describes recurs. |
-| `promoted-to-permanent-docs` | Moved into CLAUDE.md, an ADR, a skill, or another permanent surface. Session log keeps the pointer — and, for a multi-instance target, names every instance it landed in. |
+| `promoted-to-permanent-docs` | Moved into a `docs/conventions/` page, an ADR, a skill, or another permanent surface (a `CLAUDE.md` line only when it passes that file's residency test). Session log keeps the pointer — and, for a multi-instance target, names every instance it landed in. |
 | `archived` | Pattern no longer load-bearing — either the underlying system changed or the discipline became automatic. |
 
 ---
