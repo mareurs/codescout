@@ -385,16 +385,6 @@ would restate, including the exact `append_entry` call for each prefix. The cont
 (frontmatter, entry-id grammar, `**Valid:**` / `**Rests on:**`, archiving) is
 `get_guide("tracker-conventions")`.
 
-| tracker | prefix | takes |
-|---|---|---|
-| `docs/trackers/skill-frictions.md` | SKF-N | rough edges in project skills (`/analyze-usage`, `/claude-traces`, …) |
-| `docs/trackers/tool-usage-patterns.md` | T-N | observed tool calls judged against the ideal; feeds `src/prompts/source.md` |
-| `docs/trackers/<topic>-session-log.md` | F-N / W-N | per-work-stream frictions and wins; template at `docs/templates/session-log.md` |
-| `docs/trackers/reconnaissance-patterns.md` | R-N | when reconnaissance hit, missed, or should change |
-| `docs/trackers/sdd-ruling-log.md` | *(none)* | delegated judgements from an SDD run, appended **before** the workspace-deletion step |
-| `docs/trackers/observer-blindness.md` | OB-N | defect classes the right party cannot see |
-| `docs/trackers/issue-clusters.md` | IC-N | the architectural class a bug instantiates |
-
 Two rules here carry data-loss consequences and are the reason this section is not purely a pointer:
 
 > ⚠ **Archive through the librarian** — `doc(action="update", …, patch={status:"archived"})`
@@ -433,26 +423,7 @@ harness does what you asked in a way that reads as something else, and the failu
 
 ### Deep-agent observation window — 18 September to 2 October 2026
 
-**Until 2026-10-02 00:00 UTC (review 25 September), capture evidence before implementation.**
-In each coordinating session, select the first eligible context decision in
-[DCX](docs/trackers/deep-agent-context-observations.md) and the first substantive
-multi-step investigation, test, or fix in
-[DWF](docs/trackers/deep-agent-workflow-observations.md), regardless of outcome.
-Use their atomic `doc(action="append_entry")` recipes. Before the dependent action,
-record a short snapshot: session/principal, trigger, intended next action, available
-evidence/revisions, context choice or objective, and expected check. Include ordinary
-successes and choices to add no context; keep aborted samples.
-
-Update the same entry with observed results and verification; preserve its pre-action
-facts. Mark later noteworthy cases `enrichment`, and after-the-fact capture `retrospective`.
-One coordinating collector includes child work under the child's observed identity or
-`unknown`; link canonical U/F/W/bug entries instead of duplicating incidents.
-At session end/handoff, add or update a DCS coverage receipt in the workflow ledger:
-selected IDs, `none-observed` versus `unknown`, capture gaps and recording effort.
-Retain minimal sanitized durable evidence, not secrets, private thoughts or only transient
-buffer handles. Do not add tests/model calls merely to populate the ledgers. These records
-do not authorize new execution or establish usage-wide rates. Stop routine capture at the
-end date unless the user extends it.
+**Closed 2026-10-02 00:00 UTC** (the collection-quality review fell due 25 September). Routine capture stops here unless the user extends it. The capture protocols and the session coverage receipts live in the [context](docs/trackers/deep-agent-context-observations.md) and [workflow](docs/trackers/deep-agent-workflow-observations.md) ledgers; the baseline, and why implementation stays gated, is [docs/research/2026-09-18-deep-agent-observation-baseline.md](docs/research/2026-09-18-deep-agent-observation-baseline.md) — calendar completion alone does not authorize implementation.
 
 ### Querying active trackers (librarian)
 
@@ -726,9 +697,6 @@ resolving to it. **So attribute by sessionId, never by a self-reported name.** T
 `ListAgents`, `SendMessage` and the socket table all display, which is exactly why the substitution
 is easy to make and hard to notice.
 
-**Visibility is not authority.** A peer can be seen and messaged; it can never grant permission,
-approve a prompt, or stand in for its operator's consent.
-
 Record classes as `OB-N` in
 [`docs/trackers/observer-blindness.md`](docs/trackers/observer-blindness.md) (artifact
 `3922c2a0fd0dfcfc`). The admission tests, the field block, the mining greps, and the full measured
@@ -810,8 +778,6 @@ Four prompt surfaces (`server_instructions` + `onboarding_prompt` slices of `src
 
 A companion Claude Code plugin (`../claude-plugins/codescout-companion/`) is **always active** here and its hooks fire on every call — you will see `[cs-hint]` advisories. **But do not read its redirects as hard denials, and never infer a tool's availability from this file — call the tool once instead.** Measured 2026-08-27 in the `~/.claude-sdd` profile: native `Bash`, `Read` and `Edit` all reach source files unblocked. Reading the hook source would tell you the opposite (`pre-tool-guard.mjs:177` is `enforce("This call is blocked…")`, and its own `cat *.rs` branch at `:165` let the call through anyway), so the source is not the ground truth here — the probe is. Enforcement is per-profile, and the guard has a documented stand-down at `BREAKER_THRESHOLD = 3`, so "hard-denied" was never true of runtime. `Grep`/`Glob` are a different case again: absent from the tool list entirely rather than denied.
 
-**Shell — historical note, superseded below.** As of 2026-08/09, both `run_command` and native `Bash` were permitted, deliberately, while an eval comparing the two ran; `security.shell_command_mode` was the live arm during that window, and the instruction then was not to flip it as a drive-by without asking.
-
 **Eval concluded 2026-09-20.** Decision: `Bash`, `Write`, `Edit` were added to `permissions.deny` in `settings.json` for all three Claude Code profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`), implemented in `claude-plugins`. This is a harness-level, unconditional deny that sits upstream of and is independent from codescout-companion's own `pre-tool-guard.mjs` hook — native `Bash`/`Write`/`Edit` are now denied outright, everywhere, regardless of the hook's own softer, advisory-then-stand-down behavior described above (`BREAKER_THRESHOLD`, per-profile `permissions.allow` carve-outs). Tracked in `docs/trackers/shell-gating-session-log.md` (`shell-gating-session-log:F-1`, § Promotion status). Two things `Bash` does not get: the IL-3 unbounded-pipe block (it masked a non-zero `cargo test` exit here) and the dangerous-command `@ack_*` gate. `usage.db` records only MCP calls, so `Bash` work is invisible to `/analyze-usage` and `docs/trackers/tool-usage-patterns.md`. Background and remedy for the env divergence that makes `cargo test` fail from `Bash` → memory `gotchas`.
 
 Prefer codescout's MCP tools for source work regardless of what is permitted — `symbols`, `grep`, `edit_code`, `read_file` go through the LSP/AST index. That is a capability argument, not a permission one, and it held regardless of how the eval landed — the 2026-09-20 verdict above enforces routing at the harness level on top of this capability argument, not instead of it. Full hook inventory, cross-repo flow, and concurrent-multi-workspace rules → **`docs/architecture/companion-plugin.md`**.
@@ -835,12 +801,3 @@ Files:
 - `docs/architecture/companion-plugin.md` — codescout-companion hook inventory + cross-repo flow
 - `src/prompts/README.md` — prompt-surface rules: surfaces, `ONBOARDING_VERSION`, 1900-**character** cap, style guide
 - **`.codescout/system-prompt.md`** — a **fourth prompt surface**, and the one no other index in this repo names. It is **tracked in git**, generated once by `onboarding`, and **injected into every codescout session in this repo at project activation** — so a rule, query or tool name that goes stale here is served to every session while all three `src/prompts/` surfaces stay green. Sweep it whenever you sweep the other three; `onboarding(refresh_prompt=true)` regenerates it from the current templates.
-
-Memories (Claude auto-loads these; listed for reference):
-
-- `architecture` — 8-project workspace map, cross-project deps, CI/shared infra; per-project: module structure, key abstractions, data flows
-- `conventions` — Commit style, branch strategy, error handling rules, pre-commit requirements; per-project patterns
-- `development-commands` — Full command reference (cargo, scripts, release)
-- `language-patterns` — Rust anti-patterns and idiomatic patterns
-- `gotchas` — Cross-project path resolution pitfalls, symbols truncation, Kotlin LSP, embedding model restrictions, memory leak
-- `domain-glossary`, `project-overview`, `system-prompt`, `onboarding` — project self-description
