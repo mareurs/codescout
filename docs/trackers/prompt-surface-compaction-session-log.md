@@ -94,7 +94,7 @@ snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 | F-11 | 2026-09-09 | med | prompt-surface | open | The collapse's byte win is 2.7% — a merge moves parameters into the survivors rather than deleting them, so a tool COUNT is a bad proxy for surface cost; and `budget 57296, headroom 0` leaves no slack |
 | F-12 | 2026-09-10 | med | prompt-surface | open | `F-11`'s 57296 decayed to 56485 in under two hours with no alarm — two agreeing instruments protect a number synchronically and not against decay; and the budget is a RATCHET re-set to each new total, not the post-collapse ceiling `F-11` called it |
 | F-13 | 2026-09-10 | high | self-friction | open | I designed a cross-cutting input-repair mechanism an accepted ADR already specified, and picked a field name contradicting it — searched for the mechanism, never for the policy |
-| F-14 | 2026-10-02 | med | prompt-surface | open | **Staged CLAUDE.md slim proposed as new; it was already cut 70% once (`b603d86f`) and regrew 6.3× because three promotion paths end in it** — the regrowth guard is the load-bearing stage, not the last one |
+| F-14 | 2026-10-02 | med | prompt-surface | mitigated | **Staged CLAUDE.md slim proposed as new; it was already cut 70% once (`b603d86f`) and regrew 6.3× because three promotion paths end in it** — the regrowth guard is the load-bearing stage, not the last one |
 ## Wins Index
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
@@ -2282,6 +2282,13 @@ Derivation: `git log --reverse b603d86f..HEAD -- CLAUDE.md`, then `git cat-file 
 **Expected vs reality:** I treated Stages 1–3 (remove noise, relocate history, shrink the gate) as untested design and Stage 4 (stop regrowth) as an afterthought. Reality inverts that: the relocation is a repeat of a cut already shown safe, and the part never solved is regrowth — so the promotion destination and a size budget are the load-bearing stage.
 
 **Cost:** none paid; caught before any edit. Secondary gap from the same scout: my count of tests pinning the file missed `tests/doc_tool_refs.rs`, whose `present_tense_surfaces()` lists CLAUDE.md. I found the other readers by grepping for read calls; this reader goes through a surface list, so a grep for the read call cannot see it. Deletion-only edits are monotone-safe against it; rewrites are not.
+
+
+**Outcome (2026-10-02) — mitigated, not closed.** Stage 1 `c81bea9c` (patch-id `886f1ff9915998d36b7a4cf1a2ed053b11ca5e7c`) cut the file 78,918 → 75,969 B. The regrowth guard `1568b777` (patch-id `e109033f643f98c727bdb32b7cce0835b971595c`) redirects the three promotion paths to `docs/conventions/<topic>.md`, adds `CLAUDE.md` § *What belongs in this file*, and adds `claude_md_stays_within_its_byte_budget` at 76,800 B. Gate green (FMT/CLIPPY/LEAN/DEFAULT all 0); the new tests ran in both lanes.
+
+The guard was mutation-probed per site. A first design passed a length into the verdict from the live test, and hollowing that call to `0` SURVIVED; moving the measurement inside the verdict fixed it, and the six mutations re-run against the new design are all killed.
+
+**Still open:** relocating the long sections (Testing Discipline, Peer Session, Observer Blindness, Parsers, Git Workflow) and shrinking the gate section, whose pinned tests must move with it. The budget is lowered as each lands. **Residual that no test can close:** a raised budget constant passes every check and shows only as a one-line diff.
 
 ## Template for new entries
 
