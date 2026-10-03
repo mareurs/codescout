@@ -499,19 +499,16 @@ prevented none of the four. A standing policy caught one.
    so the gate cannot be *followed correctly* and still arm the next session). Next best is an
    unconditional policy tied to a trigger that happens anyway. And for any published claim, ship its
    **derivation** rather than its value, so a reader re-checks it instead of re-deriving it under a
-   counting rule of their own choosing. **And ship its POPULATION in the same place.** A bound
-   that lives in the *enforcement* layer — a test module header, a gate script, a hook — is
-   correctly published to an audience that never reads the number, and the author cannot perceive
-   the gap because they are the party holding the bound. So when a tracker's number and its scope
-   live apart, the fix is to **move the scope to the read surface**, not to record the lesson:
-   publishing again is redundant and reading harder is impossible, since the reader does not know
-   the other surface exists. Worse, a document that carefully names *one* failure mode implies by
-   omission that the rest are handled. (`OB-1` § *the third position*,
-   `reconnaissance-patterns:R-170`: a 29.5% tag-coverage ratio read as drift, one step from a
-   236-file campaign the gate's own header forbade in writing. Cheap tell — **a coverage ratio
-   that is neither ~0% nor ~100% is a boundary someone drew before it is drift**; and before any
-   campaign over a population, grep `tests/`, `scripts/pre-commit-*` and hooks for that
-   population's name, not only the docs.)
+   counting rule of their own choosing. **And ship its POPULATION in the same place.** A bound that
+   lives in the *enforcement* layer — a test module header, a gate script, a hook — is correctly
+   published to an audience that never reads the number, and the author cannot perceive the gap
+   because they are the party holding the bound. So when a tracker's number and its scope live
+   apart, the fix is to **move the scope to the read surface**, not to record the lesson: publishing
+   again is redundant and reading harder is impossible, since the reader does not know the other
+   surface exists. Worse, a document that carefully names *one* failure mode implies by omission
+   that the rest are handled. Cheap tell — **a coverage ratio that is neither ~0% nor ~100% is a
+   boundary someone drew before it is drift**; and before any campaign over a population, grep
+   `tests/`, `scripts/pre-commit-*` and hooks for that population's name, not only the docs.
 
 **Authorship on a shared checkout is one of these.** The operational procedure — the scope table,
 the skill to invoke, the addressing forms, the unit rule — is § *Reaching a Peer Session* above, and
@@ -526,35 +523,26 @@ agreement at the point of use. **So completeness is the thing to check, not the 
 windowed instrument's zero is scoped to its window, and re-running it later silently moves that
 window; the positive identifier for uncommitted state is to resolve the session's own registry row
 from the socket its message arrived on — a channel the sender does not control (§ *Reaching a Peer
-Session* holds the route). **Asking it to quote its scratchpad path is the FALLBACK, and calling
-that *given* was too strong.** The harness does make the session id a path component, but a session
-reporting its own path is still reporting, and nothing ties the quoted string to the process that
-sent it. Both beat inference; only the channel route is independent of the message body.
+Session* holds the route).
 
-**That holds for the sessionId and fails for the NAME — and the name is what sessions actually
-quote at each other.** A name is minted into a per-profile registry
+**That holds for the sessionId and fails for the NAME — and the name is what sessions actually quote
+at each other.** A name is minted into a per-profile registry
 (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`); compaction, resume, or a restart under another profile
 mints a new one and nothing re-informs the running context, so a session reporting its own name is
-quoting a belief rather than reading a fact. Measured 2026-09-02, twice in one evening: a peer
-signed as `codescout-26` — a session that had already exited on another profile — and
-`bug-fix-session-log:F-97` recorded the misattribution before that peer corrected it by reading its
-own registry entry; separately `codescout-00` became `codescout-cc` on a different profile and PID
-with its sessionId unchanged, which is the only reason earlier stage-log attributions kept
-resolving to it. **So attribute by sessionId, never by a self-reported name.** The name is what
-`ListAgents`, `SendMessage` and the socket table all display, which is exactly why the substitution
-is easy to make and hard to notice.
+quoting a belief rather than reading a fact. **So attribute by sessionId, never by a self-reported
+name.** The name is what `ListAgents`, `SendMessage` and the socket table all display, which is
+exactly why the substitution is easy to make and hard to notice.
 
 Record classes as `OB-N` in
 [`docs/trackers/observer-blindness.md`](docs/trackers/observer-blindness.md) (artifact
 `3922c2a0fd0dfcfc`). The admission tests, the field block, the mining greps, and the full measured
 history of every instance — including the corrections that superseded earlier readings — live in the
 file; the one-line index is [`docs/TAXONOMY.md`](docs/TAXONOMY.md). **An instance is a bug file, an
-`F-N` or an `R-N`; only the class is an `OB`.** A row reading `**Mechanism status:** none yet` is a
-design worklist item, and is exactly what `H-N` (hooks) and `I-N`
-([`docs/trackers/test-escape-hardening.md`](docs/trackers/test-escape-hardening.md)) consume — that
-tracker reached the same conclusion from the cost side, *"lenses must move LEFT into standing
-mechanisms so they catch by default without a human remembering"*, and the two are complements
-rather than copies.
+`F-N` or an `R-N`; only the class is an `OB`.**
+
+The full text, with the measurements and incident accounts moved out of this section:
+[`docs/conventions/observer-blindness-long-form.md`](docs/conventions/observer-blindness-long-form.md).
+
 ## Parsers Over a Namespace — owe an escape and a disambiguator
 
 A parser that interprets every token in its namespace is correct on every input it *accepts*; the

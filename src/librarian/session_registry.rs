@@ -201,7 +201,7 @@ impl SessionRegistry {
         // Duplicate sessionIds across profiles are a documented reality on this
         // machine: a resumed/restarted session leaves a stale row under the old
         // profile and a live row under the new one, both keyed by the same
-        // sessionId (CLAUDE.md § Observer Blindness: "`codescout-00` became
+        // sessionId (docs/conventions/observer-blindness-long-form.md: "`codescout-00` became
         // `codescout-cc` on a different profile and PID with its sessionId
         // unchanged"). The dangerous direction is a stale row shadowing a live
         // one, so: if ANY matching row resolves Live, report it. Otherwise
@@ -558,8 +558,9 @@ mod tests {
     }
     /// Duplicate sessionIds across profiles are a documented reality on this machine: a
     /// resumed/restarted session leaves a stale row under the old profile and a live row
-    /// under the new one, both keyed by the same sessionId (CLAUDE.md § Observer
-    /// Blindness: "`codescout-00` became `codescout-cc` on a different profile and PID
+    /// under the new one, both keyed by the same sessionId
+    /// (docs/conventions/observer-blindness-long-form.md: "`codescout-00` became `codescout-cc`
+    /// on a different profile and PID
     /// with its sessionId unchanged"). The stale row sorts first in load order here —
     /// it must not shadow the live one.
     #[test]
