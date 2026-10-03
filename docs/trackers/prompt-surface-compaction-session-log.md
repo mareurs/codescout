@@ -2288,7 +2288,7 @@ Derivation: `git log --reverse b603d86f..HEAD -- CLAUDE.md`, then `git cat-file 
 
 The guard was mutation-probed per site. A first design passed a length into the verdict from the live test, and hollowing that call to `0` SURVIVED; moving the measurement inside the verdict fixed it, and the six mutations re-run against the new design are all killed.
 
-**Still open:** relocating the long sections (Testing Discipline, Peer Session, Observer Blindness, Parsers, Git Workflow) and shrinking the gate section, whose pinned tests must move with it. The budget is lowered as each lands. **Residual that no test can close:** a raised budget constant passes every check and shows only as a one-line diff.
+**Progress (2026-10-03):** Peer Session `1a44326b` (patch-id `5c40cb41e79cb83eedc1063cf895dbe1fc5bc45b`) and Testing Discipline `b0c6d56d` (patch-id `654501753ca91cac0133bdf281d43e8eafaa998a`) moved their long forms to `docs/conventions/` and left compact stubs, taking `CLAUDE.md` from 75,969 B to 65,318 B with the budget lowered to 65,400 B. Each stub was assembled from selected original sentences, asserted verbatim, and the full text sits unchanged on the new page. **Still open:** Observer Blindness, Parsers Over a Namespace, Git Workflow, Session Intelligence Trackers, Bug Tracking, Docs, and the gate section, whose pinned tests must move with it. The budget is lowered as each lands. **Residual that no test can close:** a raised budget constant passes every check and shows only as a one-line diff.
 
 ## Template for new entries
 
