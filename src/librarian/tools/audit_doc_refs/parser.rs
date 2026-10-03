@@ -206,7 +206,7 @@ fn classify(s: &str, in_code_context: bool, syntax: PathSyntax) -> Option<RefKin
 /// Whether the inline span starting at `span_start` is LABELLED a git patch-id.
 ///
 /// `git patch-id --stable` emits 40 hex, but this corpus records it truncated to 16 — which
-/// is byte-identical to an artifact id, and `CLAUDE.md` § *Bug Tracking* MANDATES recording
+/// is byte-identical to an artifact id, and `docs/issues/_TEMPLATE.md` MANDATES recording
 /// one beside every fix SHA. So the two namespaces collide by construction and no property
 /// of the token itself can separate them: the discriminator is the label the author already
 /// wrote, and it was sitting in the text unused.

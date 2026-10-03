@@ -301,29 +301,7 @@ premise that every addition falsifies.
 
 ## Bug Tracking
 
-**Per-file bug tracking lives in `docs/issues/`.** Every bug noticed during work gets its own file, copied from `docs/issues/_TEMPLATE.md`. Path, slug, the `status:` vocabulary (`open | taken | investigating | fixed | mitigated | wontfix | zombie`), and the archive flow are documented in **`get_guide("tracker-conventions")` § Bug files**.
-
-Four behaviors are load-bearing and easy to skip:
-
-- **Declare the defect class** — every bug file carries exactly one reserved `cluster/<slug>` tag in frontmatter, from the closed set defined in [`docs/trackers/issue-clusters.md`](docs/trackers/issue-clusters.md) (`IC-N`, artifact `1b5a080fe2efcb6b`). That tag is what makes *"which architectural problem do these bugs share?"* a query instead of a re-reading, and what lets a class reach its promotion threshold (**≥3 instances spanning ≥2 subsystems**) rather than being re-noticed and forgotten — three open files today carry a sentence of the form *"this is the third instance of one mechanism"* and had nowhere to put the count. Slugs are claim-shaped (`blast-radius-exceeds-visibility`), never topic-shaped (`concurrency`, which spans three classes). **Write it through the catalog** — `doc(action="update", id=…, patch={tags:[…]})` or `codescout doc update <id> --tags …`. A direct frontmatter edit does **not** reach the catalog (BL-48), so the tag sits on disk while every `find` reports the bug unclassified.
-
-- **Capture on notice** — add the bug file the moment a bug is noticed (wrong edits, corrupt output, silent failures, misleading errors from codescout's own MCP tools), not at task end.
-- **Archive once the fix is verified on `experiments`** — gate green plus a regression test. Reaching `master` is **not** required; `experiments` is never deleted. Archive via `doc(action="move", …)`, never a bare `git mv`.
-- **Record the fix SHA *and* its patch-id — never a pending-master-SHA line.** `git show <sha> | git patch-id --stable`. The SHA is positional and dies when `experiments` is rebased (which happens after every ship); the patch-id is a content hash of the diff and survives rebase *and* cherry-pick. Record the pair once at fix time: there is no promotion path to check and nothing owed later. (Measured 2026-08-19: 10 of 63 archived bug files had already lost their SHA to a rebase; zero patch-id collisions across 3594 commits. Many archived files still carry the older master-SHA-owed form — stale instructions, not open debt; do not sweep them.) **A merge commit's patch-id is never citable, and it is not always empty** — a **clean** merge emits no diff so the pipeline returns empty and exits `0` (no error, no value), while a merge that **resolved a conflict** emits a *combined* diff and hands back a well-formed value hashing only the resolution hunks. Measured 2026-09-10: `4485eeb0` clean → empty; `8cf67de0` conflicted → `9817e7c6…`. The blank you would notice; that value you would record. Cite the merged branch's constituent commits either way; never record an empty patch-id field and never record a conflicted merge's. Full rule → `get_guide("tracker-conventions")` § *Bug files*.
-
-**Run the reproduction before reading the fix plan — the plan is a hypothesis about the
-reproduction.** Not to confirm the bug exists; to find out what the plan is actually about.
-Promoted 2026-08-20 from `bug-fix-session-log:W-32` at four datapoints (with W-30). In one
-2026-08-14 sweep it changed the fix three times: a bug filed as "top-level `extra` dropped"
-was **five** params dropped by one mechanism, so a per-field fix would have shipped the same
-defect a seventh time; a `delete` bug's severity turned on which key *neighboured* it
-(scalar above → loud invalid YAML, sequence above → silent corruption), and only reproduction
-separates them; and once the fix direction **inverted** — measuring fastembed's real 512-token
-ceiling showed the prescribed change would over-chunk large-context models against a hard cap,
-so deleting the dead code, not promoting it, was correct. Case 3 would have introduced a bug;
-case 1 would have left four siblings broken behind a passing test.
-
-**Open a bug file for ANY bug noticed during work** — including incidental bugs we won't fix and tool quirks/misbehaviors. *Not* for pure typos (commit message suffices) or feature ideas/refactors (→ `docs/trackers/` or `docs/plans/`). Don't append to retired surfaces (`docs/archive/old-trackers/*`) — open a new `docs/issues/<date>-<slug>.md`.
+Every bug noticed during work gets its own file in `docs/issues/`, copied from [`docs/issues/_TEMPLATE.md`](docs/issues/_TEMPLATE.md), which holds the procedure.
 ## Session Intelligence Trackers
 
 **One-page index of every ID prefix** (F-N / W-N / R-N / U-N / SKF-N / H-N / T-N / BUG) — file,

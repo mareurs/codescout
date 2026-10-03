@@ -634,7 +634,7 @@ alone does not: it leaves the wildcard short-circuit in place and prints the lit
 `all` as a session to go and notify, a plausible line naming a party that does not exist.
 
 **Independence of causes does not transfer to independence of repairs.** The author derived
-the independence by reading, and reading cannot separate the two — § *Bug Tracking*'s *"run
+the independence by reading, and reading cannot separate the two — `bug-fix-session-log:W-32`'s *"run
 the reproduction before reading the fix plan"* reaching the **fix** rather than the
 diagnosis.
 
