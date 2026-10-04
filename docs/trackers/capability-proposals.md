@@ -11,7 +11,7 @@ tags:
 - reflective
 - backlog
 topic: capability-proposals
-entry_high_water_CAP: 12
+entry_high_water_CAP: 13
 entry_prefix: CAP
 expects_augmentation: docs/augmentations/docs-trackers-capability-proposals.yaml
 ---
@@ -54,8 +54,9 @@ the reason kept. It is not a wishlist: an entry with no substrate check is not r
 | CAP-9 | 2026-08-20 | proposed | medium | Friction observability — fix attribution, then **S-A only** (S-B falsified 2026-08-20) and an in-band `friction()` self-report |
 | CAP-11 | 2026-08-26 | proposed | small–medium | Reconcile memory files against memory points — a doctor check, because only doctor can see both projects |
 | CAP-12 | 2026-09-02 | **rejected** 2026-09-02 | small — measured, not built | Detect a stale `Resume` — an append-only document strands its oldest instruction at the bottom |
+| CAP-13 | 2026-10-04 | proposed | small (one call site) + 1 policy decision | Route LSP requests to the declared sub-project that owns the file — a root-level `.idea/` made Kotlin `references()` silently definition-only |
 
-**Open: 9 of 12** — all but CAP-5, CAP-7 and CAP-12. Derived 2026-09-02 by reading each entry's
+**Open: 10 of 13** — all but CAP-5, CAP-7 and CAP-12. CAP-13 was added 2026-10-04 as `proposed`; the other twelve are as derived 2026-09-02 by reading each entry's
 own `**Status:**` line, not by counting rows above; the two counts agree, which is the check.
 ## CAP-1 — Session artifact-touch ledger
 
@@ -1454,6 +1455,42 @@ the reconnaissance skill's substrate rule.
    (a healthy project, and an `unstructured`-bucket memory with no disk file, which is the
    by-design case a naive diff breaks on).
 5. Doctor's numbered module docstring, and a `docs/PROBES.md` row naming the blind spot.
+
+## CAP-13 — Route LSP requests to the declared sub-project that owns the file, not always the active project root
+
+**Status:** proposed · **Opened:** 2026-10-04 · **Size:** small (one call site) + one policy decision
+
+**Valid:** dated 2026-10-04
+
+**Ask.** In a multi-root workspace (a repo root plus the `[[project]]` sub-projects declared in `.codescout/workspace.toml`), `get_lsp_client` should start or reuse the language server rooted at the **declared sub-project that owns the file** (longest prefix), instead of always using the active project root. Example: a Kotlin file under `ktor-server/` should get a kotlin-lsp rooted at `ktor-server/`, where `settings.gradle.kts` lives, not at the repo root. Requested by the backend-kotlin owner, 2026-10-04.
+
+**Why it is worth building.** Measured 2026-10-04 in backend-kotlin with kotlin-lsp 263.6379.0; the evidence is not self-generated. It was surfaced by the owner's request to check the LSP.
+- **What happens at the root.** The repo root has no Gradle settings. kotlin-lsp has four importers (`json, maven, gradle, jps`) and falls back to **JPS**, importing a stale, gitignored root `.idea/` whose only module is a Python facet with no Kotlin source roots. The server log shows "There are 0 libraries to load" and "Updated 8 files".
+- **The wrong answer it produces.** `references(PlacementVerdictPersister)` returned **only the definition**, although the class is used in 5+ files. codescout's own "0 references outside the definition file" warning was the only signal.
+- **The same call pinned.** With `workspace=…/ktor-server`, codescout started a second kotlin-lsp rooted there. It imported via **Gradle** (~80 s, "There are 245 libraries to load") and returned **24 references in 6 files**.
+- **How long it went unnoticed.** The expired 263.4421.0 build logged the identical JPS import on 2026-10-02, so Kotlin cross-file navigation in that repo was silently wrong for an unknown period.
+- **Why it matters.** The failure is wrong-but-plausible: a definition-only answer reads as "unused". The workaround, pinning every Kotlin LSP call, is easy to forget, and it also rebases the caller's relative `path` onto the sub-project.
+
+**Substrate check (2026-10-04).**
+- `get_lsp_client` (`src/fs/mod.rs:306-327`) computes `root = agent.require_project_root_for(workspace_override)`. That is the pinned or active project root; **the file path is never consulted** for the root.
+- **The classifier already exists, and so does the precedence rule.**
+  - `resolve_project_for_path` (`src/workspace.rs:333-357`) does a longest-prefix match with `..` normalization; tests at `:785` (escape rejected) and `:935` (longest prefix wins).
+  - `Workspace::resolve_root(project, file_hint)` (`src/workspace.rs:442-461`) wraps it as: explicit project id > the file hint's owning project > focused project.
+  - `Agent::resolve_root` (`src/agent/mod.rs:1371`) exposes it.
+  - `get_lsp_client` does not call either.
+- **Config has no root lever.** Per-language LSP config is `LspSection` / `LspLangOverride` (`src/config/project.rs:306-318`), and it carries only `mux`.
+- **The mux layer already supports one server per (language, root).** On 2026-10-04 two kotlin-lsp muxes ran at the same time: `/tmp/codescout-mux-kotlin-lsp-26a9e85d58931839` (repo root) and `…-1a01e21f7e9cd622` (`ktor-server/`). `[resources] max_lsp_clients = 5` and `idle_timeout_secs = 600` already bound the cost.
+- **What is actually missing:** routing `get_lsp_client` through `resolve_root(…, file_hint = path)` when there is no explicit pin, plus the policy below.
+
+**Open questions.**
+1. **Routing policy:** route to the owning sub-project always, or only when that sub-project declares the file's language in `workspace.toml`? (`ktor-server` declares `kotlin, java`.) The language-gated form avoids re-rooting, e.g., pyright for `python-services/` where the repo-root config may be what works today.
+2. **Opt-in or default?** Candidate: an `[lsp.<lang>] root = "owning-project" | "workspace"` setting next to `mux` in `LspLangOverride`.
+3. **Precedence:** an explicit `workspace=` pin must still win. It is the caller's stated choice, and `resolve_root` already orders an explicit project first.
+4. **Path semantics:** routing the server must NOT change how the caller's relative `path` is interpreted. Today's pin workaround does change it (paths become sub-project-relative); that is a wart this fixes, not one to reproduce.
+5. **Cross-sub-project references:** a symbol used from a sibling sub-project becomes invisible to a sub-project-rooted server. Is that acceptable, or should a definition-only result fall back to the workspace-root server?
+6. **Cost:** one more JVM server per routed sub-project (kotlin-lsp runs with `-Xmx2g`). The root-level instance goes idle and is evicted after 600 s.
+
+**Rests on:** `backend-kotlin:5ba687aae` — that repo's `.codescout/memories/gotchas.md` § "codescout: Kotlin LSP at the Repo Root Imports a Stale `.idea/`", which records the measurement and the per-call pin workaround.
 
 ## Anti-goals
 
