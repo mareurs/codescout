@@ -65,7 +65,7 @@
 //! * A **lean build** emits nothing (see above).
 //! * **`check`, not `test` — and this is the one ceiling the header above used to present
 //!   as MET.** An uncommitted edit that COMPILES and reds a TEST produces nothing here.
-//!   Same distinction `CLAUDE.md` § *Development Commands* already draws for the gate
+//!   Same distinction `docs/conventions/gate-ordering.md` already draws for the gate
 //!   itself: *"it is `test`, not `check`"*. Measured 2026-09-16 — three failures in one
 //!   gate run, all on code that compiled clean (`read_file.rs:2277`, `doctor.rs:13572`,
 //!   `update.rs:1182`), so every red that day was in this half. The READER side routed

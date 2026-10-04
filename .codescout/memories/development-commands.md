@@ -2,7 +2,7 @@
 
 ## The pre-commit gate — four commands, and the ORDER is load-bearing
 
-Run all four before completing any task. CLAUDE.md § *Development Commands* carries the
+Run all four before completing any task. `docs/conventions/gate-ordering.md` carries the
 full evidence for each; this is the executable summary.
 
 ```bash

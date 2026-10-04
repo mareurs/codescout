@@ -8559,7 +8559,7 @@ mod tests {
     ///
     /// `memory` rather than `doc` on purpose: the librarian is off under
     /// `--no-default-features`, so a `doc`-based probe would silently not exist in
-    /// the lean lane — the vacuity CLAUDE.md § *Development Commands* warns about.
+    /// the lean lane — the vacuity `docs/conventions/gate-ordering.md` warns about.
     /// `memory` is core, so this runs in both.
     ///
     /// Step 2 sends VALID params. An invalid call would be refused either way and

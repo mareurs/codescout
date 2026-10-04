@@ -118,6 +118,16 @@ echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at 
 [ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT"
 
+# What a green run here does NOT cover. Printed every time because this output is what a
+# session reads when it decides "green". Pinned by gate_script_prints_what_green_does_not_cover
+# (src/prompts/mod.rs), which reads these echo lines.
+echo "gate.sh: green here does not cover:"
+echo "  - server-stack, which cargo rb ships and no lane compiles: read CI job test-server-stack (kept alive by every_declared_feature_has_a_lane_or_a_reason)"
+echo "  - librarian code in LEAN: the librarian is off there, so only DEFAULT runs its tests"
+if [ "$CODESCOUT_SKIP_ONNX_TESTS" = 1 ]; then
+    echo "  - the two local ONNX weight tests, which print 'ok' while skipped: CI's local-embed job runs them"
+fi
+
 # FMT is the one ambiguous code, and the ambiguity is routine rather than rare on a shared
 # checkout — so it is named here rather than left for the reader to infer from a bare 1.
 if [ "$FMT" -ne 0 ]; then

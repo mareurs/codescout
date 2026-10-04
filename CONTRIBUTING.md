@@ -174,7 +174,9 @@ sitting there; ending on the default lane puts it back.
 
 This block is a deliberate second copy, kept because a contributor should not have to read an
 internal agent contract to find out how to verify a patch. **[`CLAUDE.md`](CLAUDE.md) §
-Development Commands is authoritative** and carries the rationale for every command above — if
+Development Commands is authoritative**, and
+[`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md) carries the rationale for
+every command above — if
 the two ever disagree, this block is the bug.
 
 ## What to Contribute

@@ -2087,7 +2087,7 @@ mod tests {
     /// tested against sizes chosen to discriminate, not only against a file that is within budget
     /// today.
     // cap-class: NOT_A_CAP — test-only ratchet asserting a document's size; it bounds no runtime path
-    const CLAUDE_MD_BYTE_BUDGET: usize = 48_700;
+    const CLAUDE_MD_BYTE_BUDGET: usize = 33_700;
 
     /// Whether the `CLAUDE.md` at `path` is within `budget` bytes, and what to do when it is not.
     /// It measures the file itself, so the live test and the synthetic ones share one measurement
@@ -2863,175 +2863,54 @@ mod tests {
             cursor += offset + needle.len();
         }
     }
-
-    /// The gate section must keep NAMING what the four commands do not cover, and must
-    /// keep naming it accurately.
+    /// `scripts/gate.sh` must keep PRINTING what a green run does not cover. Its output is
+    /// what a session reads when it decides "green", so the bound lives there; it moved from
+    /// `CLAUDE.md` § Development Commands on 2026-10-04, where it had been the fix for
+    /// docs/issues/archive/2026-09-06-the-documented-gate-never-compiles-the-feature-set-that-ships.md.
     ///
-    /// `default` does not include `server-stack`, so the documented gate never compiles
-    /// `dep:qdrant-client`, `QdrantArtifactStore` or the hybrid sparse+reranker path —
-    /// 11 source files and 2 test files, measured 2026-09-06 — while `cargo rb` ships
-    /// exactly that feature set. Local green is therefore *silence* about code the
-    /// running binary uses, which is the lean-lane vacuity law with its polarity
-    /// reversed. See `docs/issues/2026-09-06-the-documented-gate-never-compiles-the-feature-set-that-ships.md`.
+    /// Scoped to `echo` lines: the script's comments also name ONNX, `local-embed` and the
+    /// librarian, so a file-wide `contains` would pass with every printed line deleted. Each
+    /// needle belongs to one printed line, so deleting any one of those lines reds here.
     ///
-    /// The chosen repair was a sentence rather than a fifth command, because CI already
-    /// owns the lane and `tests/feature_lanes.rs` guards that it keeps existing. A
-    /// sentence with no test is a resolution to remember, which is what the bug file
-    /// itself warned against — hence this.
-    ///
-    /// **Both directions are asserted, and that is the point.** A one-way check would
-    /// let the pair rot in whichever direction it was not looking:
-    ///
-    /// - CLAUDE.md must cite the guard, so deleting or softening the bullet fails here.
-    /// - The guard must still EXIST under the cited name, so renaming or removing
-    ///   `every_declared_feature_has_a_lane_or_a_reason` fails here too, rather than
-    ///   leaving CLAUDE.md confidently pointing at nothing. A citation nobody resolves
-    ///   is indistinguishable from a live one — that is
-    ///   `cluster/doc-contradicted-by-code`, and this is the cheap way to be immune to it.
-    ///
-    /// Scoped to the gate section rather than the whole file, for the reason the sibling
-    /// test above documents: `server-stack` is discussed elsewhere in this repo, so a
-    /// file-wide `contains` would pass on a mention that has nothing to do with the gate.
+    /// The other direction is kept from the test this replaces: the guard the script names
+    /// must still exist under that name, or the printed line points at nothing.
     #[test]
-    fn claude_md_gate_section_names_the_server_stack_blind_spot_and_its_live_guard() {
+    fn gate_script_prints_what_green_does_not_cover() {
         let root = env!("CARGO_MANIFEST_DIR");
-        let claude_md = std::fs::read_to_string(format!("{root}/CLAUDE.md"))
-            .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
-
-        // Same scoping discipline as the sibling tests: find the gate section first.
-        // Anchor updated 2026-09-09 with the directive's step 1 (`cargo fmt` ->
-        // `./scripts/fmt-mine.sh`), and again 2026-09-14 when `./scripts/gate.sh` was
-        // promoted to the head of the directive. This is the "move this test with it"
-        // its own panic message asks for.
-        //
-        // DO NOT hardcode how many tests share this anchor. Earlier revisions of this
-        // comment said TWO, then THREE, and the 2026-09-14 edit was made by a session
-        // that went by the test names it already knew and missed this one entirely --
-        // the accurate count was sitting in the sibling comment, unread. Derive it:
-        //
-        //     grep -c '\*\*Run `\./scripts/' src/prompts/mod.rs
-        //
-        // Every hit is a START anchor that must move together, in one commit, or the
-        // gate reds for everyone sharing the checkout.
-        const START: &str = "**Run `./scripts/gate.sh`";
-        const END: &str = "The gate sentence above is pinned byte-for-byte by";
-
-        let start = claude_md.find(START).unwrap_or_else(|| {
-            panic!("CLAUDE.md has no gate directive beginning {START:?} — move this test with it")
-        });
-        let rest = &claude_md[start..];
-        let end = rest.find(END).unwrap_or_else(|| {
-            panic!("CLAUDE.md's gate section begins with {START:?} but never reaches {END:?}")
-        });
-        let section = &rest[..end];
+        let gate = std::fs::read_to_string(format!("{root}/scripts/gate.sh"))
+            .unwrap_or_else(|e| panic!("cannot read scripts/gate.sh: {e}"));
+        let printed: Vec<&str> = gate
+            .lines()
+            .filter(|l| l.trim_start().starts_with("echo "))
+            .collect();
 
         const GUARD_FN: &str = "every_declared_feature_has_a_lane_or_a_reason";
-        for needle in ["server-stack", "test-server-stack", GUARD_FN] {
+        for needle in [
+            "server-stack",
+            "test-server-stack",
+            GUARD_FN,
+            "librarian",
+            "local-embed",
+        ] {
             assert!(
-                section.contains(needle),
-                "CLAUDE.md § Development Commands no longer names {needle:?}.\n\n\
-                 The four gate commands do not compile `server-stack`, but `cargo rb` \
-                 ships it — so a session that reads local green as full coverage is \
-                 wrong, and nothing in the gate's own output says so. That bound lives \
-                 nowhere a session reads except this section: not in the CI yaml, not in \
-                 tests/feature_lanes.rs's module header. If you are moving this text, \
-                 move it somewhere a session running the gate will actually see, and \
-                 update this test. Do not simply delete it."
+                printed.iter().any(|l| l.contains(needle)),
+                "scripts/gate.sh no longer PRINTS {needle:?}.\n\n\
+             Green from the four lanes says nothing about server-stack (cargo rb ships it, \
+             no lane compiles it), about librarian code in LEAN, or about the two local \
+             ONNX weight tests (they print `ok` while skipped). The gate's own output is \
+             where a session reads \"green\", so that is where the bound must stay. If you \
+             move it, move it somewhere a session running the gate sees, and update this \
+             test."
             );
         }
 
-        // The other direction. Without this, the citation above can rot into a confident
-        // pointer at a test that no longer exists.
         let lanes = std::fs::read_to_string(format!("{root}/tests/feature_lanes.rs"))
             .unwrap_or_else(|e| panic!("cannot read tests/feature_lanes.rs: {e}"));
         assert!(
             lanes.contains(&format!("fn {GUARD_FN}(")),
-            "CLAUDE.md § Development Commands tells sessions that {GUARD_FN} keeps the \
-             server-stack CI lane alive, but tests/feature_lanes.rs no longer defines it. \
-             Either the guard was renamed (update CLAUDE.md) or it was removed (then \
-             CLAUDE.md's claim is false and the lane is unprotected — fix that first)."
-        );
-    }
-
-    /// The gate section must keep stating that its own guarantee is SEQUENTIAL, and must keep
-    /// naming the error a reader will actually have on screen.
-    ///
-    /// The guarantee reads *"following the gate cannot arm the trap for anyone else — provided
-    /// both lanes actually run."* That holds for one session alone and fails under concurrency
-    /// **while every party complies**: a lean lane arms the trap when it finishes and disarms it
-    /// when that session's default lane completes, so any session whose `cli_doc` tests execute
-    /// inside the window gets the librarian-less binary. The stated condition is satisfied by
-    /// everyone involved, which is precisely why it cannot catch this — measured 2026-09-14 with
-    /// six sessions on this checkout
-    /// (`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`).
-    ///
-    /// **The error string is the load-bearing needle, not the argument.** A reader meets this as
-    /// 13 of 15 `cli_doc` failures reading `error: unrecognized subcommand 'doc'`, and concludes
-    /// their own diff broke feature gating — `cluster/transient-shared-state-lies-to-readers`,
-    /// where the standard diagnostic reports someone else's outage as your bug. The caveat is
-    /// only worth anything if the person holding that red can FIND it, so what is pinned here is
-    /// the text they would grep, not the sentence explaining it. That is
-    /// `CLAUDE.md` § *Observer Blindness* position 3 — move the scope to the read surface.
-    ///
-    /// **Both directions, for the reason the sibling test above documents.** CLAUDE.md must cite
-    /// the bug file, and the bug file must still exist: a citation nobody resolves is
-    /// indistinguishable from a live one.
-    ///
-    /// **What this canNOT do**, stated because the assertion looks stronger than it is: it pins
-    /// that the caveat is PRESENT and findable, never that it is true or that anyone acts on it.
-    /// The remedies that would actually close the class are a per-session `CARGO_TARGET_DIR` or
-    /// `cli_doc` asserting the binary advertises `doc`; both are open, and this test must not be
-    /// read as covering them.
-    #[test]
-    fn claude_md_gate_section_states_its_guarantee_is_sequential() {
-        let root = env!("CARGO_MANIFEST_DIR");
-        let claude_md = std::fs::read_to_string(format!("{root}/CLAUDE.md"))
-            .unwrap_or_else(|e| panic!("cannot read CLAUDE.md: {e}"));
-
-        // Same scoping anchors as the sibling tests. For how many share this anchor,
-        // and why the number is derived rather than written down, see the comment on
-        // `claude_md_gate_section_names_the_server_stack_blind_spot_and_its_live_guard`.
-        const START: &str = "**Run `./scripts/gate.sh`";
-        const END: &str = "The gate sentence above is pinned byte-for-byte by";
-
-        let start = claude_md.find(START).unwrap_or_else(|| {
-            panic!("CLAUDE.md has no gate directive beginning {START:?} — move this test with it")
-        });
-        let rest = &claude_md[start..];
-        let end = rest.find(END).unwrap_or_else(|| {
-            panic!("CLAUDE.md's gate section begins with {START:?} but never reaches {END:?}")
-        });
-        let section = &rest[..end];
-
-        const BUG: &str =
-            "docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md";
-        for needle in ["unrecognized subcommand", "cli_doc", BUG] {
-            assert!(
-                section.contains(needle),
-                "CLAUDE.md § Development Commands no longer names {needle:?}.\n\n\
-                 The gate's trap guarantee is SEQUENTIAL: it fails under concurrency while every \
-                 party runs both lanes in the documented order, so compliance cannot close it and \
-                 there is nothing for a careful reader to do differently. What the caveat buys is \
-                 that someone holding `error: unrecognized subcommand 'doc'` across 13 of 15 \
-                 `cli_doc` tests can find out it is not their diff — which requires the ERROR TEXT \
-                 to be here, not just the explanation. If you are moving this, move it somewhere a \
-                 session running the gate will see it, and update this test. Do not simply delete \
-                 it."
-            );
-        }
-
-        // The other direction: a citation nobody resolves is indistinguishable from a live one.
-        assert!(
-            std::path::Path::new(&format!("{root}/{BUG}")).exists()
-                || std::path::Path::new(&format!(
-                    "{root}/docs/issues/archive/{}",
-                    BUG.trim_start_matches("docs/issues/")
-                ))
-                .exists(),
-            "CLAUDE.md § Development Commands cites {BUG} for the concurrency premise, and it is \
-             at neither its live path nor docs/issues/archive/. Either it was archived under a \
-             different slug (re-point CLAUDE.md) or deleted (then the caveat's evidence is gone \
-             and the claim needs re-deriving, not re-citing)."
+            "scripts/gate.sh tells sessions that {GUARD_FN} keeps the server-stack CI lane \
+         alive, but tests/feature_lanes.rs no longer defines it. Either it was renamed \
+         (update gate.sh) or removed (then the lane is unprotected; fix that first)."
         );
     }
 

@@ -169,6 +169,10 @@ Both recorded now rather than owed later: the SHA is positional and dies when
 `experiments` is rebased, which happens after every ship; the patch-id is a content
 hash of the diff and survives rebase and cherry-pick alike. There is no
 pending-master line to reconcile.
+
+**Moved 2026-10-04:** the bullet left `CLAUDE.md` when § *Development Commands* became a
+pointer. `scripts/gate.sh` now prints the same bound under `GATE EXITS` on every run, pinned by
+`gate_script_prints_what_green_does_not_cover`, which replaces `c0cfa326`'s test.
 ## Tests added
 
 `claude_md_gate_section_names_the_server_stack_blind_spot_and_its_live_guard`

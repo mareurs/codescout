@@ -40,7 +40,7 @@ invisible to it — an inline `#[cfg(test)]` module included, not just `tests/`.
 compiles the lean targets without running them, so a lean-only *runtime* failure never
 surfaces.
 
-Full evidence and measurements: CLAUDE.md § *Development Commands*. Executable summary with
+Full evidence and measurements: `docs/conventions/gate-ordering.md`. Executable summary with
 the build commands and the binary-freshness probe: memory `development-commands`.
 ## Error Handling
 

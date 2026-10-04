@@ -3,7 +3,7 @@
 #
 # WHY THIS EXISTS
 #
-# `CLAUDE.md` § *Development Commands* opens the four-command gate with bare
+# `CLAUDE.md` § *Development Commands* opened the four-command gate with bare
 # `cargo fmt`. `cargo fmt` takes no pathspec, no `--staged` and no "only my files"
 # mode: its blast radius is every `.rs` in the workspace, which on a shared
 # checkout is strictly wider than the set of files the running session authored.
