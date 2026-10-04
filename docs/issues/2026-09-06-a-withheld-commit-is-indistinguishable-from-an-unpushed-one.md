@@ -1,17 +1,15 @@
 ---
 kind: bug
-status: mitigated
+status: open
 tags:
 - cluster/shared-resource-carries-no-owner
 - shared-checkout
 - git-workflow
 - multi-session
-closed: 2026-09-24
 opened: 2026-09-06
 owner: marius
 related: []
 severity: medium
-unverified: 'STANDING — A policy, not a mechanism: nothing stops a session committing a held change, and a commit''s publishability is still unrecorded in git.'
 ---
 
 # BUG: a commit an author is deliberately withholding is byte-identical to one merely not pushed yet, so any peer's push publishes it
@@ -275,6 +273,8 @@ Directions if a mechanism is wanted, none free and none yet chosen:
 - **The marker direction is declined, not deferred**, for the reason § *Resume* gave — a
   fail-open hook nobody has installed reproduces the defect while reading as a fix. The
   isolation direction is the rule itself.
+- **Withdrawn 2026-10-04:** the operator removed the rule from `CLAUDE.md` when § *Git Workflow*
+  became a pointer, so nothing mitigates this and it is `open` again.
 
 ## Tests added
 
@@ -310,6 +310,9 @@ Session*, since this is that rule's other direction. That is a text change and n
 operator's agreement, not a code change. Only then decide between the marker and the isolation
 direction in § *Fix*; do not build the marker first, because a fail-open hook nobody has
 installed reproduces the defect while reading as a fix.
+
+**2026-10-04: not `CLAUDE.md`.** The operator removed the rule from there; pick another surface
+or a mechanism.
 
 ## Resolution, and the two things this file said too strongly
 

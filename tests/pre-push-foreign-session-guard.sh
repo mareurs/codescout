@@ -4,9 +4,8 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# The guard refuses a push that would publish another session's commits. It is the
-# pusher-side complement to "a session that cannot publish must not COMMIT to a shared
-# branch" (docs/trackers/observer-blindness.md OB-20), and it is the kind of guard that
+# The guard refuses a push that would publish another session's commits
+# (docs/trackers/observer-blindness.md OB-20), and it is the kind of guard that
 # fails silently in the wrong direction: one that refuses everything looks exactly as
 # safe as one that works, right up until someone disables it, and one that refuses
 # nothing looks identical to a quiet week.

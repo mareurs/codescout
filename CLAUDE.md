@@ -384,56 +384,7 @@ scan re-derives a worse version of a wired check **and reports its own shortfall
 backlog** — it returns a small number, never an error.
 ## Git Workflow
 
-**`master` is protected** — all experimental work on `experiments`; promote to `master` only after tests + clippy + MCP verify; `experiments` is never deleted; never commit in-progress work directly to `master`.
-
-**That sentence is now enforced server-side, not only by convention.** Both branches carry a
-GitHub *ruleset* requiring a pull request, each with exactly one bypass actor — `User` `mareurs`.
-Ids: `23546832` (master), `23533382` (experiments); read the live state with `gh api
-repos/mareurs/codescout/rules/branches/<branch>`, which returns `[]` for any unruled branch.
-**Rulesets, not classic branch protection, and that is forced rather than chosen:** classic
-protection's push allowlist is org-only, so on a user-owned repo it can express *protected* but
-never *protected from whom*. Two consequences worth stating because neither is visible from the
-repo. **Any credential that is not the owner's user account is refused on both branches** — a
-GitHub App, a deploy key, Actions' `GITHUB_TOKEN` — so release automation cannot push a ref
-here; no workflow does today (`ci.yml`/`manual.yml` use `push:` only as a trigger), and that is
-the thing to re-check before wiring one. And **agent sessions are NOT constrained**: they push
-over the owner's SSH key, authenticate as `mareurs`, and inherit the bypass. No server-side rule
-can separate one session from another, because GitHub sees one identity — that discrimination
-exists only in `scripts/pre-push-foreign-session-guard.sh`, and the remote has strictly less
-information than that hook does.
-
-**Cite a fix by SHA *and* patch-id — the SHA alone is not durable.** Both promotion paths stay available (cherry-pick for single fixes, fast-forward for large cohorts), and neither needs checking before you cite: `experiments` is rebased after every ship, so a cherry-picked commit's original is orphaned and eventually garbage-collected, while `git show <sha> | git patch-id --stable` is a content hash of the diff that survives both. Record the pair once at fix time — no decision, no follow-up reconciliation.
-
-**On this checkout committing IS publishing — so a commit your operator told you to HOLD must not
-exist yet.** `git push <branch>` sends every commit beneath the tip, not the pusher's own, and git
-records who *authored* a commit and nothing about whether its author may publish it. That leaves
-two states per change, not three: **uncommitted** — withheld, in the working tree or a patch file
-(a scratch branch is not available: `git checkout -b` moves the tree for every session here) — and
-**committed**, publishable by any push the operator authorises. **Ordinary unpushed work is the
-second state and is fine to commit:** the pre-push guard names every foreign session in the range,
-so the operator decides with the list in front of them, and publication *without a decision* is the
-failure, not publication. A change your operator explicitly said to hold is the first state and
-only the first, because nothing can mark a commit withheld. The refspec form
-`git push origin <sha>:<branch>` publishes a prefix, so it can leave a held commit *above* yours
-unpublished and never one beneath — the pusher's side is `docs/RELEASE.md` § *Concurrent-Work
-Rules*. **No marker mechanism, deliberately:** a withheld-trailer or note checked by a hook fails
-open for any session that never installed or read it, reproducing the defect while reading as a
-fix. Instances and derivation →
-`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`,
-`docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md`.
-
-**A deliberately red commit is a published red — so a plan may not sanction one across a task
-boundary.** Operator ruling 2026-09-24. On a solo checkout an intermediate red is private; here every
-session that gates in this tree runs it, in files it never touched, with nothing marking it expected,
-and the fail-fast test lanes then hide every test binary after it. So fold a gate's deletion or
-rewrite into the commit that falsifies it rather than scheduling it for a later task: the gate and its
-falsifier are a coupled pair, like a count and its member. **No hook can see a plan's shape**, which is
-why this rule is stated on the surface a plan author reads rather than in a refusal they would never
-trip. Derivation → `docs/conventions/shared-checkout-commit-sequence.md` § *3. Decide the coupling
-before you stage*; instance →
-`docs/issues/archive/2026-09-10-a-deliberately-red-commit-exports-a-red-only-its-author-can-interpret.md`.
-
-Full release cycle, standard ship sequence, SHA + patch-id citation rule, chained-git state-check, and concurrent-work reset safety → **`docs/RELEASE.md`**. SHA-citation + cross-repo `<repo>:<sha>` prefix discipline → memory `gotchas`. Commit style → memory `conventions`.
+Branch policy, the release and ship sequence, citing a fix (SHA + patch-id), and the rules for committing and pushing on this shared checkout → [`docs/RELEASE.md`](docs/RELEASE.md); the step-by-step commit sequence → [`docs/conventions/shared-checkout-commit-sequence.md`](docs/conventions/shared-checkout-commit-sequence.md). Commit style → memory `conventions`; cross-repo `<repo>:<sha>` citations → memory `gotchas`.
 ## Reaching a Peer Session — address by scope, not by the list you were handed
 
 Several agent sessions routinely share this checkout, and messaging the wrong one is the common failure: `ListAgents` answers a narrower question than it appears to.

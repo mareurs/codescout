@@ -1,7 +1,7 @@
 ---
 id: d9d291b44775e50d
 kind: bug
-status: mitigated
+status: open
 title: 'BUG: a push publishes every local commit, and nothing records that an author was withholding one pending their operator''s say-so'
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -9,12 +9,10 @@ tags:
 - shared-checkout
 - git-workflow
 - authorisation
-closed: 2026-09-24
 last_observed: 2026-09-13
 opened: 2026-09-06
 owner: marius
 severity: high
-unverified: 'STANDING — A policy, not a mechanism: a session that commits a change its operator said to hold is published by the next authorised push exactly as before, and nothing fires. The rule is reachable (CLAUDE.md is loaded into every session here) but not enforced.'
 verified_open: 2026-09-11 at HEAD 6c31ef0f — trailer census (10 kinds, none answers publishability), zero git-notes refs, remedy unadopted in both candidate surfaces
 ---
 
@@ -959,6 +957,9 @@ than declared unilaterally by one session.
 - **Mechanism question: answered NO, deliberately.** A withheld-marker checked by a hook fails
   open for any session that never installed or read it; the rule says so in its own text. The
   pusher-side half needed nothing new (`docs/RELEASE.md` § *Concurrent-Work Rules*).
+- **Withdrawn 2026-10-04:** the operator removed the rule from `CLAUDE.md` when § *Git Workflow*
+  became a pointer, so the author side has no mitigation and this file is `open` again. The
+  pre-push guard (pusher side) is unaffected.
 
 ## Tests added
 

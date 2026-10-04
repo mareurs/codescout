@@ -99,8 +99,7 @@ touched what it covered and neither of whom made a mistake
 (`docs/issues/archive/2026-09-10-a-deliberately-red-commit-exports-a-red-only-its-author-can-interpret.md`).
 The explanatory assertion message tried there is kept as defence in depth, not as the remedy: it
 reaches the reader who opens the failure, and none of the results a fail-fast lane never ran.
-**Unlike the two pairs above, no hook can catch this one** — plan shape is invisible to every gate — so
-the ruling is also stated in `CLAUDE.md` § *Git Workflow*, the surface a plan author actually reads.
+**Unlike the two pairs above, no hook can catch this one** — plan shape is invisible to every gate.
 
 ### 4. Stage, read the diff, then commit by pathspec
 

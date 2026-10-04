@@ -6756,7 +6756,7 @@ fn scan_archived_fix_sha_unresolvable(
         // first anchor would leave the second rotting exactly as if it were never recorded.
         scanned += 1;
         for (sha, patch_id) in &pointers {
-            // `<repo>:<sha>` cites a commit in a SIBLING repo (CLAUDE.md § Git Workflow).
+            // `<repo>:<sha>` cites a commit in a SIBLING repo (memory `gotchas`).
             // This check is deliberately scoped to one repo, holds no map from prefix to
             // checkout path, and the sibling may not be on this machine at all. Handing the
             // whole token to revparse asks git for "the object at path <sha> inside a

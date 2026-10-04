@@ -379,9 +379,8 @@ fi
 
 install_shim post-index-change scripts/post-index-change-stage-log.sh
 
-# Refuses a push that would publish another session's commits. Pusher-side complement to
-# "a session that cannot publish must not commit to a shared branch" — that rule needs no
-# coordination and is the right primary defence, but it is silent on the party who acts.
+# Refuses a push that would publish another session's commits. It covers the pusher only:
+# nothing stops a session committing a change its operator said to hold.
 # Inert for anyone without CLAUDE_CODE_SESSION_ID, so the human release flow is untouched.
 # Why: docs/trackers/observer-blindness.md OB-20. Tests: tests/pre-push-foreign-session-guard.sh.
 install_shim pre-push scripts/pre-push-foreign-session-guard.sh

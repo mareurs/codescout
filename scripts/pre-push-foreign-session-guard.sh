@@ -23,10 +23,9 @@
 # does is make the QUESTION unskippable at the only moment it is answerable, which is the
 # most a mechanism can do for a fact that lives outside the repository.
 #
-# It is the complement to the rule "a session that cannot publish must not COMMIT to a
-# shared branch". That rule needs no coordination and is the right primary defence, but it
-# is silent on the pusher — and the pusher is the party who acts. This covers the case the
-# rule exists for: someone forgot.
+# It covers the pusher only. Nothing stops a session committing a change its operator said
+# to hold, and no rule asks it not to: that half is open
+# (docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md).
 #
 # WHY THE `Session-Id` TRAILER IS THE DISCRIMINATOR
 # -------------------------------------------------
