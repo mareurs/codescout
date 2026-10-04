@@ -229,6 +229,27 @@ Still unverified:
 - Phase 1b status after 2026-09-27.
 - If the settings write is reopened: the timing of the `settings.local.json` hot-reload.
 
+## Constraints carried into the second plan
+
+These come from the per-task and final reviews of the branch `feat/effort-steering-core` in the `claude-plugins` repo (2026-10-04). The scratch ledger that first held them is a gitignored file in a worktree that will be deleted, so they are recorded here. The review notes are in `docs/research/2026-10-04-effort-steering-branch-review-notes.md`.
+
+Adapter:
+- The adapter must put a wall-clock timeout around the `effort-policy` CLI and treat a timeout as `default` with no steering. The CLI has no timeout of its own. A rules file with a catastrophic regex, or a FIFO passed as `--rules` or `--table`, can block it. Reading stdin blocks until the caller closes it.
+- The adapter must always exit 0 from the hook. In Claude Code an exit code of 2 from a `UserPromptSubmit` hook blocks and erases the user's prompt. The CLI exits 64 for a usage error, so an adapter that passes the exit code through cannot block a prompt by accident.
+- The adapter must not derive `turn_id`, `harness` or `session_id` from prompt text. The log writes them as given and does not cap their length. S1 found the hook input fields `prompt_id` (usable as `turn_id`), `session_id`, `transcript_path`, `cwd` and `permission_mode`.
+- A CLI usage mistake is now visible: an unknown flag gives `unknown_arg`, and a value flag without a value gives `bad_holdout_rate`, `rules_unreadable` or `table_unreadable`. The adapter should log and alert on any of these reasons during rollout, because each can silently change the experiment.
+
+Rules (Task 11 is held):
+- Task 11 (the first rules) stays held until spike S4 or a session-signal replay gives a basis. `core/rules.json` ships empty.
+- Review every regex in a future `rules.json` for nested quantifiers. The compile probe does not catch all of them: `(b+)+c` passes it and took 11.5 s on a 30-character prompt.
+- The runtime slow-regex probe uses wall-clock time. Under CPU starvation (192 busy loops on 64 cores, node at nice 19), 27 of 1,500 benign regexes were skipped as `slow_regex`. Once rules ship, decisions could become nondeterministic, and a partly skipped file logs the whole file's version. Surface skipped rule ids in the log (for example a `rules_skipped` reason). Check the shipped file at test time (the Task 11 test asserts that `skipped` is empty). Keep the runtime probe for `--rules` overrides only.
+- Each regex that is slow costs about 50 ms of compile probe on every call.
+
+Build and repository:
+- `tests/run-all.sh` finds `effort-steering/*/*.test.mjs`, one level deep only. A test under `effort-steering/adapter/claude-code/` would never run, and the runner would still print "All suites passed". Use a recursive glob before the first adapter test, and assert the population.
+- Delete or exclude `effort-steering/spikes/` before `.claude-plugin/plugin.json` lands. The spikes hard-code machine-specific paths into three Claude Code profiles, and they would ship into every install cache. The findings document cites their commits.
+- Rulings still open for the operator: a bad `--holdout-rate` becomes rate 0 (every turn steered; ruling R3). The final reviewer preferred rate 1 (no steering on a configuration error). Either choice loses those rows, and the reason `bad_holdout_rate` is logged.
+
 ## Non-goals for v1
 
 - The classifier provider.
