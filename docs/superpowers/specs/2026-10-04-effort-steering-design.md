@@ -212,11 +212,18 @@ v2 plan: the decision log and the holdout arms become labeled data. The classifi
 
 ## Unverified claims register
 
-- Which fields the `UserPromptSubmit` input carries.
+Verified by the spikes (results in `docs/research/2026-10-04-effort-steering-spike-findings.md`):
+- The `UserPromptSubmit` input carries `session_id`, `transcript_path`, `cwd`, `prompt_id`, `permission_mode`, `hook_event_name` and `prompt`, all strings (S1, one scratch run). It carries no effort level.
+- The transcript dedupe key is `message.id`, and a transcript records the effort level as a top-level `effort` field on assistant records (S2).
+
+Still unverified:
 - Whether steering text injected through `additionalContext` moves thinking depth. The `ultrathink` variant is also unconfirmed.
 - Whether `additionalContext` is cache-neutral.
-- How Claude Code orders or merges the `additionalContext` of several hooks. `codescout-companion` already registers a `UserPromptSubmit` hook.
-- Which message-id field dedupes the repeated usage lines in a transcript, and whether a transcript records the effort level.
+- How Claude Code orders or merges the `additionalContext` of several hooks. `codescout-companion` already registers a `UserPromptSubmit` hook. S1 ran with user-level plugin hooks switched off.
+- Whether `UserPromptSubmit` fires for turns that peer messages, task notifications or slash-command records trigger. About 25% of the thinking tokens in the S3 data follow such records.
+- What `perTurnEffort` means. It is non-null on 21,275 of 86,955 usage records.
+- The possible values of `permission_mode`, and whether it gives the plan-mode signal.
+- Whether the session signals (previous-turn failure, retries, plan mode) separate thinking depth. S3 tested prompt features only.
 - Whether the other harnesses expose a prompt hook that can inject context.
 - Jev latency, and Jev performance on effort selection. Neither was measured.
 - Phase 1b status after 2026-09-27.
