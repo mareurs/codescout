@@ -2697,18 +2697,19 @@ fn format_compact_map_shape_renders_indented_headings() {
 
     assert!(out.contains("329 lines"), "missing line count, got: {out}");
     assert!(out.contains("@file_xyz"), "missing file_id, got: {out}");
-    assert!(
-        out.contains("# codescout  L1"),
-        "missing level-1 heading, got: {out}"
-    );
-    assert!(
-        out.contains("## Development Commands  L7"),
-        "missing level-2 heading, got: {out}"
-    );
-    assert!(
-        out.contains("  ### Skill Frictions  L32"),
-        "level-3 heading should be indented by 4 spaces (level-1*2), got: {out}"
-    );
+    // Whole lines, not `contains`: a substring is satisfied by any WIDER indent, so it caught
+    // a removed indent and missed a wrong one.
+    let lines: Vec<&str> = out.lines().collect();
+    for want in [
+        "# codescout  L1",
+        "  ## Development Commands  L7",
+        "    ### Skill Frictions  L32",
+    ] {
+        assert!(
+            lines.contains(&want),
+            "heading line must be exactly {want:?} (indent = (level-1)*2), got: {out}"
+        );
+    }
     assert!(
         out.starts_with("329"),
         "header line should come first, got: {out}"
@@ -2730,14 +2731,13 @@ fn format_compact_section_map_renders_same_as_headings() {
         "hint": "use \"@file_abc\" — pick a sub-heading from `section_map` or start_line/end_line",
     });
     let out = crate::tools::markdown::read_markdown::format_read(&response).unwrap_or_default();
-    assert!(
-        out.contains("  ### Sub A  L100"),
-        "section_map should render with indent, got: {out}"
-    );
-    assert!(
-        out.contains("  ### Sub B  L150"),
-        "section_map should render with indent, got: {out}"
-    );
+    let lines: Vec<&str> = out.lines().collect();
+    for want in ["    ### Sub A  L100", "    ### Sub B  L150"] {
+        assert!(
+            lines.contains(&want),
+            "section_map line must be exactly {want:?}, got: {out}"
+        );
+    }
     assert!(out.contains("@file_abc"));
 }
 
@@ -2762,10 +2762,13 @@ fn format_compact_error_shape_renders_headings_with_error_prefix() {
         out.contains("## Foo' not found"),
         "missing error message, got: {out}"
     );
-    assert!(
-        out.contains("# A  L1") && out.contains("## B  L5"),
-        "missing available headings, got: {out}"
-    );
+    let lines: Vec<&str> = out.lines().collect();
+    for want in ["# A  L1", "  ## B  L5"] {
+        assert!(
+            lines.contains(&want),
+            "available-headings line must be exactly {want:?}, got: {out}"
+        );
+    }
     assert!(out.contains("next: "), "missing next cue, got: {out}");
 }
 
@@ -2876,11 +2879,13 @@ async fn format_compact_live_renders_heading_not_found_as_error_with_headings() 
         rendered.contains("available headings:"),
         "ERROR with headings must show the list"
     );
-    assert!(
-        rendered.contains("# A  L1"),
-        "ERROR must indent headings same as MAP, got: {rendered}"
-    );
-    assert!(rendered.contains("## B  L3"), "ERROR list missing entry");
+    let lines: Vec<&str> = rendered.lines().collect();
+    for want in ["# A  L1", "  ## B  L3"] {
+        assert!(
+            lines.contains(&want),
+            "ERROR must indent headings same as MAP: want line {want:?}, got: {rendered}"
+        );
+    }
     assert!(rendered.contains("next: "), "ERROR must end with next-cue");
 }
 
