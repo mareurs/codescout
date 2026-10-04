@@ -39,10 +39,7 @@ To open a bug:
      status="open" alone hides any bug marked `taken` (a live session holds
      it), `investigating` (worked, no live owner) or `zombie`
      (recurring-but-unconfirmed -- a "has this come back?"
-     check, not a task to pick up). No manual index file. (Pre-2026-05-18 there was a docs/issues/INDEX.md
-     to maintain by hand; that workflow was retired when bug files gained
-     `kind: bug` frontmatter and the librarian classifier started picking
-     them up automatically — see CLAUDE.md "Querying active trackers".)
+     check, not a task to pick up). No manual index file.
 
 Trigger rules — open a tracker for ANY bug noticed during work:
   ✓ User explicitly asks ("log this", "open a tracker")

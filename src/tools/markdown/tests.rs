@@ -2829,10 +2829,9 @@ async fn format_compact_live_renders_claude_md_as_map_shape() {
         "MAP must render top heading with line number, got: {}",
         rendered.chars().take(500).collect::<String>()
     );
-    assert!(
-        rendered.contains("  ### "),
-        "MAP must indent level-3 headings by 4 spaces (level-1*2)"
-    );
+    // Level-3 indentation is asserted on a fixed fixture in
+    // `format_compact_map_shape_renders_indented_headings`, which kills a zeroed indent at the
+    // MAP site. CLAUDE.md is edited freely and need not contain a `###` heading.
     assert!(rendered.contains("next: "), "MAP must end with next-cue");
     // The hint must carry the file_id verbatim so the agent can copy-paste it.
     let file_id = result["file_id"].as_str().unwrap();
