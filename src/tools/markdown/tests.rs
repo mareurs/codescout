@@ -2790,51 +2790,57 @@ fn format_compact_error_without_headings_still_renders_error_prefix() {
 // ── format_compact live-render verification ───────────────────────────────────
 
 #[tokio::test]
-async fn format_compact_live_renders_claude_md_as_map_shape() {
-    // Live verification: read the real CLAUDE.md from the repo root, then
-    // invoke format_compact on the response. This exercises the same rendering
-    // path call_content uses when the response is buffered. Round 1 round 2
-    // scored JSON only — this test closes the format_compact gap.
-
-    let claude_md = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("CLAUDE.md");
-    if !claude_md.exists() {
-        // Project's own CLAUDE.md is the fixture; skip if missing (e.g. CI checkout).
-        eprintln!("SKIP: CLAUDE.md not present at {}", claude_md.display());
-        return;
+async fn format_compact_live_renders_a_long_file_as_map_shape() {
+    // Live verification of the MAP branch: read() a real file over the inline byte limit,
+    // then render the response through format_read, the path call_content uses when the
+    // response is buffered. The fixture is generated, not the repo's CLAUDE.md: that file is
+    // edited freely and is now far under the limit, and a fixture must keep its load-bearing
+    // detail. That detail is SIZE IN BYTES (~14 KB): a file that is merely over the line cap
+    // gets tier 2 (content + heading map, no `file_id`), not the MAP shape asserted here.
+    let filler = "x".repeat(60);
+    let mut body = String::from("# codescout\n\n## Section A\n\n");
+    for i in 0..200 {
+        body.push_str(&format!("line {i} {filler}\n"));
     }
+    body.push_str("\n### Sub B\n\ntail\n");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("long.md");
+    std::fs::write(&path, &body).unwrap();
 
     let ctx = test_ctx().await;
     let result = crate::tools::markdown::read_markdown::read(
-        serde_json::json!({"path": claude_md.to_str().unwrap()}),
+        serde_json::json!({"path": path.to_str().unwrap()}),
         &ctx,
     )
     .await
     .unwrap();
 
-    // The response shape must be MAP (CLAUDE.md exceeds line cap).
     assert!(
         result.get("headings").is_some(),
-        "expected MAP shape, got: {result}"
+        "expected MAP shape for a {}-byte file, got: {result}",
+        body.len()
     );
     assert!(result.get("file_id").is_some(), "MAP requires file_id");
 
     let rendered = crate::tools::markdown::read_markdown::format_read(&result)
         .expect("format_compact must return Some for MAP shape");
 
-    // Structural invariants on the rendered text.
     assert!(
         rendered.contains("lines  @file_"),
         "MAP header must show `<n> lines  <file_id>`, got first 200 chars: {}",
         rendered.chars().take(200).collect::<String>()
     );
-    assert!(
-        rendered.contains("# codescout  L1"),
-        "MAP must render top heading with line number, got: {}",
-        rendered.chars().take(500).collect::<String>()
-    );
-    // Level-3 indentation is asserted on a fixed fixture in
-    // `format_compact_map_shape_renders_indented_headings`, which kills a zeroed indent at the
-    // MAP site. CLAUDE.md is edited freely and need not contain a `###` heading.
+    let lines: Vec<&str> = rendered.lines().collect();
+    for want in [
+        "# codescout  L1",
+        "  ## Section A  L3",
+        "    ### Sub B  L206",
+    ] {
+        assert!(
+            lines.contains(&want),
+            "MAP line must be exactly {want:?}, got: {rendered}"
+        );
+    }
     assert!(rendered.contains("next: "), "MAP must end with next-cue");
     // The hint must carry the file_id verbatim so the agent can copy-paste it.
     let file_id = result["file_id"].as_str().unwrap();

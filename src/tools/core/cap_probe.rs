@@ -249,9 +249,9 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // (tests.rs) drives the cap cleanly (41 headings, ~1.8KB, well under the byte
         // budget) through the real `call_content()` surface, but its assertions check for
         // "lines"/'L', never the literal "@file_" substring;
-        // `format_compact_live_renders_claude_md_as_map_shape` (tests.rs) does assert
-        // `contains("lines  @file_")` against a live CLAUDE.md read, but CLAUDE.md has 15
-        // headings against HEADINGS_HARD_CAP=40 and 40143 bytes against the
+        // `format_compact_live_renders_a_long_file_as_map_shape` (tests.rs) does assert
+        // `contains("lines  @file_")` against a real read, but its generated fixture has 3
+        // headings against HEADINGS_HARD_CAP=40 and ~14 KB against the
         // MAX_INLINE_TOKENS*4=10000-byte oversized threshold, so its MAP-shape escalation
         // is driven by the byte-size path, not the headings-count path — confounded
         // evidence for a different cap. Reclassifying to `Deferred` rather than inventing

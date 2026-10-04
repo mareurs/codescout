@@ -2087,7 +2087,7 @@ mod tests {
     /// tested against sizes chosen to discriminate, not only against a file that is within budget
     /// today.
     // cap-class: NOT_A_CAP — test-only ratchet asserting a document's size; it bounds no runtime path
-    const CLAUDE_MD_BYTE_BUDGET: usize = 33_700;
+    const CLAUDE_MD_BYTE_BUDGET: usize = 5_600;
 
     /// Whether the `CLAUDE.md` at `path` is within `budget` bytes, and what to do when it is not.
     /// It measures the file itself, so the live test and the synthetic ones share one measurement

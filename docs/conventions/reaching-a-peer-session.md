@@ -14,7 +14,8 @@ topic: multi-session coordination
 
 # Reaching a peer session — the long form
 
-Several agent sessions share this checkout. `CLAUDE.md` § *Reaching a Peer Session* holds the rules in compact form; this page keeps the full argument and the measurements behind them, moved here unchanged from that section on 2026-10-02.
+Several agent sessions share this checkout. `CLAUDE.md` § *Reaching a Peer Session* points here; this page keeps the full argument and the measurements behind the rules, moved here unchanged from that section on 2026-10-02.
+
 Several agent sessions routinely share this checkout. **Messaging the wrong one is the common
 failure, and the cause is always the same: `ListAgents` answers a narrower question than it
 appears to.**

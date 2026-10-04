@@ -700,7 +700,7 @@ jobs:
           test -f "$DIR/cmd/git.exe" || { echo "git.exe missing at $DIR/cmd" >&2; exit 1; }
           echo "CODESCOUT_BASH=Z:${UNIX_PATH//\//\\}" >> "$GITHUB_ENV"
           echo "WINEPATH=Z:${DIR//\//\\}\\cmd" >> "$GITHUB_ENV"
-      # SKIP LIST — 10 entries covering 13 tests, every one classified below.
+      # SKIP LIST — every entry classified below.
       #
       # MEASURED, in two passes, and the second pass is the one that counts.
       #   Locally (wine 11.16, zero skips): exactly these fail.
@@ -731,15 +731,10 @@ jobs:
       #    them. Setting WINEPATH to PortableGit's `cmd/` (above) fixes all three. They are no
       #    longer skipped. If they regress, check that step's `git.exe` guard first.
       #
-      # 3. format_compact_live_renders_claude_md_as_map_shape — permanent for any CROSS-COMPILED
-      #    lane, by construction. The test deliberately reads the repo's real CLAUDE.md via
-      #    `env!("CARGO_MANIFEST_DIR")`, which bakes in the BUILD machine's path at compile time.
-      #    Cross-compiling from Linux that is a Unix root, and `Path::join` under Windows
-      #    semantics then yields a hybrid with no drive letter:
-      #      relative path '/home/runner/work/codescout/codescout\CLAUDE.md' requires an active project
-      #    It passes on windows-latest, where CARGO_MANIFEST_DIR is a real Windows path. Do NOT
-      #    "fix" the fixture by making the path absolute — the path IS the build machine's, and
-      #    using the real CLAUDE.md is the whole point of the test.
+      # 3. RESOLVED 2026-10-04. The MAP-shape live test read the repo's real CLAUDE.md through
+      #    `env!("CARGO_MANIFEST_DIR")`, a hybrid path when cross-compiled. It now generates its
+      #    fixture in a tempdir (format_compact_live_renders_a_long_file_as_map_shape) and is no
+      #    longer skipped.
       #
       # 4. background_command_with_quotes_captures_output — permanent, root cause KNOWN
       #    (2026-08-07): wine has no Python launcher and the test's command is `py -c "..."`. Run
@@ -842,7 +837,7 @@ jobs:
       # hang cost more wall-clock before failing the same way.
       # docs/issues/archive/2026-08-26-wine-lane-runs-wine-9-and-diverges-from-the-local-loop.md
       - name: Cross-test under wine (lib only)
-        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip format_compact_live_renders_claude_md_as_map_shape --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page
+        run: scripts/build-windows.sh test --lib -- --skip symbols_path_type --skip symbols_name_path_pattern_in_directory --skip include_docs_attaches_docs_in_search_mode --skip background_command_with_quotes_captures_output --skip buffer_query_truncation_hint_shows_next_page
 
   tool-docs-sync:
     name: Tool Docs Sync

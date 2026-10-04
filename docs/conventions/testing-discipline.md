@@ -14,7 +14,8 @@ topic: test rigor and what a green suite proves
 
 # Testing discipline — the laws in full
 
-`CLAUDE.md` § *Testing Discipline* holds each law in compact form. This page keeps their full wording, with the measurements and incident history inside each, moved here unchanged on 2026-10-03. The derivations behind the laws are in [`what-green-is-evidence-for.md`](what-green-is-evidence-for.md).
+`CLAUDE.md` § *Testing Discipline* points here. This page keeps each law's full wording, with the measurements and incident history inside each, moved here unchanged on 2026-10-03. The derivations behind the laws are in [`what-green-is-evidence-for.md`](what-green-is-evidence-for.md).
+
 The gate above tells you how to get green. This tells you what green is worth. Every derivation,
 measurement, date and superseded formulation →
 [`docs/conventions/what-green-is-evidence-for.md`](docs/conventions/what-green-is-evidence-for.md).

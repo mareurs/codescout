@@ -14,7 +14,8 @@ topic: defect classes the right party cannot see
 
 # Observer blindness — the long form
 
-`CLAUDE.md` § *Observer Blindness* holds the rule and its three-part remedy. This page keeps the section's full text, including the measurements and incident accounts that sit inside it, moved here unchanged on 2026-10-03. The class ledger is [`docs/trackers/observer-blindness.md`](../trackers/observer-blindness.md).
+`CLAUDE.md` § *Observer Blindness* points here. This page keeps the section's full text, including the measurements and incident accounts that sit inside it, moved here unchanged on 2026-10-03. The class ledger is [`docs/trackers/observer-blindness.md`](../trackers/observer-blindness.md).
+
 Some defect classes are invisible to the party best placed to catch them **by construction**, and
 they return a **plausible answer rather than an error** — so nothing downstream fires either. For
 these, "be careful" is not a weak remedy, it is the **wrong instrument**. Measured 2026-08-30: four

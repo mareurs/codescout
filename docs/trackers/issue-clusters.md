@@ -357,7 +357,7 @@ delete this subsection in the same commit.
 | IC-3 | declaration is not execution | `declared-not-wired` | `OB-7` — promoted 2026-09-01 |
 | IC-4 | config propagation is additive | `config-propagation-is-additive` | `OB` — passes admission test; hook owed |
 | IC-5 | the reproduction environment is not the gating environment | `repro-env-diverges-from-gate-env` | `H` — seven subsystems **adjudicated over 12 members, not re-adjudicated since**; the *"mechanism owed"* clause is **withdrawn 2026-09-04** as stale |
-| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | `CLAUDE.md` § Parsers Over a Namespace — **landed** |
+| IC-6 | an addressing scheme with no escape hatch | `addressing-without-an-escape-hatch` | `docs/conventions/parsers-over-a-namespace.md` — **landed** |
 | IC-7 | lazy warm-up bills the first caller | `lazy-warmup-bills-the-first-caller` | not yet — 2 of 4 unconfirmed |
 | IC-8 | a record asserts a completed action nothing re-checked | `record-asserts-an-unchecked-completion` | `DC` |
 | IC-9 | an assertion over environment-controlled text is satisfiable by accident | `assertion-satisfiable-by-accident` | not yet — two tags withdrawn as misfits |
@@ -367,7 +367,7 @@ delete this subsection in the same commit.
 | IC-13 | a capped result is presented as complete | `capped-result-presented-as-complete` | clears both bars — **spread re-derived 2026-09-01 over the 9 then: 5 coarse / 7 fine** (was 6 / 11 over the pre-ruling 16); **not re-derived over the 12** |
 | IC-14 | a guard's coverage is narrower than its name | `guard-narrower-than-its-name` | **CLEARS BOTH BARS — spread RE-ADJUDICATED 2026-09-04 over the whole membership: 16 distinct guards** (was 6 over the 11 then), 14 cited code subsystems as a corroborating floor |
 | IC-15 | a parameter is accepted then silently dropped | `accepted-parameter-silently-dropped` | clears count; **spread adjudicated 2026-09-01 — 6 subsystems** |
-| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | **clears both bars 2026-09-01**; rule already in `CLAUDE.md` — the third instance buys measurability, not a rule |
+| IC-16 | an assertion that cannot fail | `assertion-that-cannot-fail` | **clears both bars 2026-09-01**; rule already in `docs/conventions/testing-discipline.md` — the third instance buys measurability, not a rule |
 | IC-17 | a shared resource carries no owner, so enumerating the peer does not help | `shared-resource-carries-no-owner` | `OB-8` (+ OB-2) — 2026-09-01 |
 | IC-18 | a selector is narrower than the population it names | `selector-narrower-than-its-population` | clears both bars 2026-09-01 — 6 subsystems; remedy already Accepted as ADR-2026-08-27 for the tool-facing half |
 | IC-19 | a truncated window is ordered by a key unrelated to why it was requested | `truncated-window-ordered-by-the-wrong-key` | **clears the count bar on creation** — 4 subsystems as of 2026-09-02; spread and `OB` routing still unadjudicated |
