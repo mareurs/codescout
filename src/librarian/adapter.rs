@@ -1268,6 +1268,27 @@ mod tests {
             assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
         }
     }
+    /// The comparison's edge, derived and not cited: the index is `["a","b","c"]` and its byte
+    /// size is measured from the payload. A text that exactly TIES the index does not outweigh
+    /// it (the ids stay the answer); one byte over does. The two rows either side keep a
+    /// comparison written the wrong way round from passing on the tie alone.
+    #[test]
+    fn the_text_must_strictly_outweigh_the_index_at_a_tie() {
+        let ids = json!(["a", "b", "c"]);
+        let n = ids.to_string().len();
+        for (label, text_len, expect) in [
+            ("one byte under the index", n - 1, None),
+            ("an exact tie: the index is not outweighed", n, None),
+            (
+                "one byte over: the text outweighs the index",
+                n + 1,
+                Some("$.note"),
+            ),
+        ] {
+            let payload = json!({ "note": "n".repeat(text_len), "ids": ids });
+            assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
 
     /// A scoped read keeps `$.body` even when a larger string sits beside it. Asserted at the
     /// TRAIT METHOD: `scoped_body_hint` alone cannot tell which of the two rules
