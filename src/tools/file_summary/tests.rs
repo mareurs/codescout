@@ -438,6 +438,63 @@ fn bound_summary_cuts_an_array_one_level_down_and_marks_it_beside_the_array() {
     );
     assert!(notes[0].starts_with("schema.keys: "), "{}", notes[0]);
 }
+#[test]
+fn bound_summary_shares_the_budget_between_two_competing_arrays() {
+    // Two arrays in one summary, one of them nested. A SYNTHETIC shape: no summarizer produces
+    // two today (a default markdown read marks every heading seen, so `coverage.unread` never
+    // rides beside the map). It pins the allocation for the day one does: cutting the larger
+    // while the other stood whole once left it no room, and EVERY entry was dropped.
+    let headings: Vec<serde_json::Value> = (1..=200)
+        .map(|i| serde_json::json!({"h": format!("## S{i:03} {}", "w".repeat(60)), "l": 3 * i}))
+        .collect();
+    let unread: Vec<serde_json::Value> = (1..=200)
+        .map(|i| serde_json::json!(format!("## S{i:03} {}", "w".repeat(60))))
+        .collect();
+    let s = serde_json::json!({
+        "lines": 600,
+        "headings": headings,
+        "coverage": {"read": 1, "total": 200, "unread": unread},
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    let h = cut["headings"].as_array().unwrap();
+    assert!(h.len() > 10, "the heading map was wiped: {} left", h.len());
+    assert!(h[0]["h"].as_str().unwrap().contains("S001"));
+    assert!(h.last().unwrap()["h"].as_str().unwrap().contains("S200"));
+    let u = cut["coverage"]["unread"].as_array().unwrap();
+    assert!(u.len() > 10, "the unread list was wiped: {} left", u.len());
+    assert!(u[0].as_str().unwrap().contains("S001"));
+    assert!(u.last().unwrap().as_str().unwrap().contains("S200"));
+    assert_eq!(cut["coverage"]["unread_truncated"], true);
+    assert_eq!(notes.len(), 2, "{notes:?}");
+}
+
+#[test]
+fn bound_summary_spares_an_array_that_fits_its_share_and_gives_its_leftover_away() {
+    // `keys` is ~600 B and fits any fair share; `symbols` is huge. The small one must be
+    // returned whole AND what it leaves unused must go to the large one: a plain equal split
+    // would give `symbols` only half the room.
+    let s = serde_json::json!({
+        "type": "source",
+        "keys": numbered_entries(12),
+        "symbols": numbered_entries(400),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+
+    assert_eq!(
+        cut["keys"].as_array().unwrap().len(),
+        12,
+        "a small array was cut"
+    );
+    assert!(cut.get("keys_truncated").is_none());
+    let kept = cut["symbols"].as_array().unwrap().len();
+    assert!(
+        kept >= 85,
+        "the leftover was not handed on: only {kept} symbols kept (an equal split keeps ~55)"
+    );
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+}
 
 #[test]
 fn bound_summary_note_is_a_ready_to_run_call_naming_the_handle_and_the_gap() {

@@ -444,6 +444,18 @@ fn read_markdown_default_tiers(
         if let Some(c) = md_cov {
             result["coverage"] = c;
         }
+        // The map lists EVERY heading, and `HEADINGS_HARD_CAP` only chooses this tier: it bounds
+        // nothing in it. Heading text has no length, so a 200-heading file of ordinary titles
+        // is ~15 KB of map, and `call_content` buffered it again under `@tool_*` beside
+        // `file_id`. Bound it by bytes, with the note in the hint the renderer prints as
+        // `next:`. (`coverage` cannot add a second list here: a default read counts every
+        // heading as seen, so `markdown_coverage` returns `None`. The bound would cut one
+        // anyway if that ever changed.)
+        let (mut result, notes) = crate::tools::file_summary::bound_summary(result, &file_id);
+        if !notes.is_empty() {
+            let hint = result["hint"].as_str().unwrap_or("").to_string();
+            result["hint"] = json!(format!("{hint} {}", notes.join(" ")));
+        }
         return Ok(result);
     }
 
@@ -656,7 +668,14 @@ pub(crate) fn format_read(result: &Value) -> Option<String> {
         let lines = result.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
         let file_id = result.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
         let mut out = format!("{} lines  {}\n\n", lines, file_id);
-        for entry in headings {
+        for (i, entry) in headings.iter().enumerate() {
+            // The gap line replaces nothing: it sits between the two kept halves. Its helper
+            // leads with a newline for the indented outline in `read_file`; here every entry
+            // already ends with one.
+            if let Some(gap) = crate::tools::read_file::omitted_gap(result, "headings", i) {
+                out.push_str(gap.trim_start_matches('\n'));
+                out.push('\n');
+            }
             let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
             let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
             let level = h.chars().take_while(|c| *c == '#').count().max(1);

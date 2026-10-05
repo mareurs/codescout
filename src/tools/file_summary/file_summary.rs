@@ -1180,9 +1180,13 @@ pub(crate) const SUMMARY_BYTE_BUDGET: usize = 6_000;
 /// shared EQUALLY between them rather than spent largest-first, because `head` and `tail` are
 /// both informative and a largest-first pass would crush the first one to its floor.
 ///
-/// **Then arrays** (`symbols`, `sections`, `headings`, `keys`, at the top level or one level down,
-/// where `summarize_json` keeps `schema.keys`): the largest array loses its
-/// MIDDLE entries — the first and last halves of what is left of the budget survive. Entries
+/// **Then arrays** (`symbols`, `sections`, `headings`, `keys`, at the top level or one level
+/// down, where `summarize_json` keeps `schema.keys`): every array is taken
+/// out, what is left is the fixed part, and the rest of the budget is shared between the arrays
+/// by max-min fairness. Smallest first, each gets at most an equal share of what remains, so an
+/// array that fits its share is returned whole and what it leaves unused goes to the larger
+/// ones. Each cut array loses its MIDDLE entries: the first and last halves of its allowance
+/// survive. Entries
 /// stay objects of the same shape, so no consumer sees a foreign element; the gap is described
 /// in structured keys beside the array (`<key>_truncated`, `total_<key>` if absent, and
 /// `<key>_omitted {after, count, from_line, to_line}`) and rendered where it falls.
@@ -1229,49 +1233,84 @@ pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<St
             ));
         }
     }
+    if size(&summary) <= SUMMARY_BYTE_BUDGET {
+        return (summary, notes);
+    }
 
     // ---- arrays ----
     // Top level, and one level down: `summarize_json` nests its key list under `schema`.
-    // (parent pointer, key, serialized bytes)
-    let mut arrays: Vec<(String, String, usize)> = Vec::new();
+    let mut found: Vec<(String, String)> = Vec::new(); // (parent pointer, key)
     for (k, v) in summary.as_object().into_iter().flatten() {
         match v {
-            Value::Array(a) if a.len() > 1 => {
-                arrays.push((String::new(), k.clone(), v.to_string().len()));
-            }
+            Value::Array(a) if a.len() > 1 => found.push((String::new(), k.clone())),
             Value::Object(inner) => {
                 for (ik, iv) in inner {
                     if iv.as_array().is_some_and(|a| a.len() > 1) {
-                        arrays.push((format!("/{k}"), ik.clone(), iv.to_string().len()));
+                        found.push((format!("/{k}"), ik.clone()));
                     }
                 }
             }
             _ => {}
         }
     }
-    arrays.sort_by_key(|(_, _, bytes)| std::cmp::Reverse(*bytes));
-    for (parent, key, _) in arrays {
-        if size(&summary) <= SUMMARY_BYTE_BUDGET {
-            break;
+    // Take every array OUT first, so what is left is the fixed part, then share what is left
+    // between them. Cutting the largest while the others are still whole would leave it no room
+    // at all: with two arrays in one summary, the larger lost EVERY entry.
+    let mut taken: Vec<(String, String, Vec<Value>, usize)> = Vec::new();
+    for (parent, key) in found {
+        let Some(entries) = summary
+            .pointer(&parent)
+            .and_then(|h| h.get(&key))
+            .and_then(Value::as_array)
+            .cloned()
+        else {
+            continue;
+        };
+        let bytes = size(&Value::Array(entries.clone()));
+        if let Some(slot) = summary.pointer_mut(&parent).and_then(|h| h.get_mut(&key)) {
+            *slot = Value::Array(Vec::new());
         }
-        if let Some(note) = cut_array_middle(&mut summary, &parent, &key, file_id) {
+        taken.push((parent, key, entries, bytes));
+    }
+    let count = taken.len();
+    // 300 B per array for the structured markers a cut adds beside it.
+    let mut remaining = SUMMARY_BYTE_BUDGET.saturating_sub(size(&summary) + 300 * count);
+    // Smallest first, each getting at most an equal share of what is left: an array that fits
+    // its share is returned whole, and what it leaves unused goes to the larger ones.
+    taken.sort_by_key(|(_, _, _, bytes)| *bytes);
+    for (i, (parent, key, entries, bytes)) in taken.into_iter().enumerate() {
+        let fair = remaining / (count - i);
+        if bytes <= fair {
+            // Fits its share whole: put it back untouched. Cutting by halves of its own size
+            // would lose up to an entry of what fits, because each half rounds down.
+            remaining -= bytes;
+            if let Some(slot) = summary.pointer_mut(&parent).and_then(|h| h.get_mut(&key)) {
+                *slot = Value::Array(entries);
+            }
+            continue;
+        }
+        remaining -= fair;
+        if let Some(note) = cut_array_middle(&mut summary, &parent, &key, entries, fair, file_id) {
             notes.push(note);
         }
     }
     (summary, notes)
 }
 
-/// Drop the MIDDLE entries of the array `key` inside the object at JSON pointer `parent` ("" is
-/// the summary itself; `/schema` for a JSON summary's key list), so the whole summary fits
-/// [`SUMMARY_BYTE_BUDGET`].
+/// Cut the MIDDLE entries out of `entries`, the array `key` inside the object at JSON pointer
+/// `parent` ("" is the summary itself; `/schema` for a JSON summary's key list), keeping what
+/// fits `allowance` bytes, half from each end. The caller took the array out and priced it.
 /// Returns the note for the caller's hint, or `None` when `key` is not an array.
-fn cut_array_middle(summary: &mut Value, parent: &str, key: &str, file_id: &str) -> Option<String> {
-    let entries = summary.pointer(parent)?.get(key)?.as_array()?.clone();
+fn cut_array_middle(
+    summary: &mut Value,
+    parent: &str,
+    key: &str,
+    entries: Vec<Value>,
+    allowance: usize,
+    file_id: &str,
+) -> Option<String> {
     let total = entries.len();
-    *summary.pointer_mut(parent)?.get_mut(key)? = Value::Array(Vec::new());
-    // Everything else, then 300 B for the structured markers added below.
-    let base = summary.to_string().len();
-    let half = SUMMARY_BYTE_BUDGET.saturating_sub(base + 300) / 2;
+    let half = allowance / 2;
     let cost = |e: &Value| e.to_string().len() + 1; // +1 for the comma
 
     let (mut head, mut used) = (0usize, 0usize);
@@ -1284,16 +1323,17 @@ fn cut_array_middle(summary: &mut Value, parent: &str, key: &str, file_id: &str)
         used += cost(&entries[total - 1 - tail]);
         tail += 1;
     }
-    // Unreachable by arithmetic: the caller only cuts a summary that is OVER budget, and if
-    // every entry fit its half of what is left, the whole could not be. A branch for it would
-    // be a guard nothing can reach, so the invariant is asserted instead of handled.
-    debug_assert!(
-        head + tail < total,
-        "cut_array_middle called on an array that fits: {head}+{tail} of {total}"
-    );
+    // The array fit its allowance (or only the brackets and commas it was priced with did not):
+    // put it back whole and say nothing, rather than mark a cut that removed no entry.
+    if head + tail >= total {
+        *summary.pointer_mut(parent)?.get_mut(key)? = Value::Array(entries);
+        return None;
+    }
 
     let omitted = total - head - tail;
-    let line_of = |e: &Value| e["line"].as_u64();
+    // Entries name their line `line` (symbols, sections, headings in a file summary) or `l`
+    // (the compact heading map `read_markdown` returns).
+    let line_of = |e: &Value| e["line"].as_u64().or_else(|| e["l"].as_u64());
     let from = entries.get(head).and_then(line_of);
     let to = if tail > 0 {
         entries

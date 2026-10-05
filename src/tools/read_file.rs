@@ -1215,7 +1215,7 @@ fn format_read_file_body(val: &Value) -> String {
 /// The line to print where `bound_summary` cut the middle out of `val[key]`, if `index` is
 /// where the gap falls: `    … 1384 symbols omitted (L59-L1442) …`. `None` everywhere else, and
 /// for a summary that was not cut.
-fn omitted_gap(val: &Value, key: &str, index: usize) -> Option<String> {
+pub(crate) fn omitted_gap(val: &Value, key: &str, index: usize) -> Option<String> {
     let gap = val.get(format!("{key}_omitted"))?;
     if gap["after"].as_u64()? as usize != index {
         return None;
@@ -2527,6 +2527,156 @@ mod tests {
             !crate::tools::exceeds_inline_limit(&text),
             "{} B",
             text.len()
+        );
+    }
+    // ---- read_markdown's oversized tier: the heading map is bounded by bytes ----
+    //
+    // `HEADINGS_HARD_CAP` (40) is a TRIGGER into the oversized tier, not a cap on what the
+    // tier returns: it then lists EVERY heading beside `file_id`. Its size is the headings'
+    // text, so the overflow point depends on heading width, not on a heading count. A file of
+    // 200 ordinary 60-character headings is ~15 KB of map.
+
+    fn markdown_with_headings(n: usize, width: usize) -> String {
+        (1..=n)
+            .map(|i| format!("## Section {i:03} {}\nbody {i}\n\n", "w".repeat(width)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_markdown_file_with_many_headings_is_mapped_inline_with_one_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("many.md");
+        std::fs::write(&path, markdown_with_headings(200, 60)).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(
+            text.contains("Section 001"),
+            "the FIRST heading must survive"
+        );
+        assert!(
+            text.contains("Section 200"),
+            "the LAST heading must survive"
+        );
+        assert!(
+            text.contains("entries omitted"),
+            "a cut must say so: {text:.300}"
+        );
+        assert!(
+            text.contains("headings omitted"),
+            "and show where: {text:.300}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_markdown_heading_map_that_fits_is_returned_whole() {
+        // 60 short headings: over HEADINGS_HARD_CAP (so the oversized tier), but a ~1.5 KB map.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("short.md");
+        std::fs::write(&path, markdown_with_headings(60, 4)).unwrap();
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["headings"].as_array().unwrap().len(),
+            60,
+            "{result:.300}"
+        );
+        assert!(result.get("headings_truncated").is_none(), "{result:.300}");
+        assert!(!result["hint"].as_str().unwrap().contains("omitted"));
+    }
+    #[tokio::test]
+    async fn the_cut_heading_map_shows_its_gap_between_the_two_halves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gapmap.md");
+        std::fs::write(&path, markdown_with_headings(200, 60)).unwrap();
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let gap = &result["headings_omitted"];
+        let after = gap["after"].as_u64().unwrap() as usize;
+        let from = gap["from_line"].as_u64().unwrap();
+        let to = gap["to_line"].as_u64().unwrap();
+        let headings = result["headings"].as_array().unwrap();
+        // Heading i (1-based) is on line 3i-2, so the gap spans the line AFTER the last kept
+        // head heading up to the line before the first kept tail heading.
+        assert_eq!(from, headings[after - 1]["l"].as_u64().unwrap() + 3);
+        assert_eq!(to + 1, headings[after]["l"].as_u64().unwrap());
+
+        let rendered = ReadFile
+            .format_compact(&result)
+            .expect("a markdown result renders");
+        let lines: Vec<&str> = rendered.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains("headings omitted"))
+            .unwrap_or_else(|| panic!("no gap line in: {rendered:.600}"));
+        assert!(
+            lines[at].contains(&format!("(L{from}-L{to})")),
+            "{}",
+            lines[at]
+        );
+        assert!(
+            lines[at - 1].contains(headings[after - 1]["h"].as_str().unwrap()),
+            "the entry before the gap must be the last kept head heading: {}",
+            lines[at - 1]
+        );
+        assert!(
+            lines[at + 1].contains(headings[after]["h"].as_str().unwrap()),
+            "the entry after the gap must be the first kept tail heading: {}",
+            lines[at + 1]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_default_markdown_read_marks_every_heading_seen_so_no_unread_list_is_returned() {
+        // PINS A REACHABILITY FACT the tier-3 bound relies on. A default (whole-file) read marks
+        // every heading as seen, so `markdown_coverage` has nothing unread to report even after
+        // a section was read first: no `coverage.unread` list can sit beside the heading map and
+        // double its size. (If this ever fails, the bound still cuts a nested array; this test
+        // only says the case just became reachable.)
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cov.md");
+        std::fs::write(&path, markdown_with_headings(200, 60)).unwrap();
+        let ctx = test_ctx().await;
+        ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Section 001" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            value["headings"].as_array().unwrap().len() > 10,
+            "{value:.200}"
+        );
+        assert!(
+            value.get("coverage").is_none(),
+            "{:.300}",
+            value["coverage"]
         );
     }
 
