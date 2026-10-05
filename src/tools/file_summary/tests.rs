@@ -622,6 +622,136 @@ fn bound_summary_string_threshold_is_exactly_500() {
     assert!(cut.get("summary_omitted").is_none());
     assert!(ser_len(&cut) <= 400, "{} B", ser_len(&cut));
 }
+// ---- the six survivors of the final mutation run: tests where ONLY the arithmetic decides ----
+
+#[test]
+fn bound_summary_takes_the_smallest_cut_when_no_share_fits_and_lets_the_arrays_finish() {
+    // B4. The fixed part leaves no room for `head` at ANY share: even with `head` cut to its
+    // marker alone, the whole array still does not fit. The smallest cut (share 0, marker only)
+    // is then taken and the ARRAY pass finishes the job. Taking no cut instead leaves 5,000 B of
+    // `head` that nothing can reduce, and the last resort drops the whole summary.
+    let budget = 900;
+    let marker = "\n--- head: 0 of 5000 bytes shown; the rest: read_file(path=\"@file_t\", \
+                  start_line=N, end_line=M) ---\n";
+    let s = serde_json::json!({"type": "x", "head": "h".repeat(5_000), "symbols": sevens(400)});
+    // Premise: with head at its smallest the summary is STILL over budget.
+    let floor = serde_json::json!({"type": "x", "head": marker, "symbols": sevens(400)});
+    assert!(ser_len(&floor) > budget, "{} B", ser_len(&floor));
+    // The array's allowance: what is left after the fixed part and 300 B of markers; cost 2 each.
+    let base = ser_len(&serde_json::json!({"type": "x", "head": marker, "symbols": []}));
+    let remaining = budget - base - 300;
+    let expected_kept = 2 * ((remaining / 2) / 2);
+
+    let (cut, notes) = super::bound_summary(s, "@file_t", budget);
+
+    assert!(
+        cut.get("summary_omitted").is_none(),
+        "dropped whole: {cut:.200}"
+    );
+    assert_eq!(cut["head"], marker, "head must be exactly its marker");
+    assert_eq!(cut["symbols"].as_array().unwrap().len(), expected_kept);
+    assert_eq!(
+        expected_kept, 230,
+        "fixture drifted: {remaining} B left for the array"
+    );
+    assert!(ser_len(&cut) <= budget, "{} B", ser_len(&cut));
+    assert_eq!(notes.len(), 1, "{notes:?}");
+}
+
+#[test]
+fn fit_envelope_accepts_an_envelope_that_lands_exactly_on_the_target_in_one_pass() {
+    // E5 and E3. The hint carries the cut note plus `hp` bytes of padding that exist ONLY when a
+    // note does, so the overhead probe (no note) and therefore the cut are the same for every
+    // `hp`: the first pass's envelope is a fixed ~8.8 KB plus `hp`, rising one byte per step.
+    // Sweeping `hp` from 0 therefore passes through EXACTLY the 9,000 B target, and that
+    // envelope must be accepted as it is: three `finish` calls (the whole, the overhead probe,
+    // ONE pass). `size < target` would reject it and cut again; an overhead not subtracted would
+    // overshoot on pass 1 and need a second pass. Neither can produce an envelope of exactly
+    // the target, so the search below fails for both.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    for hp in 0..400 {
+        let calls = std::cell::Cell::new(0);
+        let finish = |s: serde_json::Value, notes: &[String]| {
+            calls.set(calls.get() + 1);
+            let hint = if notes.is_empty() {
+                String::new()
+            } else {
+                format!("{} {}", notes.join(" "), "x".repeat(hp))
+            };
+            serde_json::json!({"s": s, "hint": hint})
+        };
+        let got = fit_envelope(summary.clone(), "@file_t", finish);
+        if ser_len(&got) == SUMMARY_ENVELOPE_BUDGET {
+            assert_eq!(
+                calls.get(),
+                3,
+                "hp {hp}: an envelope on the target must be accepted"
+            );
+            return;
+        }
+    }
+    panic!("no hint padding of 0..400 lands the envelope exactly on {SUMMARY_ENVELOPE_BUDGET} B");
+}
+
+#[test]
+fn fit_envelope_converges_in_exactly_two_passes_when_the_notes_overshoot_the_slack() {
+    // E4 and E7. The hint carries the cut note six times, ~700 B against the ~200 B of slack the
+    // 300 B marker reservation leaves, so the FIRST pass overshoots. The second must shrink the
+    // budget by exactly that excess and fit: four `finish` calls (whole, overhead, pass 1,
+    // pass 2). No shrink repeats pass 1's overshoot until the retries run out; a single pass
+    // never gets a second chance. Both end in the minimal summary instead of these symbols.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let calls = std::cell::Cell::new(0);
+    let finish = |s: serde_json::Value, notes: &[String]| {
+        calls.set(calls.get() + 1);
+        serde_json::json!({"s": s, "hint": notes.join(" ").repeat(6)})
+    };
+
+    let got = fit_envelope(summary, "@file_t", finish);
+
+    assert_eq!(
+        calls.get(),
+        4,
+        "whole, overhead, pass 1 (overshoots), pass 2 (fits)"
+    );
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B",
+        ser_len(&got)
+    );
+    assert!(
+        got["s"].get("summary_omitted").is_none(),
+        "fell back to the minimal summary"
+    );
+    assert_eq!(got["s"]["symbols"].as_array().unwrap().len(), 174);
+}
+
+#[test]
+fn fit_envelope_falls_back_to_the_minimal_summary_while_the_budget_is_still_positive() {
+    // E6, and the retry count. Whenever a note exists the envelope is a constant 10,500 B, so no
+    // budget fits and each pass shrinks the budget by 1,516. From ~8,990 B that leaves ~2,930 B
+    // after four passes: STILL POSITIVE, so the fallback must be the budget-0 minimal summary,
+    // not another cut at the leftover budget (which keeps symbols and claims to have fit). Seven
+    // `finish` calls: whole, overhead, four passes, the minimal; a fifth pass would make eight.
+    let summary =
+        serde_json::json!({"type": "source", "line_count": 400, "symbols": numbered_entries(400)});
+    let calls = std::cell::Cell::new(0);
+    let finish = |s: serde_json::Value, notes: &[String]| {
+        calls.set(calls.get() + 1);
+        if notes.is_empty() {
+            return serde_json::json!({"s": s});
+        }
+        let bare = ser_len(&serde_json::json!({"s": s, "pad": ""}));
+        serde_json::json!({"s": s, "pad": "p".repeat(10_500 - bare)})
+    };
+
+    let got = fit_envelope(summary, "@file_t", finish);
+
+    assert_eq!(got["s"]["summary_omitted"], true, "{:.300}", got["s"]);
+    assert!(got["s"].get("symbols").is_none());
+    assert_eq!(got["s"]["line_count"], 400);
+    assert_eq!(calls.get(), 7, "whole, overhead, four passes, the minimal");
+}
 
 #[test]
 fn bound_summary_shares_the_budget_equally_between_wide_strings() {
