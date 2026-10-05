@@ -3025,6 +3025,71 @@ async fn a_banded_query_budgets_stdout_against_the_escaped_stderr() {
         text.len()
     );
 }
+// ---- the banded arm's hint names a route that works for the ref the caller queried ----
+//
+// BUG-adjacent, found by the 2026-10-05 sibling sweep. The third buffer-only arm (output a few
+// hundred bytes under the summary threshold) carried one hard-coded hint: "a single grep match
+// inside a @tool_* ref ... Use read_file(@tool_abc, json_path=\"$.field\")". On a `@cmd_*` or
+// `@file_*` query `read_file` REFUSES `json_path`, and `@tool_abc` is a literal placeholder.
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cmd_query_in_the_banded_arm_gets_routes_that_work_on_a_cmd_ref() {
+    let (_dir, ctx) = project_ctx().await;
+    // 98 lines x 100 B = 9,800 B: over the arm's guard, under the summary threshold, and more
+    // than the arm's byte budget, so it truncates by bytes and the hint fires.
+    let stdout: String = (1..=98)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stdout, String::new(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep row {id}")).await;
+
+    assert_eq!(
+        parsed["truncated"], true,
+        "the hint only fires on a cut: {text:.300}"
+    );
+    let hint = parsed["hint"].as_str().unwrap_or_default();
+    assert!(
+        !hint.contains("json_path") && !hint.contains("@tool_"),
+        "`read_file` refuses json_path on a {id} ref, and `@tool_abc` is a placeholder: {hint}"
+    );
+    assert!(
+        hint.contains(&id),
+        "the hint names the handle the caller used: {hint}"
+    );
+    let shown = parsed["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .lines()
+        .count();
+    assert!(
+        hint.contains(&format!("sed -n '{},", shown + 1)),
+        "the next page starts after the {shown} lines shown: {hint}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_tool_query_in_the_banded_arm_keeps_json_path_on_the_queried_handle() {
+    // `json_path` IS the right route on a `@tool_*` ref, so it stays — but on the real handle.
+    let (_dir, ctx) = project_ctx().await;
+    let blob = format!("{{\"rows\":[\"{}\"]}}", "r".repeat(9_800));
+    let id = ctx.output_buffer.store_tool("probe", blob);
+    let (text, parsed) = buffer_query(&ctx, format!("cat {id}")).await;
+
+    assert_eq!(parsed["truncated"], true, "{text:.300}");
+    let hint = parsed["hint"].as_str().unwrap_or_default();
+    assert!(
+        hint.contains(&format!("read_file(\"{id}\", json_path=")),
+        "a tool ref is read with json_path on ITS OWN handle: {hint}"
+    );
+    assert!(
+        !hint.contains("@tool_abc"),
+        "the placeholder is gone: {hint}"
+    );
+}
 
 #[cfg(unix)]
 #[tokio::test]

@@ -442,7 +442,10 @@ const BUFFER_QUERY_JSON_OVERHEAD: usize = 800;
 /// `@file_*` handles count too; an `.err` suffix is dropped, so the result is always the bare
 /// handle and a caller can append `.err` or not.
 fn queried_ref(command: &str) -> Option<&str> {
-    let start = command.find("@cmd_").or_else(|| command.find("@file_"))?;
+    let start = command
+        .find("@cmd_")
+        .or_else(|| command.find("@file_"))
+        .or_else(|| command.find("@tool_"))?;
     let rest = &command[start..];
     let end = rest
         .char_indices()
@@ -526,6 +529,22 @@ fn capped_hint(
         ));
     }
     hint
+}
+
+/// The hint on the banded arm (output a few hundred bytes under the summary threshold), chosen by
+/// the KIND of ref the caller queried. `read_file(.., json_path=..)` reads `@tool_*` refs only and
+/// is refused on `@cmd_*` / `@file_*`; this arm used to say it for every ref, with a literal
+/// `@tool_abc` in place of the handle, so on the refs `run_command` normally takes it named a
+/// route that could not work.
+fn banded_hint(query: &str, shown: usize, total: usize, clipped_wide: bool) -> String {
+    match queried_ref(query) {
+        Some(r) if r.starts_with("@tool_") => format!(
+            "Output cut to fit the response ({shown}/{total} lines shown). This ref holds compact \
+             JSON: read one field with read_file(\"{r}\", json_path=\"$.<field>\"), or browse the \
+             pretty-printed result with read_file(\"{r}\", start_line=N, end_line=M)."
+        ),
+        _ => capped_hint(query, shown, total, "", clipped_wide),
+    }
 }
 
 /// Build the response for a command that ran to completion — at any exit code.
@@ -853,13 +872,12 @@ pub(crate) async fn handle_successful_output(
             }
             if stdout_shown < stdout_total || clipped_wide {
                 r["truncated"] = json!(true);
-                r["hint"] = json!(
-                    "Match truncated: a single grep match inside a @tool_* ref \
-                     contains compact JSON (one very long line). \
-                     Use read_file(@tool_abc, json_path=\"$.field\") to extract \
-                     a specific field, or read_file(@tool_abc, start_line=N, \
-                     end_line=M) to browse sections of the pretty-printed result."
-                );
+                r["hint"] = json!(banded_hint(
+                    original_command,
+                    stdout_shown,
+                    stdout_total,
+                    clipped_wide,
+                ));
             }
             r
         } else if let Some(c) = (!buffer_only
