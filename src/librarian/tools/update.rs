@@ -2783,7 +2783,10 @@ text
         let body = "# Doc\n\n## A\nalpha body\n";
         for (action, extra) in [
             ("replace", serde_json::json!({"content": "new"})),
-            ("insert_before", serde_json::json!({"content": "new"})),
+            (
+                "insert_before",
+                serde_json::json!({"content": "## New\n\nnew"}),
+            ),
             ("insert_after", serde_json::json!({"content": "new"})),
             ("remove", serde_json::json!({})),
             (

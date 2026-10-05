@@ -282,6 +282,25 @@ pub(crate) fn plan_section_edit<'q, Q: Into<crate::tools::file_summary::HeadingQ
             let new = new_content.ok_or_else(|| {
                 anyhow::anyhow!("the section body is required for the insert_before action — `body` at the top level, `content` inside edits[]")
             })?;
+            // `insert_before` adds a SIBLING section, and `heading` names the ANCHOR, not the
+            // new section's title. The splice lands at the anchor's line start, which is the
+            // END of the preceding section, so a body that does not itself open with a heading
+            // line adds no section at all: its text is absorbed into whatever precedes the
+            // anchor, and the call would report ok. `replace` has the opposite contract (the
+            // heading is kept for you), which is the habit that produces this mistake.
+            if !opens_with_heading(new) {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "insert_before on {heading_query:?}: the new section's body must start \
+                         with its own heading line, and this one does not"
+                    ),
+                    "insert_before adds a sibling section and `heading` only names the anchor it \
+                     goes before, so put the new heading in the body, e.g. body=\"## New \
+                     section\\n\\ntext\\n\". To add text to an existing section instead, use \
+                     insert_after (appends to the target section) or replace.",
+                )
+                .into());
+            }
             let span = off.line_start(heading_idx)..off.line_start(heading_idx);
             // The splice lands after whatever blank lines precede the target heading, so
             // those stay ABOVE the inserted text and the text would butt against the
@@ -657,6 +676,19 @@ fn join_lines_tail(lines: &[&str]) -> String {
         return String::new();
     }
     lines.join("\n")
+}
+
+/// Whether `body`'s first non-blank line is an ATX heading (`#`..`######` then a space).
+///
+/// The test `insert_before` applies to its body: a sibling section starts with its own
+/// heading, and anything ahead of that heading would be spliced onto the end of the
+/// PRECEDING section. Judged on the first non-blank line only, so a heading buried below
+/// lead-in prose does not count, and by [`heading_level`](crate::tools::file_summary::heading_level)
+/// so `#hashtag` and seven hashes do not either.
+fn opens_with_heading(body: &str) -> bool {
+    body.lines()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|l| crate::tools::file_summary::heading_level(l).is_some())
 }
 
 /// Ensure `s` ends with exactly one newline.
@@ -1499,7 +1531,7 @@ pub(crate) const LONG_DOCS: &str =
      | Action | Effect on target section | Use when |\n\
      |---|---|---|\n\
      | `replace` | **OVERWRITES the entire body** (from line after the heading until next sibling heading). Heading preserved; subsections refused unless `include_subsections=true`. | The whole section body should be rewritten from scratch (e.g. refreshing a stale memory table). |\n\
-     | `insert_before` / `insert_after` | Adds a new sibling section before/after the target. Target body **preserved**. `at=\"end-of-section\"` (default) or `\"after-heading-line\"` for `insert_after`. | Adding adjacent sections without touching the target's body. |\n\
+     | `insert_before` / `insert_after` | Adds a new sibling section before/after the target. Target body **preserved**. `insert_before`'s body must open with its own heading line (refused otherwise, since the text would land in the preceding section). `at=\"end-of-section\"` (default) or `\"after-heading-line\"` for `insert_after`. | Adding adjacent sections without touching the target's body. |\n\
      | `remove` | Deletes target section (heading + body). | Removing a section entirely. |\n\
      | `edit` | Surgical text replacement within the section via `old_string` / `new_string`. Surrounding body preserved. | Fixing a typo, updating a single line, scoped substring change. |\n\n\
      **Common footgun:** reaching for `action=\"replace\"` when you meant `action=\"insert_after\"`. `replace` destroys the existing body; `insert_after` adds adjacent without loss. Verify-after-edit with `read_file(path, heading=\"...\")` on any non-trivial mutation.";
