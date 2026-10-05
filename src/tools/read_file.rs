@@ -1998,10 +1998,13 @@ mod tests {
         assert_eq!(ReadFile.json_path_hint(&without), "$.field");
     }
     /// ReadFile's hint, tested by FOLLOWING it for each buffered payload shape. A `content` string
-    /// hints itself (and wins even beside an array); a whole-file outline, an array of symbols
-    /// beside a `file_id`, hints the array. A payload with neither gets the shared default's
-    /// placeholder, pinned in `core/types.rs`, which is not a route and has no row here. This
-    /// replaces a test that compared the hint to a string.
+    /// hints itself (and wins even beside an array); an array of records with no `content`
+    /// hints the array. That shape is synthetic here, a pin on the fallback branch alone:
+    /// whole-file outlines are bounded inline now, and the live payload that takes this branch
+    /// is the missed-heading list, followed end to end by
+    /// `an_overflowing_missed_heading_list_hints_a_route_that_returns_data`. A payload with
+    /// neither gets the shared default's placeholder, pinned in `core/types.rs`, which is not a
+    /// route and has no row here. This replaces a test that compared the hint to a string.
     #[tokio::test]
     async fn read_file_hints_lead_to_the_data_for_each_payload_shape() {
         let ctx = test_ctx().await;
@@ -2037,48 +2040,46 @@ mod tests {
         );
     }
 
-    /// REACH and REMEDY for D4, through the real `call_content`. A whole-file read of a source
-    /// file with many symbols overflowed to `@tool_*` (beside its own `@file_*`) with the hint
-    /// `$.field`. The route the envelope names is followed with a real `read_file`; it must
-    /// not be the placeholder, must be an array projection, and must come back as data.
+    /// REACH and REMEDY for D4, through the real `call_content`, on the one `read_file` payload
+    /// that still overflows to `@tool_*` WITHOUT a `content` string: a heading that is not in a
+    /// markdown file answers `{ok:false, error, headings:[{h,l}..], hint}`, and a file with
+    /// enough headings makes that list the whole payload. Such a payload reaches the shared
+    /// default's array detection in `ReadFile::json_path_hint`, which used to answer the
+    /// placeholder `$.field`. The route the envelope names is followed with a real `read_file`;
+    /// it must not be the placeholder, must project `headings`, and must come back as data.
     ///
-    /// This depends on a whole-file source read overflowing. If a later change bounds that
-    /// summary so it no longer does, the precondition below fails by name instead of letting
-    /// the test pass over an envelope that was never produced.
+    /// This replaces a test that overflowed a 450-symbol whole-file read. Whole-file summaries
+    /// are now bounded to the inline limit at the source (`fit_envelope`), so that read stays
+    /// inline and never spills; every other `read_file` payload that spills (line ranges,
+    /// `json_path`, `toml_key`, a heading read) carries `content` and hints `$.content`. If a
+    /// later change bounds this list too, `envelope_of` fails by name instead of letting the test
+    /// pass over an envelope that was never produced.
     #[tokio::test]
-    async fn an_overflowing_whole_file_read_hints_a_route_that_returns_data() {
+    async fn an_overflowing_missed_heading_list_hints_a_route_that_returns_data() {
         use crate::tools::hint_probe::{envelope_of, follow_hint};
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
-        let source: String = (0..450)
-            .map(|i| {
-                format!(
-                    "pub fn function_number_{i:04}_with_a_long_name(a: u32, b: u32) -> u32 {{ a + b + {i} }}\n"
-                )
-            })
+        let doc: String = (0..1500)
+            .map(|i| format!("## Section number {i:04} with a long title\n\nbody {i}\n\n"))
             .collect();
-        std::fs::write(dir.path().join("big.rs"), source).unwrap();
+        std::fs::write(dir.path().join("notes.md"), doc).unwrap();
         let mut ctx = test_ctx().await;
         ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
 
         let content = ReadFile
-            .call_content(json!({ "path": "big.rs" }), &ctx)
+            .call_content(
+                json!({ "path": "notes.md", "heading": "## no such heading" }),
+                &ctx,
+            )
             .await
             .unwrap();
         let envelope = envelope_of(&content);
-        assert!(
-            envelope["output_id"]
-                .as_str()
-                .unwrap_or("")
-                .starts_with("@tool_"),
-            "precondition: a whole-file read of 450 symbols must overflow to @tool_*: {envelope}"
-        );
 
         let (jp, followed) = follow_hint(&envelope, &ctx).await;
         assert_ne!(jp, "$.field", "the placeholder is not a route");
-        assert!(
-            jp.ends_with("[*]"),
-            "an array projection was expected, got {jp:?}"
+        assert_eq!(
+            jp, "$.headings[*]",
+            "the array the payload is made of was expected"
         );
         let value =
             followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
@@ -2088,27 +2089,26 @@ mod tests {
         );
         // The type alone would pass for any array. The DATA must be there, first to last: the
         // projection is far over the inline budget, so it is parked under its own `@file_*`
-        // handle, and the first and last symbol must both be findable in it.
+        // handle, and the first and last heading must both be found in it exactly once.
         let file_id = value["file_id"]
             .as_str()
-            .unwrap_or_else(|| panic!("a 450-symbol projection must name its buffer: {value}"));
-        for name in [
-            "function_number_0000_with_a_long_name",
-            "function_number_0449_with_a_long_name",
-        ] {
+            .unwrap_or_else(|| panic!("a 1500-heading projection must name its buffer: {value}"));
+        for name in ["Section number 0000", "Section number 1499"] {
             let out = crate::tools::run_command::RunCommand
                 .call(
-                    json!({ "command": format!("grep -o {name} {file_id}") }),
+                    json!({ "command": format!("grep -c '{name}' {file_id}") }),
                     &ctx,
                 )
                 .await
                 .unwrap_or_else(|e| panic!("searching the projection for {name} failed: {e}"));
-            assert!(
-                out.to_string().contains(name),
-                "the route {jp:?} must return every symbol; {name} is missing from {file_id}: {out}"
+            assert_eq!(
+                out["stdout"].as_str().map(str::trim),
+                Some("1"),
+                "the route {jp:?} must return every heading; {name} is not in {file_id}: {out}"
             );
         }
     }
+
     /// D4b, by FOLLOWING every route the hint offers on a real buffer of each ref kind.
     /// `over_budget_line_hint` is only called from `read_from_buffer`, so its path is always a
     /// buffer ref. Its non-`@tool_` branch used to advise `json_path` on `@cmd_*`/`@file_*`
