@@ -28,6 +28,7 @@ curl -s -X POST http://127.0.0.1:PORT/mcp \
 ```json
 {
   "window": "30d",
+  "scope": "codescout MCP calls only; native harness tools (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded",
   "low_call_threshold": 5,
   "total_calls": 4217,
   "tools": [
@@ -52,6 +53,7 @@ curl -s -X POST http://127.0.0.1:PORT/mcp \
 | Field | Meaning |
 |-------|---------|
 | `window` | Time window analysed (default `30d`). |
+| `scope` | What the counts cover: the recorder sees codescout MCP calls only, so a native harness tool (`Read`, `Grep`, `Glob`, `Bash`, `Agent`, `WebFetch`) has no row in `tools` because it is *not recorded*, not because it is *unused*. |
 | `low_call_threshold` | Tools called fewer than this many times are flagged as `prune_candidates`. |
 | `total_calls` | Sum of calls across all tools in the window. |
 | `tools` | Per-tool stats from `usage.db`, ordered by call count descending. |

@@ -1,6 +1,17 @@
 pub mod db;
 pub(crate) mod deliveries;
 
+/// What every `tool_calls` reader must say beside a count or a zero.
+///
+/// The recorder is mounted on the MCP server boundary (`UsageRecorder` is reached
+/// only from codescout's own dispatch), so a native harness tool never reaches a
+/// writer. A zero for one of those reads as "never used" when the truth is "never
+/// recorded". One constant so the readers (`doctor://tool-usage`, the dashboard
+/// `/api/usage`) cannot drift apart.
+/// docs/issues/2026-09-01-tool-call-recorder-cannot-see-the-arm-under-evaluation.md
+pub const RECORDER_SCOPE: &str = "codescout MCP calls only; native harness tools \
+    (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded";
+
 use crate::agent::Agent;
 use anyhow::Result;
 use rmcp::model::Content;

@@ -300,6 +300,47 @@ mod tests {
         assert_eq!(failures[0]["language"], "kotlin");
         assert_eq!(failures[0]["error"], "LSP server disconnected");
     }
+    /// GET `uri` and return the JSON body.
+    async fn get_json(dir: &std::path::Path, uri: &str) -> serde_json::Value {
+        let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+        let resp = test_router(dir).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let body = axum::body::to_bytes(resp.into_body(), 1_000_000)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn usage_response_names_the_recorder_scope_beside_the_counts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // The DB exists but holds no tool_calls: a zero the reader must not take
+        // for "no native tool was used".
+        drop(crate::usage::db::open_db(dir.path()).unwrap());
+
+        let usage = get_json(dir.path(), "/api/usage").await;
+        assert_eq!(usage["available"], true);
+        assert_eq!(usage["scope"], crate::usage::RECORDER_SCOPE);
+        assert!(usage["scope"]
+            .as_str()
+            .unwrap()
+            .starts_with("codescout MCP calls only"));
+
+        // Negative control: /api/lsp reads lsp_events, not tool_calls, so the
+        // recorder-scope claim does not apply to it and must not be attached.
+        let lsp = get_json(dir.path(), "/api/lsp").await;
+        assert_eq!(lsp["available"], true);
+        assert!(lsp.get("scope").is_none(), "lsp response: {lsp}");
+    }
+
+    #[tokio::test]
+    async fn unavailable_usage_response_carries_no_scope() {
+        // No DB -> no counts -> nothing for a scope to qualify.
+        let dir = tempfile::TempDir::new().unwrap();
+        let usage = get_json(dir.path(), "/api/usage").await;
+        assert_eq!(usage["available"], false);
+        assert!(usage.get("scope").is_none(), "usage response: {usage}");
+    }
 
     #[tokio::test]
     async fn memories_list_returns_empty_for_fresh_project() {

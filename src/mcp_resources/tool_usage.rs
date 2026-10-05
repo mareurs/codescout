@@ -5,7 +5,8 @@
 //! (#7): quantify what the token-diet actually bought us and surface rarely-used
 //! tools for the next prompt-surface review.
 //!
-//! Returns JSON with fields: `window`, `total_calls`, `tools[]`,
+//! Returns JSON with fields: `window`, `scope` (what the recorder can and cannot
+//! see: codescout MCP calls only), `total_calls`, `tools[]`,
 //! `prune_candidates[]` (known tools called < LOW_CALL_THRESHOLD times),
 //! `unused_tools[]` (registered tools with zero calls in the window).
 
@@ -74,6 +75,10 @@ struct ReportEntry<'a> {
 #[derive(Debug, Serialize)]
 struct Report<'a> {
     window: &'a str,
+    /// What the counts below cover. The recorder sees codescout MCP calls only, so
+    /// a native tool's absence from `tools[]` or `unused_tools[]` means "not
+    /// recorded", not "not used". See [`crate::usage::RECORDER_SCOPE`].
+    scope: &'static str,
     low_call_threshold: i64,
     total_calls: i64,
     tools: Vec<ReportEntry<'a>>,
@@ -149,6 +154,7 @@ impl<S: UsageSource + 'static> ResourceProvider for ToolUsageProvider<S> {
 
         let report = Report {
             window,
+            scope: crate::usage::RECORDER_SCOPE,
             low_call_threshold: LOW_CALL_THRESHOLD,
             total_calls: snap.total_calls,
             tools,
@@ -372,5 +378,58 @@ mod tests {
         assert_eq!(parsed["unused_tools"], serde_json::json!([]));
         // And no prune candidate either (10 >= threshold).
         assert_eq!(parsed["prune_candidates"], serde_json::json!([]));
+    }
+    /// The recorder is mounted on the MCP server boundary, so every count in this
+    /// report is a count over codescout MCP calls only. A zero for a native tool
+    /// would otherwise read as "never used" rather than "never recorded".
+    /// docs/issues/2026-09-01-tool-call-recorder-cannot-see-the-arm-under-evaluation.md
+    const EXPECTED_SCOPE: &str = "codescout MCP calls only; native harness tools \
+        (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded";
+
+    #[tokio::test]
+    async fn report_names_the_recorder_scope_beside_the_counts() {
+        // Populated AND empty snapshots: the scope must sit beside a zero as
+        // much as beside a non-zero count, which is the misleading case.
+        for snap in [
+            UsageSnapshot::default(),
+            UsageSnapshot {
+                total_calls: 10,
+                by_tool: vec![make_stats("symbols", 10)],
+            },
+        ] {
+            let provider = ToolUsageProvider::new(FakeSource {
+                snap,
+                registered: vec!["symbols".into()],
+            });
+            let ResourceBytes::Text(json) = provider.read(URI).await.unwrap() else {
+                panic!()
+            };
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed["scope"], EXPECTED_SCOPE);
+            // Per member, not just "the field is non-empty": every omitted
+            // native tool is named.
+            let scope = parsed["scope"].as_str().unwrap();
+            for native in ["Read", "Grep", "Glob", "Bash", "Agent", "WebFetch"] {
+                assert!(scope.contains(native), "scope must name {native}: {scope}");
+            }
+            assert!(scope.starts_with("codescout MCP calls only"));
+        }
+    }
+
+    #[tokio::test]
+    async fn non_usage_resource_does_not_carry_the_recorder_scope() {
+        // Negative control: the scope belongs to the tool_calls readers. A
+        // resource that never reads tool_calls must not claim it, or the field
+        // would be noise attached to everything and stop being read
+        // (docs/adrs/2026-08-27-negative-results-name-their-scope.md, clause 2).
+        let guide = crate::mcp_resources::tool_guide::ToolGuideProvider::new(vec![]);
+        let ResourceBytes::Text(text) = guide.read("doc://codescout-tool-guide").await.unwrap()
+        else {
+            panic!()
+        };
+        assert!(
+            !text.contains("MCP calls only") && !text.contains("are not recorded"),
+            "tool-guide must not carry the recorder scope"
+        );
     }
 }
