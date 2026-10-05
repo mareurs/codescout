@@ -3383,6 +3383,113 @@ mod tests {
             sw.worst
         );
     }
+    #[tokio::test]
+    async fn sweep_tier_two_fall_through_across_the_edge_band() {
+        // The same sweep, for TIER 2: 210 lines (over LINE_SOFT_CAP), 30 headings. The earlier
+        // sweep has ~90 lines and only ever builds tier 1, so a tier-2 candidate built without
+        // `format` slipped past it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inline2.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for x in (2_300..=2_900).step_by(2) {
+            let section = |i: usize, last: usize| {
+                format!("## S{i:02}\n{}{}\n\n", "p".repeat(40) + "\n", {
+                    let mut lines = "q".repeat(40) + "\n";
+                    lines = lines.repeat(3);
+                    lines + &"r".repeat(40 + last)
+                })
+            };
+            let mut body: String = (1..30).map(|i| section(i, 0)).collect();
+            body.push_str(&section(30, x));
+            assert!(body.lines().count() > 150, "{}", body.lines().count());
+            assert!(
+                body.len() <= LIMIT,
+                "x={x}: the raw body must stay under the limit"
+            );
+            std::fs::write(&path, &body).unwrap();
+
+            let value = ReadFile
+                .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let size = value.to_string().len();
+            assert!(size <= LIMIT, "x={x}: the returned response is {size} B");
+            let text = read_text(&path).await;
+            assert!(
+                !text.contains("@tool_"),
+                "x={x}: parked under @tool_: {text:.120}"
+            );
+            assert!(handles_in(&text).len() <= 1, "x={x}: {text:.120}");
+            sw.points += 1;
+            sw.worst = sw.worst.max(size);
+            if value.get("content").is_some() {
+                assert!(
+                    value["lines"].as_u64().unwrap() > 150,
+                    "this must be tier 2"
+                );
+                sw.uncut += 1;
+                sw.worst_uncut = sw.worst_uncut.max(size);
+            } else {
+                sw.cut += 1;
+            }
+        }
+        eprintln!(
+            "SWEEP tier2: {} points, worst {} B, worst inline {} B, inline {}, fell through {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "the sweep stopped short of the band: {}",
+            sw.worst_uncut
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_multi_heading_read_with_coverage_across_the_edge_band() {
+        // A third, unread heading keeps `coverage` in the response. The candidate that drops only
+        // `sections` then carries `coverage` too, and its fit is decided by what it MEASURES: a
+        // candidate built without `format` was accepted up to 21 B too large (the no-coverage
+        // sweep cannot see this: the 24 B it always reserves for `coverage_omitted` absorbs it).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-cov.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for n in 4_700..=4_950 {
+            std::fs::write(&path, format!("{}\n## M3\nshort\n", two_sections_exact(n))).unwrap();
+            let input = json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] });
+            match ReadFile.call(input, &ctx).await {
+                Ok(value) => {
+                    let size = value.to_string().len();
+                    assert!(size <= LIMIT, "n={n}: the returned response is {size} B");
+                    sw.worst = sw.worst.max(size);
+                    sw.uncut += 1;
+                    if value.get("coverage").is_some() {
+                        sw.worst_uncut = sw.worst_uncut.max(size);
+                    }
+                }
+                Err(_) => sw.cut += 1,
+            }
+            sw.points += 1;
+        }
+        eprintln!(
+            "SWEEP multi+coverage: {} points, worst ok {} B, worst with coverage kept {} B, ok {}, error path {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "no response that KEPT its coverage reached the edge: {}",
+            sw.worst_uncut
+        );
+    }
 
     /// `## M1` and `## M2`, each a single line of exactly `n` plain bytes.
     fn two_sections_exact(n: usize) -> String {
