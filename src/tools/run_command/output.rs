@@ -554,6 +554,37 @@ const TEE_KEYS_LEN: usize = 160;
 /// Serialized bytes the `stderr_shown` / `stderr_total` counters add to a buffer-query response.
 const BUFFER_QUERY_COUNTER_KEYS_LEN: usize = 48;
 
+/// Byte ceiling on the `wip_authors` diagnostic a red run carries.
+///
+/// The diagnostic lists every uncommitted file the failure names, with who wrote it, so its size is
+/// files x peers and nothing else bounds it. Measured 2026-10-05 against `scripts/attribute-red.py`:
+/// a red naming 5 dirty files made a 1,466 B answer, 150 made 35,976 B. At that size the answer
+/// alone pushed the response over the inline limit, and the only thing standing between the caller
+/// and a content-free `@tool_*` envelope was a backstop in `call_content` whose marker says the
+/// tool's own buffer holds the cut text. For this field that is false: the diagnostic is computed
+/// from the streams and stored nowhere.
+///
+/// Cut here, at the source, with a remedy that is true, and by eliding the MIDDLE: the head is the
+/// first files named and the tail is the scope footer that keeps the diagnostic's silence from
+/// being read as an exoneration, which a head-only cut would drop. 3,000 B holds about 40 files of
+/// the shape measured, ahead of a footer of about 350 B.
+// cap-class: RESULT_CAP run_command.wip_authors_bytes — probed
+pub(super) const WIP_AUTHORS_BYTE_BUDGET: usize = 3000;
+
+/// `wip_authors`, cut to [`WIP_AUTHORS_BYTE_BUDGET`] behind a marker whose remedy is true.
+/// `git status --short` lists every uncommitted file in any repository, which is what a reader
+/// needs when the list was cut.
+pub(super) fn bound_wip_authors(text: String) -> String {
+    let len = text.len();
+    crate::util::text::elide_middle_bytes(
+        text,
+        len,
+        WIP_AUTHORS_BYTE_BUDGET,
+        "wip_authors",
+        "every uncommitted file: `git status --short`",
+    )
+}
+
 /// Bytes `handle_successful_output` adds to the response BEYOND the two streams, for the summary-or-
 /// inline gate: each present diagnostic (`,"key":"` + its escaped text + `"`), the tee keys when a
 /// capture is attached, and the counters a buffer query carries. Without it the gate judged the
@@ -742,7 +773,8 @@ pub(crate) async fn handle_successful_output(
         &format!("{raw_stdout}\n{raw_stderr}"),
         work_dir,
     )
-    .await;
+    .await
+    .map(bound_wip_authors);
 
     // Computed BEFORE the branch below, and the HOIST is the fix rather than tidying.
     // A `@cmd_*` entry stores both streams, but `grep`'s and `read_file`'s buffer

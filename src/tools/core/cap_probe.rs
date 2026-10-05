@@ -1104,6 +1104,22 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "a_short_buffer_query_bounds_a_wide_stored_stderr_by_bytes",
         },
     },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test runs a
+        // red naming 150 dirty files (a 36,277 B answer) through `handle_successful_output`
+        // against `WIP_AUTHORS_BYTE_BUDGET` 3,000. Nothing else bounds the field: it is sized by
+        // files x peers. The exact-at-the-limit and one-byte-over edges are pinned by
+        // `wip_authors_is_returned_whole_at_exactly_the_budget_and_cut_one_byte_over`, which a row
+        // cannot also cite. The cited test returns early, printing why, when git or python3 is
+        // absent; that is the repo's convention for the attribution engine. Marker written by
+        // production in `util::text::elide_middle_bytes`, called from `bound_wip_authors`.
+        id: "run_command.wip_authors_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_red_naming_many_dirty_files_carries_a_bounded_wip_authors",
+        },
+    },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
         id: "call_graph.workspace_files_scan",

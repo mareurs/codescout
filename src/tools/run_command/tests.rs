@@ -3452,6 +3452,240 @@ async fn following_the_stderr_marker_reads_the_whole_stream_back() {
         "the `.err` handle named by the marker holds the cut bytes: {t:.300}"
     );
 }
+// ---- wip_authors is bounded: files x peers is the only thing that sized it ----
+//
+// Measured 2026-10-05 against scripts/attribute-red.py: a red naming 5 dirty files answers in
+// 1,466 B, 150 in 35,976 B. Nothing capped the field, and the backstop in `call_content` says the
+// tool's own buffer holds what it cuts, which is false for a diagnostic computed from the streams.
+
+/// A git repo with `n` committed files that are then dirtied; names deep enough that the answer
+/// grows by ~240 B a file, like the repo paths that produced the measurement. `None` when git is
+/// unavailable, so a skipped run is never read as a passing one (the caller prints why).
+fn dirty_repo_with(n: usize) -> Option<(tempfile::TempDir, Vec<String>)> {
+    let dir = tempfile::tempdir().ok()?;
+    let p = dir.path();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(p)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+    };
+    git(&["init", "-q"])?;
+    git(&["config", "user.email", "t@t"])?;
+    git(&["config", "user.name", "t"])?;
+    let sub = "src/some/deeply/nested/module/directory";
+    std::fs::create_dir_all(p.join(sub)).ok()?;
+    let names: Vec<String> = (0..n)
+        .map(|i| format!("{sub}/file_number_{i:04}.rs"))
+        .collect();
+    for f in &names {
+        std::fs::write(p.join(f), "fn main() {}\n").ok()?;
+    }
+    git(&["add", "-A"])?;
+    git(&["commit", "-q", "-m", "seed"])?;
+    for f in &names {
+        std::fs::write(p.join(f), "fn main() { broken\n").ok()?;
+    }
+    Some((dir, names))
+}
+
+fn red_naming(files: &[String]) -> String {
+    files
+        .iter()
+        .map(|f| format!("error[E0425]: cannot find value `broken`\n  --> {f}:1:13\n"))
+        .collect()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_red_naming_many_dirty_files_carries_a_bounded_wip_authors() {
+    let (_ctx_dir, ctx) = project_ctx().await;
+    let run = |dir: std::path::PathBuf, red: String| {
+        let ctx = &ctx;
+        async move {
+            super::output::handle_successful_output(
+                "cargo build",
+                red,
+                String::new(),
+                101,
+                false,
+                None,
+                &dir,
+                ctx,
+            )
+            .await
+            .expect("a completed command returns a response")
+        }
+    };
+
+    // Control: the engine answers at all here. Without it an absent python3 yields the same
+    // missing field as a bound that deleted the diagnostic, and this would pass vacuously.
+    let Some((small_dir, small_files)) = dirty_repo_with(3) else {
+        eprintln!("skipping: git unavailable");
+        return;
+    };
+    let small = run(small_dir.path().to_path_buf(), red_naming(&small_files)).await;
+    let Some(small_who) = small["wip_authors"].as_str() else {
+        eprintln!("skipping: no diagnostic at 3 files (python3 absent?)");
+        return;
+    };
+    assert!(
+        !small_who.contains("bytes shown"),
+        "a diagnostic under the budget is returned whole"
+    );
+
+    let (dir, files) = dirty_repo_with(150).expect("git worked a moment ago");
+    let big = run(dir.path().to_path_buf(), red_naming(&files)).await;
+    let who = big["wip_authors"]
+        .as_str()
+        .expect("the same engine answers for 150 files");
+
+    assert!(
+        who.len() <= super::output::WIP_AUTHORS_BYTE_BUDGET + 300,
+        "{} B of wip_authors: the field is unbounded",
+        who.len()
+    );
+    assert!(
+        who.contains("file_number_0000"),
+        "the head names the first file"
+    );
+    assert!(
+        who.contains("silence is not 'nobody'"),
+        "the tail keeps the scope footer that stops silence reading as an exoneration"
+    );
+    assert!(who.contains("bytes shown"), "a cut must say so");
+    assert!(
+        who.contains("git status --short"),
+        "the marker names a route that lists every file, and the diagnostic is stored nowhere else"
+    );
+    assert!(
+        !who.contains("tool's own buffer"),
+        "the backstop's remedy would be FALSE for this field"
+    );
+    // And the route the marker names really lists what was cut.
+    let (_t, listed) = buffer_query_free(
+        &ctx,
+        &format!("git -C {} status --short", dir.path().display()),
+    )
+    .await;
+    assert!(listed["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("file_number_0149"));
+}
+
+#[test]
+fn wip_authors_is_returned_whole_at_exactly_the_budget_and_cut_one_byte_over() {
+    let at = "w".repeat(super::output::WIP_AUTHORS_BYTE_BUDGET);
+    assert_eq!(super::output::bound_wip_authors(at.clone()), at);
+    let over = "w".repeat(super::output::WIP_AUTHORS_BYTE_BUDGET + 1);
+    let cut = super::output::bound_wip_authors(over);
+    assert!(cut.contains("of 3001 bytes shown"), "{cut:.0}");
+}
+// ---- C: the remaining run_command fields cannot mint a second handle, and the tests say why ----
+
+/// Compacted libtest response (`compacted_test_response`). It is built only when the run is under
+/// the inline gate and the compacted text is at most 70% of the raw size, and it ALWAYS carries its
+/// own `@cmd_*` `output_id`, so a response that still came out over the limit is clipped by
+/// `clip_prebuffered_envelope` and never re-buffered under `@tool_*`. This sweeps raw sizes from the
+/// 1,024 B compaction floor to the inline edge with quote-dense kept lines (the worst case for
+/// escaping), through the real builder AND the clip, and requires: one handle, of the right kind,
+/// within the limit. A size that falls out of the compaction arm lands in the summary or raw arm
+/// and is held to the same property.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_libtest_response_never_needs_a_second_handle_at_any_size() {
+    let mut compacted = 0usize;
+    for payload in (0..=9_500usize).step_by(500) {
+        let kept: String = (0..)
+            .map(|i| format!("    \"case {i}\" \\\"x\\\" \"y\"\n"))
+            .scan(0usize, |n, line| {
+                if *n >= payload {
+                    return None;
+                }
+                *n += line.len();
+                Some(line)
+            })
+            .collect();
+        let stdout = format!("{INLINE_EMPTY_WORKSPACE_STDOUT}{kept}");
+        let (result, _ctx) =
+            run_inline("cargo test x", &stdout, INLINE_EMPTY_WORKSPACE_STDERR).await;
+        if result["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("codescout compacted this run")
+        {
+            compacted += 1;
+        }
+        let before_clip = result.to_string();
+        let out = crate::tools::clip_prebuffered_envelope(result, false);
+        let text = out.to_string();
+        assert!(
+            !crate::tools::exceeds_inline_limit(&before_clip),
+            "payload {payload}: the response is {} B BEFORE the backstop, so the gate and the 70% \
+             rule alone do not bound it",
+            before_clip.len()
+        );
+        let id = out["output_id"].as_str().unwrap_or("");
+        assert!(
+            id.is_empty() || id.starts_with("@cmd_"),
+            "payload {payload}: a handle that is not the tool's own: {id}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "payload {payload}: a {} B response would be re-buffered under a second handle",
+            text.len()
+        );
+    }
+    assert!(
+        compacted >= 3,
+        "only {compacted} sizes reached the compaction arm, so the sweep did not test it"
+    );
+}
+
+/// Interactive stdout. The accumulated output has no cap, but the response has NO `output_id`:
+/// nothing is stored behind a `@cmd_*` handle, so there is exactly one place the full text can
+/// live, and it is the single `@tool_*` buffer `call_content` makes. That is the designed
+/// single-handle path, not a second handle, and it is line-addressable (a multi-line `stdout` is
+/// materialized one line per line). Pinned in three steps: the response carries no handle; the clip
+/// leaves it alone; and a range read of the one buffer returns the lines.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_oversized_interactive_stdout_has_one_handle_and_it_reads_back() {
+    let (_dir, ctx) = project_ctx().await;
+    let output: String = (1..=3_000).map(|i| format!("repl line {i}\n")).collect();
+    let response = super::interactive::interactive_response(0, &output, 7, None);
+
+    assert!(response.get("output_id").is_none(), "{response}");
+    assert_eq!(
+        crate::tools::clip_prebuffered_envelope(response.clone(), false),
+        response,
+        "no handle of its own, so the clip never touches it"
+    );
+    assert!(crate::tools::exceeds_inline_limit(&response.to_string()));
+
+    let id = ctx
+        .output_buffer
+        .store_tool("run_command", response.to_string());
+    let page = crate::tools::read_file::ReadFile
+        .call(
+            json!({ "path": id, "json_path": "$.interactive_rounds" }),
+            &ctx,
+        )
+        .await;
+    assert!(page.is_ok(), "the one handle is readable: {page:?}");
+    let lines = crate::tools::read_file::ReadFile
+        .call(json!({ "path": id, "start_line": 1, "end_line": 12 }), &ctx)
+        .await
+        .expect("a range read of the single handle");
+    assert!(
+        lines.to_string().contains("repl line 2"),
+        "the interactive text comes back from the one handle: {lines}"
+    );
+}
 
 #[test]
 fn system_prompt_draft_omits_hints_for_unsupported_languages() {
