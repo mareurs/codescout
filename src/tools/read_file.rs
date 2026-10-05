@@ -236,9 +236,13 @@ impl Tool for ReadFile {
     }
     fn json_path_hint(&self, val: &Value) -> String {
         // Buffered read results carry the payload under `content` (line ranges,
-        // toml_key/json_path extractions, full reads). Point agents there. A payload
-        // WITHOUT a `content` string is a whole-file outline — an array of symbols
-        // beside a `file_id` — and falls to the shared default, which names that array.
+        // toml_key/json_path extractions, heading reads). Point agents there. A payload
+        // WITHOUT a `content` string falls to the shared default, which names its largest
+        // array. A whole-file outline no longer takes this branch: `read_full_file` bounds
+        // it to the inline limit (`fit_envelope`), so it is never buffered a second time.
+        // What reaches it today is the `headings` list a missed-heading read answers with
+        // (`{ok: false, error, headings, hint}`), pinned by
+        // `an_overflowing_missed_heading_list_hints_a_route_that_returns_data`.
         // The constant `$.field` it replaced exists in no read_file payload.
         if val["content"].is_string() {
             "$.content".to_string()
