@@ -6633,9 +6633,165 @@ mod tests {
         for n in ["doc", "librarian"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
+        // Positive form first. `!pinnable.contains(n)` is also true for a name no tool
+        // produces — rename `Workspace` and the loop below keeps passing while guarding
+        // nothing. So each listed name must be a REGISTERED tool before its absence from
+        // `pinnable` means anything.
+        let registered: std::collections::HashSet<&str> =
+            server.tools.iter().map(|t| t.name()).collect();
         for n in ["workspace", "get_guide"] {
+            assert!(
+                registered.contains(n),
+                "'{n}' is not a registered tool, so asserting it is not pinnable is vacuous — \
+                 update this list to the tool's current name"
+            );
             assert!(!pinnable.contains(n), "{n} must NOT be pinnable");
         }
+    }
+    /// Names in `Tool::pinnable`'s exclusion arm that no registered tool produces and are
+    /// not on `exempt`. Pure over its inputs so the red case can be driven from a fixture.
+    fn unaccounted_pinnable_arm_names<'a>(
+        arm: &'a [String],
+        registered: &std::collections::HashSet<&str>,
+        exempt: &[&str],
+    ) -> Vec<&'a str> {
+        arm.iter()
+            .map(String::as_str)
+            .filter(|n| !registered.contains(n) && !exempt.contains(n))
+            .collect()
+    }
+
+    /// The string literals inside `Tool::pinnable`'s `matches!( self.name(), … )` arm,
+    /// read from the source so a name added to the arm is checked without being restated
+    /// here. Balanced-paren scan: a bare `find(')')` lands on `self.name()`'s own paren,
+    /// which precedes every literal (the same trap `tests/doc_tool_refs.rs` documents).
+    fn pinnable_arm_names(src: &str) -> Vec<String> {
+        let Some(at) = src.find("fn pinnable(&self) -> bool {") else {
+            return Vec::new();
+        };
+        let Some(m) = src[at..].find("matches!").map(|i| at + i) else {
+            return Vec::new();
+        };
+        let Some(open) = src[m..].find('(').map(|i| m + i) else {
+            return Vec::new();
+        };
+        let mut depth = 0usize;
+        let mut close = open;
+        for (i, b) in src.as_bytes()[open..].iter().enumerate() {
+            match b {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        let mut rest = &src[open..close];
+        while let Some(s) = rest.find('"') {
+            let after = &rest[s + 1..];
+            let Some(e) = after.find('"') else { break };
+            out.push(after[..e].to_string());
+            rest = &after[e + 1..];
+        }
+        out
+    }
+
+    /// Every name in `Tool::pinnable`'s exclusion arm is produced by a registered tool, or is
+    /// on a NAMED exemption. The arm is the other half of the pair
+    /// `pinnable_tools_advertise_workspace_param` asserts: a name here that no tool
+    /// produces is a dead arm, and a renamed tool silently drops out of the exclusion.
+    #[tokio::test]
+    async fn every_pinnable_exclusion_names_a_registered_tool_or_a_named_exemption() {
+        let (_dir, server) = make_server().await;
+        let registered: std::collections::HashSet<&str> =
+            server.tools.iter().map(|t| t.name()).collect();
+
+        // Each exemption is tied to the TYPE that owns the name, so renaming the type's
+        // name without updating the arm reds here rather than leaving a free-floating string.
+        //  * `activate_project`: `ActivateProject` is dispatched to by `Workspace`
+        //    (`action="activate"`), never registered on its own. The arm is dead for the
+        //    wire surface — filed as a follow-up, not deleted here.
+        //  * `__probe_description_cap__`: registered only under `CODESCOUT_PROBE=1`.
+        let exempt = [
+            crate::tools::config::ActivateProject.name(),
+            crate::tools::probe::ProbeTool.name(),
+        ];
+        assert_eq!(
+            exempt,
+            ["activate_project", "__probe_description_cap__"],
+            "an exemption's owning type no longer carries the name the arm lists"
+        );
+
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tools/core/types.rs"
+        ))
+        .unwrap();
+        let arm = pinnable_arm_names(&src);
+        assert!(
+            arm.len() >= 5,
+            "control: parsed only {} names from `Tool::pinnable`'s arm ({arm:?}); an empty \
+         parse would make this test pass over nothing",
+            arm.len()
+        );
+        // Control that the production names the other test relies on were actually parsed.
+        for n in ["workspace", "get_guide", "onboarding"] {
+            assert!(
+                arm.iter().any(|a| a == n),
+                "control: `{n}` missing from {arm:?}"
+            );
+        }
+
+        let bad = unaccounted_pinnable_arm_names(&arm, &registered, &exempt);
+        assert!(
+            bad.is_empty(),
+            "`Tool::pinnable` lists {bad:?}, which no registered tool produces and no named \
+         exemption covers — a renamed tool has dropped out of the exclusion, or the arm \
+         names a tool that does not exist"
+        );
+    }
+
+    /// Positive twin and negative control for `unaccounted_pinnable_arm_names`: a name no tool
+    /// produces is reported; a registered one and an exempt one are not.
+    #[test]
+    fn unaccounted_pinnable_arm_names_reports_only_the_unproduced() {
+        let registered: std::collections::HashSet<&str> =
+            ["workspace", "onboarding"].into_iter().collect();
+        let arm: Vec<String> = ["workspace", "onboarding", "gone_tool", "probe_only"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            unaccounted_pinnable_arm_names(&arm, &registered, &["probe_only"]),
+            vec!["gone_tool"]
+        );
+        assert!(
+            unaccounted_pinnable_arm_names(&arm[..2], &registered, &[]).is_empty(),
+            "all-registered arm must report nothing"
+        );
+    }
+
+    /// `pinnable_arm_names` against a fixture shaped like the production arm, including the
+    /// `self.name()` paren that precedes every literal.
+    #[test]
+    fn pinnable_arm_names_reads_every_literal_in_the_matches_arm() {
+        let src = r#"
+        fn pinnable(&self) -> bool {
+            !matches!(
+                self.name(),
+                "workspace"
+                    | "a_b"
+            )
+        }
+        fn other() { let _ = "not_in_arm"; }
+    "#;
+        assert_eq!(pinnable_arm_names(src), vec!["workspace", "a_b"]);
+        assert!(pinnable_arm_names("fn nothing() {}").is_empty());
     }
 
     /// The injected `workspace` param is optional (never added to `required`),
