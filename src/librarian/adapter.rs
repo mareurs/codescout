@@ -1289,6 +1289,38 @@ mod tests {
             assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
         }
     }
+    /// `scan_arrays` calls an array "records" when any element is an object OR an array. The
+    /// table has object elements only, so the array half of that test was unguarded: a grid
+    /// (`[[1, 2]]`) read as an index of scalars would hand the prose the win over a result set.
+    /// The scalar rows prove the converse: an array of numbers is an index, not records.
+    #[test]
+    fn an_array_of_arrays_is_records_and_an_array_of_scalars_is_an_index() {
+        let long = "packed artifact text\n".repeat(2_000);
+        for (label, payload, expect) in [
+            (
+                "a grid: elements are arrays, so it is a result set",
+                json!({ "body": long, "grid": [[1, 2], [3, 4]] }),
+                None,
+            ),
+            (
+                "a mixed array with one array element is still records",
+                json!({ "body": long, "mixed": [1, [2]] }),
+                None,
+            ),
+            (
+                "an array of numbers is an index",
+                json!({ "body": long, "nums": [1, 2, 3] }),
+                Some("$.body"),
+            ),
+            (
+                "an array of strings is an index",
+                json!({ "body": long, "names": ["a", "b"] }),
+                Some("$.body"),
+            ),
+        ] {
+            assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
 
     /// A scoped read keeps `$.body` even when a larger string sits beside it. Asserted at the
     /// TRAIT METHOD: `scoped_body_hint` alone cannot tell which of the two rules
