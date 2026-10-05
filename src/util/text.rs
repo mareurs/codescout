@@ -882,6 +882,47 @@ mod tests {
     fn truncate_short_unchanged() {
         assert_eq!(truncate("hello", 10), "hello");
     }
+    // -- elide_middle_escaped: the unit is serialized bytes, and the marker tells the truth --
+
+    #[test]
+    fn elide_middle_escaped_cuts_text_whose_raw_length_fits_but_whose_escaped_length_does_not() {
+        // 500 control characters are 500 raw bytes and 3,000 serialized. Under a budget of 1,000
+        // the RAW length fits and the response would not: the cut must be decided on the
+        // serialized length (mutation U3, 2026-10-05).
+        let text = "\u{1}".repeat(500);
+        let cut = elide_middle_escaped(&text, text.len(), 1_000, "stderr", "R");
+        assert!(
+            json_escaped_len(&cut) <= 1_000,
+            "{} B escaped",
+            json_escaped_len(&cut)
+        );
+        assert!(cut.contains("bytes shown"), "a cut must say so");
+    }
+
+    #[test]
+    fn elide_middle_escaped_reports_the_bytes_it_actually_kept() {
+        // `shown` is head plus tail, `of` is the original length: parsed out of the marker and
+        // compared with the real halves (mutation U7, 2026-10-05).
+        let text = format!("HEAD{}TAIL", "m".repeat(5_000));
+        let cut = elide_middle_escaped(&text, text.len(), 1_000, "x", "R");
+        let (head, rest) = cut.split_once("\n--- x: ").expect("a marker");
+        let (marker, tail) = rest.split_once(" bytes shown; R ---\n").expect("its end");
+        let (shown, of) = marker.split_once(" of ").expect("shown of total");
+        assert_eq!(shown.parse::<usize>().unwrap(), head.len() + tail.len());
+        assert_eq!(of.parse::<usize>().unwrap(), text.len());
+        assert!(head.starts_with("HEAD") && tail.ends_with("TAIL"));
+    }
+
+    #[test]
+    fn elide_middle_escaped_never_splits_a_character_and_keeps_text_that_fits() {
+        let euros = "€".repeat(5_000);
+        let cut = elide_middle_escaped(&euros, euros.len(), 1_000, "x", "R");
+        assert!(json_escaped_len(&cut) <= 1_000);
+        assert!(cut.starts_with('€') && cut.ends_with('€'));
+        let small = "fits";
+        assert_eq!(elide_middle_escaped(small, 4, 1_000, "x", "R"), small);
+    }
+
     #[test]
     fn leading_ws_extracts_indent() {
         assert_eq!(leading_ws("    x"), "    ");
