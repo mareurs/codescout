@@ -13,7 +13,20 @@ fn lsp() -> Arc<dyn crate::lsp::LspProvider> {
 /// (`p.config.embeddings.model_or_default()`, the divergent copy this replaced)
 /// cannot pass by coincidence. Fixed as part of Task 8,
 /// docs/plans/2026-09-17-embedding-config-consolidation.md.
+///
+/// `#[serial_test::serial]` is load-bearing, not hygiene. The `temp_env` window below
+/// UNSETS every embedding variable and restores the ambient values on exit; a bare
+/// `#[test]` ran concurrently with the `tools::config::tests` ones that read those
+/// variables as ground truth, and `status_reports_local_onnx_for_an_urlless_bare_model_name`
+/// passed its "ambient url is set, skip" guard inside this window, then saw the url
+/// restored and reported `remote-http` (measured: 20 of 30 runs with both tests selected
+/// and `CODESCOUT_EMBEDDER_URL` exported). The default serial group is the one those
+/// readers are already in. Locking against annotated tests is all `serial` can do — see
+/// `docs/conventions/test-env-isolation.md` — which is why
+/// `tests/env_mutation_isolation.rs` refuses a `temp_env` user that does not carry it.
+/// docs/issues/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md.
 #[test]
+#[serial_test::serial]
 fn resolved_chunk_budget_reflects_the_projects_configured_model() {
     // `resolved_chunk_budget` resolves through
     // `RetrievalConfig::from_env_and_project`, so ANY ambient embedding-model

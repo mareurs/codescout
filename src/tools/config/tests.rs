@@ -662,24 +662,21 @@ async fn status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_co
     )
     .unwrap();
 
-    // Two ambient env layers can override the model this test just set on
-    // disk (see the sibling test above) — if either is present on this
-    // machine, the ground truth this test asserts no longer holds, so skip
-    // rather than assert a premise that isn't true here.
-    if std::env::var("CODESCOUT_EMBEDDER_MODEL").is_ok()
-        || std::env::var("CODESCOUT_EMBED_MODEL").is_ok()
-    {
+    // Ambient env layers can override the model this test just set on disk (see the
+    // sibling `status_reports_the_live_backend_and_what_is_compiled_in`) — if one is
+    // present on this machine, the ground truth this test asserts no longer holds, so
+    // skip rather than assert a premise that isn't true here. Read through
+    // `embedding_env::read` so the canonical `CODESCOUT_EMBEDDING_*` names are covered
+    // along with every deprecated alias.
+    if crate::config::embedding_env::read(&crate::config::embedding_env::MODEL).is_some() {
         eprintln!(
             "skipping status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends: \
-                 CODESCOUT_EMBEDDER_MODEL/CODESCOUT_EMBED_MODEL ambient override present"
+                 an ambient CODESCOUT_EMBEDDING_MODEL (or deprecated alias) override is present"
         );
         return;
     }
-    let embedder_url_set = std::env::var("CODESCOUT_EMBEDDER_URL")
-        .ok()
-        .or_else(|| std::env::var("CODESCOUT_EMBED_URL").ok())
-        .filter(|s| !s.is_empty())
-        .is_some();
+    let embedder_url_set =
+        crate::config::embedding_env::read(&crate::config::embedding_env::URL).is_some();
     if embedder_url_set {
         eprintln!(
             "skipping status_reports_remote_http_for_an_urlless_ollama_model_regardless_of_compiled_backends: \
@@ -745,23 +742,22 @@ async fn status_reports_local_onnx_for_an_urlless_bare_model_name() {
     )
     .unwrap();
 
-    // Same two ambient override layers the sibling test guards against: either
-    // one replaces the model this test just wrote, invalidating its premise.
-    if std::env::var("CODESCOUT_EMBEDDER_MODEL").is_ok()
-        || std::env::var("CODESCOUT_EMBED_MODEL").is_ok()
-    {
+    // Same ambient override layers the sibling test guards against: either one
+    // replaces the model this test just wrote, invalidating its premise. Read through
+    // `embedding_env::read` — the one resolver the production path uses, and the one the
+    // sibling `status_reports_the_live_backend_and_what_is_compiled_in` uses — so the
+    // canonical `CODESCOUT_EMBEDDING_*` names and every deprecated alias are covered. A
+    // hand-typed pair of `std::env::var` calls omitted the canonical names entirely, so a
+    // shell exporting only `CODESCOUT_EMBEDDING_URL` passed the guard and then resolved to
+    // `remote-http`.
+    if crate::config::embedding_env::read(&crate::config::embedding_env::MODEL).is_some() {
         eprintln!(
             "skipping status_reports_local_onnx_for_an_urlless_bare_model_name: \
-             CODESCOUT_EMBEDDER_MODEL/CODESCOUT_EMBED_MODEL ambient override present"
+             an ambient CODESCOUT_EMBEDDING_MODEL (or deprecated alias) override is present"
         );
         return;
     }
-    if std::env::var("CODESCOUT_EMBEDDER_URL")
-        .ok()
-        .or_else(|| std::env::var("CODESCOUT_EMBED_URL").ok())
-        .filter(|s| !s.is_empty())
-        .is_some()
-    {
+    if crate::config::embedding_env::read(&crate::config::embedding_env::URL).is_some() {
         eprintln!(
             "skipping status_reports_local_onnx_for_an_urlless_bare_model_name: \
              an ambient embedder url is set, which always wins over the model"
