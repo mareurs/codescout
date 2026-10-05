@@ -237,8 +237,9 @@ fn dominant_text_hint(val: &Value) -> Option<String> {
         .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
         .max_by_key(|(_, s)| s.len())?;
     // `$.key` can only be written for a plain identifier; anything else is left to the
-    // default rather than guessed at.
-    if text.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    // default rather than guessed at. (An empty string needs no guard of its own: its length
+    // is 0, which never outweighs the index, so the size check below already declines it.)
+    if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return None;
     }
     let mut has_records = false;
@@ -1258,8 +1259,10 @@ mod tests {
         }
     }
 
-    /// A scoped read keeps `$.body` even when a larger string sits beside it: the new rule is
-    /// consulted only AFTER `scoped_body_hint` declines.
+    /// A scoped read keeps `$.body` even when a larger string sits beside it. Asserted at the
+    /// TRAIT METHOD: `scoped_body_hint` alone cannot tell which of the two rules
+    /// `json_path_hint` consults first, and swapping them must fail here. The precondition
+    /// proves the text rule WOULD have said something else, so the order is what is decided.
     #[test]
     fn the_scoped_body_hint_still_outranks_the_text_rule() {
         let payload = json!({
@@ -1267,7 +1270,17 @@ mod tests {
             "body_meta": { "heading": "## Index" },
             "markdown": "m".repeat(40_000),
         });
-        assert_eq!(scoped_body_hint(&payload).as_deref(), Some("$.body"));
+        assert_eq!(
+            dominant_text_hint(&payload).as_deref(),
+            Some("$.markdown"),
+            "precondition: the text rule alone would name the larger string"
+        );
+        let adapter = adapter_for_test();
+        assert_eq!(
+            crate::tools::Tool::json_path_hint(&adapter, &payload),
+            "$.body",
+            "a scoped read's body must outrank the text rule"
+        );
     }
 
     /// A librarian tool that answers with a fixed payload, so the REAL adapter's `call_content`
