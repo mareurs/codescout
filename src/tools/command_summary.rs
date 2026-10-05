@@ -766,9 +766,13 @@ pub(crate) struct LineCut {
     pub shown: usize,
     /// Lines in the input.
     pub total: usize,
-    /// The FIRST line was wider than the whole budget and is shown clipped, behind a marker.
-    /// Needed beside `shown`/`total` because a single wide line reads `1/1` and is still cut.
+    /// The first line that carries text was wider than the whole budget and is shown clipped,
+    /// behind a marker. Needed beside `shown`/`total` because a single wide line reads `1/1` and is
+    /// still cut.
     pub clipped_wide: bool,
+    /// The cut stopped at the BYTE budget (a line did not fit), not at the line cap. A hint that
+    /// says "capped at 100 lines" after a cut at line 24 names a cause that did not happen.
+    pub by_bytes: bool,
 }
 
 /// Clip ONE over-wide line to at most `max_escaped` JSON-escaped bytes, head and tail behind a
@@ -787,32 +791,46 @@ fn clip_wide_line(line: &str, max_escaped: usize, remedy: &str) -> String {
 ///
 /// Truncation occurs on a line boundary, with ONE exception, and it is the point of the
 /// function's contract: **a non-empty input never yields an empty result.** When the first line
-/// alone is wider than the budget it is shown clipped (head and tail, behind a marker naming
-/// `wide_line_remedy`) and reported through `clipped_wide`. Before this, such a line produced
-/// nothing, so a reader got `stdout_shown: 0, stdout_total: 1` and a hint to page forward with
-/// `sed -n '1,100p'`, which returned the identical response — a loop. A WIDE LINE THAT IS NOT
-/// FIRST is left alone: the lines before it already answered, and the next page starts at it.
+/// that carries text is wider than the room left, it is shown clipped (head and tail, behind a
+/// marker naming `wide_line_remedy`) and reported through `clipped_wide`. Before this, such a line
+/// produced nothing, so a reader got `stdout_shown: 0, stdout_total: 1` and a hint to page forward
+/// with `sed -n '1,100p'`, which returned the identical response — a loop.
+///
+/// "First that carries text", not "first": blank lines ahead of a wide line are kept (they are real
+/// lines, and counted as shown) but do not make the wide line "not first". With `"\n"` in front of
+/// a 60 KB line the old rule kept the blank line, found the wide line not first and left it alone,
+/// which returned `""` for a non-empty buffer. A WIDE LINE BEHIND TEXT IS STILL LEFT ALONE: the
+/// lines before it already answered, and the next page starts at it.
 pub(crate) fn truncate_lines_and_bytes(
     text: &str,
     max_lines: usize,
     max_bytes: usize,
     wide_line_remedy: &str,
 ) -> LineCut {
-    use crate::util::text::json_escaped_len;
     let total = count_lines(text);
     let mut result = String::new();
     let mut escaped = 0usize;
     let mut shown = 0;
     let mut clipped_wide = false;
+    let mut by_bytes = false;
+    // A non-whitespace character has been kept: the reader already has something to read.
+    let mut has_text = false;
 
     for line in text.lines().take(max_lines) {
         // Each line adds the line itself plus a '\n' separator (except the first), and that
         // separator escapes to two bytes.
-        let needed = json_escaped_len(line) + if shown == 0 { 0 } else { 2 };
+        let separator = if shown == 0 { 0 } else { 2 };
+        let needed = json_escaped_len(line) + separator;
         if escaped + needed > max_bytes {
-            if shown == 0 {
-                result = clip_wide_line(line, max_bytes, wide_line_remedy);
-                shown = 1;
+            by_bytes = true;
+            if !has_text {
+                // Only blank lines so far: clip this one into what they left, beside them.
+                let room = max_bytes.saturating_sub(escaped + separator);
+                if shown > 0 {
+                    result.push('\n');
+                }
+                result.push_str(&clip_wide_line(line, room, wide_line_remedy));
+                shown += 1;
                 clipped_wide = true;
             }
             break;
@@ -823,6 +841,7 @@ pub(crate) fn truncate_lines_and_bytes(
         result.push_str(line);
         escaped += needed;
         shown += 1;
+        has_text |= !line.trim().is_empty();
     }
 
     LineCut {
@@ -830,6 +849,7 @@ pub(crate) fn truncate_lines_and_bytes(
         shown,
         total,
         clipped_wide,
+        by_bytes,
     }
 }
 
@@ -2123,6 +2143,58 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             "the marker carries the caller's remedy"
         );
         assert!(crate::util::text::json_escaped_len(&cut.text) <= 1_000);
+    }
+    #[test]
+    fn truncate_lines_and_bytes_clips_the_first_line_with_text_behind_blank_ones() {
+        // `"\n"` + a 60 KB line used to keep the blank line, call the wide one "not first" and return
+        // an empty string for a non-empty input. Whitespace-only lines do not count as an answer.
+        for prefix in ["\n", " \n", "\n\n\n", "\t\n \n"] {
+            let text = format!("{prefix}{}", "w".repeat(60_000));
+            let cut = truncate_lines_and_bytes(&text, 100, 2_000, "R");
+            assert!(cut.clipped_wide, "{prefix:?}");
+            assert!(cut.by_bytes, "{prefix:?}");
+            assert!(
+                cut.text.matches('w').count() >= 500,
+                "{prefix:?}: only whitespace came back: {:?}",
+                cut.text.chars().take(30).collect::<String>()
+            );
+            assert!(
+                crate::util::text::json_escaped_len(&cut.text) <= 2_000,
+                "{prefix:?}: {} B escaped",
+                crate::util::text::json_escaped_len(&cut.text)
+            );
+            // The blank lines are real lines, counted with the clipped one, and each keeps its own
+            // newline: the clipped line starts on a line of its own, not glued to the last blank.
+            assert_eq!(cut.shown, prefix.lines().count() + 1, "{prefix:?}");
+            assert_eq!(cut.total, prefix.lines().count() + 1, "{prefix:?}");
+            let blanks: Vec<&str> = prefix.lines().collect();
+            assert!(
+                cut.text.starts_with(&format!("{}\n", blanks.join("\n"))),
+                "{prefix:?}: {:?}",
+                cut.text.chars().take(12).collect::<String>()
+            );
+        }
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_still_leaves_a_wide_line_behind_text_alone() {
+        // Text, then a blank, then a wide line: the text already answered.
+        let text = format!("answer\n\n{}", "w".repeat(60_000));
+        let cut = truncate_lines_and_bytes(&text, 100, 2_000, "R");
+        assert_eq!(cut.text, "answer\n");
+        assert!(!cut.clipped_wide);
+        assert!(cut.by_bytes);
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_says_which_limit_cut() {
+        let lines: String = (0..50).map(|i| format!("line{i:02}\n")).collect();
+        let by_lines = truncate_lines_and_bytes(&lines, 10, 10_000, "R");
+        assert_eq!((by_lines.shown, by_lines.by_bytes), (10, false));
+        let by_bytes = truncate_lines_and_bytes(&lines, 100, 30, "R");
+        assert!(by_bytes.shown < 50 && by_bytes.by_bytes);
+        let whole = truncate_lines_and_bytes(&lines, 100, 10_000, "R");
+        assert_eq!((whole.shown, whole.by_bytes), (50, false));
     }
 
     #[test]

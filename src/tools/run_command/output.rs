@@ -519,14 +519,22 @@ fn capped_hint(
     total: usize,
     stderr_note: &str,
     clipped_wide: bool,
+    by_bytes: bool,
 ) -> String {
     use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
     let r = queried_ref(query).unwrap_or("@ref");
     let first = query_first_line(query);
     let next_start = first + shown;
     let next_end = first - 1 + shown + BUFFER_QUERY_INLINE_CAP;
+    // The reason is the TRUE one: a cut at line 24 of 60 by the byte budget is not "capped at 100
+    // lines", and a reader told so goes looking for a line cap that was never reached.
+    let why = if by_bytes {
+        "Output cut to fit the response budget".to_string()
+    } else {
+        format!("Output capped at {BUFFER_QUERY_INLINE_CAP} lines")
+    };
     let mut hint = format!(
-        "Output capped at {BUFFER_QUERY_INLINE_CAP} lines \
+        "{why} \
          (stdout {shown}/{total}{stderr_note}). \
          Next page: sed -n '{next_start},{next_end}p' {r}. \
          Or grep 'keyword' {r} for targeted search."
@@ -550,6 +558,7 @@ fn truncation_hint(
     total: usize,
     stderr_note: &str,
     clipped_wide: bool,
+    by_bytes: bool,
 ) -> String {
     match queried_ref(query) {
         Some(r) if r.starts_with("@tool_") => format!(
@@ -557,7 +566,7 @@ fn truncation_hint(
              JSON: read one field with read_file(\"{r}\", json_path=\"$.<field>\"), or browse the \
              pretty-printed result with read_file(\"{r}\", start_line=N, end_line=M)."
         ),
-        _ => capped_hint(query, shown, total, stderr_note, clipped_wide),
+        _ => capped_hint(query, shown, total, stderr_note, clipped_wide, by_bytes),
     }
 }
 
@@ -996,6 +1005,9 @@ pub(crate) async fn handle_successful_output_with(
                     "stdout_total": stdout_lines,
                     "hint": truncation_hint(
                         original_command, stdout_lines, stdout_lines, &stderr_note, clipped_wide,
+                        // The byte-budget wording is the longer one, so the room measured with it
+                        // can only be short of the true room, never over it.
+                        true,
                     ),
                 });
                 if !stderr_out.is_empty() {
@@ -1022,6 +1034,7 @@ pub(crate) async fn handle_successful_output_with(
                 );
             }
             let clipped_wide = cut.clipped_wide;
+            let cut_by_bytes = cut.by_bytes;
             let (stdout_out, stdout_shown, stdout_total) = (cut.text, cut.shown, cut.total);
 
             let was_truncated =
@@ -1048,6 +1061,7 @@ pub(crate) async fn handle_successful_output_with(
                     stdout_total,
                     &stderr_note,
                     clipped_wide,
+                    cut_by_bytes,
                 ));
             }
             result
@@ -1389,10 +1403,10 @@ mod tests {
     /// at 2, so the next page is 102.., not 1.. — which sent a reader back to the top.
     #[test]
     fn a_ranged_sed_query_gets_a_next_page_in_the_buffers_own_numbering() {
-        let hint = capped_hint("sed -n '2,101p' @cmd_abc12345", 100, 500, "", false);
+        let hint = capped_hint("sed -n '2,101p' @cmd_abc12345", 100, 500, "", false, false);
         assert!(hint.contains("sed -n '102,201p' @cmd_abc12345"), "{hint}");
         // And a plain read keeps the old numbering, which already was the buffer's.
-        let plain = capped_hint("cat @cmd_abc12345", 100, 500, "", false);
+        let plain = capped_hint("cat @cmd_abc12345", 100, 500, "", false, false);
         assert!(plain.contains("sed -n '101,200p' @cmd_abc12345"), "{plain}");
         assert!(
             !plain.contains("grep -o"),

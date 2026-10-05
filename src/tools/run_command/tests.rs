@@ -7705,6 +7705,98 @@ async fn a_summary_marker_reports_the_stream_total_once() {
     );
 }
 
+// ---- a buffer whose first lines are blank still returns real bytes, and says why it was cut ----
+//
+// Reviewer's measurement on the merged tree: a stored buffer of `"\n"` + one 60 KB line, queried
+// with `cat` or `grep -v`, returned NO `stdout` key at all (`truncated:true`, 1/2); `" \n"` and
+// `"\n\n\n"` in front returned only whitespace. `truncate_lines_and_bytes` treated the blank line
+// as "the first line", kept it, and found the wide line "not first" so left it alone.
+
+#[cfg(unix)]
+#[tokio::test]
+async fn blank_leading_lines_do_not_hide_a_wide_line_and_the_hint_routes_to_it() {
+    let (_dir, ctx) = project_ctx().await;
+    for prefix in ["\n", " \n", "\n\n\n"] {
+        for query in ["cat", "grep -v zzz"] {
+            let what = format!("prefix {prefix:?} via `{query}`");
+            let stored = format!("{prefix}{}", "w".repeat(60_000));
+            let (id, text, parsed) =
+                query_stored(&ctx, stored, String::new(), |id| format!("{query} {id}")).await;
+
+            let stdout = parsed["stdout"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{what}: zero bytes of a non-empty result: {text:.300}"));
+            assert!(
+                stdout.matches('w').count() >= 1_000,
+                "{what}: only whitespace came back ({} B): {:?}",
+                stdout.len(),
+                stdout.chars().take(40).collect::<String>()
+            );
+            assert!(
+                stdout.contains("bytes shown"),
+                "{what}: a clipped line must say so"
+            );
+            assert_eq!(parsed["truncated"], true, "{what}: {text:.200}");
+            assert!(!has_tool_handle(&text), "{what}: {text:.200}");
+            assert!(text.len() <= 10_003, "{what}: {} B", text.len());
+
+            // FOLLOW the hint's route for a wide line.
+            let hint = parsed["hint"].as_str().unwrap_or_default();
+            assert!(
+                hint.contains(&format!("cut -c1-4000 {id}")),
+                "{what}: the hint names no window route: {hint}"
+            );
+            let (t2, p2) = buffer_query(&ctx, format!("cut -c1-4000 {id}")).await;
+            let window = p2["stdout"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{what}: the hint's route returned nothing: {t2:.300}"));
+            assert!(
+                window.contains(&"w".repeat(4_000)),
+                "{what}: the window is not the line's first 4,000 bytes"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cut_by_bytes_does_not_claim_a_line_cap() {
+    // 60 lines of 400 B: ~24 KB, so the BYTE budget binds at ~24 lines, far under the 100-line cap.
+    let (_dir, ctx) = project_ctx().await;
+    let stored: String = (0..60)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(393)))
+        .collect();
+    let (_id, text, parsed) =
+        query_stored(&ctx, stored, String::new(), |id| format!("cat {id}")).await;
+    let shown = parsed["stdout_shown"].as_u64().expect("a truncated query");
+    assert!(shown < 60, "{text:.200}");
+    let hint = parsed["hint"].as_str().unwrap_or_default();
+    assert!(
+        !hint.contains("capped at 100 lines"),
+        "the cut was by bytes after {shown} lines, not by a line cap: {hint}"
+    );
+    assert!(
+        hint.contains("response") && hint.contains(&format!("{shown}/60")),
+        "the hint must state the real reason and the counts: {hint}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_cut_by_the_line_cap_still_says_so() {
+    // The sibling of the test above: 400 lines are cut by LINES, and the hint says so.
+    let (_dir, ctx) = project_ctx().await;
+    // 400 lines of 40 B: 16 KB raw, so the response is summarized/cut; the 100-line cap binds well
+    // before the byte budget (~9.7 KB, ~230 lines).
+    let stored: String = (0..400)
+        .map(|i| format!("{i:04} {}\n", "l".repeat(35)))
+        .collect();
+    let (_id, _text, parsed) =
+        query_stored(&ctx, stored, String::new(), |id| format!("cat {id}")).await;
+    let hint = parsed["hint"].as_str().unwrap_or_default();
+    assert!(hint.contains("capped at 100 lines"), "{hint}");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_summary_budgets_around_the_late_keys_it_carries() {
