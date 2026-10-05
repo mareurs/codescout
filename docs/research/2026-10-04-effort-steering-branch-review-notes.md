@@ -1,7 +1,7 @@
 # Effort steering: branch review notes
 
 **Date:** 2026-10-04
-**Branch:** `feat/effort-steering-core` in the `claude-plugins` repo (worktree `claude-plugins-effort-steering`). Local only: not merged, not pushed.
+**Branch:** `feat/effort-steering-core` in the `claude-plugins` repo (worktree `claude-plugins-effort-steering`). Merged locally into `main` on 2026-10-05 as a fast-forward (`main` is now `7475f6d`, with the full suite green on the merged result: 65 suites, 0 failures). Not pushed: local `main` is 19 commits ahead of `origin/main`, two of them unpushed commits from another session. The branch and its worktree still exist, because the worktree is not under `.worktrees/` and holds the scratch evidence.
 **Plan:** `docs/superpowers/plans/2026-10-04-effort-steering-core-and-spikes.md`
 **Spec:** `docs/superpowers/specs/2026-10-04-effort-steering-design.md` (see its section "Constraints carried into the second plan")
 **Findings:** `docs/research/2026-10-04-effort-steering-spike-findings.md`

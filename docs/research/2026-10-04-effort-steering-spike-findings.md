@@ -3,7 +3,7 @@
 **Date:** 2026-10-04
 **Spec:** `docs/superpowers/specs/2026-10-04-effort-steering-design.md`
 **Plan:** `docs/superpowers/plans/2026-10-04-effort-steering-core-and-spikes.md` (Task 5)
-**Code:** the `claude-plugins` repo, branch `feat/effort-steering-core`, in the worktree `claude-plugins-effort-steering`. Not merged, not pushed. Commits: features `claude-plugins:2e7757d` and `claude-plugins:c0e3cd6`; S2 `claude-plugins:13273ea`; S3 `claude-plugins:1b32e2e`, `claude-plugins:e0a355c` and `claude-plugins:e578c9f`; S1 `claude-plugins:c243591`.
+**Code:** the `claude-plugins` repo, branch `feat/effort-steering-core`, in the worktree `claude-plugins-effort-steering`. Since 2026-10-05 the branch is merged locally into `main` (fast-forward, `main` = `7475f6d`) and not pushed. Commits: features `claude-plugins:2e7757d` and `claude-plugins:c0e3cd6`; S2 `claude-plugins:13273ea`; S3 `claude-plugins:1b32e2e`, `claude-plugins:e0a355c` and `claude-plugins:e578c9f`; S1 `claude-plugins:c243591`.
 
 ## Summary
 
