@@ -90,6 +90,16 @@ TOK = re.compile(r"\w+")
 
 def norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
+def twin_in_context_before(row: dict) -> bool:
+    """True when the row's twin already appears inside its own `context_before`.
+
+    The freeze builds a mined POSITIVE from `context_before` and its negative from the twin, so
+    a row where the correction is already in the positive's window carries the label leak the
+    context re-centring removed everywhere else. Whitespace-normalised, as the measurement that
+    found 10 such rows was. A row with no twin cannot leak one (guarded: `"" in text` is True).
+    docs/issues/2026-10-01-residual-mined-rows-with-the-twin-already-in-context-before.md"""
+    twin = norm(row.get("twin") or "")
+    return bool(twin) and twin in norm(row.get("context_before") or "")
 
 
 def window(text: str, sentence: str, width: int = 1500) -> str:
