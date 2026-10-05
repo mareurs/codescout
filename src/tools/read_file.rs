@@ -2063,10 +2063,14 @@ mod tests {
         let mut ctx = test_ctx().await;
         ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
 
-        // One 40 KB line with a needle far past the point where it is clamped.
+        // One ~40 KB line with the needle in the MIDDLE, commas on both sides, and a distinct
+        // sentinel after it. At the END of the line a greedy `.*` returns the same short match
+        // as `[^,]*`, so the route's bound was untested; here `.*` returns the needle AND
+        // everything after it, sentinel included, and the output busts the inline budget.
         let line = format!(
-            "{}needle-token-4242,tail-of-line",
-            "filler-record, ".repeat(2_600)
+            "{}needle-token-4242,AFTER-SENTINEL,{}",
+            "filler-record, ".repeat(1_300),
+            "filler-record, ".repeat(1_300)
         );
         let id = ctx
             .output_buffer
@@ -2093,9 +2097,14 @@ mod tests {
             .call(json!({ "command": command }), &ctx)
             .await
             .unwrap_or_else(|e| panic!("the shown route {command:?} failed: {e}"));
+        let rendered = out.to_string();
         assert!(
-            out.to_string().contains("needle-token-4242"),
-            "the shown route {command:?} must return the match, got: {out}"
+            rendered.contains("needle-token-4242"),
+            "the shown route {command:?} must return the match, got: {rendered:.300}"
+        );
+        assert!(
+            !rendered.contains("AFTER-SENTINEL"),
+            "the route must return only the match, not the rest of the wide line: {rendered:.300}"
         );
     }
 
