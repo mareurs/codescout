@@ -584,10 +584,12 @@ pub(super) const WIP_AUTHORS_BYTE_BUDGET: usize = 3000;
 /// `git status --short` lists every uncommitted file in any repository, which is what a reader
 /// needs when the list was cut.
 pub(super) fn bound_wip_authors(text: String) -> String {
-    let len = text.len();
-    crate::util::text::elide_middle_bytes(
-        text,
-        len,
+    // ESCAPED bytes, the unit the response is measured in: a raw cut let a diagnostic dense in
+    // control characters (a path or a porcelain line carrying one) serialize to several times its
+    // budget. The marker's total stays the diagnostic's own length.
+    crate::util::text::elide_middle_escaped(
+        &text,
+        text.len(),
         WIP_AUTHORS_BYTE_BUDGET,
         "wip_authors",
         "every uncommitted file: `git status --short`",
@@ -1537,5 +1539,19 @@ mod tests {
 
         let (_, list) = multi_filter_test_command("cd sub && cargo test -- aa bb | tail").unwrap();
         assert_eq!(list, "cd sub && cargo test -- --list");
+    }
+    /// `wip_authors` is bounded in the unit the limit counts. A raw 3,000 B cut of a diagnostic
+    /// holding control characters (a path with one in it, a tab-heavy porcelain line) serializes to
+    /// many times that, so the field alone pushed the response over the limit.
+    #[test]
+    fn wip_authors_is_bounded_in_escaped_bytes() {
+        let text = "\u{1}".repeat(20_000);
+        let cut = bound_wip_authors(text);
+        let escaped = crate::util::text::json_escaped_len(&cut);
+        assert!(
+            escaped <= WIP_AUTHORS_BYTE_BUDGET,
+            "{escaped} B escaped of {WIP_AUTHORS_BYTE_BUDGET}"
+        );
+        assert!(cut.contains("of 20000 bytes shown"), "{cut:.0}");
     }
 }

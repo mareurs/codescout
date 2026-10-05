@@ -1148,7 +1148,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // `wip_authors_is_returned_whole_at_exactly_the_budget_and_cut_one_byte_over`, which a row
         // cannot also cite. The cited test returns early, printing why, when git or python3 is
         // absent; that is the repo's convention for the attribution engine. Marker written by
-        // production in `util::text::elide_middle_bytes`, called from `bound_wip_authors`.
+        // production in `util::text::elide_middle_escaped`, called from `bound_wip_authors`.
         id: "run_command.wip_authors_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("bytes shown"),
