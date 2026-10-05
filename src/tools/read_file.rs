@@ -236,12 +236,14 @@ impl Tool for ReadFile {
     }
     fn json_path_hint(&self, val: &Value) -> String {
         // Buffered read results carry the payload under `content` (line ranges,
-        // toml_key/json_path extractions, full reads). Point agents there rather
-        // than the generic default `$.field`.
+        // toml_key/json_path extractions, full reads). Point agents there. A payload
+        // WITHOUT a `content` string is a whole-file outline — an array of symbols
+        // beside a `file_id` — and falls to the shared default, which names that array.
+        // The constant `$.field` it replaced exists in no read_file payload.
         if val["content"].is_string() {
             "$.content".to_string()
         } else {
-            "$.field".to_string()
+            crate::tools::default_json_path_hint(val)
         }
     }
 }
@@ -496,20 +498,26 @@ fn clamp_over_budget_line(chunk: String, budget: usize) -> (String, bool) {
 /// JSON-escaped payload, and field addressing reaches it in one call where line
 /// addressing cannot reach it at all.
 fn over_budget_line_hint(path: &str) -> String {
+    // `grep -o` prints only the part of the line that matched. Plain `grep` returns the whole
+    // line, which is the thing that was too wide; `[^,]*` ends the match at the next comma,
+    // which bounds a hit inside JSON or CSV. The `PATTERN` placeholder is the caller's to fill.
+    let grep = format!("run_command(\"grep -o 'PATTERN[^,]*' {path}\")");
     if path.starts_with("@tool_") {
         format!(
             "A single line here is wider than the inline budget, so it is shown truncated. \
              On a @tool_* ref that is usually a JSON-escaped payload on one line — address the \
              field instead of the line: read_file(\"{path}\", json_path=\"$.stdout\") for a \
              run_command envelope, or json_path=\"$.<field>\" generally. \
-             run_command(\"grep PATTERN {path}\") also searches it."
+             {grep} prints just the matching part of the line."
         )
     } else {
+        // Every caller is `read_from_buffer`, so this is a `@cmd_*` / `@file_*` ref, and
+        // `json_path` is refused on those ("only supported on @tool_* refs"). The branch used
+        // to advise it anyway.
         format!(
             "A single line here is wider than the inline budget, so it is shown truncated. \
-             Search it instead of slicing it: run_command(\"grep PATTERN {path}\"). \
-             For JSON content, read_file(\"{path}\", json_path=\"$.<field>\") addresses fields \
-             rather than lines."
+             Fields cannot be addressed on this kind of ref. Print just the part you need: \
+             {grep} (replace PATTERN; `[^,]*` ends the match at the next comma)."
         )
     }
 }
@@ -1137,6 +1145,14 @@ fn format_read_file_body(val: &Value) -> String {
 
         if let Some(file_id) = val["file_id"].as_str() {
             out.push_str(&format!("\n\n  Buffer: {file_id}"));
+        }
+        // A clamped line carries a hint that names the route off it. This renderer used to drop
+        // it, so the caller saw `…[truncated: this line is wider than the inline budget]` and
+        // nothing to do about it; the hint existed only in JSON no one reads in the text form.
+        if val["line_truncated"].as_bool() == Some(true) {
+            if let Some(hint) = val["hint"].as_str() {
+                out.push_str(&format!("\n\n  {hint}"));
+            }
         }
         if !complete {
             out.push_str(&format!("\n  [{lines_shown} of {total} lines shown]"));
@@ -1935,6 +1951,152 @@ mod tests {
         // Falls back to the generic default when there is no content field.
         let without = json!({ "file_id": "@file_x", "total_lines": 9 });
         assert_eq!(ReadFile.json_path_hint(&without), "$.field");
+    }
+    /// D4 of the hint-family sweep. `ReadFile::json_path_hint` fell back to the constant `$.field`
+    /// for every payload without a `content` string, including a whole-file source read whose
+    /// payload is an array of symbols beside a `file_id`. It must use the same array detection
+    /// every other tool's default uses; a payload with no array keeps the default's placeholder.
+    #[tokio::test]
+    async fn read_file_hint_uses_array_detection_when_the_payload_has_no_content() {
+        let outline = json!({
+            "file_id": "@file_x",
+            "total_lines": 6206,
+            "symbols": [{ "name": "a" }, { "name": "b" }, { "name": "c" }],
+        });
+        assert_eq!(ReadFile.json_path_hint(&outline), "$.symbols[*]");
+        // The rows that must NOT move.
+        assert_eq!(
+            ReadFile.json_path_hint(&json!({ "content": "x", "symbols": [1, 2] })),
+            "$.content"
+        );
+        assert_eq!(
+            ReadFile.json_path_hint(&json!({ "file_id": "@file_x", "total_lines": 9 })),
+            "$.field"
+        );
+    }
+
+    /// REACH and REMEDY for D4, through the real `call_content`. A whole-file read of a source
+    /// file with many symbols overflowed to `@tool_*` (beside its own `@file_*`) with the hint
+    /// `$.field`. The route the envelope names is followed with a real `read_file`; it must
+    /// not be the placeholder, must be an array projection, and must come back as data.
+    ///
+    /// This depends on a whole-file source read overflowing. If a later change bounds that
+    /// summary so it no longer does, the precondition below fails by name instead of letting
+    /// the test pass over an envelope that was never produced.
+    #[tokio::test]
+    async fn an_overflowing_whole_file_read_hints_a_route_that_returns_data() {
+        use crate::tools::hint_probe::{envelope_of, follow_hint};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let source: String = (0..450)
+            .map(|i| {
+                format!(
+                    "pub fn function_number_{i:04}_with_a_long_name(a: u32, b: u32) -> u32 {{ a + b + {i} }}\n"
+                )
+            })
+            .collect();
+        std::fs::write(dir.path().join("big.rs"), source).unwrap();
+        let mut ctx = test_ctx().await;
+        ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        let content = ReadFile
+            .call_content(json!({ "path": "big.rs" }), &ctx)
+            .await
+            .unwrap();
+        let envelope = envelope_of(&content);
+        assert!(
+            envelope["output_id"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("@tool_"),
+            "precondition: a whole-file read of 450 symbols must overflow to @tool_*: {envelope}"
+        );
+
+        let (jp, followed) = follow_hint(&envelope, &ctx).await;
+        assert_ne!(jp, "$.field", "the placeholder is not a route");
+        assert!(
+            jp.ends_with("[*]"),
+            "an array projection was expected, got {jp:?}"
+        );
+        let value =
+            followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
+        assert_eq!(
+            value["value_type"], "array",
+            "the route {jp:?} must come back as the array it projects: {value}"
+        );
+    }
+    /// D4b. `over_budget_line_hint` is only ever called from `read_from_buffer`, so `path` is
+    /// always a buffer ref, never a real file. Its `else` branch told the caller to use
+    /// `json_path` on `@cmd_*`/`@file_*` refs, which `read_file` refuses
+    /// (`json_path is only supported on @tool_* refs`). The route it DOES keep for `@tool_*`
+    /// (`$.stdout`, `$.<field>`) works, and a wide line is printed in part by `grep -o`.
+    #[test]
+    fn the_over_budget_hint_never_names_a_route_the_ref_refuses() {
+        for refused in ["@cmd_0b1", "@file_0b1", "@cmd_0b1.err"] {
+            let hint = over_budget_line_hint(refused);
+            assert!(
+                !hint.contains("json_path"),
+                "json_path is refused on {refused}, so the hint must not advise it: {hint}"
+            );
+            assert!(
+                hint.contains("grep -o") && hint.contains(refused),
+                "the route that works on a wide line is `grep -o`, naming the ref: {hint}"
+            );
+        }
+        let tool = over_budget_line_hint("@tool_0b1");
+        assert!(tool.contains("json_path=\"$.stdout\""), "{tool}");
+        assert!(
+            tool.contains("grep -o") && tool.contains("@tool_0b1"),
+            "{tool}"
+        );
+    }
+
+    /// REACH and REMEDY for D4b, through the real `call_content`. The hint was attached to the
+    /// result's JSON but `format_read_file_body` never rendered it, so the agent saw only
+    /// `…[truncated: this line is wider than the inline budget]` and no route off it. This reads
+    /// a wide single line from a `@cmd_*` buffer, takes the `run_command(...)` route out of
+    /// what the AGENT sees, and runs it: it must return the part of the line asked for.
+    #[tokio::test]
+    async fn a_clamped_wide_line_shows_the_agent_a_route_that_returns_the_match() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let mut ctx = test_ctx().await;
+        ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        // One 40 KB line with a needle far past the point where it is clamped.
+        let line = format!(
+            "{}needle-token-4242,tail-of-line",
+            "filler-record, ".repeat(2_600)
+        );
+        let id = ctx
+            .output_buffer
+            .store("wide".into(), line, String::new(), 0);
+
+        let content = ReadFile
+            .call_content(json!({ "path": id }), &ctx)
+            .await
+            .unwrap();
+        let text = crate::tools::hint_probe::primary_text(&content);
+        assert!(
+            text.contains("wider than the inline budget"),
+            "precondition: the read must clamp the line: {text:.200}"
+        );
+
+        // The route, as the agent reads it: `run_command("<cmd>")` with a PATTERN placeholder.
+        let start = text
+            .find("run_command(\"")
+            .unwrap_or_else(|| panic!("the clamped read shows the agent no route: {text:.400}"))
+            + "run_command(\"".len();
+        let end = text[start..].find("\")").expect("an unterminated route") + start;
+        let command = text[start..end].replace("PATTERN", "needle-token");
+        let out = crate::tools::run_command::RunCommand
+            .call(json!({ "command": command }), &ctx)
+            .await
+            .unwrap_or_else(|e| panic!("the shown route {command:?} failed: {e}"));
+        assert!(
+            out.to_string().contains("needle-token-4242"),
+            "the shown route {command:?} must return the match, got: {out}"
+        );
     }
 
     #[tokio::test]
