@@ -1449,7 +1449,8 @@ fn the_key_window_elides_from_the_eleventh_key_and_not_before() {
 
 /// `[*]` on a string. A JSON document inside a string is the case that started this family
 /// (`run_command`'s `stdout`): `json_path` addresses JSON VALUES, and a string is one value.
-/// The error must say what it found, how big, and that it is not an array.
+/// The error says what it found, how big it is, and that it is not an array, and then the route
+/// it names, "drop `[*]` to read the text", is RUN: it must return exactly that string, whole.
 #[test]
 fn wildcard_on_a_string_says_how_big_it_is_and_that_it_is_text() {
     let body = "x".repeat(1_234);
@@ -1465,6 +1466,16 @@ fn wildcard_on_a_string_says_how_big_it_is_and_that_it_is_text() {
     assert!(
         err.contains("text") && err.contains("jq"),
         "the error must say it is text and name the route that can parse it: {err}"
+    );
+
+    // The route the error names: drop `[*]`. It must work and return the text itself.
+    let (text, type_name, _count) = extract_json_path(&content, "$.stdout")
+        .expect("the route the error names, without `[*]`, must work");
+    assert_eq!(type_name, "string");
+    assert_eq!(
+        text.trim_matches('"'),
+        body,
+        "dropping `[*]` must return the whole 1,234-byte text, as the error promises"
     );
 }
 

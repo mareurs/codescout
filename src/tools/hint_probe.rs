@@ -65,3 +65,48 @@ pub(crate) async fn follow_hint(
         .await;
     (jp, result)
 }
+
+/// Store `payload` as a real `@tool_*` buffer and run `read_file(<handle>, json_path=<jp>)` on
+/// it: the call an agent makes after reading a hint, without needing a tool that produces
+/// `payload`. For a hint decision tested against a payload SHAPE rather than a live result.
+pub(crate) async fn follow_path_on(
+    payload: &Value,
+    jp: &str,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    let handle = ctx
+        .output_buffer
+        .store_tool("hint_probe", payload.to_string());
+    crate::tools::read_file::ReadFile
+        .call(json!({ "path": handle, "json_path": jp }), ctx)
+        .await
+}
+
+/// Every `json_path="..."` route a hint's text offers, with the `<field>` template filled by
+/// `field`. The template is the one placeholder a hint is allowed to carry; a literal `$.field`
+/// is NOT filled, so a hint that offers it fails when followed.
+pub(crate) fn json_paths_in(text: &str, field: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("json_path=") {
+        rest = &rest[i + "json_path=".len()..];
+        let quoted = rest.trim_start_matches('\\').trim_start_matches('"');
+        if let Some(end) = quoted.find(['"', '\\']) {
+            out.push(quoted[..end].replace("<field>", field));
+        }
+    }
+    out
+}
+
+/// Every `run_command("...")` route a hint's text offers, with `PATTERN` replaced by `pattern`.
+pub(crate) fn commands_in(text: &str, pattern: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("run_command(\"") {
+        rest = &rest[i + "run_command(\"".len()..];
+        if let Some(end) = rest.find("\")") {
+            out.push(rest[..end].replace("PATTERN", pattern));
+        }
+    }
+    out
+}

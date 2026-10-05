@@ -1952,26 +1952,43 @@ mod tests {
         let without = json!({ "file_id": "@file_x", "total_lines": 9 });
         assert_eq!(ReadFile.json_path_hint(&without), "$.field");
     }
-    /// D4 of the hint-family sweep. `ReadFile::json_path_hint` fell back to the constant `$.field`
-    /// for every payload without a `content` string, including a whole-file source read whose
-    /// payload is an array of symbols beside a `file_id`. It must use the same array detection
-    /// every other tool's default uses; a payload with no array keeps the default's placeholder.
+    /// ReadFile's hint, tested by FOLLOWING it for each buffered payload shape. A `content` string
+    /// hints itself (and wins even beside an array); a whole-file outline, an array of symbols
+    /// beside a `file_id`, hints the array. A payload with neither gets the shared default's
+    /// placeholder, pinned in `core/types.rs`, which is not a route and has no row here. This
+    /// replaces a test that compared the hint to a string.
     #[tokio::test]
-    async fn read_file_hint_uses_array_detection_when_the_payload_has_no_content() {
+    async fn read_file_hints_lead_to_the_data_for_each_payload_shape() {
+        let ctx = test_ctx().await;
         let outline = json!({
             "file_id": "@file_x",
             "total_lines": 6206,
-            "symbols": [{ "name": "a" }, { "name": "b" }, { "name": "c" }],
+            "symbols": [{ "name": "sym_alpha" }, { "name": "sym_beta" }, { "name": "sym_gamma" }],
         });
-        assert_eq!(ReadFile.json_path_hint(&outline), "$.symbols[*]");
-        // The rows that must NOT move.
-        assert_eq!(
-            ReadFile.json_path_hint(&json!({ "content": "x", "symbols": [1, 2] })),
-            "$.content"
+        let content_and_array = json!({
+            "content": "the file text, line one",
+            "symbols": [{ "name": "not_this" }],
+        });
+
+        let jp = ReadFile.json_path_hint(&outline);
+        let got = crate::tools::hint_probe::follow_path_on(&outline, &jp, &ctx)
+            .await
+            .unwrap_or_else(|e| panic!("outline route {jp:?} failed: {e}"));
+        assert_eq!(got["value_type"], "array", "{jp:?}: {got}");
+        let rendered = got.to_string();
+        assert!(
+            rendered.contains("sym_alpha") && rendered.contains("sym_gamma"),
+            "{jp:?} must return the symbols, first to last: {rendered}"
         );
-        assert_eq!(
-            ReadFile.json_path_hint(&json!({ "file_id": "@file_x", "total_lines": 9 })),
-            "$.field"
+
+        let jp = ReadFile.json_path_hint(&content_and_array);
+        let got = crate::tools::hint_probe::follow_path_on(&content_and_array, &jp, &ctx)
+            .await
+            .unwrap_or_else(|e| panic!("content route {jp:?} failed: {e}"));
+        assert!(
+            got.to_string().contains("the file text, line one")
+                && !got.to_string().contains("not_this"),
+            "a content string must outrank an array beside it: {jp:?} gave {got}"
         );
     }
 
@@ -2024,31 +2041,97 @@ mod tests {
             value["value_type"], "array",
             "the route {jp:?} must come back as the array it projects: {value}"
         );
-    }
-    /// D4b. `over_budget_line_hint` is only ever called from `read_from_buffer`, so `path` is
-    /// always a buffer ref, never a real file. Its `else` branch told the caller to use
-    /// `json_path` on `@cmd_*`/`@file_*` refs, which `read_file` refuses
-    /// (`json_path is only supported on @tool_* refs`). The route it DOES keep for `@tool_*`
-    /// (`$.stdout`, `$.<field>`) works, and a wide line is printed in part by `grep -o`.
-    #[test]
-    fn the_over_budget_hint_never_names_a_route_the_ref_refuses() {
-        for refused in ["@cmd_0b1", "@file_0b1", "@cmd_0b1.err"] {
-            let hint = over_budget_line_hint(refused);
+        // The type alone would pass for any array. The DATA must be there, first to last: the
+        // projection is far over the inline budget, so it is parked under its own `@file_*`
+        // handle, and the first and last symbol must both be findable in it.
+        let file_id = value["file_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a 450-symbol projection must name its buffer: {value}"));
+        for name in [
+            "function_number_0000_with_a_long_name",
+            "function_number_0449_with_a_long_name",
+        ] {
+            let out = crate::tools::run_command::RunCommand
+                .call(
+                    json!({ "command": format!("grep -o {name} {file_id}") }),
+                    &ctx,
+                )
+                .await
+                .unwrap_or_else(|e| panic!("searching the projection for {name} failed: {e}"));
             assert!(
-                !hint.contains("json_path"),
-                "json_path is refused on {refused}, so the hint must not advise it: {hint}"
-            );
-            assert!(
-                hint.contains("grep -o") && hint.contains(refused),
-                "the route that works on a wide line is `grep -o`, naming the ref: {hint}"
+                out.to_string().contains(name),
+                "the route {jp:?} must return every symbol; {name} is missing from {file_id}: {out}"
             );
         }
-        let tool = over_budget_line_hint("@tool_0b1");
-        assert!(tool.contains("json_path=\"$.stdout\""), "{tool}");
-        assert!(
-            tool.contains("grep -o") && tool.contains("@tool_0b1"),
-            "{tool}"
+    }
+    /// D4b, by FOLLOWING every route the hint offers on a real buffer of each ref kind.
+    /// `over_budget_line_hint` is only called from `read_from_buffer`, so its path is always a
+    /// buffer ref. Its non-`@tool_` branch used to advise `json_path` on `@cmd_*`/`@file_*`
+    /// refs, which `read_file` refuses; following that route fails with
+    /// `json_path is only supported on @tool_* refs`. So this runs each `json_path` route through
+    /// `read_file` and each `run_command` route through `run_command`, and every one must work:
+    /// a `json_path` offered on a refused kind, or a grep that cannot find the needle, is a red.
+    /// A literal `$.<field>` is a template and is filled with `stdout`, the key of a
+    /// `run_command` envelope; a literal `$.field` is not filled and would fail when followed.
+    #[tokio::test]
+    async fn the_over_budget_hint_never_names_a_route_the_ref_refuses() {
+        use crate::tools::hint_probe::{commands_in, json_paths_in};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let mut ctx = test_ctx().await;
+        ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+
+        let wide = format!(
+            "{}needle-hit,tail, {}",
+            "filler, ".repeat(1_500),
+            "filler, ".repeat(1_500)
         );
+        let cmd = ctx
+            .output_buffer
+            .store("wide".into(), wide.clone(), String::new(), 0);
+        // A `@file_*` handle in production is a slice or extraction of another buffer, stored
+        // under a derived name (`<ref>[1-1]`), not under the path of a file that is not there.
+        let file = ctx
+            .output_buffer
+            .store_file(format!("{cmd}[1-1]"), wide.clone());
+        let tool = ctx.output_buffer.store_tool(
+            "run_command",
+            json!({ "exit_code": 0, "stdout": wide }).to_string(),
+        );
+
+        for (kind, handle) in [("@cmd_", cmd), ("@file_", file), ("@tool_", tool)] {
+            assert!(
+                handle.starts_with(kind),
+                "fixture: {handle} is not a {kind} ref"
+            );
+            let hint = over_budget_line_hint(&handle);
+
+            for jp in json_paths_in(&hint, "stdout") {
+                crate::tools::read_file::ReadFile
+                    .call(json!({ "path": handle, "json_path": jp }), &ctx)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "the hint for {kind} offers json_path {jp:?}, which fails: {e}\n{hint}"
+                        )
+                    });
+            }
+            let commands = commands_in(&hint, "needle");
+            assert!(
+                !commands.is_empty(),
+                "the hint for {kind} offers no run_command route: {hint}"
+            );
+            for command in commands {
+                let out = crate::tools::run_command::RunCommand
+                    .call(json!({ "command": command }), &ctx)
+                    .await
+                    .unwrap_or_else(|e| panic!("the {kind} route {command:?} failed: {e}"));
+                assert!(
+                    out.to_string().contains("needle-hit"),
+                    "the {kind} route {command:?} must return the match, got: {out:.300}"
+                );
+            }
+        }
     }
 
     /// REACH and REMEDY for D4b, through the real `call_content`. The hint was attached to the

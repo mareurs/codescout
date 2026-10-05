@@ -573,27 +573,42 @@ async fn an_overflowing_memory_list_hints_a_path_that_returns_the_topics() {
     );
 }
 
-/// The decision itself, in the three shapes it must tell apart. A `content` string keeps
-/// pointing at itself; a payload with an array points at the array (this is the row that was
-/// `$.field`); a payload with neither falls to the default's own placeholder, which is
-/// deliberate and pinned in `core/types.rs`.
-#[test]
-fn memory_hint_uses_array_detection_when_the_payload_has_no_content() {
-    assert_eq!(
-        Memory.json_path_hint(&json!({ "content": "x" })),
-        "$.content"
+/// The hint's decision, tested by FOLLOWING it for each payload shape memory can overflow with.
+/// A `content` string hints itself and its route returns that text; an array under a named key
+/// hints the array and its route returns the rows. (A payload with neither gets the shared
+/// default's placeholder, pinned on purpose in `core/types.rs`; it is a placeholder and
+/// following it is expected to fail, so it has no row here.) This replaces a test that compared
+/// the hint to a string: the strings it compared are what a following test now exercises.
+#[tokio::test]
+async fn memory_hints_lead_to_the_data_for_each_payload_shape() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let text = "memory text ".repeat(50);
+    let content = json!({ "content": text, "topic": "t" });
+    let rows = json!({
+        "results": [{ "topic": "row-a" }, { "topic": "row-b" }, { "topic": "row-c" }],
+        "count": 3,
+        "has_more": false,
+    });
+
+    let jp = Memory.json_path_hint(&content);
+    let got = crate::tools::hint_probe::follow_path_on(&content, &jp, &ctx)
+        .await
+        .unwrap_or_else(|e| panic!("content route {jp:?} failed: {e}"));
+    assert_eq!(got["value_type"], "string", "{jp:?}: {got}");
+    assert!(
+        got.to_string().contains("memory text"),
+        "{jp:?} must return the text: {got}"
     );
-    assert_eq!(
-        Memory.json_path_hint(&json!({
-            "results": [{ "topic": "a" }, { "topic": "b" }],
-            "count": 2,
-            "has_more": false,
-        })),
-        "$.results[*]"
-    );
-    assert_eq!(
-        Memory.json_path_hint(&json!({ "status": "ok" })),
-        crate::tools::default_json_path_hint(&json!({ "status": "ok" }))
+
+    let jp = Memory.json_path_hint(&rows);
+    let got = crate::tools::hint_probe::follow_path_on(&rows, &jp, &ctx)
+        .await
+        .unwrap_or_else(|e| panic!("array route {jp:?} failed: {e}"));
+    assert_eq!(got["value_type"], "array", "{jp:?}: {got}");
+    let rendered = got.to_string();
+    assert!(
+        rendered.contains("row-a") && rendered.contains("row-c"),
+        "{jp:?} must return the rows, first to last: {rendered}"
     );
 }
 /// An EMPTY array is still the answer. `{"results": [], ...}` is a real payload (a recall that
