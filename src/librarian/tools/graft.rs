@@ -16,7 +16,12 @@ struct Args {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        LibrarianRecoverableError::new(format!("graft requires 'from_id' and 'into_id': {e}"))
+        super::deser_error(
+            e,
+            "graft",
+            "doc(action=\"graft\") requires 'from_id' and 'into_id'",
+            "e.g. doc(action=\"graft\", from_id=\"<16-hex>\", into_id=\"<16-hex>\") previews; add force=true to apply. from_id is DELETED and its history moves to into_id.",
+        )
     })?;
 
     let mut cat = ctx.catalog.lock();

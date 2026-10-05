@@ -516,7 +516,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
-    let mut a: Args = serde_json::from_value(args)?;
+    let mut a: Args = serde_json::from_value(args).map_err(|e| {
+        super::deser_error(
+            e,
+            "update",
+            "doc(action=\"update\") requires 'id' and well-typed patch fields",
+            "e.g. doc(action=\"update\", id=\"<16-hex>\", patch={\"status\": \"fixed\"}). Get an id from doc(action=\"find\", ...).",
+        )
+    })?;
 
     // Every top-level param the artifact schema advertises for `update` is lifted
     // into `patch`, which is where the write actually reads from. Skipping one does

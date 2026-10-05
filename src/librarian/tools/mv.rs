@@ -134,7 +134,12 @@ const CITATION_SAMPLE: usize = 20;
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        super::LibrarianRecoverableError::new(format!("move requires 'id' and 'new_rel_path': {e}"))
+        super::deser_error(
+            e,
+            "move",
+            "doc(action=\"move\") requires 'id' and 'new_rel_path'",
+            "e.g. doc(action=\"move\", id=\"<16-hex>\", new_rel_path=\"docs/archive/foo.md\"). new_rel_path is relative to the repo root; get an id from doc(action=\"find\", ...).",
+        )
     })?;
 
     // Defense-in-depth: new_rel_path must stay within the resolved root. Reject
