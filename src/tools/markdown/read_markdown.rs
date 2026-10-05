@@ -250,6 +250,27 @@ fn drop_to_fit(
     }
 }
 
+/// How much of a heading's text the oversized-section error echoes back (in `section_map`,
+/// `next_actions`, `breadcrumb` and the message). Heading text has no length: a 12 KB sub-heading
+/// made the error body 12,700 B, which `fit_envelope` cannot shrink because it is part of what
+/// the error adds AROUND the map. A prefix is enough to name the heading, and still resolves it:
+/// `read_file(heading=<prefix>)` matches by prefix. A clipped entry carries the true length as
+/// `h_bytes`, so the clip is a statement and not a silent edit.
+// cap-class: RESULT_CAP read_markdown.heading_echo_bytes — probed
+const HEADING_ECHO_CLIP: usize = 200;
+
+/// `text` clipped to [`HEADING_ECHO_CLIP`] bytes on a character boundary, and its original
+/// length when it was clipped.
+fn clip_heading(text: &str) -> (String, Option<usize>) {
+    if text.len() <= HEADING_ECHO_CLIP {
+        return (text.to_string(), None);
+    }
+    (
+        crate::util::text::clip_to_bytes(text, HEADING_ECHO_CLIP).to_string(),
+        Some(text.len()),
+    )
+}
+
 /// Single-heading navigation: extract one section. Returns a `headings` list on
 /// not-found, a buffered hint + `section_map` when the match is oversized, or
 /// the section content (+ coverage).
@@ -311,14 +332,29 @@ fn read_markdown_single_heading(
         let nested: Vec<serde_json::Value> = all_headings
             .iter()
             .filter(|h| h.line > start_ln && h.line <= end_ln)
-            .map(|h| json!({"h": h.text, "l": h.line - start_ln + 1}))
+            .map(|h| {
+                let (text, clipped_from) = clip_heading(&h.text);
+                let mut entry = json!({"h": text, "l": h.line - start_ln + 1});
+                if let Some(n) = clipped_from {
+                    entry["h_bytes"] = json!(n);
+                }
+                entry
+            })
             .collect();
 
-        let heading_label = section_result
+        let heading_label = clip_heading(
+            &section_result
+                .breadcrumb
+                .last()
+                .cloned()
+                .unwrap_or_else(|| heading_query.to_string()),
+        )
+        .0;
+        let breadcrumb: Vec<String> = section_result
             .breadcrumb
-            .last()
-            .cloned()
-            .unwrap_or_else(|| heading_query.to_string());
+            .iter()
+            .map(|b| clip_heading(b).0)
+            .collect();
 
         let hint = format!(
             "use {:?} — pick a sub-heading from `section_map` or start_line/end_line",
@@ -352,7 +388,10 @@ fn read_markdown_single_heading(
         // `finish` builds the whole body (message, hint with the cut notes, `file_id`, the map
         // and its markers, `next_actions`, `breadcrumb`, `line_range`), it is measured, and only
         // `section_map` is cut, by the excess. The hint's route still works after a cut: the
-        // first sub-heading is always kept (it is what `next_actions` names), and the note adds
+        // first sub-heading is kept, which holds because every heading echoed here is clipped to
+        // `HEADING_ECHO_CLIP` first (an entry larger than its half of the allowance is DROPPED
+        // by `cut_array_middle`, and so is anything `fit_envelope` cannot shrink: it never
+        // re-checks the response around an empty summary). The note adds
         // `read_file(path=<file_id>, start_line=.., end_line=..)` for the middle, in the buffer's
         // own line frame, which is the frame `section_map`'s `l` values are in.
         let finish = |map: Value, notes: &[String]| -> Value {
@@ -371,7 +410,7 @@ fn read_markdown_single_heading(
                 }
             }
             body.insert("next_actions".into(), json!(next_actions));
-            body.insert("breadcrumb".into(), json!(section_result.breadcrumb));
+            body.insert("breadcrumb".into(), json!(breadcrumb));
             body.insert("line_range".into(), json!([start_ln, end_ln]));
             Value::Object(body)
         };

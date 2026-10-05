@@ -2813,6 +2813,87 @@ mod tests {
         assert!(rec.extra.get("section_map_truncated").is_none());
         assert!(!rec.hint().unwrap().contains("omitted"));
     }
+    #[tokio::test]
+    async fn the_oversized_section_error_clips_a_huge_sub_heading_and_keeps_its_route() {
+        // A 12 KB FIRST sub-heading: `next_actions` echoes it and `section_map` lists it, so the
+        // error body was 12,700 B with the map dropped to `summary_omitted`, contradicting the
+        // claim that the first sub-heading is always kept. The echoed text is clipped to a
+        // prefix with its true length beside it, and a prefix still resolves the heading.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hugesub.md");
+        let mut body = format!("## Big\n### {}\nfirst body\n\n", "s".repeat(12_000));
+        for i in 2..=40 {
+            body.push_str(&format!("### Sub {i:03}\n{}\n\n", "b".repeat(300)));
+        }
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Big" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an oversized section is a RecoverableError");
+
+        assert!(
+            error_body_len(rec) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the error body is {} B",
+            error_body_len(rec)
+        );
+        assert!(
+            rec.extra.get("summary_omitted").is_none(),
+            "{:?}",
+            rec.extra
+        );
+        let map = rec.extra["section_map"].as_array().unwrap();
+        assert!(map.len() > 30, "the map was gutted: {} entries", map.len());
+        let first = &map[0];
+        assert!(first["h"].as_str().unwrap().starts_with("### sss"));
+        assert!(
+            first["h"].as_str().unwrap().len() <= 200,
+            "the heading was not clipped"
+        );
+        assert!(first["h_bytes"].as_u64().unwrap() > 12_000, "{first}");
+        assert!(
+            map[1].get("h_bytes").is_none(),
+            "a short heading must not be marked clipped"
+        );
+
+        // The route in `next_actions` still works: a PREFIX of the heading resolves it.
+        let action = rec.extra["next_actions"][0].as_str().unwrap();
+        assert!(action.len() < 400, "next_actions[0] is {} B", action.len());
+        let file_id = rec.extra["file_id"].as_str().unwrap();
+        let quoted = action
+            .split("heading=")
+            .nth(1)
+            .unwrap()
+            .trim_end_matches(')');
+        let heading: String = serde_json::from_str(quoted).unwrap();
+        // The prefix resolves the 12 KB sub-heading. That section is ITSELF over the inline
+        // limit (its heading alone is 12 KB), so the answer is its own oversized-section error,
+        // naming exactly the two lines it spans: the heading and its one body line.
+        let followed = ReadFile
+            .call(json!({ "path": file_id, "heading": heading }), &ctx)
+            .await
+            .unwrap_err();
+        let rec2 = followed
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("the resolved section is oversized");
+        assert!(
+            rec2.message.contains("spans 2 lines"),
+            "the clipped heading did not resolve its section: {}",
+            rec2.message
+        );
+        assert!(
+            error_body_len(rec2) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the follow-up error body is {} B",
+            error_body_len(rec2)
+        );
+    }
 
     fn two_sections(width: usize) -> String {
         format!(
@@ -3085,6 +3166,7 @@ mod tests {
     // `@tool_*` beside its own handle. Point probes at the edges miss that; a sweep that walks
     // the content size across the whole band, one response kind at a time, cannot.
 
+    // cap-class: NOT_A_CAP — the inline limit the sweeps assert AGAINST; it shapes no result
     const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
 
     /// What one sweep saw, for the assertions after it.

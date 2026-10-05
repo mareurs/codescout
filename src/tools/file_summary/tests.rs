@@ -903,6 +903,18 @@ fn fit_envelope_subtracts_what_the_envelope_costs_around_the_summary() {
     );
     assert!(got["s"].get("summary_omitted").is_none());
 }
+#[test]
+fn fit_envelope_cannot_shrink_what_finish_itself_adds() {
+    // The documented limit of the function: if `finish`'s OWN output is over the limit around an
+    // empty summary, no cut of the summary can fit it. The result is then the minimal summary,
+    // marked, inside an envelope that is still oversized. Pinned so that any change here is a
+    // decision; callers that echo user-sized text (the oversized-section error) clip it first.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let finish = |s: serde_json::Value, _notes: &[String]| serde_json::json!({"s": s, "echo": "e".repeat(11_000)});
+    let got = fit_envelope(summary, "@file_t", finish);
+    assert_eq!(got["s"]["summary_omitted"], true, "{:.200}", got["s"]);
+    assert!(ser_len(&got) > 11_000, "{} B", ser_len(&got));
+}
 
 #[test]
 fn fit_envelope_converges_in_exactly_two_passes_when_the_notes_overshoot_the_slack() {

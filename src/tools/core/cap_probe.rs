@@ -1086,6 +1086,19 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test seeds
+        // ONE 12,000 B sub-heading against `HEADING_ECHO_CLIP` 200, through the real tool, and
+        // asserts the echoed text is a prefix of at most 200 B with its true length beside it as
+        // `h_bytes`. The error body without the clip was 12,643 B. Marker written by production
+        // in `read_markdown_single_heading`, from `clip_heading`.
+        id: "read_markdown.heading_echo_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("h_bytes"),
+            mutation: Mutation::Killed,
+            cited_test: "the_oversized_section_error_clips_a_huge_sub_heading_and_keeps_its_route",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked
