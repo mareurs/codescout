@@ -1245,6 +1245,16 @@ mod tests {
                 None,
             ),
             (
+                "the unit is BYTES, not items: 1,000 B of text beside 300 short ids. The ids \
+                     are 300 items but ~2.1 KB, so by bytes they outweigh the text; compared by \
+                     item count, 1,000 would beat 300 and hand the text the win",
+                json!({
+                    "note": "n".repeat(1_000),
+                    "ids": (0..300).map(|i| format!("i{i:03}")).collect::<Vec<_>>(),
+                }),
+                None,
+            ),
+            (
                 "no string field at all",
                 json!({ "count": 3, "ids": ["a", "b", "c"] }),
                 None,
