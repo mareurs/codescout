@@ -61,9 +61,10 @@ real ones. `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw 
 `grep -o 'PATTERN[^,]*'`.
 
 A `run_command` result keeps its `@cmd_*` handle: a long stream in its summary is cut to
-`N of M bytes shown` (stderr: `.err`), and an oversized envelope is clipped to fit. Only an
-envelope that cannot be clipped (bulk nested or spread over many small fields) is still wrapped in
-a `@tool_*`. Other tools produce `@tool_*`. All are addressable by any tool that accepts a path.
+`N of M bytes shown` (stderr: `.err`), and an oversized envelope is clipped to fit. An
+envelope that cannot be clipped to fit (bulk nested, spread over many small fields, or in strings
+the clip stops cutting at 1,000 raw bytes each) is still wrapped in a `@tool_*`. Other tools
+produce `@tool_*`. All are addressable by any tool that accepts a path.
 `@file_*` and `@ack_*` are sibling handle kinds — same mechanics. `@ack_*`
 covers both dangerous commands and out-of-scope writes: re-invoke the tool with
 the handle to acknowledge and proceed.

@@ -25,10 +25,26 @@ pub(crate) fn primary_text(content: &[rmcp::model::Content]) -> String {
 }
 
 /// Parse the primary block as the overflow envelope it must be, naming the text on failure.
+///
+/// Every caller's precondition is that its response SPILLED behind `@tool_*`. When that no
+/// longer holds (a later change bounds the payload so it stays inline), the failure says so
+/// instead of surfacing a JSON parse error from deep inside the instrument.
 pub(crate) fn envelope_of(content: &[rmcp::model::Content]) -> Value {
-    let text = primary_text(content);
-    serde_json::from_str(&text)
-        .unwrap_or_else(|e| panic!("the primary block is not a JSON envelope ({e}): {text:.300}"))
+    envelope_in(&primary_text(content)).unwrap_or_else(|why| panic!("{why}"))
+}
+
+/// The body of [`envelope_of`], returning the failure message so it can be pinned by a test.
+fn envelope_in(text: &str) -> Result<Value, String> {
+    const PRECONDITION: &str = "the response was expected to spill behind @tool_* and did not";
+    let envelope: Value = serde_json::from_str(text).map_err(|e| {
+        format!("{PRECONDITION}: the primary block is not a JSON envelope ({e}): {text:.300}")
+    })?;
+    match envelope["output_id"].as_str() {
+        Some(id) if id.starts_with("@tool_") => Ok(envelope),
+        other => Err(format!(
+            "{PRECONDITION}: output_id is {other:?}, not a @tool_* handle: {text:.300}"
+        )),
+    }
 }
 
 /// The `json_path` the envelope's `hint` tells the caller to use.
@@ -109,4 +125,51 @@ pub(crate) fn commands_in(text: &str, pattern: &str) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A response that stayed inline is the case `envelope_of` exists to name: the primary block
+    /// is text, not an envelope. The failure must state the PRECONDITION and carry the text, not
+    /// surface as a bare JSON parse error.
+    #[test]
+    fn an_inline_response_fails_by_naming_the_spill_precondition() {
+        let err = envelope_in("450 lines\n  … showing 0 of 450 — Outline only").unwrap_err();
+        assert!(
+            err.starts_with("the response was expected to spill behind @tool_* and did not: "),
+            "{err}"
+        );
+        assert!(err.contains("not a JSON envelope"), "{err}");
+        assert!(
+            err.contains("Outline only"),
+            "the text must be shown: {err}"
+        );
+    }
+
+    /// JSON that parses is still not the envelope when it carries no `@tool_*` handle: an
+    /// inline JSON result, or a `@cmd_*` / `@file_*` handle, would otherwise fail later in
+    /// `hinted_path` with a message about the hint rather than about the missing spill.
+    #[test]
+    fn a_json_block_without_a_tool_handle_fails_by_the_same_name() {
+        for text in [
+            r#"{"content":"x"}"#,
+            r#"{"output_id":"@file_abc","summary":"s"}"#,
+            r#"{"output_id":"@cmd_abc"}"#,
+        ] {
+            let err = envelope_in(text).unwrap_err();
+            assert!(
+                err.starts_with("the response was expected to spill behind @tool_* and did not: "),
+                "{err}"
+            );
+            assert!(err.contains("not a @tool_* handle"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_tool_envelope_is_returned_as_parsed() {
+        let text = r#"{"output_id":"@tool_abc","summary":"s","hint":"h"}"#;
+        assert_eq!(envelope_in(text).unwrap()["summary"], "s");
+    }
 }
