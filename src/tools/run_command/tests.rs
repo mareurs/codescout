@@ -3266,6 +3266,192 @@ async fn a_wide_line_in_the_banded_arm_is_clipped_too() {
     assert_eq!(parsed["truncated"], true, "{text:.300}");
     assert!(!has_tool_handle(&text), "{text:.200}");
 }
+// ---- the routes the hints name are FOLLOWED, against the same buffer, and the data comes back ----
+//
+// A test that compares a hint to a literal proves the sentence is stable, not that the route works;
+// the defect these replace was a hint whose advised route returned the identical empty response.
+// Each case here runs the command the hint tells the reader to run.
+
+/// The backtick-quoted commands in `text` that start with `prefix`, in order.
+fn hinted_commands(text: &str, prefix: &str) -> Vec<String> {
+    text.split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|c| c.starts_with(prefix))
+        .map(str::to_string)
+        .collect()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn following_the_wide_line_hint_returns_the_data_it_promised() {
+    let (_dir, ctx) = project_ctx().await;
+    let line = wide_line(78_000);
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), line.clone(), String::new(), 0);
+    let (_t, first) = buffer_query(&ctx, format!("grep status {id}")).await;
+    let hint = first["hint"].as_str().unwrap_or_default().to_string();
+
+    // Route 1: a window of the line around a token that occurs ONCE.
+    let grep_o = hinted_commands(&hint, "grep -o");
+    assert_eq!(grep_o.len(), 1, "the hint names one grep -o route: {hint}");
+    let cmd = grep_o[0].replace("TEXT", "HEAD");
+    let (t1, p1) = buffer_query(&ctx, cmd.clone()).await;
+    let window = p1["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("`{cmd}` returned zero bytes: {t1:.300}"));
+    assert!(window.starts_with("HEAD"), "{window:.80}");
+    assert_eq!(
+        window.trim_end().len(),
+        4 + 200,
+        "HEAD plus the 200 bytes asked for"
+    );
+
+    // Route 2: the first N characters of the line.
+    let cut = hinted_commands(&hint, "cut -c");
+    assert_eq!(cut.len(), 1, "the hint names one cut route: {hint}");
+    let (t2, p2) = buffer_query(&ctx, cut[0].clone()).await;
+    let head = p2["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("`{}` returned zero bytes: {t2:.300}", cut[0]));
+    assert!(head.starts_with("HEAD") && head.contains("status"));
+    assert_eq!(
+        head.trim_end().len(),
+        4_000,
+        "exactly the 4,000 characters asked for"
+    );
+    assert!(
+        line.starts_with(head.trim_end()),
+        "and they are the line's own first bytes"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_marker_in_the_clipped_line_names_the_same_working_routes() {
+    // The marker travels with the data; a reader who never sees the envelope's hint sees this one.
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), wide_line(78_000), String::new(), 0);
+    let (_t, p) = buffer_query(&ctx, format!("cat {id}")).await;
+    let stdout = p["stdout"].as_str().unwrap_or_default().to_string();
+
+    let grep_o = hinted_commands(&stdout, "grep -o");
+    assert_eq!(
+        grep_o.len(),
+        1,
+        "the marker names a grep -o route: {stdout:.0}"
+    );
+    let (t, window) = buffer_query(&ctx, grep_o[0].replace("TEXT", "HEAD")).await;
+    assert!(
+        window["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("HEAD"),
+        "following the marker's own route returned nothing: {t:.300}"
+    );
+}
+
+// A comma-free wide match is what `grep -o 'PATTERN[^,]*'` returns on JSON or CSV-ish output: ONE
+// line, no separator to page on. 9,850 B lands in the banded arm (over its 9,700 B guard, under the
+// summary gate); 20,000 B lands in the summary arm. Both used to return zero bytes.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_comma_free_wide_match_returns_real_bytes_in_both_arms() {
+    for width in [9_850usize, 20_000] {
+        let (_dir, ctx) = project_ctx().await;
+        let body = format!("a,b,HEAD{},tail\n", "x".repeat(width));
+        let id = ctx
+            .output_buffer
+            .store("cmd".into(), body, String::new(), 0);
+        let (text, parsed) = buffer_query(&ctx, format!("grep -o 'HEAD[^,]*' {id}")).await;
+
+        let stdout = parsed["stdout"].as_str().unwrap_or_else(|| {
+            panic!("width {width}: zero bytes of a non-empty match: {text:.300}")
+        });
+        assert!(stdout.starts_with("HEAD"), "width {width}");
+        assert!(
+            stdout.len() > 3_000,
+            "width {width}: only {} bytes came back",
+            stdout.len()
+        );
+        assert!(
+            stdout.contains("bytes shown"),
+            "width {width}: a clipped match must say so"
+        );
+        assert_eq!(parsed["truncated"], true, "width {width}: {text:.200}");
+        assert!(!has_tool_handle(&text), "width {width}: {text:.200}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "width {width}: {} B",
+            text.len()
+        );
+    }
+}
+
+// ---- the stored-stderr byte bound: exact at the limit, one byte over ----
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stored_stderr_line_of_exactly_the_budget_is_returned_whole() {
+    let (_dir, ctx) = project_ctx().await;
+    let stderr = "e".repeat(super::output::BUFFER_STDERR_BYTE_BUDGET);
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), "a\nb\n".into(), stderr.clone(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep -c a {id}")).await;
+
+    assert_eq!(
+        parsed["stderr"].as_str().unwrap_or_default(),
+        stderr,
+        "{text:.200}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stored_stderr_line_one_byte_over_the_budget_is_cut_and_says_so() {
+    let (_dir, ctx) = project_ctx().await;
+    let stderr = "e".repeat(super::output::BUFFER_STDERR_BYTE_BUDGET + 1);
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), "a\nb\n".into(), stderr, 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep -c a {id}")).await;
+
+    let got = parsed["stderr"].as_str().unwrap_or_default();
+    assert!(got.contains("bytes shown"), "{text:.200}");
+    assert!(
+        got.contains(&format!(
+            "of {} bytes shown",
+            super::output::BUFFER_STDERR_BYTE_BUDGET + 1
+        )),
+        "the total names the stored stream: {:.0}",
+        got
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn following_the_stderr_marker_reads_the_whole_stream_back() {
+    // The marker says "all of it: <handle>.err". Follow it: the whole stderr must come back.
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), "a\n".into(), wide_stderr(), 0);
+    let (_t, first) = buffer_query(&ctx, format!("grep -c a {id}")).await;
+    let marker = first["stderr"].as_str().unwrap_or_default();
+    assert!(marker.contains(&format!("{id}.err")), "{marker:.0}");
+
+    // `grep -o 'TAIL' <id>.err` proves the stream behind the named handle holds what was cut.
+    let (t, tail) = buffer_query(&ctx, format!("grep -o TAIL {id}.err")).await;
+    assert_eq!(
+        tail["stdout"].as_str().unwrap_or_default().trim_end(),
+        "TAIL",
+        "the `.err` handle named by the marker holds the cut bytes: {t:.300}"
+    );
+}
 
 #[test]
 fn system_prompt_draft_omits_hints_for_unsupported_languages() {

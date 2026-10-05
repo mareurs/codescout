@@ -427,7 +427,7 @@ pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<Str
 /// `TOOL_OUTPUT_BUFFER_THRESHOLD`: the stdout budget below is computed from what this ACTUALLY
 /// emitted.
 // cap-class: RESULT_CAP run_command.buffer_stderr_bytes — probed
-const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
+pub(super) const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
 
 /// Escaped bytes a buffer-query response spends on everything that is NOT the stdout and stderr
 /// text: the keys (`exit_code`, `truncated`, `stdout_shown`, `stdout_total`, `stderr_shown`,
