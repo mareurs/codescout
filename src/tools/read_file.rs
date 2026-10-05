@@ -2529,6 +2529,73 @@ mod tests {
             text.len()
         );
     }
+    // ---- one reach test per renderer site that prints a gap ----
+    //
+    // `format_read_file_summary` has a separate loop per summary type, each calling
+    // `omitted_gap` for its own array key. A site with no test is a site whose gap line can
+    // vanish while every other assertion (the hint's `entries omitted`) stays green.
+
+    #[tokio::test]
+    async fn a_wide_yaml_shows_its_gap_line_between_the_kept_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.yaml");
+        let body: String = (0..30)
+            .map(|i| format!("{}{i:02}: 1\n", "k".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("sections omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_wide_toml_shows_its_gap_line_between_the_kept_sections() {
+        // 40 `[table]` headers of 600 B: the `sections` list, 30 entries after its own cap.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.toml");
+        let body: String = (0..40)
+            .map(|i| format!("[{}{i:02}]\nv = 1\n", "t".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("sections omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wide_flat_toml_shows_its_gap_line_between_the_kept_keys() {
+        // No table headers: the summary lists top-level `keys`, capped at 20 by the summarizer.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flat.toml");
+        let body: String = (0..20)
+            .map(|i| format!("{}{i:02} = 1\n", "k".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("keys omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_wide_mdx_shows_its_gap_line_between_the_kept_headings() {
+        // `.mdx` is a Markdown SUMMARY type that `read_file` does not route to the heading-map
+        // reader, so it reaches the `markdown` branch of the summary renderer.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.mdx");
+        let body: String = (1..=35)
+            .map(|i| format!("# H{i:02} {}\nbody\n", "w".repeat(400)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("headings omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
     // ---- read_markdown's oversized tier: the heading map is bounded by bytes ----
     //
     // `HEADINGS_HARD_CAP` (40) is a TRIGGER into the oversized tier, not a cap on what the

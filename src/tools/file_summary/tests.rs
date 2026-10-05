@@ -495,6 +495,85 @@ fn bound_summary_spares_an_array_that_fits_its_share_and_gives_its_leftover_away
     );
     assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
 }
+#[test]
+fn bound_summary_leaves_arrays_alone_when_cutting_strings_was_enough() {
+    // The string pass leaves the summary under budget, so the small array is NOT touched: if
+    // the arrays phase ran anyway it would find no room left (the string took its share) and
+    // cut a 3-entry array to nothing.
+    let s = serde_json::json!({
+        "type": "x",
+        "head": "h".repeat(10_000),
+        "keys": numbered_entries(3),
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert!(cut["head"].as_str().unwrap().contains("bytes shown"));
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert_eq!(
+        cut["keys"].as_array().unwrap().len(),
+        3,
+        "an array that fit was cut"
+    );
+    assert!(cut.get("keys_truncated").is_none());
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+/// A summary of two arrays in which `a` (`n` equal-length strings) serializes to EXACTLY
+/// `fair + delta` bytes, `fair` being the share `bound_summary` offers it (it is the smaller,
+/// so it is allocated first, with `count == 2`). The arithmetic depends on the length of
+/// `type`, so that is searched until `a`'s byte count can be hit exactly.
+fn two_arrays_with_a_sized_against_its_share(n: usize, delta: i64) -> serde_json::Value {
+    for pad in 0..32 {
+        let ty = "x".repeat(1 + pad);
+        let probe = serde_json::json!({"type": ty, "a": [], "b": []});
+        let remaining = SUMMARY_BYTE_BUDGET - ser_len(&probe) - 600;
+        let want = (remaining / 2) as i64 + delta;
+        // n strings of length L serialize to n * (L + 3) + 1 bytes.
+        if want >= 1 && (want - 1) % n as i64 == 0 {
+            let len = (want - 1) / n as i64 - 3;
+            if len >= 1 {
+                let a: Vec<serde_json::Value> = (0..n)
+                    .map(|_| serde_json::json!("a".repeat(len as usize)))
+                    .collect();
+                let s = serde_json::json!({"type": ty, "a": a, "b": numbered_entries(400)});
+                let got = ser_len(&serde_json::json!(s["a"]));
+                assert_eq!(got as i64, want, "the fixture arithmetic is off");
+                return s;
+            }
+        }
+    }
+    panic!("no `type` length lands the fixture on fair + {delta} with {n} entries");
+}
+
+#[test]
+fn bound_summary_returns_an_array_whole_when_it_is_exactly_its_share() {
+    // bytes == fair: it fits. With three entries a cut by halves of its own size would still
+    // drop one (each half rounds down to one entry), so only the `<=` keeps it whole.
+    let s = two_arrays_with_a_sized_against_its_share(3, 0);
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert_eq!(
+        cut["a"].as_array().unwrap().len(),
+        3,
+        "an array that fit was cut"
+    );
+    assert!(cut.get("a_truncated").is_none());
+    assert!(
+        cut["b_truncated"] == true,
+        "the large one must still be cut"
+    );
+}
+
+#[test]
+fn bound_summary_marks_no_cut_when_the_halves_still_hold_every_entry() {
+    // One byte over its share, but the entries (2 of them) each fit a half: nothing is
+    // removed, so nothing may be marked. A marker with `count: 0` claims a cut that did not
+    // happen.
+    let s = two_arrays_with_a_sized_against_its_share(2, 1);
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert_eq!(cut["a"].as_array().unwrap().len(), 2);
+    assert!(cut.get("a_truncated").is_none(), "{}", cut["a_omitted"]);
+    assert!(cut.get("a_omitted").is_none());
+    assert_eq!(notes.len(), 1, "only `b` was cut: {notes:?}");
+}
 
 #[test]
 fn bound_summary_note_is_a_ready_to_run_call_naming_the_handle_and_the_gap() {
