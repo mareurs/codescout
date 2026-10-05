@@ -388,6 +388,51 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
     }
     Ok(buf)
 }
+/// Ids of ledger entries whose body_edits reached the entry's own `## F-N — …` section while an
+/// `| F-N | … |` Index row for the same id stayed byte-identical.
+///
+/// An entry is two text surfaces under two headings; a heading-addressed edit reaches one and
+/// reports `updated: true`. This names the other. Detection is by content, not by guessing the
+/// ledger's layout: an edit's `heading` must start with an entry id (`F-168`, optionally behind
+/// `##`), and the row is a table line whose FIRST cell is exactly that id, compared before and
+/// after the whole batch — so a batch that amends the row as well stays silent, and so does an
+/// entry that has no row. See
+/// `docs/issues/2026-09-16-one-ledger-entry-is-two-headings-so-a-heading-addressed-edit-amends-half.md`.
+fn untouched_index_rows(before: &str, after: &str, edits: &[Value]) -> Vec<String> {
+    static ENTRY_HEADING: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^(?:#{2,}\s+)?([A-Z]{1,3}-\d+)\b").expect("static regex")
+    });
+    fn rows_for<'a>(text: &'a str, id: &str) -> Vec<&'a str> {
+        text.lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                t.strip_prefix('|').is_some_and(|rest| {
+                    rest.split('|')
+                        .next()
+                        .is_some_and(|cell| cell.trim().trim_matches(['*', '`']).trim() == id)
+                })
+            })
+            .collect()
+    }
+    let mut ids: Vec<String> = Vec::new();
+    for edit in edits {
+        let Some(heading) = edit["heading"].as_str() else {
+            continue;
+        };
+        if let Some(c) = ENTRY_HEADING.captures(heading.trim()) {
+            let id = c[1].to_string();
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids.into_iter()
+        .filter(|id| {
+            let now = rows_for(after, id);
+            !now.is_empty() && now == rows_for(before, id)
+        })
+        .collect()
+}
 
 /// Lift a top-level param the schema advertises for `update` into its canonical
 /// `patch.<field>` slot, per the Repair-and-Continue convention: one correct
@@ -565,6 +610,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Surfaced in the response and the `field_patch` payload so a section-level
     // loss is visible even when the whole-file write grew.
     let mut consumed_subsections: Vec<String> = Vec::new();
+    // Entry ids whose section a body_edit reached while their Index row stayed byte-identical.
+    let mut untouched_rows: Vec<String> = Vec::new();
 
     let new_content = if let Some(new_body) = &patch.body {
         let (fm_opt, old_body) = crate::librarian::frontmatter::parse(&original)?;
@@ -607,7 +654,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 )?,
             };
         }
-        apply_body_edits(&working, edits, &mut consumed_subsections).map_err(|e| {
+        let edited = apply_body_edits(&working, edits, &mut consumed_subsections).map_err(|e| {
             // Extract nudge inputs in a scoped block so the borrow of `e` ends
             // before we either rebuild or return it.
             let rebuilt = {
@@ -648,7 +695,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 }
                 None => e,
             }
-        })?
+        })?;
+        untouched_rows = untouched_index_rows(&working, &edited, edits);
+        edited
     } else {
         match try_preserving_frontmatter_patch(&original, patch) {
             Some(preserved) => preserved,
@@ -840,6 +889,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     if !consumed_subsections.is_empty() {
         out["replaced_subsections"] = json!(consumed_subsections);
+    }
+    if !untouched_rows.is_empty() {
+        let note = format!(
+            "{}. An entry is two surfaces — its section and its `| ID | … |` Index row — and \
+             body_edits addressed the section only. If the row quotes what you changed, amend it \
+             with a second body_edit addressed to the Index heading.",
+            untouched_rows
+                .iter()
+                .map(|id| format!("Index row for {id} exists and was not touched"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        // `warning` may already carry the params-replace note; append, never clobber it.
+        out["warning"] = match out["warning"].as_str() {
+            Some(existing) => json!(format!("{existing} {note}")),
+            None => json!(note),
+        };
+        out["untouched_index_rows"] = json!(untouched_rows);
     }
     Ok(out)
 }
@@ -3881,5 +3948,127 @@ text
         )
         .await
         .expect("only the flip to `archived` leaves doctor's population");
+    }
+    // ── An entry is two surfaces: a `## F-N — …` section and a `| F-N | … |` Index row ──
+    // docs/issues/2026-09-16-one-ledger-entry-is-two-headings-so-a-heading-addressed-edit-amends-half.md
+
+    const LEDGER: &str = "# Ledger\n\n## Index\n\n| id | title |\n|---|---|\n\
+        | F-1 | has a row |\n\n## F-1 — has a row\n\nfigure: 10\n\n\
+        ## F-2 — no row anywhere\n\nfigure: 20\n";
+
+    async fn mk_ledger(ctx: &ToolContext) -> String {
+        let v = crate::librarian::tools::create::call(
+            ctx,
+            serde_json::json!({
+                "repo": "r", "rel_path": "ledger.md",
+                "kind": "spec", "title": "T", "body": LEDGER,
+            }),
+        )
+        .await
+        .unwrap();
+        v["id"].as_str().unwrap().to_string()
+    }
+
+    fn amend(id: &str, heading: &str, old: &str, new: &str) -> Value {
+        serde_json::json!({"id": id, "patch": {"body_edits": [
+            {"heading": heading, "action": "edit", "old_string": old, "new_string": new}
+        ]}})
+    }
+
+    #[tokio::test]
+    async fn amending_an_entry_section_names_the_index_row_it_left_untouched() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_ledger(&ctx).await;
+        let out = call(
+            &ctx,
+            amend(&id, "## F-1 — has a row", "figure: 10", "figure: 11"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["updated"], true);
+        assert_eq!(out["untouched_index_rows"], serde_json::json!(["F-1"]));
+        let warning = out["warning"].as_str().expect("a warning must be present");
+        assert!(
+            warning.contains("Index row for F-1 exists and was not touched"),
+            "{warning}"
+        );
+        // The section really was amended and the row really is byte-identical — the warning
+        // describes the file, not a guess.
+        let content = std::fs::read_to_string(tmp.path().join("ledger.md")).unwrap();
+        assert!(content.contains("figure: 11"));
+        assert!(content.contains("| F-1 | has a row |"));
+    }
+
+    #[tokio::test]
+    async fn amending_an_entry_that_has_no_index_row_is_silent() {
+        // Negative control: without it a response that ALWAYS warns passes the test above.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_ledger(&ctx).await;
+        let out = call(
+            &ctx,
+            amend(&id, "## F-2 — no row anywhere", "figure: 20", "figure: 21"),
+        )
+        .await
+        .unwrap();
+        assert!(out.get("warning").is_none(), "{out}");
+        assert!(out.get("untouched_index_rows").is_none(), "{out}");
+    }
+
+    #[tokio::test]
+    async fn an_edit_that_also_changes_the_index_row_is_silent() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_ledger(&ctx).await;
+        let out = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"body_edits": [
+                {"heading": "## F-1 — has a row", "action": "edit",
+                 "old_string": "figure: 10", "new_string": "figure: 11"},
+                {"heading": "## Index", "action": "edit",
+                 "old_string": "| F-1 | has a row |", "new_string": "| F-1 | has a row, amended |"},
+            ]}}),
+        )
+        .await
+        .unwrap();
+        assert!(out.get("warning").is_none(), "{out}");
+        assert!(out.get("untouched_index_rows").is_none(), "{out}");
+    }
+
+    #[tokio::test]
+    async fn editing_a_non_entry_heading_never_looks_for_an_index_row() {
+        // `## Index` is not entry-shaped; a bare `F-1` mention in prose is not a row either.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_ledger(&ctx).await;
+        let out = call(
+            &ctx,
+            amend(&id, "## Index", "| id | title |", "| id | name |"),
+        )
+        .await
+        .unwrap();
+        assert!(out.get("warning").is_none(), "{out}");
+    }
+
+    #[test]
+    fn untouched_index_rows_compares_the_row_lines_before_and_after() {
+        let before = "| F-1 | a |\n## F-1 — a\n\nx\n";
+        let edits = [serde_json::json!({"heading": "## F-1 — a", "action": "edit"})];
+        // Row byte-identical across the edit: named.
+        let after = "| F-1 | a |\n## F-1 — a\n\ny\n";
+        assert_eq!(untouched_index_rows(before, after, &edits), vec!["F-1"]);
+        // Row changed by the same batch: silent.
+        let after_row = "| F-1 | b |\n## F-1 — a\n\ny\n";
+        assert!(untouched_index_rows(before, after_row, &edits).is_empty());
+        // Row removed: nothing left to be stale.
+        let after_gone = "## F-1 — a\n\ny\n";
+        assert!(untouched_index_rows(before, after_gone, &edits).is_empty());
+        // Heading without an entry id: never looks.
+        let plain = [serde_json::json!({"heading": "## Index", "action": "edit"})];
+        assert!(untouched_index_rows(before, after, &plain).is_empty());
+        // A different id's row is not F-1's.
+        let other = "| F-10 | a |\n## F-1 — a\n\nx\n";
+        assert!(untouched_index_rows(other, other, &edits).is_empty());
     }
 }
