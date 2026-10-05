@@ -210,6 +210,73 @@ fn scoped_body_hint(val: &Value) -> Option<String> {
     let scoped = val.get("body_meta").is_some_and(Value::is_object);
     (scoped && val.get("body").is_some()).then(|| "$.body".to_string())
 }
+/// `Some("$.<key>")` when a buffered librarian result is mostly **text** and its only arrays are
+/// indexes, `None` to leave the general heuristic in place.
+///
+/// `default_json_path_hint` picks the largest array by element COUNT. A string is never a
+/// candidate for it, so `librarian(action="context")` — `{markdown, included_ids[21], scope}`,
+/// 48,839 B measured 2026-10-05 — advertised `$.included_ids[*]`: 21 opaque ids, while the packed
+/// artifacts the caller asked for sat at `$.markdown`. The envelope's own summary line even
+/// said `$.markdown starts: …`, so the summary and the hint disagreed about where the content
+/// was.
+///
+/// **The rule: an array of scalars is an index, and a text field that outweighs it is the
+/// payload.** It is deliberately not "prefer strings over arrays". An array of RECORDS is a
+/// result set, and projecting a field across it is worth more than a prose blob beside it, so
+/// the presence of any array of records anywhere within the default's own depth bound keeps
+/// the default — an augmented tracker's `$.augmentation.params.tasks[*]` still wins over its
+/// `body`. And a string that does not outweigh the index (a short note beside 200 ids) keeps
+/// it too, because then the ids ARE the bulk.
+///
+/// Scoped to the librarian adapter, like [`scoped_body_hint`] and for the same reason: the
+/// default is right for `find`, `graph`, `state_at`, `link_scan` and the rest.
+fn dominant_text_hint(val: &Value) -> Option<String> {
+    let obj = val.as_object()?;
+    let (key, text) = obj
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
+        .max_by_key(|(_, s)| s.len())?;
+    // `$.key` can only be written for a plain identifier; anything else is left to the
+    // default rather than guessed at.
+    if text.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    let mut has_records = false;
+    let mut largest_index_bytes = 0;
+    scan_arrays(val, 0, &mut has_records, &mut largest_index_bytes);
+    if has_records || text.len() <= largest_index_bytes {
+        return None;
+    }
+    Some(format!("$.{key}"))
+}
+
+/// What arrays does `v` hold, within the depth `default_json_path_hint` itself searches?
+///
+/// Records the presence of any array whose elements are objects or arrays (`has_records`) and
+/// the serialized size of the largest array of scalars (`largest_index_bytes`). Descends through
+/// objects only, never into arrays, and stops at the same depth as `find_largest_array` in
+/// `core/types.rs` (4) — keep the two equal, or this rule and the default it defers to would
+/// disagree about which arrays exist.
+fn scan_arrays(v: &Value, depth: usize, has_records: &mut bool, largest_index_bytes: &mut usize) {
+    let Some(map) = v.as_object() else {
+        return;
+    };
+    for child in map.values() {
+        match child {
+            Value::Array(items) => {
+                if items.iter().any(|e| e.is_object() || e.is_array()) {
+                    *has_records = true;
+                } else {
+                    *largest_index_bytes = (*largest_index_bytes).max(child.to_string().len());
+                }
+            }
+            Value::Object(_) if depth < 4 => {
+                scan_arrays(child, depth + 1, has_records, largest_index_bytes)
+            }
+            _ => {}
+        }
+    }
+}
 
 struct LibrarianAdapter {
     inner: Arc<dyn crate::librarian::tools::Tool>,
@@ -479,7 +546,9 @@ impl crate::tools::Tool for LibrarianAdapter {
     /// `librarian_compact_summary`.
     /// docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
     fn json_path_hint(&self, val: &Value) -> String {
-        scoped_body_hint(val).unwrap_or_else(|| crate::tools::default_json_path_hint(val))
+        scoped_body_hint(val)
+            .or_else(|| dominant_text_hint(val))
+            .unwrap_or_else(|| crate::tools::default_json_path_hint(val))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -1129,6 +1198,169 @@ mod tests {
             scoped_body_hint(&payload).unwrap_or(default),
             "$.body",
             "the override must win for a scoped read"
+        );
+    }
+    /// D2 of the hint-family sweep. One row per way the rule can be wrong, each built so only
+    /// ITS condition decides the answer: the rows that must say `None` use a string that WOULD
+    /// win on size, so a `None` proves the records / index check fired and not that the text
+    /// was merely too short.
+    #[test]
+    fn a_text_field_that_outweighs_an_index_array_is_the_hinted_payload() {
+        let ids: Vec<String> = (0..21).map(|i| format!("{i:016x}")).collect();
+        let long = "packed artifact text\n".repeat(2_000);
+        for (label, payload, expect) in [
+            (
+                "librarian(context) — the reported case: ids index, markdown payload",
+                json!({ "markdown": long, "included_ids": ids, "scope": { "applied": "project" } }),
+                Some("$.markdown"),
+            ),
+            (
+                "no array at all, one large string",
+                json!({ "markdown": long, "scope": { "applied": "project" } }),
+                Some("$.markdown"),
+            ),
+            (
+                "a full get with an index array (tags) and no records: the body is the payload",
+                json!({ "id": "x", "body": long, "tags": ["a", "b", "c"] }),
+                Some("$.body"),
+            ),
+            (
+                "an array of RECORDS anywhere within depth: keep the default even though the \
+                 string is far larger",
+                json!({
+                    "body": long,
+                    "augmentation": { "params": { "tasks": [{ "id": "T-1" }, { "id": "T-2" }] } },
+                }),
+                None,
+            ),
+            (
+                "find — records only",
+                json!({ "count": 2, "items": [{ "id": "a" }, { "id": "b" }] }),
+                None,
+            ),
+            (
+                "a string SMALLER than the index it sits beside: the ids are the bulk",
+                json!({ "note": "short", "ids": (0..300).map(|i| format!("{i:016x}")).collect::<Vec<_>>() }),
+                None,
+            ),
+            (
+                "no string field at all",
+                json!({ "count": 3, "ids": ["a", "b", "c"] }),
+                None,
+            ),
+            (
+                "a key that cannot be written as `$.key` is not guessed at",
+                json!({ "a.b": long, "ids": ["a"] }),
+                None,
+            ),
+        ] {
+            assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
+
+    /// A scoped read keeps `$.body` even when a larger string sits beside it: the new rule is
+    /// consulted only AFTER `scoped_body_hint` declines.
+    #[test]
+    fn the_scoped_body_hint_still_outranks_the_text_rule() {
+        let payload = json!({
+            "body": "## Index\n",
+            "body_meta": { "heading": "## Index" },
+            "markdown": "m".repeat(40_000),
+        });
+        assert_eq!(scoped_body_hint(&payload).as_deref(), Some("$.body"));
+    }
+
+    /// A librarian tool that answers with a fixed payload, so the REAL adapter's `call_content`
+    /// runs over a result of the reported shape without needing a catalog full of artifacts.
+    struct FixedPayloadTool(Value);
+
+    #[async_trait::async_trait]
+    impl crate::librarian::tools::Tool for FixedPayloadTool {
+        fn name(&self) -> &'static str {
+            "librarian"
+        }
+        fn description(&self) -> &'static str {
+            "fixed payload"
+        }
+        fn input_schema(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        async fn call(&self, _ctx: &LibToolContext, _args: Value) -> Result<Value> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// REACH and REMEDY for D2: through the adapter's real `call_content`, then FOLLOW the hint
+    /// with a real `read_file`. Before the fix the hint was `$.included_ids[*]` and following it
+    /// returned 21 ids; the route a caller needs returns the markdown.
+    #[tokio::test]
+    async fn an_overflowing_librarian_context_hints_the_markdown_and_it_returns_it() {
+        use crate::tools::hint_probe::{envelope_of, follow_hint};
+        let tmp = tempfile::TempDir::new().unwrap();
+        let core = core_ctx_for_guard(tmp.path()).await;
+        let lib_ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let ids: Vec<String> = (0..21).map(|i| format!("{i:016x}")).collect();
+        let markdown = format!(
+            "## packed context — FIRST-LINE-MARKER\n{}",
+            "an artifact body line\n".repeat(2_000)
+        );
+        let adapter = LibrarianAdapter {
+            inner: Arc::new(FixedPayloadTool(json!({
+                "markdown": markdown,
+                "included_ids": ids,
+                "scope": { "applied": "project" },
+            }))),
+            ctx: lib_ctx,
+        };
+
+        let content = crate::tools::Tool::call_content(
+            &adapter,
+            json!({ "action": "context", "topic": "x" }),
+            &core,
+        )
+        .await
+        .unwrap();
+        let envelope = envelope_of(&content);
+        assert!(
+            envelope["output_id"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("@tool_"),
+            "the result must overflow, or this checks nothing: {envelope}"
+        );
+
+        let (jp, followed) = follow_hint(&envelope, &core).await;
+        assert_eq!(
+            jp, "$.markdown",
+            "the hint must name the payload, not the ids"
+        );
+        let value =
+            followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
+        // The extracted string is itself over the inline budget, so it is parked under a
+        // `@file_*` handle: read its first line through that handle.
+        assert_eq!(
+            value["value_type"], "string",
+            "{jp:?} must project the text: {value}"
+        );
+        let file_id = value["file_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
+        let first = crate::tools::Tool::call(
+            &crate::tools::read_file::ReadFile,
+            json!({ "path": file_id, "start_line": 1, "end_line": 1 }),
+            &core,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("reading line 1 of {file_id} failed: {e}"))
+        .to_string();
+        assert!(
+            first.contains("FIRST-LINE-MARKER"),
+            "the route {jp:?} must return the markdown, starting at its first line: {first:.300}"
         );
     }
 
