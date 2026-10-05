@@ -5,14 +5,14 @@ tags:
 - cluster/unclassified
 - run_command
 - progressive-disclosure
-opened: 2026-10-05
 closed: 2026-10-05
+opened: 2026-10-05
 owner: marius
 related:
-- docs/issues/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
+- docs/issues/archive/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
 - docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
 severity: medium
-unverified: The fix is UNCOMMITTED in the working tree, so there is no fix SHA or patch-id and the file is not archived. Measured with synthetic 60 KB lines only; whether real failing cargo test runs hit this in practice was not measured. The 5,000-byte budget assumes JSON escaping inflates text by under about 30%; not measured on real failure output. cluster/unclassified was used because the field had no cap at all, which does not fit IC-13; the owner should reclassify.
+unverified: Measured with synthetic 60 KB lines only; whether real failing cargo test runs hit this was not measured. The 5,000-byte budget assumes JSON escaping inflates text by under about 30%; not measured on real failure output. The live MCP binary that ran the probes predates the fix. cluster/unclassified was used because the field had no cap at all, which does not fit IC-13; the owner should reclassify.
 ---
 
 # BUG: `run_command`'s `test` envelope carries the `failures` field with no bound, so one wide failure re-buffers the whole response under a content-free `@tool_*` envelope
@@ -64,13 +64,18 @@ See Symptom. The `stderr` field of the same envelope is bounded by `STDERR_SUMMA
 
 ## Fix
 
-Fixed 2026-10-05, uncommitted (see `unverified`), in the same change as `2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md`.
+Fixed 2026-10-05 in `e833abeb` on `experiments` (patch-id `faf97e30544df47032c960dd237dae29d6b890e1`; not on `master`), in the same change as `2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md`.
 
 `summarize_test_output` and `summarize_build_output` (`src/tools/command_summary.rs`) now pass `failures` and `first_error` through `bound_stream_bytes` with `FAILURE_FIELD_BYTE_BUDGET` (5,000 bytes). The helper keeps the first and last half and puts a marker between them: `--- failures: <shown> of <total> bytes shown; all of it: output_id (stdout) or output_id.err (stderr) ---`. `<total>` is the length of the extracted section. Both ends are kept because a failure section opens with the first panic and closes on the list of failing test names.
 
 **Why 5,000 and not the generic 2,000.** Failure sections of 2 to 9 KB are inline and complete today, and a 2,000-byte cap would cut output that never needed cutting. The field sits beside at most one `stderr` (about 2,150 bytes with its marker), so the worst raw envelope is about 7,500 bytes. It stays under the 10,000-byte threshold unless JSON escaping inflates the text by more than about 30%. That limit is real: a field that is dense in quotes could still push an envelope over it. Not measured on real failing runs.
 
 Not done: a line bound for `failures`. The byte bound covers it, because any size is bounded.
+
+## Fix provenance
+
+- **SHA:** `e833abeb` (`experiments`)
+- **patch-id:** `faf97e30544df47032c960dd237dae29d6b890e1`
 
 ## Tests added
 
@@ -95,10 +100,10 @@ Read the raw output through the handle named in the summary: `run_command("grep 
 
 ## Resume
 
-Commit with the sibling fix, record the fix SHA labelled `experiments` and its patch-id, and archive both files with `doc(action="move")`. Re-run the probe in Symptom on the first binary built from that commit.
+Re-run the probe in Symptom on the first binary built from `e833abeb`.
 
 ## References
 
 - `src/tools/command_summary.rs`: `extract_test_failures`, `extract_error_block`, `summarize_test_output`, `summarize_build_output`
-- `docs/issues/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md`
+- `docs/issues/archive/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md`
 - `docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md`

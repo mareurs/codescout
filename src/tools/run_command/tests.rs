@@ -2222,7 +2222,7 @@ async fn run_command_large_output_stored_in_buffer() {
 }
 /// REACH test for the byte bound on `summarize_generic`, through the surface a caller sees.
 ///
-/// BUG docs/issues/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
+/// BUG docs/issues/archive/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
 ///
 /// One 95 KB line is "1 line", so the line-only summary returned it verbatim, the response
 /// overflowed AGAIN in `call_content`, and the caller got a `@tool_*` envelope whose summary
@@ -2287,7 +2287,7 @@ async fn a_huge_stdout_line_is_summarized_inline_not_rebuffered() {
 }
 /// REACH test for the byte bound on the `test` envelope's `failures` field.
 ///
-/// BUG docs/issues/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
+/// BUG docs/issues/archive/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
 ///
 /// The command ends in `echo cargo test` only so `detect_command_type` classifies the run as
 /// a test run; the `failures:` block is printed by `printf`. One 60 KB line used to push the

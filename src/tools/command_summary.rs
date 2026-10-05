@@ -987,7 +987,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     }
     // -- summarize_generic: byte bound --
     //
-    // BUG docs/issues/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
+    // BUG docs/issues/archive/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
     //
     // A LINE budget does not bound a field: one 95 KB line is "1 line". These tests pin the
     // byte bound from BOTH ends of the kept text, because a bound that kept only the head
@@ -1344,7 +1344,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     }
     // -- summarized `failures` / `first_error`: byte bound --
     //
-    // BUG docs/issues/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
+    // BUG docs/issues/archive/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
     //
     // `extract_test_failures` returns the WHOLE failure section and `extract_error_block`
     // stops only at a blank line, so neither field had a size bound. The inputs below are

@@ -14,7 +14,7 @@ related:
 - docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md
 - docs/issues/archive/2026-09-07-the-json-path-key-hint-caps-at-ten-keys-and-marks-no-cut.md
 severity: high
-unverified: The fix is UNCOMMITTED in the working tree, so there is no fix SHA or patch-id and the file is not archived. The live MCP binary that ran the probes predates the fix; the Reproduction was not re-run on a rebuilt binary (the reach test covers the same path through call_content). Root cause items 1 to 5 (hint, json_path on @cmd_*, shape-mismatch error) are unchanged and unfixed by design. The frequency in usage.db was not measured. The cluster/ tag was the filer's judgment; the root cause is now closer to IC-13 (cf. the archived 2026-09-14 stderr bug) than to IC-22, and the owner should decide.
+unverified: The live MCP binary that ran the probes predates the fix, and the Reproduction was not re-run on a binary built from the fix commit (the reach test covers the same path through call_content). Root cause items 1 to 5 (hint, json_path on @cmd_*, shape-mismatch error) are unchanged and unfixed by design. The frequency in usage.db was not measured. The cluster/ tag was the filer's judgment; the root cause is now closer to IC-13 (cf. the archived 2026-09-14 stderr bug) than to IC-22, and the owner should decide.
 ---
 
 # BUG: when a `run_command` prints one big JSON document, the overflow recovery cannot work — the hint is the placeholder `$.field`, `json_path` cannot enter `stdout`, and `@cmd_*` refuses `json_path`
@@ -99,7 +99,7 @@ See Symptom and Reproduction. The workarounds below were also run, which shows t
 
 ## Fix
 
-Fixed 2026-10-05, uncommitted (see `unverified`). The fix is at the cause (Root cause item 0), not at the hint.
+Fixed 2026-10-05 in `e833abeb` on `experiments` (patch-id `faf97e30544df47032c960dd237dae29d6b890e1`; not on `master`). The fix is at the cause (Root cause item 0), not at the hint.
 
 `summarize_generic` (`src/tools/command_summary.rs`) now bounds each stream by bytes after its line summary:
 
@@ -113,6 +113,11 @@ The response for the Reproduction is now the small `@cmd_*` envelope with the do
 **Options (a), (b) and (c) from the filing were not implemented.** They repair the recovery route for a `@tool_*` handle, which this class of output no longer reaches. They stay open as separate work if another tool produces a scalar-shaped overflow. Not measured: whether any tool other than `run_command` does.
 
 **Same defect, other fields.** The `failures` field of the `test` envelope and the `first_error` field of the `build` envelope had no byte bound either. They are fixed in the same change with `FAILURE_FIELD_BYTE_BUDGET` (5,000 bytes), tracked in `2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md`.
+
+## Fix provenance
+
+- **SHA:** `e833abeb` (`experiments`)
+- **patch-id:** `faf97e30544df47032c960dd237dae29d6b890e1`
 
 ## Tests added
 
@@ -153,7 +158,7 @@ run_command("jq -r '.stdout | fromjson | .[] | \"\\(.name) \\(.status)\"' @tool_
 
 ## Resume
 
-Commit the fix (it is in the working tree on `experiments`, with the two issue files). Then record the fix SHA labelled `experiments` and its patch-id (`git show <sha> > x.patch && git patch-id --stable < x.patch`), and archive both bug files with `doc(action="move")`. Re-run the Reproduction on the first binary built from that commit: the live MCP binary used for the probes predates the fix.
+Re-run the Reproduction on the first binary built from `e833abeb`: the live MCP binary used for the probes predates the fix. If a tool other than `run_command` returns a scalar-shaped overflow, options (a) to (c) in the filing are still open for it.
 
 ## References
 
