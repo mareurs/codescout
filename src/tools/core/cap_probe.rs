@@ -1132,7 +1132,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // against `BUFFER_STDERR_BYTE_BUDGET` 2,000, in the `grep -c` arm. The other two
         // buffer-only arms call the same helper, `bound_buffer_stderr`; they are pinned by their
         // own tests and not cited because a row names one. Marker written by production in
-        // `util::text::elide_middle_bytes`, called from `bound_buffer_stderr`.
+        // `util::text::elide_middle_escaped`, called from `bound_buffer_stderr`.
         id: "run_command.buffer_stderr_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("bytes shown"),
