@@ -77,6 +77,19 @@ fn compacted_test_response(
         raw_stderr.to_string(),
         exit_code,
     );
+    compacted_test_value(&c, raw_stdout, raw_stderr, exit_code, &output_id)
+}
+
+/// The response [`compacted_test_response`] returns, around a given `output_id`, with nothing
+/// stored: pure, so the summary-or-inline gate can MEASURE the compacted response (with a
+/// stand-in handle of the real length) before deciding to use it.
+fn compacted_test_value(
+    c: &crate::tools::libtest_compact::CompactedTest,
+    raw_stdout: &str,
+    raw_stderr: &str,
+    exit_code: i32,
+    output_id: &str,
+) -> Value {
     let mut summary =
         super::super::command_summary::summarize_test_output(raw_stdout, raw_stderr, exit_code);
     // The compacted text already carries the failure detail and the stderr, so the
@@ -85,7 +98,7 @@ fn compacted_test_response(
         obj.remove("failures");
         obj.remove("stderr");
     }
-    let trailer = c.trailer(&output_id);
+    let trailer = c.trailer(output_id);
     summary["stdout"] = json!(if c.stdout.is_empty() {
         trailer
     } else {
@@ -94,7 +107,33 @@ fn compacted_test_response(
     if !c.stderr.is_empty() {
         summary["stderr"] = json!(c.stderr);
     }
-    rebuild_buffered_summary(summary, &output_id)
+    rebuild_buffered_summary(summary, output_id)
+}
+
+/// A stand-in for the `@cmd_*` handle a compacted response will carry, of the REAL length (the
+/// prefix and eight hex digits), for measuring the response before the buffer entry exists.
+const MEASURING_OUTPUT_ID: &str = "@cmd_00000000";
+
+/// Does the compacted response, with everything attached after it, fit the inline limit?
+///
+/// The gate that chooses between "summarize" and "inline" measures the RAW streams, and a run that
+/// compacts to a few hundred bytes can be over the limit raw: 85 empty-target blocks are ~9.6 KB
+/// and ~10 KB serialized, where every newline costs two. Asked of the raw run, that gate summarized
+/// a response that would have fit compacted with 9 KB to spare, and the compacted stdout, the one
+/// thing a reader of a test run wants, never reached them. So the gate asks THIS first.
+fn compacted_fits(
+    c: &crate::tools::libtest_compact::CompactedTest,
+    raw_stdout: &str,
+    raw_stderr: &str,
+    exit_code: i32,
+    late: &serde_json::Map<String, Value>,
+) -> bool {
+    let mut response =
+        compacted_test_value(c, raw_stdout, raw_stderr, exit_code, MEASURING_OUTPUT_ID);
+    // A compacted response always carries `stdout`, so the empty-`stdout` a tee capture adds to a
+    // response that had none never applies here.
+    attach(&mut response, late.clone(), false);
+    !crate::tools::exceeds_inline_limit_len(response.to_string().len())
 }
 
 /// Name the cause when the shell performed command substitution the caller did not intend.
@@ -976,8 +1015,19 @@ pub(crate) async fn handle_successful_output_with(
         &gate_keys,
         unfiltered_ref.is_some() && raw_stdout.is_empty(),
     );
-    let summary_needed =
-        inline_response_exceeds_limit(exit_code, &raw_stdout, stderr_for_gate, extras);
+    // A libtest run is compacted BEFORE the gate judges it, and the gate is asked about the
+    // COMPACTED response when there is one: see `compacted_fits`. Only for runs whose raw bytes fit
+    // the limit, the population that was returned inline (and compacted) before the gate counted
+    // serialized bytes: a run over it was summarized then and is now, unchanged. Compaction that
+    // does not fit either falls through to the raw gate, as it always did.
+    let compacted = (!buffer_only
+        && raw_stdout.len() + raw_stderr.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN
+        && detect_command_type(original_command) == CommandType::Test)
+        .then(|| crate::tools::libtest_compact::compact_libtest_output(&raw_stdout, &raw_stderr))
+        .flatten()
+        .filter(|c| compacted_fits(c, &raw_stdout, &raw_stderr, exit_code, &late));
+    let summary_needed = compacted.is_none()
+        && inline_response_exceeds_limit(exit_code, &raw_stdout, stderr_for_gate, extras);
     let mut result = if summary_needed {
         if let Some((stderr_out, stderr_shown, stderr_total)) = stderr_cut.clone() {
             // Buffer-only: return inline, never create a new buffer ref (avoids infinite loop).
@@ -1098,14 +1148,11 @@ pub(crate) async fn handle_successful_output_with(
                 response
             })
         }
-    } else if let Some(c) = (!buffer_only
-        && detect_command_type(original_command) == CommandType::Test)
-        .then(|| crate::tools::libtest_compact::compact_libtest_output(&raw_stdout, &raw_stderr))
-        .flatten()
-    {
+    } else if let Some(c) = compacted {
         // A short libtest run is ~40% cargo progress and empty sibling targets
         // (docs/research/2026-09-24-rtk-evaluation.pdf § 7). Compacted only when that
-        // pays; otherwise the raw arm below returns it exactly as before.
+        // pays AND the compacted response fits (`compacted_fits`); otherwise the raw arm below
+        // returns it exactly as before.
         compacted_test_response(
             c,
             original_command,

@@ -7797,6 +7797,170 @@ async fn a_cut_by_the_line_cap_still_says_so() {
     assert!(hint.contains("capped at 100 lines"), "{hint}");
 }
 
+// ---- a libtest run that compacts to a few hundred bytes is returned compacted, not summarized ----
+//
+// Reviewer's measurement: a `cargo test` with 85-88 empty-target blocks (raw ~9.6 KB, ~10 KB
+// serialized because every newline is 2 B) came back as `{type, exit_code, output_id, passed}` with
+// NO stdout, because the serialized gate judged the RAW streams before compaction was tried; the
+// compacted response was 406 B and fit with room to spare.
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_libtest_run_that_compacts_to_a_few_hundred_bytes_is_returned_compacted() {
+    let (dir, ctx) = project_ctx().await;
+    let mut stdout = String::from(
+        "\nrunning 1 test\ntest alpha::one ... ok\n\n\
+         test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+    );
+    let mut blocks = 0;
+    while blocks < 86 {
+        blocks += 1;
+        stdout.push_str(&format!(
+            "\nrunning 0 tests\n\n\
+             test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; {blocks} filtered out; finished in 0.00s\n\n"
+        ));
+    }
+    // The shape the reviewer measured: 85-88 empty blocks, raw under the limit, serialized over it.
+    assert!(
+        (85..=88).contains(&blocks),
+        "fixture drifted: {blocks} blocks"
+    );
+    assert!(
+        stdout.len() <= 10_003,
+        "raw must fit: {} B (else this tests a different thing)",
+        stdout.len()
+    );
+    assert!(
+        crate::tools::command_summary::inline_response_exceeds_limit(0, &stdout, "", 0),
+        "the serialized raw run must be over the limit, or the gate is not what is under test"
+    );
+    std::fs::write(dir.path().join("libtest.out"), &stdout).unwrap();
+
+    let (text, parsed) = buffer_query_free(&ctx, "cat libtest.out; echo cargo test").await;
+    assert!(!has_tool_handle(&text), "{text:.200}");
+    let out = parsed["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the compacted stdout is missing: {text:.300}"));
+    assert!(
+        out.contains("codescout compacted this run") && out.contains("alpha::one"),
+        "{out:.300}"
+    );
+    assert!(
+        parsed["output_id"]
+            .as_str()
+            .is_some_and(|i| i.starts_with("@cmd_")),
+        "{text:.200}"
+    );
+    assert_eq!(parsed["passed"], 1, "{text:.200}");
+    assert!(
+        text.len() < 1_000,
+        "compacted is small, got {} B",
+        text.len()
+    );
+}
+/// A libtest stdout of one real test and `blocks` empty targets; the real test's name carries `pad`
+/// extra bytes so a caller can land the total on an exact length.
+fn libtest_run(blocks: usize, pad: usize) -> String {
+    let mut s = format!(
+        "\nrunning 1 test\ntest alpha::{}one ... ok\n\n\
+         test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+        "p".repeat(pad)
+    );
+    for b in 1..=blocks {
+        s.push_str(&format!(
+            "\nrunning 0 tests\n\n\
+             test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; {b} filtered out; finished in 0.00s\n\n"
+        ));
+    }
+    s
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn compaction_is_considered_up_to_exactly_the_inline_limit_in_raw_bytes() {
+    // A run over the limit RAW was summarized before the gate counted serialized bytes and still is:
+    // only the population that was returned inline (and compacted) is rescued. The boundary is
+    // inclusive: 10,003 raw bytes is inside it and 10,004 is not.
+    let base = libtest_run(86, 0).len();
+    assert!(base < 10_003, "fixture: {base} B");
+    let at = libtest_run(86, 10_003 - base);
+    let over = libtest_run(86, 10_004 - base);
+    assert_eq!((at.len(), over.len()), (10_003, 10_004));
+
+    let (inside, _c) = run_inline("cargo test", &at, "").await;
+    assert!(
+        inside["stdout"]
+            .as_str()
+            .is_some_and(|s| s.contains("codescout compacted this run")),
+        "10,003 raw bytes is inside the boundary: {inside:.200}"
+    );
+    let (outside, _c) = run_inline("cargo test", &over, "").await;
+    assert_eq!(outside["type"], "test", "{outside:.200}");
+    assert!(
+        outside.get("stdout").is_none(),
+        "10,004 raw bytes is over the limit and is summarized, as it always was: {outside:.200}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_compacted_response_is_judged_with_its_late_keys_and_its_real_handle_at_the_edge() {
+    // The compacted response is measured BEFORE its buffer entry exists, so the gate builds it
+    // around a stand-in handle of the real length and with every late key attached. Here the
+    // response is landed exactly ON the limit (a `tee_skipped` note sized from a measured control
+    // run), then one byte over: a stand-in shorter than the real handle, or a gate that left the
+    // late keys out, calls the over-the-limit response small and returns it.
+    use super::output::{handle_successful_output_with, LateKeys};
+    let (_dir, ctx) = project_ctx().await;
+    let stdout = libtest_run(86, 0);
+    let run = |note: usize| {
+        let (ctx, stdout) = (&ctx, stdout.clone());
+        async move {
+            handle_successful_output_with(
+                "cargo test",
+                stdout,
+                String::new(),
+                0,
+                false,
+                None,
+                std::path::Path::new("."),
+                ctx,
+                LateKeys {
+                    redacted: 0,
+                    tee_skipped: Some("n".repeat(note)),
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let is_compacted = |r: &Value| {
+        r["stdout"]
+            .as_str()
+            .is_some_and(|s| s.contains("codescout compacted this run"))
+    };
+
+    let control = run(1).await;
+    assert!(is_compacted(&control), "precondition: {control:.200}");
+    let note = 1 + (10_003 - control.to_string().len());
+
+    let at = run(note).await;
+    assert!(is_compacted(&at), "exactly on the limit stays compacted");
+    assert_eq!(at.to_string().len(), 10_003);
+
+    let over = run(note + 1).await;
+    assert!(
+        !is_compacted(&over),
+        "one byte over the limit must not be returned compacted: {} B",
+        over.to_string().len()
+    );
+    assert!(
+        over.to_string().len() <= 10_003,
+        "the fallback is a response that fits: {} B",
+        over.to_string().len()
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_summary_budgets_around_the_late_keys_it_carries() {
