@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure the `tools/list` prompt surface off the live wire, per tool and per parameter.
 
-`tools/list` is the fourth prompt surface and the only one with a PER-REQUEST cost, so it
+`tools/list` is the one prompt surface with a PER-REQUEST cost, so it
 is re-read at cache-read rates for the life of every session. `cargo test --lib
 tool_surface_report_lengths -- --nocapture` already reports it per tool; this goes one level
 down (per parameter, per action) and joins usage.db so cost can be read against use.

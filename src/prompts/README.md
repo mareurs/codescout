@@ -2,7 +2,7 @@
 
 Read this when touching `source.md` (the single source for the `server_instructions` and `onboarding_prompt` surfaces) or `builders.rs`. This file is the **canonical home** for prompt-surface rules: which surfaces exist (§ Surfaces), when to bump `ONBOARDING_VERSION` (§ Versioning), the writing style guide (§ Rules), and the shared-branch slice hazard (§ Verify the slice). `CLAUDE.md` carries only a one-line pointer here; memory `conventions` § Prompt Surface Consistency has the short version.
 
-**Any change to tool behavior or signatures requires a prompt-surface review** — adding/renaming tools, changing parameter semantics, new error/fallback modes, or changed response shapes. Ask: "Does the LLM need to know this to use the tool correctly?" If yes, update all surfaces in the same commit. The build-time test `server::tests::prompt_surfaces_reference_only_real_tools` catches stale tool-name mentions across the three surfaces; `prompts::tests::claude_md_contains_no_deprecated_tool_names` guards `CLAUDE.md`. ("Distance from change": files closer to a rename get updated, distant ones accumulate stale refs — the tests are the backstop.)
+**Any change to tool behavior or signatures requires a prompt-surface review** — adding/renaming tools, changing parameter semantics, new error/fallback modes, or changed response shapes. Ask: "Does the LLM need to know this to use the tool correctly?" If yes, update all surfaces in the same commit. The build-time test `server::tests::prompt_surfaces_reference_only_real_tools` catches stale tool-name mentions across the four surfaces it reads — the `server_instructions` and `onboarding_prompt` slices, the `build_system_prompt_draft()` output and `.codescout/system-prompt.md` (§ Surfaces); it does **not** read `tools/list`. `prompts::tests::claude_md_contains_no_deprecated_tool_names` guards `CLAUDE.md`. ("Distance from change": files closer to a rename get updated, distant ones accumulate stale refs — the tests are the backstop.)
 
 ## Surfaces
 
@@ -10,6 +10,7 @@ Read this when touching `source.md` (the single source for the `server_instructi
   - `server_instructions` surface — injected **once at MCP session start**, not per-request. Token cost is session-scoped, not per-call — invest in clarity over brevity.
   - `onboarding_prompt` surface — one-time onboarding, read only when a project is activated for the first time.
 - `build_system_prompt_draft()` in `src/prompts/builders.rs` — generated per-project and embedded into the project's system prompt via onboarding.
+- `.codescout/system-prompt.md` — the committed, `onboarding`-generated system prompt for this repo, injected into every session here at project activation. It is read from disk, so it is the one surface a compile-time `include_str!` never sees. Two gates read it: `server::tests::prompt_surfaces_reference_only_real_tools` (stale tool names) and `prompts::tests::reader_docs_contain_no_retired_call_forms` (retired call forms, via the `.codescout` root).
 - **`tools/list`** — every tool's `description()` + `input_schema()`, delivered **on every request of every session**. The largest surface by an order of magnitude and the only one with a per-request cost: **55,519 characters** as of 2026-09-03. Budgeted — see § The tool-surface budget. **Derive these numbers, don't cite them:** `cargo test --lib tool_surface_report_lengths -- --nocapture` prints the per-tool map, and `python3 scripts/probe_tool_surface.py` prints both cuts below plus the per-parameter table.
 
   **There are two cuts of that total. They answer different questions, and the second is the one that tells you what to trim.**
@@ -51,7 +52,7 @@ Read this when touching `source.md` (the single source for the `server_instructi
 
 ## The tool-surface budget
 
-`tools/list` is the fourth prompt surface and the only one with a **per-request** cost. Measured 2026-08-18 across four Claude Code sessions and three models, **100.0% of input reads are cache hits**, so this block is re-read at cache-read rates for the life of a session — about 5% of a long session's cached prefix, 10% of a short one's.
+`tools/list` is the one prompt surface with a **per-request** cost. Measured 2026-08-18 across four Claude Code sessions and three models, **100.0% of input reads are cache hits**, so this block is re-read at cache-read rates for the life of a session — about 5% of a long session's cached prefix, 10% of a short one's.
 
 **Budget: `TOOL_SURFACE_CHAR_BUDGET` in `src/server.rs`**, enforced by `server::tests::tool_surface_under_budget`, with `tool_surface_report_lengths` as the per-tool map (`cargo test --lib tool_surface_report_lengths -- --nocapture`). Same instruction as rule 8 above: **do not raise it — find the bytes.** Ratchet it *down* whenever a trim frees room. It has already been paid down once: declaring `anchor_heading` cost +808 and was funded by compressing the injected `workspace` description.
 
