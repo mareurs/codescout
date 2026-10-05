@@ -596,6 +596,30 @@ fn memory_hint_uses_array_detection_when_the_payload_has_no_content() {
         crate::tools::default_json_path_hint(&json!({ "status": "ok" }))
     );
 }
+/// An EMPTY array is still the answer. `{"results": [], ...}` is a real payload (a recall that
+/// matched nothing, beside a note long enough to overflow), and the route `$.results[*]` is valid
+/// on it: it projects to `[]`. A default that skipped empty arrays when choosing the largest
+/// would fall to the `$.field` placeholder instead, and following THAT fails with
+/// `path segment 'field' not found`. Asserted by following the hint on a real buffer, so it fails
+/// on the behaviour and not on a spelling.
+#[tokio::test]
+async fn a_hint_naming_an_empty_array_is_a_route_that_works() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let payload = json!({ "results": [], "count": 0, "has_more": false });
+    let jp = Memory.json_path_hint(&payload);
+    let id = ctx.output_buffer.store_tool("memory", payload.to_string());
+
+    let value = crate::tools::read_file::ReadFile
+        .call(json!({ "path": id, "json_path": jp }), &ctx)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("following the hinted route {jp:?} on an empty array failed: {e}")
+        });
+    assert_eq!(
+        value["value_type"], "array",
+        "the route {jp:?} must project the (empty) array: {value}"
+    );
+}
 
 #[tokio::test]
 async fn delete_removes_entry() {
