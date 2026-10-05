@@ -563,12 +563,15 @@ fn read_markdown_default_tiers(
     };
 
     // The map lists EVERY heading, and `HEADINGS_HARD_CAP` only chooses this tier: it bounds
-    // nothing in it. Heading text has no length, so a 200-heading file of ordinary titles
-    // is ~15 KB of map, and `call_content` buffered it again under `@tool_*` beside
-    // `file_id`. `fit_envelope` builds the whole response, measures it, and cuts the map
-    // only by the excess, with the note added to the hint the renderer prints as `next:`.
-    // (`coverage` cannot add a second list here: a default read counts every heading as
-    // seen, so `markdown_coverage` returns `None`. It sits in the measured envelope anyway.)
+    // nothing in it. Heading text has no length, so the map crosses the inline limit at about
+    // 109 headings of 60 characters (map and `lines`, before `file_id` and the hint: 100 ->
+    // 9,190 B, 120 -> 11,030 B, 200 -> 18,390 B; computed, and within 25 B of the reviewer's
+    // live probe), and `call_content` buffered it again under `@tool_*` beside `file_id`.
+    // `fit_envelope` builds the whole response, measures it, and cuts the map only by the
+    // excess, with the note added to the hint the renderer prints as `next:`. (`coverage`
+    // cannot add a second list here: a default read counts every heading as seen, so
+    // `markdown_coverage` returns `None`. It sits in the measured envelope anyway, so if that
+    // ever changed the map would simply get less room.)
     let summary = json!({ "lines": total_lines, "headings": headings_json });
     let finish = |mut result: Value, notes: &[String]| -> Value {
         result["file_id"] = json!(file_id);
