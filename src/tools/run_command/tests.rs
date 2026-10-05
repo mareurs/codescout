@@ -2774,6 +2774,15 @@ async fn buffer_query_below_summary_threshold_still_surfaces_stored_stderr() {
 // above the cap claimed it prevented exactly that. Three arms, three tests: each arm has its
 // own call, and a mutation of one is not caught by a test of another.
 
+/// True when `text` contains an actual `@tool_<8 hex>` handle. A bare `@tool_` substring is NOT
+/// the test: hint prose may legitimately mention the kind (`@tool_*`), and one hint literal
+/// did for a `@cmd_*` query, which is a different defect than minting a second handle.
+fn has_tool_handle(text: &str) -> bool {
+    regex::Regex::new(r"@tool_[0-9a-f]{8}")
+        .expect("static pattern")
+        .is_match(text)
+}
+
 /// A stored `@cmd_*` entry whose stderr is ONE wide line with distinguishable ends.
 fn wide_stderr() -> String {
     format!("HEAD{}TAIL\n", "e".repeat(50_000))
@@ -2796,7 +2805,7 @@ async fn buffer_query(ctx: &ToolContext, command: String) -> (String, Value) {
 
 fn assert_stderr_bounded(id: &str, text: &str, parsed: &Value) {
     assert!(
-        !text.contains("@tool_"),
+        !has_tool_handle(text),
         "a wide stored stderr line re-buffered the response under a second handle: {text:.300}"
     );
     let stderr = parsed["stderr"]
@@ -2871,6 +2880,192 @@ async fn a_summarized_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
         .as_str()
         .unwrap_or_default()
         .contains("out1"));
+}
+// ---- a buffer query never returns zero bytes of a non-empty result ----
+//
+// BUG-adjacent, found by the 2026-10-05 sibling sweep and verified live: `grep status @cmd_X` and
+// `sed -n '1,100p' @cmd_X` on a 78 KB SINGLE-LINE buffer returned
+// {"truncated":true,"stdout_shown":0,"stdout_total":1} with the hint "Next page: sed -n '1,100p'
+// @ref" — and that advised route returned the identical response, a loop. `truncate_lines_and_bytes`
+// emitted nothing when the first line alone exceeded the byte budget. `jq` and `grep -o` worked.
+
+/// One wide line with distinguishable ends, as `jq -c` or `curl` prints a JSON document.
+fn wide_line(width: usize) -> String {
+    format!("HEAD{}TAIL", "status:created,".repeat(width / 15))
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wide_first_line_is_shown_clipped_never_dropped() {
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), wide_line(78_000), String::new(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep status {id}")).await;
+
+    let stdout = parsed["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a non-empty result returned zero bytes: {text:.300}"));
+    assert!(stdout.starts_with("HEAD"), "the head of the line survives");
+    assert!(stdout.ends_with("TAIL"), "the tail of the line survives");
+    assert!(
+        stdout.contains("bytes shown"),
+        "a clipped line must say so: {:.160}",
+        stdout
+    );
+    assert!(
+        stdout.contains("grep -o") && stdout.contains(&id),
+        "the marker names a working route on the queried handle: {:.400}",
+        stdout.chars().skip(1000).collect::<String>()
+    );
+    assert_eq!(
+        parsed["truncated"], true,
+        "one line shown whole-by-count but clipped by bytes is still truncated: {text:.300}"
+    );
+    let hint = parsed["hint"].as_str().unwrap_or_default();
+    assert!(
+        hint.contains("grep -o"),
+        "the hint must name a route that works on a wide line: {hint}"
+    );
+    assert!(
+        !has_tool_handle(&text),
+        "the response re-buffered under a second handle: {text:.200}"
+    );
+    assert!(!crate::tools::exceeds_inline_limit(&text));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_advised_next_page_of_a_wide_line_makes_progress() {
+    // Line 1 narrow, line 2 wide, line 3 narrow. The first query stops before the wide line and
+    // advises `sed -n '2,..p'`; that advised query used to return zero bytes, forever.
+    let (_dir, ctx) = project_ctx().await;
+    let content = format!("first-line\n{}\nthird-line\n", wide_line(30_000));
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), content, String::new(), 0);
+
+    let (_t1, p1) = buffer_query(&ctx, format!("cat {id}")).await;
+    assert!(p1["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("first-line"));
+    let hint1 = p1["hint"].as_str().unwrap_or_default();
+    assert!(
+        hint1.contains("sed -n '2,"),
+        "page 1 must advise starting at line 2: {hint1}"
+    );
+
+    // Follow the advice exactly.
+    let (t2, p2) = buffer_query(&ctx, format!("sed -n '2,101p' {id}")).await;
+    let page2 = p2["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the advised route returned zero bytes: {t2:.300}"));
+    assert!(page2.starts_with("HEAD") && page2.contains("bytes shown"));
+
+    // And the page after it reaches line 3: progress, not a loop.
+    let (_t3, p3) = buffer_query(&ctx, format!("sed -n '3,102p' {id}")).await;
+    assert!(p3["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("third-line"));
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn a_summarized_query_budgets_stdout_against_the_escaped_stderr() {
+    // 3,000 double quotes of stored stderr are 3,000 raw bytes but ~4,000 escaped once bounded.
+    // Charging them raw leaves stdout ~2 KB too much room and the response is re-buffered.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=400)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let stderr = format!("HEAD{}TAIL\n", "\"".repeat(3_000));
+    let id = ctx.output_buffer.store("cmd".into(), stdout, stderr, 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep row {id}")).await;
+
+    assert!(
+        !has_tool_handle(&text),
+        "quote-dense stderr was charged raw and the response re-buffered: {text:.200}"
+    );
+    assert!(parsed["stderr"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("HEAD"));
+    assert!(
+        !crate::tools::exceeds_inline_limit(&text),
+        "{} bytes",
+        text.len()
+    );
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn a_banded_query_budgets_stdout_against_the_escaped_stderr() {
+    // The banded arm's own twin of the summary-arm test above: ~9.8 KB of stdout takes the
+    // third arm, and 3,000 stored double quotes are ~4,000 escaped once bounded. Charged raw
+    // they leave stdout ~2 KB too much room (mutation C3, 2026-10-05).
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=98)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let stderr = format!("HEAD{}TAIL\n", "\"".repeat(3_000));
+    let id = ctx.output_buffer.store("cmd".into(), stdout, stderr, 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep row {id}")).await;
+
+    assert!(
+        !has_tool_handle(&text),
+        "quote-dense stderr was charged raw and the response re-buffered: {text:.200}"
+    );
+    assert!(parsed["stderr"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("HEAD"));
+    assert!(
+        !crate::tools::exceeds_inline_limit(&text),
+        "{} bytes",
+        text.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_banded_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
+    // The narrow band between `TOOL_OUTPUT_BUFFER_THRESHOLD - 300` and the summary threshold:
+    // ~9.8 KB of stdout is over the first and under the second, so it takes the third arm. It
+    // overflowed by its own arithmetic (raw-byte budget, 300 B overhead) before the budgets
+    // were measured in escaped bytes with an honest overhead.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=98)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stdout, wide_stderr(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep row {id}")).await;
+
+    assert_stderr_bounded(&id, &text, &parsed);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wide_line_in_the_banded_arm_is_clipped_too() {
+    // ONE 9,800-byte line: over the arm's guard (9,700) and under the summary threshold, so it is
+    // the banded arm's own truncation that meets a first line wider than the budget.
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), wide_line(9_800), String::new(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("cat {id}")).await;
+
+    let stdout = parsed["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("zero bytes of a non-empty result: {text:.300}"));
+    assert!(stdout.contains("bytes shown") && stdout.starts_with("HEAD"));
+    assert!(
+        stdout.contains("grep -o") && stdout.contains(&id),
+        "the marker names a working route on the queried handle"
+    );
+    assert_eq!(parsed["truncated"], true, "{text:.300}");
+    assert!(!has_tool_handle(&text), "{text:.200}");
 }
 
 #[test]

@@ -429,6 +429,15 @@ pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<Str
 // cap-class: RESULT_CAP run_command.buffer_stderr_bytes — probed
 const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
 
+/// Escaped bytes a buffer-query response spends on everything that is NOT the stdout and stderr
+/// text: the keys (`exit_code`, `truncated`, `stdout_shown`, `stdout_total`, `stderr_shown`,
+/// `stderr_total`, `hint`, about 160 B) and the longest hint `capped_hint` composes (about 425 B
+/// with the wide-line sentence and a 7-digit total). 300 B was reserved here before, which was
+/// below even the old hint plus its keys, so a truncated response could serialize past the
+/// inline limit by the difference and be re-buffered under `@tool_*`. Pinned by
+/// `the_buffer_query_overhead_covers_the_longest_hint_and_every_key`.
+const BUFFER_QUERY_JSON_OVERHEAD: usize = 800;
+
 /// The handle the caller's buffer query names (`@cmd_0bdbc0aa`), read from the command text.
 /// `@file_*` handles count too; an `.err` suffix is dropped, so the result is always the bare
 /// handle and a caller can append `.err` or not.
@@ -462,6 +471,61 @@ fn bound_buffer_stderr(stored: &str, max_lines: usize, query: &str) -> (String, 
         &remedy,
     );
     (bounded, shown, total)
+}
+
+/// The line the queried range starts at: `A` for `sed -n 'A,Bp' @ref`, else 1.
+///
+/// A page hint counts lines of the OUTPUT it follows. For a whole-buffer read that is the buffer's
+/// own numbering; for a ranged `sed` it starts at `A`, so "next page: sed -n '1,100p'" sent a
+/// reader that had just read lines 2..101 back to the top. Only this one literal shape is
+/// recognised, because it is the shape the hint itself advises; any other command keeps the
+/// old relative numbering.
+fn query_first_line(command: &str) -> usize {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"sed\s+-n\s+'?(\d+),\d+p'?").expect("static pattern"))
+        .captures(command)
+        .and_then(|c| c[1].parse::<usize>().ok())
+        .map_or(1, |a| a.max(1))
+}
+
+/// How to read a window of a line wider than the response budget, in terms of the ref the caller
+/// queried. These are the routes that work on a wide line: `sed -n` and a bare `grep` return the
+/// whole line or nothing, `jq` needs JSON.
+fn wide_line_remedy(command: &str) -> String {
+    let r = queried_ref(command).unwrap_or("@ref");
+    format!(
+        "this line is wider than the response budget; read a window of it with \
+         `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`"
+    )
+}
+
+/// The hint on a capped buffer query: the next page, in the buffer's own line numbers, and the
+/// route for a wide first line when one was clipped.
+fn capped_hint(
+    query: &str,
+    shown: usize,
+    total: usize,
+    stderr_note: &str,
+    clipped_wide: bool,
+) -> String {
+    use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
+    let r = queried_ref(query).unwrap_or("@ref");
+    let first = query_first_line(query);
+    let next_start = first + shown;
+    let next_end = first - 1 + shown + BUFFER_QUERY_INLINE_CAP;
+    let mut hint = format!(
+        "Output capped at {BUFFER_QUERY_INLINE_CAP} lines \
+         (stdout {shown}/{total}{stderr_note}). \
+         Next page: sed -n '{next_start},{next_end}p' {r}. \
+         Or grep 'keyword' {r} for targeted search."
+    );
+    if clipped_wide {
+        hint.push_str(&format!(
+            " The first line is wider than the response budget and is shown clipped: read a \
+             window of it with `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`."
+        ));
+    }
+    hint
 }
 
 /// Build the response for a command that ran to completion — at any exit code.
@@ -673,15 +737,22 @@ pub(crate) async fn handle_successful_output(
                 bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
 
             // Byte budget: keep final JSON under TOOL_OUTPUT_BUFFER_THRESHOLD to avoid re-buffering loop.
-            const JSON_OVERHEAD: usize = 300;
+            const JSON_OVERHEAD: usize = BUFFER_QUERY_JSON_OVERHEAD;
             let stdout_byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
                 .saturating_sub(JSON_OVERHEAD)
-                .saturating_sub(stderr_out.len());
+                .saturating_sub(crate::util::text::json_escaped_len(&stderr_out));
 
-            let (stdout_out, stdout_shown, stdout_total) =
-                truncate_lines_and_bytes(&raw_stdout, stdout_budget, stdout_byte_budget);
+            let cut = truncate_lines_and_bytes(
+                &raw_stdout,
+                stdout_budget,
+                stdout_byte_budget,
+                &wide_line_remedy(original_command),
+            );
+            let clipped_wide = cut.clipped_wide;
+            let (stdout_out, stdout_shown, stdout_total) = (cut.text, cut.shown, cut.total);
 
-            let was_truncated = stdout_shown < stdout_total || stderr_shown < stderr_total;
+            let was_truncated =
+                stdout_shown < stdout_total || clipped_wide || stderr_shown < stderr_total;
 
             let mut result = json!({"exit_code": exit_code});
             if !stdout_out.is_empty() {
@@ -703,13 +774,12 @@ pub(crate) async fn handle_successful_output(
                 } else {
                     String::new()
                 };
-                let next_start = stdout_shown + 1;
-                let next_end = stdout_shown + BUFFER_QUERY_INLINE_CAP;
-                result["hint"] = json!(format!(
-                    "Output capped at {BUFFER_QUERY_INLINE_CAP} lines \
-                     (stdout {stdout_shown}/{stdout_total}{stderr_note}). \
-                     Next page: sed -n '{next_start},{next_end}p' @ref. \
-                     Or grep 'keyword' @ref for targeted search.",
+                result["hint"] = json!(capped_hint(
+                    original_command,
+                    stdout_shown,
+                    stdout_total,
+                    &stderr_note,
+                    clipped_wide,
                 ));
             }
             // buffer_only => tee injection was skipped (unfiltered_tmpfile is None).
@@ -752,7 +822,7 @@ pub(crate) async fn handle_successful_output(
             && raw_stdout.len() + raw_stderr.len()
                 > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD.saturating_sub(300)
         {
-            const JSON_OVERHEAD: usize = 300;
+            const JSON_OVERHEAD: usize = BUFFER_QUERY_JSON_OVERHEAD;
             // Capped like the summarized path above, then stdout is budgeted against
             // what the stderr ACTUALLY costs. Budgeting against `raw_stderr` here was
             // wrong twice: on a buffer query it is empty, so it under-counted by the
@@ -761,9 +831,15 @@ pub(crate) async fn handle_successful_output(
                 bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
             let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
                 .saturating_sub(JSON_OVERHEAD)
-                .saturating_sub(stderr_out.len());
-            let (stdout_out, stdout_shown, stdout_total) =
-                truncate_lines_and_bytes(&raw_stdout, BUFFER_QUERY_INLINE_CAP, byte_budget);
+                .saturating_sub(crate::util::text::json_escaped_len(&stderr_out));
+            let cut = truncate_lines_and_bytes(
+                &raw_stdout,
+                BUFFER_QUERY_INLINE_CAP,
+                byte_budget,
+                &wide_line_remedy(original_command),
+            );
+            let clipped_wide = cut.clipped_wide;
+            let (stdout_out, stdout_shown, stdout_total) = (cut.text, cut.shown, cut.total);
             let mut r = json!({"exit_code": exit_code});
             if !stdout_out.is_empty() {
                 r["stdout"] = json!(stdout_out);
@@ -775,7 +851,7 @@ pub(crate) async fn handle_successful_output(
                 r["stderr_shown"] = json!(stderr_shown);
                 r["stderr_total"] = json!(stderr_total);
             }
-            if stdout_shown < stdout_total {
+            if stdout_shown < stdout_total || clipped_wide {
                 r["truncated"] = json!(true);
                 r["hint"] = json!(
                     "Match truncated: a single grep match inside a @tool_* ref \
@@ -1112,6 +1188,42 @@ mod tests {
                 r#"cargo test --lib zz -- --ignored --nocapture > $S/r.log 2>&1; grep -E "REPLAY|test result" $S/r.log"#
             )
             .is_none()
+        );
+    }
+    /// The reserve for everything that is not stdout/stderr text must cover the LONGEST hint and
+    /// every key a truncated buffer-query response can carry. 300 B did not, and a clipped
+    /// response serialized 43 B past the inline limit and was re-buffered under `@tool_*`.
+    #[test]
+    fn the_buffer_query_overhead_covers_the_longest_hint_and_every_key() {
+        // Worst case on every axis: a 7-digit total, 100 shown, a stderr note, the wide-line
+        // sentence, a ranged sed whose first line is 7 digits, and a long handle.
+        let query = "sed -n '1000000,1000099p' @cmd_0bf0a111";
+        let hint = capped_hint(query, 100, 9_999_999, ", stderr 20/20", true);
+        let non_text = json!({
+            "exit_code": -1, "stdout": "", "stderr": "", "truncated": true,
+            "stdout_shown": 100, "stdout_total": 9_999_999,
+            "stderr_shown": 20, "stderr_total": 20, "hint": hint,
+        })
+        .to_string()
+        .len();
+        assert!(
+            non_text <= BUFFER_QUERY_JSON_OVERHEAD,
+            "keys plus hint take {non_text} B but only {BUFFER_QUERY_JSON_OVERHEAD} are reserved"
+        );
+    }
+
+    /// A page hint counts the lines of the output it follows. After `sed -n '2,101p'` those start
+    /// at 2, so the next page is 102.., not 1.. — which sent a reader back to the top.
+    #[test]
+    fn a_ranged_sed_query_gets_a_next_page_in_the_buffers_own_numbering() {
+        let hint = capped_hint("sed -n '2,101p' @cmd_abc12345", 100, 500, "", false);
+        assert!(hint.contains("sed -n '102,201p' @cmd_abc12345"), "{hint}");
+        // And a plain read keeps the old numbering, which already was the buffer's.
+        let plain = capped_hint("cat @cmd_abc12345", 100, 500, "", false);
+        assert!(plain.contains("sed -n '101,200p' @cmd_abc12345"), "{plain}");
+        assert!(
+            !plain.contains("grep -o"),
+            "the wide-line sentence only appears when a line was clipped"
         );
     }
 

@@ -562,39 +562,98 @@ pub(crate) fn truncate_lines(text: &str, max_lines: usize) -> (String, usize, us
     (truncated, max_lines, total)
 }
 
-/// Truncate `text` to at most `max_lines` lines **and** at most `max_bytes` bytes.
+/// What [`truncate_lines_and_bytes`] kept of a text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LineCut {
+    /// The kept text. Never empty when the input was not: see the function's doc.
+    pub text: String,
+    /// Lines of the input that `text` carries, counting a clipped line as shown.
+    pub shown: usize,
+    /// Lines in the input.
+    pub total: usize,
+    /// The FIRST line was wider than the whole budget and is shown clipped, behind a marker.
+    /// Needed beside `shown`/`total` because a single wide line reads `1/1` and is still cut.
+    pub clipped_wide: bool,
+}
+
+/// Escaped bytes held back for the marker [`clip_wide_line`] adds, before it measures the result.
+const WIDE_LINE_MARKER_RESERVE: usize = 240;
+
+/// Clip ONE over-wide line to at most `max_escaped` JSON-escaped bytes: head and tail with the
+/// marker between. The text is clipped in raw bytes but MEASURED escaped, so a line dense in
+/// quotes or newlines (which serialize to two bytes) is cut again until it fits.
 ///
-/// Both limits are applied; whichever is more restrictive wins. Truncation
-/// always occurs on a line boundary so output is never split mid-line.
+/// Below `2 * WIDE_LINE_MARKER_RESERVE` there is no room for a marker beside any useful text, so
+/// the head alone is returned: showing something beats showing nothing, and no caller in the
+/// tree budgets that little.
+fn clip_wide_line(line: &str, max_escaped: usize, remedy: &str) -> String {
+    use crate::util::text::{clip_to_bytes, elide_middle_bytes, json_escaped_len};
+    if max_escaped < 2 * WIDE_LINE_MARKER_RESERVE {
+        return clip_to_bytes(line, max_escaped).to_string();
+    }
+    let mut budget = max_escaped - WIDE_LINE_MARKER_RESERVE;
+    loop {
+        let clipped = elide_middle_bytes(line.to_string(), line.len(), budget, "stdout", remedy);
+        if json_escaped_len(&clipped) <= max_escaped || budget <= WIDE_LINE_MARKER_RESERVE {
+            return clipped;
+        }
+        budget = budget * 3 / 4;
+    }
+}
+
+/// Truncate `text` to at most `max_lines` lines **and** at most `max_bytes` JSON-ESCAPED bytes.
 ///
-/// Returns `(content, lines_shown, total_lines)`.
+/// Both limits are applied; whichever is more restrictive wins. The unit is escaped bytes
+/// (a quote or a newline costs two) because the cut text is what the caller serializes into a
+/// response measured in exactly that unit; a raw-byte budget let ~100 lines of JSON-ish text
+/// serialize 3% past the limit, enough to re-buffer the whole response.
+///
+/// Truncation occurs on a line boundary, with ONE exception, and it is the point of the
+/// function's contract: **a non-empty input never yields an empty result.** When the first line
+/// alone is wider than the budget it is shown clipped (head and tail, behind a marker naming
+/// `wide_line_remedy`) and reported through `clipped_wide`. Before this, such a line produced
+/// nothing, so a reader got `stdout_shown: 0, stdout_total: 1` and a hint to page forward with
+/// `sed -n '1,100p'`, which returned the identical response — a loop. A WIDE LINE THAT IS NOT
+/// FIRST is left alone: the lines before it already answered, and the next page starts at it.
 pub(crate) fn truncate_lines_and_bytes(
     text: &str,
     max_lines: usize,
     max_bytes: usize,
-) -> (String, usize, usize) {
+    wide_line_remedy: &str,
+) -> LineCut {
+    use crate::util::text::json_escaped_len;
     let total = count_lines(text);
     let mut result = String::new();
-    let mut lines_shown = 0;
+    let mut escaped = 0usize;
+    let mut shown = 0;
+    let mut clipped_wide = false;
 
     for line in text.lines().take(max_lines) {
-        // Each line adds the line itself plus a '\n' separator (except the first).
-        let needed = if result.is_empty() {
-            line.len()
-        } else {
-            line.len() + 1 // +1 for '\n'
-        };
-        if result.len() + needed > max_bytes {
+        // Each line adds the line itself plus a '\n' separator (except the first), and that
+        // separator escapes to two bytes.
+        let needed = json_escaped_len(line) + if shown == 0 { 0 } else { 2 };
+        if escaped + needed > max_bytes {
+            if shown == 0 {
+                result = clip_wide_line(line, max_bytes, wide_line_remedy);
+                shown = 1;
+                clipped_wide = true;
+            }
             break;
         }
-        if !result.is_empty() {
+        if shown > 0 {
             result.push('\n');
         }
         result.push_str(line);
-        lines_shown += 1;
+        escaped += needed;
+        shown += 1;
     }
 
-    (result, lines_shown, total)
+    LineCut {
+        text: result,
+        shown,
+        total,
+        clipped_wide,
+    }
 }
 
 /// Extract text between the first `failures:` section markers in cargo test output.
@@ -1512,10 +1571,10 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     fn truncate_lines_and_bytes_line_limit_wins() {
         // 3 lines, byte budget is generous — line limit (2) wins.
         let text = "aaa\nbbb\nccc";
-        let (out, shown, total) = truncate_lines_and_bytes(text, 2, 1000);
-        assert_eq!(out, "aaa\nbbb");
-        assert_eq!(shown, 2);
-        assert_eq!(total, 3);
+        let cut = truncate_lines_and_bytes(text, 2, 1000, "R");
+        assert_eq!(cut.text, "aaa\nbbb");
+        assert_eq!(cut.shown, 2);
+        assert_eq!(cut.total, 3);
     }
 
     #[test]
@@ -1523,19 +1582,19 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         // 5 short lines, byte budget forces truncation after the 2nd line.
         // "aaa\nbbb" = 7 bytes; adding "\nccc" = 11 bytes — over the 8-byte budget.
         let text = "aaa\nbbb\nccc\nddd\neee";
-        let (out, shown, total) = truncate_lines_and_bytes(text, 10, 8);
-        assert_eq!(out, "aaa\nbbb");
-        assert_eq!(shown, 2);
-        assert_eq!(total, 5);
+        let cut = truncate_lines_and_bytes(text, 10, 8, "R");
+        assert_eq!(cut.text, "aaa\nbbb");
+        assert_eq!(cut.shown, 2);
+        assert_eq!(cut.total, 5);
     }
 
     #[test]
     fn truncate_lines_and_bytes_both_fit() {
         let text = "a\nb\nc";
-        let (out, shown, total) = truncate_lines_and_bytes(text, 10, 1000);
-        assert_eq!(out, text);
-        assert_eq!(shown, 3);
-        assert_eq!(total, 3);
+        let cut = truncate_lines_and_bytes(text, 10, 1000, "R");
+        assert_eq!(cut.text, text);
+        assert_eq!(cut.shown, 3);
+        assert_eq!(cut.total, 3);
     }
 
     #[test]
@@ -1543,7 +1602,8 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         // Simulate log output: 200-char lines, budget = 10_000 bytes (TOOL_OUTPUT_BUFFER_THRESHOLD).
         let long_line = "x".repeat(200);
         let text: String = (0..100).map(|_| format!("{long_line}\n")).collect();
-        let (out, shown, _total) = truncate_lines_and_bytes(&text, 100, 10_000);
+        let cut = truncate_lines_and_bytes(&text, 100, 10_000, "R");
+        let (out, shown) = (cut.text, cut.shown);
         // Must fit within budget.
         assert!(
             out.len() <= 10_000,
@@ -1552,6 +1612,145 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         );
         // Should have shown fewer than 100 lines (200-char lines can't all fit in 10KB).
         assert!(shown < 100, "expected byte truncation, shown={shown}");
+    }
+    // -- truncate_lines_and_bytes: a non-empty input never yields an empty result --
+    //
+    // Found by the 2026-10-05 sibling sweep: a first line wider than the whole budget produced
+    // NOTHING, so a buffer query read `stdout_shown: 0, stdout_total: 1` and was told to page with
+    // `sed -n '1,100p'`, which returned the same thing. Each case below is an input every OTHER
+    // rule admits, so only the rule it names can decide the outcome.
+
+    fn wide(width: usize) -> String {
+        format!("HEAD{}TAIL", "m".repeat(width))
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_clips_a_first_line_wider_than_the_budget() {
+        let cut = truncate_lines_and_bytes(&wide(5_000), 100, 1_000, "REMEDY-TEXT");
+        assert!(cut.clipped_wide);
+        assert_eq!(
+            (cut.shown, cut.total),
+            (1, 1),
+            "a clipped line counts as shown"
+        );
+        assert!(cut.text.starts_with("HEAD") && cut.text.ends_with("TAIL"));
+        assert!(cut.text.contains("bytes shown"), "a cut must say so");
+        assert!(
+            cut.text.contains("REMEDY-TEXT"),
+            "the marker carries the caller's remedy"
+        );
+        assert!(crate::util::text::json_escaped_len(&cut.text) <= 1_000);
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_leaves_a_wide_line_that_is_not_first_alone() {
+        // The lines before it already answered, and the next page starts AT the wide line, where
+        // it will be the first line and get clipped. Clipping it here would hide the boundary.
+        let text = format!("short\n{}\nlast", wide(5_000));
+        let cut = truncate_lines_and_bytes(&text, 100, 1_000, "R");
+        assert_eq!(cut.text, "short");
+        assert_eq!((cut.shown, cut.total, cut.clipped_wide), (1, 3, false));
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_budget_is_inclusive_in_raw_bytes() {
+        let line = "z".repeat(1_000);
+        let at = truncate_lines_and_bytes(&line, 100, 1_000, "R");
+        assert!(!at.clipped_wide, "exactly the budget fits");
+        assert_eq!(at.text, line);
+        let under = truncate_lines_and_bytes(&line, 100, 999, "R");
+        assert!(under.clipped_wide, "one byte over is clipped");
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_measures_escaped_bytes_not_raw() {
+        // 400 double quotes are 400 raw bytes and 800 escaped. Raw measurement would fit this
+        // under 700; escaped measurement must not.
+        let line = "\"".repeat(400);
+        assert!(truncate_lines_and_bytes(&line, 100, 700, "R").clipped_wide);
+        let fits = truncate_lines_and_bytes(&line, 100, 800, "R");
+        assert!(
+            !fits.clipped_wide && fits.text == line,
+            "exactly 800 escaped bytes fits"
+        );
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_recuts_a_clipped_line_that_escapes_past_the_budget() {
+        // The clip is made in raw bytes and measured escaped: a line of quotes doubles, so the
+        // first cut is still too big and must be shrunk again.
+        let line = format!("<{}>", "\"".repeat(10_000));
+        let cut = truncate_lines_and_bytes(&line, 100, 2_000, "R");
+        assert!(cut.clipped_wide);
+        assert!(
+            crate::util::text::json_escaped_len(&cut.text) <= 2_000,
+            "escaped {} bytes",
+            crate::util::text::json_escaped_len(&cut.text)
+        );
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_with_no_room_for_a_marker_returns_the_head_not_nothing() {
+        let cut = truncate_lines_and_bytes(&wide(5_000), 100, 100, "R");
+        assert!(cut.clipped_wide);
+        assert_eq!(cut.text.len(), 100);
+        assert!(cut.text.starts_with("HEAD"));
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_clips_on_char_boundaries() {
+        // `€` is three bytes: a cut at a raw offset inside one would panic.
+        let line = format!("{}\n", "€".repeat(5_000));
+        let cut = truncate_lines_and_bytes(&line, 100, 1_000, "R");
+        assert!(cut.clipped_wide && !cut.text.is_empty());
+        assert!(cut.text.starts_with('€') && cut.text.ends_with('€'));
+    }
+    #[test]
+    fn truncate_lines_and_bytes_charges_two_escaped_bytes_for_the_newline_between_lines() {
+        // Three 3-byte lines: 3 + (2+3) + (2+3) = 13 escaped bytes. A separator charged as one
+        // byte would total 11 and fit a budget of 12; charged as two it must not.
+        let text = "aaa\nbbb\nccc";
+        let at = truncate_lines_and_bytes(text, 100, 13, "R");
+        assert_eq!((at.shown, at.text.as_str()), (3, text), "13 fits exactly");
+        let under = truncate_lines_and_bytes(text, 100, 12, "R");
+        assert_eq!(
+            under.shown, 2,
+            "12 does not: the separator escapes to two bytes"
+        );
+    }
+
+    #[test]
+    fn truncate_lines_and_bytes_budget_at_the_marker_reserve_boundary_still_marks_the_cut() {
+        // Exactly `2 * WIDE_LINE_MARKER_RESERVE` is the smallest budget with room for a marker;
+        // one below it returns the bare head. Both sides pinned so the comparison cannot drift.
+        let at = truncate_lines_and_bytes(&wide(5_000), 100, 2 * WIDE_LINE_MARKER_RESERVE, "R");
+        assert!(
+            at.text.contains("bytes shown"),
+            "room for a marker: {:.80}",
+            at.text
+        );
+        let below =
+            truncate_lines_and_bytes(&wide(5_000), 100, 2 * WIDE_LINE_MARKER_RESERVE - 1, "R");
+        assert!(
+            !below.text.contains("bytes shown"),
+            "no room: the head alone"
+        );
+        assert_eq!(below.text.len(), 2 * WIDE_LINE_MARKER_RESERVE - 1);
+    }
+    #[test]
+    fn truncate_lines_and_bytes_uses_nearly_all_of_the_budget_for_a_clipped_line() {
+        // The clip must show about as much as fits, not a quarter less. Starting the clip at the
+        // whole budget and letting the re-measure loop shrink it by thirds still returns a text
+        // that fits, so every "is under the budget" assertion passes; only a lower bound on how
+        // much was KEPT tells them apart (mutation T9, 2026-10-05).
+        let budget = 10_000;
+        let cut = truncate_lines_and_bytes(&wide(30_000), 100, budget, "R");
+        let kept = crate::util::text::json_escaped_len(&cut.text);
+        assert!(kept <= budget);
+        assert!(
+            kept >= budget - 2 * WIDE_LINE_MARKER_RESERVE,
+            "kept {kept} of {budget}: the clip left more than the marker's reserve unused"
+        );
     }
 
     // -- detect_terminal_filter --

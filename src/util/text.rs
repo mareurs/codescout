@@ -686,7 +686,7 @@ pub fn extract_lines_to_json_budget(
 /// Byte length of `s` inside a JSON string literal, matching `serde_json`'s
 /// default escaping. Computed rather than serialized, so budgeting a chunk
 /// costs no allocation per line.
-fn json_escaped_len(s: &str) -> usize {
+pub(crate) fn json_escaped_len(s: &str) -> usize {
     s.chars()
         .map(|c| match c {
             '"' | '\\' | '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' => 2,
