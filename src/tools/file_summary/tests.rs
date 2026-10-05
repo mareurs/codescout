@@ -788,6 +788,24 @@ fn bound_summary_string_threshold_is_exactly_500() {
     assert!(cut.get("summary_omitted").is_none());
     assert!(ser_len(&cut) <= 400, "{} B", ser_len(&cut));
 }
+#[test]
+fn bound_summary_finds_a_share_over_half_the_string_when_the_budget_allows_it() {
+    // M1 (`hi = longest / 2`). One 1,000 B string and a 900 B budget: the largest share that
+    // fits is ~770 B, over HALF the string (500). A search capped at half stops at ~499 and
+    // leaves ~280 B of the budget unused. The result must sit within 4 B of the budget: a
+    // serialized size moves in steps of 2 (head and tail each take share/2), plus the digits of
+    // the marker's count.
+    let s = serde_json::json!({"type": "x", "head": "h".repeat(1_000)});
+    let (cut, _) = super::bound_summary(s, "@file_t", 900);
+    let size = ser_len(&cut);
+    assert!(size <= 900, "{size} B over the budget");
+    assert!(
+        size >= 896,
+        "{size} B: the search stopped short of the best share"
+    );
+    assert!(cut["head"].as_str().unwrap().contains("bytes shown"));
+}
+
 // ---- the six survivors of the final mutation run: tests where ONLY the arithmetic decides ----
 
 #[test]

@@ -2881,6 +2881,37 @@ mod tests {
         let text = assert_inline_with_one_handle(&path, "one huge JSON key").await;
         assert!(text.contains("entries omitted"), "{text:.300}");
     }
+    #[tokio::test]
+    async fn a_generic_file_with_one_wide_head_keeps_the_head_close_to_the_budget() {
+        // 20 lines of 600 B then 10 short ones: `head` (12 KB) is the only wide string, `tail`
+        // (~400 B) is part of the fixed cost. The best share for `head` is ~8 KB, over HALF of
+        // it (6 KB), so a search capped at half returns a ~5 KB envelope for a file that could carry 9.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headwide.txt");
+        let mut body: String = (0..20)
+            .map(|i| format!("{i:02}{}\n", "x".repeat(598)))
+            .collect();
+        body.extend((0..10).map(|i| format!("short line {i:02} {}\n", "s".repeat(20))));
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            value["head"].as_str().unwrap().contains("bytes shown"),
+            "{value:.200}"
+        );
+        let size = value.to_string().len();
+        assert!(
+            (8_800..=crate::tools::INLINE_BYTE_BUDGET).contains(&size),
+            "{size} B: the head was cut far below the {} B target",
+            crate::tools::INLINE_BYTE_BUDGET
+        );
+    }
+
     // ---- TOML flat keys: the route the hint names must work ----
 
     /// `n` flat TOML keys of 600 B each, written in line order `order` (names `kNN`).
