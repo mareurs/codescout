@@ -509,6 +509,119 @@ fn fit_envelope_falls_back_to_the_minimal_summary_when_cutting_cannot_converge()
     assert_eq!(got["s"]["line_count"], 400);
     assert!(got["s"].get("symbols").is_none());
 }
+// ---- the allocation ARITHMETIC, pinned by exact kept counts ----
+//
+// The earlier tests assert "fits" and "starts with / ends with", which a one-entry rounding
+// error satisfies. Each test below uses entries that serialize to ONE byte (`7`, cost 2 with the
+// comma) so the count is a closed-form function of the allowance, and asserts that count exactly.
+
+fn sevens(n: usize) -> Vec<serde_json::Value> {
+    vec![serde_json::json!(7); n]
+}
+
+/// Entries kept (head + tail) and the entries omitted, from `cut_array_middle` on `n` sevens
+/// with `allowance` bytes; `None` when nothing was cut.
+fn kept_and_omitted(n: usize, allowance: usize) -> Option<(usize, usize)> {
+    let mut summary = serde_json::json!({"type": "x", "a": []});
+    cut_array_middle(&mut summary, "", "a", sevens(n), allowance, "@file_t")?;
+    let kept = summary["a"].as_array().unwrap().len();
+    Some((
+        kept,
+        summary["a_omitted"]["count"].as_u64().unwrap() as usize,
+    ))
+}
+
+#[test]
+fn cut_array_middle_rounds_each_half_down_not_up() {
+    // Allowance 39 (odd): half = 19 floor, so each side takes 9 entries (18 B); a half rounded
+    // UP is 20, which takes 10 per side. Odd and even array lengths give the same count.
+    for n in [50, 51] {
+        assert_eq!(kept_and_omitted(n, 39), Some((18, n - 18)), "n={n}");
+    }
+    // The even allowance next to it, as the anchor: 40 -> half 20 -> 10 per side.
+    for n in [50, 51] {
+        assert_eq!(kept_and_omitted(n, 40), Some((20, n - 20)), "n={n}");
+    }
+}
+
+#[test]
+fn cut_array_middle_prices_the_comma_between_entries() {
+    // Each `7` costs 2 B: itself and the comma that joins it. Unpriced it costs 1 and twice as
+    // many fit. Allowance 40 -> half 20 -> 10 per side priced, 20 per side unpriced.
+    for n in [100, 101] {
+        assert_eq!(kept_and_omitted(n, 40), Some((20, n - 20)), "n={n}");
+    }
+}
+
+#[test]
+fn cut_array_middle_cuts_at_exactly_one_more_entry_than_fits_and_not_before() {
+    // Allowance 36 -> half 18 -> 9 per side. 18 entries are ALL kept: nothing to omit, so
+    // nothing is cut and nothing is marked. A 19th makes one entry omitted. This pins the
+    // `head + tail >= total` boundary (`>` would mark a cut with `count: 0`).
+    let mut whole = serde_json::json!({"type": "x", "a": []});
+    assert!(cut_array_middle(&mut whole, "", "a", sevens(18), 36, "@file_t").is_none());
+    assert_eq!(
+        whole["a"].as_array().unwrap().len(),
+        18,
+        "an array that fit was cut"
+    );
+    assert!(whole.get("a_truncated").is_none() && whole.get("a_omitted").is_none());
+
+    assert_eq!(kept_and_omitted(19, 36), Some((18, 1)));
+    assert_eq!(kept_and_omitted(20, 36), Some((18, 2)));
+}
+
+#[test]
+fn bound_summary_gives_the_first_of_two_arrays_the_rounded_down_share() {
+    // Two equal arrays, smallest-first so `a` is allocated with `count - i == 2`. The remaining
+    // room R is odd, so the share is floor(R/2) or, with a rounded-up division, one more. R =
+    // 8k - 1 (here k = 8, R = 63) puts that one byte across a boundary: share 31 keeps 7+7,
+    // share 32 keeps 8+8. `b` then takes the remainder (32) whichever way `a` was rounded, so
+    // only `a` tells the two apart.
+    let base = ser_len(&serde_json::json!({"type": "x", "a": [], "b": []}));
+    let budget = base + 600 + 63; // 300 B reserved per array for its markers
+    let s = serde_json::json!({"type": "x", "a": sevens(400), "b": sevens(400)});
+    let (cut, _) = super::bound_summary(s, "@file_t", budget);
+
+    assert!(cut.get("summary_omitted").is_none(), "{cut:.200}");
+    assert_eq!(
+        cut["a"].as_array().unwrap().len(),
+        14,
+        "a: floor(63/2) = 31 -> 7 per side"
+    );
+    assert_eq!(
+        cut["b"].as_array().unwrap().len(),
+        16,
+        "b: the remaining 32 -> 8 per side"
+    );
+}
+
+#[test]
+fn bound_summary_string_threshold_is_exactly_500() {
+    // A 500-byte string is part of the fixed cost, never cut; the next one is wide. Tight budget
+    // so a string counted as wide WOULD be cut: with `>= 500` the 500-byte `a` joins `b` and the
+    // common share (about 370) cuts it too.
+    let s = serde_json::json!({"type": "x", "a": "a".repeat(500), "b": "b".repeat(20_000)});
+    let (cut, _) = super::bound_summary(s, "@file_t", 1_000);
+    assert_eq!(
+        cut["a"].as_str().unwrap(),
+        "a".repeat(500),
+        "a 500 B string was cut"
+    );
+    assert!(cut["b"].as_str().unwrap().contains("bytes shown"));
+    assert!(ser_len(&cut) <= 1_000, "{} B", ser_len(&cut));
+
+    // 501 bytes IS wide: with `> 501` it would be treated as fixed, nothing could be cut, and
+    // the last resort would drop the whole summary.
+    let s = serde_json::json!({"type": "x", "a": "a".repeat(501)});
+    let (cut, _) = super::bound_summary(s, "@file_t", 400);
+    assert!(
+        cut["a"].as_str().unwrap().contains("bytes shown"),
+        "a 501 B string was not cut: {cut:.200}"
+    );
+    assert!(cut.get("summary_omitted").is_none());
+    assert!(ser_len(&cut) <= 400, "{} B", ser_len(&cut));
+}
 
 #[test]
 fn bound_summary_shares_the_budget_equally_between_wide_strings() {

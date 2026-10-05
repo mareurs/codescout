@@ -1394,7 +1394,7 @@ pub(crate) fn bound_summary(
 /// `parent` ("" is the summary itself; `/schema` for a JSON summary's key list), keeping what
 /// fits `allowance` bytes, half from each end. The caller took the array out and priced it.
 /// Returns the note for the caller's hint, or `None` when `key` is not an array.
-fn cut_array_middle(
+pub(crate) fn cut_array_middle(
     summary: &mut Value,
     parent: &str,
     key: &str,
