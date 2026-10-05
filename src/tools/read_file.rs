@@ -915,7 +915,7 @@ fn read_full_file(
         let file_id = ctx
             .output_buffer
             .store_file(resolved.to_string_lossy().to_string(), text.to_string());
-        let mut result =
+        let summary =
             match crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy()) {
                 crate::tools::file_summary::FileSummaryType::Source => {
                     crate::tools::file_summary::summarize_source(&resolved.to_string_lossy(), text)
@@ -939,45 +939,56 @@ fn read_full_file(
                     crate::tools::file_summary::summarize_generic_file(text)
                 }
             };
-        result["file_id"] = json!(file_id);
-
-        // This summary describes a file it does not contain — an outline, zero content
-        // lines. Until now it carried only `line_count`, which the renderer prints as a
-        // bare "1505 lines" header: indistinguishable from a complete read, so a caller
-        // could reasonably believe it had seen the file.
-        //
-        // Thirteen lines below, the milder case (exploring mode, file longer than
-        // max_results) builds a full OverflowInfo with a tailored hint. The worse case had
-        // none. That asymmetry is the bug — not a design philosophy, a local omission.
-        //
-        // `shown: 0` is literal, not a placeholder: zero lines of content are shown.
-        //
-        // See `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
-        let summarised_lines = result["line_count"]
-            .as_u64()
-            .unwrap_or_else(|| text.lines().count() as u64) as usize;
+        // `markdown_coverage` MARKS headings as seen, so it runs once, here, and its value is
+        // handed to `finish` (which `fit_envelope` may call several times).
+        let coverage = if path.ends_with(".md") || path.ends_with(".markdown") {
+            markdown_coverage(text, resolved, ctx, None, None, None)
+        } else {
+            None
+        };
         let is_source = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy())
             == crate::tools::file_summary::FileSummaryType::Source;
-        result["complete"] = json!(false);
-        result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
-            shown: 0,
-            total: summarised_lines,
-            hint: outline_hint(
-                &file_id,
-                is_source,
-                input["force"].as_bool().unwrap_or(false),
-            ),
-            next_offset: None,
-            by_file: None,
-            by_file_overflow: 0,
-        });
+        let force = input["force"].as_bool().unwrap_or(false);
 
-        if path.ends_with(".md") || path.ends_with(".markdown") {
-            if let Some(c) = markdown_coverage(text, resolved, ctx, None, None, None) {
-                result["coverage"] = c;
+        // The whole response around a summary. This is the construction `read_full_file` always
+        // had; it is a closure so `fit_envelope` can MEASURE the real envelope, and cut only if
+        // that is over the inline limit, instead of cutting to a guess about what the keys cost.
+        //
+        // This summary describes a file it does not contain: an outline, zero content lines.
+        // It carries `complete: false` and an `overflow` with `shown: 0` (literal, not a
+        // placeholder) so a caller cannot take it for a complete read. See
+        // `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
+        let finish = |mut result: Value, cut_notes: &[String]| -> Value {
+            let summarised_lines = result["line_count"]
+                .as_u64()
+                .unwrap_or_else(|| text.lines().count() as u64)
+                as usize;
+            result["file_id"] = json!(file_id);
+            result["complete"] = json!(false);
+            result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
+                shown: 0,
+                total: summarised_lines,
+                hint: {
+                    let mut hint = outline_hint(&file_id, is_source, force);
+                    // Where each cut array's middle can be read, as a ready-to-run call.
+                    for note in cut_notes {
+                        hint.push(' ');
+                        hint.push_str(note);
+                    }
+                    hint
+                },
+                next_offset: None,
+                by_file: None,
+                by_file_overflow: 0,
+            });
+            if let Some(c) = &coverage {
+                result["coverage"] = c.clone();
             }
-        }
-        return Ok(result);
+            result
+        };
+        return Ok(crate::tools::file_summary::fit_envelope(
+            summary, &file_id, finish,
+        ));
     }
 
     let is_md = path.ends_with(".md") || path.ends_with(".markdown");
@@ -1215,6 +1226,22 @@ fn format_read_file_body(val: &Value) -> String {
     insert_below_header(out, &overflow_head(val))
 }
 
+/// The line to print where `bound_summary` cut the middle out of `val[key]`, if `index` is
+/// where the gap falls: `    … 1384 symbols omitted (L59-L1442) …`. `None` everywhere else, and
+/// for a summary that was not cut.
+pub(crate) fn omitted_gap(val: &Value, key: &str, index: usize) -> Option<String> {
+    let gap = val.get(format!("{key}_omitted"))?;
+    if gap["after"].as_u64()? as usize != index {
+        return None;
+    }
+    let count = gap["count"].as_u64()?;
+    let span = match (gap["from_line"].as_u64(), gap["to_line"].as_u64()) {
+        (Some(f), Some(t)) => format!(" (L{f}-L{t})"),
+        _ => String::new(),
+    };
+    Some(format!("\n    … {count} {key} omitted{span} …"))
+}
+
 fn format_read_file_summary(val: &Value, file_type: &str) -> String {
     let line_count = val["line_count"].as_u64().unwrap_or(0);
 
@@ -1246,7 +1273,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
                         .max()
                         .unwrap_or(0);
 
-                    for sym in symbols {
+                    for (i, sym) in symbols.iter().enumerate() {
+                        if let Some(gap) = omitted_gap(val, "symbols", i) {
+                            out.push_str(&gap);
+                        }
                         let kind = sym["kind"].as_str().unwrap_or("?");
                         let name = sym["name"].as_str().unwrap_or("?");
                         let line = sym["line"].as_u64().unwrap_or(0);
@@ -1263,7 +1293,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
             if let Some(headings) = val["headings"].as_array() {
                 if !headings.is_empty() {
                     out.push_str("\n  Headings:");
-                    for h in headings {
+                    for (i, h) in headings.iter().enumerate() {
+                        if let Some(gap) = omitted_gap(val, "headings", i) {
+                            out.push_str(&gap);
+                        }
                         let heading = h["heading"].as_str().unwrap_or("?");
                         let line = h["line"].as_u64().unwrap_or(0);
                         let end_line = h["end_line"].as_u64().unwrap_or(0);
@@ -1279,7 +1312,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
                 let root_type = schema["root_type"].as_str().unwrap_or("?");
                 out.push_str(&format!("\n  Root: {root_type}"));
                 if let Some(keys) = schema["keys"].as_array() {
-                    for k in keys {
+                    for (i, k) in keys.iter().enumerate() {
+                        if let Some(gap) = omitted_gap(schema, "keys", i) {
+                            out.push_str(&gap);
+                        }
                         let path = k["path"].as_str().unwrap_or("?");
                         let typ = k["type"].as_str().unwrap_or("?");
                         let mut desc = format!("\n    {path}: {typ}");
@@ -1300,7 +1336,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
         "toml" => {
             if let Some(sections) = val["sections"].as_array() {
                 out.push_str("\n  Sections:");
-                for s in sections {
+                for (i, s) in sections.iter().enumerate() {
+                    if let Some(gap) = omitted_gap(val, "sections", i) {
+                        out.push_str(&gap);
+                    }
                     let key = s["key"].as_str().unwrap_or("?");
                     let line = s["line"].as_u64().unwrap_or(0);
                     let end = s["end_line"].as_u64().unwrap_or(0);
@@ -1309,7 +1348,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
             }
             if let Some(keys) = val["keys"].as_array() {
                 out.push_str("\n  Keys:");
-                for k in keys {
+                for (i, k) in keys.iter().enumerate() {
+                    if let Some(gap) = omitted_gap(val, "keys", i) {
+                        out.push_str(&gap);
+                    }
                     let key = k["key"].as_str().unwrap_or("?");
                     let line = k["line"].as_u64().unwrap_or(0);
                     out.push_str(&format!("\n    {key}  L{line}"));
@@ -1319,7 +1361,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
         "yaml" => {
             if let Some(sections) = val["sections"].as_array() {
                 out.push_str("\n  Sections:");
-                for s in sections {
+                for (i, s) in sections.iter().enumerate() {
+                    if let Some(gap) = omitted_gap(val, "sections", i) {
+                        out.push_str(&gap);
+                    }
                     let key = s["key"].as_str().unwrap_or("?");
                     let line = s["line"].as_u64().unwrap_or(0);
                     let end = s["end_line"].as_u64().unwrap_or(0);
@@ -2430,6 +2475,1589 @@ mod tests {
             result["total_lines"].as_u64().unwrap(),
             40,
             "total_lines must be the file's total, so shown_lines reads against it: {result}"
+        );
+    }
+    // ---- the whole-file summary must fit the inline budget and carry ONE handle ----
+    //
+    // `read_full_file` summarises a file over the inline limit and attaches the buffer handle
+    // (`file_id`). The summaries were bounded by COUNT (all symbols; 20+10 lines; 30 lines;
+    // 30 sections), and a count has no size, so a 1,500-function file or a file of a few very
+    // wide lines made the JSON exceed the inline limit. `call_content` then buffered it a
+    // second time under `@tool_*`, leaving the caller two handles for one read and a
+    // `json_path="$.field"` hint that reaches nothing. Measured 2026-10-05: `read_file` on a
+    // 6,206-line source file returned `@tool_0bce7715` (20,636 B) beside `@file_0bce76f9`.
+
+    /// Every distinct buffer handle named in `text`, so "one handle" is counted, not assumed.
+    fn handles_in(text: &str) -> std::collections::BTreeSet<String> {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '@' || c == '_'))
+            .filter(|t| {
+                ["@file_", "@tool_", "@cmd_", "@bg_"]
+                    .iter()
+                    .any(|p| t.starts_with(p))
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The primary block of `call_content` for `path`, as text.
+    async fn read_text(path: &std::path::Path) -> String {
+        let ctx = test_ctx().await;
+        let content = ReadFile
+            .call_content(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        content[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn a_source_file_with_many_symbols_is_summarised_inline_with_one_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.rs");
+        let src: String = (1..=1500).map(|i| format!("fn f{i:04}() {{}}\n")).collect();
+        std::fs::write(&path, &src).unwrap();
+        assert!(
+            src.len() > 20_000,
+            "fixture must be far over the inline limit"
+        );
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.400}"
+        );
+        assert!(
+            !text.contains("buffered_bytes"),
+            "the `@tool_*` envelope's field leaked: {text:.400}"
+        );
+        let handles = handles_in(&text);
+        assert_eq!(handles.len(), 1, "one read, one handle; got {handles:?}");
+        assert!(handles.iter().next().unwrap().starts_with("@file_"));
+        assert!(text.contains("f0001"), "the FIRST symbol must survive");
+        assert!(text.contains("f1500"), "the LAST symbol must survive");
+        assert!(
+            text.contains("entries omitted"),
+            "a cut must say so, and say how much: {text:.600}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} bytes is over the inline limit",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_source_file_summary_within_the_budget_is_not_cut() {
+        // Over the inline limit as TEXT (40 functions of ~330 B), but the symbol list is a
+        // few KB: nothing to cut, so nothing may be, and no marker may claim otherwise.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fits.rs");
+        let src: String = (1..=40)
+            .map(|i| format!("fn g{i:02}() {{ let _ = \"{}\"; }}\n", "p".repeat(300)))
+            .collect();
+        std::fs::write(&path, &src).unwrap();
+        assert!(crate::tools::exceeds_inline_limit(&src));
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["symbols"],
+            crate::tools::file_summary::summarize_source(path.to_str().unwrap(), &src)["symbols"],
+            "a summary that fits must be returned exactly as the summarizer built it"
+        );
+        assert!(result.get("symbols_truncated").is_none(), "{result}");
+        let hint = result["overflow"]["hint"].as_str().unwrap_or("");
+        assert!(!hint.contains("entries omitted"), "{hint}");
+    }
+    /// CONTROL AT THE EDGE of the contract: a file whose summary USED TO FIT must come back
+    /// exactly as it did before any bound existed. The golden is what `fac7abce` (before
+    /// `bound_summary`) returned for this fixture, captured by running that commit's code, with
+    /// the buffer handle replaced by `@file_X`: a 17,200 B source file whose summary is 8,938 B
+    /// and whose whole envelope is 9,224 B, under the 10,003 B inline limit. A bound sized for
+    /// the worst case (6,000 B) cut it and added `<key>_truncated`, `total_<key>`,
+    /// `<key>_omitted`, a note in the hint and a gap line: a contract change for ordinary files.
+    #[tokio::test]
+    async fn a_summary_that_fits_is_returned_exactly_as_before_any_bound_existed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fits.rs");
+        let src: String = (1..=200)
+            .map(|i| format!("fn f{i:03}() {{ let _ = \"{}\"; }}\n", "p".repeat(60)))
+            .collect();
+        std::fs::write(&path, &src).unwrap();
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let id = result["file_id"].as_str().unwrap().to_string();
+        let got: Value = serde_json::from_str(
+            &serde_json::to_string(&result)
+                .unwrap()
+                .replace(&id, "@file_X"),
+        )
+        .unwrap();
+        let golden: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/golden/read_file_summary_fits.json"
+        ))
+        .unwrap();
+        assert_eq!(got, golden, "a summary that fit changed shape or content");
+        // The size this fixture sits at is the point: over the old 6,000 B budget, under the limit.
+        assert!(
+            (6_100..9_000).contains(&got["symbols"].to_string().len()),
+            "the fixture drifted off the edge: {} B",
+            got["symbols"].to_string().len()
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&result.to_string()),
+            "{} B",
+            result.to_string().len()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_cut_symbol_list_shows_its_gap_between_the_two_halves() {
+        // The gap line must sit WHERE the entries are missing, with the neighbours' line
+        // numbers either side: a gap line at the wrong index tells the reader the wrong
+        // thing about which lines the omitted symbols cover.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.rs");
+        let src: String = (1..=1500).map(|i| format!("fn f{i:04}() {{}}\n")).collect();
+        std::fs::write(&path, &src).unwrap();
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let gap = &result["symbols_omitted"];
+        let after = gap["after"].as_u64().unwrap() as usize;
+        let from = gap["from_line"].as_u64().unwrap();
+        let to = gap["to_line"].as_u64().unwrap();
+        assert_eq!(
+            from as usize,
+            after + 1,
+            "each `fn` is on its own line: {gap}"
+        );
+        assert_eq!(to + 1, result["symbols"][after]["line"].as_u64().unwrap());
+
+        let rendered = format_read_file(&result);
+        let lines: Vec<&str> = rendered.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains("symbols omitted"))
+            .unwrap_or_else(|| panic!("no gap line in: {rendered:.600}"));
+        assert!(
+            lines[at].contains(&format!("(L{from}-L{to})")),
+            "{}",
+            lines[at]
+        );
+        assert!(
+            lines[at - 1].ends_with(&format!("L{}", from - 1)),
+            "the entry before the gap must be the last kept head symbol: {}",
+            lines[at - 1]
+        );
+        assert!(
+            lines[at + 1].ends_with(&format!("L{}", to + 1)),
+            "the entry after the gap must be the first kept tail symbol: {}",
+            lines[at + 1]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_of_few_very_wide_lines_is_summarised_inline_with_one_handle() {
+        // Twelve lines of 6 KB: far under any line budget, so only a byte bound can refuse it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.txt");
+        let body: String = (b'a'..=b'l')
+            .map(|c| format!("{}\n", (c as char).to_string().repeat(6_000)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(
+            text.contains("bytes shown"),
+            "a cut must say so: {text:.300}"
+        );
+        assert!(text.contains("aaaa"), "the head of the file must survive");
+        assert!(text.contains("llll"), "the tail of the file must survive");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn one_enormous_json_line_is_summarised_inline_with_one_handle() {
+        // The invalid-JSON fallback path: a single 80 KB line that does not parse falls back
+        // to the generic head/tail summary, which is one line wide.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.json");
+        let body = format!("{{\"items\": [{}", "{\"k\": \"v\"}, ".repeat(6_500));
+        std::fs::write(&path, &body).unwrap();
+        assert!(body.len() > 70_000);
+
+        // The renderer prints no content for type `json` (only a schema), so the bound is
+        // asserted on the VALUE it was applied to, where `head` and `tail` both live.
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        for field in ["head", "tail"] {
+            let s = value[field]
+                .as_str()
+                .unwrap_or_else(|| panic!("`{field}` missing from {value:.300}"));
+            assert!(
+                s.contains("bytes shown"),
+                "`{field}` was not cut: {} B",
+                s.len()
+            );
+        }
+        assert!(
+            !crate::tools::exceeds_inline_limit(&value.to_string()),
+            "the summary is {} B and would be buffered a second time",
+            value.to_string().len()
+        );
+
+        // And through the real entry point: inline, one handle.
+        let text = read_text(&path).await;
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_wide_config_preview_is_summarised_inline_with_one_handle() {
+        // `summarize_config` takes the first 30 LINES; here each is 700 B.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.ini");
+        let body: String = (0..40)
+            .map(|i| format!("key{i:02}={}\n", "v".repeat(700)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("bytes shown"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn wide_yaml_keys_are_bounded_by_bytes_not_by_the_thirty_entry_count() {
+        // 30 top-level keys of 600 B each: the entry COUNT (30) is within its cap, the BYTES
+        // (~20 KB of `sections`) are not.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.yaml");
+        let body: String = (0..30)
+            .map(|i| format!("{}{i:02}: 1\n", "k".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+    #[tokio::test]
+    async fn a_json_object_with_wide_keys_is_summarised_inline_with_one_handle() {
+        // A VALID object of 30 keys, each 600 B wide: `summarize_json` lists them under
+        // `schema.keys`, one level down from where a top-level-only bound would look.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.json");
+        let body = format!(
+            "{{{}}}",
+            (0..30)
+                .map(|i| format!("\"{}{i:02}\": {i}", "k".repeat(600)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        std::fs::write(&path, &body).unwrap();
+        assert!(crate::tools::exceeds_inline_limit(&body));
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            text.contains("keys omitted"),
+            "the gap must be shown where it falls: {text:.600}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+    // ---- one reach test per renderer site that prints a gap ----
+    //
+    // `format_read_file_summary` has a separate loop per summary type, each calling
+    // `omitted_gap` for its own array key. A site with no test is a site whose gap line can
+    // vanish while every other assertion (the hint's `entries omitted`) stays green.
+
+    #[tokio::test]
+    async fn a_wide_yaml_shows_its_gap_line_between_the_kept_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.yaml");
+        let body: String = (0..30)
+            .map(|i| format!("{}{i:02}: 1\n", "k".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("sections omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+    #[tokio::test]
+    async fn a_single_enormous_yaml_key_is_bounded_too() {
+        // ONE top-level key of 20 KB: the `sections` array has a single entry, so a bound that
+        // only looks at arrays of two or more lets the whole thing through to a second handle.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("one.yaml");
+        std::fs::write(&path, format!("{}: 1\n", "k".repeat(20_000))).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+    // ---- read_markdown: the three responses the first sweep probed and left ----
+
+    /// Quote-heavy body, so escaping inflates it: every `"` serializes to two bytes.
+    fn quoted_body(lines: usize, width: usize) -> String {
+        (0..lines)
+            .map(|_| format!("{}\n", "\"".repeat(width)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_tier_two_markdown_that_serializes_over_the_limit_gets_a_handle_not_a_tool_buffer() {
+        // 30 headings (under HEADINGS_HARD_CAP), 180 lines (over LINE_SOFT_CAP: tier 2), 7.8 KB
+        // RAW, under the limit. Serialized with its heading map and with every quote doubled it
+        // is far over, and the response used to be buffered under a bare `@tool_*`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tier2.md");
+        let body: String = (1..=30)
+            .map(|i| format!("## Section {i:02}\n{}\n", quoted_body(4, 60)))
+            .collect();
+        assert!(
+            body.len() < 10_003 && body.lines().count() > 150,
+            "{}",
+            body.len()
+        );
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert!(value["file_id"].is_string(), "no handle: {value:.300}");
+        assert!(
+            value.get("content").is_none(),
+            "the body must not ride along"
+        );
+
+        let text = assert_inline_with_one_handle(&path, "tier 2 markdown").await;
+        assert!(text.contains("Section 01"), "the heading map must be there");
+    }
+
+    #[tokio::test]
+    async fn a_tier_one_markdown_that_serializes_over_the_limit_gets_a_handle_too() {
+        // 20 headings, 80 lines: tier 1. 6.3 KB raw, doubled quotes push it over once serialized.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tier1.md");
+        let body: String = (1..=20)
+            .map(|i| format!("## S{i:02}\n{}\n", quoted_body(2, 150)))
+            .collect();
+        assert!(
+            body.len() < 10_003 && body.lines().count() < 150,
+            "{}",
+            body.len()
+        );
+        std::fs::write(&path, &body).unwrap();
+        assert_inline_with_one_handle(&path, "tier 1 markdown").await;
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert!(value["file_id"].is_string() && value.get("content").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_markdown_that_serializes_within_the_limit_still_returns_its_body_inline() {
+        // The control: plain text, 8 KB, 30 headings: tier 2 as always, body inline, no handle.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plain.md");
+        let body: String = (1..=30)
+            .map(|i| {
+                format!(
+                    "## Section {i:02}\n{}\n\n\n\n\n\n",
+                    "plain words here".repeat(10)
+                )
+            })
+            .collect();
+        assert!(!crate::tools::exceeds_inline_limit(&body));
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(value["content"].as_str().unwrap(), body);
+        assert!(value.get("file_id").is_none(), "{value:.200}");
+    }
+
+    /// `## Big` with `n` `###` sub-headings, each carrying `body` bytes of text.
+    fn big_section_file(n: usize, body: usize) -> String {
+        let mut s = String::from("## Big\n");
+        for i in 1..=n {
+            s.push_str(&format!(
+                "### Sub {i:03} {}\n{}\n\n",
+                "s".repeat(60),
+                "b".repeat(body)
+            ));
+        }
+        s
+    }
+
+    fn error_body_len(rec: &crate::tools::RecoverableError) -> usize {
+        rec.message.len()
+            + rec.hint().unwrap_or_default().len()
+            + serde_json::to_string(&rec.extra).unwrap().len()
+    }
+
+    #[tokio::test]
+    async fn the_oversized_section_error_bounds_its_section_map_and_keeps_the_route() {
+        // 300 sub-headings: the error's `extra` was 26,629 B, put inline by the server, because
+        // an `Err` never reaches `call_content`'s buffering.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bigsec.md");
+        std::fs::write(&path, big_section_file(300, 20)).unwrap();
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Big" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an oversized section is a RecoverableError");
+
+        assert!(
+            error_body_len(rec) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the error body is {} B",
+            error_body_len(rec)
+        );
+        let map = rec.extra["section_map"].as_array().unwrap();
+        assert!(map.len() < 300 && map.len() > 20, "{} kept", map.len());
+        assert!(map[0]["h"].as_str().unwrap().contains("Sub 001"));
+        assert!(map.last().unwrap()["h"]
+            .as_str()
+            .unwrap()
+            .contains("Sub 300"));
+        assert_eq!(rec.extra["section_map_truncated"], true);
+        assert_eq!(rec.extra["total_section_map"], 300);
+        let file_id = rec.extra["file_id"].as_str().unwrap().to_string();
+        // The route `next_actions` names must still be in the kept map.
+        let first_action = rec.extra["next_actions"][0].as_str().unwrap();
+        assert!(first_action.contains("Sub 001") && first_action.contains(&file_id));
+
+        // And the cut note's own route works: follow its line range on the section's handle.
+        let hint = rec.hint().unwrap();
+        assert!(hint.contains("entries omitted"), "{hint}");
+        let after = rec.extra["section_map_omitted"]["after"].as_u64().unwrap();
+        let (from, to) = (
+            rec.extra["section_map_omitted"]["from_line"]
+                .as_u64()
+                .unwrap(),
+            rec.extra["section_map_omitted"]["to_line"]
+                .as_u64()
+                .unwrap(),
+        );
+        assert!(
+            hint.contains(&format!("start_line={from}, end_line={to}")),
+            "{hint}"
+        );
+        let followed = ReadFile
+            .call(
+                json!({ "path": file_id, "start_line": from, "end_line": from + 2 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let content = followed["content"].as_str().unwrap();
+        assert!(
+            content.starts_with(&format!("### Sub {:03}", after + 1)),
+            "line {from} of the section buffer is not the first omitted sub-heading: {content:.80}"
+        );
+        assert!(to > from);
+    }
+
+    #[tokio::test]
+    async fn the_oversized_section_error_clips_the_sections_own_huge_heading() {
+        // The section's OWN heading is 12 KB: it is echoed in the message and the breadcrumb.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hugeown.md");
+        let mut body = format!("## {}\n", "o".repeat(12_000));
+        for i in 1..=40 {
+            body.push_str(&format!("### Sub {i:03}\n{}\n\n", "b".repeat(300)));
+        }
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": format!("## {}", "o".repeat(40)) }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an oversized section is a RecoverableError");
+
+        assert!(
+            error_body_len(rec) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the error body is {} B",
+            error_body_len(rec)
+        );
+        assert!(
+            rec.message.len() < 400,
+            "the message echoes {} B",
+            rec.message.len()
+        );
+        let crumb = rec.extra["breadcrumb"][0].as_str().unwrap();
+        assert!(
+            crumb.len() <= 200 && crumb.starts_with("## ooo"),
+            "{} B",
+            crumb.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_oversized_section_error_keeps_a_map_that_fits_whole() {
+        // 40 sub-headings of 300 B: the section is over the inline limit (14.8 KB) but its map
+        // (~3.6 KB) fits, so nothing in the error changes shape.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("smallmap.md");
+        std::fs::write(&path, big_section_file(40, 300)).unwrap();
+        let ctx = test_ctx().await;
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Big" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap();
+        assert_eq!(rec.extra["section_map"].as_array().unwrap().len(), 40);
+        assert!(rec.extra.get("section_map_truncated").is_none());
+        assert!(!rec.hint().unwrap().contains("omitted"));
+    }
+    #[tokio::test]
+    async fn the_oversized_section_error_clips_a_huge_sub_heading_and_keeps_its_route() {
+        // A 12 KB FIRST sub-heading: `next_actions` echoes it and `section_map` lists it, so the
+        // error body was 12,700 B with the map dropped to `summary_omitted`, contradicting the
+        // claim that the first sub-heading is always kept. The echoed text is clipped to a
+        // prefix with its true length beside it, and a prefix still resolves the heading.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hugesub.md");
+        let mut body = format!("## Big\n### {}\nfirst body\n\n", "s".repeat(12_000));
+        for i in 2..=40 {
+            body.push_str(&format!("### Sub {i:03}\n{}\n\n", "b".repeat(300)));
+        }
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Big" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an oversized section is a RecoverableError");
+
+        assert!(
+            error_body_len(rec) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the error body is {} B",
+            error_body_len(rec)
+        );
+        assert!(
+            rec.extra.get("summary_omitted").is_none(),
+            "{:?}",
+            rec.extra
+        );
+        let map = rec.extra["section_map"].as_array().unwrap();
+        assert!(map.len() > 30, "the map was gutted: {} entries", map.len());
+        let first = &map[0];
+        assert!(first["h"].as_str().unwrap().starts_with("### sss"));
+        assert!(
+            first["h"].as_str().unwrap().len() <= 200,
+            "the heading was not clipped"
+        );
+        assert!(first["h_bytes"].as_u64().unwrap() > 12_000, "{first}");
+        assert!(
+            map[1].get("h_bytes").is_none(),
+            "a short heading must not be marked clipped"
+        );
+
+        // The route in `next_actions` still works: a PREFIX of the heading resolves it.
+        let action = rec.extra["next_actions"][0].as_str().unwrap();
+        assert!(action.len() < 400, "next_actions[0] is {} B", action.len());
+        let file_id = rec.extra["file_id"].as_str().unwrap();
+        let quoted = action
+            .split("heading=")
+            .nth(1)
+            .unwrap()
+            .trim_end_matches(')');
+        let heading: String = serde_json::from_str(quoted).unwrap();
+        // The prefix resolves the 12 KB sub-heading. That section is ITSELF over the inline
+        // limit (its heading alone is 12 KB), so the answer is its own oversized-section error,
+        // naming exactly the two lines it spans: the heading and its one body line.
+        let followed = ReadFile
+            .call(json!({ "path": file_id, "heading": heading }), &ctx)
+            .await
+            .unwrap_err();
+        let rec2 = followed
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("the resolved section is oversized");
+        assert!(
+            rec2.message.contains("spans 2 lines"),
+            "the clipped heading did not resolve its section: {}",
+            rec2.message
+        );
+        assert!(
+            error_body_len(rec2) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the follow-up error body is {} B",
+            error_body_len(rec2)
+        );
+    }
+
+    fn two_sections(width: usize) -> String {
+        format!(
+            "## M1\n{}\n\n## M2\n{}\n",
+            "lorem ipsum dolor sit amet ".repeat(width / 27),
+            "consectetur adipiscing elit ".repeat(width / 28)
+        )
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_drops_the_duplicate_sections_when_it_would_not_fit() {
+        // Two sections of ~4.5 KB: `content` is the two joined (9.2 KB, fits), `sections` repeats
+        // the same text (serialized 18.9 KB together, one `@tool_*`).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi.md");
+        std::fs::write(&path, two_sections(4_500)).unwrap();
+        let ctx = test_ctx().await;
+        let input = json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] });
+
+        let value = ReadFile.call(input.clone(), &ctx).await.unwrap();
+
+        let content = value["content"].as_str().unwrap();
+        assert!(content.contains("lorem") && content.contains("consectetur"));
+        assert!(value.get("sections").is_none(), "the duplicate stayed");
+        assert_eq!(value["sections_omitted"], true);
+        assert!(value["hint"]
+            .as_str()
+            .unwrap()
+            .contains("`sections` omitted"));
+        assert!(!crate::tools::exceeds_inline_limit(&value.to_string()));
+        let text = ReadFile
+            .call_content(input, &ctx)
+            .await
+            .unwrap()
+            .remove(0)
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap();
+        assert!(!text.contains("@tool_"), "{text:.200}");
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_that_fits_keeps_its_per_section_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-small.md");
+        std::fs::write(&path, two_sections(1_000)).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(value["sections"].as_array().unwrap().len(), 2);
+        assert!(value.get("sections_omitted").is_none());
+    }
+    #[tokio::test]
+    async fn a_single_enormous_json_key_is_bounded_too() {
+        // ONE top-level key of 20 KB in a VALID object: `schema.keys` has a single entry, one
+        // level down, so a nested collector that only takes arrays of two or more lets it through.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("one.json");
+        std::fs::write(&path, format!("{{\"{}\": 1}}", "k".repeat(20_000))).unwrap();
+
+        let text = assert_inline_with_one_handle(&path, "one huge JSON key").await;
+        assert!(text.contains("entries omitted"), "{text:.300}");
+    }
+    #[tokio::test]
+    async fn a_generic_file_with_one_wide_head_keeps_the_head_close_to_the_budget() {
+        // 20 lines of 600 B then 10 short ones: `head` (12 KB) is the only wide string, `tail`
+        // (~400 B) is part of the fixed cost. The best share for `head` is ~8 KB, over HALF of
+        // it (6 KB), so a search capped at half returns a ~5 KB envelope for a file that could carry 9.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("headwide.txt");
+        let mut body: String = (0..20)
+            .map(|i| format!("{i:02}{}\n", "x".repeat(598)))
+            .collect();
+        body.extend((0..10).map(|i| format!("short line {i:02} {}\n", "s".repeat(20))));
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            value["head"].as_str().unwrap().contains("bytes shown"),
+            "{value:.200}"
+        );
+        let size = value.to_string().len();
+        assert!(
+            (8_800..=crate::tools::INLINE_BYTE_BUDGET).contains(&size),
+            "{size} B: the head was cut far below the {} B target",
+            crate::tools::INLINE_BYTE_BUDGET
+        );
+    }
+
+    // ---- TOML flat keys: the route the hint names must work ----
+
+    /// `n` flat TOML keys of 600 B each, written in line order `order` (names `kNN`).
+    fn wide_flat_toml(order: impl Iterator<Item = usize>) -> String {
+        order
+            .map(|i| format!("{}{i:02} = 1\n", "k".repeat(600)))
+            .collect()
+    }
+
+    /// The `(start_line, end_line)` pairs with real numbers in a hint (the generic `N`/`M`
+    /// placeholders do not match).
+    fn numeric_routes(hint: &str) -> Vec<(u64, u64)> {
+        let re = regex::Regex::new(r"start_line=(\d+), end_line=(\d+)").unwrap();
+        re.captures_iter(hint)
+            .map(|c| (c[1].parse().unwrap(), c[2].parse().unwrap()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_toml_whose_keys_sort_against_their_line_order_offers_no_false_route() {
+        // Written z..a: alphabetical order is the REVERSE of line order. The gap used to come
+        // out `from_line: 15, to_line: 4` and the hint offered an impossible range.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reversed.toml");
+        std::fs::write(&path, wide_flat_toml((0..20).rev())).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let gap = &value["keys_omitted"];
+        assert!(
+            gap["count"].as_u64().unwrap() > 0,
+            "nothing was cut: {value:.200}"
+        );
+        assert!(
+            gap["from_line"].is_null() && gap["to_line"].is_null(),
+            "{gap}"
+        );
+        let hint = value["overflow"]["hint"].as_str().unwrap();
+        assert!(
+            numeric_routes(hint).is_empty(),
+            "a made-up line range in: {hint}"
+        );
+        assert!(
+            hint.contains("keys:") && hint.contains("entries omitted"),
+            "{hint}"
+        );
+
+        // Follow the route the hint DOES name: read the file in ranges from its handle.
+        let file_id = value["file_id"].as_str().unwrap();
+        let followed = ReadFile
+            .call(
+                json!({ "path": file_id, "start_line": 1, "end_line": 2 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            followed["content"]
+                .as_str()
+                .unwrap()
+                .starts_with(&"k".repeat(600)),
+            "{followed:.200}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_toml_whose_keys_are_in_line_order_offers_a_route_that_returns_the_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ordered.toml");
+        std::fs::write(&path, wide_flat_toml(0..20)).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let after = value["keys_omitted"]["after"].as_u64().unwrap() as usize;
+        let hint = value["overflow"]["hint"].as_str().unwrap();
+        let routes = numeric_routes(hint);
+        assert_eq!(routes.len(), 1, "{hint}");
+        let (start, end) = routes[0];
+        assert!(
+            start <= end,
+            "an impossible range was offered: {start}-{end}"
+        );
+
+        // Follow it: the lines it names are exactly the omitted keys, the first one first.
+        let file_id = value["file_id"].as_str().unwrap();
+        let followed = ReadFile
+            .call(
+                json!({ "path": file_id, "start_line": start, "end_line": end }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let content = followed["content"].as_str().unwrap();
+        assert!(
+            content.starts_with(&format!("{}{after:02}", "k".repeat(600))),
+            "line {start} is not the first omitted key (index {after}): {content:.40}"
+        );
+        assert_eq!(content.lines().count() as u64, end - start + 1);
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_keeps_its_coverage_and_drops_only_the_duplicate() {
+        // A third, unread heading makes `coverage` non-empty. The duplicate `sections` is the
+        // first thing to go and it is enough: `coverage` must survive. A drop order of
+        // coverage-first, or dropping both once the response is over, would lose it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-cov.md");
+        std::fs::write(&path, format!("{}\n## M3\nshort\n", two_sections(4_500))).unwrap();
+        let ctx = test_ctx().await;
+
+        let value = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(value.get("sections").is_none() && value["sections_omitted"] == true);
+        assert!(
+            value.get("coverage_omitted").is_none(),
+            "coverage was dropped too"
+        );
+        assert_eq!(value["coverage"]["unread"][0], "## M3", "{value:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_whose_content_serializes_over_the_limit_takes_the_error_path() {
+        // Two sections of 3,000 quotes: the joined content is ~6 KB RAW, under the limit, but
+        // ~12 KB serialized. The oversized test must measure what lands in the response.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-quotes.md");
+        let body = format!(
+            "## Q1\n{}\n\n## Q2\n{}\n",
+            "\"".repeat(3_000),
+            "\"".repeat(3_000)
+        );
+        std::fs::write(&path, &body).unwrap();
+        assert!(body.len() < 10_003);
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "headings": ["## Q1", "## Q2"] }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an over-limit combined read is a RecoverableError");
+        assert!(
+            rec.message.contains("exceeds inline threshold"),
+            "{}",
+            rec.message
+        );
+        assert!(rec.extra["file_id"].is_string());
+    }
+    // ---- SWEEPS: what is measured must be what is returned ----
+    //
+    // `read()` adds `"format": "markdown"` AFTER the tier builders measured their response, and
+    // the multi-heading read added its hint and `sections_omitted` after it measured. Every key
+    // added after the measurement widens a window just below the inline limit: a response the
+    // builder judged to fit (<= 10,003 B) came back 10,004-10,136 B and was buffered under a
+    // `@tool_*` beside its own handle. Point probes at the edges miss that; a sweep that walks
+    // the content size across the whole band, one response kind at a time, cannot.
+
+    // cap-class: NOT_A_CAP — the inline limit the sweeps assert AGAINST; it shapes no result
+    const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
+
+    /// What one sweep saw, for the assertions after it.
+    #[derive(Default)]
+    struct Sweep {
+        points: usize,
+        worst: usize,
+        /// Largest response that was returned UNCUT and inline (it sits on the edge).
+        worst_uncut: usize,
+        cut: usize,
+        uncut: usize,
+    }
+
+    #[tokio::test]
+    async fn sweep_tier_three_heading_map_across_the_edge_band() {
+        // 100 headings (over HEADINGS_HARD_CAP, so always tier 3); the LAST heading widens by
+        // 2 B per point, walking the uncut response from ~9.9 KB to ~10.3 KB.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("map.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for x in (1_300..=1_600).step_by(2) {
+            let mut body: String = (1..100)
+                .map(|i| format!("## H{i:03} {}\nb\n\n", "w".repeat(60)))
+                .collect();
+            body.push_str(&format!("## H100 {}\nb\n", "w".repeat(60 + x)));
+            std::fs::write(&path, &body).unwrap();
+
+            let value = ReadFile
+                .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let size = value.to_string().len();
+            assert!(size <= LIMIT, "x={x}: the returned map is {size} B");
+            let text = assert_inline_with_one_handle(&path, &format!("tier-3 map x={x}")).await;
+            assert!(text.contains("H001"), "x={x}: the first heading was lost");
+            sw.points += 1;
+            sw.worst = sw.worst.max(size);
+            if value.get("headings_truncated").is_some() {
+                sw.cut += 1;
+            } else {
+                sw.uncut += 1;
+                sw.worst_uncut = sw.worst_uncut.max(size);
+            }
+        }
+        eprintln!(
+            "SWEEP tier3: {} points, worst {} B, worst uncut {} B, cut {}, uncut {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.cut, sw.uncut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "the sweep stopped short of the band: {}",
+            sw.worst_uncut
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_tier_one_and_two_fall_through_across_the_edge_band() {
+        // 30 headings, tier 1/2 (raw body under the limit); the last section widens by 2 B per
+        // point so the serialized response (body + heading map + hint + format) crosses the limit.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inline.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for x in (1_000..=1_500).step_by(2) {
+            let mut body: String = (1..30)
+                .map(|i| format!("## S{i:02}\n{}\n\n", "p".repeat(250)))
+                .collect();
+            body.push_str(&format!("## S30\n{}\n", "p".repeat(250 + x)));
+            assert!(
+                body.len() <= LIMIT,
+                "x={x}: the raw body must stay under the limit"
+            );
+            std::fs::write(&path, &body).unwrap();
+
+            let value = ReadFile
+                .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let size = value.to_string().len();
+            assert!(size <= LIMIT, "x={x}: the returned response is {size} B");
+            let text = read_text(&path).await;
+            assert!(
+                !text.contains("@tool_"),
+                "x={x}: parked under @tool_: {text:.120}"
+            );
+            assert!(handles_in(&text).len() <= 1, "x={x}: {text:.120}");
+            sw.points += 1;
+            sw.worst = sw.worst.max(size);
+            if value.get("content").is_some() {
+                sw.uncut += 1;
+                sw.worst_uncut = sw.worst_uncut.max(size);
+            } else {
+                assert!(
+                    value["file_id"].is_string(),
+                    "x={x}: fell through without a handle"
+                );
+                sw.cut += 1;
+            }
+        }
+        eprintln!(
+            "SWEEP tier1/2: {} points, worst {} B, worst inline {} B, inline {}, fell through {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "the sweep stopped short of the band: {}",
+            sw.worst_uncut
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_multi_heading_read_across_the_edge_band() {
+        // Two sections of width n: `content` is ~2n. It fits alone from ~9.5 KB to 10,003 B, where
+        // the response (content + hint + `sections_omitted` + format) is what must fit, or the read
+        // must take the error path. At no point may the result be parked under `@tool_*`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for n in 4_800..=5_000 {
+            std::fs::write(&path, two_sections_exact(n)).unwrap();
+            let input = json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] });
+
+            let text = match ReadFile.call_content(input.clone(), &ctx).await {
+                Ok(mut content) => content.remove(0).as_text().map(|t| t.text.clone()).unwrap(),
+                // The error path (content alone does not fit) surfaces as an `Err`.
+                Err(e) => e.to_string(),
+            };
+            assert!(
+                !text.contains("@tool_"),
+                "n={n}: parked under @tool_: {text:.120}"
+            );
+            assert!(handles_in(&text).len() <= 1, "n={n}: {text:.120}");
+            sw.points += 1;
+            match ReadFile.call(input, &ctx).await {
+                Ok(value) => {
+                    let size = value.to_string().len();
+                    assert!(size <= LIMIT, "n={n}: the returned response is {size} B");
+                    sw.worst = sw.worst.max(size);
+                    sw.worst_uncut = sw.worst_uncut.max(size);
+                    sw.uncut += 1;
+                }
+                Err(e) => {
+                    let rec = e.downcast_ref::<crate::tools::RecoverableError>().unwrap();
+                    assert!(rec.extra["file_id"].is_string(), "n={n}");
+                    sw.cut += 1;
+                }
+            }
+        }
+        eprintln!(
+            "SWEEP multi: {} points, worst ok {} B, ok {}, error path {}",
+            sw.points, sw.worst, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        // The decision to take the error path is deliberately CONSERVATIVE by the 24 B of
+        // `"coverage_omitted":true,` it always counts (coverage's presence is only known after
+        // it is marked), so the largest inline response sits up to 24 B under the limit.
+        assert!(
+            sw.worst >= 9_975,
+            "the sweep stopped short of the band: {}",
+            sw.worst
+        );
+    }
+    #[tokio::test]
+    async fn sweep_tier_two_fall_through_across_the_edge_band() {
+        // The same sweep, for TIER 2: 210 lines (over LINE_SOFT_CAP), 30 headings. The earlier
+        // sweep has ~90 lines and only ever builds tier 1, so a tier-2 candidate built without
+        // `format` slipped past it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inline2.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for x in (2_300..=2_900).step_by(2) {
+            let section = |i: usize, last: usize| {
+                format!("## S{i:02}\n{}{}\n\n", "p".repeat(40) + "\n", {
+                    let mut lines = "q".repeat(40) + "\n";
+                    lines = lines.repeat(3);
+                    lines + &"r".repeat(40 + last)
+                })
+            };
+            let mut body: String = (1..30).map(|i| section(i, 0)).collect();
+            body.push_str(&section(30, x));
+            assert!(body.lines().count() > 150, "{}", body.lines().count());
+            assert!(
+                body.len() <= LIMIT,
+                "x={x}: the raw body must stay under the limit"
+            );
+            std::fs::write(&path, &body).unwrap();
+
+            let value = ReadFile
+                .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let size = value.to_string().len();
+            assert!(size <= LIMIT, "x={x}: the returned response is {size} B");
+            let text = read_text(&path).await;
+            assert!(
+                !text.contains("@tool_"),
+                "x={x}: parked under @tool_: {text:.120}"
+            );
+            assert!(handles_in(&text).len() <= 1, "x={x}: {text:.120}");
+            sw.points += 1;
+            sw.worst = sw.worst.max(size);
+            if value.get("content").is_some() {
+                assert!(
+                    value["lines"].as_u64().unwrap() > 150,
+                    "this must be tier 2"
+                );
+                sw.uncut += 1;
+                sw.worst_uncut = sw.worst_uncut.max(size);
+            } else {
+                sw.cut += 1;
+            }
+        }
+        eprintln!(
+            "SWEEP tier2: {} points, worst {} B, worst inline {} B, inline {}, fell through {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "the sweep stopped short of the band: {}",
+            sw.worst_uncut
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_multi_heading_read_with_coverage_across_the_edge_band() {
+        // A third, unread heading keeps `coverage` in the response. The candidate that drops only
+        // `sections` then carries `coverage` too, and its fit is decided by what it MEASURES: a
+        // candidate built without `format` was accepted up to 21 B too large (the no-coverage
+        // sweep cannot see this: the 24 B it always reserves for `coverage_omitted` absorbs it).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-cov.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for n in 4_700..=4_950 {
+            std::fs::write(&path, format!("{}\n## M3\nshort\n", two_sections_exact(n))).unwrap();
+            let input = json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] });
+            match ReadFile.call(input, &ctx).await {
+                Ok(value) => {
+                    let size = value.to_string().len();
+                    assert!(size <= LIMIT, "n={n}: the returned response is {size} B");
+                    sw.worst = sw.worst.max(size);
+                    sw.uncut += 1;
+                    if value.get("coverage").is_some() {
+                        sw.worst_uncut = sw.worst_uncut.max(size);
+                    }
+                }
+                Err(_) => sw.cut += 1,
+            }
+            sw.points += 1;
+        }
+        eprintln!(
+            "SWEEP multi+coverage: {} points, worst ok {} B, worst with coverage kept {} B, ok {}, error path {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "no response that KEPT its coverage reached the edge: {}",
+            sw.worst_uncut
+        );
+    }
+
+    /// `## M1` and `## M2`, each a single line of exactly `n` plain bytes.
+    fn two_sections_exact(n: usize) -> String {
+        format!("## M1\n{}\n\n## M2\n{}\n", "m".repeat(n), "n".repeat(n))
+    }
+
+    // ---- JSON escaping must not break the one-handle guarantee ----
+    //
+    // The summary is measured against the SERIALIZED inline limit, and escaping inflates raw
+    // bytes: 2x for `"` `\` and tab, 6x for `\x01` and the ESC of ANSI colour codes. A cut sized
+    // in raw bytes passed its tests on plain text and left these over the limit: two handles.
+    // Measured by the reviewer through `call_content`: 11,593 B for quotes, 33,769 B for `\x01`.
+
+    const INFLATING_CHARS: [(&str, char); 5] = [
+        ("quote", '"'),
+        ("backslash", '\\'),
+        ("tab", '\t'),
+        ("control", '\u{1}'),
+        ("ansi-escape", '\u{1b}'),
+    ];
+
+    /// The outcome every case here must reach: inline, no `@tool_*`, exactly one handle.
+    async fn assert_inline_with_one_handle(path: &std::path::Path, what: &str) -> String {
+        let text = read_text(path).await;
+        assert!(
+            !text.contains("@tool_"),
+            "{what}: a second handle was minted: {text:.200}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{what}: {text:.200}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{what}: {} B is over the inline limit",
+            text.len()
+        );
+        text
+    }
+
+    #[tokio::test]
+    async fn wide_lines_of_every_escaping_kind_come_back_inline_with_one_handle() {
+        for (name, ch) in INFLATING_CHARS {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("wide.txt");
+            let line = ch.to_string().repeat(6_000);
+            std::fs::write(&path, format!("{}\n", [line.as_str(); 12].join("\n"))).unwrap();
+            assert_inline_with_one_handle(&path, &format!("wide .txt of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn config_previews_of_every_escaping_kind_come_back_inline_with_one_handle() {
+        for (name, ch) in INFLATING_CHARS {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("wide.ini");
+            let body: String = (0..40)
+                .map(|i| format!("key{i:02}={}\n", ch.to_string().repeat(700)))
+                .collect();
+            std::fs::write(&path, body).unwrap();
+            assert_inline_with_one_handle(&path, &format!(".ini of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn symbolless_source_of_every_escaping_kind_comes_back_inline_with_one_handle() {
+        // A `.rs` file with no symbols falls back to the generic head/tail summary: the shape
+        // of a generated or data-only source file.
+        for (name, ch) in INFLATING_CHARS {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("data.rs");
+            let line = format!("// {}", ch.to_string().repeat(6_000));
+            std::fs::write(&path, format!("{}\n", [line.as_str(); 12].join("\n"))).unwrap();
+            assert_inline_with_one_handle(&path, &format!("symbol-less .rs of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn wide_markdown_summary_lines_of_every_escaping_kind_come_back_inline() {
+        // `.mdx` takes the Markdown SUMMARY (headings array), whose entries carry the heading
+        // text: quote-heavy headings make every entry cost double.
+        for (name, ch) in INFLATING_CHARS {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("wide.mdx");
+            let body: String = (1..=40)
+                .map(|i| format!("# H{i:02} {}\nbody\n", ch.to_string().repeat(300)))
+                .collect();
+            std::fs::write(&path, body).unwrap();
+            assert_inline_with_one_handle(&path, &format!(".mdx of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_whose_symbol_names_are_quote_heavy_comes_back_inline_with_one_handle() {
+        // Kotlin allows backtick identifiers containing quotes. Each symbol's NAME doubles when
+        // serialized, so an array-entry budget measured in raw bytes would overshoot.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Quoted.kt");
+        let src: String = (0..400)
+            .map(|i| format!("fun `say \"a\" \"b\" \"c\" \"d\" \"e\" {i:03}`() {{}}\n"))
+            .collect();
+        std::fs::write(&path, &src).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let names: Vec<&str> = value["symbols"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no symbols in {value:.300}"))
+            .iter()
+            .filter_map(|s| s["name"].as_str())
+            .collect();
+        assert!(
+            names.iter().any(|n| n.contains('"')),
+            "the fixture must reach the summary with quotes in its names: {names:.5?}"
+        );
+
+        assert_inline_with_one_handle(&path, "quote-heavy symbol names").await;
+    }
+
+    #[tokio::test]
+    async fn a_wide_toml_shows_its_gap_line_between_the_kept_sections() {
+        // 40 `[table]` headers of 600 B: the `sections` list, 30 entries after its own cap.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.toml");
+        let body: String = (0..40)
+            .map(|i| format!("[{}{i:02}]\nv = 1\n", "t".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("sections omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wide_flat_toml_shows_its_gap_line_between_the_kept_keys() {
+        // No table headers: the summary lists top-level `keys`, capped at 20 by the summarizer.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flat.toml");
+        let body: String = (0..20)
+            .map(|i| format!("{}{i:02} = 1\n", "k".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("keys omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_wide_mdx_shows_its_gap_line_between_the_kept_headings() {
+        // `.mdx` is a Markdown SUMMARY type that `read_file` does not route to the heading-map
+        // reader, so it reaches the `markdown` branch of the summary renderer.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.mdx");
+        let body: String = (1..=35)
+            .map(|i| format!("# H{i:02} {}\nbody\n", "w".repeat(400)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let text = read_text(&path).await;
+        assert!(text.contains("headings omitted"), "{text:.600}");
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
+    // ---- read_markdown's oversized tier: the heading map is bounded by bytes ----
+    //
+    // `HEADINGS_HARD_CAP` (40) is a TRIGGER into the oversized tier, not a cap on what the
+    // tier returns: it then lists EVERY heading beside `file_id`. Its size is the headings'
+    // text, so the overflow point depends on heading width, not on a heading count. A file of
+    // 200 ordinary 60-character headings is ~15 KB of map.
+
+    fn markdown_with_headings(n: usize, width: usize) -> String {
+        (1..=n)
+            .map(|i| format!("## Section {i:03} {}\nbody {i}\n\n", "w".repeat(width)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_markdown_file_with_many_headings_is_mapped_inline_with_one_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("many.md");
+        std::fs::write(&path, markdown_with_headings(200, 60)).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(
+            text.contains("Section 001"),
+            "the FIRST heading must survive"
+        );
+        assert!(
+            text.contains("Section 200"),
+            "the LAST heading must survive"
+        );
+        assert!(
+            text.contains("entries omitted"),
+            "a cut must say so: {text:.300}"
+        );
+        assert!(
+            text.contains("headings omitted"),
+            "and show where: {text:.300}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_markdown_heading_map_that_fits_is_returned_whole() {
+        // 60 short headings: over HEADINGS_HARD_CAP (so the oversized tier), but a ~1.5 KB map.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("short.md");
+        std::fs::write(&path, markdown_with_headings(60, 4)).unwrap();
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["headings"].as_array().unwrap().len(),
+            60,
+            "{result:.300}"
+        );
+        assert!(result.get("headings_truncated").is_none(), "{result:.300}");
+        assert!(!result["hint"].as_str().unwrap().contains("omitted"));
+    }
+    #[tokio::test]
+    async fn the_cut_heading_map_shows_its_gap_between_the_two_halves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gapmap.md");
+        std::fs::write(&path, markdown_with_headings(200, 60)).unwrap();
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let gap = &result["headings_omitted"];
+        let after = gap["after"].as_u64().unwrap() as usize;
+        let from = gap["from_line"].as_u64().unwrap();
+        let to = gap["to_line"].as_u64().unwrap();
+        let headings = result["headings"].as_array().unwrap();
+        // Heading i (1-based) is on line 3i-2, so the gap spans the line AFTER the last kept
+        // head heading up to the line before the first kept tail heading.
+        assert_eq!(from, headings[after - 1]["l"].as_u64().unwrap() + 3);
+        assert_eq!(to + 1, headings[after]["l"].as_u64().unwrap());
+
+        let rendered = ReadFile
+            .format_compact(&result)
+            .expect("a markdown result renders");
+        let lines: Vec<&str> = rendered.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains("headings omitted"))
+            .unwrap_or_else(|| panic!("no gap line in: {rendered:.600}"));
+        assert!(
+            lines[at].contains(&format!("(L{from}-L{to})")),
+            "{}",
+            lines[at]
+        );
+        assert!(
+            lines[at - 1].contains(headings[after - 1]["h"].as_str().unwrap()),
+            "the entry before the gap must be the last kept head heading: {}",
+            lines[at - 1]
+        );
+        assert!(
+            lines[at + 1].contains(headings[after]["h"].as_str().unwrap()),
+            "the entry after the gap must be the first kept tail heading: {}",
+            lines[at + 1]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_default_markdown_read_marks_every_heading_seen_so_no_unread_list_is_returned() {
+        // PINS A REACHABILITY FACT the tier-3 bound relies on. A default (whole-file) read marks
+        // every heading as seen, so `markdown_coverage` has nothing unread to report even after
+        // a section was read first: no `coverage.unread` list can sit beside the heading map and
+        // double its size. (If this ever fails, the bound still cuts a nested array; this test
+        // only says the case just became reachable.)
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cov.md");
+        std::fs::write(&path, markdown_with_headings(200, 60)).unwrap();
+        let ctx = test_ctx().await;
+        ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Section 001" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            value["headings"].as_array().unwrap().len() > 10,
+            "{value:.200}"
+        );
+        assert!(
+            value.get("coverage").is_none(),
+            "{:.300}",
+            value["coverage"]
         );
     }
 

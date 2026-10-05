@@ -120,8 +120,13 @@ fn read_markdown_multi_heading(
 
     let content = sections.join("\n\n");
 
-    // Oversized multi-heading join — fall back to hint.
-    if crate::tools::exceeds_inline_limit(&content) {
+    // Oversized multi-heading join — fall back to hint. Measured on the SMALLEST response this
+    // read can return: `content` with `sections` and `coverage` dropped and EVERY key that
+    // then rides along (the omission markers, the hint, `format`). Measuring `content` alone
+    // missed those keys, and a content of 9,820-10,003 B came back 10,016-10,136 B and was
+    // parked under `@tool_*`. If even that does not fit, the read takes this error path.
+    let smallest = finalize_multi(json!({ "content": &content }), &["sections", "coverage"]);
+    if crate::tools::exceeds_inline_limit(&smallest.to_string()) {
         let file_id = ctx
             .output_buffer
             .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
@@ -180,7 +185,90 @@ fn read_markdown_multi_heading(
         }
     }
 
-    Ok(result)
+    // `sections` REPEATS the text already in `content` (it exists so a caller can tell which
+    // section produced what). Two copies of a 9,208 B read serialized to 18,869 B, and the whole
+    // response was buffered under a `@tool_*` handle. When the response does not fit, the
+    // duplicate goes first, then `coverage`, each marked `<key>_omitted: true` so its absence is
+    // a statement and not a silence. Every candidate is the FINAL response (`finalize_multi`
+    // adds the markers, the hint and `format`), so what is measured is what is returned; the
+    // smallest candidate fits, by the check above.
+    Ok(drop_to_fit(
+        &result,
+        &["sections", "coverage"],
+        finalize_multi,
+    ))
+}
+
+/// The multi-heading response as it will be RETURNED once `dropped` keys are gone: each
+/// removal marked `<key>_omitted: true`, the hint that explains a dropped `sections`, and the
+/// `format` key `read()` would add. The one place these keys are written, so the size measured
+/// is the size returned.
+fn finalize_multi(mut result: Value, dropped: &[&'static str]) -> Value {
+    if let Some(obj) = result.as_object_mut() {
+        for key in dropped {
+            obj.insert(format!("{key}_omitted"), json!(true));
+        }
+        if dropped.contains(&"sections") {
+            obj.insert(
+                "hint".into(),
+                json!(
+                    "`sections` omitted to fit: `content` holds every requested section in order; \
+                     request one heading at a time for a per-section value"
+                ),
+            );
+        }
+        obj.insert("format".into(), json!("markdown"));
+    }
+    result
+}
+
+/// Remove top-level `keys` from `base`, in order, until the FINAL response (`finalize` applied
+/// to what is left and what was dropped) fits the inline limit. Returns the first candidate
+/// that fits, or the last when none does (the caller guarantees the smallest fits).
+fn drop_to_fit(
+    base: &Value,
+    keys: &[&'static str],
+    finalize: impl Fn(Value, &[&'static str]) -> Value,
+) -> Value {
+    let mut work = base.clone();
+    let mut dropped: Vec<&'static str> = Vec::new();
+    loop {
+        let candidate = finalize(work.clone(), &dropped);
+        if !crate::tools::exceeds_inline_limit(&candidate.to_string()) {
+            return candidate;
+        }
+        let next = keys
+            .iter()
+            .find(|k| !dropped.contains(k) && work.get(**k).is_some());
+        let Some(key) = next else {
+            return candidate;
+        };
+        if let Some(obj) = work.as_object_mut() {
+            obj.remove(*key);
+        }
+        dropped.push(key);
+    }
+}
+
+/// How much of a heading's text the oversized-section error echoes back (in `section_map`,
+/// `next_actions`, `breadcrumb` and the message). Heading text has no length: a 12 KB sub-heading
+/// made the error body 12,700 B, which `fit_envelope` cannot shrink because it is part of what
+/// the error adds AROUND the map. A prefix is enough to name the heading, and still resolves it:
+/// `read_file(heading=<prefix>)` matches by prefix. A clipped entry carries the true length as
+/// `h_bytes`, so the clip is a statement and not a silent edit.
+// cap-class: RESULT_CAP read_markdown.heading_echo_bytes — probed
+const HEADING_ECHO_CLIP: usize = 200;
+
+/// `text` clipped to [`HEADING_ECHO_CLIP`] bytes on a character boundary, and its original
+/// length when it was clipped.
+fn clip_heading(text: &str) -> (String, Option<usize>) {
+    if text.len() <= HEADING_ECHO_CLIP {
+        return (text.to_string(), None);
+    }
+    (
+        crate::util::text::clip_to_bytes(text, HEADING_ECHO_CLIP).to_string(),
+        Some(text.len()),
+    )
 }
 
 /// Single-heading navigation: extract one section. Returns a `headings` list on
@@ -244,14 +332,29 @@ fn read_markdown_single_heading(
         let nested: Vec<serde_json::Value> = all_headings
             .iter()
             .filter(|h| h.line > start_ln && h.line <= end_ln)
-            .map(|h| json!({"h": h.text, "l": h.line - start_ln + 1}))
+            .map(|h| {
+                let (text, clipped_from) = clip_heading(&h.text);
+                let mut entry = json!({"h": text, "l": h.line - start_ln + 1});
+                if let Some(n) = clipped_from {
+                    entry["h_bytes"] = json!(n);
+                }
+                entry
+            })
             .collect();
 
-        let heading_label = section_result
+        let heading_label = clip_heading(
+            &section_result
+                .breadcrumb
+                .last()
+                .cloned()
+                .unwrap_or_else(|| heading_query.to_string()),
+        )
+        .0;
+        let breadcrumb: Vec<String> = section_result
             .breadcrumb
-            .last()
-            .cloned()
-            .unwrap_or_else(|| heading_query.to_string());
+            .iter()
+            .map(|b| clip_heading(b).0)
+            .collect();
 
         let hint = format!(
             "use {:?} — pick a sub-heading from `section_map` or start_line/end_line",
@@ -275,18 +378,58 @@ fn read_markdown_single_heading(
             actions
         };
 
-        let err = crate::tools::RecoverableError::with_hint(
-            format!(
-                "section {:?} spans {} lines — exceeds inline threshold",
-                heading_label, section_lines
-            ),
-            hint,
-        )
-        .with_extra("file_id", serde_json::json!(file_id))
-        .with_extra("section_map", serde_json::json!(nested))
-        .with_extra("next_actions", serde_json::json!(next_actions))
-        .with_extra("breadcrumb", serde_json::json!(section_result.breadcrumb))
-        .with_extra("line_range", serde_json::json!([start_ln, end_ln]));
+        let message = format!(
+            "section {:?} spans {} lines — exceeds inline threshold",
+            heading_label, section_lines
+        );
+        // An `Err` never reaches `call_content`'s buffering: `server.rs` puts `extra` inline in
+        // the error body, so a 300-sub-heading section returned a 26,629 B body in context. The
+        // body is therefore bounded HERE, through the same `fit_envelope` the summaries use:
+        // `finish` builds the whole body (message, hint with the cut notes, `file_id`, the map
+        // and its markers, `next_actions`, `breadcrumb`, `line_range`), it is measured, and only
+        // `section_map` is cut, by the excess. The hint's route still works after a cut: the
+        // first sub-heading is kept, which holds because every heading echoed here is clipped to
+        // `HEADING_ECHO_CLIP` first (an entry larger than its half of the allowance is DROPPED
+        // by `cut_array_middle`, and so is anything `fit_envelope` cannot shrink: it never
+        // re-checks the response around an empty summary). The note adds
+        // `read_file(path=<file_id>, start_line=.., end_line=..)` for the middle, in the buffer's
+        // own line frame, which is the frame `section_map`'s `l` values are in.
+        let finish = |map: Value, notes: &[String]| -> Value {
+            let mut body = serde_json::Map::new();
+            body.insert("error".into(), json!(message));
+            let mut hint = hint.clone();
+            for note in notes {
+                hint.push(' ');
+                hint.push_str(note);
+            }
+            body.insert("hint".into(), json!(hint));
+            body.insert("file_id".into(), json!(file_id));
+            if let Some(m) = map.as_object() {
+                for (k, v) in m {
+                    body.insert(k.clone(), v.clone());
+                }
+            }
+            body.insert("next_actions".into(), json!(next_actions));
+            body.insert("breadcrumb".into(), json!(breadcrumb));
+            body.insert("line_range".into(), json!([start_ln, end_ln]));
+            Value::Object(body)
+        };
+        let body = crate::tools::file_summary::fit_envelope(
+            json!({ "section_map": nested }),
+            &file_id,
+            finish,
+        );
+        let mut err = crate::tools::RecoverableError::with_hint(
+            message.clone(),
+            body["hint"].as_str().unwrap_or_default().to_string(),
+        );
+        if let Some(fields) = body.as_object() {
+            for (k, v) in fields {
+                if k != "error" && k != "hint" {
+                    err = err.with_extra(k.clone(), v.clone());
+                }
+            }
+        }
         return Err(err.into());
     }
 
@@ -395,6 +538,17 @@ fn read_markdown_line_range(
     Ok(result)
 }
 
+/// Add the `format` key every markdown response carries. `read()` adds it too, on whatever a
+/// builder returns, which is harmless when it is already there; the builders call it so the key
+/// is inside the response they MEASURE. Added only afterwards, it made a response judged to fit
+/// (<= 10,003 B) come back up to 20 B over and be parked under `@tool_*`.
+fn with_format(mut result: Value) -> Value {
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("format".into(), json!("markdown"));
+    }
+    result
+}
+
 /// Default (no nav/range) read: adaptive tiers — tier 3 (oversized → heading
 /// map + buffer, no body), tier 2 (medium → full content + soft hint), tier 1
 /// (small → full content).
@@ -420,35 +574,16 @@ fn read_markdown_default_tiers(
         .map(|h| json!({"h": h.text, "l": h.line}))
         .collect();
 
-    // ── Tier 3: large — heading map + hint, no body ──────────────────
-    if oversized || oversized_by_headings {
-        let file_id = ctx
-            .output_buffer
-            .store_file(resolved.to_string_lossy().to_string(), text.to_string());
-
-        let hint = if all_headings.is_empty() {
-            format!("use {:?} — start_line/end_line", file_id)
-        } else {
-            format!(
-                "use {:?} — heading=\"## Section\" or start_line/end_line",
-                file_id
-            )
-        };
-
-        let mut result = json!({
-            "lines": total_lines,
-            "headings": headings_json,
-            "file_id": file_id,
-            "hint": hint,
-        });
-        if let Some(c) = md_cov {
-            result["coverage"] = c;
-        }
-        return Ok(result);
-    }
-
-    // ── Tier 2: medium — full content + heading map + soft hint ───────
-    if total_lines > crate::tools::LINE_SOFT_CAP {
+    // ── Tiers 1 and 2: the body inline, with the heading map ─────────
+    // Built BEFORE deciding, because whether it FITS is a fact about the SERIALIZED response:
+    // `exceeds_inline_limit(text)` measures the raw body alone, but the response is the body
+    // plus the heading map, JSON-escaped (every newline and quote doubles), and a 9,900 B file
+    // serialized to 14,062 B and was buffered under `@tool_*` with no handle of its own. A
+    // response that does not fit falls through to tier 3, the tier built for exactly that.
+    let inline = if oversized || oversized_by_headings {
+        None
+    } else if total_lines > crate::tools::LINE_SOFT_CAP {
+        // Tier 2: medium — full content + heading map + soft hint.
         let heading_count = all_headings.len();
         let hint = if heading_count == 0 {
             format!(
@@ -461,36 +596,82 @@ fn read_markdown_default_tiers(
                 total_lines, heading_count
             )
         };
-
         let mut result = json!({
             "content": text,
             "lines": total_lines,
             "headings": headings_json,
             "hint": hint,
         });
-        if let Some(c) = md_cov {
-            result["coverage"] = c;
+        if let Some(c) = &md_cov {
+            result["coverage"] = c.clone();
         }
-        return Ok(result);
+        Some(with_format(result))
+    } else {
+        // Tier 1: small — full content + heading map.
+        let mut result = json!({
+            "content": text,
+            "lines": total_lines,
+            "headings": headings_json,
+        });
+        if let Some(c) = &md_cov {
+            result["coverage"] = c.clone();
+        }
+        let heading_count = all_headings.len();
+        if heading_count >= 2 {
+            result["hint"] = serde_json::json!(format!(
+                "{} lines, {} sections — read_file(path, heading=\"## Section\") to focus",
+                total_lines, heading_count
+            ));
+        }
+        Some(with_format(result))
+    };
+    if let Some(result) = inline {
+        if !crate::tools::exceeds_inline_limit(&result.to_string()) {
+            return Ok(result);
+        }
     }
 
-    // ── Tier 1: small — full content + heading map ─────────────────────
-    let mut result = json!({
-        "content": text,
-        "lines": total_lines,
-        "headings": headings_json,
-    });
-    if let Some(c) = md_cov {
-        result["coverage"] = c;
-    }
-    let heading_count = all_headings.len();
-    if heading_count >= 2 {
-        result["hint"] = serde_json::json!(format!(
-            "{} lines, {} sections — read_file(path, heading=\"## Section\") to focus",
-            total_lines, heading_count
-        ));
-    }
-    Ok(result)
+    // ── Tier 3: large — heading map + hint, no body ──────────────────
+    let file_id = ctx
+        .output_buffer
+        .store_file(resolved.to_string_lossy().to_string(), text.to_string());
+
+    let hint = if all_headings.is_empty() {
+        format!("use {:?} — start_line/end_line", file_id)
+    } else {
+        format!(
+            "use {:?} — heading=\"## Section\" or start_line/end_line",
+            file_id
+        )
+    };
+
+    // The map lists EVERY heading, and `HEADINGS_HARD_CAP` only chooses this tier: it bounds
+    // nothing in it. Heading text has no length, so the map crosses the inline limit at about
+    // 109 headings of 60 characters (map and `lines`, before `file_id` and the hint: 100 ->
+    // 9,190 B, 120 -> 11,030 B, 200 -> 18,390 B; computed, and within 25 B of the reviewer's
+    // live probe), and `call_content` buffered it again under `@tool_*` beside `file_id`.
+    // `fit_envelope` builds the whole response, measures it, and cuts the map only by the
+    // excess, with the note added to the hint the renderer prints as `next:`. (`coverage`
+    // cannot add a second list here: a default read counts every heading as seen, so
+    // `markdown_coverage` returns `None`. It sits in the measured envelope anyway, so if that
+    // ever changed the map would simply get less room.)
+    let summary = json!({ "lines": total_lines, "headings": headings_json });
+    let finish = |mut result: Value, notes: &[String]| -> Value {
+        result["file_id"] = json!(file_id);
+        let mut hint = hint.clone();
+        for note in notes {
+            hint.push(' ');
+            hint.push_str(note);
+        }
+        result["hint"] = json!(hint);
+        if let Some(c) = &md_cov {
+            result["coverage"] = c.clone();
+        }
+        with_format(result)
+    };
+    Ok(crate::tools::file_summary::fit_envelope(
+        summary, &file_id, finish,
+    ))
 }
 
 /// Heading-addressed markdown read. Reached through `read_file`, which routes here for
@@ -656,7 +837,14 @@ pub(crate) fn format_read(result: &Value) -> Option<String> {
         let lines = result.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
         let file_id = result.get("file_id").and_then(|v| v.as_str()).unwrap_or("");
         let mut out = format!("{} lines  {}\n\n", lines, file_id);
-        for entry in headings {
+        for (i, entry) in headings.iter().enumerate() {
+            // The gap line replaces nothing: it sits between the two kept halves. Its helper
+            // leads with a newline for the indented outline in `read_file`; here every entry
+            // already ends with one.
+            if let Some(gap) = crate::tools::read_file::omitted_gap(result, "headings", i) {
+                out.push_str(gap.trim_start_matches('\n'));
+                out.push('\n');
+            }
             let h = entry.get("h").and_then(|v| v.as_str()).unwrap_or("");
             let l = entry.get("l").and_then(|v| v.as_u64()).unwrap_or(0);
             let level = h.chars().take_while(|c| *c == '#').count().max(1);
@@ -673,4 +861,37 @@ pub(crate) fn format_read(result: &Value) -> Option<String> {
 
     // Fallback for shapes added later: serialize JSON.
     Some(result.to_string())
+}
+
+#[cfg(test)]
+mod clip_heading_tests {
+    use super::{clip_heading, HEADING_ECHO_CLIP};
+
+    #[test]
+    fn a_heading_of_exactly_the_clip_length_is_returned_whole() {
+        let text = "h".repeat(HEADING_ECHO_CLIP);
+        assert_eq!(clip_heading(&text), (text, None));
+    }
+
+    #[test]
+    fn a_heading_one_byte_over_is_clipped_and_its_length_reported() {
+        let text = "h".repeat(HEADING_ECHO_CLIP + 1);
+        let (clipped, from) = clip_heading(&text);
+        assert_eq!(clipped.len(), HEADING_ECHO_CLIP);
+        assert_eq!(from, Some(HEADING_ECHO_CLIP + 1));
+        assert!(
+            text.starts_with(&clipped),
+            "a clip must be a PREFIX so it still resolves"
+        );
+    }
+
+    #[test]
+    fn a_clip_never_splits_a_multibyte_character() {
+        // 100 x '€' is 300 B; 200 is not a multiple of 3, so a raw cut lands inside a character.
+        let text = "€".repeat(100);
+        let (clipped, from) = clip_heading(&text);
+        assert!(clipped.len() <= HEADING_ECHO_CLIP && clipped.len() > HEADING_ECHO_CLIP - 3);
+        assert!(clipped.chars().all(|c| c == '€'));
+        assert_eq!(from, Some(300));
+    }
 }

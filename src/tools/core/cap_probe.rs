@@ -1067,6 +1067,40 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // reads a 1,500-function source file whose symbol list is ~72 KB of JSON against
+        // `SUMMARY_ENVELOPE_BUDGET` 9,000 (the target for the MEASURED envelope), through
+        // `ReadFile.call_content`. A symbol list is an
+        // ARRAY, so it is the array cut that binds there and its marker (`entries omitted`)
+        // is what the row cites. The STRING cut of the same constant (`head`, `tail`,
+        // `preview`, marker `bytes shown`) is pinned by
+        // `a_file_of_few_very_wide_lines_is_summarised_inline_with_one_handle` and
+        // `a_wide_config_preview_is_summarised_inline_with_one_handle`, which a row cannot
+        // also cite. Marker written by production in `file_summary::cut_array_middle` and
+        // carried into the hint by `read_full_file`. MUTATION (2026-10-05, 38 mutants, all
+        // killed): R2 deletes the line that appends the cut note to the hint; the cited test
+        // goes red.
+        id: "file_summary.summary_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("entries omitted"),
+            mutation: Mutation::Killed,
+            cited_test: "a_source_file_with_many_symbols_is_summarised_inline_with_one_handle",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test seeds
+        // ONE 12,000 B sub-heading against `HEADING_ECHO_CLIP` 200, through the real tool, and
+        // asserts the echoed text is a prefix of at most 200 B with its true length beside it as
+        // `h_bytes`. The error body without the clip was 12,643 B. Marker written by production
+        // in `read_markdown_single_heading`, from `clip_heading`.
+        id: "read_markdown.heading_echo_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("h_bytes"),
+            mutation: Mutation::Killed,
+            cited_test: "the_oversized_section_error_clips_a_huge_sub_heading_and_keeps_its_route",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked

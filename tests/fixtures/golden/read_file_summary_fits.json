@@ -1,0 +1,1013 @@
+{
+  "type": "source",
+  "line_count": 200,
+  "symbols": [
+    {
+      "name": "f001",
+      "kind": "Function",
+      "line": 1
+    },
+    {
+      "name": "f002",
+      "kind": "Function",
+      "line": 2
+    },
+    {
+      "name": "f003",
+      "kind": "Function",
+      "line": 3
+    },
+    {
+      "name": "f004",
+      "kind": "Function",
+      "line": 4
+    },
+    {
+      "name": "f005",
+      "kind": "Function",
+      "line": 5
+    },
+    {
+      "name": "f006",
+      "kind": "Function",
+      "line": 6
+    },
+    {
+      "name": "f007",
+      "kind": "Function",
+      "line": 7
+    },
+    {
+      "name": "f008",
+      "kind": "Function",
+      "line": 8
+    },
+    {
+      "name": "f009",
+      "kind": "Function",
+      "line": 9
+    },
+    {
+      "name": "f010",
+      "kind": "Function",
+      "line": 10
+    },
+    {
+      "name": "f011",
+      "kind": "Function",
+      "line": 11
+    },
+    {
+      "name": "f012",
+      "kind": "Function",
+      "line": 12
+    },
+    {
+      "name": "f013",
+      "kind": "Function",
+      "line": 13
+    },
+    {
+      "name": "f014",
+      "kind": "Function",
+      "line": 14
+    },
+    {
+      "name": "f015",
+      "kind": "Function",
+      "line": 15
+    },
+    {
+      "name": "f016",
+      "kind": "Function",
+      "line": 16
+    },
+    {
+      "name": "f017",
+      "kind": "Function",
+      "line": 17
+    },
+    {
+      "name": "f018",
+      "kind": "Function",
+      "line": 18
+    },
+    {
+      "name": "f019",
+      "kind": "Function",
+      "line": 19
+    },
+    {
+      "name": "f020",
+      "kind": "Function",
+      "line": 20
+    },
+    {
+      "name": "f021",
+      "kind": "Function",
+      "line": 21
+    },
+    {
+      "name": "f022",
+      "kind": "Function",
+      "line": 22
+    },
+    {
+      "name": "f023",
+      "kind": "Function",
+      "line": 23
+    },
+    {
+      "name": "f024",
+      "kind": "Function",
+      "line": 24
+    },
+    {
+      "name": "f025",
+      "kind": "Function",
+      "line": 25
+    },
+    {
+      "name": "f026",
+      "kind": "Function",
+      "line": 26
+    },
+    {
+      "name": "f027",
+      "kind": "Function",
+      "line": 27
+    },
+    {
+      "name": "f028",
+      "kind": "Function",
+      "line": 28
+    },
+    {
+      "name": "f029",
+      "kind": "Function",
+      "line": 29
+    },
+    {
+      "name": "f030",
+      "kind": "Function",
+      "line": 30
+    },
+    {
+      "name": "f031",
+      "kind": "Function",
+      "line": 31
+    },
+    {
+      "name": "f032",
+      "kind": "Function",
+      "line": 32
+    },
+    {
+      "name": "f033",
+      "kind": "Function",
+      "line": 33
+    },
+    {
+      "name": "f034",
+      "kind": "Function",
+      "line": 34
+    },
+    {
+      "name": "f035",
+      "kind": "Function",
+      "line": 35
+    },
+    {
+      "name": "f036",
+      "kind": "Function",
+      "line": 36
+    },
+    {
+      "name": "f037",
+      "kind": "Function",
+      "line": 37
+    },
+    {
+      "name": "f038",
+      "kind": "Function",
+      "line": 38
+    },
+    {
+      "name": "f039",
+      "kind": "Function",
+      "line": 39
+    },
+    {
+      "name": "f040",
+      "kind": "Function",
+      "line": 40
+    },
+    {
+      "name": "f041",
+      "kind": "Function",
+      "line": 41
+    },
+    {
+      "name": "f042",
+      "kind": "Function",
+      "line": 42
+    },
+    {
+      "name": "f043",
+      "kind": "Function",
+      "line": 43
+    },
+    {
+      "name": "f044",
+      "kind": "Function",
+      "line": 44
+    },
+    {
+      "name": "f045",
+      "kind": "Function",
+      "line": 45
+    },
+    {
+      "name": "f046",
+      "kind": "Function",
+      "line": 46
+    },
+    {
+      "name": "f047",
+      "kind": "Function",
+      "line": 47
+    },
+    {
+      "name": "f048",
+      "kind": "Function",
+      "line": 48
+    },
+    {
+      "name": "f049",
+      "kind": "Function",
+      "line": 49
+    },
+    {
+      "name": "f050",
+      "kind": "Function",
+      "line": 50
+    },
+    {
+      "name": "f051",
+      "kind": "Function",
+      "line": 51
+    },
+    {
+      "name": "f052",
+      "kind": "Function",
+      "line": 52
+    },
+    {
+      "name": "f053",
+      "kind": "Function",
+      "line": 53
+    },
+    {
+      "name": "f054",
+      "kind": "Function",
+      "line": 54
+    },
+    {
+      "name": "f055",
+      "kind": "Function",
+      "line": 55
+    },
+    {
+      "name": "f056",
+      "kind": "Function",
+      "line": 56
+    },
+    {
+      "name": "f057",
+      "kind": "Function",
+      "line": 57
+    },
+    {
+      "name": "f058",
+      "kind": "Function",
+      "line": 58
+    },
+    {
+      "name": "f059",
+      "kind": "Function",
+      "line": 59
+    },
+    {
+      "name": "f060",
+      "kind": "Function",
+      "line": 60
+    },
+    {
+      "name": "f061",
+      "kind": "Function",
+      "line": 61
+    },
+    {
+      "name": "f062",
+      "kind": "Function",
+      "line": 62
+    },
+    {
+      "name": "f063",
+      "kind": "Function",
+      "line": 63
+    },
+    {
+      "name": "f064",
+      "kind": "Function",
+      "line": 64
+    },
+    {
+      "name": "f065",
+      "kind": "Function",
+      "line": 65
+    },
+    {
+      "name": "f066",
+      "kind": "Function",
+      "line": 66
+    },
+    {
+      "name": "f067",
+      "kind": "Function",
+      "line": 67
+    },
+    {
+      "name": "f068",
+      "kind": "Function",
+      "line": 68
+    },
+    {
+      "name": "f069",
+      "kind": "Function",
+      "line": 69
+    },
+    {
+      "name": "f070",
+      "kind": "Function",
+      "line": 70
+    },
+    {
+      "name": "f071",
+      "kind": "Function",
+      "line": 71
+    },
+    {
+      "name": "f072",
+      "kind": "Function",
+      "line": 72
+    },
+    {
+      "name": "f073",
+      "kind": "Function",
+      "line": 73
+    },
+    {
+      "name": "f074",
+      "kind": "Function",
+      "line": 74
+    },
+    {
+      "name": "f075",
+      "kind": "Function",
+      "line": 75
+    },
+    {
+      "name": "f076",
+      "kind": "Function",
+      "line": 76
+    },
+    {
+      "name": "f077",
+      "kind": "Function",
+      "line": 77
+    },
+    {
+      "name": "f078",
+      "kind": "Function",
+      "line": 78
+    },
+    {
+      "name": "f079",
+      "kind": "Function",
+      "line": 79
+    },
+    {
+      "name": "f080",
+      "kind": "Function",
+      "line": 80
+    },
+    {
+      "name": "f081",
+      "kind": "Function",
+      "line": 81
+    },
+    {
+      "name": "f082",
+      "kind": "Function",
+      "line": 82
+    },
+    {
+      "name": "f083",
+      "kind": "Function",
+      "line": 83
+    },
+    {
+      "name": "f084",
+      "kind": "Function",
+      "line": 84
+    },
+    {
+      "name": "f085",
+      "kind": "Function",
+      "line": 85
+    },
+    {
+      "name": "f086",
+      "kind": "Function",
+      "line": 86
+    },
+    {
+      "name": "f087",
+      "kind": "Function",
+      "line": 87
+    },
+    {
+      "name": "f088",
+      "kind": "Function",
+      "line": 88
+    },
+    {
+      "name": "f089",
+      "kind": "Function",
+      "line": 89
+    },
+    {
+      "name": "f090",
+      "kind": "Function",
+      "line": 90
+    },
+    {
+      "name": "f091",
+      "kind": "Function",
+      "line": 91
+    },
+    {
+      "name": "f092",
+      "kind": "Function",
+      "line": 92
+    },
+    {
+      "name": "f093",
+      "kind": "Function",
+      "line": 93
+    },
+    {
+      "name": "f094",
+      "kind": "Function",
+      "line": 94
+    },
+    {
+      "name": "f095",
+      "kind": "Function",
+      "line": 95
+    },
+    {
+      "name": "f096",
+      "kind": "Function",
+      "line": 96
+    },
+    {
+      "name": "f097",
+      "kind": "Function",
+      "line": 97
+    },
+    {
+      "name": "f098",
+      "kind": "Function",
+      "line": 98
+    },
+    {
+      "name": "f099",
+      "kind": "Function",
+      "line": 99
+    },
+    {
+      "name": "f100",
+      "kind": "Function",
+      "line": 100
+    },
+    {
+      "name": "f101",
+      "kind": "Function",
+      "line": 101
+    },
+    {
+      "name": "f102",
+      "kind": "Function",
+      "line": 102
+    },
+    {
+      "name": "f103",
+      "kind": "Function",
+      "line": 103
+    },
+    {
+      "name": "f104",
+      "kind": "Function",
+      "line": 104
+    },
+    {
+      "name": "f105",
+      "kind": "Function",
+      "line": 105
+    },
+    {
+      "name": "f106",
+      "kind": "Function",
+      "line": 106
+    },
+    {
+      "name": "f107",
+      "kind": "Function",
+      "line": 107
+    },
+    {
+      "name": "f108",
+      "kind": "Function",
+      "line": 108
+    },
+    {
+      "name": "f109",
+      "kind": "Function",
+      "line": 109
+    },
+    {
+      "name": "f110",
+      "kind": "Function",
+      "line": 110
+    },
+    {
+      "name": "f111",
+      "kind": "Function",
+      "line": 111
+    },
+    {
+      "name": "f112",
+      "kind": "Function",
+      "line": 112
+    },
+    {
+      "name": "f113",
+      "kind": "Function",
+      "line": 113
+    },
+    {
+      "name": "f114",
+      "kind": "Function",
+      "line": 114
+    },
+    {
+      "name": "f115",
+      "kind": "Function",
+      "line": 115
+    },
+    {
+      "name": "f116",
+      "kind": "Function",
+      "line": 116
+    },
+    {
+      "name": "f117",
+      "kind": "Function",
+      "line": 117
+    },
+    {
+      "name": "f118",
+      "kind": "Function",
+      "line": 118
+    },
+    {
+      "name": "f119",
+      "kind": "Function",
+      "line": 119
+    },
+    {
+      "name": "f120",
+      "kind": "Function",
+      "line": 120
+    },
+    {
+      "name": "f121",
+      "kind": "Function",
+      "line": 121
+    },
+    {
+      "name": "f122",
+      "kind": "Function",
+      "line": 122
+    },
+    {
+      "name": "f123",
+      "kind": "Function",
+      "line": 123
+    },
+    {
+      "name": "f124",
+      "kind": "Function",
+      "line": 124
+    },
+    {
+      "name": "f125",
+      "kind": "Function",
+      "line": 125
+    },
+    {
+      "name": "f126",
+      "kind": "Function",
+      "line": 126
+    },
+    {
+      "name": "f127",
+      "kind": "Function",
+      "line": 127
+    },
+    {
+      "name": "f128",
+      "kind": "Function",
+      "line": 128
+    },
+    {
+      "name": "f129",
+      "kind": "Function",
+      "line": 129
+    },
+    {
+      "name": "f130",
+      "kind": "Function",
+      "line": 130
+    },
+    {
+      "name": "f131",
+      "kind": "Function",
+      "line": 131
+    },
+    {
+      "name": "f132",
+      "kind": "Function",
+      "line": 132
+    },
+    {
+      "name": "f133",
+      "kind": "Function",
+      "line": 133
+    },
+    {
+      "name": "f134",
+      "kind": "Function",
+      "line": 134
+    },
+    {
+      "name": "f135",
+      "kind": "Function",
+      "line": 135
+    },
+    {
+      "name": "f136",
+      "kind": "Function",
+      "line": 136
+    },
+    {
+      "name": "f137",
+      "kind": "Function",
+      "line": 137
+    },
+    {
+      "name": "f138",
+      "kind": "Function",
+      "line": 138
+    },
+    {
+      "name": "f139",
+      "kind": "Function",
+      "line": 139
+    },
+    {
+      "name": "f140",
+      "kind": "Function",
+      "line": 140
+    },
+    {
+      "name": "f141",
+      "kind": "Function",
+      "line": 141
+    },
+    {
+      "name": "f142",
+      "kind": "Function",
+      "line": 142
+    },
+    {
+      "name": "f143",
+      "kind": "Function",
+      "line": 143
+    },
+    {
+      "name": "f144",
+      "kind": "Function",
+      "line": 144
+    },
+    {
+      "name": "f145",
+      "kind": "Function",
+      "line": 145
+    },
+    {
+      "name": "f146",
+      "kind": "Function",
+      "line": 146
+    },
+    {
+      "name": "f147",
+      "kind": "Function",
+      "line": 147
+    },
+    {
+      "name": "f148",
+      "kind": "Function",
+      "line": 148
+    },
+    {
+      "name": "f149",
+      "kind": "Function",
+      "line": 149
+    },
+    {
+      "name": "f150",
+      "kind": "Function",
+      "line": 150
+    },
+    {
+      "name": "f151",
+      "kind": "Function",
+      "line": 151
+    },
+    {
+      "name": "f152",
+      "kind": "Function",
+      "line": 152
+    },
+    {
+      "name": "f153",
+      "kind": "Function",
+      "line": 153
+    },
+    {
+      "name": "f154",
+      "kind": "Function",
+      "line": 154
+    },
+    {
+      "name": "f155",
+      "kind": "Function",
+      "line": 155
+    },
+    {
+      "name": "f156",
+      "kind": "Function",
+      "line": 156
+    },
+    {
+      "name": "f157",
+      "kind": "Function",
+      "line": 157
+    },
+    {
+      "name": "f158",
+      "kind": "Function",
+      "line": 158
+    },
+    {
+      "name": "f159",
+      "kind": "Function",
+      "line": 159
+    },
+    {
+      "name": "f160",
+      "kind": "Function",
+      "line": 160
+    },
+    {
+      "name": "f161",
+      "kind": "Function",
+      "line": 161
+    },
+    {
+      "name": "f162",
+      "kind": "Function",
+      "line": 162
+    },
+    {
+      "name": "f163",
+      "kind": "Function",
+      "line": 163
+    },
+    {
+      "name": "f164",
+      "kind": "Function",
+      "line": 164
+    },
+    {
+      "name": "f165",
+      "kind": "Function",
+      "line": 165
+    },
+    {
+      "name": "f166",
+      "kind": "Function",
+      "line": 166
+    },
+    {
+      "name": "f167",
+      "kind": "Function",
+      "line": 167
+    },
+    {
+      "name": "f168",
+      "kind": "Function",
+      "line": 168
+    },
+    {
+      "name": "f169",
+      "kind": "Function",
+      "line": 169
+    },
+    {
+      "name": "f170",
+      "kind": "Function",
+      "line": 170
+    },
+    {
+      "name": "f171",
+      "kind": "Function",
+      "line": 171
+    },
+    {
+      "name": "f172",
+      "kind": "Function",
+      "line": 172
+    },
+    {
+      "name": "f173",
+      "kind": "Function",
+      "line": 173
+    },
+    {
+      "name": "f174",
+      "kind": "Function",
+      "line": 174
+    },
+    {
+      "name": "f175",
+      "kind": "Function",
+      "line": 175
+    },
+    {
+      "name": "f176",
+      "kind": "Function",
+      "line": 176
+    },
+    {
+      "name": "f177",
+      "kind": "Function",
+      "line": 177
+    },
+    {
+      "name": "f178",
+      "kind": "Function",
+      "line": 178
+    },
+    {
+      "name": "f179",
+      "kind": "Function",
+      "line": 179
+    },
+    {
+      "name": "f180",
+      "kind": "Function",
+      "line": 180
+    },
+    {
+      "name": "f181",
+      "kind": "Function",
+      "line": 181
+    },
+    {
+      "name": "f182",
+      "kind": "Function",
+      "line": 182
+    },
+    {
+      "name": "f183",
+      "kind": "Function",
+      "line": 183
+    },
+    {
+      "name": "f184",
+      "kind": "Function",
+      "line": 184
+    },
+    {
+      "name": "f185",
+      "kind": "Function",
+      "line": 185
+    },
+    {
+      "name": "f186",
+      "kind": "Function",
+      "line": 186
+    },
+    {
+      "name": "f187",
+      "kind": "Function",
+      "line": 187
+    },
+    {
+      "name": "f188",
+      "kind": "Function",
+      "line": 188
+    },
+    {
+      "name": "f189",
+      "kind": "Function",
+      "line": 189
+    },
+    {
+      "name": "f190",
+      "kind": "Function",
+      "line": 190
+    },
+    {
+      "name": "f191",
+      "kind": "Function",
+      "line": 191
+    },
+    {
+      "name": "f192",
+      "kind": "Function",
+      "line": 192
+    },
+    {
+      "name": "f193",
+      "kind": "Function",
+      "line": 193
+    },
+    {
+      "name": "f194",
+      "kind": "Function",
+      "line": 194
+    },
+    {
+      "name": "f195",
+      "kind": "Function",
+      "line": 195
+    },
+    {
+      "name": "f196",
+      "kind": "Function",
+      "line": 196
+    },
+    {
+      "name": "f197",
+      "kind": "Function",
+      "line": 197
+    },
+    {
+      "name": "f198",
+      "kind": "Function",
+      "line": 198
+    },
+    {
+      "name": "f199",
+      "kind": "Function",
+      "line": 199
+    },
+    {
+      "name": "f200",
+      "kind": "Function",
+      "line": 200
+    }
+  ],
+  "file_id": "@file_X",
+  "complete": false,
+  "overflow": {
+    "shown": 0,
+    "total": 200,
+    "hint": "Outline only — no file content included. For source, prefer symbols(path) then symbols(name='...', include_body=true). To read lines: read_file(path=\"@file_X\", start_line=N, end_line=M)."
+  }
+}

@@ -1188,6 +1188,337 @@ pub fn summarize_generic_file(content: &str) -> Value {
         "tail": tail,
     })
 }
+/// Serialized-size target for a whole `read_file`/`read_markdown` summary ENVELOPE (the summary
+/// plus the keys `read_full_file` and the markdown tiers add around it: `file_id`, `complete`,
+/// `overflow`, `hint`, `coverage`): `INLINE_BYTE_BUDGET`, which leaves the slack
+/// `call_content` needs for path stripping and the guide hint it may still add.
+///
+/// The summarizers above bound their output by COUNT: every symbol, the first 20 and last 10
+/// lines, 30 lines of a config, 30 sections. A count has no size. A 1,500-function file or a
+/// file of a few very wide lines made the summary JSON exceed `TOOL_OUTPUT_BUFFER_THRESHOLD`,
+/// `call_content` buffered it a second time under `@tool_*`, and the caller held two handles
+/// for one read plus a `json_path="$.field"` hint that reaches nothing. Measured 2026-10-05:
+/// `read_file` on a 6,206-line source file returned `@tool_0bce7715` (20,636 B) beside the
+/// tool's own `@file_0bce76f9`. It is the same defect `summarize_generic` had in
+/// `command_summary.rs` and the same one `GENERIC_FIELD_BYTE_BUDGET` fixed there.
+///
+/// **The target is applied to the MEASURED envelope, never to a guess about it.** An earlier
+/// version cut every summary to a fixed 6,000 B "to leave room for the keys", but the keys cost
+/// ~300-420 B, so summaries of 6,000-9,600 B that had always come back whole were cut: a
+/// contract change for ordinary files. [`fit_envelope`] builds the envelope, and only if that
+/// is over the INLINE LIMIT does it cut, down to this target.
+// cap-class: RESULT_CAP file_summary.summary_bytes — probed
+pub(crate) const SUMMARY_ENVELOPE_BUDGET: usize = crate::tools::INLINE_BYTE_BUDGET;
+
+/// Build the response envelope around `summary` and make it fit the inline limit by cutting
+/// only the EXCESS, so a summary that fits comes back byte-for-byte as it always did.
+///
+/// `finish(summary, notes)` is the caller's own construction of the whole response (the keys
+/// it adds around the summary, the cut notes it puts in its hint). Passing it in is what lets
+/// this measure the REAL envelope: the budget handed to [`bound_summary`] is
+/// [`SUMMARY_ENVELOPE_BUDGET`] minus what `finish` costs around an empty summary, not a
+/// constant guessed to be about right.
+///
+/// 1. The envelope with the summary as built fits the inline limit: returned untouched.
+/// 2. Otherwise the summary is cut to the budget and the envelope re-measured WITH the notes
+///    the cut produced, because those lengthen the hint; if it is still over, the budget
+///    shrinks by exactly the excess and the cut is redone from the ORIGINAL summary (up to
+///    four times, which every case measured needs one or two).
+/// 3. If that never converges, the minimal `summary_omitted` summary (budget 0) is used, which
+///    always fits. So the result is never oversized and never silently so.
+pub(crate) fn fit_envelope(
+    summary: Value,
+    file_id: &str,
+    finish: impl Fn(Value, &[String]) -> Value,
+) -> Value {
+    let over_limit = |v: &Value| crate::tools::exceeds_inline_limit(&v.to_string());
+    let whole = finish(summary.clone(), &[]);
+    if !over_limit(&whole) {
+        return whole;
+    }
+    let overhead = finish(Value::Object(serde_json::Map::new()), &[])
+        .to_string()
+        .len();
+    let mut budget = SUMMARY_ENVELOPE_BUDGET.saturating_sub(overhead);
+    for _ in 0..4 {
+        let (bounded, notes) = bound_summary(summary.clone(), file_id, budget);
+        let envelope = finish(bounded, &notes);
+        let size = envelope.to_string().len();
+        if size <= SUMMARY_ENVELOPE_BUDGET {
+            return envelope;
+        }
+        budget = budget.saturating_sub(size - SUMMARY_ENVELOPE_BUDGET + 16);
+    }
+    let (minimal, notes) = bound_summary(summary, file_id, 0);
+    finish(minimal, &notes)
+}
+
+/// Bound a whole-file summary to `budget` SERIALIZED bytes, keeping both ends of whatever is
+/// cut, and say what was cut.
+///
+/// Returns the bounded summary and one note per cut array, for the caller to put in the
+/// `overflow` hint. A summary that already fits is returned untouched.
+///
+/// **The result always fits `budget`.** Every size here is measured on the serialized JSON,
+/// never estimated from raw bytes: JSON escaping turns one raw byte into 2 (`"`, `\`, tab) or 6
+/// (`\x01`, ANSI `\x1b`), so a cut sized in raw bytes left a 6 KB wide line at 11 KB or more
+/// and the response was buffered a second time. What the two passes below cannot cut is
+/// replaced by a minimal summary marked `summary_omitted` (the last resort), so an oversized
+/// summary is never returned silently.
+///
+/// **Strings first** (`head`, `tail`, `preview`, any top-level string over 500 B): each is
+/// middle-elided with `elide_middle_bytes`, its marker naming the buffer handle. They share
+/// ONE raw cut size, the largest whose whole summary serializes within the budget, so `head`
+/// and `tail` are cut alike (largest-first would crush one) and a short string is left whole.
+///
+/// **Then arrays** (`symbols`, `sections`, `headings`, `keys`, at the top level or one level
+/// down, where `summarize_json` keeps `schema.keys`): every array is taken
+/// out, what is left is the fixed part, and the rest of the budget is shared between the arrays
+/// by max-min fairness. Smallest first, each gets at most an equal share of what remains, so an
+/// array that fits its share is returned whole and what it leaves unused goes to the larger
+/// ones. Each cut array loses its MIDDLE entries: the first and last halves of its allowance
+/// survive. Entries
+/// stay objects of the same shape, so no consumer sees a foreign element; the gap is described
+/// in structured keys beside the array (`<key>_truncated`, `total_<key>` if absent, and
+/// `<key>_omitted {after, count, from_line, to_line}`) and rendered where it falls.
+pub(crate) fn bound_summary(
+    mut summary: Value,
+    file_id: &str,
+    budget: usize,
+) -> (Value, Vec<String>) {
+    let size = |v: &Value| v.to_string().len();
+    let mut notes: Vec<String> = Vec::new();
+    if size(&summary) <= budget {
+        return (summary, notes);
+    }
+    let original_bytes = size(&summary);
+
+    // ---- strings ----
+    // A string is "wide" above 500 B: below that it is part of the fixed cost of the summary.
+    let wide: Vec<(String, String)> = summary
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| !matches!(k.as_str(), "type" | "format"))
+        .filter_map(|(k, v)| {
+            v.as_str()
+                .filter(|s| s.len() > 500)
+                .map(|s| (k.clone(), s.to_owned()))
+        })
+        .collect();
+    if !wide.is_empty() {
+        let remedy = format!("the rest: read_file(path=\"{file_id}\", start_line=N, end_line=M)");
+        let with_share = |base: &Value, share: usize| -> Value {
+            let mut cut = base.clone();
+            for (key, original) in &wide {
+                cut[key.as_str()] = Value::String(crate::util::text::elide_middle_bytes(
+                    original.clone(),
+                    original.len(),
+                    share,
+                    key,
+                    &remedy,
+                ));
+            }
+            cut
+        };
+        // The share is RAW bytes (that is what `elide_middle_bytes` clips), but the budget is
+        // SERIALIZED bytes, and JSON escaping turns one raw byte into 2 (`"`, `\`, tab, newline)
+        // or 6 (`\x01`, `\x1b`). So the share is found by measuring what each candidate really
+        // serializes to, not by dividing the budget: the largest share whose whole summary fits.
+        // One common share for every wide string, so a small one is simply left whole and its
+        // unused room goes to the larger ones.
+        let longest = wide.iter().map(|(_, s)| s.len()).max().unwrap_or(0);
+        let (mut lo, mut hi) = (0usize, longest); // `hi` is known not to fit: nothing is cut
+        let mut best: Option<usize> = None;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if size(&with_share(&summary, mid)) <= budget {
+                best = Some(mid);
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        // No share fits: take the smallest one (markers only) and let the arrays, or the last
+        // resort below, finish the job.
+        summary = with_share(&summary, best.unwrap_or(0));
+    }
+    if size(&summary) <= budget {
+        return (summary, notes);
+    }
+
+    // ---- arrays ----
+    // Top level, and one level down: `summarize_json` nests its key list under `schema`.
+    let mut found: Vec<(String, String)> = Vec::new(); // (parent pointer, key)
+    for (k, v) in summary.as_object().into_iter().flatten() {
+        match v {
+            Value::Array(a) if !a.is_empty() => found.push((String::new(), k.clone())),
+            Value::Object(inner) => {
+                for (ik, iv) in inner {
+                    if iv.as_array().is_some_and(|a| !a.is_empty()) {
+                        found.push((format!("/{k}"), ik.clone()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // Take every array OUT first, so what is left is the fixed part, then share what is left
+    // between them. Cutting the largest while the others are still whole would leave it no room
+    // at all: with two arrays in one summary, the larger lost EVERY entry.
+    let mut taken: Vec<(String, String, Vec<Value>, usize)> = Vec::new();
+    for (parent, key) in found {
+        let Some(entries) = summary
+            .pointer(&parent)
+            .and_then(|h| h.get(&key))
+            .and_then(Value::as_array)
+            .cloned()
+        else {
+            continue;
+        };
+        let bytes = size(&Value::Array(entries.clone()));
+        if let Some(slot) = summary.pointer_mut(&parent).and_then(|h| h.get_mut(&key)) {
+            *slot = Value::Array(Vec::new());
+        }
+        taken.push((parent, key, entries, bytes));
+    }
+    let count = taken.len();
+    // 300 B per array for the structured markers a cut adds beside it.
+    let mut remaining = budget.saturating_sub(size(&summary) + 300 * count);
+    // Smallest first, each getting at most an equal share of what is left: an array that fits
+    // its share is returned whole, and what it leaves unused goes to the larger ones.
+    taken.sort_by_key(|(_, _, _, bytes)| *bytes);
+    for (i, (parent, key, entries, bytes)) in taken.into_iter().enumerate() {
+        let fair = remaining / (count - i);
+        if bytes <= fair {
+            // Fits its share whole: put it back untouched. Cutting by halves of its own size
+            // would lose up to an entry of what fits, because each half rounds down.
+            remaining -= bytes;
+            if let Some(slot) = summary.pointer_mut(&parent).and_then(|h| h.get_mut(&key)) {
+                *slot = Value::Array(entries);
+            }
+            continue;
+        }
+        remaining -= fair;
+        if let Some(note) = cut_array_middle(&mut summary, &parent, &key, entries, fair, file_id) {
+            notes.push(note);
+        }
+    }
+
+    // ---- last resort ----
+    // Whatever is left over budget cannot be cut by the two passes above: a wide value nested
+    // deeper than one level, or a fixed part larger than the budget on its own. Returning it
+    // would hand the caller an oversized summary with nothing saying so, so it is replaced by
+    // the smallest summary that still names what the file is, marked as dropped. Loud by
+    // construction: `summary_omitted` is a key a caller and a test can both read, and the
+    // note says where to read the file instead.
+    if size(&summary) > budget {
+        let mut minimal = serde_json::Map::new();
+        for key in ["type", "format", "line_count", "lines"] {
+            if let Some(v) = summary.get(key) {
+                minimal.insert(key.to_string(), v.clone());
+            }
+        }
+        minimal.insert("summary_omitted".to_string(), Value::Bool(true));
+        notes.push(format!(
+            "summary: {original_bytes} bytes omitted entirely (too wide to cut); read the file in \
+             ranges with read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+        ));
+        return (Value::Object(minimal), notes);
+    }
+    (summary, notes)
+}
+
+/// Cut the MIDDLE entries out of `entries`, the array `key` inside the object at JSON pointer
+/// `parent` ("" is the summary itself; `/schema` for a JSON summary's key list), keeping what
+/// fits `allowance` bytes, half from each end. The caller took the array out and priced it.
+/// Returns the note for the caller's hint, or `None` when `key` is not an array.
+pub(crate) fn cut_array_middle(
+    summary: &mut Value,
+    parent: &str,
+    key: &str,
+    entries: Vec<Value>,
+    allowance: usize,
+    file_id: &str,
+) -> Option<String> {
+    let total = entries.len();
+    let half = allowance / 2;
+    let cost = |e: &Value| e.to_string().len() + 1; // +1 for the comma
+
+    let (mut head, mut used) = (0usize, 0usize);
+    while head < total && used + cost(&entries[head]) <= half {
+        used += cost(&entries[head]);
+        head += 1;
+    }
+    let (mut tail, mut used) = (0usize, 0usize);
+    while head + tail < total && used + cost(&entries[total - 1 - tail]) <= half {
+        used += cost(&entries[total - 1 - tail]);
+        tail += 1;
+    }
+    // The array fit its allowance (or only the brackets and commas it was priced with did not):
+    // put it back whole and say nothing, rather than mark a cut that removed no entry.
+    if head + tail >= total {
+        *summary.pointer_mut(parent)?.get_mut(key)? = Value::Array(entries);
+        return None;
+    }
+
+    let omitted = total - head - tail;
+    // Entries name their line `line` (symbols, sections, headings in a file summary) or `l`
+    // (the compact heading map `read_markdown` returns).
+    let line_of = |e: &Value| e["line"].as_u64().or_else(|| e["l"].as_u64());
+    // The gap is "the line after the last kept head entry up to the line before the first kept
+    // tail entry", which is the omitted entries' lines ONLY when lines strictly ascend through the
+    // WHOLE array: kept AND omitted, since an omitted entry out of order moves the gap too. Flat
+    // TOML keys are listed through `toml::Table`, which is alphabetical, so a file written z..a
+    // produced `from_line: 15, to_line: 4` and a ready-made `read_file(start_line=15,
+    // end_line=4)` that fails with "invalid line range". Without a monotonic array no range is
+    // reported (the markers are null and the note is the generic one, which carries no numbers).
+    let lines: Vec<Option<u64>> = entries.iter().map(line_of).collect();
+    let in_line_order = lines.iter().all(Option::is_some) && lines.windows(2).all(|w| w[0] < w[1]);
+    let from = if in_line_order { lines[head] } else { None };
+    let to = if in_line_order && tail > 0 {
+        lines[total - tail].map(|l| l.saturating_sub(1))
+    } else {
+        None
+    };
+
+    // The markers go BESIDE the array, in whichever object holds it: `schema` for a JSON
+    // summary's key list, the summary itself otherwise.
+    let holder = summary.pointer_mut(parent)?;
+    let grand_total = holder[format!("total_{key}")]
+        .as_u64()
+        .map(|t| t as usize)
+        .unwrap_or(total);
+    let mut kept: Vec<Value> = entries[..head].to_vec();
+    kept.extend_from_slice(&entries[total - tail..]);
+    holder[key] = Value::Array(kept);
+    holder[format!("{key}_truncated").as_str()] = Value::Bool(true);
+    if holder.get(format!("total_{key}")).is_none() {
+        holder[format!("total_{key}").as_str()] = serde_json::json!(total);
+    }
+    holder[format!("{key}_omitted").as_str()] = serde_json::json!({
+        "after": head,
+        "count": omitted,
+        "from_line": from,
+        "to_line": to,
+    });
+
+    let label = if parent.is_empty() {
+        key.to_string()
+    } else {
+        format!("{}.{key}", parent.trim_start_matches('/'))
+    };
+    Some(match (from, to) {
+        (Some(f), Some(t)) => format!(
+            "{label}: {omitted} of {grand_total} entries omitted (lines {f}-{t}); read them with \
+             read_file(path=\"{file_id}\", start_line={f}, end_line={t})."
+        ),
+        _ => format!(
+            "{label}: {omitted} of {grand_total} entries omitted; read the file in ranges with \
+             read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+        ),
+    })
+}
 
 pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
     let summary = summarize_toml(content);

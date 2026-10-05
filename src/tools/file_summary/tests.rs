@@ -261,6 +261,1033 @@ fn markdown_summary_no_truncation_flag_when_under_cap() {
     assert!(s.get("headings_truncated").is_none());
     assert!(s.get("total_headings").is_none());
 }
+// ---- bound_summary: the byte bound on a whole-file summary ----
+//
+// Every guarded site of `bound_summary` / `cut_array_middle` has a case here that ONLY it can
+// refuse (the other bounds admit the input), so a mutation of one site cannot hide behind
+// another.
+
+/// The budget the unit tests below exercise. `bound_summary` takes it as a parameter; these
+/// tests pin the allocation arithmetic at one fixed value.
+// cap-class: NOT_A_CAP — a test fixture value passed to bound_summary; it shapes no result
+const SUMMARY_BYTE_BUDGET: usize = 6_000;
+
+/// `bound_summary` at the test budget, so each test reads as "this input, this outcome".
+fn bound_summary(s: serde_json::Value, file_id: &str) -> (serde_json::Value, Vec<String>) {
+    super::bound_summary(s, file_id, SUMMARY_BYTE_BUDGET)
+}
+
+fn ser_len(v: &serde_json::Value) -> usize {
+    v.to_string().len()
+}
+
+#[test]
+fn bound_summary_leaves_a_summary_at_the_budget_untouched() {
+    // Exactly at the budget is returned as built; one byte over is cut. Pins `<=` against `<`.
+    let overhead = ser_len(&serde_json::json!({"type": "generic", "head": ""}));
+    let at = serde_json::json!({
+        "type": "generic",
+        "head": "x".repeat(SUMMARY_BYTE_BUDGET - overhead),
+    });
+    assert_eq!(
+        ser_len(&at),
+        SUMMARY_BYTE_BUDGET,
+        "fixture must sit on the budget"
+    );
+    let (kept, notes) = bound_summary(at.clone(), "@file_t");
+    assert_eq!(kept, at);
+    assert!(notes.is_empty());
+
+    let over = serde_json::json!({
+        "type": "generic",
+        "head": "x".repeat(SUMMARY_BYTE_BUDGET - overhead + 1),
+    });
+    let (cut, _) = bound_summary(over, "@file_t");
+    assert!(cut["head"].as_str().unwrap().contains("bytes shown"));
+}
+
+#[test]
+fn bound_summary_cuts_a_string_to_the_room_the_fixed_part_leaves() {
+    // The nested part (untouched: it is neither a top-level string nor an array) costs ~5,000 B,
+    // so only ~1,000 B of the 6,000 B budget is left for `head`. The string takes exactly what
+    // is left, keeping its start, and the whole still fits.
+    let s = serde_json::json!({
+        "type": "generic",
+        "meta": {"pad": "p".repeat(5_000)},
+        "head": "h".repeat(10_000),
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    let head = cut["head"].as_str().unwrap();
+    assert!(
+        head.starts_with(&"h".repeat(100)),
+        "the head of the field was lost: {head:.120}"
+    );
+    assert!(head.contains("bytes shown"));
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert!(notes.is_empty(), "no array was cut: {notes:?}");
+    assert!(cut.get("summary_omitted").is_none());
+}
+#[test]
+fn bound_summary_fits_the_budget_whatever_json_escaping_does_to_the_text() {
+    // A raw byte serializes to 2 bytes for `"`, `\` and tab and to 6 for `\x01` and the ESC of
+    // ANSI colour codes. A cut sized in RAW bytes left each of these over the budget (measured:
+    // 11.6 KB for the 2-byte kinds, 33.8 KB for `\x01`) and the response was buffered a second
+    // time. The input is `head`/`tail` of 6,000 raw bytes each: far over the budget.
+    for ch in ['"', '\\', '\t', '\n', '\u{1}', '\u{1b}'] {
+        let s = serde_json::json!({
+            "type": "generic",
+            "line_count": 12,
+            "head": ch.to_string().repeat(6_000),
+            "tail": ch.to_string().repeat(6_000),
+        });
+        let (cut, _) = bound_summary(s, "@file_t");
+        assert!(
+            ser_len(&cut) <= SUMMARY_BYTE_BUDGET,
+            "{ch:?}: serialized {} B is over the {SUMMARY_BYTE_BUDGET} B budget",
+            ser_len(&cut)
+        );
+        assert!(
+            cut["head"].as_str().unwrap().contains("bytes shown"),
+            "{ch:?}: head was not cut"
+        );
+        assert!(
+            cut.get("summary_omitted").is_none(),
+            "{ch:?}: dropped whole"
+        );
+    }
+}
+
+#[test]
+fn bound_summary_gives_a_heavier_escaping_string_less_raw_room_than_a_light_one() {
+    // Same budget, same raw length: the `\x01` string costs 6x per byte, so it must keep fewer
+    // raw bytes than the plain one beside it, or the sum cannot fit. One common raw share for
+    // both would not do that; the common share is the largest that fits, so the heavy string
+    // is cut to it and the plain one, below it, may stay whole.
+    let s = serde_json::json!({
+        "type": "generic",
+        "head": "x".repeat(600),
+        "tail": "\u{1}".repeat(8_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert_eq!(
+        cut["head"].as_str().unwrap(),
+        "x".repeat(600),
+        "the plain string fit and must be left whole"
+    );
+    assert!(cut["tail"].as_str().unwrap().contains("bytes shown"));
+}
+
+#[test]
+fn bound_summary_last_resort_drops_what_it_cannot_cut_and_says_so() {
+    // A wide string NESTED two levels down is neither a top-level string nor an array, so
+    // neither pass can reach it. The result must still fit, and say it was dropped.
+    let s = serde_json::json!({
+        "type": "json",
+        "format": "json",
+        "line_count": 7,
+        "schema": {"deep": {"blob": "z".repeat(20_000)}},
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert_eq!(cut["summary_omitted"], true);
+    assert_eq!(cut["type"], "json", "what the file is must survive");
+    assert_eq!(cut["format"], "json");
+    assert_eq!(cut["line_count"], 7);
+    assert!(cut.get("schema").is_none());
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("summary: ") && notes[0].contains("omitted entirely"),
+        "{}",
+        notes[0]
+    );
+    assert!(
+        notes[0].contains("read_file(path=\"@file_t\""),
+        "{}",
+        notes[0]
+    );
+}
+
+#[test]
+fn bound_summary_last_resort_also_catches_a_budget_the_fixed_part_cannot_meet() {
+    // The summary has no string and no array to cut and is over budget by itself.
+    let s = serde_json::json!({"type": "x", "meta": {"pad": "p".repeat(7_000)}});
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert_eq!(cut["summary_omitted"], true);
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET);
+}
+// ---- fit_envelope: the budget comes from the MEASURED envelope ----
+
+/// A caller's `finish`, as `read_full_file` has one: keys added around the summary, and a hint
+/// that carries the cut notes. `pad` stands for whatever else the envelope holds.
+fn envelope_with(pad: usize) -> impl Fn(serde_json::Value, &[String]) -> serde_json::Value {
+    move |summary, notes| {
+        serde_json::json!({
+            "s": summary,
+            "hint": notes.join(" "),
+            "pad": "p".repeat(pad),
+        })
+    }
+}
+
+#[test]
+fn fit_envelope_returns_an_envelope_that_fits_exactly_as_the_caller_built_it() {
+    // ~9 KB of summary: over the OLD fixed 6,000 B budget, under the limit once wrapped.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(200)});
+    let finish = envelope_with(100);
+    let whole = finish(summary.clone(), &[]);
+    assert!(ser_len(&summary) > 6_000, "{} B", ser_len(&summary));
+    assert!(!crate::tools::exceeds_inline_limit(&whole.to_string()));
+
+    let got = fit_envelope(summary, "@file_t", &finish);
+
+    assert_eq!(got, whole, "an envelope that fits must not change at all");
+}
+
+#[test]
+fn fit_envelope_cuts_only_the_excess_not_down_to_a_fixed_budget() {
+    // The envelope is over the limit by a few hundred bytes. Cutting down to the 9,000 B target
+    // costs about 1.3 KB, ~30 entries: the old fixed 6,000 B budget cost about 3x that.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(200)});
+    let s = ser_len(&summary);
+    let pad = 10_100usize.saturating_sub(s + 60);
+    let finish = envelope_with(pad);
+    let whole = finish(summary.clone(), &[]);
+    assert!(
+        crate::tools::exceeds_inline_limit(&whole.to_string()),
+        "precondition: the envelope must be over the limit, got {} B",
+        ser_len(&whole)
+    );
+
+    let got = fit_envelope(summary, "@file_t", &finish);
+
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B over the {SUMMARY_ENVELOPE_BUDGET} B target",
+        ser_len(&got)
+    );
+    let kept = got["s"]["symbols"].as_array().unwrap().len();
+    assert!(kept < 200, "nothing was cut");
+    assert!(
+        kept >= 200 - 45,
+        "cut far more than the excess: {kept} of 200 kept"
+    );
+}
+
+#[test]
+fn fit_envelope_prices_the_cut_notes_that_land_in_the_hint() {
+    // The notes a cut produces are put in the hint by `finish`, which lengthens the envelope
+    // AFTER the cut was sized. The first pass overshoots by the notes' length; the loop must
+    // shrink the budget by exactly that and cut again from the ORIGINAL.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let got = fit_envelope(summary, "@file_t", envelope_with(400));
+
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B",
+        ser_len(&got)
+    );
+    assert!(
+        got["hint"].as_str().unwrap().contains("entries omitted"),
+        "{}",
+        got["hint"]
+    );
+    assert!(got["s"]["symbols_truncated"] == true);
+}
+
+#[test]
+fn fit_envelope_falls_back_to_the_minimal_summary_when_cutting_cannot_converge() {
+    // A `finish` whose cost does not shrink with the summary (a 20 KB key present whenever a
+    // note is): no budget makes this fit. After the retries the result is the MINIMAL summary
+    // and says so, not the last half-cut attempt.
+    let summary = serde_json::json!({
+        "type": "source", "line_count": 400, "symbols": numbered_entries(400),
+    });
+    let finish = |s: serde_json::Value, notes: &[String]| serde_json::json!({"s": s, "pad": "p".repeat(if notes.is_empty() { 0 } else { 20_000 })});
+    let got = fit_envelope(summary, "@file_t", finish);
+    assert_eq!(got["s"]["summary_omitted"], true, "{:.300}", got["s"]);
+    assert_eq!(got["s"]["line_count"], 400);
+    assert!(got["s"].get("symbols").is_none());
+}
+// ---- the allocation ARITHMETIC, pinned by exact kept counts ----
+//
+// The earlier tests assert "fits" and "starts with / ends with", which a one-entry rounding
+// error satisfies. Each test below uses entries that serialize to ONE byte (`7`, cost 2 with the
+// comma) so the count is a closed-form function of the allowance, and asserts that count exactly.
+
+fn sevens(n: usize) -> Vec<serde_json::Value> {
+    vec![serde_json::json!(7); n]
+}
+
+/// Entries kept (head + tail) and the entries omitted, from `cut_array_middle` on `n` sevens
+/// with `allowance` bytes; `None` when nothing was cut.
+fn kept_and_omitted(n: usize, allowance: usize) -> Option<(usize, usize)> {
+    let mut summary = serde_json::json!({"type": "x", "a": []});
+    cut_array_middle(&mut summary, "", "a", sevens(n), allowance, "@file_t")?;
+    let kept = summary["a"].as_array().unwrap().len();
+    Some((
+        kept,
+        summary["a_omitted"]["count"].as_u64().unwrap() as usize,
+    ))
+}
+
+#[test]
+fn cut_array_middle_rounds_each_half_down_not_up() {
+    // Allowance 39 (odd): half = 19 floor, so each side takes 9 entries (18 B); a half rounded
+    // UP is 20, which takes 10 per side. Odd and even array lengths give the same count.
+    for n in [50, 51] {
+        assert_eq!(kept_and_omitted(n, 39), Some((18, n - 18)), "n={n}");
+    }
+    // The even allowance next to it, as the anchor: 40 -> half 20 -> 10 per side.
+    for n in [50, 51] {
+        assert_eq!(kept_and_omitted(n, 40), Some((20, n - 20)), "n={n}");
+    }
+}
+
+#[test]
+fn cut_array_middle_prices_the_comma_between_entries() {
+    // Each `7` costs 2 B: itself and the comma that joins it. Unpriced it costs 1 and twice as
+    // many fit. Allowance 40 -> half 20 -> 10 per side priced, 20 per side unpriced.
+    for n in [100, 101] {
+        assert_eq!(kept_and_omitted(n, 40), Some((20, n - 20)), "n={n}");
+    }
+}
+
+#[test]
+fn cut_array_middle_cuts_at_exactly_one_more_entry_than_fits_and_not_before() {
+    // Allowance 36 -> half 18 -> 9 per side. 18 entries are ALL kept: nothing to omit, so
+    // nothing is cut and nothing is marked. A 19th makes one entry omitted. This pins the
+    // `head + tail >= total` boundary (`>` would mark a cut with `count: 0`).
+    let mut whole = serde_json::json!({"type": "x", "a": []});
+    assert!(cut_array_middle(&mut whole, "", "a", sevens(18), 36, "@file_t").is_none());
+    assert_eq!(
+        whole["a"].as_array().unwrap().len(),
+        18,
+        "an array that fit was cut"
+    );
+    assert!(whole.get("a_truncated").is_none() && whole.get("a_omitted").is_none());
+
+    assert_eq!(kept_and_omitted(19, 36), Some((18, 1)));
+    assert_eq!(kept_and_omitted(20, 36), Some((18, 2)));
+}
+// ---- a line route is offered only when the entries are in line order ----
+//
+// `summarize_toml` lists flat keys through `toml::Table`, which is ALPHABETICAL, not by line,
+// while `cut_array_middle` read the gap as "the line after the last kept head entry up to the line
+// before the first kept tail entry", which holds only when lines ascend. With keys written
+// z..a the gap came out `from_line: 15, to_line: 4` and the hint's ready-made
+// `read_file(start_line=15, end_line=4)` failed with "invalid line range".
+
+fn keyed_lines(lines: &[u64]) -> Vec<serde_json::Value> {
+    lines
+        .iter()
+        .map(|l| serde_json::json!({"key": format!("{}{l:03}", "k".repeat(30)), "line": l}))
+        .collect()
+}
+
+fn cut_keys(lines: &[u64], allowance: usize) -> (serde_json::Value, String) {
+    let mut summary = serde_json::json!({"type": "toml", "keys": []});
+    let note = cut_array_middle(
+        &mut summary,
+        "",
+        "keys",
+        keyed_lines(lines),
+        allowance,
+        "@file_t",
+    )
+    .expect("the array must be cut");
+    (summary, note)
+}
+
+#[test]
+fn cut_array_middle_gives_no_line_route_when_the_lines_run_backwards() {
+    let lines: Vec<u64> = (1..=60).rev().collect();
+    let (cut, note) = cut_keys(&lines, 600);
+    assert!(
+        cut["keys_omitted"]["from_line"].is_null(),
+        "{}",
+        cut["keys_omitted"]
+    );
+    assert!(
+        cut["keys_omitted"]["to_line"].is_null(),
+        "{}",
+        cut["keys_omitted"]
+    );
+    assert!(note.contains("read the file in ranges with"), "{note}");
+    assert!(
+        note.contains("start_line=N, end_line=M"),
+        "no ready-made call may carry made-up numbers: {note}"
+    );
+    assert!(cut["keys_omitted"]["count"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn cut_array_middle_gives_no_line_route_when_one_omitted_entry_is_out_of_order() {
+    // Ascending everywhere the kept entries are, but one line in the OMITTED middle breaks the
+    // order: the gap's end points would be wrong for the omitted region, so no route is offered.
+    let mut lines: Vec<u64> = (1..=60).collect();
+    lines.swap(28, 31);
+    let (cut, note) = cut_keys(&lines, 600);
+    let after = cut["keys_omitted"]["after"].as_u64().unwrap() as usize;
+    assert!(
+        after < 28,
+        "the swapped entries must be in the omitted region: after={after}"
+    );
+    assert!(
+        cut["keys_omitted"]["from_line"].is_null(),
+        "{}",
+        cut["keys_omitted"]
+    );
+    assert!(note.contains("start_line=N"), "{note}");
+}
+
+#[test]
+fn cut_array_middle_gives_no_line_route_when_an_entry_has_no_line() {
+    let mut entries = keyed_lines(&(1..=60).collect::<Vec<_>>());
+    // At index 0: `None < Some(_)`, so a missing line there does NOT break ascending order by
+    // itself, and only an explicit "every entry has a line" check can notice it.
+    entries[0] = serde_json::json!({"key": "k".repeat(33)});
+    let mut summary = serde_json::json!({"type": "toml", "keys": []});
+    let note = cut_array_middle(&mut summary, "", "keys", entries, 600, "@file_t").unwrap();
+    assert!(summary["keys_omitted"]["from_line"].is_null());
+    assert!(note.contains("start_line=N"), "{note}");
+}
+
+#[test]
+fn cut_array_middle_still_gives_the_exact_route_when_the_lines_ascend() {
+    // The control: lines ascend, so the route is the exact gap, and a line of 0 (a key the
+    // summarizer could not find) or a repeat would not be "ascending".
+    let lines: Vec<u64> = (1..=60).collect();
+    let (cut, note) = cut_keys(&lines, 600);
+    let after = cut["keys_omitted"]["after"].as_u64().unwrap();
+    let count = cut["keys_omitted"]["count"].as_u64().unwrap();
+    assert_eq!(cut["keys_omitted"]["from_line"], after + 1);
+    assert_eq!(cut["keys_omitted"]["to_line"], after + count);
+    assert!(
+        note.contains(&format!(
+            "start_line={}, end_line={}",
+            after + 1,
+            after + count
+        )),
+        "{note}"
+    );
+    // Equal neighbours are not strictly ascending: the gap would be ambiguous.
+    let (dup, _) = cut_keys(
+        &[1, 2, 3, 3]
+            .repeat(15)
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(i, l)| l + (i as u64 / 4) * 3)
+            .collect::<Vec<_>>(),
+        600,
+    );
+    assert!(
+        dup["keys_omitted"]["from_line"].is_null(),
+        "{}",
+        dup["keys_omitted"]
+    );
+}
+
+#[test]
+fn the_other_key_sources_list_their_entries_in_line_order() {
+    // The assumption `cut_array_middle` makes, checked at every source of `line`d entries rather
+    // than only the one that broke: YAML top-level keys and TOML table headers are found by
+    // scanning the file top to bottom, whatever order the names sort in.
+    let yaml: String = (0..40).rev().map(|i| format!("key{i:02}: 1\n")).collect();
+    let sections = summarize_yaml(&yaml);
+    let lines: Vec<u64> = sections["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].as_u64().unwrap())
+        .collect();
+    assert!(
+        lines.windows(2).all(|w| w[0] < w[1]),
+        "yaml sections: {lines:?}"
+    );
+
+    let toml: String = (0..40)
+        .rev()
+        .map(|i| format!("[t{i:02}]\nv = 1\n"))
+        .collect();
+    let sections = summarize_toml(&toml);
+    let lines: Vec<u64> = sections["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].as_u64().unwrap())
+        .collect();
+    assert!(
+        lines.windows(2).all(|w| w[0] < w[1]),
+        "toml tables: {lines:?}"
+    );
+
+    // The one that is NOT: flat TOML keys come from `toml::Table`, alphabetical. Pinned here so
+    // the guard in `cut_array_middle` is known to be load-bearing, not hypothetical.
+    let flat: String = (0..30).rev().map(|i| format!("key{i:02} = 1\n")).collect();
+    let keys = summarize_toml(&flat);
+    let lines: Vec<u64> = keys["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].as_u64().unwrap())
+        .collect();
+    assert!(
+        lines.windows(2).all(|w| w[0] > w[1]),
+        "flat toml keys: {lines:?}"
+    );
+}
+
+#[test]
+fn bound_summary_gives_the_first_of_two_arrays_the_rounded_down_share() {
+    // Two equal arrays, smallest-first so `a` is allocated with `count - i == 2`. The remaining
+    // room R is odd, so the share is floor(R/2) or, with a rounded-up division, one more. R =
+    // 8k - 1 (here k = 8, R = 63) puts that one byte across a boundary: share 31 keeps 7+7,
+    // share 32 keeps 8+8. `b` then takes the remainder (32) whichever way `a` was rounded, so
+    // only `a` tells the two apart.
+    let base = ser_len(&serde_json::json!({"type": "x", "a": [], "b": []}));
+    let budget = base + 600 + 63; // 300 B reserved per array for its markers
+    let s = serde_json::json!({"type": "x", "a": sevens(400), "b": sevens(400)});
+    let (cut, _) = super::bound_summary(s, "@file_t", budget);
+
+    assert!(cut.get("summary_omitted").is_none(), "{cut:.200}");
+    assert_eq!(
+        cut["a"].as_array().unwrap().len(),
+        14,
+        "a: floor(63/2) = 31 -> 7 per side"
+    );
+    assert_eq!(
+        cut["b"].as_array().unwrap().len(),
+        16,
+        "b: the remaining 32 -> 8 per side"
+    );
+}
+
+#[test]
+fn bound_summary_string_threshold_is_exactly_500() {
+    // A 500-byte string is part of the fixed cost, never cut; the next one is wide. Tight budget
+    // so a string counted as wide WOULD be cut: with `>= 500` the 500-byte `a` joins `b` and the
+    // common share (about 370) cuts it too.
+    let s = serde_json::json!({"type": "x", "a": "a".repeat(500), "b": "b".repeat(20_000)});
+    let (cut, _) = super::bound_summary(s, "@file_t", 1_000);
+    assert_eq!(
+        cut["a"].as_str().unwrap(),
+        "a".repeat(500),
+        "a 500 B string was cut"
+    );
+    assert!(cut["b"].as_str().unwrap().contains("bytes shown"));
+    assert!(ser_len(&cut) <= 1_000, "{} B", ser_len(&cut));
+
+    // 501 bytes IS wide: with `> 501` it would be treated as fixed, nothing could be cut, and
+    // the last resort would drop the whole summary.
+    let s = serde_json::json!({"type": "x", "a": "a".repeat(501)});
+    let (cut, _) = super::bound_summary(s, "@file_t", 400);
+    assert!(
+        cut["a"].as_str().unwrap().contains("bytes shown"),
+        "a 501 B string was not cut: {cut:.200}"
+    );
+    assert!(cut.get("summary_omitted").is_none());
+    assert!(ser_len(&cut) <= 400, "{} B", ser_len(&cut));
+}
+#[test]
+fn bound_summary_finds_a_share_over_half_the_string_when_the_budget_allows_it() {
+    // M1 (`hi = longest / 2`). One 1,000 B string and a 900 B budget: the largest share that
+    // fits is ~770 B, over HALF the string (500). A search capped at half stops at ~499 and
+    // leaves ~280 B of the budget unused. The result must sit within 4 B of the budget: a
+    // serialized size moves in steps of 2 (head and tail each take share/2), plus the digits of
+    // the marker's count.
+    let s = serde_json::json!({"type": "x", "head": "h".repeat(1_000)});
+    let (cut, _) = super::bound_summary(s, "@file_t", 900);
+    let size = ser_len(&cut);
+    assert!(size <= 900, "{size} B over the budget");
+    assert!(
+        size >= 896,
+        "{size} B: the search stopped short of the best share"
+    );
+    assert!(cut["head"].as_str().unwrap().contains("bytes shown"));
+}
+
+// ---- the six survivors of the final mutation run: tests where ONLY the arithmetic decides ----
+
+#[test]
+fn bound_summary_takes_the_smallest_cut_when_no_share_fits_and_lets_the_arrays_finish() {
+    // B4. The fixed part leaves no room for `head` at ANY share: even with `head` cut to its
+    // marker alone, the whole array still does not fit. The smallest cut (share 0, marker only)
+    // is then taken and the ARRAY pass finishes the job. Taking no cut instead leaves 5,000 B of
+    // `head` that nothing can reduce, and the last resort drops the whole summary.
+    let budget = 900;
+    let marker = "\n--- head: 0 of 5000 bytes shown; the rest: read_file(path=\"@file_t\", \
+                  start_line=N, end_line=M) ---\n";
+    let s = serde_json::json!({"type": "x", "head": "h".repeat(5_000), "symbols": sevens(400)});
+    // Premise: with head at its smallest the summary is STILL over budget.
+    let floor = serde_json::json!({"type": "x", "head": marker, "symbols": sevens(400)});
+    assert!(ser_len(&floor) > budget, "{} B", ser_len(&floor));
+    // The array's allowance: what is left after the fixed part and 300 B of markers; cost 2 each.
+    let base = ser_len(&serde_json::json!({"type": "x", "head": marker, "symbols": []}));
+    let remaining = budget - base - 300;
+    let expected_kept = 2 * ((remaining / 2) / 2);
+
+    let (cut, notes) = super::bound_summary(s, "@file_t", budget);
+
+    assert!(
+        cut.get("summary_omitted").is_none(),
+        "dropped whole: {cut:.200}"
+    );
+    assert_eq!(cut["head"], marker, "head must be exactly its marker");
+    assert_eq!(cut["symbols"].as_array().unwrap().len(), expected_kept);
+    assert_eq!(
+        expected_kept, 230,
+        "fixture drifted: {remaining} B left for the array"
+    );
+    assert!(ser_len(&cut) <= budget, "{} B", ser_len(&cut));
+    assert_eq!(notes.len(), 1, "{notes:?}");
+}
+
+#[test]
+fn fit_envelope_accepts_an_envelope_that_lands_exactly_on_the_target_in_one_pass() {
+    // E5 and E3. The hint carries the cut note plus `hp` bytes of padding that exist ONLY when a
+    // note does, so the overhead probe (no note) and therefore the cut are the same for every
+    // `hp`: the first pass's envelope is a fixed ~8.8 KB plus `hp`, rising one byte per step.
+    // Sweeping `hp` from 0 therefore passes through EXACTLY the 9,000 B target, and that
+    // envelope must be accepted as it is: three `finish` calls (the whole, the overhead probe,
+    // ONE pass). `size < target` would reject it and cut again; an overhead not subtracted would
+    // overshoot on pass 1 and need a second pass. Neither can produce an envelope of exactly
+    // the target, so the search below fails for both.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    for hp in 0..400 {
+        let calls = std::cell::Cell::new(0);
+        let finish = |s: serde_json::Value, notes: &[String]| {
+            calls.set(calls.get() + 1);
+            let hint = if notes.is_empty() {
+                String::new()
+            } else {
+                format!("{} {}", notes.join(" "), "x".repeat(hp))
+            };
+            serde_json::json!({"s": s, "hint": hint})
+        };
+        let got = fit_envelope(summary.clone(), "@file_t", finish);
+        if ser_len(&got) == SUMMARY_ENVELOPE_BUDGET {
+            assert_eq!(
+                calls.get(),
+                3,
+                "hp {hp}: an envelope on the target must be accepted"
+            );
+            return;
+        }
+    }
+    panic!("no hint padding of 0..400 lands the envelope exactly on {SUMMARY_ENVELOPE_BUDGET} B");
+}
+#[test]
+fn fit_envelope_subtracts_what_the_envelope_costs_around_the_summary() {
+    // E3. 2,000 B of the envelope are NOT summary. Cutting the summary to the whole 9,000 B
+    // target (the overhead not subtracted) leaves the envelope ~2,000 B over, so a second pass
+    // is forced; cutting to 9,000 minus the measured overhead fits on the FIRST: three finish
+    // calls (whole, overhead probe, one pass), the envelope within the target.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let calls = std::cell::Cell::new(0);
+    let finish = |s: serde_json::Value, notes: &[String]| {
+        calls.set(calls.get() + 1);
+        serde_json::json!({"s": s, "hint": notes.join(" "), "pad": "p".repeat(2_000)})
+    };
+
+    let got = fit_envelope(summary, "@file_t", finish);
+
+    assert_eq!(
+        calls.get(),
+        3,
+        "the overhead must be priced in before the first cut"
+    );
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B",
+        ser_len(&got)
+    );
+    assert!(got["s"].get("summary_omitted").is_none());
+}
+#[test]
+fn fit_envelope_cannot_shrink_what_finish_itself_adds() {
+    // The documented limit of the function: if `finish`'s OWN output is over the limit around an
+    // empty summary, no cut of the summary can fit it. The result is then the minimal summary,
+    // marked, inside an envelope that is still oversized. Pinned so that any change here is a
+    // decision; callers that echo user-sized text (the oversized-section error) clip it first.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let finish = |s: serde_json::Value, _notes: &[String]| serde_json::json!({"s": s, "echo": "e".repeat(11_000)});
+    let got = fit_envelope(summary, "@file_t", finish);
+    assert_eq!(got["s"]["summary_omitted"], true, "{:.200}", got["s"]);
+    assert!(ser_len(&got) > 11_000, "{} B", ser_len(&got));
+}
+
+#[test]
+fn fit_envelope_converges_in_exactly_two_passes_when_the_notes_overshoot_the_slack() {
+    // E4 and E7. The hint carries the cut note six times, ~700 B against the ~200 B of slack the
+    // 300 B marker reservation leaves, so the FIRST pass overshoots. The second must shrink the
+    // budget by exactly that excess and fit: four `finish` calls (whole, overhead, pass 1,
+    // pass 2). No shrink repeats pass 1's overshoot until the retries run out; a single pass
+    // never gets a second chance. Both end in the minimal summary instead of these symbols.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let calls = std::cell::Cell::new(0);
+    let finish = |s: serde_json::Value, notes: &[String]| {
+        calls.set(calls.get() + 1);
+        serde_json::json!({"s": s, "hint": notes.join(" ").repeat(6)})
+    };
+
+    let got = fit_envelope(summary, "@file_t", finish);
+
+    assert_eq!(
+        calls.get(),
+        4,
+        "whole, overhead, pass 1 (overshoots), pass 2 (fits)"
+    );
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B",
+        ser_len(&got)
+    );
+    assert!(
+        got["s"].get("summary_omitted").is_none(),
+        "fell back to the minimal summary"
+    );
+    assert_eq!(got["s"]["symbols"].as_array().unwrap().len(), 174);
+}
+
+#[test]
+fn fit_envelope_falls_back_to_the_minimal_summary_while_the_budget_is_still_positive() {
+    // E6, and the retry count. Whenever a note exists the envelope is a constant 10,500 B, so no
+    // budget fits and each pass shrinks the budget by 1,516. From ~8,990 B that leaves ~2,930 B
+    // after four passes: STILL POSITIVE, so the fallback must be the budget-0 minimal summary,
+    // not another cut at the leftover budget (which keeps symbols and claims to have fit). Seven
+    // `finish` calls: whole, overhead, four passes, the minimal; a fifth pass would make eight.
+    let summary =
+        serde_json::json!({"type": "source", "line_count": 400, "symbols": numbered_entries(400)});
+    let calls = std::cell::Cell::new(0);
+    let finish = |s: serde_json::Value, notes: &[String]| {
+        calls.set(calls.get() + 1);
+        if notes.is_empty() {
+            return serde_json::json!({"s": s});
+        }
+        let bare = ser_len(&serde_json::json!({"s": s, "pad": ""}));
+        serde_json::json!({"s": s, "pad": "p".repeat(10_500 - bare)})
+    };
+
+    let got = fit_envelope(summary, "@file_t", finish);
+
+    assert_eq!(got["s"]["summary_omitted"], true, "{:.300}", got["s"]);
+    assert!(got["s"].get("symbols").is_none());
+    assert_eq!(got["s"]["line_count"], 400);
+    assert_eq!(calls.get(), 7, "whole, overhead, four passes, the minimal");
+}
+
+#[test]
+fn bound_summary_shares_the_budget_equally_between_wide_strings() {
+    // `head` and `tail` are both informative: neither may be crushed to make room for the
+    // other, and together they must fit.
+    let s = serde_json::json!({
+        "type": "generic",
+        "head": "h".repeat(10_000),
+        "tail": "t".repeat(10_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    let (h, t) = (
+        cut["head"].as_str().unwrap().len(),
+        cut["tail"].as_str().unwrap().len(),
+    );
+    assert!(
+        h > 2_000 && t > 2_000,
+        "an unequal split: head {h} B, tail {t} B"
+    );
+    assert!(
+        h.abs_diff(t) < 100,
+        "an unequal split: head {h} B, tail {t} B"
+    );
+}
+
+#[test]
+fn bound_summary_cuts_several_mid_sized_strings_that_only_overflow_together() {
+    // Four strings of 2,000 B: each is modest, the sum (8 KB) is over the budget.
+    let s = serde_json::json!({
+        "type": "x", "a": "a".repeat(2_000), "b": "b".repeat(2_000),
+        "c": "c".repeat(2_000), "d": "d".repeat(2_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+}
+
+fn numbered_entries(n: usize) -> Vec<serde_json::Value> {
+    (1..=n)
+        .map(|i| serde_json::json!({"name": format!("sym{i:03}"), "kind": "Function", "line": i}))
+        .collect()
+}
+
+#[test]
+fn bound_summary_cuts_the_largest_array_and_spares_the_small_one() {
+    let s = serde_json::json!({
+        "type": "source",
+        "symbols": numbered_entries(300),
+        "keys": numbered_entries(3),
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+
+    assert_eq!(
+        cut["keys"].as_array().unwrap().len(),
+        3,
+        "the small array was cut"
+    );
+    assert!(cut.get("keys_truncated").is_none());
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+
+    let kept = cut["symbols"].as_array().unwrap();
+    let after = cut["symbols_omitted"]["after"].as_u64().unwrap() as usize;
+    let count = cut["symbols_omitted"]["count"].as_u64().unwrap() as usize;
+    assert_eq!(kept[0]["name"], "sym001", "the first entry must survive");
+    assert_eq!(
+        kept.last().unwrap()["name"],
+        "sym300",
+        "the last entry must survive"
+    );
+    assert_eq!(
+        kept.len() + count,
+        300,
+        "kept + omitted must account for every entry"
+    );
+    assert!(
+        after > 0 && after < kept.len(),
+        "both halves must be non-empty"
+    );
+    // The gap is lines [after+1, tail_first-1], each symbol being on its own line number.
+    assert_eq!(cut["symbols_omitted"]["from_line"], (after + 1) as u64);
+    let tail_first = kept[after]["line"].as_u64().unwrap();
+    assert_eq!(cut["symbols_omitted"]["to_line"], tail_first - 1);
+    assert_eq!(cut["symbols_truncated"], true);
+    assert_eq!(cut["total_symbols"], 300);
+}
+#[test]
+fn bound_summary_cuts_an_array_one_level_down_and_marks_it_beside_the_array() {
+    // `summarize_json` keeps its key list under `schema`. The markers must land NEXT TO the
+    // array (in `schema`), where the renderer and any consumer already look for `total_keys`
+    // and `keys_truncated`, and the note must say where the array lives.
+    let keys: Vec<serde_json::Value> = (1..=40)
+        .map(|i| serde_json::json!({"path": format!("$.{}{i:02}", "k".repeat(500)), "type": "number"}))
+        .collect();
+    let s = serde_json::json!({
+        "type": "json",
+        "line_count": 40,
+        "schema": {"root_type": "object", "keys": keys},
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    let schema = &cut["schema"];
+    assert_eq!(
+        schema["keys_truncated"], true,
+        "the marker must sit beside the array: {cut}"
+    );
+    assert_eq!(schema["total_keys"], 40);
+    let after = schema["keys_omitted"]["after"].as_u64().unwrap() as usize;
+    let count = schema["keys_omitted"]["count"].as_u64().unwrap() as usize;
+    assert_eq!(schema["keys"].as_array().unwrap().len() + count, 40);
+    assert!(after > 0, "the first entries must survive");
+    assert!(
+        schema["keys"].as_array().unwrap().last().unwrap()["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("40"),
+        "the last entry must survive"
+    );
+    assert!(
+        cut.get("keys_truncated").is_none(),
+        "no stray marker at the top level"
+    );
+    assert!(notes[0].starts_with("schema.keys: "), "{}", notes[0]);
+}
+#[test]
+fn bound_summary_shares_the_budget_between_two_competing_arrays() {
+    // Two arrays in one summary, one of them nested. A SYNTHETIC shape: no summarizer produces
+    // two today (a default markdown read marks every heading seen, so `coverage.unread` never
+    // rides beside the map). It pins the allocation for the day one does: cutting the larger
+    // while the other stood whole once left it no room, and EVERY entry was dropped.
+    let headings: Vec<serde_json::Value> = (1..=200)
+        .map(|i| serde_json::json!({"h": format!("## S{i:03} {}", "w".repeat(60)), "l": 3 * i}))
+        .collect();
+    let unread: Vec<serde_json::Value> = (1..=200)
+        .map(|i| serde_json::json!(format!("## S{i:03} {}", "w".repeat(60))))
+        .collect();
+    let s = serde_json::json!({
+        "lines": 600,
+        "headings": headings,
+        "coverage": {"read": 1, "total": 200, "unread": unread},
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    let h = cut["headings"].as_array().unwrap();
+    assert!(h.len() > 10, "the heading map was wiped: {} left", h.len());
+    assert!(h[0]["h"].as_str().unwrap().contains("S001"));
+    assert!(h.last().unwrap()["h"].as_str().unwrap().contains("S200"));
+    let u = cut["coverage"]["unread"].as_array().unwrap();
+    assert!(u.len() > 10, "the unread list was wiped: {} left", u.len());
+    assert!(u[0].as_str().unwrap().contains("S001"));
+    assert!(u.last().unwrap().as_str().unwrap().contains("S200"));
+    assert_eq!(cut["coverage"]["unread_truncated"], true);
+    assert_eq!(notes.len(), 2, "{notes:?}");
+}
+
+#[test]
+fn bound_summary_spares_an_array_that_fits_its_share_and_gives_its_leftover_away() {
+    // `keys` is ~600 B and fits any fair share; `symbols` is huge. The small one must be
+    // returned whole AND what it leaves unused must go to the large one: a plain equal split
+    // would give `symbols` only half the room.
+    let s = serde_json::json!({
+        "type": "source",
+        "keys": numbered_entries(12),
+        "symbols": numbered_entries(400),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+
+    assert_eq!(
+        cut["keys"].as_array().unwrap().len(),
+        12,
+        "a small array was cut"
+    );
+    assert!(cut.get("keys_truncated").is_none());
+    let kept = cut["symbols"].as_array().unwrap().len();
+    assert!(
+        kept >= 85,
+        "the leftover was not handed on: only {kept} symbols kept (an equal split keeps ~55)"
+    );
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+}
+#[test]
+fn bound_summary_leaves_arrays_alone_when_cutting_strings_was_enough() {
+    // The string pass leaves the summary under budget, so the small array is NOT touched: if
+    // the arrays phase ran anyway it would find no room left (the string took its share) and
+    // cut a 3-entry array to nothing.
+    let s = serde_json::json!({
+        "type": "x",
+        "head": "h".repeat(10_000),
+        "keys": numbered_entries(3),
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert!(cut["head"].as_str().unwrap().contains("bytes shown"));
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert_eq!(
+        cut["keys"].as_array().unwrap().len(),
+        3,
+        "an array that fit was cut"
+    );
+    assert!(cut.get("keys_truncated").is_none());
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+/// A summary of two arrays in which `a` (`n` equal-length strings) serializes to EXACTLY
+/// `fair + delta` bytes, `fair` being the share `bound_summary` offers it (it is the smaller,
+/// so it is allocated first, with `count == 2`). The arithmetic depends on the length of
+/// `type`, so that is searched until `a`'s byte count can be hit exactly.
+fn two_arrays_with_a_sized_against_its_share(n: usize, delta: i64) -> serde_json::Value {
+    for pad in 0..32 {
+        let ty = "x".repeat(1 + pad);
+        let probe = serde_json::json!({"type": ty, "a": [], "b": []});
+        let remaining = SUMMARY_BYTE_BUDGET - ser_len(&probe) - 600;
+        let want = (remaining / 2) as i64 + delta;
+        // n strings of length L serialize to n * (L + 3) + 1 bytes.
+        if want >= 1 && (want - 1) % n as i64 == 0 {
+            let len = (want - 1) / n as i64 - 3;
+            if len >= 1 {
+                let a: Vec<serde_json::Value> = (0..n)
+                    .map(|_| serde_json::json!("a".repeat(len as usize)))
+                    .collect();
+                let s = serde_json::json!({"type": ty, "a": a, "b": numbered_entries(400)});
+                let got = ser_len(&serde_json::json!(s["a"]));
+                assert_eq!(got as i64, want, "the fixture arithmetic is off");
+                return s;
+            }
+        }
+    }
+    panic!("no `type` length lands the fixture on fair + {delta} with {n} entries");
+}
+
+#[test]
+fn bound_summary_returns_an_array_whole_when_it_is_exactly_its_share() {
+    // bytes == fair: it fits. With three entries a cut by halves of its own size would still
+    // drop one (each half rounds down to one entry), so only the `<=` keeps it whole.
+    let s = two_arrays_with_a_sized_against_its_share(3, 0);
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert_eq!(
+        cut["a"].as_array().unwrap().len(),
+        3,
+        "an array that fit was cut"
+    );
+    assert!(cut.get("a_truncated").is_none());
+    assert!(
+        cut["b_truncated"] == true,
+        "the large one must still be cut"
+    );
+}
+
+#[test]
+fn bound_summary_marks_no_cut_when_the_halves_still_hold_every_entry() {
+    // One byte over its share, but the entries (2 of them) each fit a half: nothing is
+    // removed, so nothing may be marked. A marker with `count: 0` claims a cut that did not
+    // happen.
+    let s = two_arrays_with_a_sized_against_its_share(2, 1);
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert_eq!(cut["a"].as_array().unwrap().len(), 2);
+    assert!(cut.get("a_truncated").is_none(), "{}", cut["a_omitted"]);
+    assert!(cut.get("a_omitted").is_none());
+    assert_eq!(notes.len(), 1, "only `b` was cut: {notes:?}");
+}
+
+#[test]
+fn bound_summary_note_is_a_ready_to_run_call_naming_the_handle_and_the_gap() {
+    let s = serde_json::json!({"type": "source", "symbols": numbered_entries(300)});
+    let (cut, notes) = bound_summary(s, "@file_t");
+    let from = cut["symbols_omitted"]["from_line"].as_u64().unwrap();
+    let to = cut["symbols_omitted"]["to_line"].as_u64().unwrap();
+    assert_eq!(
+        notes[0],
+        format!(
+            "symbols: {} of 300 entries omitted (lines {from}-{to}); read them with \
+             read_file(path=\"@file_t\", start_line={from}, end_line={to}).",
+            cut["symbols_omitted"]["count"]
+        )
+    );
+}
+
+#[test]
+fn bound_summary_keeps_the_totals_the_summarizer_already_named() {
+    // `summarize_toml` truncates to 30 itself and records the FILE's total. This cut works on
+    // what was left, so "N of M" must use the file's M, and the key must not be overwritten.
+    let s = serde_json::json!({
+        "type": "toml",
+        "sections": numbered_entries(200),
+        "total_sections": 900,
+        "sections_truncated": true,
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert_eq!(
+        cut["total_sections"], 900,
+        "the summarizer's own total was overwritten"
+    );
+    assert!(notes[0].contains("of 900 entries omitted"), "{}", notes[0]);
+}
+
+#[test]
+fn bound_summary_note_for_entries_with_no_line_numbers_still_says_how_to_read_more() {
+    let entries: Vec<serde_json::Value> = (0..300)
+        .map(|i| serde_json::json!({"key": format!("key{i:03}-{}", "k".repeat(40))}))
+        .collect();
+    let s = serde_json::json!({"type": "x", "keys": entries});
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert!(cut["keys_omitted"]["from_line"].is_null());
+    assert!(
+        notes[0].contains("read the file in ranges with"),
+        "{}",
+        notes[0]
+    );
+    assert!(notes[0].contains("@file_t"));
+}
 
 /// docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
 ///
