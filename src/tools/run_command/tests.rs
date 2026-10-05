@@ -7552,3 +7552,209 @@ fn a_completed_buffered_result_still_reports_its_exit_status() {
         "a completed result must still report its real status: {rendered}"
     );
 }
+
+// ---- the SUMMARY arm is budgeted in the unit the limit counts: serialized (escaped) bytes ----
+//
+// The recurring defect: a size MEASURED in one unit (raw bytes) and a DIFFERENT thing returned (the
+// compact serialized whole response). `\x01` and `\x1b` are 1 raw byte and 6 serialized, so a 2,000 B
+// raw cut of one is 12,000 B on the wire; two such fields cannot share a 10,003 B response, and
+// `call_content` then buffered the summary a SECOND time under `@tool_*`.
+// Reviewer's measurement on the merged tree: `perl -e 'print "\x01" x N; print STDERR "\x01" x N'`
+// returned an `@tool_` envelope for N = 1,000..10,000 (37 of 40 points).
+
+/// `perl` printing `n` x `ch` (a perl escape such as `\x01`) on stdout and/or stderr, then `suffix`.
+fn perl_repeat(ch: &str, n: usize, out: bool, err: bool, suffix: &str) -> String {
+    let mut body = String::new();
+    if out {
+        body += &format!("print \"{ch}\" x {n}; ");
+    }
+    if err {
+        body += &format!("print STDERR \"{ch}\" x {n}; ");
+    }
+    format!("perl -e '{body}'{suffix}")
+}
+
+/// The one-handle contract of every `run_command` response: no `@tool_*` handle anywhere, any
+/// `output_id` is the command's own `@cmd_*`, and the compact response is within the inline limit.
+fn assert_one_inline_handle(text: &str, parsed: &Value, what: &str) {
+    assert!(
+        !has_tool_handle(text),
+        "{what}: a second handle: {text:.160}"
+    );
+    assert!(
+        parsed.get("buffered_bytes").is_none(),
+        "{what}: the `@tool_*` re-buffering envelope: {text:.160}"
+    );
+    if let Some(id) = parsed.get("output_id").and_then(Value::as_str) {
+        assert!(id.starts_with("@cmd_"), "{what}: output_id {id}");
+    }
+    assert!(
+        text.len() <= 10_003,
+        "{what}: {} B compact is over the inline limit",
+        text.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn control_character_streams_keep_one_handle_in_the_generic_summary() {
+    let (_dir, ctx) = project_ctx().await;
+    for ch in ["\\x01", "\\x1b"] {
+        for n in [1_000, 1_001, 1_500, 2_000, 2_001, 3_000, 5_000, 10_000] {
+            for (out, err) in [(true, false), (false, true), (true, true)] {
+                let what = format!("{ch} x {n} out={out} err={err}");
+                let (text, parsed) =
+                    buffer_query_free(&ctx, &perl_repeat(ch, n, out, err, "")).await;
+                assert_one_inline_handle(&text, &parsed, &what);
+                for (present, key) in [(out, "stdout"), (err, "stderr")] {
+                    if !present {
+                        continue;
+                    }
+                    let field = parsed[key]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("{what}: no inline {key}: {text:.160}"));
+                    assert!(
+                        field.starts_with(|c: char| c.is_control()),
+                        "{what}: the head of {key} is missing"
+                    );
+                    if field.contains("bytes shown") {
+                        assert!(
+                            field.contains(&format!("of {n} bytes shown")),
+                            "{what}: the marker misreports the stream total"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn control_character_failure_fields_keep_one_handle_in_the_test_and_build_summaries() {
+    let (_dir, ctx) = project_ctx().await;
+    for (kind, suffix, head) in [
+        ("test", "; echo cargo test", "failures:"),
+        ("build", "; echo cargo build", "error[E0308]: x"),
+    ] {
+        // 2,000 x \x01 is 12,000 B serialized, so every case is over the inline limit and takes
+        // the summary arm: the `type` key below is that arm's, which an inline response lacks.
+        for n in [2_000, 3_000, 5_000, 10_000, 60_000] {
+            for m in [0usize, 1_500, 50_000] {
+                let what = format!("{kind} n={n} stderr={m}");
+                let body = if kind == "test" {
+                    format!("print \"{head}\\n\", \"\\x01\" x {n}, \"\\nfailures:\\n\"; ")
+                } else {
+                    format!("print \"{head}\\n\", \"\\x01\" x {n}, \"\\n\"; ")
+                };
+                let err = if m > 0 {
+                    format!("print STDERR \"\\x01\" x {m}; ")
+                } else {
+                    String::new()
+                };
+                let command = format!("perl -e '{body}{err}'{suffix}");
+                let (text, parsed) = buffer_query_free(&ctx, &command).await;
+                assert_one_inline_handle(&text, &parsed, &what);
+                assert_eq!(parsed["type"], kind, "{what}: misclassified: {text:.160}");
+                let key = if kind == "test" {
+                    "failures"
+                } else {
+                    "first_error"
+                };
+                assert!(
+                    parsed[key].as_str().is_some_and(|f| f.starts_with(head)),
+                    "{what}: the head of {key} is missing: {text:.160}"
+                );
+                if m > 0 {
+                    assert!(
+                        parsed["stderr"].as_str().is_some_and(|s| !s.is_empty()),
+                        "{what}: the stderr is missing: {text:.160}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_summary_marker_reports_the_stream_total_once() {
+    // 50,000 x \x01 on stdout. `summarize_generic` cut it, then the `call_content` backstop cut the
+    // CUT text again and dropped the first marker: "1000 of 2065 bytes shown" for a 50,000 B stream.
+    let (_dir, ctx) = project_ctx().await;
+    let (text, parsed) =
+        buffer_query_free(&ctx, &perl_repeat("\\x01", 50_000, true, false, "")).await;
+    assert_one_inline_handle(&text, &parsed, "50,000 x \\x01");
+    let stdout = parsed["stdout"].as_str().expect("an inline stdout");
+    assert_eq!(
+        stdout.matches("bytes shown").count(),
+        1,
+        "the field was cut twice: {:?}",
+        stdout
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+    );
+    assert!(
+        stdout.contains("of 50000 bytes shown"),
+        "the marker must name the STREAM total: {:?}",
+        stdout
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_summary_budgets_around_the_late_keys_it_carries() {
+    // The summary arm attaches the same late keys every arm does (here a 7,000 B
+    // `unfiltered_output_skipped`). Two 1,500 B control-character streams are ~4 KB at the natural
+    // ceilings, which fits alone; beside the key it does not, so the shares must be measured beside
+    // that key, or the response lands over the limit and `call_content` buffers it a second time.
+    use super::output::{handle_successful_output_with, LateKeys};
+    let (_dir, ctx) = project_ctx().await;
+    let stream = "\u{1}".repeat(1_500);
+    let response = handle_successful_output_with(
+        "perl -e 'print 1'",
+        stream.clone(),
+        stream.clone(),
+        0,
+        false,
+        None,
+        std::path::Path::new("."),
+        &ctx,
+        LateKeys {
+            redacted: 0,
+            tee_skipped: Some("n".repeat(7_000)),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        response["output_id"]
+            .as_str()
+            .is_some_and(|i| i.starts_with("@cmd_")),
+        "the summary arm: {response:.200}"
+    );
+    assert_eq!(
+        response["unfiltered_output_skipped"]
+            .as_str()
+            .unwrap()
+            .len(),
+        7_000,
+        "the late key is carried whole"
+    );
+    let len = response.to_string().len();
+    assert!(len <= 10_003, "{len} B compact is over the inline limit");
+    for key in ["stdout", "stderr"] {
+        assert!(
+            response[key]
+                .as_str()
+                .unwrap()
+                .contains("of 1500 bytes shown"),
+            "{key}"
+        );
+    }
+}

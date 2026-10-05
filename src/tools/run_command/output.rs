@@ -746,8 +746,8 @@ pub(crate) async fn handle_successful_output_with(
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
         count_lines, detect_command_type, inline_response_exceeds_limit, strip_ansi_codes,
-        summarize_build_output, summarize_generic, summarize_test_output, truncate_lines_and_bytes,
-        CommandType, BUFFER_QUERY_INLINE_CAP,
+        summarize_build_output_within, summarize_generic_within, summarize_test_output_within,
+        truncate_lines_and_bytes, CommandType, BUFFER_QUERY_INLINE_CAP,
     };
 
     // Buffer-only queries strip ANSI codes — they are opaque to LLMs and bloat byte counts.
@@ -1060,14 +1060,29 @@ pub(crate) async fn handle_successful_output_with(
             );
 
             let cmd_type = detect_command_type(original_command);
-            let cmd_summary = match cmd_type {
-                CommandType::Test => summarize_test_output(&raw_stdout, &raw_stderr, exit_code),
-                CommandType::Build => summarize_build_output(&raw_stdout, &raw_stderr, exit_code),
-                CommandType::Generic => summarize_generic(&raw_stdout, &raw_stderr, exit_code),
-            };
-
-            // Rebuild with correct field order so output_id appears before content fields.
-            rebuild_buffered_summary(cmd_summary, &output_id)
+            let tee_present = unfiltered_ref.is_some();
+            // The summary is built by `fit_summary` against the SERIALIZED response it will be:
+            // each render is the final object, handle and late keys included, so what is measured is
+            // what is returned. The streams are bounded in escaped bytes there, from the raw text,
+            // once. (`attach` is repeated at the end of this function for every arm; applying the
+            // same keys twice changes nothing.)
+            super::super::command_summary::fit_summary(|budget| {
+                let cmd_summary = match cmd_type {
+                    CommandType::Test => {
+                        summarize_test_output_within(&raw_stdout, &raw_stderr, exit_code, budget)
+                    }
+                    CommandType::Build => {
+                        summarize_build_output_within(&raw_stdout, &raw_stderr, exit_code, budget)
+                    }
+                    CommandType::Generic => {
+                        summarize_generic_within(&raw_stdout, &raw_stderr, exit_code, budget)
+                    }
+                };
+                // Rebuild with correct field order so output_id appears before content fields.
+                let mut response = rebuild_buffered_summary(cmd_summary, &output_id);
+                attach(&mut response, late.clone(), tee_present);
+                response
+            })
         }
     } else if let Some(c) = (!buffer_only
         && detect_command_type(original_command) == CommandType::Test)

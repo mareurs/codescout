@@ -7,7 +7,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 
-use crate::util::text::{clip_to_bytes, elide_middle_bytes};
+use crate::util::text::{clip_head_escaped, elide_middle_escaped, json_escaped_len};
 
 // ---------------------------------------------------------------------------
 // Thresholds
@@ -34,7 +34,10 @@ const TAIL_LINES: usize = 10;
 // cap-class: RESULT_CAP command_summary.stderr_tail_lines — probed
 const STDERR_SUMMARY_LINE_BUDGET: usize = 20;
 
-/// Byte ceiling on that same field.
+/// Byte ceiling on that same field, in JSON-ESCAPED bytes (a control character is 1 raw byte and 6
+/// serialized; the bound that counted raw bytes let two 1,000 to 2,000 B fields of `\x01` take a
+/// summary to ~24 KB, which `call_content` then buffered a second time). For the field's BODY: the
+/// marker line above it is extra, and is accounted for when `fit_summary` shares the response.
 ///
 /// A line budget alone does not bound a field, because a line has no length
 /// bound: one 200 KB line satisfies `take(20)` and pushes the envelope past
@@ -61,7 +64,8 @@ const STDERR_SUMMARY_LINE_BUDGET: usize = 20;
 // cap-class: RESULT_CAP command_summary.stderr_tail_bytes — probed
 const STDERR_SUMMARY_BYTE_BUDGET: usize = 2000;
 
-/// Byte ceiling on each stream (`stdout`, `stderr`) of a [`summarize_generic`] envelope.
+/// Byte ceiling on each stream (`stdout`, `stderr`) of a [`summarize_generic`] envelope, in
+/// JSON-ESCAPED bytes, marker included ([`elide_middle_escaped`]).
 ///
 /// The same defect `STDERR_SUMMARY_BYTE_BUDGET` was written for, on the shape it did not
 /// reach: `summarize_generic` bounded its streams by LINE count only, and a line has no
@@ -79,7 +83,7 @@ const STDERR_SUMMARY_BYTE_BUDGET: usize = 2000;
 const GENERIC_FIELD_BYTE_BUDGET: usize = 2000;
 
 /// Byte ceiling on the `failures` field of a `test` envelope and the `first_error` field of
-/// a `build` envelope.
+/// a `build` envelope, in JSON-ESCAPED bytes, marker included.
 ///
 /// The same defect as [`GENERIC_FIELD_BYTE_BUDGET`], on the two fields that one did not
 /// reach. `extract_test_failures` returns the WHOLE failure section — no line bound, no byte
@@ -112,6 +116,95 @@ pub(crate) const STDERR_TAIL_MARKER: &str = "--- stderr TAIL:";
 /// buffered envelope passes through, and which holds the id — replaces it. Chosen to read
 /// sensibly if a caller ever renders the field without that pass.
 pub(crate) const OUTPUT_ID_PLACEHOLDER: &str = "<output_id>";
+/// How many bytes longer the real handle is than [`OUTPUT_ID_PLACEHOLDER`]: a `@cmd_` id is the
+/// prefix and eight hex digits. A summarized `stderr` field is measured with the placeholder in it
+/// and then grows by this much, once, when `rebuild_buffered_summary` swaps the handle in.
+// cap-class: NOT_A_CAP — a length difference between two literals, derived, not a bound on output
+const OUTPUT_ID_GROWTH: usize = "@cmd_00000000".len() - OUTPUT_ID_PLACEHOLDER.len();
+
+/// Ceilings, in JSON-ESCAPED bytes, on the WHOLE text fields of a summary: `stdout` and `stderr` of a
+/// generic summary, `stderr` of a test or build summary, and `detail` for `failures` / `first_error`.
+/// `None` is the field's natural ceiling (`GENERIC_FIELD_BYTE_BUDGET`, `STDERR_SUMMARY_BYTE_BUDGET`,
+/// `FAILURE_FIELD_BYTE_BUDGET`), which is what a summary of unremarkable text always gets.
+///
+/// The natural ceilings alone are not enough. Each is an answer to "how much of this stream is worth
+/// inlining", and the sum of three of them plus the keys and the diagnostics a response carries can
+/// still be over what the response may hold (`INLINE_MAX_RESPONSE_LEN`); and it is the escaped size
+/// that counts, where a control character is 6 bytes. [`fit_summary`] measures what is left and
+/// hands the fields a share of it, so the summary is cut ONCE, from the raw stream, with a marker
+/// whose total is the stream's: never cut again afterwards.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SummaryBudget {
+    pub stdout: Option<usize>,
+    pub stderr: Option<usize>,
+    pub detail: Option<usize>,
+}
+
+/// A field's ceiling: its natural one, or the share it was given when that is smaller.
+fn ceiling(natural: usize, share: Option<usize>) -> usize {
+    share.map_or(natural, |s| s.min(natural))
+}
+
+/// Every summary field that holds free text; each maps to one [`SummaryBudget`] slot.
+const SUMMARY_TEXT_FIELDS: [&str; 4] = ["stdout", "stderr", "failures", "first_error"];
+
+/// Build the response for a summarized command so it stays INLINE: at most
+/// `INLINE_MAX_RESPONSE_LEN` serialized bytes, the limit `call_content` enforces on the same value.
+///
+/// `render` returns the FINAL response for a budget (the summary with its handle, plus every key
+/// attached after it), so what is measured here is what is returned. It is called once with the
+/// natural ceilings; if that fits, that is the answer, byte for byte what it was before. Otherwise
+/// the text fields are replaced by empty strings, the skeleton that remains is measured (keys,
+/// counts, handle, diagnostics, and the cost of each text key itself), and what is left of the limit
+/// is shared out among the fields by [`share_room`]. `render` is then called a second time, FROM THE
+/// RAW STREAMS, with those shares: a field is never cut twice, so no marker misreports its total.
+///
+/// A response whose skeleton alone is over the limit comes back as built; the backstop in
+/// `call_content` is for that.
+pub(crate) fn fit_summary(render: impl Fn(&SummaryBudget) -> Value) -> Value {
+    use crate::tools::{exceeds_inline_limit_len, INLINE_MAX_RESPONSE_LEN};
+    let natural = render(&SummaryBudget::default());
+    if !exceeds_inline_limit_len(natural.to_string().len()) {
+        return natural;
+    }
+    let mut skeleton = natural.clone();
+    let mut wanted: Vec<(&str, usize)> = Vec::new();
+    for key in SUMMARY_TEXT_FIELDS {
+        if let Some(Value::String(text)) = natural.get(key) {
+            wanted.push((key, json_escaped_len(text)));
+            skeleton[key] = json!("");
+        }
+    }
+    let room = INLINE_MAX_RESPONSE_LEN.saturating_sub(skeleton.to_string().len());
+    let mut budget = SummaryBudget::default();
+    for (key, share) in share_room(&wanted, room) {
+        match key {
+            "stdout" => budget.stdout = Some(share),
+            "stderr" => budget.stderr = Some(share),
+            _ => budget.detail = Some(share),
+        }
+    }
+    render(&budget)
+}
+
+/// Share `room` bytes among fields that want `wanted` each: a field that wants no more than an equal
+/// share of what is left keeps all of it, and the rest split what remains equally. Returns a share
+/// for the fields that must be cut and for no other, so a field that fits is not handed a number
+/// that could cut it. Fields are visited smallest first, which is what lets the room a small field
+/// leaves unused go to the large ones.
+fn share_room<'a>(wanted: &[(&'a str, usize)], room: usize) -> Vec<(&'a str, usize)> {
+    let mut by_size: Vec<(&str, usize)> = wanted.to_vec();
+    by_size.sort_by_key(|&(_, want)| want);
+    let mut left = room;
+    for (i, &(_, want)) in by_size.iter().enumerate() {
+        let equal = left / (by_size.len() - i);
+        if want > equal {
+            return by_size[i..].iter().map(|&(key, _)| (key, equal)).collect();
+        }
+        left -= want;
+    }
+    Vec::new()
+}
 
 // ---------------------------------------------------------------------------
 // CommandType
@@ -329,7 +422,7 @@ pub(crate) fn inline_response_exceeds_limit(
 ///
 /// Returns `None` for empty stderr so the key is omitted rather than rendered
 /// empty, matching [`summarize_generic`].
-fn summarize_stderr(stderr: &str) -> Option<String> {
+fn summarize_stderr(stderr: &str, share: Option<usize>) -> Option<String> {
     if stderr.is_empty() {
         return None;
     }
@@ -345,6 +438,20 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     }
     let total = lines.len();
 
+    // The body's room, in JSON-ESCAPED bytes: a control character is 1 raw byte and 6 serialized, so
+    // a raw budget let two such fields overflow the response they were sized for. With a `share`
+    // (the whole field's room in the response, measured by `fit_summary`) the body gets what is
+    // left after the header at its WIDEST: every count at `total`, the largest any of them can be,
+    // plus the two bytes the placeholder grows by when it becomes the real handle.
+    let body_budget = match share {
+        None => STDERR_SUMMARY_BYTE_BUDGET,
+        Some(whole) => {
+            let widest = stderr_header(&stderr_notes(progress, total, true, true), total, total);
+            let header = json_escaped_len(&widest) + OUTPUT_ID_GROWTH;
+            STDERR_SUMMARY_BYTE_BUDGET.min(whole.saturating_sub(header))
+        }
+    };
+
     // Walk backwards, so when the byte ceiling binds it drops the OLDEST line
     // kept rather than the newest. Forwards, a long compile log would spend the
     // whole budget on its first lines and cut off exactly the verdict.
@@ -352,15 +459,15 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     let mut bytes = 0usize;
     let mut clipped = false;
     for line in lines.iter().rev().take(STDERR_SUMMARY_LINE_BUDGET) {
-        let needed = line.len() + 1; // +1 for the '\n' rejoining it
-        if bytes + needed > STDERR_SUMMARY_BYTE_BUDGET {
+        let needed = json_escaped_len(line) + 2; // +2 for the '\n' rejoining it, serialized
+        if bytes + needed > body_budget {
             // A single line wider than the entire budget is still carried, clipped:
             // an elided verdict beats an absent one. This is the only branch that can
             // reach an empty-ish field on non-empty input, and it is why `clipped` is
             // tracked separately from the dropped-line count — with `total == 1` the
             // count is zero and the marker would otherwise claim nothing was lost.
             if kept.is_empty() {
-                kept.push(clip_to_bytes(line, STDERR_SUMMARY_BYTE_BUDGET));
+                kept.push(clip_head_escaped(line, body_budget));
                 clipped = true;
             }
             break;
@@ -371,12 +478,24 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     kept.reverse();
 
     let dropped = total - kept.len();
-    if dropped == 0 && !clipped && progress == 0 {
-        // Nothing lost: hand back the stream verbatim, trailing newline and all, so a
-        // complete small stderr renders byte-identically to `summarize_generic`'s.
+    // Nothing lost, and the stream itself fits: hand it back verbatim, trailing newline and all, so
+    // a complete small stderr renders byte-identically to `summarize_generic`'s. The size check is
+    // the stream's OWN escaped length: the walk above counted each line's terminator as `\n`, which
+    // a `\r\n` stream undercounts.
+    let nothing_cut = dropped == 0 && !clipped && progress == 0;
+    if nothing_cut && json_escaped_len(stderr) <= body_budget {
         return Some(stderr.to_string());
     }
 
+    let notes = stderr_notes(progress, dropped, clipped, nothing_cut);
+    Some(format!(
+        "{}{}",
+        stderr_header(&notes, kept.len(), total),
+        kept.join("\n"),
+    ))
+}
+/// The cuts a summarized stderr announces, in the order the header lists them.
+fn stderr_notes(progress: usize, dropped: usize, clipped: bool, normalized: bool) -> Vec<String> {
     let mut notes: Vec<String> = Vec::new();
     if progress > 0 {
         notes.push(format!("{progress} cargo progress line(s) omitted"));
@@ -387,13 +506,20 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
     if clipped {
         notes.push("last line clipped to the byte ceiling".to_string());
     }
-    Some(format!(
+    if normalized {
+        notes.push("line terminators normalized to fit".to_string());
+    }
+    notes
+}
+
+/// The marker line that opens a summarized `stderr` field, newline included. A function of its
+/// notes and counts only, so the room it needs can be computed before the body is chosen.
+fn stderr_header(notes: &[String], shown: usize, total: usize) -> String {
+    format!(
         "{STDERR_TAIL_MARKER} {notes}; {shown} of {total} line(s) shown. \
-         Full stderr: read_file(\"{OUTPUT_ID_PLACEHOLDER}.err\") ---\n{body}",
+         Full stderr: read_file(\"{OUTPUT_ID_PLACEHOLDER}.err\") ---\n",
         notes = notes.join("; "),
-        shown = kept.len(),
-        body = kept.join("\n"),
-    ))
+    )
 }
 
 /// Produce a structured summary of test-runner output.
@@ -401,6 +527,16 @@ fn summarize_stderr(stderr: &str) -> Option<String> {
 /// Parses cargo-test-style result lines, sums across multiple test binaries,
 /// and extracts failure details.
 pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Value {
+    summarize_test_output_within(stdout, stderr, exit_code, &SummaryBudget::default())
+}
+
+/// [`summarize_test_output`] with the text fields held to `budget`: see [`SummaryBudget`].
+pub(crate) fn summarize_test_output_within(
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+    budget: &SummaryBudget,
+) -> Value {
     let mut passed: u64 = 0;
     let mut failed: u64 = 0;
     let mut ignored: u64 = 0;
@@ -438,10 +574,10 @@ pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Valu
         // The section can come from either stream (`combined`), so the marker names both
         // handles rather than claiming one.
         let len = f.len();
-        result["failures"] = Value::String(elide_middle_bytes(
-            f,
+        result["failures"] = Value::String(elide_middle_escaped(
+            &f,
             len,
-            FAILURE_FIELD_BYTE_BUDGET,
+            ceiling(FAILURE_FIELD_BYTE_BUDGET, budget.detail),
             "failures",
             "all of it: output_id (stdout) or output_id.err (stderr)",
         ));
@@ -450,7 +586,7 @@ pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Valu
     // compiler's diagnostics and any wrapper script's commentary — exactly what a
     // reader wants when the news is bad, and until 2026-09-14 the only shape that
     // never carried it. BUG docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
-    if let Some(err) = summarize_stderr(stderr) {
+    if let Some(err) = summarize_stderr(stderr, budget.stderr) {
         result["stderr"] = Value::String(err);
     }
 
@@ -462,6 +598,16 @@ pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Valu
 /// Counts errors (with error codes) and warnings, and extracts the first
 /// error block for quick diagnosis.
 pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Value {
+    summarize_build_output_within(stdout, stderr, exit_code, &SummaryBudget::default())
+}
+
+/// [`summarize_build_output`] with the text fields held to `budget`: see [`SummaryBudget`].
+pub(crate) fn summarize_build_output_within(
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+    budget: &SummaryBudget,
+) -> Value {
     let combined = if stderr.is_empty() {
         stdout.to_string()
     } else if stdout.is_empty() {
@@ -501,10 +647,10 @@ pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Val
     }
     if let Some(err) = first_error {
         let len = err.len();
-        result["first_error"] = Value::String(elide_middle_bytes(
-            err,
+        result["first_error"] = Value::String(elide_middle_escaped(
+            &err,
             len,
-            FAILURE_FIELD_BYTE_BUDGET,
+            ceiling(FAILURE_FIELD_BYTE_BUDGET, budget.detail),
             "first_error",
             "all of it: output_id (stdout) or output_id.err (stderr)",
         ));
@@ -512,7 +658,7 @@ pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Val
     // Same omission, same fix. `first_error` mines the HEAD of the combined stream;
     // this carries the TAIL, which is where a wrapper's verdict and the final
     // `error: could not compile` line both live.
-    if let Some(err) = summarize_stderr(stderr) {
+    if let Some(err) = summarize_stderr(stderr, budget.stderr) {
         result["stderr"] = Value::String(err);
     }
 
@@ -525,10 +671,20 @@ pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Val
 /// Otherwise the middle is replaced with an "N lines omitted" marker.
 ///
 /// **Lines are not the only bound.** A line has no length, so each stream is then held to
-/// [`GENERIC_FIELD_BYTE_BUDGET`] bytes by [`elide_middle_bytes`]. Without that, one 95 KB
+/// [`GENERIC_FIELD_BYTE_BUDGET`] escaped bytes by [`elide_middle_escaped`]. Without that, one 95 KB
 /// line of JSON is "1 line", comes back verbatim, and re-buffers the response under a
 /// `@tool_*` handle that carries none of it. Streams within both bounds are unchanged.
 pub fn summarize_generic(stdout: &str, stderr: &str, exit_code: i32) -> Value {
+    summarize_generic_within(stdout, stderr, exit_code, &SummaryBudget::default())
+}
+
+/// [`summarize_generic`] with each stream held to `budget`: see [`SummaryBudget`].
+pub(crate) fn summarize_generic_within(
+    stdout: &str,
+    stderr: &str,
+    exit_code: i32,
+    budget: &SummaryBudget,
+) -> Value {
     let stdout_lines: Vec<&str> = stdout.lines().collect();
     let total_stdout_lines = stdout_lines.len();
 
@@ -545,10 +701,10 @@ pub fn summarize_generic(stdout: &str, stderr: &str, exit_code: i32) -> Value {
     } else {
         stdout.to_string()
     };
-    let summarized_stdout = elide_middle_bytes(
-        summarized_stdout,
+    let summarized_stdout = elide_middle_escaped(
+        &summarized_stdout,
         stdout.len(),
-        GENERIC_FIELD_BYTE_BUDGET,
+        ceiling(GENERIC_FIELD_BYTE_BUDGET, budget.stdout),
         "stdout",
         "all of it: output_id",
     );
@@ -562,10 +718,10 @@ pub fn summarize_generic(stdout: &str, stderr: &str, exit_code: i32) -> Value {
         result["stdout"] = Value::String(summarized_stdout);
     }
     if !stderr.is_empty() {
-        result["stderr"] = Value::String(elide_middle_bytes(
-            stderr.to_string(),
+        result["stderr"] = Value::String(elide_middle_escaped(
+            stderr,
             stderr.len(),
-            GENERIC_FIELD_BYTE_BUDGET,
+            ceiling(GENERIC_FIELD_BYTE_BUDGET, budget.stderr),
             "stderr",
             "all of it: output_id.err",
         ));
@@ -1434,6 +1590,231 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         assert!(rendered.contains("--- stderr TAIL:"));
         assert!(rendered.contains("clipped to the byte ceiling"));
     }
+    // -- fit_summary / share_room: the summary is budgeted in the unit the limit counts --
+
+    /// The serialized length `call_content` measures.
+    fn wire_len(v: &Value) -> usize {
+        v.to_string().len()
+    }
+
+    #[test]
+    fn share_room_leaves_fields_that_fit_alone_and_splits_the_rest_equally() {
+        // Nothing to cut: no share is handed out, so nothing is cut.
+        assert!(share_room(&[("a", 100), ("b", 200)], 300).is_empty());
+        // `a` wants less than an equal share (333) and keeps it; `b` and `c` split what is left, which
+        // is MORE than the 333 an equal split of the whole would give them.
+        let shares = share_room(&[("c", 5_000), ("a", 100), ("b", 4_000)], 1_000);
+        assert_eq!(shares, vec![("b", 450), ("c", 450)]);
+        // Equal wants split equally, and a lone field gets all the room.
+        assert_eq!(
+            share_room(&[("x", 900), ("y", 900)], 1_000),
+            vec![("x", 500), ("y", 500)]
+        );
+        assert_eq!(share_room(&[("x", 900)], 400), vec![("x", 400)]);
+    }
+
+    #[test]
+    fn share_room_is_exact_at_the_edge() {
+        // 600 + 400 == 1,000: both fit. One byte less room and the larger must be cut, to what is
+        // left after the smaller keeps its 400.
+        assert!(share_room(&[("a", 600), ("b", 400)], 1_000).is_empty());
+        assert_eq!(share_room(&[("a", 600), ("b", 400)], 999), vec![("a", 599)]);
+    }
+
+    #[test]
+    fn fit_summary_returns_a_summary_that_already_fits_untouched() {
+        let summary = summarize_generic("ok\n", "warn\n", 0);
+        let fitted = fit_summary(|b| summarize_generic_within("ok\n", "warn\n", 0, b));
+        assert_eq!(fitted, summary);
+    }
+
+    #[test]
+    fn fit_summary_keeps_two_control_character_streams_inline_with_true_totals() {
+        // 1,500 x \x01 on each stream: 9,000 serialized each, which a raw-unit ceiling of 2,000 B let
+        // through whole (18,000 B). In escaped bytes the natural ceiling binds, and the pair fits by
+        // itself, so `fit_summary` returns it as built.
+        let stream = "\u{1}".repeat(1_500);
+        let fitted = fit_summary(|b| summarize_generic_within(&stream, &stream, 0, b));
+
+        assert_eq!(fitted, summarize_generic(&stream, &stream, 0));
+        assert!(
+            wire_len(&fitted) <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+            "{} B",
+            wire_len(&fitted)
+        );
+        for key in ["stdout", "stderr"] {
+            let (head, shown, total, tail) = split_elided(fitted[key].as_str().unwrap(), key);
+            assert_eq!(total, 1_500, "{key}: the total is the stream's");
+            assert_eq!(shown, head.len() + tail.len(), "{key}");
+            assert!(!head.is_empty() && !tail.is_empty(), "{key}: both ends");
+            assert!(json_escaped_len(fitted[key].as_str().unwrap()) <= GENERIC_FIELD_BYTE_BUDGET);
+        }
+    }
+
+    #[test]
+    fn fit_summary_budgets_around_keys_attached_after_the_summary() {
+        // The render adds a 7,000 B key the summarizers know nothing about, as `run_command` adds its
+        // diagnostics: the shares must be measured WITH it. At the natural ceilings the two streams are
+        // ~4 KB, so without the key nothing is cut; with it the pair overflows and must be shared out.
+        let stream = "\u{1}".repeat(1_500);
+        let render = |b: &SummaryBudget| {
+            let mut v = summarize_generic_within(&stream, &stream, 0, b);
+            v["diagnostic"] = json!("d".repeat(7_000));
+            v
+        };
+        assert!(
+            wire_len(&render(&SummaryBudget::default())) > crate::tools::INLINE_MAX_RESPONSE_LEN,
+            "fixture must overflow at the natural ceilings"
+        );
+
+        let fitted = fit_summary(render);
+
+        assert!(
+            wire_len(&fitted) <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+            "{} B",
+            wire_len(&fitted)
+        );
+        assert_eq!(fitted["diagnostic"].as_str().unwrap().len(), 7_000);
+        for key in ["stdout", "stderr"] {
+            assert!(
+                fitted[key]
+                    .as_str()
+                    .unwrap()
+                    .contains("of 1500 bytes shown"),
+                "{key}"
+            );
+        }
+        // The room is used, not left on the table: within a marker's slack of the limit.
+        assert!(
+            wire_len(&fitted) + 100 > crate::tools::INLINE_MAX_RESPONSE_LEN,
+            "{} B: the cut kept far less than fits",
+            wire_len(&fitted)
+        );
+    }
+
+    #[test]
+    fn a_summarized_stderr_tail_fits_the_whole_share_it_was_given() {
+        // 30 lines of 100 control characters, a share of 1,500 for the WHOLE field, header included.
+        let stderr: String = (0..30)
+            .map(|_| format!("{}\n", "\u{1}".repeat(100)))
+            .collect();
+        for share in [400usize, 700, 1_500, 5_000] {
+            let field = summarize_stderr(&stderr, Some(share)).unwrap();
+            // The handle replaces the placeholder in `rebuild_buffered_summary`.
+            let live = field.replace(OUTPUT_ID_PLACEHOLDER, "@cmd_00000000");
+            assert!(
+                json_escaped_len(&live) <= share,
+                "share {share}: {} B escaped",
+                json_escaped_len(&live)
+            );
+            assert!(live.contains("--- stderr TAIL:"), "share {share}");
+        }
+        // And a share bigger than the natural ceiling does not raise the ceiling.
+        let field = summarize_stderr(&stderr, Some(1_000_000)).unwrap();
+        assert!(json_escaped_len(&field) <= STDERR_SUMMARY_BYTE_BUDGET + 400);
+    }
+    #[test]
+    fn a_stderr_share_reserves_the_bytes_the_real_handle_adds() {
+        // The field is measured with `<output_id>` (11 B) in it and carries the real 13 B handle once
+        // `rebuild_buffered_summary` swaps it in. Lines of 10 B cost 12 escaped each; a share of the
+        // widest header + 2 + 71 leaves a body budget of 71, which holds five whole lines and 11 B of a
+        // sixth. Without the two reserved bytes the budget is 73 and a sixth line fits.
+        let stderr: String = (0..40).map(|_| format!("{}\n", "e".repeat(10))).collect();
+        let widest = stderr_header(&stderr_notes(0, 40, true, true), 40, 40);
+        let share = json_escaped_len(&widest) + OUTPUT_ID_GROWTH + 71;
+
+        let field = summarize_stderr(&stderr, Some(share)).unwrap();
+
+        assert!(field.contains("5 of 40 line(s) shown"), "{field:.160}");
+        let live = field.replace(OUTPUT_ID_PLACEHOLDER, "@cmd_00000000");
+        assert!(
+            json_escaped_len(&live) <= share,
+            "{} B",
+            json_escaped_len(&live)
+        );
+    }
+
+    #[test]
+    fn fit_summary_shares_the_failure_field_of_a_test_and_a_build_summary() {
+        // `failures` / `first_error` over their 5,000 B ceiling, a stderr over its 2,000 B one, and a
+        // 4,000 B key attached after the summary: ~11 KB at the natural ceilings. The stderr fits an
+        // equal share and keeps all of it; the failure field gets what is left. Nothing here is a
+        // control character: the budget slot for these two fields is what is under test.
+        let filler = "x".repeat(6_000);
+        let stderr = format!("{}\n", "e".repeat(3_000));
+        let cases = [
+            (
+                "failures",
+                format!("failures:\n{filler}\nfailures:\n"),
+                true,
+            ),
+            ("first_error", format!("error[E0308]: x\n{filler}\n"), false),
+        ];
+        for (key, stdout, is_test) in cases {
+            let render = |b: &SummaryBudget| {
+                let mut v = if is_test {
+                    summarize_test_output_within(&stdout, &stderr, 101, b)
+                } else {
+                    summarize_build_output_within(&stdout, &stderr, 101, b)
+                };
+                v["diagnostic"] = json!("d".repeat(4_000));
+                v
+            };
+            let natural = render(&SummaryBudget::default());
+            assert!(
+                wire_len(&natural) > crate::tools::INLINE_MAX_RESPONSE_LEN,
+                "{key}: fixture must overflow at the natural ceilings: {} B",
+                wire_len(&natural)
+            );
+
+            let fitted = fit_summary(render);
+
+            assert!(
+                wire_len(&fitted) <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+                "{key}: {} B",
+                wire_len(&fitted)
+            );
+            assert_eq!(
+                fitted["stderr"], natural["stderr"],
+                "{key}: a field within its share is left untouched"
+            );
+            let field = fitted[key].as_str().unwrap();
+            let (head, shown, total, tail) = split_elided(field, key);
+            assert_eq!(shown, head.len() + tail.len(), "{key}");
+            assert!(
+                total > 5_000,
+                "{key}: the total is the section's own length"
+            );
+            assert!(
+                json_escaped_len(field) < json_escaped_len(natural[key].as_str().unwrap()),
+                "{key}: the field was not cut below its natural ceiling"
+            );
+            assert!(!head.is_empty() && !tail.is_empty(), "{key}: both ends");
+        }
+    }
+
+    #[test]
+    fn a_crlf_stderr_that_only_fits_without_its_carriage_returns_is_not_returned_verbatim() {
+        // 20 lines of 98 B ending in `\r\n`: the walk counts a terminator as `\n` (20 x 100 = exactly the
+        // 2,000 B body budget, so nothing is cut), but the stream's own serialized length counts each
+        // `\r` too (20 x 102 = 2,040), and that tips it over.
+        let stderr: String = (0..20).map(|_| format!("{}\r\n", "e".repeat(98))).collect();
+        assert!(
+            json_escaped_len(&stderr) > STDERR_SUMMARY_BYTE_BUDGET,
+            "fixture: the stream must overflow the budget escaped"
+        );
+        let field = summarize_stderr(&stderr, None).unwrap();
+        assert!(
+            field.contains("line terminators normalized"),
+            "{field:.200}"
+        );
+        assert!(
+            json_escaped_len(&field) <= STDERR_SUMMARY_BYTE_BUDGET + 400,
+            "{} B",
+            json_escaped_len(&field)
+        );
+    }
+
     // -- summarized `failures` / `first_error`: byte bound --
     //
     // BUG docs/issues/archive/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
@@ -1522,13 +1903,14 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 
     #[test]
     fn summarize_test_output_failures_bound_is_inclusive_at_the_budget() {
-        // One `failures:` marker, so the section is the whole text: 9 B of marker, 1 B of
-        // newline, then filler. Exactly the budget is verbatim; one byte over is elided.
-        let at = format!("failures:\n{}", "z".repeat(FAILURE_FIELD_BYTE_BUDGET - 10));
+        // One `failures:` marker, so the section is the whole text: 9 B of marker, a newline (2
+        // ESCAPED bytes: the budget counts what the response carries), then filler. Exactly the
+        // budget, escaped, is verbatim; one byte over is elided.
+        let at = format!("failures:\n{}", "z".repeat(FAILURE_FIELD_BYTE_BUDGET - 11));
         let summary = summarize_test_output(&at, "", 101);
         assert_eq!(summary["failures"].as_str().unwrap(), at);
 
-        let over = format!("failures:\n{}", "z".repeat(FAILURE_FIELD_BYTE_BUDGET - 9));
+        let over = format!("failures:\n{}", "z".repeat(FAILURE_FIELD_BYTE_BUDGET - 10));
         let summary = summarize_test_output(&over, "", 101);
         let (_h, _s, total, _t) = split_elided(summary["failures"].as_str().unwrap(), "failures");
         assert_eq!(total, over.len());
@@ -1585,14 +1967,14 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     }
     #[test]
     fn summarize_build_output_first_error_bound_is_inclusive_at_the_budget() {
-        // The block is the error line, a newline, then filler: exactly the budget is verbatim,
-        // one byte over is elided. A boundary test per field, because a field wired to the
+        // The block is the error line, a newline (2 ESCAPED bytes), then filler: exactly the
+        // budget, escaped, is verbatim, one byte over is elided. A boundary test per field, because a field wired to the
         // WRONG budget (the 2,000 B generic one) passes every "is under the budget" assertion
         // and is caught only by an input that sits between the two budgets (M14, 2026-10-05).
         let head_line = "error[E0308]: x";
         let at = format!(
             "{head_line}\n{}",
-            "z".repeat(FAILURE_FIELD_BYTE_BUDGET - head_line.len() - 1)
+            "z".repeat(FAILURE_FIELD_BYTE_BUDGET - head_line.len() - 2)
         );
         let summary = summarize_build_output(&at, "", 101);
         assert_eq!(summary["first_error"].as_str().unwrap(), at);

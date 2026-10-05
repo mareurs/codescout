@@ -1042,7 +1042,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // stream only; the stderr stream of the same constant is pinned by
         // `summarize_generic_bounds_a_huge_stderr_and_leaves_a_short_stdout_alone`, which
         // cannot be cited because its marker assertions live in a shared helper this gate's
-        // body scan does not follow. Marker written by production in `util::text::elide_middle_bytes`.
+        // body scan does not follow. Marker written by production in `util::text::elide_middle_escaped`.
         id: "command_summary.generic_field_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("bytes shown"),
@@ -1058,7 +1058,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // the `first_error` site of the same constant is pinned by
         // `a_huge_error_block_is_summarized_inline_not_rebuffered`,
         // which cannot also be cited because a row names ONE test. Marker written by
-        // production in `util::text::elide_middle_bytes`.
+        // production in `util::text::elide_middle_escaped`.
         id: "command_summary.failure_field_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("bytes shown"),
