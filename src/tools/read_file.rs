@@ -2792,6 +2792,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_oversized_section_error_clips_the_sections_own_huge_heading() {
+        // The section's OWN heading is 12 KB: it is echoed in the message and the breadcrumb.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hugeown.md");
+        let mut body = format!("## {}\n", "o".repeat(12_000));
+        for i in 1..=40 {
+            body.push_str(&format!("### Sub {i:03}\n{}\n\n", "b".repeat(300)));
+        }
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": format!("## {}", "o".repeat(40)) }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an oversized section is a RecoverableError");
+
+        assert!(
+            error_body_len(rec) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the error body is {} B",
+            error_body_len(rec)
+        );
+        assert!(
+            rec.message.len() < 400,
+            "the message echoes {} B",
+            rec.message.len()
+        );
+        let crumb = rec.extra["breadcrumb"][0].as_str().unwrap();
+        assert!(
+            crumb.len() <= 200 && crumb.starts_with("## ooo"),
+            "{} B",
+            crumb.len()
+        );
+    }
+
+    #[tokio::test]
     async fn the_oversized_section_error_keeps_a_map_that_fits_whole() {
         // 40 sub-headings of 300 B: the section is over the inline limit (14.8 KB) but its map
         // (~3.6 KB) fits, so nothing in the error changes shape.

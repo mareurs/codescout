@@ -862,3 +862,36 @@ pub(crate) fn format_read(result: &Value) -> Option<String> {
     // Fallback for shapes added later: serialize JSON.
     Some(result.to_string())
 }
+
+#[cfg(test)]
+mod clip_heading_tests {
+    use super::{clip_heading, HEADING_ECHO_CLIP};
+
+    #[test]
+    fn a_heading_of_exactly_the_clip_length_is_returned_whole() {
+        let text = "h".repeat(HEADING_ECHO_CLIP);
+        assert_eq!(clip_heading(&text), (text, None));
+    }
+
+    #[test]
+    fn a_heading_one_byte_over_is_clipped_and_its_length_reported() {
+        let text = "h".repeat(HEADING_ECHO_CLIP + 1);
+        let (clipped, from) = clip_heading(&text);
+        assert_eq!(clipped.len(), HEADING_ECHO_CLIP);
+        assert_eq!(from, Some(HEADING_ECHO_CLIP + 1));
+        assert!(
+            text.starts_with(&clipped),
+            "a clip must be a PREFIX so it still resolves"
+        );
+    }
+
+    #[test]
+    fn a_clip_never_splits_a_multibyte_character() {
+        // 100 x '€' is 300 B; 200 is not a multiple of 3, so a raw cut lands inside a character.
+        let text = "€".repeat(100);
+        let (clipped, from) = clip_heading(&text);
+        assert!(clipped.len() <= HEADING_ECHO_CLIP && clipped.len() > HEADING_ECHO_CLIP - 3);
+        assert!(clipped.chars().all(|c| c == '€'));
+        assert_eq!(from, Some(300));
+    }
+}

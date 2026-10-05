@@ -644,7 +644,9 @@ fn cut_array_middle_gives_no_line_route_when_one_omitted_entry_is_out_of_order()
 #[test]
 fn cut_array_middle_gives_no_line_route_when_an_entry_has_no_line() {
     let mut entries = keyed_lines(&(1..=60).collect::<Vec<_>>());
-    entries[10] = serde_json::json!({"key": "k".repeat(33)});
+    // At index 0: `None < Some(_)`, so a missing line there does NOT break ascending order by
+    // itself, and only an explicit "every entry has a line" check can notice it.
+    entries[0] = serde_json::json!({"key": "k".repeat(33)});
     let mut summary = serde_json::json!({"type": "toml", "keys": []});
     let note = cut_array_middle(&mut summary, "", "keys", entries, 600, "@file_t").unwrap();
     assert!(summary["keys_omitted"]["from_line"].is_null());
