@@ -3741,6 +3741,74 @@ text
         assert_eq!(row.status, "archived");
     }
 
+    /// Regression for
+    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`: the
+    /// archive guard accepted a SHA with no patch-id, the half that orphans at the next rebase.
+    ///
+    /// The guard now demands the pair, with a hint of its own — an author who wrote a SHA and
+    /// is told "declares no fix anchor" is told something false. The same record, given its
+    /// patch-id in a second update, is the positive twin: an always-refuse guard fails it. The
+    /// refusal is also pinned to write nothing.
+    #[tokio::test]
+    async fn archiving_a_bug_with_a_sha_and_no_patch_id_is_refused_with_its_own_hint() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let id = mk_bug(
+            &ctx,
+            "bug",
+            "fixed",
+            "## Fix provenance\n\n- **SHA:** `5a72304c` (`experiments`)\n",
+        )
+        .await;
+        let path = artifact::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .unwrap()
+            .abs_path;
+        let before = std::fs::read(&path).unwrap();
+
+        let err = call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {"status": "archived"}}),
+        )
+        .await
+        .expect_err("a SHA with no patch-id must not discharge the archive guard");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("no patch-id") && msg.contains("orphans"),
+            "the refusal must say what is missing and why it matters: {msg}"
+        );
+        assert!(
+            !msg.contains("declares no fix anchor"),
+            "a record that DID declare a SHA must not be told it declared nothing: {msg}"
+        );
+        assert!(
+            msg.contains("git patch-id --stable"),
+            "the refusal must carry the command that produces the missing half: {msg}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "a refusal writes nothing"
+        );
+
+        call(
+            &ctx,
+            serde_json::json!({"id": id, "patch": {
+                "status": "archived",
+                "body_edits": [{
+                    "heading": "## Fix provenance",
+                    "action": "edit",
+                    "old_string": "- **SHA:** `5a72304c` (`experiments`)",
+                    "new_string": "- **SHA:** `5a72304c` (`experiments`)\n- **patch-id:** `e9f8df63b911`"
+                }]
+            }}),
+        )
+        .await
+        .expect("the same record with its patch-id added in the same call must archive");
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.status, "archived");
+    }
+
     #[tokio::test]
     async fn a_non_empty_no_fix_commit_discharges_the_archive_guard_and_an_empty_one_does_not() {
         let tmp = TempDir::new().unwrap();

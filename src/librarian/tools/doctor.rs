@@ -362,6 +362,7 @@ impl Check {
                 | Check::EntryDefinedTwice
                 | Check::EntryPrefixDeclaredTwice
                 | Check::EntryWithoutDefinition
+                | Check::FixAnchorMissingPatchId
                 | Check::FrontmatterIdIsNotACatalogId
                 | Check::FrontmatterIdMismatch
                 | Check::FrontmatterStatusMismatch
@@ -407,6 +408,7 @@ declare_checks! {
     EntryDefinedTwice => "entry_defined_twice",
     EntryPrefixDeclaredTwice => "entry_prefix_declared_twice",
     EntryWithoutDefinition => "entry_without_definition",
+    FixAnchorMissingPatchId => "fix_anchor_missing_patch_id",
     FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
     FrontmatterStatusMismatch => "frontmatter_status_mismatch",
@@ -575,6 +577,9 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::AugmentationDeclarationUnparseable,
     Check::ArchivedFixShaUnresolvable,
     Check::TerminalStatusWithoutFixAnchor,
+    // Added with the check itself, as a sibling of the line above: same scan, same population,
+    // same `(id, abs_path)` admitted — it only names the SHA-without-patch-id state apart.
+    Check::FixAnchorMissingPatchId,
     Check::NonTerminalStatusWithFixAnchor,
     Check::OpenBugCitedFromSource,
     // Added 2026-09-16 with the check itself. It shares `scan_open_bug_cited_from_source`'s
@@ -6599,14 +6604,20 @@ fn declares_fix_provenance_heading(content: &str) -> bool {
 /// committed. An empty `no_fix_commit` counts as absent, like `unverified:`: presence is what a
 /// reader queries.
 ///
-/// **The one predicate behind `terminal_status_without_fix_anchor` and the archive guards in
-/// `update` and `move` ([`refuse_unanchored_archive`]).** The guards exist because the check
-/// stops looking at exactly the transition its rule is for, so the two must agree on what
-/// "anchored" means: a second copy of this logic would let a record pass one and fail the other.
+/// **The predicate that separates "owes an anchor" from "owes the rest of one".**
+/// `terminal_status_without_fix_anchor` fires when this is false; when it is true but
+/// [`declares_fix_pair`] is false the record is reported as `fix_anchor_missing_patch_id`
+/// instead. The archive guards in `update` and `move` ([`refuse_unanchored_archive`]) share both
+/// predicates, because the guards exist as the check stops looking at exactly the transition its
+/// rule is for, so the two must agree on what "anchored" means: a second copy of this logic
+/// would let a record pass one and fail the other.
 pub(crate) fn declares_fix_anchor(content: &str) -> bool {
-    if !structured_fix_pointers(content).is_empty() {
-        return true;
-    }
+    !structured_fix_pointers(content).is_empty() || declares_no_fix_commit(content)
+}
+
+/// Whether the frontmatter carries a non-empty `no_fix_commit:` — the author's statement that
+/// nothing was committed, so no anchor can exist. Empty counts as absent, like `unverified:`.
+fn declares_no_fix_commit(content: &str) -> bool {
     let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(content) else {
         return false;
     };
@@ -6617,6 +6628,30 @@ pub(crate) fn declares_fix_anchor(content: &str) -> bool {
     }
 }
 
+/// Whether a bug record's fix anchor is **recoverable after a rebase**: at least one
+/// `## Fix provenance` pointer carries a non-empty patch-id ([`structured_fix_pointers`]), or a
+/// non-empty `no_fix_commit:` says nothing was committed.
+///
+/// **The question [`declares_fix_anchor`] does not ask.** That predicate answers *"did the author
+/// write anything shaped like a pointer?"*; a lone `- **SHA:**` bullet satisfies it, though the
+/// SHA is the half that dies when `experiments` is rebased and the patch-id — a content hash of
+/// the diff — is the half that survives. A record with only the SHA reads as anchored until the
+/// next rebase, at which point `archived_fix_sha_unresolvable` finds the SHA dead and the
+/// patch-id that would have recovered it was never required.
+/// docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
+///
+/// **Both parser and `declares_fix_anchor` stay as they were**: [`structured_fix_pointers`]
+/// returns the patch-id as an `Option` deliberately, and it has two other consumers whose
+/// inverse property depends on that. The strictness lives here, in the one caller that owes the
+/// recoverability question. An EMPTY backticked patch-id (`` ` ` ``) counts as absent: presence
+/// of a value is what recovers anything.
+pub(crate) fn declares_fix_pair(content: &str) -> bool {
+    structured_fix_pointers(content)
+        .iter()
+        .any(|(_, patch_id)| patch_id.as_deref().is_some_and(|p| !p.trim().is_empty()))
+        || declares_no_fix_commit(content)
+}
+
 /// Whether any component of `path` is `archive`. A component, not a substring, so a directory
 /// such as `archived-notes/` does not count.
 pub(crate) fn in_archive_dir(path: &Path) -> bool {
@@ -6624,8 +6659,10 @@ pub(crate) fn in_archive_dir(path: &Path) -> bool {
         .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
 }
 
-/// Refuse to take a `fixed`/`mitigated` bug out of `terminal_status_without_fix_anchor`'s
-/// population unless it declares its fix anchor ([`declares_fix_anchor`]).
+/// Refuse to take a `fixed`/`mitigated` bug out of `terminal_status_without_fix_anchor`'s and
+/// `fix_anchor_missing_patch_id`'s population unless it declares the recoverable pair
+/// ([`declares_fix_pair`]): a patch-id next to the SHA, or `no_fix_commit:`. A SHA alone is
+/// refused with its own hint, because the SHA is the half that orphans at rebase.
 ///
 /// **Why at the transition, not in the check.** The check selects live `fixed`/`mitigated`
 /// records and skips archive paths, deliberately: of 355 archived files, 297 predated the rule
@@ -6645,8 +6682,29 @@ pub(crate) fn refuse_unanchored_archive(
     content: &str,
     surface: &str,
 ) -> Result<()> {
-    if kind != "bug" || !matches!(status, "fixed" | "mitigated") || declares_fix_anchor(content) {
+    if kind != "bug" || !matches!(status, "fixed" | "mitigated") || declares_fix_pair(content) {
         return Ok(());
+    }
+    // Two states reach here and they owe different edits, so they get different text: a record
+    // that declared NOTHING owes both bullets; one that declared a SHA owes the half that
+    // survives a rebase. Telling the second "declares no fix anchor" contradicts the file its
+    // author is looking at.
+    if declares_fix_anchor(content) {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!(
+                "doc(action=\"{surface}\") refused: this `{status}` bug declares a fix SHA but no \
+                 patch-id, and a SHA alone orphans on the next rebase (`experiments` is rebased \
+                 after every ship); archiving it would take it out of \
+                 `fix_anchor_missing_patch_id`, the only check that asks for the patch-id"
+            ),
+            "Add the patch-id as its own bullet under the SHA, `- **patch-id:** `<id>``, with the \
+             id from `git show <sha> | git patch-id --stable` (docs/RELEASE.md § Citing a fix), \
+             via doc(action=\"update\", patch={body_edits: [...]}); one update may add it and \
+             archive in the same call. Both labels must be line-start bullets outside any fence: \
+             a patch-id written on the SAME line as the SHA is not parsed. If nothing was \
+             committed, declare `no_fix_commit: \"<reason>\"` via patch.extra instead. Then \
+             archive.",
+        ));
     }
     Err(LibrarianRecoverableError::with_hint(
         format!(
@@ -6894,6 +6952,14 @@ fn commit_like_hashes(content: &str) -> Vec<String> {
 ///
 /// Reports only; there is no `fix=`. Recovering a fix SHA is research, and a wrong anchor is
 /// worse than an absent one.
+///
+/// **Emits two check names from one loop, because there are two states and the existing check's
+/// population must not move.** `terminal_status_without_fix_anchor` is the record that declares
+/// nothing. `fix_anchor_missing_patch_id` is the record that declares a SHA and no patch-id —
+/// previously discharged outright, though the SHA is the half that orphans at rebase
+/// ([`declares_fix_pair`]). Each is admitted under its OWN name, so each is counted under its own
+/// name when scoped out, and both are in `ROW_GRAIN_SCOPED_CHECKS`.
+/// docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
 fn scan_terminal_status_without_fix_anchor(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -6925,7 +6991,37 @@ fn scan_terminal_status_without_fix_anchor(
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
+        if declares_fix_pair(&content) {
+            continue;
+        }
+        // A SHA is declared and no patch-id parses next to it. Its own check name, so the
+        // absent-anchor population above does not move and the state is queryable by name.
+        // docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
         if declares_fix_anchor(&content) {
+            if !scope.admit("fix_anchor_missing_patch_id", id, abs_path) {
+                continue;
+            }
+            let shas: Vec<String> = structured_fix_pointers(&content)
+                .into_iter()
+                .map(|(sha, _)| format!("`{sha}`"))
+                .collect();
+            out.push(Violation::new(
+                "fix_anchor_missing_patch_id",
+                Some(id.clone()),
+                abs_path.clone(),
+                format!(
+                    "status is `{status}` and a fix SHA is declared ({}) but no patch-id parses \
+                     next to it. The SHA is positional and orphans when `experiments` is rebased, \
+                     which happens after every ship; the patch-id is a content hash of the diff \
+                     and is the half that survives. Give the patch-id its own bullet under the \
+                     SHA — `- **patch-id:** ` followed by a backticked id from \
+                     `git show <sha> | git patch-id --stable` (docs/RELEASE.md § Citing a fix). \
+                     The label must START its line, outside any fence: a patch-id written on \
+                     the SAME line as the SHA, or in prose, is not parsed. If the fix had no \
+                     commit, say so in `no_fix_commit:` instead.",
+                    shas.join(", ")
+                ),
+            ));
             continue;
         }
 
@@ -10699,6 +10795,229 @@ mod tests {
             1,
             "the sibling-root row must be COUNTED as scoped out, not silently dropped: \
              {scoped_out:?}"
+        );
+    }
+
+    // ---- fix_anchor_missing_patch_id (and the fence escape of its sibling) -------------
+
+    /// `(check, artifact_id)` for every finding `scan_terminal_status_without_fix_anchor`
+    /// emits over `ctx`, sorted. Pairs rather than ids alone, because the property under test
+    /// is WHICH check names a record: a SHA-only record must be reported under its own name,
+    /// and must not be folded into the absent-anchor check or silently discharged.
+    fn terminal_anchor_findings(ctx: &ToolContext) -> Vec<(String, String)> {
+        let cat = ctx.catalog.lock();
+        let mut scope =
+            scope::DoctorScope::new(super::super::scope::Scope::All, ctx, &cat.conn).unwrap();
+        let mut found: Vec<(String, String)> =
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn)
+                .unwrap()
+                .into_iter()
+                .map(|v| (v.check, v.artifact_id.unwrap()))
+                .collect();
+        found.sort();
+        found
+    }
+
+    /// Regression for
+    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`.
+    ///
+    /// A record declaring `- **SHA:**` and no patch-id was discharged by `is_empty()` on the
+    /// pointer list, though the SHA is the half that dies at rebase. It must now be reported —
+    /// under ITS OWN check name, so the absent-anchor check's population does not move.
+    ///
+    /// Every other seed is a control that a single-sided implementation fails: `pair` (both
+    /// bullets) must stay silent, or an always-fire check passes; `bare` (no pointer) must
+    /// keep the OLD name, or folding both states under the new name passes; `declared-none`
+    /// (SHA only, plus a non-empty `no_fix_commit`) must stay silent, or a check that ignored
+    /// the escape passes; `same-line` is the exact shape the bug was measured on — both labels
+    /// on one bullet, which the line-start parser reads as a SHA with no patch-id.
+    #[tokio::test]
+    async fn a_sha_with_no_patch_id_is_reported_under_its_own_check_name() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "sha-only",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234` (`experiments`)\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "same-line",
+            "mitigated",
+            "",
+            "## Fix provenance\n\n- **SHA:** `737a29fe` — what it did. **patch-id:** \
+             `79c64ff0427f983feb6898e438a23910adc5768f`\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "empty-patch-id",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** ``\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "pair",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "bare",
+            "fixed",
+            "",
+            "Nothing here names a commit.",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "declared-none",
+            "fixed",
+            "no_fix_commit: \"doc note; nothing was committed\"\n",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let found = terminal_anchor_findings(&ctx);
+        let want = |check: &str, id: &str| (check.to_string(), id.to_string());
+        assert_eq!(
+            found,
+            vec![
+                want("fix_anchor_missing_patch_id", "empty-patch-id"),
+                want("fix_anchor_missing_patch_id", "same-line"),
+                want("fix_anchor_missing_patch_id", "sha-only"),
+                want("terminal_status_without_fix_anchor", "bare"),
+            ],
+            "a SHA with no (non-empty) patch-id owes the pair under its own name; the pair, \
+             and a stated `no_fix_commit`, owe nothing; a record with no pointer keeps the \
+             old name"
+        );
+    }
+
+    /// The detail text is the only place the author learns what shape is owed, and the
+    /// same-line shape is the one the bug was measured on. Pin that the text names the
+    /// consequence and the two-bullet remedy, and says the SHA half is the one that orphans.
+    #[tokio::test]
+    async fn the_missing_patch_id_finding_names_the_consequence_and_the_remedy() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "sha-only",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+        let v = {
+            let cat = ctx.catalog.lock();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "fix_anchor_missing_patch_id");
+        for needle in ["orphans", "patch-id", "git patch-id --stable", "own bullet"] {
+            assert!(
+                v[0].detail.contains(needle),
+                "detail must contain `{needle}`: {}",
+                v[0].detail
+            );
+        }
+    }
+
+    /// The new name is scope-gated like its sibling, so a row under a sibling root is COUNTED
+    /// as scoped out under the NEW name rather than reported or silently dropped.
+    #[tokio::test]
+    async fn fix_anchor_missing_patch_id_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "sha-only",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
+
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&mut ds, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "the sibling-root row must not be reported: {v:#?}"
+        );
+        let scoped_out = ds
+            .scoped_out()
+            .get("fix_anchor_missing_patch_id")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the refusal must be counted under the new check's own name: {scoped_out:?}"
+        );
+    }
+
+    /// The fence escape of `terminal_status_without_fix_anchor`, which
+    /// `docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md`
+    /// records as untested: a regression in the fence skip would break the check silently.
+    ///
+    /// A worked example of the provenance block inside a fence is a quotation, not a claim, so
+    /// a record whose ONLY pair is fenced still owes an anchor. The `unfenced` seed carries the
+    /// identical block outside a fence and must stay silent — without it, a check that fired on
+    /// every record mentioning a pair in any form would pass.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_does_not_read_a_fenced_pair_as_a_declaration() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "fenced",
+            "fixed",
+            "",
+            "## Fix provenance\n\n```\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n```\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "unfenced",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let found = terminal_anchor_findings(&ctx);
+        assert_eq!(
+            found,
+            vec![(
+                "terminal_status_without_fix_anchor".to_string(),
+                "fenced".to_string()
+            )],
+            "a fenced pair is a quotation: the record owes an anchor, and owes the whole one \
+             (no pointer at all), not just a patch-id"
         );
     }
 
