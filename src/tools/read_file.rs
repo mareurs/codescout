@@ -1298,7 +1298,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
                 let root_type = schema["root_type"].as_str().unwrap_or("?");
                 out.push_str(&format!("\n  Root: {root_type}"));
                 if let Some(keys) = schema["keys"].as_array() {
-                    for k in keys {
+                    for (i, k) in keys.iter().enumerate() {
+                        if let Some(gap) = omitted_gap(schema, "keys", i) {
+                            out.push_str(&gap);
+                        }
                         let path = k["path"].as_str().unwrap_or("?");
                         let typ = k["type"].as_str().unwrap_or("?");
                         let mut desc = format!("\n    {path}: {typ}");
@@ -2486,6 +2489,40 @@ mod tests {
         );
         assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
         assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+    #[tokio::test]
+    async fn a_json_object_with_wide_keys_is_summarised_inline_with_one_handle() {
+        // A VALID object of 30 keys, each 600 B wide: `summarize_json` lists them under
+        // `schema.keys`, one level down from where a top-level-only bound would look.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.json");
+        let body = format!(
+            "{{{}}}",
+            (0..30)
+                .map(|i| format!("\"{}{i:02}\": {i}", "k".repeat(600)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        std::fs::write(&path, &body).unwrap();
+        assert!(crate::tools::exceeds_inline_limit(&body));
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            text.contains("keys omitted"),
+            "the gap must be shown where it falls: {text:.600}"
+        );
         assert!(
             !crate::tools::exceeds_inline_limit(&text),
             "{} B",

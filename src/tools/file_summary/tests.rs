@@ -399,6 +399,45 @@ fn bound_summary_cuts_the_largest_array_and_spares_the_small_one() {
     assert_eq!(cut["symbols_truncated"], true);
     assert_eq!(cut["total_symbols"], 300);
 }
+#[test]
+fn bound_summary_cuts_an_array_one_level_down_and_marks_it_beside_the_array() {
+    // `summarize_json` keeps its key list under `schema`. The markers must land NEXT TO the
+    // array (in `schema`), where the renderer and any consumer already look for `total_keys`
+    // and `keys_truncated`, and the note must say where the array lives.
+    let keys: Vec<serde_json::Value> = (1..=40)
+        .map(|i| serde_json::json!({"path": format!("$.{}{i:02}", "k".repeat(500)), "type": "number"}))
+        .collect();
+    let s = serde_json::json!({
+        "type": "json",
+        "line_count": 40,
+        "schema": {"root_type": "object", "keys": keys},
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    let schema = &cut["schema"];
+    assert_eq!(
+        schema["keys_truncated"], true,
+        "the marker must sit beside the array: {cut}"
+    );
+    assert_eq!(schema["total_keys"], 40);
+    let after = schema["keys_omitted"]["after"].as_u64().unwrap() as usize;
+    let count = schema["keys_omitted"]["count"].as_u64().unwrap() as usize;
+    assert_eq!(schema["keys"].as_array().unwrap().len() + count, 40);
+    assert!(after > 0, "the first entries must survive");
+    assert!(
+        schema["keys"].as_array().unwrap().last().unwrap()["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("40"),
+        "the last entry must survive"
+    );
+    assert!(
+        cut.get("keys_truncated").is_none(),
+        "no stray marker at the top level"
+    );
+    assert!(notes[0].starts_with("schema.keys: "), "{}", notes[0]);
+}
 
 #[test]
 fn bound_summary_note_is_a_ready_to_run_call_naming_the_handle_and_the_gap() {

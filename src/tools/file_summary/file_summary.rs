@@ -1180,7 +1180,8 @@ pub(crate) const SUMMARY_BYTE_BUDGET: usize = 6_000;
 /// shared EQUALLY between them rather than spent largest-first, because `head` and `tail` are
 /// both informative and a largest-first pass would crush the first one to its floor.
 ///
-/// **Then arrays** (`symbols`, `sections`, `headings`, `keys`): the largest array loses its
+/// **Then arrays** (`symbols`, `sections`, `headings`, `keys`, at the top level or one level down,
+/// where `summarize_json` keeps `schema.keys`): the largest array loses its
 /// MIDDLE entries — the first and last halves of what is left of the budget survive. Entries
 /// stay objects of the same shape, so no consumer sees a foreign element; the gap is described
 /// in structured keys beside the array (`<key>_truncated`, `total_<key>` if absent, and
@@ -1230,31 +1231,44 @@ pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<St
     }
 
     // ---- arrays ----
-    let mut arrays: Vec<(String, usize)> = summary
-        .as_object()
-        .into_iter()
-        .flatten()
-        .filter(|(_, v)| v.as_array().is_some_and(|a| a.len() > 1))
-        .map(|(k, v)| (k.clone(), v.to_string().len()))
-        .collect();
-    arrays.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
-    for (key, _) in arrays {
+    // Top level, and one level down: `summarize_json` nests its key list under `schema`.
+    // (parent pointer, key, serialized bytes)
+    let mut arrays: Vec<(String, String, usize)> = Vec::new();
+    for (k, v) in summary.as_object().into_iter().flatten() {
+        match v {
+            Value::Array(a) if a.len() > 1 => {
+                arrays.push((String::new(), k.clone(), v.to_string().len()));
+            }
+            Value::Object(inner) => {
+                for (ik, iv) in inner {
+                    if iv.as_array().is_some_and(|a| a.len() > 1) {
+                        arrays.push((format!("/{k}"), ik.clone(), iv.to_string().len()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    arrays.sort_by_key(|(_, _, bytes)| std::cmp::Reverse(*bytes));
+    for (parent, key, _) in arrays {
         if size(&summary) <= SUMMARY_BYTE_BUDGET {
             break;
         }
-        if let Some(note) = cut_array_middle(&mut summary, &key, file_id) {
+        if let Some(note) = cut_array_middle(&mut summary, &parent, &key, file_id) {
             notes.push(note);
         }
     }
     (summary, notes)
 }
 
-/// Drop the MIDDLE entries of `summary[key]` so the whole summary fits [`SUMMARY_BYTE_BUDGET`].
+/// Drop the MIDDLE entries of the array `key` inside the object at JSON pointer `parent` ("" is
+/// the summary itself; `/schema` for a JSON summary's key list), so the whole summary fits
+/// [`SUMMARY_BYTE_BUDGET`].
 /// Returns the note for the caller's hint, or `None` when `key` is not an array.
-fn cut_array_middle(summary: &mut Value, key: &str, file_id: &str) -> Option<String> {
-    let entries = summary[key].as_array()?.clone();
+fn cut_array_middle(summary: &mut Value, parent: &str, key: &str, file_id: &str) -> Option<String> {
+    let entries = summary.pointer(parent)?.get(key)?.as_array()?.clone();
     let total = entries.len();
-    summary[key] = Value::Array(Vec::new());
+    *summary.pointer_mut(parent)?.get_mut(key)? = Value::Array(Vec::new());
     // Everything else, then 300 B for the structured markers added below.
     let base = summary.to_string().len();
     let half = SUMMARY_BYTE_BUDGET.saturating_sub(base + 300) / 2;
@@ -1289,32 +1303,40 @@ fn cut_array_middle(summary: &mut Value, key: &str, file_id: &str) -> Option<Str
     } else {
         None
     };
-    let grand_total = summary[format!("total_{key}")]
+
+    // The markers go BESIDE the array, in whichever object holds it: `schema` for a JSON
+    // summary's key list, the summary itself otherwise.
+    let holder = summary.pointer_mut(parent)?;
+    let grand_total = holder[format!("total_{key}")]
         .as_u64()
         .map(|t| t as usize)
         .unwrap_or(total);
-
     let mut kept: Vec<Value> = entries[..head].to_vec();
     kept.extend_from_slice(&entries[total - tail..]);
-    summary[key] = Value::Array(kept);
-    summary[format!("{key}_truncated").as_str()] = Value::Bool(true);
-    if summary.get(format!("total_{key}")).is_none() {
-        summary[format!("total_{key}").as_str()] = serde_json::json!(total);
+    holder[key] = Value::Array(kept);
+    holder[format!("{key}_truncated").as_str()] = Value::Bool(true);
+    if holder.get(format!("total_{key}")).is_none() {
+        holder[format!("total_{key}").as_str()] = serde_json::json!(total);
     }
-    summary[format!("{key}_omitted").as_str()] = serde_json::json!({
+    holder[format!("{key}_omitted").as_str()] = serde_json::json!({
         "after": head,
         "count": omitted,
         "from_line": from,
         "to_line": to,
     });
 
+    let label = if parent.is_empty() {
+        key.to_string()
+    } else {
+        format!("{}.{key}", parent.trim_start_matches('/'))
+    };
     Some(match (from, to) {
         (Some(f), Some(t)) => format!(
-            "{key}: {omitted} of {grand_total} entries omitted (lines {f}-{t}); read them with \
+            "{label}: {omitted} of {grand_total} entries omitted (lines {f}-{t}); read them with \
              read_file(path=\"{file_id}\", start_line={f}, end_line={t})."
         ),
         _ => format!(
-            "{key}: {omitted} of {grand_total} entries omitted; read the file in ranges with \
+            "{label}: {omitted} of {grand_total} entries omitted; read the file in ranges with \
              read_file(path=\"{file_id}\", start_line=N, end_line=M)."
         ),
     })
