@@ -931,62 +931,56 @@ fn read_full_file(
                     crate::tools::file_summary::summarize_generic_file(text)
                 }
             };
-        // Bound the summary by BYTES before anything is added to it: every summarizer above
-        // bounds by count, and a count has no size, so an unbounded one overflowed the inline
-        // limit and `call_content` buffered it a second time under `@tool_*` beside `file_id`.
-        // Doing it here covers every file type and every fallback path at one site.
-        let (mut result, cut_notes) = crate::tools::file_summary::bound_summary(
-            summary,
-            &file_id,
-            crate::tools::file_summary::SUMMARY_BYTE_BUDGET,
-        );
-        result["file_id"] = json!(file_id);
-
-        // This summary describes a file it does not contain — an outline, zero content
-        // lines. Until now it carried only `line_count`, which the renderer prints as a
-        // bare "1505 lines" header: indistinguishable from a complete read, so a caller
-        // could reasonably believe it had seen the file.
-        //
-        // Thirteen lines below, the milder case (exploring mode, file longer than
-        // max_results) builds a full OverflowInfo with a tailored hint. The worse case had
-        // none. That asymmetry is the bug — not a design philosophy, a local omission.
-        //
-        // `shown: 0` is literal, not a placeholder: zero lines of content are shown.
-        //
-        // See `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
-        let summarised_lines = result["line_count"]
-            .as_u64()
-            .unwrap_or_else(|| text.lines().count() as u64) as usize;
+        // `markdown_coverage` MARKS headings as seen, so it runs once, here, and its value is
+        // handed to `finish` (which `fit_envelope` may call several times).
+        let coverage = if path.ends_with(".md") || path.ends_with(".markdown") {
+            markdown_coverage(text, resolved, ctx, None, None, None)
+        } else {
+            None
+        };
         let is_source = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy())
             == crate::tools::file_summary::FileSummaryType::Source;
-        result["complete"] = json!(false);
-        result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
-            shown: 0,
-            total: summarised_lines,
-            hint: {
-                let mut hint = outline_hint(
-                    &file_id,
-                    is_source,
-                    input["force"].as_bool().unwrap_or(false),
-                );
-                // Where each cut array's middle can be read, as a ready-to-run call.
-                for note in &cut_notes {
-                    hint.push(' ');
-                    hint.push_str(note);
-                }
-                hint
-            },
-            next_offset: None,
-            by_file: None,
-            by_file_overflow: 0,
-        });
+        let force = input["force"].as_bool().unwrap_or(false);
 
-        if path.ends_with(".md") || path.ends_with(".markdown") {
-            if let Some(c) = markdown_coverage(text, resolved, ctx, None, None, None) {
-                result["coverage"] = c;
+        // The whole response around a summary. This is the construction `read_full_file` always
+        // had; it is a closure so `fit_envelope` can MEASURE the real envelope, and cut only if
+        // that is over the inline limit, instead of cutting to a guess about what the keys cost.
+        //
+        // This summary describes a file it does not contain: an outline, zero content lines.
+        // It carries `complete: false` and an `overflow` with `shown: 0` (literal, not a
+        // placeholder) so a caller cannot take it for a complete read. See
+        // `docs/issues/archive/2026-08-15-read-file-buffered-summary-has-no-incompleteness-signal.md`.
+        let finish = |mut result: Value, cut_notes: &[String]| -> Value {
+            let summarised_lines = result["line_count"]
+                .as_u64()
+                .unwrap_or_else(|| text.lines().count() as u64)
+                as usize;
+            result["file_id"] = json!(file_id);
+            result["complete"] = json!(false);
+            result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
+                shown: 0,
+                total: summarised_lines,
+                hint: {
+                    let mut hint = outline_hint(&file_id, is_source, force);
+                    // Where each cut array's middle can be read, as a ready-to-run call.
+                    for note in cut_notes {
+                        hint.push(' ');
+                        hint.push_str(note);
+                    }
+                    hint
+                },
+                next_offset: None,
+                by_file: None,
+                by_file_overflow: 0,
+            });
+            if let Some(c) = &coverage {
+                result["coverage"] = c.clone();
             }
-        }
-        return Ok(result);
+            result
+        };
+        return Ok(crate::tools::file_summary::fit_envelope(
+            summary, &file_id, finish,
+        ));
     }
 
     let is_md = path.ends_with(".md") || path.ends_with(".markdown");
@@ -2328,6 +2322,53 @@ mod tests {
         let hint = result["overflow"]["hint"].as_str().unwrap_or("");
         assert!(!hint.contains("entries omitted"), "{hint}");
     }
+    /// CONTROL AT THE EDGE of the contract: a file whose summary USED TO FIT must come back
+    /// exactly as it did before any bound existed. The golden is what `fac7abce` (before
+    /// `bound_summary`) returned for this fixture, captured by running that commit's code, with
+    /// the buffer handle replaced by `@file_X`: a 17,200 B source file whose summary is 8,938 B
+    /// and whose whole envelope is 9,224 B, under the 10,003 B inline limit. A bound sized for
+    /// the worst case (6,000 B) cut it and added `<key>_truncated`, `total_<key>`,
+    /// `<key>_omitted`, a note in the hint and a gap line: a contract change for ordinary files.
+    #[tokio::test]
+    async fn a_summary_that_fits_is_returned_exactly_as_before_any_bound_existed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fits.rs");
+        let src: String = (1..=200)
+            .map(|i| format!("fn f{i:03}() {{ let _ = \"{}\"; }}\n", "p".repeat(60)))
+            .collect();
+        std::fs::write(&path, &src).unwrap();
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let id = result["file_id"].as_str().unwrap().to_string();
+        let got: Value = serde_json::from_str(
+            &serde_json::to_string(&result)
+                .unwrap()
+                .replace(&id, "@file_X"),
+        )
+        .unwrap();
+        let golden: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/golden/read_file_summary_fits.json"
+        ))
+        .unwrap();
+        assert_eq!(got, golden, "a summary that fit changed shape or content");
+        // The size this fixture sits at is the point: over the old 6,000 B budget, under the limit.
+        assert!(
+            (6_100..9_000).contains(&got["symbols"].to_string().len()),
+            "the fixture drifted off the edge: {} B",
+            got["symbols"].to_string().len()
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&result.to_string()),
+            "{} B",
+            result.to_string().len()
+        );
+    }
+
     #[tokio::test]
     async fn the_cut_symbol_list_shows_its_gap_between_the_two_halves() {
         // The gap line must sit WHERE the entries are missing, with the neighbours' line
@@ -2580,7 +2621,7 @@ mod tests {
     // in raw bytes passed its tests on plain text and left these over the limit: two handles.
     // Measured by the reviewer through `call_content`: 11,593 B for quotes, 33,769 B for `\x01`.
 
-    const ESCAPING: [(&str, char); 5] = [
+    const INFLATING_CHARS: [(&str, char); 5] = [
         ("quote", '"'),
         ("backslash", '\\'),
         ("tab", '\t'),
@@ -2606,7 +2647,7 @@ mod tests {
 
     #[tokio::test]
     async fn wide_lines_of_every_escaping_kind_come_back_inline_with_one_handle() {
-        for (name, ch) in ESCAPING {
+        for (name, ch) in INFLATING_CHARS {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("wide.txt");
             let line = ch.to_string().repeat(6_000);
@@ -2617,7 +2658,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_previews_of_every_escaping_kind_come_back_inline_with_one_handle() {
-        for (name, ch) in ESCAPING {
+        for (name, ch) in INFLATING_CHARS {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("wide.ini");
             let body: String = (0..40)
@@ -2632,7 +2673,7 @@ mod tests {
     async fn symbolless_source_of_every_escaping_kind_comes_back_inline_with_one_handle() {
         // A `.rs` file with no symbols falls back to the generic head/tail summary: the shape
         // of a generated or data-only source file.
-        for (name, ch) in ESCAPING {
+        for (name, ch) in INFLATING_CHARS {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("data.rs");
             let line = format!("// {}", ch.to_string().repeat(6_000));
@@ -2645,7 +2686,7 @@ mod tests {
     async fn wide_markdown_summary_lines_of_every_escaping_kind_come_back_inline() {
         // `.mdx` takes the Markdown SUMMARY (headings array), whose entries carry the heading
         // text: quote-heavy headings make every entry cost double.
-        for (name, ch) in ESCAPING {
+        for (name, ch) in INFLATING_CHARS {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("wide.mdx");
             let body: String = (1..=40)

@@ -435,32 +435,30 @@ fn read_markdown_default_tiers(
             )
         };
 
-        let mut result = json!({
-            "lines": total_lines,
-            "headings": headings_json,
-            "file_id": file_id,
-            "hint": hint,
-        });
-        if let Some(c) = md_cov {
-            result["coverage"] = c;
-        }
         // The map lists EVERY heading, and `HEADINGS_HARD_CAP` only chooses this tier: it bounds
         // nothing in it. Heading text has no length, so a 200-heading file of ordinary titles
         // is ~15 KB of map, and `call_content` buffered it again under `@tool_*` beside
-        // `file_id`. Bound it by bytes, with the note in the hint the renderer prints as
-        // `next:`. (`coverage` cannot add a second list here: a default read counts every
-        // heading as seen, so `markdown_coverage` returns `None`. The bound would cut one
-        // anyway if that ever changed.)
-        let (mut result, notes) = crate::tools::file_summary::bound_summary(
-            result,
-            &file_id,
-            crate::tools::file_summary::SUMMARY_BYTE_BUDGET,
-        );
-        if !notes.is_empty() {
-            let hint = result["hint"].as_str().unwrap_or("").to_string();
-            result["hint"] = json!(format!("{hint} {}", notes.join(" ")));
-        }
-        return Ok(result);
+        // `file_id`. `fit_envelope` builds the whole response, measures it, and cuts the map
+        // only by the excess, with the note added to the hint the renderer prints as `next:`.
+        // (`coverage` cannot add a second list here: a default read counts every heading as
+        // seen, so `markdown_coverage` returns `None`. It sits in the measured envelope anyway.)
+        let summary = json!({ "lines": total_lines, "headings": headings_json });
+        let finish = |mut result: Value, notes: &[String]| -> Value {
+            result["file_id"] = json!(file_id);
+            let mut hint = hint.clone();
+            for note in notes {
+                hint.push(' ');
+                hint.push_str(note);
+            }
+            result["hint"] = json!(hint);
+            if let Some(c) = &md_cov {
+                result["coverage"] = c.clone();
+            }
+            result
+        };
+        return Ok(crate::tools::file_summary::fit_envelope(
+            summary, &file_id, finish,
+        ));
     }
 
     // ── Tier 2: medium — full content + heading map + soft hint ───────

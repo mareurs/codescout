@@ -269,6 +269,7 @@ fn markdown_summary_no_truncation_flag_when_under_cap() {
 
 /// The budget the unit tests below exercise. `bound_summary` takes it as a parameter; these
 /// tests pin the allocation arithmetic at one fixed value.
+// cap-class: NOT_A_CAP — a test fixture value passed to bound_summary; it shapes no result
 const SUMMARY_BYTE_BUDGET: usize = 6_000;
 
 /// `bound_summary` at the test budget, so each test reads as "this input, this outcome".
@@ -414,6 +415,99 @@ fn bound_summary_last_resort_also_catches_a_budget_the_fixed_part_cannot_meet() 
     let (cut, _) = bound_summary(s, "@file_t");
     assert_eq!(cut["summary_omitted"], true);
     assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET);
+}
+// ---- fit_envelope: the budget comes from the MEASURED envelope ----
+
+/// A caller's `finish`, as `read_full_file` has one: keys added around the summary, and a hint
+/// that carries the cut notes. `pad` stands for whatever else the envelope holds.
+fn envelope_with(pad: usize) -> impl Fn(serde_json::Value, &[String]) -> serde_json::Value {
+    move |summary, notes| {
+        serde_json::json!({
+            "s": summary,
+            "hint": notes.join(" "),
+            "pad": "p".repeat(pad),
+        })
+    }
+}
+
+#[test]
+fn fit_envelope_returns_an_envelope_that_fits_exactly_as_the_caller_built_it() {
+    // ~9 KB of summary: over the OLD fixed 6,000 B budget, under the limit once wrapped.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(200)});
+    let finish = envelope_with(100);
+    let whole = finish(summary.clone(), &[]);
+    assert!(ser_len(&summary) > 6_000, "{} B", ser_len(&summary));
+    assert!(!crate::tools::exceeds_inline_limit(&whole.to_string()));
+
+    let got = fit_envelope(summary, "@file_t", &finish);
+
+    assert_eq!(got, whole, "an envelope that fits must not change at all");
+}
+
+#[test]
+fn fit_envelope_cuts_only_the_excess_not_down_to_a_fixed_budget() {
+    // The envelope is over the limit by a few hundred bytes. Cutting down to the 9,000 B target
+    // costs about 1.3 KB, ~30 entries: the old fixed 6,000 B budget cost about 3x that.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(200)});
+    let s = ser_len(&summary);
+    let pad = 10_100usize.saturating_sub(s + 60);
+    let finish = envelope_with(pad);
+    let whole = finish(summary.clone(), &[]);
+    assert!(
+        crate::tools::exceeds_inline_limit(&whole.to_string()),
+        "precondition: the envelope must be over the limit, got {} B",
+        ser_len(&whole)
+    );
+
+    let got = fit_envelope(summary, "@file_t", &finish);
+
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B over the {SUMMARY_ENVELOPE_BUDGET} B target",
+        ser_len(&got)
+    );
+    let kept = got["s"]["symbols"].as_array().unwrap().len();
+    assert!(kept < 200, "nothing was cut");
+    assert!(
+        kept >= 200 - 45,
+        "cut far more than the excess: {kept} of 200 kept"
+    );
+}
+
+#[test]
+fn fit_envelope_prices_the_cut_notes_that_land_in_the_hint() {
+    // The notes a cut produces are put in the hint by `finish`, which lengthens the envelope
+    // AFTER the cut was sized. The first pass overshoots by the notes' length; the loop must
+    // shrink the budget by exactly that and cut again from the ORIGINAL.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let got = fit_envelope(summary, "@file_t", envelope_with(400));
+
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B",
+        ser_len(&got)
+    );
+    assert!(
+        got["hint"].as_str().unwrap().contains("entries omitted"),
+        "{}",
+        got["hint"]
+    );
+    assert!(got["s"]["symbols_truncated"] == true);
+}
+
+#[test]
+fn fit_envelope_falls_back_to_the_minimal_summary_when_cutting_cannot_converge() {
+    // A `finish` whose cost does not shrink with the summary (a 20 KB key present whenever a
+    // note is): no budget makes this fit. After the retries the result is the MINIMAL summary
+    // and says so, not the last half-cut attempt.
+    let summary = serde_json::json!({
+        "type": "source", "line_count": 400, "symbols": numbered_entries(400),
+    });
+    let finish = |s: serde_json::Value, notes: &[String]| serde_json::json!({"s": s, "pad": "p".repeat(if notes.is_empty() { 0 } else { 20_000 })});
+    let got = fit_envelope(summary, "@file_t", finish);
+    assert_eq!(got["s"]["summary_omitted"], true, "{:.300}", got["s"]);
+    assert_eq!(got["s"]["line_count"], 400);
+    assert!(got["s"].get("symbols").is_none());
 }
 
 #[test]

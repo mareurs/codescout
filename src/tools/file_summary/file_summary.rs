@@ -1149,8 +1149,10 @@ pub fn summarize_generic_file(content: &str) -> Value {
         "tail": tail,
     })
 }
-/// Serialized-size ceiling on a whole-file summary BEFORE `read_full_file` adds its own keys
-/// (`file_id`, `complete`, `overflow`, `coverage`).
+/// Serialized-size target for a whole `read_file`/`read_markdown` summary ENVELOPE (the summary
+/// plus the keys `read_full_file` and the markdown tiers add around it: `file_id`, `complete`,
+/// `overflow`, `hint`, `coverage`): `INLINE_BYTE_BUDGET`, which leaves the slack
+/// `call_content` needs for path stripping and the guide hint it may still add.
 ///
 /// The summarizers above bound their output by COUNT: every symbol, the first 20 and last 10
 /// lines, 30 lines of a config, 30 sections. A count has no size. A 1,500-function file or a
@@ -1161,13 +1163,56 @@ pub fn summarize_generic_file(content: &str) -> Value {
 /// tool's own `@file_0bce76f9`. It is the same defect `summarize_generic` had in
 /// `command_summary.rs` and the same one `GENERIC_FIELD_BYTE_BUDGET` fixed there.
 ///
-/// 6,000 B leaves about 3,000 B of the 9,000 B inline budget for what `read_full_file` adds
-/// after the summary is built: the handle, `complete`, and an `overflow` object whose hint runs
-/// to a few hundred bytes. Applied at that single choke point rather than in each summarizer,
-/// so every file type and every fallback path (an unparseable JSON, a YAML with no keys, a
-/// source file with no symbols) is covered and a new summarizer cannot forget it.
+/// **The target is applied to the MEASURED envelope, never to a guess about it.** An earlier
+/// version cut every summary to a fixed 6,000 B "to leave room for the keys", but the keys cost
+/// ~300-420 B, so summaries of 6,000-9,600 B that had always come back whole were cut: a
+/// contract change for ordinary files. [`fit_envelope`] builds the envelope, and only if that
+/// is over the INLINE LIMIT does it cut, down to this target.
 // cap-class: RESULT_CAP file_summary.summary_bytes — probed
-pub(crate) const SUMMARY_BYTE_BUDGET: usize = 6_000;
+pub(crate) const SUMMARY_ENVELOPE_BUDGET: usize = crate::tools::INLINE_BYTE_BUDGET;
+
+/// Build the response envelope around `summary` and make it fit the inline limit by cutting
+/// only the EXCESS, so a summary that fits comes back byte-for-byte as it always did.
+///
+/// `finish(summary, notes)` is the caller's own construction of the whole response (the keys
+/// it adds around the summary, the cut notes it puts in its hint). Passing it in is what lets
+/// this measure the REAL envelope: the budget handed to [`bound_summary`] is
+/// [`SUMMARY_ENVELOPE_BUDGET`] minus what `finish` costs around an empty summary, not a
+/// constant guessed to be about right.
+///
+/// 1. The envelope with the summary as built fits the inline limit: returned untouched.
+/// 2. Otherwise the summary is cut to the budget and the envelope re-measured WITH the notes
+///    the cut produced, because those lengthen the hint; if it is still over, the budget
+///    shrinks by exactly the excess and the cut is redone from the ORIGINAL summary (up to
+///    four times, which every case measured needs one or two).
+/// 3. If that never converges, the minimal `summary_omitted` summary (budget 0) is used, which
+///    always fits. So the result is never oversized and never silently so.
+pub(crate) fn fit_envelope(
+    summary: Value,
+    file_id: &str,
+    finish: impl Fn(Value, &[String]) -> Value,
+) -> Value {
+    let over_limit = |v: &Value| crate::tools::exceeds_inline_limit(&v.to_string());
+    let whole = finish(summary.clone(), &[]);
+    if !over_limit(&whole) {
+        return whole;
+    }
+    let overhead = finish(Value::Object(serde_json::Map::new()), &[])
+        .to_string()
+        .len();
+    let mut budget = SUMMARY_ENVELOPE_BUDGET.saturating_sub(overhead);
+    for _ in 0..4 {
+        let (bounded, notes) = bound_summary(summary.clone(), file_id, budget);
+        let envelope = finish(bounded, &notes);
+        let size = envelope.to_string().len();
+        if size <= SUMMARY_ENVELOPE_BUDGET {
+            return envelope;
+        }
+        budget = budget.saturating_sub(size - SUMMARY_ENVELOPE_BUDGET + 16);
+    }
+    let (minimal, notes) = bound_summary(summary, file_id, 0);
+    finish(minimal, &notes)
+}
 
 /// Bound a whole-file summary to `budget` SERIALIZED bytes, keeping both ends of whatever is
 /// cut, and say what was cut.

@@ -1067,7 +1067,8 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
         // reads a 1,500-function source file whose symbol list is ~72 KB of JSON against
-        // `SUMMARY_BYTE_BUDGET` 6,000, through `ReadFile.call_content`. A symbol list is an
+        // `SUMMARY_ENVELOPE_BUDGET` 9,000 (the target for the MEASURED envelope), through
+        // `ReadFile.call_content`. A symbol list is an
         // ARRAY, so it is the array cut that binds there and its marker (`entries omitted`)
         // is what the row cites. The STRING cut of the same constant (`head`, `tail`,
         // `preview`, marker `bytes shown`) is pinned by
