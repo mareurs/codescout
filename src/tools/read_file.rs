@@ -2614,6 +2614,263 @@ mod tests {
             text.len()
         );
     }
+    // ---- read_markdown: the three responses the first sweep probed and left ----
+
+    /// Quote-heavy body, so escaping inflates it: every `"` serializes to two bytes.
+    fn quoted_body(lines: usize, width: usize) -> String {
+        (0..lines)
+            .map(|_| format!("{}\n", "\"".repeat(width)))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_tier_two_markdown_that_serializes_over_the_limit_gets_a_handle_not_a_tool_buffer() {
+        // 30 headings (under HEADINGS_HARD_CAP), 180 lines (over LINE_SOFT_CAP: tier 2), 7.8 KB
+        // RAW, under the limit. Serialized with its heading map and with every quote doubled it
+        // is far over, and the response used to be buffered under a bare `@tool_*`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tier2.md");
+        let body: String = (1..=30)
+            .map(|i| format!("## Section {i:02}\n{}\n", quoted_body(4, 60)))
+            .collect();
+        assert!(
+            body.len() < 10_003 && body.lines().count() > 150,
+            "{}",
+            body.len()
+        );
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert!(value["file_id"].is_string(), "no handle: {value:.300}");
+        assert!(
+            value.get("content").is_none(),
+            "the body must not ride along"
+        );
+
+        let text = assert_inline_with_one_handle(&path, "tier 2 markdown").await;
+        assert!(text.contains("Section 01"), "the heading map must be there");
+    }
+
+    #[tokio::test]
+    async fn a_tier_one_markdown_that_serializes_over_the_limit_gets_a_handle_too() {
+        // 20 headings, 80 lines: tier 1. 6.3 KB raw, doubled quotes push it over once serialized.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tier1.md");
+        let body: String = (1..=20)
+            .map(|i| format!("## S{i:02}\n{}\n", quoted_body(2, 150)))
+            .collect();
+        assert!(
+            body.len() < 10_003 && body.lines().count() < 150,
+            "{}",
+            body.len()
+        );
+        std::fs::write(&path, &body).unwrap();
+        assert_inline_with_one_handle(&path, "tier 1 markdown").await;
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert!(value["file_id"].is_string() && value.get("content").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_markdown_that_serializes_within_the_limit_still_returns_its_body_inline() {
+        // The control: plain text, 8 KB, 30 headings: tier 2 as always, body inline, no handle.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plain.md");
+        let body: String = (1..=30)
+            .map(|i| {
+                format!(
+                    "## Section {i:02}\n{}\n\n\n\n\n\n",
+                    "plain words here".repeat(10)
+                )
+            })
+            .collect();
+        assert!(!crate::tools::exceeds_inline_limit(&body));
+        std::fs::write(&path, &body).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(value["content"].as_str().unwrap(), body);
+        assert!(value.get("file_id").is_none(), "{value:.200}");
+    }
+
+    /// `## Big` with `n` `###` sub-headings, each carrying `body` bytes of text.
+    fn big_section_file(n: usize, body: usize) -> String {
+        let mut s = String::from("## Big\n");
+        for i in 1..=n {
+            s.push_str(&format!(
+                "### Sub {i:03} {}\n{}\n\n",
+                "s".repeat(60),
+                "b".repeat(body)
+            ));
+        }
+        s
+    }
+
+    fn error_body_len(rec: &crate::tools::RecoverableError) -> usize {
+        rec.message.len()
+            + rec.hint().unwrap_or_default().len()
+            + serde_json::to_string(&rec.extra).unwrap().len()
+    }
+
+    #[tokio::test]
+    async fn the_oversized_section_error_bounds_its_section_map_and_keeps_the_route() {
+        // 300 sub-headings: the error's `extra` was 26,629 B, put inline by the server, because
+        // an `Err` never reaches `call_content`'s buffering.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bigsec.md");
+        std::fs::write(&path, big_section_file(300, 20)).unwrap();
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Big" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an oversized section is a RecoverableError");
+
+        assert!(
+            error_body_len(rec) <= crate::tools::INLINE_BYTE_BUDGET,
+            "the error body is {} B",
+            error_body_len(rec)
+        );
+        let map = rec.extra["section_map"].as_array().unwrap();
+        assert!(map.len() < 300 && map.len() > 20, "{} kept", map.len());
+        assert!(map[0]["h"].as_str().unwrap().contains("Sub 001"));
+        assert!(map.last().unwrap()["h"]
+            .as_str()
+            .unwrap()
+            .contains("Sub 300"));
+        assert_eq!(rec.extra["section_map_truncated"], true);
+        assert_eq!(rec.extra["total_section_map"], 300);
+        let file_id = rec.extra["file_id"].as_str().unwrap().to_string();
+        // The route `next_actions` names must still be in the kept map.
+        let first_action = rec.extra["next_actions"][0].as_str().unwrap();
+        assert!(first_action.contains("Sub 001") && first_action.contains(&file_id));
+
+        // And the cut note's own route works: follow its line range on the section's handle.
+        let hint = rec.hint().unwrap();
+        assert!(hint.contains("entries omitted"), "{hint}");
+        let after = rec.extra["section_map_omitted"]["after"].as_u64().unwrap();
+        let (from, to) = (
+            rec.extra["section_map_omitted"]["from_line"]
+                .as_u64()
+                .unwrap(),
+            rec.extra["section_map_omitted"]["to_line"]
+                .as_u64()
+                .unwrap(),
+        );
+        assert!(
+            hint.contains(&format!("start_line={from}, end_line={to}")),
+            "{hint}"
+        );
+        let followed = ReadFile
+            .call(
+                json!({ "path": file_id, "start_line": from, "end_line": from + 2 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let content = followed["content"].as_str().unwrap();
+        assert!(
+            content.starts_with(&format!("### Sub {:03}", after + 1)),
+            "line {from} of the section buffer is not the first omitted sub-heading: {content:.80}"
+        );
+        assert!(to > from);
+    }
+
+    #[tokio::test]
+    async fn the_oversized_section_error_keeps_a_map_that_fits_whole() {
+        // 40 sub-headings of 300 B: the section is over the inline limit (14.8 KB) but its map
+        // (~3.6 KB) fits, so nothing in the error changes shape.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("smallmap.md");
+        std::fs::write(&path, big_section_file(40, 300)).unwrap();
+        let ctx = test_ctx().await;
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "heading": "## Big" }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap();
+        assert_eq!(rec.extra["section_map"].as_array().unwrap().len(), 40);
+        assert!(rec.extra.get("section_map_truncated").is_none());
+        assert!(!rec.hint().unwrap().contains("omitted"));
+    }
+
+    fn two_sections(width: usize) -> String {
+        format!(
+            "## M1\n{}\n\n## M2\n{}\n",
+            "lorem ipsum dolor sit amet ".repeat(width / 27),
+            "consectetur adipiscing elit ".repeat(width / 28)
+        )
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_drops_the_duplicate_sections_when_it_would_not_fit() {
+        // Two sections of ~4.5 KB: `content` is the two joined (9.2 KB, fits), `sections` repeats
+        // the same text (serialized 18.9 KB together, one `@tool_*`).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi.md");
+        std::fs::write(&path, two_sections(4_500)).unwrap();
+        let ctx = test_ctx().await;
+        let input = json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] });
+
+        let value = ReadFile.call(input.clone(), &ctx).await.unwrap();
+
+        let content = value["content"].as_str().unwrap();
+        assert!(content.contains("lorem") && content.contains("consectetur"));
+        assert!(value.get("sections").is_none(), "the duplicate stayed");
+        assert_eq!(value["sections_omitted"], true);
+        assert!(value["hint"]
+            .as_str()
+            .unwrap()
+            .contains("`sections` omitted"));
+        assert!(!crate::tools::exceeds_inline_limit(&value.to_string()));
+        let text = ReadFile
+            .call_content(input, &ctx)
+            .await
+            .unwrap()
+            .remove(0)
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap();
+        assert!(!text.contains("@tool_"), "{text:.200}");
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_that_fits_keeps_its_per_section_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-small.md");
+        std::fs::write(&path, two_sections(1_000)).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(value["sections"].as_array().unwrap().len(), 2);
+        assert!(value.get("sections_omitted").is_none());
+    }
+
     // ---- JSON escaping must not break the one-handle guarantee ----
     //
     // The summary is measured against the SERIALIZED inline limit, and escaping inflates raw
