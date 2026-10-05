@@ -2940,6 +2940,195 @@ mod tests {
         );
         assert!(rec.extra["file_id"].is_string());
     }
+    // ---- SWEEPS: what is measured must be what is returned ----
+    //
+    // `read()` adds `"format": "markdown"` AFTER the tier builders measured their response, and
+    // the multi-heading read added its hint and `sections_omitted` after it measured. Every key
+    // added after the measurement widens a window just below the inline limit: a response the
+    // builder judged to fit (<= 10,003 B) came back 10,004-10,136 B and was buffered under a
+    // `@tool_*` beside its own handle. Point probes at the edges miss that; a sweep that walks
+    // the content size across the whole band, one response kind at a time, cannot.
+
+    const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
+
+    /// What one sweep saw, for the assertions after it.
+    #[derive(Default)]
+    struct Sweep {
+        points: usize,
+        worst: usize,
+        /// Largest response that was returned UNCUT and inline (it sits on the edge).
+        worst_uncut: usize,
+        cut: usize,
+        uncut: usize,
+    }
+
+    #[tokio::test]
+    async fn sweep_tier_three_heading_map_across_the_edge_band() {
+        // 100 headings (over HEADINGS_HARD_CAP, so always tier 3); the LAST heading widens by
+        // 2 B per point, walking the uncut response from ~9.9 KB to ~10.3 KB.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("map.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for x in (1_300..=1_600).step_by(2) {
+            let mut body: String = (1..100)
+                .map(|i| format!("## H{i:03} {}\nb\n\n", "w".repeat(60)))
+                .collect();
+            body.push_str(&format!("## H100 {}\nb\n", "w".repeat(60 + x)));
+            std::fs::write(&path, &body).unwrap();
+
+            let value = ReadFile
+                .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let size = value.to_string().len();
+            assert!(size <= LIMIT, "x={x}: the returned map is {size} B");
+            let text = assert_inline_with_one_handle(&path, &format!("tier-3 map x={x}")).await;
+            assert!(text.contains("H001"), "x={x}: the first heading was lost");
+            sw.points += 1;
+            sw.worst = sw.worst.max(size);
+            if value.get("headings_truncated").is_some() {
+                sw.cut += 1;
+            } else {
+                sw.uncut += 1;
+                sw.worst_uncut = sw.worst_uncut.max(size);
+            }
+        }
+        eprintln!(
+            "SWEEP tier3: {} points, worst {} B, worst uncut {} B, cut {}, uncut {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.cut, sw.uncut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "the sweep stopped short of the band: {}",
+            sw.worst_uncut
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_tier_one_and_two_fall_through_across_the_edge_band() {
+        // 30 headings, tier 1/2 (raw body under the limit); the last section widens by 2 B per
+        // point so the serialized response (body + heading map + hint + format) crosses the limit.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inline.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for x in (1_000..=1_500).step_by(2) {
+            let mut body: String = (1..30)
+                .map(|i| format!("## S{i:02}\n{}\n\n", "p".repeat(250)))
+                .collect();
+            body.push_str(&format!("## S30\n{}\n", "p".repeat(250 + x)));
+            assert!(
+                body.len() <= LIMIT,
+                "x={x}: the raw body must stay under the limit"
+            );
+            std::fs::write(&path, &body).unwrap();
+
+            let value = ReadFile
+                .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let size = value.to_string().len();
+            assert!(size <= LIMIT, "x={x}: the returned response is {size} B");
+            let text = read_text(&path).await;
+            assert!(
+                !text.contains("@tool_"),
+                "x={x}: parked under @tool_: {text:.120}"
+            );
+            assert!(handles_in(&text).len() <= 1, "x={x}: {text:.120}");
+            sw.points += 1;
+            sw.worst = sw.worst.max(size);
+            if value.get("content").is_some() {
+                sw.uncut += 1;
+                sw.worst_uncut = sw.worst_uncut.max(size);
+            } else {
+                assert!(
+                    value["file_id"].is_string(),
+                    "x={x}: fell through without a handle"
+                );
+                sw.cut += 1;
+            }
+        }
+        eprintln!(
+            "SWEEP tier1/2: {} points, worst {} B, worst inline {} B, inline {}, fell through {}",
+            sw.points, sw.worst, sw.worst_uncut, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        assert!(
+            sw.worst_uncut >= 9_985,
+            "the sweep stopped short of the band: {}",
+            sw.worst_uncut
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_multi_heading_read_across_the_edge_band() {
+        // Two sections of width n: `content` is ~2n. It fits alone from ~9.5 KB to 10,003 B, where
+        // the response (content + hint + `sections_omitted` + format) is what must fit, or the read
+        // must take the error path. At no point may the result be parked under `@tool_*`.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi.md");
+        let ctx = test_ctx().await;
+        let mut sw = Sweep::default();
+        for n in 4_800..=5_000 {
+            std::fs::write(&path, two_sections_exact(n)).unwrap();
+            let input = json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] });
+
+            let text = match ReadFile.call_content(input.clone(), &ctx).await {
+                Ok(mut content) => content.remove(0).as_text().map(|t| t.text.clone()).unwrap(),
+                // The error path (content alone does not fit) surfaces as an `Err`.
+                Err(e) => e.to_string(),
+            };
+            assert!(
+                !text.contains("@tool_"),
+                "n={n}: parked under @tool_: {text:.120}"
+            );
+            assert!(handles_in(&text).len() <= 1, "n={n}: {text:.120}");
+            sw.points += 1;
+            match ReadFile.call(input, &ctx).await {
+                Ok(value) => {
+                    let size = value.to_string().len();
+                    assert!(size <= LIMIT, "n={n}: the returned response is {size} B");
+                    sw.worst = sw.worst.max(size);
+                    sw.worst_uncut = sw.worst_uncut.max(size);
+                    sw.uncut += 1;
+                }
+                Err(e) => {
+                    let rec = e.downcast_ref::<crate::tools::RecoverableError>().unwrap();
+                    assert!(rec.extra["file_id"].is_string(), "n={n}");
+                    sw.cut += 1;
+                }
+            }
+        }
+        eprintln!(
+            "SWEEP multi: {} points, worst ok {} B, ok {}, error path {}",
+            sw.points, sw.worst, sw.uncut, sw.cut
+        );
+        assert!(
+            sw.cut > 0 && sw.uncut > 0,
+            "the sweep never crossed the edge"
+        );
+        // The decision to take the error path is deliberately CONSERVATIVE by the 24 B of
+        // `"coverage_omitted":true,` it always counts (coverage's presence is only known after
+        // it is marked), so the largest inline response sits up to 24 B under the limit.
+        assert!(
+            sw.worst >= 9_975,
+            "the sweep stopped short of the band: {}",
+            sw.worst
+        );
+    }
+
+    /// `## M1` and `## M2`, each a single line of exactly `n` plain bytes.
+    fn two_sections_exact(n: usize) -> String {
+        format!("## M1\n{}\n\n## M2\n{}\n", "m".repeat(n), "n".repeat(n))
+    }
 
     // ---- JSON escaping must not break the one-handle guarantee ----
     //

@@ -120,9 +120,13 @@ fn read_markdown_multi_heading(
 
     let content = sections.join("\n\n");
 
-    // Oversized multi-heading join — fall back to hint. Measured SERIALIZED, because that is
-    // what lands in the response: the raw join is smaller by every escaped newline and quote.
-    if crate::tools::exceeds_inline_limit(&json!({ "content": &content }).to_string()) {
+    // Oversized multi-heading join — fall back to hint. Measured on the SMALLEST response this
+    // read can return: `content` with `sections` and `coverage` dropped and EVERY key that
+    // then rides along (the omission markers, the hint, `format`). Measuring `content` alone
+    // missed those keys, and a content of 9,820-10,003 B came back 10,016-10,136 B and was
+    // parked under `@tool_*`. If even that does not fit, the read takes this error path.
+    let smallest = finalize_multi(json!({ "content": &content }), &["sections", "coverage"]);
+    if crate::tools::exceeds_inline_limit(&smallest.to_string()) {
         let file_id = ctx
             .output_buffer
             .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
@@ -183,38 +187,67 @@ fn read_markdown_multi_heading(
 
     // `sections` REPEATS the text already in `content` (it exists so a caller can tell which
     // section produced what). Two copies of a 9,208 B read serialized to 18,869 B, and the whole
-    // response was buffered under a `@tool_*` handle. `content` alone fits (checked above), so
-    // when the response does not, the duplicate goes first, then `coverage`, each marked
-    // `<key>_omitted: true` so its absence is a statement and not a silence.
-    let dropped = drop_to_fit(&mut result, &["sections", "coverage"]);
-    if dropped.contains(&"sections") {
-        result["hint"] = json!(
-            "`sections` omitted to fit: `content` holds every requested section in order; \
-             request one heading at a time for a per-section value"
-        );
-    }
-
-    Ok(result)
+    // response was buffered under a `@tool_*` handle. When the response does not fit, the
+    // duplicate goes first, then `coverage`, each marked `<key>_omitted: true` so its absence is
+    // a statement and not a silence. Every candidate is the FINAL response (`finalize_multi`
+    // adds the markers, the hint and `format`), so what is measured is what is returned; the
+    // smallest candidate fits, by the check above.
+    Ok(drop_to_fit(
+        &result,
+        &["sections", "coverage"],
+        finalize_multi,
+    ))
 }
 
-/// Remove top-level `keys` from `result`, in order, until its SERIALIZED size is within the
-/// inline limit, marking each removal `<key>_omitted: true`. Returns the keys removed. A
-/// response that already fits is untouched, and one that still does not after every key is
-/// gone is returned as it is (the caller owns what the remaining keys cost).
-fn drop_to_fit(result: &mut Value, keys: &[&'static str]) -> Vec<&'static str> {
-    let mut dropped = Vec::new();
-    for key in keys {
-        if !crate::tools::exceeds_inline_limit(&result.to_string()) {
-            break;
+/// The multi-heading response as it will be RETURNED once `dropped` keys are gone: each
+/// removal marked `<key>_omitted: true`, the hint that explains a dropped `sections`, and the
+/// `format` key `read()` would add. The one place these keys are written, so the size measured
+/// is the size returned.
+fn finalize_multi(mut result: Value, dropped: &[&'static str]) -> Value {
+    if let Some(obj) = result.as_object_mut() {
+        for key in dropped {
+            obj.insert(format!("{key}_omitted"), json!(true));
         }
-        if let Some(obj) = result.as_object_mut() {
-            if obj.remove(*key).is_some() {
-                obj.insert(format!("{key}_omitted"), json!(true));
-                dropped.push(*key);
-            }
+        if dropped.contains(&"sections") {
+            obj.insert(
+                "hint".into(),
+                json!(
+                    "`sections` omitted to fit: `content` holds every requested section in order; \
+                     request one heading at a time for a per-section value"
+                ),
+            );
         }
+        obj.insert("format".into(), json!("markdown"));
     }
-    dropped
+    result
+}
+
+/// Remove top-level `keys` from `base`, in order, until the FINAL response (`finalize` applied
+/// to what is left and what was dropped) fits the inline limit. Returns the first candidate
+/// that fits, or the last when none does (the caller guarantees the smallest fits).
+fn drop_to_fit(
+    base: &Value,
+    keys: &[&'static str],
+    finalize: impl Fn(Value, &[&'static str]) -> Value,
+) -> Value {
+    let mut work = base.clone();
+    let mut dropped: Vec<&'static str> = Vec::new();
+    loop {
+        let candidate = finalize(work.clone(), &dropped);
+        if !crate::tools::exceeds_inline_limit(&candidate.to_string()) {
+            return candidate;
+        }
+        let next = keys
+            .iter()
+            .find(|k| !dropped.contains(k) && work.get(**k).is_some());
+        let Some(key) = next else {
+            return candidate;
+        };
+        if let Some(obj) = work.as_object_mut() {
+            obj.remove(*key);
+        }
+        dropped.push(key);
+    }
 }
 
 /// Single-heading navigation: extract one section. Returns a `headings` list on
@@ -466,6 +499,17 @@ fn read_markdown_line_range(
     Ok(result)
 }
 
+/// Add the `format` key every markdown response carries. `read()` adds it too, on whatever a
+/// builder returns, which is harmless when it is already there; the builders call it so the key
+/// is inside the response they MEASURE. Added only afterwards, it made a response judged to fit
+/// (<= 10,003 B) come back up to 20 B over and be parked under `@tool_*`.
+fn with_format(mut result: Value) -> Value {
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("format".into(), json!("markdown"));
+    }
+    result
+}
+
 /// Default (no nav/range) read: adaptive tiers — tier 3 (oversized → heading
 /// map + buffer, no body), tier 2 (medium → full content + soft hint), tier 1
 /// (small → full content).
@@ -522,7 +566,7 @@ fn read_markdown_default_tiers(
         if let Some(c) = &md_cov {
             result["coverage"] = c.clone();
         }
-        Some(result)
+        Some(with_format(result))
     } else {
         // Tier 1: small — full content + heading map.
         let mut result = json!({
@@ -540,7 +584,7 @@ fn read_markdown_default_tiers(
                 total_lines, heading_count
             ));
         }
-        Some(result)
+        Some(with_format(result))
     };
     if let Some(result) = inline {
         if !crate::tools::exceeds_inline_limit(&result.to_string()) {
@@ -584,7 +628,7 @@ fn read_markdown_default_tiers(
         if let Some(c) = &md_cov {
             result["coverage"] = c.clone();
         }
-        result
+        with_format(result)
     };
     Ok(crate::tools::file_summary::fit_envelope(
         summary, &file_id, finish,
