@@ -118,6 +118,12 @@ pub(crate) fn clip_prebuffered_envelope(val: Value, force_inline: bool) -> Value
         .filter_map(|(k, v)| {
             v.as_str()
                 .filter(|s| s.len() > PREBUFFERED_FIELD_FLOOR)
+                // A field the tool already cut keeps its marker, whose total names the SOURCE
+                // stream; cutting it again would drop that marker and report the length of the
+                // cut text as the total. The other fields are clipped instead, or, when they
+                // cannot make the envelope fit, the whole envelope goes behind `@tool_*` below,
+                // where nothing was cut at all.
+                .filter(|s| !crate::util::text::carries_elision_marker(s))
                 .map(|s| (k.clone(), s.to_owned()))
         })
         .collect();

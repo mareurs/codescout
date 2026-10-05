@@ -868,6 +868,20 @@ pub(crate) fn elide_middle_escaped(
     let shown = head.len() + tail.len();
     format!("{head}\n--- {label}: {shown} of {original_len} bytes shown; {remedy} ---\n{tail}")
 }
+/// Does `s` already carry one of this module's elision markers, `--- <label>: N of M bytes shown;
+/// <remedy> ---` on a line of its own?
+///
+/// Such text was cut from a source of `M` bytes, and `M` is in the marker. Cutting it AGAIN
+/// loses the marker (it sits in the middle) and writes a new one whose total is the length of
+/// the already-cut text: a 50,000 B stream read "1000 of 2065 bytes shown". A second cutter asks
+/// this first and leaves marked text alone.
+pub(crate) fn carries_elision_marker(s: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r"(?:^|\n)--- [^\n:]+: \d+ of \d+ bytes shown; ").expect("static pattern")
+    })
+    .is_match(s)
+}
 
 // `extract_lines_to_budget` is deprecated but deliberately still exercised here:
 // its nine tests are the direct coverage of the shared `extract_lines_with_cost`
@@ -960,6 +974,38 @@ mod tests {
                 json_escaped_len(&cut)
             );
         }
+    }
+    #[test]
+    fn carries_elision_marker_recognises_the_markers_this_module_writes() {
+        let text = "m".repeat(5_000);
+        assert!(carries_elision_marker(&elide_middle_escaped(
+            &text,
+            text.len(),
+            1_000,
+            "stdout",
+            "all of it: output_id"
+        )));
+        assert!(carries_elision_marker(&elide_middle_bytes(
+            text.clone(),
+            text.len(),
+            1_000,
+            "failures",
+            "R"
+        )));
+        // Text that merely mentions the words, or was never cut, is not marked.
+        assert!(!carries_elision_marker(&text));
+        assert!(!carries_elision_marker(
+            "12 of 40 bytes shown; but no marker line"
+        ));
+        assert!(!carries_elision_marker(
+            "a\n--- stdout: lines omitted ---\nb"
+        ));
+        // The marker is a line of its own: prose that quotes one mid-line is not marked, and one
+        // at the very start of the text is.
+        assert!(!carries_elision_marker("see --- x: 1 of 2 bytes shown; y"));
+        assert!(carries_elision_marker(
+            "--- x: 1 of 2 bytes shown; R ---\nrest"
+        ));
     }
 
     #[test]

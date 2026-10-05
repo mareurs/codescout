@@ -1680,6 +1680,65 @@ async fn a_prebuffered_envelope_within_the_budget_is_untouched() {
     );
     assert!(!stdout.contains("bytes shown"));
 }
+/// A field that already carries an `... of M bytes shown` marker was cut from a STREAM of `M`
+/// bytes. Cutting the cut text again drops that marker and writes a new one whose total is the
+/// length of the already-cut text, so a 50,000 B stream read "1000 of 2065 bytes shown". The
+/// backstop must not do that: it clips the OTHER fields, or, when they cannot make the envelope fit,
+/// hands the original back for the `@tool_*` buffer, which holds every byte.
+#[test]
+fn a_field_that_already_carries_a_marker_is_never_clipped_again() {
+    let marked = format!(
+        "{}\n--- stdout: 9000 of 50000 bytes shown; all of it: @cmd_own9 ---\n{}",
+        "h".repeat(4_500),
+        "t".repeat(4_500)
+    );
+    // The marked field is the LARGEST, so the old code cut it first. The other field, clipped to its
+    // 1,000 B floor, still leaves the envelope over the budget: nothing can be clipped honestly.
+    let val = serde_json::json!({
+        "output_id": "@cmd_own9",
+        "stdout": marked,
+        "stderr": "e".repeat(3_000),
+    });
+    assert!(
+        exceeds_inline_limit(&val.to_string()),
+        "fixture must overflow"
+    );
+
+    let out = clip_prebuffered_envelope(val.clone(), false);
+
+    assert_eq!(
+        out, val,
+        "an envelope that fits only by re-cutting a marked field must be handed back whole"
+    );
+}
+
+#[test]
+fn a_marked_field_is_spared_while_an_unmarked_one_is_clipped() {
+    let marked = format!(
+        "{}\n--- stdout: 3000 of 50000 bytes shown; all of it: @cmd_own9 ---\n{}",
+        "h".repeat(1_500),
+        "t".repeat(1_500)
+    );
+    let val = serde_json::json!({
+        "output_id": "@cmd_own9",
+        "stdout": marked.clone(),
+        "stderr": "e".repeat(20_000),
+    });
+
+    let out = clip_prebuffered_envelope(val, false);
+
+    assert_eq!(out["stdout"], marked, "the marked field must be untouched");
+    let stderr = out["stderr"].as_str().unwrap();
+    assert!(
+        stderr.contains("of 20000 bytes shown"),
+        "an unmarked field is clipped with its true total: {stderr:.0}"
+    );
+    assert!(
+        !exceeds_inline_limit(&out.to_string()),
+        "the envelope must fit"
+    );
+}
+
 #[tokio::test]
 async fn an_envelope_between_the_clip_target_and_the_inline_limit_is_untouched() {
     // Clipping aims at INLINE_BYTE_BUDGET (9,000 B) but is only TRIGGERED by the inline limit
