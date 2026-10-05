@@ -935,7 +935,11 @@ fn read_full_file(
         // bounds by count, and a count has no size, so an unbounded one overflowed the inline
         // limit and `call_content` buffered it a second time under `@tool_*` beside `file_id`.
         // Doing it here covers every file type and every fallback path at one site.
-        let (mut result, cut_notes) = crate::tools::file_summary::bound_summary(summary, &file_id);
+        let (mut result, cut_notes) = crate::tools::file_summary::bound_summary(
+            summary,
+            &file_id,
+            crate::tools::file_summary::SUMMARY_BYTE_BUDGET,
+        );
         result["file_id"] = json!(file_id);
 
         // This summary describes a file it does not contain — an outline, zero content
@@ -2568,6 +2572,117 @@ mod tests {
             "{} B",
             text.len()
         );
+    }
+    // ---- JSON escaping must not break the one-handle guarantee ----
+    //
+    // The summary is measured against the SERIALIZED inline limit, and escaping inflates raw
+    // bytes: 2x for `"` `\` and tab, 6x for `\x01` and the ESC of ANSI colour codes. A cut sized
+    // in raw bytes passed its tests on plain text and left these over the limit: two handles.
+    // Measured by the reviewer through `call_content`: 11,593 B for quotes, 33,769 B for `\x01`.
+
+    const ESCAPING: [(&str, char); 5] = [
+        ("quote", '"'),
+        ("backslash", '\\'),
+        ("tab", '\t'),
+        ("control", '\u{1}'),
+        ("ansi-escape", '\u{1b}'),
+    ];
+
+    /// The outcome every case here must reach: inline, no `@tool_*`, exactly one handle.
+    async fn assert_inline_with_one_handle(path: &std::path::Path, what: &str) -> String {
+        let text = read_text(path).await;
+        assert!(
+            !text.contains("@tool_"),
+            "{what}: a second handle was minted: {text:.200}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{what}: {text:.200}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{what}: {} B is over the inline limit",
+            text.len()
+        );
+        text
+    }
+
+    #[tokio::test]
+    async fn wide_lines_of_every_escaping_kind_come_back_inline_with_one_handle() {
+        for (name, ch) in ESCAPING {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("wide.txt");
+            let line = ch.to_string().repeat(6_000);
+            std::fs::write(&path, format!("{}\n", [line.as_str(); 12].join("\n"))).unwrap();
+            assert_inline_with_one_handle(&path, &format!("wide .txt of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn config_previews_of_every_escaping_kind_come_back_inline_with_one_handle() {
+        for (name, ch) in ESCAPING {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("wide.ini");
+            let body: String = (0..40)
+                .map(|i| format!("key{i:02}={}\n", ch.to_string().repeat(700)))
+                .collect();
+            std::fs::write(&path, body).unwrap();
+            assert_inline_with_one_handle(&path, &format!(".ini of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn symbolless_source_of_every_escaping_kind_comes_back_inline_with_one_handle() {
+        // A `.rs` file with no symbols falls back to the generic head/tail summary: the shape
+        // of a generated or data-only source file.
+        for (name, ch) in ESCAPING {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("data.rs");
+            let line = format!("// {}", ch.to_string().repeat(6_000));
+            std::fs::write(&path, format!("{}\n", [line.as_str(); 12].join("\n"))).unwrap();
+            assert_inline_with_one_handle(&path, &format!("symbol-less .rs of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn wide_markdown_summary_lines_of_every_escaping_kind_come_back_inline() {
+        // `.mdx` takes the Markdown SUMMARY (headings array), whose entries carry the heading
+        // text: quote-heavy headings make every entry cost double.
+        for (name, ch) in ESCAPING {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("wide.mdx");
+            let body: String = (1..=40)
+                .map(|i| format!("# H{i:02} {}\nbody\n", ch.to_string().repeat(300)))
+                .collect();
+            std::fs::write(&path, body).unwrap();
+            assert_inline_with_one_handle(&path, &format!(".mdx of {name}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_whose_symbol_names_are_quote_heavy_comes_back_inline_with_one_handle() {
+        // Kotlin allows backtick identifiers containing quotes. Each symbol's NAME doubles when
+        // serialized, so an array-entry budget measured in raw bytes would overshoot.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Quoted.kt");
+        let src: String = (0..400)
+            .map(|i| format!("fun `say \"a\" \"b\" \"c\" \"d\" \"e\" {i:03}`() {{}}\n"))
+            .collect();
+        std::fs::write(&path, &src).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        let names: Vec<&str> = value["symbols"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no symbols in {value:.300}"))
+            .iter()
+            .filter_map(|s| s["name"].as_str())
+            .collect();
+        assert!(
+            names.iter().any(|n| n.contains('"')),
+            "the fixture must reach the summary with quotes in its names: {names:.5?}"
+        );
+
+        assert_inline_with_one_handle(&path, "quote-heavy symbol names").await;
     }
 
     #[tokio::test]

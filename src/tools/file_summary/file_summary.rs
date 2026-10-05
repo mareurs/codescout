@@ -1169,16 +1169,23 @@ pub fn summarize_generic_file(content: &str) -> Value {
 // cap-class: RESULT_CAP file_summary.summary_bytes — probed
 pub(crate) const SUMMARY_BYTE_BUDGET: usize = 6_000;
 
-/// Bound a whole-file summary to [`SUMMARY_BYTE_BUDGET`], keeping both ends of whatever is cut,
-/// and say what was cut.
+/// Bound a whole-file summary to `budget` SERIALIZED bytes, keeping both ends of whatever is
+/// cut, and say what was cut.
 ///
 /// Returns the bounded summary and one note per cut array, for the caller to put in the
-/// `overflow` hint. A summary that already fits is returned untouched, so no small file changes.
+/// `overflow` hint. A summary that already fits is returned untouched.
 ///
-/// **Strings first** (`head`, `tail`, `preview`, any wide top-level string): each is
-/// middle-elided with `elide_middle_bytes`, its marker naming the buffer handle. The budget is
-/// shared EQUALLY between them rather than spent largest-first, because `head` and `tail` are
-/// both informative and a largest-first pass would crush the first one to its floor.
+/// **The result always fits `budget`.** Every size here is measured on the serialized JSON,
+/// never estimated from raw bytes: JSON escaping turns one raw byte into 2 (`"`, `\`, tab) or 6
+/// (`\x01`, ANSI `\x1b`), so a cut sized in raw bytes left a 6 KB wide line at 11 KB or more
+/// and the response was buffered a second time. What the two passes below cannot cut is
+/// replaced by a minimal summary marked `summary_omitted` (the last resort), so an oversized
+/// summary is never returned silently.
+///
+/// **Strings first** (`head`, `tail`, `preview`, any top-level string over 500 B): each is
+/// middle-elided with `elide_middle_bytes`, its marker naming the buffer handle. They share
+/// ONE raw cut size, the largest whose whole summary serializes within the budget, so `head`
+/// and `tail` are cut alike (largest-first would crush one) and a short string is left whole.
 ///
 /// **Then arrays** (`symbols`, `sections`, `headings`, `keys`, at the top level or one level
 /// down, where `summarize_json` keeps `schema.keys`): every array is taken
@@ -1190,15 +1197,20 @@ pub(crate) const SUMMARY_BYTE_BUDGET: usize = 6_000;
 /// stay objects of the same shape, so no consumer sees a foreign element; the gap is described
 /// in structured keys beside the array (`<key>_truncated`, `total_<key>` if absent, and
 /// `<key>_omitted {after, count, from_line, to_line}`) and rendered where it falls.
-pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<String>) {
+pub(crate) fn bound_summary(
+    mut summary: Value,
+    file_id: &str,
+    budget: usize,
+) -> (Value, Vec<String>) {
     let size = |v: &Value| v.to_string().len();
     let mut notes: Vec<String> = Vec::new();
-    if size(&summary) <= SUMMARY_BYTE_BUDGET {
+    if size(&summary) <= budget {
         return (summary, notes);
     }
+    let original_bytes = size(&summary);
 
     // ---- strings ----
-    // 500 B is the floor: a head and tail of 250 B each still say what the field was.
+    // A string is "wide" above 500 B: below that it is part of the fixed cost of the summary.
     let wide: Vec<(String, String)> = summary
         .as_object()
         .into_iter()
@@ -1211,29 +1223,43 @@ pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<St
         })
         .collect();
     if !wide.is_empty() {
-        for (key, _) in &wide {
-            summary[key.as_str()] = Value::String(String::new());
-        }
-        // What the summary costs with every wide string emptied: the fixed part to share around.
-        let fixed = size(&summary);
-        // 200 B of allowance per string for the marker the cut itself adds.
-        let share = SUMMARY_BYTE_BUDGET
-            .saturating_sub(fixed + 200 * wide.len())
-            .checked_div(wide.len())
-            .unwrap_or(0)
-            .max(500);
         let remedy = format!("the rest: read_file(path=\"{file_id}\", start_line=N, end_line=M)");
-        for (key, original) in wide {
-            summary[key.as_str()] = Value::String(crate::util::text::elide_middle_bytes(
-                original.clone(),
-                original.len(),
-                share,
-                &key,
-                &remedy,
-            ));
+        let with_share = |base: &Value, share: usize| -> Value {
+            let mut cut = base.clone();
+            for (key, original) in &wide {
+                cut[key.as_str()] = Value::String(crate::util::text::elide_middle_bytes(
+                    original.clone(),
+                    original.len(),
+                    share,
+                    key,
+                    &remedy,
+                ));
+            }
+            cut
+        };
+        // The share is RAW bytes (that is what `elide_middle_bytes` clips), but the budget is
+        // SERIALIZED bytes, and JSON escaping turns one raw byte into 2 (`"`, `\`, tab, newline)
+        // or 6 (`\x01`, `\x1b`). So the share is found by measuring what each candidate really
+        // serializes to, not by dividing the budget: the largest share whose whole summary fits.
+        // One common share for every wide string, so a small one is simply left whole and its
+        // unused room goes to the larger ones.
+        let longest = wide.iter().map(|(_, s)| s.len()).max().unwrap_or(0);
+        let (mut lo, mut hi) = (0usize, longest); // `hi` is known not to fit: nothing is cut
+        let mut best: Option<usize> = None;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if size(&with_share(&summary, mid)) <= budget {
+                best = Some(mid);
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
         }
+        // No share fits: take the smallest one (markers only) and let the arrays, or the last
+        // resort below, finish the job.
+        summary = with_share(&summary, best.unwrap_or(0));
     }
-    if size(&summary) <= SUMMARY_BYTE_BUDGET {
+    if size(&summary) <= budget {
         return (summary, notes);
     }
 
@@ -1274,7 +1300,7 @@ pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<St
     }
     let count = taken.len();
     // 300 B per array for the structured markers a cut adds beside it.
-    let mut remaining = SUMMARY_BYTE_BUDGET.saturating_sub(size(&summary) + 300 * count);
+    let mut remaining = budget.saturating_sub(size(&summary) + 300 * count);
     // Smallest first, each getting at most an equal share of what is left: an array that fits
     // its share is returned whole, and what it leaves unused goes to the larger ones.
     taken.sort_by_key(|(_, _, _, bytes)| *bytes);
@@ -1293,6 +1319,28 @@ pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<St
         if let Some(note) = cut_array_middle(&mut summary, &parent, &key, entries, fair, file_id) {
             notes.push(note);
         }
+    }
+
+    // ---- last resort ----
+    // Whatever is left over budget cannot be cut by the two passes above: a wide value nested
+    // deeper than one level, or a fixed part larger than the budget on its own. Returning it
+    // would hand the caller an oversized summary with nothing saying so, so it is replaced by
+    // the smallest summary that still names what the file is, marked as dropped. Loud by
+    // construction: `summary_omitted` is a key a caller and a test can both read, and the
+    // note says where to read the file instead.
+    if size(&summary) > budget {
+        let mut minimal = serde_json::Map::new();
+        for key in ["type", "format", "line_count", "lines"] {
+            if let Some(v) = summary.get(key) {
+                minimal.insert(key.to_string(), v.clone());
+            }
+        }
+        minimal.insert("summary_omitted".to_string(), Value::Bool(true));
+        notes.push(format!(
+            "summary: {original_bytes} bytes omitted entirely (too wide to cut); read the file in \
+             ranges with read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+        ));
+        return (Value::Object(minimal), notes);
     }
     (summary, notes)
 }

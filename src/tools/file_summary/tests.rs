@@ -267,6 +267,15 @@ fn markdown_summary_no_truncation_flag_when_under_cap() {
 // refuse (the other bounds admit the input), so a mutation of one site cannot hide behind
 // another.
 
+/// The budget the unit tests below exercise. `bound_summary` takes it as a parameter; these
+/// tests pin the allocation arithmetic at one fixed value.
+const SUMMARY_BYTE_BUDGET: usize = 6_000;
+
+/// `bound_summary` at the test budget, so each test reads as "this input, this outcome".
+fn bound_summary(s: serde_json::Value, file_id: &str) -> (serde_json::Value, Vec<String>) {
+    super::bound_summary(s, file_id, SUMMARY_BYTE_BUDGET)
+}
+
 fn ser_len(v: &serde_json::Value) -> usize {
     v.to_string().len()
 }
@@ -297,21 +306,114 @@ fn bound_summary_leaves_a_summary_at_the_budget_untouched() {
 }
 
 #[test]
-fn bound_summary_keeps_the_head_of_a_string_when_the_rest_leaves_no_room() {
-    // The non-string part alone (nested, so untouched) is ~5,900 B, leaving nothing to share.
-    // The 500 B floor is what keeps the field's two ends; without it they are empty.
+fn bound_summary_cuts_a_string_to_the_room_the_fixed_part_leaves() {
+    // The nested part (untouched: it is neither a top-level string nor an array) costs ~5,000 B,
+    // so only ~1,000 B of the 6,000 B budget is left for `head`. The string takes exactly what
+    // is left, keeping its start, and the whole still fits.
     let s = serde_json::json!({
         "type": "generic",
-        "meta": {"pad": "p".repeat(5_900)},
+        "meta": {"pad": "p".repeat(5_000)},
         "head": "h".repeat(10_000),
     });
-    let (cut, _) = bound_summary(s, "@file_t");
+    let (cut, notes) = bound_summary(s, "@file_t");
     let head = cut["head"].as_str().unwrap();
     assert!(
-        head.starts_with(&"h".repeat(200)),
+        head.starts_with(&"h".repeat(100)),
         "the head of the field was lost: {head:.120}"
     );
     assert!(head.contains("bytes shown"));
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert!(notes.is_empty(), "no array was cut: {notes:?}");
+    assert!(cut.get("summary_omitted").is_none());
+}
+#[test]
+fn bound_summary_fits_the_budget_whatever_json_escaping_does_to_the_text() {
+    // A raw byte serializes to 2 bytes for `"`, `\` and tab and to 6 for `\x01` and the ESC of
+    // ANSI colour codes. A cut sized in RAW bytes left each of these over the budget (measured:
+    // 11.6 KB for the 2-byte kinds, 33.8 KB for `\x01`) and the response was buffered a second
+    // time. The input is `head`/`tail` of 6,000 raw bytes each: far over the budget.
+    for ch in ['"', '\\', '\t', '\n', '\u{1}', '\u{1b}'] {
+        let s = serde_json::json!({
+            "type": "generic",
+            "line_count": 12,
+            "head": ch.to_string().repeat(6_000),
+            "tail": ch.to_string().repeat(6_000),
+        });
+        let (cut, _) = bound_summary(s, "@file_t");
+        assert!(
+            ser_len(&cut) <= SUMMARY_BYTE_BUDGET,
+            "{ch:?}: serialized {} B is over the {SUMMARY_BYTE_BUDGET} B budget",
+            ser_len(&cut)
+        );
+        assert!(
+            cut["head"].as_str().unwrap().contains("bytes shown"),
+            "{ch:?}: head was not cut"
+        );
+        assert!(
+            cut.get("summary_omitted").is_none(),
+            "{ch:?}: dropped whole"
+        );
+    }
+}
+
+#[test]
+fn bound_summary_gives_a_heavier_escaping_string_less_raw_room_than_a_light_one() {
+    // Same budget, same raw length: the `\x01` string costs 6x per byte, so it must keep fewer
+    // raw bytes than the plain one beside it, or the sum cannot fit. One common raw share for
+    // both would not do that; the common share is the largest that fits, so the heavy string
+    // is cut to it and the plain one, below it, may stay whole.
+    let s = serde_json::json!({
+        "type": "generic",
+        "head": "x".repeat(600),
+        "tail": "\u{1}".repeat(8_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert_eq!(
+        cut["head"].as_str().unwrap(),
+        "x".repeat(600),
+        "the plain string fit and must be left whole"
+    );
+    assert!(cut["tail"].as_str().unwrap().contains("bytes shown"));
+}
+
+#[test]
+fn bound_summary_last_resort_drops_what_it_cannot_cut_and_says_so() {
+    // A wide string NESTED two levels down is neither a top-level string nor an array, so
+    // neither pass can reach it. The result must still fit, and say it was dropped.
+    let s = serde_json::json!({
+        "type": "json",
+        "format": "json",
+        "line_count": 7,
+        "schema": {"deep": {"blob": "z".repeat(20_000)}},
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    assert_eq!(cut["summary_omitted"], true);
+    assert_eq!(cut["type"], "json", "what the file is must survive");
+    assert_eq!(cut["format"], "json");
+    assert_eq!(cut["line_count"], 7);
+    assert!(cut.get("schema").is_none());
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("summary: ") && notes[0].contains("omitted entirely"),
+        "{}",
+        notes[0]
+    );
+    assert!(
+        notes[0].contains("read_file(path=\"@file_t\""),
+        "{}",
+        notes[0]
+    );
+}
+
+#[test]
+fn bound_summary_last_resort_also_catches_a_budget_the_fixed_part_cannot_meet() {
+    // The summary has no string and no array to cut and is over budget by itself.
+    let s = serde_json::json!({"type": "x", "meta": {"pad": "p".repeat(7_000)}});
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert_eq!(cut["summary_omitted"], true);
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET);
 }
 
 #[test]

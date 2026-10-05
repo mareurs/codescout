@@ -451,7 +451,11 @@ fn read_markdown_default_tiers(
         // `next:`. (`coverage` cannot add a second list here: a default read counts every
         // heading as seen, so `markdown_coverage` returns `None`. The bound would cut one
         // anyway if that ever changed.)
-        let (mut result, notes) = crate::tools::file_summary::bound_summary(result, &file_id);
+        let (mut result, notes) = crate::tools::file_summary::bound_summary(
+            result,
+            &file_id,
+            crate::tools::file_summary::SUMMARY_BYTE_BUDGET,
+        );
         if !notes.is_empty() {
             let hint = result["hint"].as_str().unwrap_or("").to_string();
             result["hint"] = json!(format!("{hint} {}", notes.join(" ")));
