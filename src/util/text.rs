@@ -912,6 +912,55 @@ mod tests {
         assert_eq!(of.parse::<usize>().unwrap(), text.len());
         assert!(head.starts_with("HEAD") && tail.ends_with("TAIL"));
     }
+    /// The marker's `shown` is the RAW bytes of head plus tail, whatever their escaped cost and
+    /// whatever the budget's parity. The first version of this test used ASCII and an even remainder,
+    /// where `max_escaped - marker_len` (the escaped budget) and `head.len() + tail.len()` are the same
+    /// number, so the mutant `shown = max_escaped - marker_len` survived it (2026-10-05 review).
+    /// Each input below separates them: control characters (6 serialized B per raw B), quotes (2), a
+    /// 3-byte character whose boundary rounds the halves down, and ASCII with an ODD remainder, where
+    /// the halves hold one byte fewer than the remainder.
+    #[test]
+    fn elide_middle_escaped_reports_raw_bytes_kept_for_escape_heavy_and_odd_remainders() {
+        fn marker_len(label: &str, remedy: &str, original: usize) -> usize {
+            json_escaped_len(&format!(
+                "\n--- {label}: {original} of {original} bytes shown; {remedy} ---\n"
+            ))
+        }
+        let ctrl = "\u{1}".repeat(2_000);
+        let quotes = format!("HEAD{}TAIL", "\"".repeat(2_000));
+        let euros = "€".repeat(2_000);
+        let ascii = format!("HEAD{}TAIL", "m".repeat(5_000));
+        let ml = |t: &str| marker_len("x", "R", t.len());
+        let cases: Vec<(&str, &str, usize)> = vec![
+            ("control characters", &ctrl, 1_000),
+            ("quotes", &quotes, 1_000),
+            ("a 3-byte character", &euros, 1_000),
+            // remainders of exactly 1,001 (odd) and 1,000 (even) bytes beside the marker
+            ("ascii, odd remainder", &ascii, ml(&ascii) + 1_001),
+            ("ascii, even remainder", &ascii, ml(&ascii) + 1_000),
+        ];
+        for (what, text, max) in cases {
+            let cut = elide_middle_escaped(text, text.len(), max, "x", "R");
+            let (head, rest) = cut
+                .split_once("\n--- x: ")
+                .unwrap_or_else(|| panic!("{what}: no marker"));
+            let (marker, tail) = rest
+                .split_once(" bytes shown; R ---\n")
+                .unwrap_or_else(|| panic!("{what}: unterminated marker"));
+            let (shown, of) = marker.split_once(" of ").expect("shown of total");
+            assert_eq!(
+                shown.parse::<usize>().unwrap(),
+                head.len() + tail.len(),
+                "{what}: `shown` is not the raw bytes kept"
+            );
+            assert_eq!(of.parse::<usize>().unwrap(), text.len(), "{what}");
+            assert!(
+                json_escaped_len(&cut) <= max,
+                "{what}: {} B escaped over {max}",
+                json_escaped_len(&cut)
+            );
+        }
+    }
 
     #[test]
     fn elide_middle_escaped_never_splits_a_character_and_keeps_text_that_fits() {
