@@ -1042,6 +1042,18 @@ pub(crate) fn default_json_path_hint(val: &Value) -> String {
         .unwrap_or_else(|| "$.field".to_string())
 }
 
+/// How many levels of nested objects the overflow-hint searches go through to find an array.
+///
+/// ONE constant for both readers of that question: [`find_largest_array`] here, and
+/// `scan_arrays` in `librarian/adapter.rs`, whose doc comment used to say "keep the two equal"
+/// and was enforced by nothing. A rule that defers to the default for payloads with records
+/// must see the same arrays the default sees, or it answers about a payload the default
+/// never looked at: records sitting just below the default's reach would be invisible to the
+/// rule, and it would hand the prose the win over a result set. Tested by
+/// `the_text_rule_and_the_default_agree_at_every_depth`.
+// cap-class: RESULT_CAP tool_output.largest_array_depth — probed
+pub(crate) const ARRAY_SEARCH_MAX_DEPTH: usize = 4;
+
 /// Record the largest array reachable through object keys, with its full path.
 ///
 /// Descends through objects only, never into arrays: an array's *elements* are
@@ -1049,8 +1061,6 @@ pub(crate) fn default_json_path_hint(val: &Value) -> String {
 /// row rather than the set. Depth-bounded so a deeply nested payload costs a fixed
 /// walk rather than a full traversal.
 fn find_largest_array(v: &Value, path: &str, depth: usize, best: &mut Option<(String, usize)>) {
-    // cap-class: RESULT_CAP tool_output.largest_array_depth — probed
-    const MAX_DEPTH: usize = 4;
     let Some(map) = v.as_object() else {
         return;
     };
@@ -1062,7 +1072,7 @@ fn find_largest_array(v: &Value, path: &str, depth: usize, best: &mut Option<(St
                     *best = Some((child_path, items.len()));
                 }
             }
-            Value::Object(_) if depth < MAX_DEPTH => {
+            Value::Object(_) if depth < ARRAY_SEARCH_MAX_DEPTH => {
                 find_largest_array(child, &child_path, depth + 1, best);
             }
             _ => {}

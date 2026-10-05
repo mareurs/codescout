@@ -255,8 +255,8 @@ fn dominant_text_hint(val: &Value) -> Option<String> {
 ///
 /// Records the presence of any array whose elements are objects or arrays (`has_records`) and
 /// the serialized size of the largest array of scalars (`largest_index_bytes`). Descends through
-/// objects only, never into arrays, and stops at the same depth as `find_largest_array` in
-/// `core/types.rs` (4) — keep the two equal, or this rule and the default it defers to would
+/// objects only, never into arrays, and stops at `ARRAY_SEARCH_MAX_DEPTH` — the SAME constant
+/// `find_largest_array` in `core/types.rs` uses, so this rule and the default it defers to cannot
 /// disagree about which arrays exist.
 fn scan_arrays(v: &Value, depth: usize, has_records: &mut bool, largest_index_bytes: &mut usize) {
     let Some(map) = v.as_object() else {
@@ -271,7 +271,7 @@ fn scan_arrays(v: &Value, depth: usize, has_records: &mut bool, largest_index_by
                     *largest_index_bytes = (*largest_index_bytes).max(child.to_string().len());
                 }
             }
-            Value::Object(_) if depth < 4 => {
+            Value::Object(_) if depth < crate::tools::ARRAY_SEARCH_MAX_DEPTH => {
                 scan_arrays(child, depth + 1, has_records, largest_index_bytes)
             }
             _ => {}
@@ -1320,6 +1320,83 @@ mod tests {
         ] {
             assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
         }
+    }
+    /// `payload` with `objects` levels of nesting around a records array, beside a large `body`.
+    fn nested_records(objects: usize) -> Value {
+        let mut inner = json!({ "rows": [{ "id": 1 }, { "id": 2 }] });
+        for level in 0..objects {
+            inner = json!({ format!("o{level}"): inner });
+        }
+        let mut payload = json!({ "body": "packed artifact text\n".repeat(2_000) });
+        payload["wrap"] = inner;
+        payload
+    }
+
+    /// The text rule defers to the default whenever records exist "within the default's own
+    /// depth", so the two must see the same arrays at EVERY depth, not at the one the doc
+    /// comment names. `wrap` is one object, so `n` extra levels put the records `n + 1` objects
+    /// deep. For each depth the default either finds the array (its hint ends in `[*]`) or falls
+    /// to the placeholder; the text rule must say `None` exactly when the default found it.
+    /// Shrinking or growing `scan_arrays`' bound alone breaks the agreement at the edge, which
+    /// is what a hand-kept "keep the two equal" comment could not enforce.
+    #[test]
+    fn the_text_rule_and_the_default_agree_at_every_depth() {
+        let mut saw_visible = false;
+        let mut saw_hidden = false;
+        for objects in 0..=8 {
+            let payload = nested_records(objects);
+            let default_sees = crate::tools::default_json_path_hint(&payload).ends_with("[*]");
+            let rule_defers = dominant_text_hint(&payload).is_none();
+            assert_eq!(
+                rule_defers,
+                default_sees,
+                "at {objects} extra levels the default {} the records but the text rule {}",
+                if default_sees { "sees" } else { "does not see" },
+                if rule_defers {
+                    "defers"
+                } else {
+                    "does not defer"
+                },
+            );
+            saw_visible |= default_sees;
+            saw_hidden |= !default_sees;
+        }
+        assert!(
+            saw_visible && saw_hidden,
+            "the sweep must cross the default's depth bound, or it checks no edge"
+        );
+    }
+
+    /// The edge by name, so a failure reads as a depth and not as a loop index. Four nested
+    /// objects around the array is what the default reaches (`$.a.b.c.d.rows[*]`); five is
+    /// past it.
+    #[test]
+    fn records_at_the_defaults_depth_bound_keep_the_default() {
+        let long = "packed artifact text\n".repeat(2_000);
+        let at_bound =
+            json!({ "body": long, "a": { "b": { "c": { "d": { "rows": [{ "id": 1 }] } } } } });
+        assert_eq!(
+            crate::tools::default_json_path_hint(&at_bound),
+            "$.a.b.c.d.rows[*]",
+            "precondition: the default reaches four nested objects"
+        );
+        assert_eq!(
+            dominant_text_hint(&at_bound),
+            None,
+            "records at the bound keep the default"
+        );
+
+        let past_bound = json!({ "body": long, "a": { "b": { "c": { "d": { "e": { "rows": [{ "id": 1 }] } } } } } });
+        assert_eq!(
+            crate::tools::default_json_path_hint(&past_bound),
+            "$.field",
+            "precondition: the default does not reach five nested objects"
+        );
+        assert_eq!(
+            dominant_text_hint(&past_bound).as_deref(),
+            Some("$.body"),
+            "records the default cannot see do not hold the rule back"
+        );
     }
 
     /// A scoped read keeps `$.body` even when a larger string sits beside it. Asserted at the
