@@ -90,8 +90,17 @@ async fn mcp_handshake(
     .await;
 }
 
-#[tokio::test]
-async fn write_lock_contention_produces_recoverable_error() {
+/// Hold the project's OS-level flock from THIS process, spawn a codescout binary
+/// against the same project, ask it to `edit_file`, and return its raw JSON-RPC
+/// response to that call.
+///
+/// `holder_record` is the exact content to place in `.codescout/write.lock.holder`
+/// before the binary is spawned, or `None` to write no record at all. The test
+/// process takes a raw flock rather than going through `write_guard::acquire`, so
+/// it writes no record of its own: whichever branch of the binary's refusal a test
+/// reaches is decided by this argument and nothing else. `None` reaches the
+/// anonymous branch; a well-formed `<epoch_ms>\t<holder>` reaches the named one.
+async fn contended_edit_response(holder_record: Option<&str>) -> String {
     let bin = binary_path();
 
     // Create a temp project.
@@ -116,6 +125,14 @@ async fn write_lock_contention_produces_recoverable_error() {
     lock_file
         .try_lock_exclusive()
         .expect("test process should acquire the lock uncontested");
+
+    // The holder-record sidecar, written (or not) AFTER the flock is taken —
+    // the same order `write_guard::acquire` uses, and the property that makes the
+    // record trustworthy: only the lock's holder can have written it.
+    if let Some(record) = holder_record {
+        std::fs::write(lock_dir.join("write.lock.holder"), record)
+            .expect("failed to write holder record");
+    }
 
     // Spawn the binary against the same project directory.
     //
@@ -170,11 +187,57 @@ async fn write_lock_contention_produces_recoverable_error() {
         .expect("binary did not respond within 15 s");
 
     child.kill().await.ok();
-    // Release our lock after the binary has responded.
-    lock_file.unlock().expect("failed to release test lock");
+    // Release our lock after the binary has responded. Called through the trait: on a
+    // toolchain with `File::unlock` (1.89) the method form resolves to the std inherent
+    // one, which is newer than this crate's MSRV.
+    FileExt::unlock(&lock_file).expect("failed to release test lock");
+
+    response
+}
+
+/// The ANONYMOUS branch: the flock is held and no holder record exists, so the
+/// refusal can say only that some other instance is writing.
+#[tokio::test]
+async fn write_lock_contention_produces_recoverable_error() {
+    let response = contended_edit_response(None).await;
 
     assert!(
         response.contains("another codescout instance"),
         "expected contention error in response, got:\n{response}"
+    );
+    assert!(
+        !response.contains("write lock held by"),
+        "with no holder record the refusal must not name a holder, got:\n{response}"
+    );
+}
+
+/// The NAMED branch, end to end: the same contention, but the holder record is
+/// present and well-formed, so the refusal must name the holder from the record.
+///
+/// Until this test existed the named branch of `write_guard::acquire` was covered
+/// only in-process (`write_guard::tests`), and the one cross-process test above
+/// reached only the anonymous fallback — a regression that made the binary ignore
+/// the record, or read it from the wrong path, would have passed every test. The
+/// holder string is deliberately one no other test or default uses, so the
+/// assertion cannot be satisfied by anything but the record's own bytes.
+///
+/// See docs/issues/archive/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md.
+#[tokio::test]
+async fn write_lock_contention_names_the_holder_recorded_in_the_sidecar() {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let record = format!("{now_ms}\tcodescout:sid-alpha reindex");
+
+    let response = contended_edit_response(Some(&record)).await;
+
+    assert!(
+        response.contains("write lock held by codescout:sid-alpha reindex"),
+        "the refusal must name the holder recorded in write.lock.holder, got:\n{response}"
+    );
+    assert!(
+        !response.contains("another codescout instance"),
+        "a readable holder record selects the NAMED branch, not the anonymous one, got:\n{response}"
     );
 }
