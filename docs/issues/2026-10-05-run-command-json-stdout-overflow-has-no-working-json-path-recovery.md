@@ -14,7 +14,7 @@ related:
 - docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md
 - docs/issues/archive/2026-09-07-the-json-path-key-hint-caps-at-ten-keys-and-marks-no-cut.md
 severity: high
-unverified: 'The mechanism is read in src/tools/core/types.rs, not stepped through; the symptom and every workaround were run. No fix attempted. The cluster/ tag is my judgment of the fit; the IC-22 **Members:** line is not added, so the commit gate will refuse until it is. The frequency in usage.db was not measured.'
+unverified: "The mechanism is read in src/tools/core/types.rs, not stepped through; the symptom and every workaround were run. No fix attempted. The cluster/ tag is my judgment of the fit (the IC-22 **Members:** line was added in the same commit). The frequency in usage.db was not measured."
 ---
 
 # BUG: when a `run_command` prints one big JSON document, the overflow recovery cannot work — the hint is the placeholder `$.field`, `json_path` cannot enter `stdout`, and `@cmd_*` refuses `json_path`
