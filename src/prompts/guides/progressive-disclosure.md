@@ -51,17 +51,19 @@ The addressing grammar is a deliberate subset: `.key`, `["key"]` (for keys conta
 `[-N]`, `[-N:]` (last N), and `[*]`. Forward slices (`[1:3]`) and filters (`[?(...)]`) are **not**
 supported — project with `[*]` and filter the returned array yourself.
 
-The envelope's `hint` names a path derived from the payload's shape: the largest array of records
-or, for a librarian result whose only arrays are id lists, its long text field. A payload with no
-array gets the placeholder `$.field` — **a placeholder, not a key**: use a key of the payload (the
-error for a wrong path lists them). `json_path` addresses `@tool_*` buffers only; `@cmd_*` and
-`@file_*` are raw text, so use `grep`, `jq` or line ranges. A line wider than the inline budget is
-shown clipped and marked: print the part you need with `grep -o 'PATTERN[^,]*'`.
+The envelope's `hint` is the tool's guess at where the payload is: usually the largest array of
+any element type (`$.key[*]`); `read_file` and `memory` name their `content` string, and a
+librarian result names its long text field (`markdown`, `body`) when its only arrays are id lists.
+With none of these it is the placeholder `$.field` — **not a key**; a wrong path's error lists the
+real ones. `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw text, so use
+`grep`, `jq` or line ranges. A line wider than the inline budget is shown clipped and marked, and
+`sed -n` or plain `grep` cannot page inside it: print the part you need with
+`grep -o 'PATTERN[^,]*'`.
 
-`@cmd_*` buffers come from `run_command`, and its result keeps exactly that handle: a long stream
-in its summary is cut to `N of M bytes shown` (stderr: read `.err`), the whole stream stays behind
-`output_id`, and an oversized envelope is clipped to fit instead of wrapped in a second `@tool_*`.
-Other tools produce `@tool_*`. All are addressable by any tool that accepts a path.
+A `run_command` result keeps its `@cmd_*` handle: a long stream in its summary is cut to
+`N of M bytes shown` (stderr: `.err`), and an oversized envelope is clipped to fit. Only an
+envelope that cannot be clipped (bulk nested or spread over many small fields) is still wrapped in
+a `@tool_*`. Other tools produce `@tool_*`. All are addressable by any tool that accepts a path.
 `@file_*` and `@ack_*` are sibling handle kinds — same mechanics. `@ack_*`
 covers both dangerous commands and out-of-scope writes: re-invoke the tool with
 the handle to acknowledge and proceed.
