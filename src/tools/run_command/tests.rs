@@ -2765,6 +2765,113 @@ async fn buffer_query_below_summary_threshold_still_surfaces_stored_stderr() {
          stored stderr; got: {result:?}"
     );
 }
+// ---- a buffer query bounds the STORED stderr by bytes, not only by lines ----
+//
+// BUG-adjacent, found by the 2026-10-05 sibling sweep: all three buffer-only arms of
+// `handle_successful_output` carried the stored stderr through `truncate_lines(.., 20)`. A line has
+// no length, so one 50 KB stderr line passed whole, the response crossed the inline limit, and
+// `call_content` buffered it under `@tool_*`, hiding the query's own answer (`0`). The comment
+// above the cap claimed it prevented exactly that. Three arms, three tests: each arm has its
+// own call, and a mutation of one is not caught by a test of another.
+
+/// A stored `@cmd_*` entry whose stderr is ONE wide line with distinguishable ends.
+fn wide_stderr() -> String {
+    format!("HEAD{}TAIL\n", "e".repeat(50_000))
+}
+
+/// Run `command` through `RunCommand::call_content`; return the primary block's text and parse.
+async fn buffer_query(ctx: &ToolContext, command: String) -> (String, Value) {
+    let content = RunCommand
+        .call_content(json!({ "command": command, "timeout_secs": 10 }), ctx)
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let parsed: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("response is not JSON ({e}): {text:.200}"));
+    (text, parsed)
+}
+
+fn assert_stderr_bounded(id: &str, text: &str, parsed: &Value) {
+    assert!(
+        !text.contains("@tool_"),
+        "a wide stored stderr line re-buffered the response under a second handle: {text:.300}"
+    );
+    let stderr = parsed["stderr"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no inline stderr: {text:.300}"));
+    assert!(
+        stderr.starts_with("HEAD"),
+        "the head of the stderr line survives"
+    );
+    assert!(
+        stderr.ends_with("TAIL\n") || stderr.ends_with("TAIL"),
+        "the tail survives"
+    );
+    assert!(
+        stderr.contains("bytes shown"),
+        "a cut must say so: {:.200}",
+        stderr
+    );
+    assert!(
+        stderr.contains(&format!("of {} bytes shown", wide_stderr().len())),
+        "the total is the stored stream as it was, not the cut text"
+    );
+    assert!(
+        stderr.contains(&format!("{id}.err")),
+        "the marker names the `.err` handle that holds all of it"
+    );
+    assert!(
+        !crate::tools::exceeds_inline_limit(text),
+        "the response is {} bytes and is still over the inline limit",
+        text.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_short_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
+    // The `grep -c` zero-count arm: tiny stdout, so only the stderr can overflow.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=30).map(|i| format!("out{i}\n")).collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stdout, wide_stderr(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep -c NOSUCHTOKEN {id}")).await;
+
+    assert_stderr_bounded(&id, &text, &parsed);
+    assert!(
+        parsed["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("bytes shown"),
+        "the cut must announce itself: {text:.200}"
+    );
+    assert!(parsed["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with('0'));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_summarized_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
+    // The `needs_summary` arm: the query's own stdout is over 10 KB.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=4000).map(|i| format!("out{i}\n")).collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stdout, wide_stderr(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep out {id}")).await;
+
+    assert_stderr_bounded(&id, &text, &parsed);
+    assert!(parsed["stdout"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("out1"));
+}
 
 #[test]
 fn system_prompt_draft_omits_hints_for_unsupported_languages() {

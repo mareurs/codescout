@@ -412,6 +412,58 @@ pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<Str
     Some(msg)
 }
 
+/// Byte ceiling on the STORED stderr a buffer query carries back.
+///
+/// A line budget alone does not bound it, because a line has no length: `STDERR_BUDGET` (20
+/// lines) let one 50 KB stderr line through whole, the response crossed the inline limit, and
+/// `call_content` buffered it under `@tool_*` — hiding the query's own answer, often a bare `0`.
+/// The comment above that cap said it prevented exactly this; it did not for a wide line.
+/// Measured 2026-10-05: `grep -c zzz @cmd_X` on a buffer with a 50,001 B stderr line returned a
+/// 50,044 B `@tool_*` envelope.
+///
+/// Equal to `STDERR_SUMMARY_BYTE_BUDGET` on purpose (both answer "how much stderr is worth
+/// inlining beside the stream a reader came for") and a literal rather than an alias, because
+/// the cap-marker gate reads the declaration. Two such fields beside a stdout still fit under
+/// `TOOL_OUTPUT_BUFFER_THRESHOLD`: the stdout budget below is computed from what this ACTUALLY
+/// emitted.
+// cap-class: RESULT_CAP run_command.buffer_stderr_bytes — probed
+const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
+
+/// The handle the caller's buffer query names (`@cmd_0bdbc0aa`), read from the command text.
+/// `@file_*` handles count too; an `.err` suffix is dropped, so the result is always the bare
+/// handle and a caller can append `.err` or not.
+fn queried_ref(command: &str) -> Option<&str> {
+    let start = command.find("@cmd_").or_else(|| command.find("@file_"))?;
+    let rest = &command[start..];
+    let end = rest
+        .char_indices()
+        .skip(1)
+        .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+        .map_or(rest.len(), |(i, _)| i);
+    Some(&rest[..end])
+}
+
+/// The stored stderr a buffer query carries: at most `max_lines` lines AND at most
+/// `BUFFER_STDERR_BYTE_BUDGET` bytes, the latter by eliding the MIDDLE behind a marker that names
+/// the `.err` handle holding all of it. Returns `(text, lines_shown, lines_total)` like
+/// `truncate_lines`; `lines_total` counts the stored stream, so a wide single line reads `1/1`
+/// and the marker, which travels with the data, is what says it was cut.
+fn bound_buffer_stderr(stored: &str, max_lines: usize, query: &str) -> (String, usize, usize) {
+    let (by_lines, shown, total) = crate::tools::command_summary::truncate_lines(stored, max_lines);
+    let remedy = match queried_ref(query) {
+        Some(handle) => format!("all of it: {handle}.err"),
+        None => "all of it: the stored buffer's `.err` handle".to_string(),
+    };
+    let bounded = crate::util::text::elide_middle_bytes(
+        by_lines,
+        stored.len(),
+        BUFFER_STDERR_BYTE_BUDGET,
+        "stderr",
+        &remedy,
+    );
+    (bounded, shown, total)
+}
+
 /// Build the response for a command that ran to completion — at any exit code.
 ///
 /// The name says "successful" about the *process*, not the *outcome*: a failing
@@ -437,8 +489,8 @@ pub(crate) async fn handle_successful_output(
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
         count_lines, detect_command_type, needs_summary, strip_ansi_codes, summarize_build_output,
-        summarize_generic, summarize_test_output, truncate_lines, truncate_lines_and_bytes,
-        CommandType, BUFFER_QUERY_INLINE_CAP,
+        summarize_generic, summarize_test_output, truncate_lines_and_bytes, CommandType,
+        BUFFER_QUERY_INLINE_CAP,
     };
 
     // Buffer-only queries strip ANSI codes — they are opaque to LLMs and bloat byte counts.
@@ -618,7 +670,7 @@ pub(crate) async fn handle_successful_output(
             let stdout_budget = BUFFER_QUERY_INLINE_CAP - stderr_budget;
 
             let (stderr_out, stderr_shown, stderr_total) =
-                truncate_lines(&buffer_stderr, STDERR_BUDGET);
+                bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
 
             // Byte budget: keep final JSON under TOOL_OUTPUT_BUFFER_THRESHOLD to avoid re-buffering loop.
             const JSON_OVERHEAD: usize = 300;
@@ -706,7 +758,7 @@ pub(crate) async fn handle_successful_output(
             // wrong twice: on a buffer query it is empty, so it under-counted by the
             // whole stored stream, and it was never the text being emitted.
             let (stderr_out, stderr_shown, stderr_total) =
-                truncate_lines(&buffer_stderr, STDERR_BUDGET);
+                bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
             let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
                 .saturating_sub(JSON_OVERHEAD)
                 .saturating_sub(stderr_out.len());
@@ -764,7 +816,7 @@ pub(crate) async fn handle_successful_output(
                 // never surfaced. Capped like the path above so a large stored stderr
                 // cannot re-trigger buffering on a query whose own output was short.
                 let (stderr_out, stderr_shown, stderr_total) =
-                    truncate_lines(&buffer_stderr, STDERR_BUDGET);
+                    bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
                 if !stderr_out.is_empty() {
                     r["stderr"] = json!(stderr_out);
                 }

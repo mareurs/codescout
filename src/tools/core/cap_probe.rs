@@ -1090,6 +1090,20 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "run_command_buffer_only_stderr_gets_priority",
         },
     },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test seeds
+        // ONE 50,006 B stderr line (a single line, so the 20-line `STDERR_BUDGET` cannot bind)
+        // against `BUFFER_STDERR_BYTE_BUDGET` 2,000, in the `grep -c` arm. The other two
+        // buffer-only arms call the same helper, `bound_buffer_stderr`; they are pinned by their
+        // own tests and not cited because a row names one. Marker written by production in
+        // `util::text::elide_middle_bytes`, called from `bound_buffer_stderr`.
+        id: "run_command.buffer_stderr_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_short_buffer_query_bounds_a_wide_stored_stderr_by_bytes",
+        },
+    },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
         id: "call_graph.workspace_files_scan",
