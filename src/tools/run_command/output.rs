@@ -547,6 +547,36 @@ fn banded_hint(query: &str, shown: usize, total: usize, clipped_wide: bool) -> S
     }
 }
 
+/// Serialized bytes `unfiltered_output`, `unfiltered_output_lines` and the two truncation flags add
+/// when a tee capture is attached: the handle (`@cmd_` + 8 hex), the line count, and the keys.
+const TEE_KEYS_LEN: usize = 160;
+
+/// Serialized bytes the `stderr_shown` / `stderr_total` counters add to a buffer-query response.
+const BUFFER_QUERY_COUNTER_KEYS_LEN: usize = 48;
+
+/// Bytes `handle_successful_output` adds to the response BEYOND the two streams, for the summary-or-
+/// inline gate: each present diagnostic (`,"key":"` + its escaped text + `"`), the tee keys when a
+/// capture is attached, and the counters a buffer query carries. Without it the gate judged the
+/// streams alone and a failing run whose `wip_authors` was 3 KB could be called small.
+fn response_extras_len(
+    diagnostics: &[(&str, Option<&str>)],
+    tee: bool,
+    buffer_only: bool,
+) -> usize {
+    let diag: usize = diagnostics
+        .iter()
+        .filter_map(|(key, value)| {
+            value.map(|v| key.len() + 6 + crate::util::text::json_escaped_len(v))
+        })
+        .sum();
+    diag + if tee { TEE_KEYS_LEN } else { 0 }
+        + if buffer_only {
+            BUFFER_QUERY_COUNTER_KEYS_LEN
+        } else {
+            0
+        }
+}
+
 /// Build the response for a command that ran to completion — at any exit code.
 ///
 /// The name says "successful" about the *process*, not the *outcome*: a failing
@@ -571,9 +601,9 @@ pub(crate) async fn handle_successful_output(
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
-        count_lines, detect_command_type, needs_summary, strip_ansi_codes, summarize_build_output,
-        summarize_generic, summarize_test_output, truncate_lines_and_bytes, CommandType,
-        BUFFER_QUERY_INLINE_CAP,
+        count_lines, detect_command_type, inline_response_exceeds_limit, strip_ansi_codes,
+        summarize_build_output, summarize_generic, summarize_test_output, truncate_lines_and_bytes,
+        CommandType, BUFFER_QUERY_INLINE_CAP,
     };
 
     // Buffer-only queries strip ANSI codes — they are opaque to LLMs and bloat byte counts.
@@ -746,7 +776,28 @@ pub(crate) async fn handle_successful_output(
     };
 
     // --- Step 6: Decide whether to buffer + summarize ---
-    let mut result = if needs_summary(&raw_stdout, &raw_stderr) {
+    //
+    // Decided on the SERIALIZED response, not the raw streams: see `inline_response_exceeds_limit`.
+    // For a buffer query the stderr that counts is the bounded stored one, because that is what the
+    // response emits.
+    let gate_stderr = if buffer_only {
+        bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command).0
+    } else {
+        raw_stderr.clone()
+    };
+    let extras = response_extras_len(
+        &[
+            ("shell_cause", shell_cause.as_deref()),
+            ("wip_authors", wip_authors.as_deref()),
+            ("empty_test_selection", empty_selection.as_deref()),
+            ("partial_test_selection", partial_selection.as_deref()),
+        ],
+        unfiltered_ref.is_some(),
+        buffer_only,
+    );
+    let summary_needed =
+        inline_response_exceeds_limit(exit_code, &raw_stdout, &gate_stderr, extras);
+    let mut result = if summary_needed {
         if buffer_only {
             // Buffer-only: return inline, never create a new buffer ref (avoids infinite loop).
             let stderr_budget = STDERR_BUDGET.min(count_lines(&buffer_stderr));
@@ -1227,6 +1278,31 @@ mod tests {
         assert!(
             non_text <= BUFFER_QUERY_JSON_OVERHEAD,
             "keys plus hint take {non_text} B but only {BUFFER_QUERY_JSON_OVERHEAD} are reserved"
+        );
+    }
+    #[test]
+    fn response_extras_len_counts_diagnostics_tee_keys_and_counters() {
+        // A present diagnostic costs `,"key":"` (key + 6) plus its escaped text.
+        let two_quotes = "\"\"";
+        assert_eq!(
+            response_extras_len(&[("shell_cause", Some(two_quotes))], false, false),
+            "shell_cause".len() + 6 + 4,
+            "quotes escape to two bytes each"
+        );
+        // An absent one costs nothing.
+        assert_eq!(
+            response_extras_len(&[("wip_authors", None)], false, false),
+            0
+        );
+        assert_eq!(response_extras_len(&[], true, false), TEE_KEYS_LEN);
+        assert_eq!(
+            response_extras_len(&[], false, true),
+            BUFFER_QUERY_COUNTER_KEYS_LEN
+        );
+        assert_eq!(
+            response_extras_len(&[("a", Some("x"))], true, true),
+            "a".len() + 6 + 1 + TEE_KEYS_LEN + BUFFER_QUERY_COUNTER_KEYS_LEN,
+            "the three parts add"
         );
     }
 

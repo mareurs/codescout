@@ -2802,6 +2802,10 @@ async fn buffer_query(ctx: &ToolContext, command: String) -> (String, Value) {
         .unwrap_or_else(|e| panic!("response is not JSON ({e}): {text:.200}"));
     (text, parsed)
 }
+/// Like [`buffer_query`] but takes a plain `&str` command, for runs that are not buffer queries.
+async fn buffer_query_free(ctx: &ToolContext, command: &str) -> (String, Value) {
+    buffer_query(ctx, command.to_string()).await
+}
 
 fn assert_stderr_bounded(id: &str, text: &str, parsed: &Value) {
     assert!(
@@ -3089,6 +3093,136 @@ async fn a_tool_query_in_the_banded_arm_keeps_json_path_on_the_queried_handle() 
         !hint.contains("@tool_abc"),
         "the placeholder is gone: {hint}"
     );
+}
+// ---- the summary-or-inline gate measures the response, not the raw output ----
+//
+// BUG-adjacent, found by the 2026-10-05 sibling sweep and verified live: a 175-record pretty-JSON
+// run is ~9.3 KB raw but serializes to ~11.4 KB (every quote and newline costs two bytes). The
+// gate compared RAW bytes against the limit, so it chose the inline arm; `call_content` measures the
+// SERIALIZED response, saw it over the limit, and re-buffered it under `@tool_*` with a
+// content-free summary, a `$.field` hint, and no `@cmd_*` handle at all. The same defect hit PLAIN
+// text between 9,977 and 10,003 raw bytes, once the response's own keys were counted.
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pretty_json_run_inside_the_old_raw_gate_is_summarized_under_a_cmd_handle() {
+    let (_dir, ctx) = project_ctx().await;
+    // 175 records, ~53 B raw each = ~9.3 KB raw; ~65 B escaped each = ~11.4 KB.
+    let command = r#"awk 'BEGIN{for(i=0;i<175;i++){printf "  {\n    \"name\": \"n%d\",\n    \"status\": \"created\"\n  },\n", i}}'"#;
+    let (text, parsed) = buffer_query_free(&ctx, command).await;
+
+    assert!(
+        parsed["output_id"].as_str().unwrap_or_default().starts_with("@cmd_"),
+        "the run must keep a `@cmd_*` handle, not be re-buffered under a content-free `@tool_*`: {text:.300}"
+    );
+    assert!(!has_tool_handle(&text), "{text:.200}");
+    assert!(parsed.get("buffered_bytes").is_none());
+    assert!(
+        !crate::tools::exceeds_inline_limit(&text),
+        "{} bytes",
+        text.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_plain_run_at_the_exact_inline_edge_stays_inline() {
+    // `{"exit_code":0,"stdout":""}` is 27 B, so 9,976 B of text is a 10,003 B response: the largest
+    // `exceeds_inline_limit` lets through. Output that FITS must not start being summarized.
+    let (_dir, ctx) = project_ctx().await;
+    let (text, parsed) = buffer_query_free(&ctx, "printf '%09976d' 0").await;
+
+    assert!(
+        parsed.get("output_id").is_none(),
+        "must not buffer: {text:.200}"
+    );
+    assert_eq!(parsed["stdout"].as_str().unwrap_or_default().len(), 9_976);
+    // The limit applies to the COMPACT response BEFORE `call_content` injects its first-call
+    // `_guide_hint`; the inline text is also pretty-printed. Pin the edge itself so a drifted
+    // envelope shows here rather than as a silent off-by-N.
+    let mut compact = parsed.clone();
+    compact.as_object_mut().unwrap().remove("_guide_hint");
+    assert_eq!(
+        compact.to_string().len(),
+        10_003,
+        "the response is not at the edge"
+    );
+    assert!(!crate::tools::exceeds_inline_limit(&compact.to_string()));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_plain_run_one_byte_past_the_inline_edge_is_summarized_not_rebuffered() {
+    // One byte more is a 10,004 B response. The old raw gate called it small, and `call_content`
+    // then buffered it under `@tool_*` with no `@cmd_*` handle.
+    let (_dir, ctx) = project_ctx().await;
+    let (text, parsed) = buffer_query_free(&ctx, "printf '%09977d' 0").await;
+
+    assert!(
+        parsed["output_id"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("@cmd_"),
+        "{text:.300}"
+    );
+    assert!(!has_tool_handle(&text), "{text:.200}");
+    assert!(!crate::tools::exceeds_inline_limit(&text));
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn a_buffer_query_gate_counts_the_bounded_stored_stderr_it_will_emit() {
+    // 85 lines of 100 B = 8,500 B of plain stdout fits on its own (8,527 B response), but the
+    // bounded stored stderr this query ALSO emits is ~2.1 KB: together over the limit. A gate that
+    // judged the query's own (empty) stderr called it small, and the response was re-buffered.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=85)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stdout, wide_stderr(), 0);
+    let (text, parsed) = buffer_query(&ctx, format!("grep row {id}")).await;
+
+    assert!(!has_tool_handle(&text), "{text:.300}");
+    assert!(parsed["stderr"]
+        .as_str()
+        .unwrap_or_default()
+        .starts_with("HEAD"));
+    assert!(
+        !crate::tools::exceeds_inline_limit(&text),
+        "{} bytes",
+        text.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_run_whose_diagnostic_tips_it_over_the_limit_is_summarized() {
+    // The streams alone fit (a 9,990 B response). The empty-selection diagnostic attached AFTER the
+    // branch adds a few hundred bytes and pushes the whole over the limit; the gate must count it.
+    let (_dir, ctx) = project_ctx().await;
+    let libtest = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; \
+                   5 filtered out; finished in 0.00s\n";
+    // Size the filler so the streams alone make a 9,990 B response, measured, not assumed.
+    let response_len = |filler: usize| {
+        serde_json::json!({"exit_code": 0, "stdout": format!("{libtest}{}", "0".repeat(filler))})
+            .to_string()
+            .len()
+    };
+    let filler = 9_990 - (response_len(0));
+    assert_eq!(response_len(filler), 9_990);
+    let command = format!("printf 'running 0 tests\\n\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s\\n'; printf '%0{filler}d' 0");
+    let (text, parsed) = buffer_query_free(&ctx, &command).await;
+
+    assert!(
+        parsed.get("empty_test_selection").is_some(),
+        "the fixture must trigger the diagnostic or this proves nothing: {text:.300}"
+    );
+    assert!(
+        parsed["output_id"].as_str().unwrap_or_default().starts_with("@cmd_"),
+        "the diagnostic pushed the response over the limit and the gate did not count it: {text:.300}"
+    );
+    assert!(!has_tool_handle(&text), "{text:.200}");
 }
 
 #[cfg(unix)]

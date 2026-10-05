@@ -263,7 +263,46 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
 /// Returns `true` when the combined output is large enough to benefit from
 /// summarization rather than raw output.
 pub fn needs_summary(stdout: &str, stderr: &str) -> bool {
-    (stdout.len() + stderr.len()) / 4 > crate::tools::MAX_INLINE_TOKENS
+    inline_response_exceeds_limit(0, stdout, stderr, 0)
+}
+
+/// Would the INLINE response for these streams be over the limit `call_content` enforces?
+///
+/// The summary-or-inline choice used to compare the RAW output length with the limit. But
+/// `call_content` measures the serialized response, in which every quote and newline costs two
+/// bytes and the keys cost another ~30. A 175-record pretty-JSON run (~9.3 KB raw, ~11.4 KB
+/// serialized) therefore took the inline arm, was found over the limit one layer up, and was
+/// buffered under `@tool_*` with no `@cmd_*` handle at all. Plain text between 9,977 and 10,003
+/// raw bytes did the same.
+///
+/// This builds the object the inline arm returns — `exit_code`, plus `stdout` and `stderr` when
+/// non-empty — and applies the SAME predicate (`exceeds_inline_limit_len`) to its serialized
+/// length. `extras` is the byte cost of the keys added after the streams (diagnostics,
+/// `unfiltered_output*`), measured by the caller who holds them. So the inline arm provably stays
+/// within the limit `call_content` applies to the same value, and output that FITS is not
+/// summarized: no reserve is subtracted, because a reserve would start buffering output that
+/// fits today.
+///
+/// Escaping never shortens text, so raw bytes alone settle the large case without serializing.
+pub(crate) fn inline_response_exceeds_limit(
+    exit_code: i32,
+    stdout: &str,
+    stderr: &str,
+    extras: usize,
+) -> bool {
+    use crate::tools::exceeds_inline_limit_len;
+    if exceeds_inline_limit_len(stdout.len() + stderr.len() + extras) {
+        return true;
+    }
+    let mut response = serde_json::Map::new();
+    response.insert("exit_code".into(), json!(exit_code));
+    if !stdout.is_empty() {
+        response.insert("stdout".into(), json!(stdout));
+    }
+    if !stderr.is_empty() {
+        response.insert("stderr".into(), json!(stderr));
+    }
+    exceeds_inline_limit_len(Value::Object(response).to_string().len() + extras)
 }
 
 /// Render the `stderr` field for a summarized envelope: the LAST lines, bounded
@@ -852,6 +891,86 @@ mod tests {
         // Generate output exceeding MAX_INLINE_TOKENS * 4 bytes (~10KB)
         let stdout: String = (1..=3000).map(|i| format!("line {}\n", i)).collect();
         assert!(needs_summary(&stdout, ""));
+    }
+    // -- inline_response_exceeds_limit: the gate measures the SERIALIZED response --
+    //
+    // The limit is on the compact JSON: `len / 4 > 2500`, so 10,003 B passes and 10,004 B does not.
+    // `{"exit_code":0,"stdout":""}` is 27 B. Each case sits ON the edge so a drifted constant,
+    // a forgotten key, or an unescaped byte moves a result across it.
+
+    #[test]
+    fn inline_gate_is_exact_at_the_edge_for_plain_stdout() {
+        assert!(!inline_response_exceeds_limit(0, &"a".repeat(9_976), "", 0));
+        assert!(inline_response_exceeds_limit(0, &"a".repeat(9_977), "", 0));
+    }
+
+    #[test]
+    fn inline_gate_counts_the_escaped_size_not_the_raw_size() {
+        // 4,988 quotes are 4,988 raw bytes and 9,976 serialized: 27 + 9,976 = 10,003, at the edge.
+        assert!(!inline_response_exceeds_limit(
+            0,
+            &"\"".repeat(4_988),
+            "",
+            0
+        ));
+        assert!(inline_response_exceeds_limit(0, &"\"".repeat(4_989), "", 0));
+        // Raw, 4,989 B is nowhere near the limit: the old gate called it small.
+        assert!(!needs_summary_raw_for_comparison(&"\"".repeat(4_989), ""));
+    }
+
+    /// The comparison the gate REPLACED, kept so the test above states what changed.
+    fn needs_summary_raw_for_comparison(stdout: &str, stderr: &str) -> bool {
+        (stdout.len() + stderr.len()) / 4 > crate::tools::MAX_INLINE_TOKENS
+    }
+
+    #[test]
+    fn inline_gate_counts_stderr_and_its_key() {
+        // With stderr present the keys cost 39 B (`,"stderr":""` adds 12). 5,000 B of stderr
+        // leaves 10,003 - 39 - 5,000 = 4,964 B for stdout.
+        let stderr = "e".repeat(5_000);
+        assert!(!inline_response_exceeds_limit(
+            0,
+            &"a".repeat(4_964),
+            &stderr,
+            0
+        ));
+        assert!(inline_response_exceeds_limit(
+            0,
+            &"a".repeat(4_965),
+            &stderr,
+            0
+        ));
+    }
+
+    #[test]
+    fn inline_gate_serializes_the_exit_code() {
+        // 9,975 B of text is a 10,002 B response at exit 0, 10,003 at -1, 10,004 at 101: the
+        // exit code's digits are part of the response and part of the gate.
+        let stdout = "a".repeat(9_975);
+        assert!(!inline_response_exceeds_limit(0, &stdout, "", 0));
+        assert!(!inline_response_exceeds_limit(-1, &stdout, "", 0));
+        assert!(inline_response_exceeds_limit(101, &stdout, "", 0));
+    }
+
+    #[test]
+    fn inline_gate_adds_the_extras_the_caller_measured() {
+        let stdout = "a".repeat(9_876);
+        assert!(!inline_response_exceeds_limit(0, &stdout, "", 100));
+        assert!(inline_response_exceeds_limit(
+            0,
+            &"a".repeat(9_877),
+            "",
+            100
+        ));
+        // And extras alone can tip an otherwise small response over.
+        assert!(inline_response_exceeds_limit(0, "ok", "", 10_000));
+    }
+
+    #[test]
+    fn inline_gate_leaves_output_that_fits_alone() {
+        // No reserve is subtracted: a response that fits must not start being summarized.
+        assert!(!inline_response_exceeds_limit(0, "hello\nworld\n", "", 0));
+        assert!(!inline_response_exceeds_limit(0, "", "", 0));
     }
 
     // -- summarize_test_output --

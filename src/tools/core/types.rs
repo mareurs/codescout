@@ -47,7 +47,15 @@ pub(crate) const HEADINGS_HARD_CAP: usize = 40;
 
 /// Check whether content should be buffered based on estimated token count.
 pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
-    text.len() / 4 > MAX_INLINE_TOKENS
+    exceeds_inline_limit_len(text.len())
+}
+
+/// The same predicate as [`exceeds_inline_limit`], for a caller that knows the byte length of
+/// the response it is about to build and has not built it. There is ONE definition of "over the
+/// limit": a gate that approximated it (the raw-byte comparison in `run_command`) chose the
+/// inline arm for responses `call_content` then buffered anyway.
+pub(crate) fn exceeds_inline_limit_len(len: usize) -> bool {
+    len / 4 > MAX_INLINE_TOKENS
 }
 /// The fewest bytes of one string field that [`clip_prebuffered_envelope`] will keep.
 ///
