@@ -53,6 +53,19 @@ checkout, three profiles: 756 subagent transcript files, 755 carrying the flag, 
 records, newest same-day under 2.1.267 — a version the superseded claim named as
 emitting none. **Bash remains the one real blind spot.**
 
+THE OTHER DIRECTION: what SHARED / PEER may claim
+-------------------------------------------------
+Both assert that another party's UNCOMMITTED bytes are in the path right now, so two things
+that look like writes in a transcript but put nothing at risk are NOT counted as that:
+a call whose own tool_result says it was REFUSED (a request and a landed edit are the same
+token in a tool_use block; a codescout refusal arrives as `{"ok": false}` with `is_error`
+absent, a harness refusal sets `is_error`), and a write to a path git reports CLEAN, which is
+history already in HEAD and is reported as the verdict `CLEAN` rather than SHARED or PEER.
+Both narrow the false-POSITIVE side only. A call with no result on record, and every shell
+call whatever its exit status, still counts; UNKNOWN is still never "not mine"; and a path git
+cannot vouch for (untracked) keeps its transcript verdict. Verdict tokens, first column:
+MINE SHARED PEER UNKNOWN CLEAN. scripts/fmt-mine.sh partitions on that column.
+
 USAGE
     ./scripts/file-provenance.py <path> [<path>...]
     ./scripts/file-provenance.py $(git diff --name-only)
@@ -92,6 +105,21 @@ NATIVE_WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 # `event_create` is deliberately absent: it writes a catalog row, not the file.
 ARTIFACT_WRITE_ACTIONS = {"create", "update", "move", "delete", "graft", "link",
                           "append_entry", "update_entry", "augment"}
+
+# Calls whose result says nothing about whether the write landed. A shell command that exits
+# non-zero (or that codescout's own shell blocks) may still have written before it failed:
+# `sed -i ... && make` writes the file whatever `make` does, and `cat > f <<EOF; false` leaves
+# `f` behind. Every OTHER write-capable call is all-or-nothing -- an edit is applied or it is
+# refused -- so a refusal on record means nothing was written (see `_result_refused`). Dropping a
+# failed shell call as well would convert "the command errored" into "the command wrote
+# nothing", which is a false NEGATIVE, the direction this tool refuses to err in. Deliberately
+# not named `*_TOOLS`: the registry drift gate reads every such constant as a tool-name list.
+_NON_ATOMIC_NAMES = ("Bash", "mcp__codescout__run_command")
+
+# Prefilter for `refused_call_ids`: a tool_result line that CAN be a refusal. `is_error` for the
+# harness's own refusals; the escaped `\"ok\": false` for a codescout refusal, which is JSON text
+# inside a JSON string; `pending_ack` for the unacknowledged out-of-project write.
+_REFUSAL_HINT = re.compile(r'"is_error"\s*:\s*true|\\"ok\\"\s*:\s*false|pending_ack')
 
 # Python snippets run through Bash or run_command. The target lives inside the script
 # body -- as a literal, or as a variable bound ANYWHERE in the snippet. The binder is a
@@ -674,6 +702,79 @@ def tool_records(f: Path):
             blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
             if blocks:
                 yield rec, blocks
+def _result_refused(block: dict) -> bool:
+    """Did this tool_result say the call did NOT take effect?
+
+    Two shapes, and the second is the one that matters here because it is the one a reader
+    would not guess. A harness refusal (a hook denial, a read-only project, a native
+    `Edit` whose `old_string` is absent) sets `is_error: true`. A codescout REFUSAL does
+    NOT: `RecoverableError` maps to `isError: false` on purpose, so that a sibling parallel
+    call is not aborted, and the refusal arrives as ordinary text,
+    `{"ok": false, "error": "old_string not found ..."}`. Measured 2026-10-05 over this
+    project's 80 newest transcripts: 262 `edit_file` and 45 `edit_code` results of that shape, every
+    one with `is_error` absent. Reading `is_error` alone would have fixed the native tools
+    and left the codescout case this bug was filed on untouched.
+
+    `pending_ack` is the out-of-project-write envelope: nothing was written, the caller must
+    re-invoke with the `@ack_*` handle, and THAT re-invocation is its own call with its own
+    result.
+    """
+    if block.get("is_error") is True:
+        return True
+    content = block.get("content")
+    if isinstance(content, list):
+        text = " ".join(p.get("text", "") for p in content
+                        if isinstance(p, dict) and isinstance(p.get("text"), str))
+    elif isinstance(content, str):
+        text = content
+    else:
+        return False
+    text = text.strip()
+    if not text.startswith("{"):
+        return False
+    try:
+        body = json.loads(text)
+    except Exception:
+        return False
+    return isinstance(body, dict) and (body.get("ok") is False or "pending_ack" in body)
+
+
+def refused_call_ids(f: Path) -> set[str]:
+    """tool_use ids in transcript `f` whose own result says the call did not take effect.
+
+    Paired by `tool_use_id`, never by position: parallel calls return their results in
+    whatever order they finish, in later records than the calls.
+
+    A call with NO result on record is NOT in this set. A missing result is a gap in the
+    transcript (an interrupted session, a truncated file, every synthetic fixture), and
+    reading it as a refusal would convert a substrate gap into an exoneration, which is the
+    direction this tool refuses to err in.
+    """
+    ids: set[str] = set()
+    try:
+        fh = open(f, errors="replace")
+    except OSError:
+        return ids
+    with fh:
+        for line in fh:
+            # Cheap prefilter. Only a line that CAN carry a refusal is parsed; a miss here
+            # leaves a refused call counted as a write, which is the pre-existing behaviour
+            # and the safe direction. The escaped quotes match a refusal that is JSON text
+            # inside a JSON string, which is how a codescout result is serialised.
+            if '"tool_result"' not in line or not _REFUSAL_HINT.search(line):
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = (rec.get("message") or {}).get("content")
+            if not isinstance(content, list):
+                continue
+            for b in content:
+                if (isinstance(b, dict) and b.get("type") == "tool_result"
+                        and isinstance(b.get("tool_use_id"), str) and _result_refused(b)):
+                    ids.add(b["tool_use_id"])
+    return ids
 
 
 def record_session(rec: dict, fallback: str) -> str:
@@ -756,6 +857,12 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
     for f in files:
         is_sub = f.parent.name == "subagents"
         fallback = file_session_id(f)
+        # Calls this transcript itself records as REFUSED. Their write targets are not writes:
+        # a request and an accomplished act are the same token in a tool_use block, and only
+        # the result tells them apart (docs/issues/2026-09-13-file-provenance-conflates-touched-
+        # once-with-bytes-at-risk.md). Narrows the FALSE-POSITIVE direction only -- a call with
+        # no result on record, and every shell call, still counts.
+        refused = refused_call_ids(f)
         # The tree a RELATIVE codescout path names: the checkout root of the session's cwd
         # until a `workspace(action="activate")` moves it. None until a record carries `cwd`,
         # which keeps cwd-less fixtures on the old "relative means this checkout" reading.
@@ -781,7 +888,11 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                 # The base is UNKNOWN_TREE after an id activation, unless this call pins an
                 # absolute `workspace=`, which write_base reads in preference to the active tree.
                 tree_unknown = base is UNKNOWN_TREE
-                for raw in write_targets(name, inp, root):
+                # A refused all-or-nothing call wrote nothing. Activation tracking below is
+                # deliberately unchanged: this narrows WRITES only.
+                targets = () if (b.get("id") in refused and name not in _NON_ATOMIC_NAMES) \
+                    else write_targets(name, inp, root)
+                for raw in targets:
                     if (unknowable or tree_unknown) and relative_cs and not Path(raw).is_absolute():
                         continue
                     rel = normalize(raw, root, base)
@@ -958,10 +1069,25 @@ def main(argv: list[str]) -> int:
         hidden_peer = mine and not peers and any(
             w != me for w, when in records
             if when is not None and floor is not None and _key(when) < floor)
-        if hidden_peer and worktree_is_dirty(rel, root):
+        # Git cleanliness, read once and only when a verdict could change on it. Three-valued
+        # (see worktree_is_dirty): None -- untracked, or git cannot say -- never licenses
+        # anything, so it falls through to the transcript verdict unchanged.
+        dirty = (worktree_is_dirty(rel, root)
+                 if hidden_peer or not (mine and not peers) else None)
+        if hidden_peer and dirty:
             verdict = "SHARED"
         else:
             verdict = "MINE" if mine and not peers else ("SHARED" if mine else "PEER")
+        # SHARED and PEER both assert that ANOTHER party's UNCOMMITTED bytes are in this path
+        # right now -- that is the claim a reader acts on (fmt-mine refuses, a commit waits for
+        # an answer). A path git reports CLEAN holds no uncommitted bytes from anyone, so a
+        # session's write to it is history already absorbed into HEAD and the claim is false
+        # (docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md).
+        # This is the FALSE-POSITIVE direction only: UNKNOWN is still never rendered as "not
+        # mine", MINE is untouched, and a dirty or untracked path keeps its transcript verdict.
+        # `CLEAN` is a NEW first-column token; scripts/fmt-mine.sh partitions on that column.
+        if verdict in ("SHARED", "PEER") and dirty is False:
+            verdict = "CLEAN"
         print(f"{verdict:9} {rel}")
         if floor:
             print(f"          window: writes at or after {floor}")
@@ -971,6 +1097,15 @@ def main(argv: list[str]) -> int:
             # write. Previously only the UNKNOWN branch printed it.
             print(f"          ({hidden} write(s) also exist but predate the window; "
                   f"re-run with --all to see them)")
+        if verdict == "CLEAN":
+            print("          the worktree is CLEAN for this path: git holds no uncommitted "
+                  "bytes in it at this instant, so nothing is at risk and there is no one's "
+                  "work to overwrite. The writes on record are history already in git, not "
+                  "co-ownership of the working tree — there is nobody to ask about it.")
+            writers = sorted(who_set)
+            print("          recorded writer(s), committed history: "
+                  + ", ".join(w[:8] + (" (THIS session)" if w == me else "") for w in writers))
+            continue
         if mine:
             print(f"          written by THIS session ({me[:8]})")
         for w in peers:
