@@ -1482,6 +1482,240 @@ async fn overflow_envelope_carries_buffered_bytes() {
         .expect("envelope must carry buffered_bytes");
     assert!(bytes > 0, "buffered_bytes must be positive: {parsed}");
 }
+// ---- a result that already carries its own handle is never wrapped in a second one ----
+//
+// BUG-adjacent design rule, 2026-10-05: `run_command` pre-buffers its raw stream behind
+// `@cmd_*` and returns a summary envelope carrying that `output_id`. When the envelope was
+// itself over the inline budget, `call_content` buffered it AGAIN under `@tool_*`, so the
+// caller held two handles for one result and the second was a copy of a summary it was
+// never shown. The rule: a result with its own `output_id` keeps exactly that one; an
+// oversized envelope is clipped to fit, behind a marker, and only an envelope that cannot be
+// clipped to fit falls back to the old `@tool_*` buffering.
+
+/// Run `result` through `EchoTool::call_content`; return the primary block's text and its
+/// parse.
+async fn echo_envelope(result: serde_json::Value) -> (String, serde_json::Value) {
+    let ctx = bare_ctx().await;
+    let tool = EchoTool {
+        result,
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("primary block is not JSON ({e}): {text:.200}"));
+    (text, parsed)
+}
+
+/// `head`, then `n` bytes of `fill`, then `tail`: ends that can be told apart.
+fn wide(head: &str, fill: char, n: usize, tail: &str) -> String {
+    format!("{head}{}{tail}", fill.to_string().repeat(n))
+}
+
+#[tokio::test]
+async fn a_prebuffered_oversized_envelope_is_clipped_not_rebuffered() {
+    let (text, parsed) = echo_envelope(serde_json::json!({
+        "output_id": "@cmd_own1",
+        "exit_code": 0,
+        "diagnostic": wide("HEAD", 'm', 40_000, "TAIL"),
+    }))
+    .await;
+
+    assert_eq!(
+        parsed["output_id"], "@cmd_own1",
+        "the tool's own handle must be the only one: {text:.300}"
+    );
+    assert!(
+        parsed.get("buffered_bytes").is_none(),
+        "`buffered_bytes` belongs to the `@tool_*` envelope: {text:.300}"
+    );
+    assert!(!text.contains("@tool_"), "a second handle was minted");
+    assert_eq!(parsed["exit_code"], 0, "a small field must survive");
+    let field = parsed["diagnostic"].as_str().expect("the field is kept");
+    assert!(
+        field.contains("bytes shown"),
+        "a cut must say so: {:.120}",
+        field
+    );
+    assert!(field.starts_with("HEAD"), "the head of the field survives");
+    assert!(field.ends_with("TAIL"), "the tail of the field survives");
+    assert!(
+        field.contains("@cmd_own1"),
+        "the marker names the tool's own handle: {field:.0}"
+    );
+    assert!(
+        !exceeds_inline_limit(&text),
+        "the clipped envelope is {} bytes and is still over the inline limit",
+        text.len()
+    );
+}
+
+#[tokio::test]
+async fn a_prebuffered_envelope_clips_the_largest_field_first_and_spares_the_rest() {
+    // One field is far over the budget; the other two fit on their own. Only as much as
+    // needed is cut, and from the largest field: clipping every field would also cut the
+    // 4 KB one, which never needed it.
+    let medium = wide("MID", 'q', 4_000, "END");
+    let (_text, parsed) = echo_envelope(serde_json::json!({
+        "output_id": "@cmd_own2",
+        "big": wide("HEAD", 'b', 40_000, "TAIL"),
+        "medium": medium.clone(),
+        "note": "keep me",
+    }))
+    .await;
+
+    assert!(parsed["big"].as_str().unwrap().contains("bytes shown"));
+    assert_eq!(
+        parsed["medium"].as_str().unwrap(),
+        medium,
+        "a field that fits must be left byte-for-byte"
+    );
+    assert_eq!(parsed["note"], "keep me");
+}
+
+#[tokio::test]
+async fn clipping_survives_text_that_json_escaping_doubles() {
+    // 20,000 double quotes serialize to 40,000 bytes: a clip measured in raw bytes alone
+    // would leave this over the limit. The clip must re-measure the SERIALIZED envelope.
+    let (text, parsed) = echo_envelope(serde_json::json!({
+        "output_id": "@cmd_own3",
+        "diagnostic": format!("<{}>", "\"".repeat(20_000)),
+    }))
+    .await;
+
+    assert_eq!(parsed["output_id"], "@cmd_own3");
+    assert!(parsed["diagnostic"]
+        .as_str()
+        .unwrap()
+        .contains("bytes shown"));
+    assert!(
+        !exceeds_inline_limit(&text),
+        "escaping defeated the clip: {} bytes",
+        text.len()
+    );
+}
+
+#[tokio::test]
+async fn a_prebuffered_envelope_that_cannot_be_clipped_falls_back_to_a_tool_handle() {
+    // 200 fields of 100 bytes each: every one is under the per-field floor, so nothing can
+    // be clipped, yet the whole is far over the limit. Losing that data silently is worse
+    // than the second handle, so the old `@tool_*` buffering takes it.
+    let mut obj = serde_json::Map::new();
+    obj.insert("output_id".into(), serde_json::json!("@cmd_own4"));
+    for i in 0..200 {
+        obj.insert(format!("k{i:03}"), serde_json::json!("v".repeat(100)));
+    }
+    let (text, parsed) = echo_envelope(serde_json::Value::Object(obj)).await;
+
+    assert!(
+        parsed["output_id"].as_str().unwrap().starts_with("@tool_"),
+        "an unclippable envelope must still be buffered: {text:.200}"
+    );
+    assert!(parsed["buffered_bytes"].as_u64().unwrap() > 20_000);
+}
+#[tokio::test]
+async fn a_clip_that_still_cannot_fit_hands_the_original_to_the_buffer_unclipped() {
+    // One huge field plus 100 small ones that are each under the floor. Clipping the huge
+    // field to its floor still leaves ~12 KB, so the envelope cannot be made to fit. What is
+    // buffered must be the ORIGINAL 40 KB: handing back the half-clipped copy would store a
+    // cut result behind a handle with no marker saying so, and nothing would hold the rest.
+    let mut obj = serde_json::Map::new();
+    obj.insert("output_id".into(), serde_json::json!("@cmd_own8"));
+    obj.insert("big".into(), serde_json::json!("B".repeat(40_000)));
+    for i in 0..100 {
+        obj.insert(format!("k{i:03}"), serde_json::json!("v".repeat(100)));
+    }
+    let (text, parsed) = echo_envelope(serde_json::Value::Object(obj)).await;
+
+    assert!(
+        parsed["output_id"].as_str().unwrap().starts_with("@tool_"),
+        "{text:.200}"
+    );
+    assert!(
+        parsed["buffered_bytes"].as_u64().unwrap() > 50_000,
+        "the buffer must hold the whole original, got {}",
+        parsed["buffered_bytes"]
+    );
+}
+
+#[tokio::test]
+async fn an_envelope_without_its_own_handle_still_buffers_under_a_tool_handle() {
+    // The rule is keyed on `output_id`, not on the shape of the payload: the same oversized
+    // string with no handle of its own must still go behind `@tool_*`, or it would be
+    // clipped and lost with nothing holding the rest.
+    let (text, parsed) = echo_envelope(serde_json::json!({
+        "diagnostic": wide("HEAD", 'm', 40_000, "TAIL"),
+    }))
+    .await;
+
+    assert!(
+        parsed["output_id"].as_str().unwrap().starts_with("@tool_"),
+        "{text:.200}"
+    );
+    assert!(
+        parsed.get("diagnostic").is_none(),
+        "nothing was clipped inline"
+    );
+}
+
+#[tokio::test]
+async fn a_prebuffered_envelope_within_the_budget_is_untouched() {
+    let (_text, parsed) = echo_envelope(serde_json::json!({
+        "output_id": "@cmd_own5",
+        "stdout": wide("HEAD", 's', 3_000, "TAIL"),
+    }))
+    .await;
+
+    let stdout = parsed["stdout"].as_str().unwrap();
+    assert_eq!(
+        stdout.len(),
+        3_008,
+        "a result that fits is returned as built"
+    );
+    assert!(!stdout.contains("bytes shown"));
+}
+#[tokio::test]
+async fn an_envelope_between_the_clip_target_and_the_inline_limit_is_untouched() {
+    // Clipping aims at INLINE_BYTE_BUDGET (9,000 B) but is only TRIGGERED by the inline limit
+    // (10,000 B): an envelope in between already fits, so cutting it would lose bytes for
+    // nothing. ~9,500 B of one field, inside the gap.
+    let body = wide("HEAD", 's', 9_400, "TAIL");
+    let (text, parsed) = echo_envelope(serde_json::json!({
+        "output_id": "@cmd_own6",
+        "stdout": body.clone(),
+    }))
+    .await;
+
+    assert!(
+        text.len() > INLINE_BYTE_BUDGET,
+        "fixture must sit above the clip target: {} B",
+        text.len()
+    );
+    assert!(!exceeds_inline_limit(&text), "and below the trigger");
+    assert_eq!(parsed["stdout"].as_str().unwrap(), body);
+}
+
+#[test]
+fn a_force_inline_tool_is_never_clipped() {
+    // `force_inline` tools opt out of overflow handling: their payload is returned whole
+    // however large. A handle of their own does not change that.
+    let val = serde_json::json!({
+        "output_id": "@cmd_own7",
+        "stdout": "z".repeat(40_000),
+    });
+    assert_eq!(clip_prebuffered_envelope(val.clone(), true), val);
+    assert_ne!(
+        clip_prebuffered_envelope(val.clone(), false),
+        val,
+        "the same value IS clipped for a tool that did not opt out"
+    );
+}
 
 // ---- truncate_compact tests ----
 

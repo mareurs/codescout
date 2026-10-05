@@ -7,6 +7,8 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 
+use crate::util::text::{clip_to_bytes, elide_middle_bytes};
+
 // ---------------------------------------------------------------------------
 // Thresholds
 // ---------------------------------------------------------------------------
@@ -264,18 +266,6 @@ pub fn needs_summary(stdout: &str, stderr: &str) -> bool {
     (stdout.len() + stderr.len()) / 4 > crate::tools::MAX_INLINE_TOKENS
 }
 
-/// Clip `s` to at most `max` bytes, on a `char` boundary.
-fn clip_to_bytes(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
 /// Render the `stderr` field for a summarized envelope: the LAST lines, bounded
 /// in both lines and bytes, behind an explicit marker when anything was cut.
 ///
@@ -409,12 +399,12 @@ pub fn summarize_test_output(stdout: &str, stderr: &str, exit_code: i32) -> Valu
         // The section can come from either stream (`combined`), so the marker names both
         // handles rather than claiming one.
         let len = f.len();
-        result["failures"] = Value::String(bound_stream_bytes(
+        result["failures"] = Value::String(elide_middle_bytes(
             f,
             len,
             FAILURE_FIELD_BYTE_BUDGET,
             "failures",
-            "output_id (stdout) or output_id.err (stderr)",
+            "all of it: output_id (stdout) or output_id.err (stderr)",
         ));
     }
     // A test harness writes its RESULTS to stdout, so a test run's stderr is the
@@ -472,12 +462,12 @@ pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Val
     }
     if let Some(err) = first_error {
         let len = err.len();
-        result["first_error"] = Value::String(bound_stream_bytes(
+        result["first_error"] = Value::String(elide_middle_bytes(
             err,
             len,
             FAILURE_FIELD_BYTE_BUDGET,
             "first_error",
-            "output_id (stdout) or output_id.err (stderr)",
+            "all of it: output_id (stdout) or output_id.err (stderr)",
         ));
     }
     // Same omission, same fix. `first_error` mines the HEAD of the combined stream;
@@ -490,71 +480,13 @@ pub fn summarize_build_output(stdout: &str, stderr: &str, exit_code: i32) -> Val
     result
 }
 
-/// Clip `s` to at most its last `max` bytes, on a `char` boundary.
-///
-/// The mirror of [`clip_to_bytes`]: the boundary search moves FORWARD, so the result is
-/// never longer than `max` and never starts inside a character.
-fn clip_tail_to_bytes(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut start = s.len() - max;
-    while start < s.len() && !s.is_char_boundary(start) {
-        start += 1;
-    }
-    &s[start..]
-}
-
-/// Bound one field of a summary envelope to `budget` bytes by eliding its MIDDLE: the first
-/// and last halves of the budget survive, a marker sits between.
-///
-/// `budget` is the caller's: [`GENERIC_FIELD_BYTE_BUDGET`] for a generic summary's streams,
-/// [`FAILURE_FIELD_BYTE_BUDGET`] for a test envelope's `failures` and a build envelope's
-/// `first_error`. One mechanism with the budget passed in, so the marker's shape cannot drift
-/// between the fields.
-///
-/// **Both ends, because each is where something different lives.** The head of a JSON
-/// document shows its shape; the tail of a stream is where a wrapper writes its verdict; a
-/// failure section opens with the first panic and closes on the list of failing names.
-/// Keeping one end would answer one question and silently drop the other.
-///
-/// `text` is what the LINE summary left, but `original_len` is the stream as the command
-/// wrote it, and the marker reports THAT: "N of M bytes shown" with `M` measured after a
-/// line elision would under-report what sits behind the handle. A stream already within
-/// the budget is returned untouched, so no short output changes.
-///
-/// `handle` names where the whole text can be read — `output_id` for stdout,
-/// `output_id.err` for stderr (the suffix the progressive-disclosure guide documents). It is
-/// the envelope's own key, spelled literally rather than substituted: `stdout` is the
-/// command's own bytes and must not be rewritten after the fact the way `stderr`'s
-/// `<output_id>` placeholder is.
-fn bound_stream_bytes(
-    text: String,
-    original_len: usize,
-    budget: usize,
-    stream: &str,
-    handle: &str,
-) -> String {
-    if text.len() <= budget {
-        return text;
-    }
-    let half = budget / 2;
-    let head = clip_to_bytes(&text, half);
-    let tail = clip_tail_to_bytes(&text, half);
-    let shown = head.len() + tail.len();
-    format!(
-        "{head}\n--- {stream}: {shown} of {original_len} bytes shown; \
-         all of it: {handle} ---\n{tail}"
-    )
-}
-
 /// Produce a head+tail summary for generic command output.
 ///
 /// If stdout fits within HEAD_LINES + TAIL_LINES, it is returned verbatim.
 /// Otherwise the middle is replaced with an "N lines omitted" marker.
 ///
 /// **Lines are not the only bound.** A line has no length, so each stream is then held to
-/// [`GENERIC_FIELD_BYTE_BUDGET`] bytes by [`bound_stream_bytes`]. Without that, one 95 KB
+/// [`GENERIC_FIELD_BYTE_BUDGET`] bytes by [`elide_middle_bytes`]. Without that, one 95 KB
 /// line of JSON is "1 line", comes back verbatim, and re-buffers the response under a
 /// `@tool_*` handle that carries none of it. Streams within both bounds are unchanged.
 pub fn summarize_generic(stdout: &str, stderr: &str, exit_code: i32) -> Value {
@@ -574,12 +506,12 @@ pub fn summarize_generic(stdout: &str, stderr: &str, exit_code: i32) -> Value {
     } else {
         stdout.to_string()
     };
-    let summarized_stdout = bound_stream_bytes(
+    let summarized_stdout = elide_middle_bytes(
         summarized_stdout,
         stdout.len(),
         GENERIC_FIELD_BYTE_BUDGET,
         "stdout",
-        "output_id",
+        "all of it: output_id",
     );
 
     let mut result = json!({
@@ -591,12 +523,12 @@ pub fn summarize_generic(stdout: &str, stderr: &str, exit_code: i32) -> Value {
         result["stdout"] = Value::String(summarized_stdout);
     }
     if !stderr.is_empty() {
-        result["stderr"] = Value::String(bound_stream_bytes(
+        result["stderr"] = Value::String(elide_middle_bytes(
             stderr.to_string(),
             stderr.len(),
             GENERIC_FIELD_BYTE_BUDGET,
             "stderr",
-            "output_id.err",
+            "all of it: output_id.err",
         ));
     }
 

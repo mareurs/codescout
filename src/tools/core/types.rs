@@ -49,6 +49,94 @@ pub(crate) const HEADINGS_HARD_CAP: usize = 40;
 pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
     text.len() / 4 > MAX_INLINE_TOKENS
 }
+/// The fewest bytes of one string field that [`clip_prebuffered_envelope`] will keep.
+///
+/// A FLOOR, where the other caps in this file are ceilings: clipping stops at this much
+/// of a field and moves to the next, so a field is never reduced to a bare marker. Below it a
+/// head and a tail of 500 B each stop telling a reader anything about what was cut. An
+/// envelope that cannot fit with every field at its floor is not clipped at all (it falls
+/// back to `@tool_*` buffering), because a result that is cut past usefulness and marked as
+/// cut is still a loss.
+// cap-class: RESULT_CAP tool_output.prebuffered_field_floor — probed
+const PREBUFFERED_FIELD_FLOOR: usize = 1_000;
+
+/// Keep a result that already carries its own handle to exactly that one handle.
+///
+/// A tool that pre-buffers (`run_command` stores its raw stream behind `@cmd_*`) returns an
+/// envelope with a string `output_id`. If that envelope is itself over the inline budget,
+/// `call_content` used to buffer it again under `@tool_*`: the caller then held two handles
+/// for one result, and the second was a copy of a summary it had never been shown. The
+/// tool's own handle is the recovery route, so this clips the envelope's oversized string
+/// fields until it fits [`INLINE_BYTE_BUDGET`], each behind a marker that says how much was
+/// shown and names that handle.
+///
+/// Largest field first, and only as much as needed: a field that fits is left byte-for-byte.
+/// The fit is re-measured on the SERIALIZED envelope after every cut, because JSON escaping
+/// can double the bytes a cut was sized for. Only top-level string fields are clipped; an
+/// envelope whose bulk is nested, or one that does not fit with every field at
+/// [`PREBUFFERED_FIELD_FLOOR`], is returned unchanged for the caller to buffer as before.
+/// A result without its own `output_id` is never touched: nothing would hold the rest of it.
+///
+/// `force_inline` tools opt out of overflow handling altogether, so they are returned as built.
+pub(crate) fn clip_prebuffered_envelope(val: Value, force_inline: bool) -> Value {
+    if force_inline {
+        return val;
+    }
+    let Some(handle) = val
+        .get("output_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return val;
+    };
+    if !exceeds_inline_limit(&val.to_string()) {
+        return val;
+    }
+
+    let mut work = val.clone();
+    let mut fields: Vec<(String, String)> = work
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| k.as_str() != "output_id")
+        .filter_map(|(k, v)| {
+            v.as_str()
+                .filter(|s| s.len() > PREBUFFERED_FIELD_FLOOR)
+                .map(|s| (k.clone(), s.to_owned()))
+        })
+        .collect();
+    fields.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
+    let remedy = format!("cut to fit the response budget; the tool's own buffer is {handle}");
+
+    for (key, original) in fields {
+        let mut target = original.len();
+        loop {
+            let size = work.to_string().len();
+            let Some(excess) = size.checked_sub(INLINE_BYTE_BUDGET).filter(|e| *e > 0) else {
+                return work;
+            };
+            if target <= PREBUFFERED_FIELD_FLOOR {
+                break;
+            }
+            // 200 B of allowance for the marker the cut itself adds.
+            target = target
+                .saturating_sub(excess + 200)
+                .max(PREBUFFERED_FIELD_FLOOR);
+            work[key.as_str()] = Value::String(crate::util::text::elide_middle_bytes(
+                original.clone(),
+                original.len(),
+                target,
+                &key,
+                &remedy,
+            ));
+        }
+    }
+    if exceeds_inline_limit(&work.to_string()) {
+        val
+    } else {
+        work
+    }
+}
 
 /// Soft cap for compact summaries shown alongside `@tool_*` refs.
 /// Truncation prefers whole-line boundaries. See [`truncate_compact`].
@@ -1465,7 +1553,10 @@ pub trait Tool: Send + Sync {
         if let Some(path) = write_path.as_deref() {
             annotate_write_path(&mut val, path);
         }
-        let val = val;
+        // A result that already carries its own handle keeps exactly that one: an oversized
+        // envelope is clipped to fit instead of being buffered a second time under `@tool_*`.
+        // Before `json` is measured, so the buffering decision below sees the clipped bytes.
+        let val = clip_prebuffered_envelope(val, self.force_inline());
         let form = self.output_form();
         let json = serde_json::to_string(&val).unwrap_or_else(|_| val.to_string());
 

@@ -740,6 +740,67 @@ fn extract_lines_with_cost(
     let lines_shown = result_lines.len();
     (result_lines.join("\n"), lines_shown, hit_end)
 }
+/// Clip `s` to at most `max` bytes, keeping the START, on a `char` boundary.
+pub(crate) fn clip_to_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Clip `s` to at most its last `max` bytes, on a `char` boundary.
+///
+/// The mirror of [`clip_to_bytes`]: the boundary search moves FORWARD, so the result is
+/// never longer than `max` and never starts inside a character.
+pub(crate) fn clip_tail_to_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut start = s.len() - max;
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
+
+/// Bound `text` to `budget` bytes by eliding its MIDDLE: the first and last halves of the
+/// budget survive, and a marker sits between them.
+///
+/// **Both ends, because each is where something different lives.** The head of a JSON
+/// document shows its shape; the tail of a stream is where a wrapper writes its verdict; a
+/// failure section opens with the first panic and closes on the list of failing names.
+/// Keeping one end would answer one question and silently drop the other.
+///
+/// `original_len` is the text as its SOURCE wrote it, which can be longer than `text` when an
+/// earlier step already cut it (a line summary does), and the marker reports THAT: "N of M
+/// bytes shown" with `M` measured after an earlier elision would under-report what is behind
+/// the handle. Text already within `budget` is returned untouched, so no short input changes.
+///
+/// `label` names what was cut (`stdout`, `failures`, a JSON key). `remedy` is the rest of the
+/// marker's sentence and must be TRUE of this caller: `all of it: output_id` is right for a
+/// stream whose raw bytes sit behind that handle, and wrong for a field that exists only in
+/// the response. It is spelled by the caller and never substituted afterwards, because
+/// `stdout` is the command's own bytes and must not be rewritten after the fact.
+pub(crate) fn elide_middle_bytes(
+    text: String,
+    original_len: usize,
+    budget: usize,
+    label: &str,
+    remedy: &str,
+) -> String {
+    if text.len() <= budget {
+        return text;
+    }
+    let half = budget / 2;
+    let head = clip_to_bytes(&text, half);
+    let tail = clip_tail_to_bytes(&text, half);
+    let shown = head.len() + tail.len();
+    format!("{head}\n--- {label}: {shown} of {original_len} bytes shown; {remedy} ---\n{tail}")
+}
 
 // `extract_lines_to_budget` is deprecated but deliberately still exercised here:
 // its nine tests are the direct coverage of the shared `extract_lines_with_cost`

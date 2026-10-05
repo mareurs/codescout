@@ -291,6 +291,23 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
              nests to depth 3; MAX_DEPTH is 4, so the cap's own threshold is never reached",
         ),
     },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // seeds ONE 40,008 B field in an envelope that carries its own `output_id`, against
+        // `INLINE_BYTE_BUDGET` 9,000 — so it is the BUDGET that binds there, and the cited
+        // marker proves a cut announces itself. This const is the per-field FLOOR, which
+        // binds only when every field is already at it; that case ends in the `@tool_*`
+        // fallback and carries no marker, so it is pinned by
+        // `a_prebuffered_envelope_that_cannot_be_clipped_falls_back_to_a_tool_handle`, which
+        // a row cannot also cite. Marker written by production in
+        // `util::text::elide_middle_bytes`, called from `clip_prebuffered_envelope`.
+        id: "tool_output.prebuffered_field_floor",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_prebuffered_oversized_envelope_is_clipped_not_rebuffered",
+        },
+    },
     // -- src/tools/symbol/symbols.rs --
     ProbeRow {
         id: "symbols.find_results",
@@ -1023,7 +1040,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // stream only; the stderr stream of the same constant is pinned by
         // `summarize_generic_bounds_a_huge_stderr_and_leaves_a_short_stdout_alone`, which
         // cannot be cited because its marker assertions live in a shared helper this gate's
-        // body scan does not follow. Marker written by production in `bound_stream_bytes`.
+        // body scan does not follow. Marker written by production in `util::text::elide_middle_bytes`.
         id: "command_summary.generic_field_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("bytes shown"),
@@ -1039,7 +1056,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // the `first_error` site of the same constant is pinned by
         // `a_huge_error_block_is_summarized_inline_not_rebuffered`,
         // which cannot also be cited because a row names ONE test. Marker written by
-        // production in `bound_stream_bytes`.
+        // production in `util::text::elide_middle_bytes`.
         id: "command_summary.failure_field_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("bytes shown"),
