@@ -1149,6 +1149,176 @@ pub fn summarize_generic_file(content: &str) -> Value {
         "tail": tail,
     })
 }
+/// Serialized-size ceiling on a whole-file summary BEFORE `read_full_file` adds its own keys
+/// (`file_id`, `complete`, `overflow`, `coverage`).
+///
+/// The summarizers above bound their output by COUNT: every symbol, the first 20 and last 10
+/// lines, 30 lines of a config, 30 sections. A count has no size. A 1,500-function file or a
+/// file of a few very wide lines made the summary JSON exceed `TOOL_OUTPUT_BUFFER_THRESHOLD`,
+/// `call_content` buffered it a second time under `@tool_*`, and the caller held two handles
+/// for one read plus a `json_path="$.field"` hint that reaches nothing. Measured 2026-10-05:
+/// `read_file` on a 6,206-line source file returned `@tool_0bce7715` (20,636 B) beside the
+/// tool's own `@file_0bce76f9`. It is the same defect `summarize_generic` had in
+/// `command_summary.rs` and the same one `GENERIC_FIELD_BYTE_BUDGET` fixed there.
+///
+/// 6,000 B leaves about 3,000 B of the 9,000 B inline budget for what `read_full_file` adds
+/// after the summary is built: the handle, `complete`, and an `overflow` object whose hint runs
+/// to a few hundred bytes. Applied at that single choke point rather than in each summarizer,
+/// so every file type and every fallback path (an unparseable JSON, a YAML with no keys, a
+/// source file with no symbols) is covered and a new summarizer cannot forget it.
+// cap-class: RESULT_CAP file_summary.summary_bytes — probed
+pub(crate) const SUMMARY_BYTE_BUDGET: usize = 6_000;
+
+/// Bound a whole-file summary to [`SUMMARY_BYTE_BUDGET`], keeping both ends of whatever is cut,
+/// and say what was cut.
+///
+/// Returns the bounded summary and one note per cut array, for the caller to put in the
+/// `overflow` hint. A summary that already fits is returned untouched, so no small file changes.
+///
+/// **Strings first** (`head`, `tail`, `preview`, any wide top-level string): each is
+/// middle-elided with `elide_middle_bytes`, its marker naming the buffer handle. The budget is
+/// shared EQUALLY between them rather than spent largest-first, because `head` and `tail` are
+/// both informative and a largest-first pass would crush the first one to its floor.
+///
+/// **Then arrays** (`symbols`, `sections`, `headings`, `keys`): the largest array loses its
+/// MIDDLE entries — the first and last halves of what is left of the budget survive. Entries
+/// stay objects of the same shape, so no consumer sees a foreign element; the gap is described
+/// in structured keys beside the array (`<key>_truncated`, `total_<key>` if absent, and
+/// `<key>_omitted {after, count, from_line, to_line}`) and rendered where it falls.
+pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<String>) {
+    let size = |v: &Value| v.to_string().len();
+    let mut notes: Vec<String> = Vec::new();
+    if size(&summary) <= SUMMARY_BYTE_BUDGET {
+        return (summary, notes);
+    }
+
+    // ---- strings ----
+    // 500 B is the floor: a head and tail of 250 B each still say what the field was.
+    let wide: Vec<(String, String)> = summary
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| !matches!(k.as_str(), "type" | "format"))
+        .filter_map(|(k, v)| {
+            v.as_str()
+                .filter(|s| s.len() > 500)
+                .map(|s| (k.clone(), s.to_owned()))
+        })
+        .collect();
+    if !wide.is_empty() {
+        for (key, _) in &wide {
+            summary[key.as_str()] = Value::String(String::new());
+        }
+        // What the summary costs with every wide string emptied: the fixed part to share around.
+        let fixed = size(&summary);
+        // 200 B of allowance per string for the marker the cut itself adds.
+        let share = SUMMARY_BYTE_BUDGET
+            .saturating_sub(fixed + 200 * wide.len())
+            .checked_div(wide.len())
+            .unwrap_or(0)
+            .max(500);
+        let remedy = format!("the rest: read_file(path=\"{file_id}\", start_line=N, end_line=M)");
+        for (key, original) in wide {
+            summary[key.as_str()] = Value::String(crate::util::text::elide_middle_bytes(
+                original.clone(),
+                original.len(),
+                share,
+                &key,
+                &remedy,
+            ));
+        }
+    }
+
+    // ---- arrays ----
+    let mut arrays: Vec<(String, usize)> = summary
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(_, v)| v.as_array().is_some_and(|a| a.len() > 1))
+        .map(|(k, v)| (k.clone(), v.to_string().len()))
+        .collect();
+    arrays.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
+    for (key, _) in arrays {
+        if size(&summary) <= SUMMARY_BYTE_BUDGET {
+            break;
+        }
+        if let Some(note) = cut_array_middle(&mut summary, &key, file_id) {
+            notes.push(note);
+        }
+    }
+    (summary, notes)
+}
+
+/// Drop the MIDDLE entries of `summary[key]` so the whole summary fits [`SUMMARY_BYTE_BUDGET`].
+/// Returns the note for the caller's hint, or `None` when `key` is not an array.
+fn cut_array_middle(summary: &mut Value, key: &str, file_id: &str) -> Option<String> {
+    let entries = summary[key].as_array()?.clone();
+    let total = entries.len();
+    summary[key] = Value::Array(Vec::new());
+    // Everything else, then 300 B for the structured markers added below.
+    let base = summary.to_string().len();
+    let half = SUMMARY_BYTE_BUDGET.saturating_sub(base + 300) / 2;
+    let cost = |e: &Value| e.to_string().len() + 1; // +1 for the comma
+
+    let (mut head, mut used) = (0usize, 0usize);
+    while head < total && used + cost(&entries[head]) <= half {
+        used += cost(&entries[head]);
+        head += 1;
+    }
+    let (mut tail, mut used) = (0usize, 0usize);
+    while head + tail < total && used + cost(&entries[total - 1 - tail]) <= half {
+        used += cost(&entries[total - 1 - tail]);
+        tail += 1;
+    }
+    // Unreachable by arithmetic: the caller only cuts a summary that is OVER budget, and if
+    // every entry fit its half of what is left, the whole could not be. A branch for it would
+    // be a guard nothing can reach, so the invariant is asserted instead of handled.
+    debug_assert!(
+        head + tail < total,
+        "cut_array_middle called on an array that fits: {head}+{tail} of {total}"
+    );
+
+    let omitted = total - head - tail;
+    let line_of = |e: &Value| e["line"].as_u64();
+    let from = entries.get(head).and_then(line_of);
+    let to = if tail > 0 {
+        entries
+            .get(total - tail)
+            .and_then(line_of)
+            .map(|l| l.saturating_sub(1))
+    } else {
+        None
+    };
+    let grand_total = summary[format!("total_{key}")]
+        .as_u64()
+        .map(|t| t as usize)
+        .unwrap_or(total);
+
+    let mut kept: Vec<Value> = entries[..head].to_vec();
+    kept.extend_from_slice(&entries[total - tail..]);
+    summary[key] = Value::Array(kept);
+    summary[format!("{key}_truncated").as_str()] = Value::Bool(true);
+    if summary.get(format!("total_{key}")).is_none() {
+        summary[format!("total_{key}").as_str()] = serde_json::json!(total);
+    }
+    summary[format!("{key}_omitted").as_str()] = serde_json::json!({
+        "after": head,
+        "count": omitted,
+        "from_line": from,
+        "to_line": to,
+    });
+
+    Some(match (from, to) {
+        (Some(f), Some(t)) => format!(
+            "{key}: {omitted} of {grand_total} entries omitted (lines {f}-{t}); read them with \
+             read_file(path=\"{file_id}\", start_line={f}, end_line={t})."
+        ),
+        _ => format!(
+            "{key}: {omitted} of {grand_total} entries omitted; read the file in ranges with \
+             read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+        ),
+    })
+}
 
 pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
     let summary = summarize_toml(content);

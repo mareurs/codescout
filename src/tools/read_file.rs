@@ -907,7 +907,7 @@ fn read_full_file(
         let file_id = ctx
             .output_buffer
             .store_file(resolved.to_string_lossy().to_string(), text.to_string());
-        let mut result =
+        let summary =
             match crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy()) {
                 crate::tools::file_summary::FileSummaryType::Source => {
                     crate::tools::file_summary::summarize_source(&resolved.to_string_lossy(), text)
@@ -931,6 +931,11 @@ fn read_full_file(
                     crate::tools::file_summary::summarize_generic_file(text)
                 }
             };
+        // Bound the summary by BYTES before anything is added to it: every summarizer above
+        // bounds by count, and a count has no size, so an unbounded one overflowed the inline
+        // limit and `call_content` buffered it a second time under `@tool_*` beside `file_id`.
+        // Doing it here covers every file type and every fallback path at one site.
+        let (mut result, cut_notes) = crate::tools::file_summary::bound_summary(summary, &file_id);
         result["file_id"] = json!(file_id);
 
         // This summary describes a file it does not contain — an outline, zero content
@@ -954,11 +959,19 @@ fn read_full_file(
         result["overflow"] = OutputGuard::overflow_json(&OverflowInfo {
             shown: 0,
             total: summarised_lines,
-            hint: outline_hint(
-                &file_id,
-                is_source,
-                input["force"].as_bool().unwrap_or(false),
-            ),
+            hint: {
+                let mut hint = outline_hint(
+                    &file_id,
+                    is_source,
+                    input["force"].as_bool().unwrap_or(false),
+                );
+                // Where each cut array's middle can be read, as a ready-to-run call.
+                for note in &cut_notes {
+                    hint.push(' ');
+                    hint.push_str(note);
+                }
+                hint
+            },
             next_offset: None,
             by_file: None,
             by_file_overflow: 0,
@@ -1199,6 +1212,22 @@ fn format_read_file_body(val: &Value) -> String {
     insert_below_header(out, &overflow_head(val))
 }
 
+/// The line to print where `bound_summary` cut the middle out of `val[key]`, if `index` is
+/// where the gap falls: `    … 1384 symbols omitted (L59-L1442) …`. `None` everywhere else, and
+/// for a summary that was not cut.
+fn omitted_gap(val: &Value, key: &str, index: usize) -> Option<String> {
+    let gap = val.get(format!("{key}_omitted"))?;
+    if gap["after"].as_u64()? as usize != index {
+        return None;
+    }
+    let count = gap["count"].as_u64()?;
+    let span = match (gap["from_line"].as_u64(), gap["to_line"].as_u64()) {
+        (Some(f), Some(t)) => format!(" (L{f}-L{t})"),
+        _ => String::new(),
+    };
+    Some(format!("\n    … {count} {key} omitted{span} …"))
+}
+
 fn format_read_file_summary(val: &Value, file_type: &str) -> String {
     let line_count = val["line_count"].as_u64().unwrap_or(0);
 
@@ -1230,7 +1259,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
                         .max()
                         .unwrap_or(0);
 
-                    for sym in symbols {
+                    for (i, sym) in symbols.iter().enumerate() {
+                        if let Some(gap) = omitted_gap(val, "symbols", i) {
+                            out.push_str(&gap);
+                        }
                         let kind = sym["kind"].as_str().unwrap_or("?");
                         let name = sym["name"].as_str().unwrap_or("?");
                         let line = sym["line"].as_u64().unwrap_or(0);
@@ -1247,7 +1279,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
             if let Some(headings) = val["headings"].as_array() {
                 if !headings.is_empty() {
                     out.push_str("\n  Headings:");
-                    for h in headings {
+                    for (i, h) in headings.iter().enumerate() {
+                        if let Some(gap) = omitted_gap(val, "headings", i) {
+                            out.push_str(&gap);
+                        }
                         let heading = h["heading"].as_str().unwrap_or("?");
                         let line = h["line"].as_u64().unwrap_or(0);
                         let end_line = h["end_line"].as_u64().unwrap_or(0);
@@ -1284,7 +1319,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
         "toml" => {
             if let Some(sections) = val["sections"].as_array() {
                 out.push_str("\n  Sections:");
-                for s in sections {
+                for (i, s) in sections.iter().enumerate() {
+                    if let Some(gap) = omitted_gap(val, "sections", i) {
+                        out.push_str(&gap);
+                    }
                     let key = s["key"].as_str().unwrap_or("?");
                     let line = s["line"].as_u64().unwrap_or(0);
                     let end = s["end_line"].as_u64().unwrap_or(0);
@@ -1293,7 +1331,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
             }
             if let Some(keys) = val["keys"].as_array() {
                 out.push_str("\n  Keys:");
-                for k in keys {
+                for (i, k) in keys.iter().enumerate() {
+                    if let Some(gap) = omitted_gap(val, "keys", i) {
+                        out.push_str(&gap);
+                    }
                     let key = k["key"].as_str().unwrap_or("?");
                     let line = k["line"].as_u64().unwrap_or(0);
                     out.push_str(&format!("\n    {key}  L{line}"));
@@ -1303,7 +1344,10 @@ fn format_read_file_summary(val: &Value, file_type: &str) -> String {
         "yaml" => {
             if let Some(sections) = val["sections"].as_array() {
                 out.push_str("\n  Sections:");
-                for s in sections {
+                for (i, s) in sections.iter().enumerate() {
+                    if let Some(gap) = omitted_gap(val, "sections", i) {
+                        out.push_str(&gap);
+                    }
                     let key = s["key"].as_str().unwrap_or("?");
                     let line = s["line"].as_u64().unwrap_or(0);
                     let end = s["end_line"].as_u64().unwrap_or(0);
@@ -2176,6 +2220,276 @@ mod tests {
             result["total_lines"].as_u64().unwrap(),
             40,
             "total_lines must be the file's total, so shown_lines reads against it: {result}"
+        );
+    }
+    // ---- the whole-file summary must fit the inline budget and carry ONE handle ----
+    //
+    // `read_full_file` summarises a file over the inline limit and attaches the buffer handle
+    // (`file_id`). The summaries were bounded by COUNT (all symbols; 20+10 lines; 30 lines;
+    // 30 sections), and a count has no size, so a 1,500-function file or a file of a few very
+    // wide lines made the JSON exceed the inline limit. `call_content` then buffered it a
+    // second time under `@tool_*`, leaving the caller two handles for one read and a
+    // `json_path="$.field"` hint that reaches nothing. Measured 2026-10-05: `read_file` on a
+    // 6,206-line source file returned `@tool_0bce7715` (20,636 B) beside `@file_0bce76f9`.
+
+    /// Every distinct buffer handle named in `text`, so "one handle" is counted, not assumed.
+    fn handles_in(text: &str) -> std::collections::BTreeSet<String> {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '@' || c == '_'))
+            .filter(|t| {
+                ["@file_", "@tool_", "@cmd_", "@bg_"]
+                    .iter()
+                    .any(|p| t.starts_with(p))
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The primary block of `call_content` for `path`, as text.
+    async fn read_text(path: &std::path::Path) -> String {
+        let ctx = test_ctx().await;
+        let content = ReadFile
+            .call_content(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        content[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn a_source_file_with_many_symbols_is_summarised_inline_with_one_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.rs");
+        let src: String = (1..=1500).map(|i| format!("fn f{i:04}() {{}}\n")).collect();
+        std::fs::write(&path, &src).unwrap();
+        assert!(
+            src.len() > 20_000,
+            "fixture must be far over the inline limit"
+        );
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.400}"
+        );
+        assert!(
+            !text.contains("buffered_bytes"),
+            "the `@tool_*` envelope's field leaked: {text:.400}"
+        );
+        let handles = handles_in(&text);
+        assert_eq!(handles.len(), 1, "one read, one handle; got {handles:?}");
+        assert!(handles.iter().next().unwrap().starts_with("@file_"));
+        assert!(text.contains("f0001"), "the FIRST symbol must survive");
+        assert!(text.contains("f1500"), "the LAST symbol must survive");
+        assert!(
+            text.contains("entries omitted"),
+            "a cut must say so, and say how much: {text:.600}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} bytes is over the inline limit",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_source_file_summary_within_the_budget_is_not_cut() {
+        // Over the inline limit as TEXT (40 functions of ~330 B), but the symbol list is a
+        // few KB: nothing to cut, so nothing may be, and no marker may claim otherwise.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fits.rs");
+        let src: String = (1..=40)
+            .map(|i| format!("fn g{i:02}() {{ let _ = \"{}\"; }}\n", "p".repeat(300)))
+            .collect();
+        std::fs::write(&path, &src).unwrap();
+        assert!(crate::tools::exceeds_inline_limit(&src));
+        let ctx = test_ctx().await;
+
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result["symbols"],
+            crate::tools::file_summary::summarize_source(path.to_str().unwrap(), &src)["symbols"],
+            "a summary that fits must be returned exactly as the summarizer built it"
+        );
+        assert!(result.get("symbols_truncated").is_none(), "{result}");
+        let hint = result["overflow"]["hint"].as_str().unwrap_or("");
+        assert!(!hint.contains("entries omitted"), "{hint}");
+    }
+    #[tokio::test]
+    async fn the_cut_symbol_list_shows_its_gap_between_the_two_halves() {
+        // The gap line must sit WHERE the entries are missing, with the neighbours' line
+        // numbers either side: a gap line at the wrong index tells the reader the wrong
+        // thing about which lines the omitted symbols cover.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gap.rs");
+        let src: String = (1..=1500).map(|i| format!("fn f{i:04}() {{}}\n")).collect();
+        std::fs::write(&path, &src).unwrap();
+        let ctx = test_ctx().await;
+        let result = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let gap = &result["symbols_omitted"];
+        let after = gap["after"].as_u64().unwrap() as usize;
+        let from = gap["from_line"].as_u64().unwrap();
+        let to = gap["to_line"].as_u64().unwrap();
+        assert_eq!(
+            from as usize,
+            after + 1,
+            "each `fn` is on its own line: {gap}"
+        );
+        assert_eq!(to + 1, result["symbols"][after]["line"].as_u64().unwrap());
+
+        let rendered = format_read_file(&result);
+        let lines: Vec<&str> = rendered.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.contains("symbols omitted"))
+            .unwrap_or_else(|| panic!("no gap line in: {rendered:.600}"));
+        assert!(
+            lines[at].contains(&format!("(L{from}-L{to})")),
+            "{}",
+            lines[at]
+        );
+        assert!(
+            lines[at - 1].ends_with(&format!("L{}", from - 1)),
+            "the entry before the gap must be the last kept head symbol: {}",
+            lines[at - 1]
+        );
+        assert!(
+            lines[at + 1].ends_with(&format!("L{}", to + 1)),
+            "the entry after the gap must be the first kept tail symbol: {}",
+            lines[at + 1]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_of_few_very_wide_lines_is_summarised_inline_with_one_handle() {
+        // Twelve lines of 6 KB: far under any line budget, so only a byte bound can refuse it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.txt");
+        let body: String = (b'a'..=b'l')
+            .map(|c| format!("{}\n", (c as char).to_string().repeat(6_000)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(
+            text.contains("bytes shown"),
+            "a cut must say so: {text:.300}"
+        );
+        assert!(text.contains("aaaa"), "the head of the file must survive");
+        assert!(text.contains("llll"), "the tail of the file must survive");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn one_enormous_json_line_is_summarised_inline_with_one_handle() {
+        // The invalid-JSON fallback path: a single 80 KB line that does not parse falls back
+        // to the generic head/tail summary, which is one line wide.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.json");
+        let body = format!("{{\"items\": [{}", "{\"k\": \"v\"}, ".repeat(6_500));
+        std::fs::write(&path, &body).unwrap();
+        assert!(body.len() > 70_000);
+
+        // The renderer prints no content for type `json` (only a schema), so the bound is
+        // asserted on the VALUE it was applied to, where `head` and `tail` both live.
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        for field in ["head", "tail"] {
+            let s = value[field]
+                .as_str()
+                .unwrap_or_else(|| panic!("`{field}` missing from {value:.300}"));
+            assert!(
+                s.contains("bytes shown"),
+                "`{field}` was not cut: {} B",
+                s.len()
+            );
+        }
+        assert!(
+            !crate::tools::exceeds_inline_limit(&value.to_string()),
+            "the summary is {} B and would be buffered a second time",
+            value.to_string().len()
+        );
+
+        // And through the real entry point: inline, one handle.
+        let text = read_text(&path).await;
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_wide_config_preview_is_summarised_inline_with_one_handle() {
+        // `summarize_config` takes the first 30 LINES; here each is 700 B.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.ini");
+        let body: String = (0..40)
+            .map(|i| format!("key{i:02}={}\n", "v".repeat(700)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("bytes shown"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn wide_yaml_keys_are_bounded_by_bytes_not_by_the_thirty_entry_count() {
+        // 30 top-level keys of 600 B each: the entry COUNT (30) is within its cap, the BYTES
+        // (~20 KB of `sections`) are not.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wide.yaml");
+        let body: String = (0..30)
+            .map(|i| format!("{}{i:02}: 1\n", "k".repeat(600)))
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
         );
     }
 

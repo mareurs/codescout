@@ -1065,6 +1065,23 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // reads a 1,500-function source file whose symbol list is ~72 KB of JSON against
+        // `SUMMARY_BYTE_BUDGET` 6,000, through `ReadFile.call_content`. A symbol list is an
+        // ARRAY, so it is the array cut that binds there and its marker (`entries omitted`)
+        // is what the row cites. The STRING cut of the same constant (`head`, `tail`,
+        // `preview`, marker `bytes shown`) is pinned by
+        // `a_file_of_few_very_wide_lines_is_summarised_inline_with_one_handle` and
+        // `a_wide_config_preview_is_summarised_inline_with_one_handle`, which a row cannot
+        // also cite. Marker written by production in `file_summary::cut_array_middle`.
+        id: "file_summary.summary_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("entries omitted"),
+            mutation: Mutation::NotYet("mutation run pending: see the commit that adds this row"),
+            cited_test: "a_source_file_with_many_symbols_is_summarised_inline_with_one_handle",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked

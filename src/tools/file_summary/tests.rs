@@ -261,6 +261,194 @@ fn markdown_summary_no_truncation_flag_when_under_cap() {
     assert!(s.get("headings_truncated").is_none());
     assert!(s.get("total_headings").is_none());
 }
+// ---- bound_summary: the byte bound on a whole-file summary ----
+//
+// Every guarded site of `bound_summary` / `cut_array_middle` has a case here that ONLY it can
+// refuse (the other bounds admit the input), so a mutation of one site cannot hide behind
+// another.
+
+fn ser_len(v: &serde_json::Value) -> usize {
+    v.to_string().len()
+}
+
+#[test]
+fn bound_summary_leaves_a_summary_at_the_budget_untouched() {
+    // Exactly at the budget is returned as built; one byte over is cut. Pins `<=` against `<`.
+    let overhead = ser_len(&serde_json::json!({"type": "generic", "head": ""}));
+    let at = serde_json::json!({
+        "type": "generic",
+        "head": "x".repeat(SUMMARY_BYTE_BUDGET - overhead),
+    });
+    assert_eq!(
+        ser_len(&at),
+        SUMMARY_BYTE_BUDGET,
+        "fixture must sit on the budget"
+    );
+    let (kept, notes) = bound_summary(at.clone(), "@file_t");
+    assert_eq!(kept, at);
+    assert!(notes.is_empty());
+
+    let over = serde_json::json!({
+        "type": "generic",
+        "head": "x".repeat(SUMMARY_BYTE_BUDGET - overhead + 1),
+    });
+    let (cut, _) = bound_summary(over, "@file_t");
+    assert!(cut["head"].as_str().unwrap().contains("bytes shown"));
+}
+
+#[test]
+fn bound_summary_keeps_the_head_of_a_string_when_the_rest_leaves_no_room() {
+    // The non-string part alone (nested, so untouched) is ~5,900 B, leaving nothing to share.
+    // The 500 B floor is what keeps the field's two ends; without it they are empty.
+    let s = serde_json::json!({
+        "type": "generic",
+        "meta": {"pad": "p".repeat(5_900)},
+        "head": "h".repeat(10_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    let head = cut["head"].as_str().unwrap();
+    assert!(
+        head.starts_with(&"h".repeat(200)),
+        "the head of the field was lost: {head:.120}"
+    );
+    assert!(head.contains("bytes shown"));
+}
+
+#[test]
+fn bound_summary_shares_the_budget_equally_between_wide_strings() {
+    // `head` and `tail` are both informative: neither may be crushed to make room for the
+    // other, and together they must fit.
+    let s = serde_json::json!({
+        "type": "generic",
+        "head": "h".repeat(10_000),
+        "tail": "t".repeat(10_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+    let (h, t) = (
+        cut["head"].as_str().unwrap().len(),
+        cut["tail"].as_str().unwrap().len(),
+    );
+    assert!(
+        h > 2_000 && t > 2_000,
+        "an unequal split: head {h} B, tail {t} B"
+    );
+    assert!(
+        h.abs_diff(t) < 100,
+        "an unequal split: head {h} B, tail {t} B"
+    );
+}
+
+#[test]
+fn bound_summary_cuts_several_mid_sized_strings_that_only_overflow_together() {
+    // Four strings of 2,000 B: each is modest, the sum (8 KB) is over the budget.
+    let s = serde_json::json!({
+        "type": "x", "a": "a".repeat(2_000), "b": "b".repeat(2_000),
+        "c": "c".repeat(2_000), "d": "d".repeat(2_000),
+    });
+    let (cut, _) = bound_summary(s, "@file_t");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+}
+
+fn numbered_entries(n: usize) -> Vec<serde_json::Value> {
+    (1..=n)
+        .map(|i| serde_json::json!({"name": format!("sym{i:03}"), "kind": "Function", "line": i}))
+        .collect()
+}
+
+#[test]
+fn bound_summary_cuts_the_largest_array_and_spares_the_small_one() {
+    let s = serde_json::json!({
+        "type": "source",
+        "symbols": numbered_entries(300),
+        "keys": numbered_entries(3),
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+
+    assert_eq!(
+        cut["keys"].as_array().unwrap().len(),
+        3,
+        "the small array was cut"
+    );
+    assert!(cut.get("keys_truncated").is_none());
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(ser_len(&cut) <= SUMMARY_BYTE_BUDGET, "{} B", ser_len(&cut));
+
+    let kept = cut["symbols"].as_array().unwrap();
+    let after = cut["symbols_omitted"]["after"].as_u64().unwrap() as usize;
+    let count = cut["symbols_omitted"]["count"].as_u64().unwrap() as usize;
+    assert_eq!(kept[0]["name"], "sym001", "the first entry must survive");
+    assert_eq!(
+        kept.last().unwrap()["name"],
+        "sym300",
+        "the last entry must survive"
+    );
+    assert_eq!(
+        kept.len() + count,
+        300,
+        "kept + omitted must account for every entry"
+    );
+    assert!(
+        after > 0 && after < kept.len(),
+        "both halves must be non-empty"
+    );
+    // The gap is lines [after+1, tail_first-1], each symbol being on its own line number.
+    assert_eq!(cut["symbols_omitted"]["from_line"], (after + 1) as u64);
+    let tail_first = kept[after]["line"].as_u64().unwrap();
+    assert_eq!(cut["symbols_omitted"]["to_line"], tail_first - 1);
+    assert_eq!(cut["symbols_truncated"], true);
+    assert_eq!(cut["total_symbols"], 300);
+}
+
+#[test]
+fn bound_summary_note_is_a_ready_to_run_call_naming_the_handle_and_the_gap() {
+    let s = serde_json::json!({"type": "source", "symbols": numbered_entries(300)});
+    let (cut, notes) = bound_summary(s, "@file_t");
+    let from = cut["symbols_omitted"]["from_line"].as_u64().unwrap();
+    let to = cut["symbols_omitted"]["to_line"].as_u64().unwrap();
+    assert_eq!(
+        notes[0],
+        format!(
+            "symbols: {} of 300 entries omitted (lines {from}-{to}); read them with \
+             read_file(path=\"@file_t\", start_line={from}, end_line={to}).",
+            cut["symbols_omitted"]["count"]
+        )
+    );
+}
+
+#[test]
+fn bound_summary_keeps_the_totals_the_summarizer_already_named() {
+    // `summarize_toml` truncates to 30 itself and records the FILE's total. This cut works on
+    // what was left, so "N of M" must use the file's M, and the key must not be overwritten.
+    let s = serde_json::json!({
+        "type": "toml",
+        "sections": numbered_entries(200),
+        "total_sections": 900,
+        "sections_truncated": true,
+    });
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert_eq!(
+        cut["total_sections"], 900,
+        "the summarizer's own total was overwritten"
+    );
+    assert!(notes[0].contains("of 900 entries omitted"), "{}", notes[0]);
+}
+
+#[test]
+fn bound_summary_note_for_entries_with_no_line_numbers_still_says_how_to_read_more() {
+    let entries: Vec<serde_json::Value> = (0..300)
+        .map(|i| serde_json::json!({"key": format!("key{i:03}-{}", "k".repeat(40))}))
+        .collect();
+    let s = serde_json::json!({"type": "x", "keys": entries});
+    let (cut, notes) = bound_summary(s, "@file_t");
+    assert!(cut["keys_omitted"]["from_line"].is_null());
+    assert!(
+        notes[0].contains("read the file in ranges with"),
+        "{}",
+        notes[0]
+    );
+    assert!(notes[0].contains("@file_t"));
+}
 
 /// docs/issues/archive/2026-08-27-append-entry-anchor-is-undiscoverable-through-the-surface-its-error-names.md
 ///
