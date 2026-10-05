@@ -79,6 +79,66 @@ class MechanismToolsRegistryProblems(unittest.TestCase):
         problems = probe.mechanism_tools_registry_problems(live)
 
         self.assertEqual([], problems)
+class MissingGuideIsNotNoRules(unittest.TestCase):
+    """docs/issues/2026-09-24-residual-section-use-signatures-for-nine-topics.md (missing-guide half).
+
+    `topics_with_rules()` used to swallow a missing guide file with `continue`, so a deleted
+    guide fell out of `measurable` and `main` refused it as "no SECTION_SIGNATURES rule matches"
+    -- a rules gap, when the real defect is a registered topic with no file behind it. These
+    cases point `GUIDE_DIR` at a FABRICATED directory so both causes are reproducible without
+    touching the real guides.
+    """
+
+    RULED_HEADING = next(iter(probe.SECTION_SIGNATURES))  # a heading some rule is keyed on
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._saved = probe.GUIDE_DIR
+        probe.GUIDE_DIR = Path(self._tmp.name)
+        self.addCleanup(setattr, probe, "GUIDE_DIR", self._saved)
+
+    def _write(self, topic, heading):
+        (probe.GUIDE_DIR / f"{topic}.md").write_text(f"# t\n\n## {heading}\n\nbody\n", encoding="utf-8")
+
+    def test_a_missing_guide_gets_its_own_refusal_not_the_no_rules_one(self):
+        # `librarian` is a registered topic with NO file in the fabricated dir.
+        refusal = probe.refusal_for_topic("librarian")
+
+        self.assertIsNotNone(refusal)
+        self.assertIn("guide file", refusal)
+        self.assertIn("missing", refusal)
+        self.assertNotIn("no SECTION_SIGNATURES rule matches", refusal)
+
+    def test_a_present_guide_with_no_matching_rule_keeps_the_no_rules_refusal(self):
+        # TWIN of the case above: the file exists, its headings just match no rule. Without
+        # this, an implementation that said "missing" for every refusal would pass the test above.
+        self._write("librarian", "A heading no rule is keyed on")
+
+        refusal = probe.refusal_for_topic("librarian")
+
+        self.assertIsNotNone(refusal)
+        self.assertIn("no SECTION_SIGNATURES rule matches", refusal)
+        self.assertNotIn("missing", refusal)
+
+    def test_a_present_guide_with_a_matching_rule_is_not_refused(self):
+        # Positive control: an implementation that refused everything would fail here.
+        self._write("tracker-conventions", self.RULED_HEADING)
+
+        self.assertIsNone(probe.refusal_for_topic("tracker-conventions"))
+
+    def test_missing_guides_are_listed_apart_from_ruleless_ones(self):
+        self._write("tracker-conventions", self.RULED_HEADING)
+        self._write("librarian", "A heading no rule is keyed on")
+
+        missing = probe.topics_with_missing_guide()
+
+        self.assertNotIn("tracker-conventions", missing)
+        self.assertNotIn("librarian", missing)  # present, merely ruleless
+        self.assertIn("error-handling", missing)  # registered, no file
+        self.assertEqual(["tracker-conventions"], probe.topics_with_rules())
 
 
 if __name__ == "__main__":

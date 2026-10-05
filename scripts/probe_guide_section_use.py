@@ -440,8 +440,9 @@ def topics_with_rules() -> list[str]:
     `cluster/selector-narrower-than-its-population`, whose sibling instance in this very
     file was `MECHANISM_TOOLS` going stale across a tool rename.
 
-    A topic whose guide file is missing is reported as unmeasurable rather than crashing:
-    the caller's job is to refuse the run, and a missing guide is one reason to.
+    A topic whose guide file is missing is left out of the result rather than crashing, but it
+    is NOT thereby "no rules" -- `topics_with_missing_guide()` names those, and
+    `refusal_for_topic()` refuses them with their own message.
     """
     out = []
     for t in TOPICS:
@@ -452,6 +453,53 @@ def topics_with_rules() -> list[str]:
         if set(sections) & set(SECTION_SIGNATURES):
             out.append(t)
     return out
+def topics_with_missing_guide() -> list[str]:
+    """Registered topics whose guide file is absent or unreadable under `GUIDE_DIR`.
+
+    The other half of `topics_with_rules()`'s `continue`: that function must keep skipping such a
+    topic (it cannot be measured), but "cannot be measured because the file is gone" and "cannot
+    be measured because no rule is keyed on its headings" are different defects with different
+    fixes, so this reports the first apart from the second. A deleted guide used to present as a
+    rules gap. docs/issues/2026-09-24-residual-section-use-signatures-for-nine-topics.md
+    """
+    out = []
+    for t in TOPICS:
+        path = GUIDE_DIR / f"{t}.md"
+        try:
+            path.read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            out.append(t)
+    return out
+
+
+def refusal_for_topic(topic: str) -> str | None:
+    """The refusal message for `topic`, or None when it is measurable.
+
+    A missing guide file and an unmatched rule set are refused with DIFFERENT messages: the
+    first means a registered topic has no file behind it (restore the guide or drop the topic
+    from TOPICS); the second means no SECTION_SIGNATURES key matches a heading of a guide that
+    is there (author rules). Checked missing-first, because a missing file also has no rules.
+    """
+    if topic in topics_with_missing_guide():
+        return (
+            f"REFUSING to report on `{topic}`: its guide file is missing or unreadable -- "
+            f"{GUIDE_DIR / (topic + '.md')} -- so there are no sections to measure. This is "
+            f"NOT a rules gap: restore the guide, or remove `{topic}` from TOPICS if the "
+            f"topic was retired."
+        )
+    measurable = topics_with_rules()
+    if topic not in measurable:
+        return (
+            f"REFUSING to report on `{topic}`: no SECTION_SIGNATURES rule matches "
+            f"any section of that topic, so every section would score zero and the run "
+            f"would report ~100% never-engaged by construction rather than by "
+            f"measurement.\n"
+            f"  topics with rules: {', '.join(measurable) if measurable else '(none)'}\n"
+            f"  Authoring rules for `{topic}` is a separate change -- the guard is "
+            f"the fix.\n"
+            f"  docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md"
+        )
+    return None
 
 
 def iter_transcripts(profiles: list[str], roots: list[str] | None) -> list[tuple[str, Path]]:
@@ -749,20 +797,18 @@ def main() -> int:
     # change. Shipping signatures without this guard would leave the next eight topics
     # silently broken, which is the trap that made this defect worth filing.
     # docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
-    measurable = topics_with_rules()
-    if args.topic not in measurable:
-        print(
-            f"REFUSING to report on `{args.topic}`: no SECTION_SIGNATURES rule matches "
-            f"any section of that topic, so every section would score zero and the run "
-            f"would report ~100% never-engaged by construction rather than by "
-            f"measurement.\n"
-            f"  topics with rules: {', '.join(measurable) if measurable else '(none)'}\n"
-            f"  Authoring rules for `{args.topic}` is a separate change -- the guard is "
-            f"the fix.\n"
-            f"  docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md",
-            file=sys.stderr,
-        )
+    #
+    # A missing guide file is refused DISTINCTLY from "no rule matches" (`refusal_for_topic`):
+    # the first is a registered topic with no file behind it, not a rules gap.
+    # docs/issues/2026-09-24-residual-section-use-signatures-for-nine-topics.md
+    refusal = refusal_for_topic(args.topic)
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
         return 2
+    # A missing guide for some OTHER registered topic does not block this run, but it is drift
+    # worth seeing rather than a silent `continue`.
+    for gone in topics_with_missing_guide():
+        print(f"warning: guide file for registered topic `{gone}` is missing or unreadable", file=sys.stderr)
 
     since_ts = None
     if args.since:
