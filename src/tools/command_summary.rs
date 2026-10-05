@@ -615,29 +615,11 @@ pub(crate) struct LineCut {
     pub clipped_wide: bool,
 }
 
-/// Escaped bytes held back for the marker [`clip_wide_line`] adds, before it measures the result.
-const WIDE_LINE_MARKER_RESERVE: usize = 240;
-
-/// Clip ONE over-wide line to at most `max_escaped` JSON-escaped bytes: head and tail with the
-/// marker between. The text is clipped in raw bytes but MEASURED escaped, so a line dense in
-/// quotes or newlines (which serialize to two bytes) is cut again until it fits.
-///
-/// Below `2 * WIDE_LINE_MARKER_RESERVE` there is no room for a marker beside any useful text, so
-/// the head alone is returned: showing something beats showing nothing, and no caller in the
-/// tree budgets that little.
+/// Clip ONE over-wide line to at most `max_escaped` JSON-escaped bytes, head and tail behind a
+/// marker: `elide_middle_escaped` does the clip in escaped bytes, in one pass. With no room for a
+/// marker the head alone is returned, so a non-empty line is never reduced to nothing.
 fn clip_wide_line(line: &str, max_escaped: usize, remedy: &str) -> String {
-    use crate::util::text::{clip_to_bytes, elide_middle_bytes, json_escaped_len};
-    if max_escaped < 2 * WIDE_LINE_MARKER_RESERVE {
-        return clip_to_bytes(line, max_escaped).to_string();
-    }
-    let mut budget = max_escaped - WIDE_LINE_MARKER_RESERVE;
-    loop {
-        let clipped = elide_middle_bytes(line.to_string(), line.len(), budget, "stdout", remedy);
-        if json_escaped_len(&clipped) <= max_escaped || budget <= WIDE_LINE_MARKER_RESERVE {
-            return clipped;
-        }
-        budget = budget * 3 / 4;
-    }
+    crate::util::text::elide_middle_escaped(line, line.len(), max_escaped, "stdout", remedy)
 }
 
 /// Truncate `text` to at most `max_lines` lines **and** at most `max_bytes` JSON-ESCAPED bytes.
@@ -1810,10 +1792,12 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 
     #[test]
     fn truncate_lines_and_bytes_with_no_room_for_a_marker_returns_the_head_not_nothing() {
-        let cut = truncate_lines_and_bytes(&wide(5_000), 100, 100, "R");
+        // 20 B is under the ~45 B marker for remedy "R": no room, so the bare head.
+        let cut = truncate_lines_and_bytes(&wide(5_000), 100, 20, "R");
         assert!(cut.clipped_wide);
-        assert_eq!(cut.text.len(), 100);
+        assert_eq!(cut.text.len(), 20);
         assert!(cut.text.starts_with("HEAD"));
+        assert!(!cut.text.contains("bytes shown"));
     }
 
     #[test]
@@ -1840,36 +1824,48 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
 
     #[test]
     fn truncate_lines_and_bytes_budget_at_the_marker_reserve_boundary_still_marks_the_cut() {
-        // Exactly `2 * WIDE_LINE_MARKER_RESERVE` is the smallest budget with room for a marker;
-        // one below it returns the bare head. Both sides pinned so the comparison cannot drift.
-        let at = truncate_lines_and_bytes(&wide(5_000), 100, 2 * WIDE_LINE_MARKER_RESERVE, "R");
-        assert!(
-            at.text.contains("bytes shown"),
-            "room for a marker: {:.80}",
-            at.text
-        );
-        let below =
-            truncate_lines_and_bytes(&wide(5_000), 100, 2 * WIDE_LINE_MARKER_RESERVE - 1, "R");
-        assert!(
-            !below.text.contains("bytes shown"),
-            "no room: the head alone"
-        );
-        assert_eq!(below.text.len(), 2 * WIDE_LINE_MARKER_RESERVE - 1);
+        // For EVERY budget from 1 upward a clipped line fits it and is never empty; it carries a
+        // marker exactly when the budget leaves room for one beside a character on each side, and
+        // is the bare head otherwise. The boundary is the marker's own escaped length, computed
+        // here from the format and not from a constant.
+        let line = wide(5_000);
+        let n = line.len();
+        let marker_len = crate::util::text::json_escaped_len(&format!(
+            "\n--- stdout: {n} of {n} bytes shown; R ---\n"
+        ));
+        for budget in 1..=(marker_len + 50) {
+            let cut = truncate_lines_and_bytes(&line, 100, budget, "R");
+            assert!(cut.clipped_wide, "budget {budget}");
+            assert!(
+                !cut.text.is_empty(),
+                "budget {budget}: zero bytes of a non-empty line"
+            );
+            let escaped = crate::util::text::json_escaped_len(&cut.text);
+            assert!(escaped <= budget, "budget {budget}: {escaped} B escaped");
+            assert_eq!(
+                cut.text.contains("bytes shown"),
+                budget > marker_len + 1,
+                "budget {budget} (marker is {marker_len} B)"
+            );
+        }
     }
     #[test]
     fn truncate_lines_and_bytes_uses_nearly_all_of_the_budget_for_a_clipped_line() {
-        // The clip must show about as much as fits, not a quarter less. Starting the clip at the
-        // whole budget and letting the re-measure loop shrink it by thirds still returns a text
-        // that fits, so every "is under the budget" assertion passes; only a lower bound on how
-        // much was KEPT tells them apart (mutation T9, 2026-10-05).
+        // A clip must show about as much as fits, for ASCII and for the units that serialize to
+        // 2, 3 and 6 bytes alike. The slack allowed is one character per side (up to 5 B each) and
+        // the marker's digit width: about 12 B. A guessed reserve left up to a QUARTER unused.
         let budget = 10_000;
-        let cut = truncate_lines_and_bytes(&wide(30_000), 100, budget, "R");
-        let kept = crate::util::text::json_escaped_len(&cut.text);
-        assert!(kept <= budget);
-        assert!(
-            kept >= budget - 2 * WIDE_LINE_MARKER_RESERVE,
-            "kept {kept} of {budget}: the clip left more than the marker's reserve unused"
-        );
+        for text in [
+            wide(30_000),
+            "\"".repeat(30_000),
+            "\u{1}".repeat(30_000),
+            "€".repeat(10_000),
+        ] {
+            let cut = truncate_lines_and_bytes(&text, 100, budget, "R");
+            let kept = crate::util::text::json_escaped_len(&cut.text);
+            assert!(kept <= budget, "{kept} B escaped");
+            assert!(kept + 20 >= budget, "kept {kept} of {budget}: under-filled");
+        }
     }
 
     // -- detect_terminal_filter --

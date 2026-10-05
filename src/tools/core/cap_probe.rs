@@ -213,9 +213,11 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
-        // test seeds 11,000 B against a 9,700 B budget (10,000 - 300 envelope overhead -
-        // 0 stderr). Marker written by production at
-        // `src/tools/run_command/output.rs:268`.
+        // test seeds ONE 11,000 B line against the room the truncated response leaves for
+        // stdout: 9,608 B for `cat @cmd_<8 hex>` (the 10,003 B inline limit, less the 383 B
+        // stdout-less response with the clipped-line hint, less the 12 B `\"stdout\"` key),
+        // measured from the response by `inline_stdout_room` and no longer a fixed 300 B or 800 B
+        // reserve. Marker written by production in `capped_hint`, called from `truncation_hint`.
         id: "run_command.inline_bytes",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.truncated"),
@@ -1092,7 +1094,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test seeds
-        // ONE 50,006 B stderr line (a single line, so the 20-line `STDERR_BUDGET` cannot bind)
+        // ONE 50,009 B stderr line (a single line, so the 20-line `STDERR_BUDGET` cannot bind)
         // against `BUFFER_STDERR_BYTE_BUDGET` 2,000, in the `grep -c` arm. The other two
         // buffer-only arms call the same helper, `bound_buffer_stderr`; they are pinned by their
         // own tests and not cited because a row names one. Marker written by production in
@@ -1106,7 +1108,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test runs a
-        // red naming 150 dirty files (a 36,277 B answer) through `handle_successful_output`
+        // red naming 150 dirty files (a 36,277 B answer on this fixture; 35,976 B on the probe repo's shorter paths) through `handle_successful_output`
         // against `WIP_AUTHORS_BYTE_BUDGET` 3,000. Nothing else bounds the field: it is sized by
         // files x peers. The exact-at-the-limit and one-byte-over edges are pinned by
         // `wip_authors_is_returned_whole_at_exactly_the_budget_and_cut_one_byte_over`, which a row

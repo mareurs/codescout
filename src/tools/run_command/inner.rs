@@ -5,9 +5,9 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use super::super::{RecoverableError, ToolContext};
-use super::output::handle_successful_output;
+use super::output::{handle_successful_output_with, LateKeys};
 use crate::tools::output_buffer::{BackgroundJob, JobState};
-use crate::util::redact::{note_in, redact_credentials};
+use crate::util::redact::redact_credentials;
 
 /// RAII guard: deletes a named temp file when dropped.
 pub(crate) struct TmpfileGuard(pub(crate) String);
@@ -627,7 +627,7 @@ pub(crate) async fn run_command_inner(
             let stdout = redact_credentials(&stdout_text);
             let stderr = redact_credentials(&stderr_text);
             let redacted = stdout.count + stderr.count;
-            let mut result = handle_successful_output(
+            let result = handle_successful_output_with(
                 original_command,
                 stdout.text.into_owned(),
                 stderr.text.into_owned(),
@@ -636,17 +636,16 @@ pub(crate) async fn run_command_inner(
                 unfiltered_tmpfile,
                 &work_dir,
                 ctx,
+                // Passed IN, not added afterwards: the summary-or-inline gate measures the response
+                // including them. `unfiltered_output_skipped` says a wanted capture could not be
+                // made; absent, the response would be indistinguishable from a command that simply
+                // had no filter to capture.
+                LateKeys {
+                    redacted,
+                    tee_skipped,
+                },
             )
             .await?;
-            note_in(&mut result, redacted);
-            // A capture that was wanted and could not be made says so. Absent, the response
-            // would be indistinguishable from a command that simply had no filter to capture.
-            if let (Some(note), Some(obj)) = (tee_skipped, result.as_object_mut()) {
-                obj.insert(
-                    "unfiltered_output_skipped".to_string(),
-                    serde_json::Value::String(note),
-                );
-            }
             Ok(result)
         }
         Ok(Err(e)) => Err(RecoverableError::new(format!("command execution error: {}", e)).into()),

@@ -801,6 +801,73 @@ pub(crate) fn elide_middle_bytes(
     let shown = head.len() + tail.len();
     format!("{head}\n--- {label}: {shown} of {original_len} bytes shown; {remedy} ---\n{tail}")
 }
+/// Longest prefix of `s` whose JSON-escaped length is at most `max`, on a `char` boundary.
+///
+/// The unit differs from [`clip_to_bytes`] where it matters: a control character is 1 raw byte
+/// and 6 serialized, so a raw-byte clip of control-heavy text overflows the response it was sized
+/// for. Returns the empty string only when `max` is smaller than the first character's cost.
+pub(crate) fn clip_head_escaped(s: &str, max: usize) -> &str {
+    let mut used = 0usize;
+    for (i, c) in s.char_indices() {
+        let cost = json_escaped_len(c.encode_utf8(&mut [0u8; 4]));
+        if used + cost > max {
+            return &s[..i];
+        }
+        used += cost;
+    }
+    s
+}
+
+/// Longest suffix of `s` whose JSON-escaped length is at most `max`, on a `char` boundary: the
+/// mirror of [`clip_head_escaped`].
+pub(crate) fn clip_tail_escaped(s: &str, max: usize) -> &str {
+    let mut used = 0usize;
+    for (i, c) in s.char_indices().rev() {
+        let cost = json_escaped_len(c.encode_utf8(&mut [0u8; 4]));
+        if used + cost > max {
+            return &s[i + c.len_utf8()..];
+        }
+        used += cost;
+    }
+    s
+}
+
+/// [`elide_middle_bytes`], bounded in JSON-ESCAPED bytes: the result, marker included, serializes
+/// to at most `max_escaped` bytes, and uses all but a character or two of them.
+///
+/// One pass, no reserve and no shrink loop. The marker's own escaped cost is computed (with
+/// `shown` at its widest, the original length, so the real marker can only be shorter), and the
+/// rest is split into two halves that are each clipped in ESCAPED bytes. Text dense in quotes,
+/// newlines or control characters (2 to 6 serialized bytes each) therefore keeps as much as fits
+/// instead of overflowing, and ordinary text is not under-filled by a guessed reserve. The head and
+/// tail cannot overlap: together they hold at most `max_escaped` less the marker, which is less
+/// than the whole text's escaped length, or the text would have fit.
+///
+/// Text that already fits is returned untouched. With no room for a marker beside any text at all
+/// the head alone is returned: showing something beats showing nothing, and it is clipped in
+/// escaped bytes too, so even then the result fits. Never over `max_escaped`.
+pub(crate) fn elide_middle_escaped(
+    text: &str,
+    original_len: usize,
+    max_escaped: usize,
+    label: &str,
+    remedy: &str,
+) -> String {
+    if json_escaped_len(text) <= max_escaped {
+        return text.to_string();
+    }
+    let widest =
+        format!("\n--- {label}: {original_len} of {original_len} bytes shown; {remedy} ---\n");
+    let marker_len = json_escaped_len(&widest);
+    if max_escaped <= marker_len + 1 {
+        return clip_head_escaped(text, max_escaped).to_string();
+    }
+    let half = (max_escaped - marker_len) / 2;
+    let head = clip_head_escaped(text, half);
+    let tail = clip_tail_escaped(text, half);
+    let shown = head.len() + tail.len();
+    format!("{head}\n--- {label}: {shown} of {original_len} bytes shown; {remedy} ---\n{tail}")
+}
 
 // `extract_lines_to_budget` is deprecated but deliberately still exercised here:
 // its nine tests are the direct coverage of the shared `extract_lines_with_cost`

@@ -2798,13 +2798,42 @@ async fn buffer_query(ctx: &ToolContext, command: String) -> (String, Value) {
         .as_text()
         .map(|t| t.text.clone())
         .unwrap_or_default();
-    let parsed: Value = serde_json::from_str(&text)
+    let mut parsed: Value = serde_json::from_str(&text)
         .unwrap_or_else(|e| panic!("response is not JSON ({e}): {text:.200}"));
+    // The COMPACT form, without the first-call `_guide_hint`: that is what `call_content` measures
+    // against the inline limit, and it is shorter than the pretty-printed text the transport
+    // carries. Every size assertion in the tests below is therefore in the unit the limit uses.
+    if let Some(obj) = parsed.as_object_mut() {
+        obj.remove("_guide_hint");
+    }
+    let text = parsed.to_string();
     (text, parsed)
 }
 /// Like [`buffer_query`] but takes a plain `&str` command, for runs that are not buffer queries.
 async fn buffer_query_free(ctx: &ToolContext, command: &str) -> (String, Value) {
     buffer_query(ctx, command.to_string()).await
+}
+/// The `sed -n 'A,Bp' @handle` page a truncation hint advises, parsed OUT of the hint so a test
+/// follows the route the response actually gave and not one it hard-coded.
+fn next_page_command(hint: &str) -> String {
+    regex::Regex::new(r"sed -n '\d+,\d+p' @[A-Za-z0-9_]+")
+        .expect("static pattern")
+        .find(hint)
+        .unwrap_or_else(|| panic!("no next-page command in the hint: {hint}"))
+        .as_str()
+        .to_string()
+}
+
+/// Store `stdout` / `stderr` and run `command_for(id)` as a buffer query.
+async fn query_stored(
+    ctx: &ToolContext,
+    stdout: String,
+    stderr: String,
+    command_for: impl Fn(&str) -> String,
+) -> (String, String, Value) {
+    let id = ctx.output_buffer.store("cmd".into(), stdout, stderr, 0);
+    let (text, parsed) = buffer_query(ctx, command_for(&id)).await;
+    (id, text, parsed)
 }
 
 fn assert_stderr_bounded(id: &str, text: &str, parsed: &Value) {
@@ -2967,12 +2996,17 @@ async fn the_advised_next_page_of_a_wide_line_makes_progress() {
         .unwrap_or_else(|| panic!("the advised route returned zero bytes: {t2:.300}"));
     assert!(page2.starts_with("HEAD") && page2.contains("bytes shown"));
 
-    // And the page after it reaches line 3: progress, not a loop.
-    let (_t3, p3) = buffer_query(&ctx, format!("sed -n '3,102p' {id}")).await;
-    assert!(p3["stdout"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("third-line"));
+    // And FOLLOW page 2's own hint: the page it advises reaches line 3. Progress, not a loop.
+    let hint2 = p2["hint"].as_str().unwrap_or_default();
+    let next = next_page_command(hint2);
+    let (t3, p3) = buffer_query(&ctx, next.clone()).await;
+    assert!(
+        p3["stdout"]
+            .as_str()
+            .unwrap_or_else(|| panic!("`{next}` returned zero bytes: {t3:.300}"))
+            .contains("third-line"),
+        "`{next}`, advised by page 2, did not reach line 3: {t3:.300}"
+    );
 }
 #[cfg(unix)]
 #[tokio::test]
@@ -3003,8 +3037,8 @@ async fn a_summarized_query_budgets_stdout_against_the_escaped_stderr() {
 }
 #[cfg(unix)]
 #[tokio::test]
-async fn a_banded_query_budgets_stdout_against_the_escaped_stderr() {
-    // The banded arm's own twin of the summary-arm test above: ~9.8 KB of stdout takes the
+async fn a_near_limit_query_budgets_stdout_against_the_escaped_stderr() {
+    // The near-limit twin of the summary test above: ~9.8 KB of stdout takes the
     // third arm, and 3,000 stored double quotes are ~4,000 escaped once bounded. Charged raw
     // they leave stdout ~2 KB too much room (mutation C3, 2026-10-05).
     let (_dir, ctx) = project_ctx().await;
@@ -3029,26 +3063,25 @@ async fn a_banded_query_budgets_stdout_against_the_escaped_stderr() {
         text.len()
     );
 }
-// ---- the banded arm's hint names a route that works for the ref the caller queried ----
+// ---- a truncation hint names a route that works for the ref the caller queried ----
 //
-// BUG-adjacent, found by the 2026-10-05 sibling sweep. The third buffer-only arm (output a few
-// hundred bytes under the summary threshold) carried one hard-coded hint: "a single grep match
+// BUG-adjacent, found by the 2026-10-05 sibling sweep. One buffer-only arm carried a hard-coded
+// hint: "a single grep match
 // inside a @tool_* ref ... Use read_file(@tool_abc, json_path=\"$.field\")". On a `@cmd_*` or
 // `@file_*` query `read_file` REFUSES `json_path`, and `@tool_abc` is a literal placeholder.
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_cmd_query_in_the_banded_arm_gets_routes_that_work_on_a_cmd_ref() {
+async fn a_truncated_cmd_query_gets_routes_that_work_on_a_cmd_ref() {
     let (_dir, ctx) = project_ctx().await;
-    // 98 lines x 100 B = 9,800 B: over the arm's guard, under the summary threshold, and more
-    // than the arm's byte budget, so it truncates by bytes and the hint fires.
-    let stdout: String = (1..=98)
+    // 130 lines x 100 B = 13 KB: over the limit, so the query is cut and the hint fires.
+    let stdout: String = (1..=130)
         .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
         .collect();
     let id = ctx
         .output_buffer
         .store("cmd".into(), stdout, String::new(), 0);
-    let (text, parsed) = buffer_query(&ctx, format!("grep row {id}")).await;
+    let (text, parsed) = buffer_query(&ctx, format!("cat {id}")).await;
 
     assert_eq!(
         parsed["truncated"], true,
@@ -3063,23 +3096,35 @@ async fn a_cmd_query_in_the_banded_arm_gets_routes_that_work_on_a_cmd_ref() {
         hint.contains(&id),
         "the hint names the handle the caller used: {hint}"
     );
-    let shown = parsed["stdout"]
+
+    // FOLLOW the route: the page the hint advises returns the very next line after those shown.
+    let shown = parsed["stdout_shown"].as_u64().expect("a count") as usize;
+    let page = next_page_command(hint);
+    let (t2, p2) = buffer_query(&ctx, page.clone()).await;
+    let first = p2["stdout"]
         .as_str()
-        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("`{page}` returned zero bytes: {t2:.300}"))
         .lines()
-        .count();
-    assert!(
-        hint.contains(&format!("sed -n '{},", shown + 1)),
-        "the next page starts after the {shown} lines shown: {hint}"
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(
+        first,
+        format!("row{:03} {}", shown + 1, "r".repeat(92)),
+        "`{page}` did not continue where the first page stopped"
     );
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_tool_query_in_the_banded_arm_keeps_json_path_on_the_queried_handle() {
-    // `json_path` IS the right route on a `@tool_*` ref, so it stays — but on the real handle.
+async fn a_truncated_tool_query_keeps_json_path_and_the_route_returns_data() {
+    // `json_path` IS the right route on a `@tool_*` ref, so it stays, on the real handle, and the
+    // route must WORK: following the hint's `read_file` call returns the field it names.
     let (_dir, ctx) = project_ctx().await;
-    let blob = format!("{{\"rows\":[\"{}\"]}}", "r".repeat(9_800));
+    let blob = format!(
+        "{{\"meta\":\"found-me\",\"rows\":[\"{}\"]}}",
+        "r".repeat(12_000)
+    );
     let id = ctx.output_buffer.store_tool("probe", blob);
     let (text, parsed) = buffer_query(&ctx, format!("cat {id}")).await;
 
@@ -3092,6 +3137,18 @@ async fn a_tool_query_in_the_banded_arm_keeps_json_path_on_the_queried_handle() 
     assert!(
         !hint.contains("@tool_abc"),
         "the placeholder is gone: {hint}"
+    );
+
+    // Follow it, with the field the hint leaves for the caller to fill in.
+    assert!(hint.contains("json_path=\"$.<field>\""), "{hint}");
+    let got = crate::tools::read_file::ReadFile
+        .call(json!({ "path": id, "json_path": "$.meta" }), &ctx)
+        .await
+        .unwrap_or_else(|e| panic!("the hinted json_path route failed: {e}"));
+    assert!(
+        got.to_string().contains("found-me"),
+        "the route returned no data: {:.200}",
+        got.to_string()
     );
 }
 // ---- the summary-or-inline gate measures the response, not the raw output ----
@@ -3227,13 +3284,11 @@ async fn a_run_whose_diagnostic_tips_it_over_the_limit_is_summarized() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_banded_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
-    // The narrow band under the inline limit: ~9.8 KB of stdout with a wide stored stderr beside it.
-    // Since the gate counts the BOUNDED stored stderr this query will emit, this lands in the
-    // summary arm; the banded arm is entered only when that stderr is ~226 B or less, where the
-    // 2,000 B byte bound is a no-op (see the comment at that arm's `bound_buffer_stderr`). It
-    // overflowed by its own arithmetic (raw-byte budget, 300 B overhead) before the budgets were
-    // measured in escaped bytes with an honest overhead.
+async fn a_query_just_under_the_limit_bounds_a_wide_stored_stderr() {
+    // ~9.8 KB of stdout fits on its own, and a wide stored stderr beside it does not: the stderr
+    // must be bounded and the stdout must give way to it by the MEASURED amount. This size used to
+    // land in a third arm that cut at a fixed 9,700 B guard; that arm is gone, because the gate
+    // already measures the serialized response and the arm cut responses it had just said fit.
     let (_dir, ctx) = project_ctx().await;
     let stdout: String = (1..=98)
         .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
@@ -3248,25 +3303,34 @@ async fn a_banded_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_wide_line_in_the_banded_arm_is_clipped_too() {
-    // ONE 9,800-byte line: over the arm's guard (9,700) and under the summary threshold, so it is
-    // the banded arm's own truncation that meets a first line wider than the budget.
-    let (_dir, ctx) = project_ctx().await;
-    let id = ctx
-        .output_buffer
-        .store("cmd".into(), wide_line(9_800), String::new(), 0);
-    let (text, parsed) = buffer_query(&ctx, format!("cat {id}")).await;
+async fn a_response_exactly_at_the_limit_stays_whole_and_one_byte_over_is_cut() {
+    // `cat @cmd` of N bytes with no newline answers `{"exit_code":0,"stdout":"a…"}`: 27 + N bytes
+    // COMPACT, the unit `call_content` measures. N = 9,976 is exactly the 10,003 B limit and must
+    // come back WHOLE; N = 9,977 is one byte over and must be cut. A fixed guard under the limit
+    // (the 9,700 B guard this replaced) clipped the first case for nothing.
+    for (n, whole) in [(9_976usize, true), (9_977, false)] {
+        let (_dir, ctx) = project_ctx().await;
+        let id = ctx
+            .output_buffer
+            .store("cmd".into(), "a".repeat(n), String::new(), 0);
+        let (text, parsed) = buffer_query(&ctx, format!("cat {id}")).await;
 
-    let stdout = parsed["stdout"]
-        .as_str()
-        .unwrap_or_else(|| panic!("zero bytes of a non-empty result: {text:.300}"));
-    assert!(stdout.contains("bytes shown") && stdout.starts_with("HEAD"));
-    assert!(
-        stdout.contains("grep -o") && stdout.contains(&id),
-        "the marker names a working route on the queried handle"
-    );
-    assert_eq!(parsed["truncated"], true, "{text:.300}");
-    assert!(!has_tool_handle(&text), "{text:.200}");
+        assert!(!has_tool_handle(&text), "n={n}: {text:.200}");
+        let stdout = parsed["stdout"].as_str().unwrap_or_default();
+        if whole {
+            assert_eq!(text.len(), 10_003, "n={n}: not on the edge");
+            assert!(parsed.get("truncated").is_none(), "n={n}: cut for nothing");
+            assert_eq!(stdout.len(), n, "n={n}: bytes were dropped");
+        } else {
+            assert_eq!(parsed["truncated"], true, "n={n}");
+            assert!(stdout.contains("bytes shown"), "n={n}");
+            assert!(
+                (9_900..=10_003).contains(&text.len()),
+                "n={n}: {} B; a cut must fill the limit, not stop a reserve short of it",
+                text.len()
+            );
+        }
+    }
 }
 // ---- the routes the hints name are FOLLOWED, against the same buffer, and the data comes back ----
 //
@@ -3357,39 +3421,53 @@ async fn the_marker_in_the_clipped_line_names_the_same_working_routes() {
 }
 
 // A comma-free wide match is what `grep -o 'PATTERN[^,]*'` returns on JSON or CSV-ish output: ONE
-// line, no separator to page on. 9,850 B lands in the banded arm (over its 9,700 B guard, under the
-// summary gate); 20,000 B lands in the summary arm. Both used to return zero bytes.
+// line, no separator to page on. At 9,850 B the response (27 + the match + its newline, escaped)
+// FITS the inline limit, so it comes back WHOLE; at 20,000 B it does not, and a clipped head and
+// tail come back instead. Both used to return zero bytes, and a fixed guard under the limit once
+// clipped the first for nothing. Real bytes, never none, in both.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_comma_free_wide_match_returns_real_bytes_in_both_arms() {
-    for width in [9_850usize, 20_000] {
+async fn a_comma_free_wide_match_returns_real_bytes_whole_or_clipped() {
+    for (width, whole) in [(9_850usize, true), (20_000, false)] {
         let (_dir, ctx) = project_ctx().await;
         let body = format!("a,b,HEAD{},tail\n", "x".repeat(width));
-        let id = ctx
-            .output_buffer
-            .store("cmd".into(), body, String::new(), 0);
-        let (text, parsed) = buffer_query(&ctx, format!("grep -o 'HEAD[^,]*' {id}")).await;
+        let (_id, text, parsed) = query_stored(&ctx, body, String::new(), |id| {
+            format!("grep -o 'HEAD[^,]*' {id}")
+        })
+        .await;
 
         let stdout = parsed["stdout"].as_str().unwrap_or_else(|| {
             panic!("width {width}: zero bytes of a non-empty match: {text:.300}")
         });
         assert!(stdout.starts_with("HEAD"), "width {width}");
-        assert!(
-            stdout.len() > 3_000,
-            "width {width}: only {} bytes came back",
-            stdout.len()
-        );
-        assert!(
-            stdout.contains("bytes shown"),
-            "width {width}: a clipped match must say so"
-        );
-        assert_eq!(parsed["truncated"], true, "width {width}: {text:.200}");
         assert!(!has_tool_handle(&text), "width {width}: {text:.200}");
         assert!(
             !crate::tools::exceeds_inline_limit(&text),
-            "width {width}: {} B",
+            "width {width}: {} B compact",
             text.len()
         );
+        if whole {
+            assert_eq!(
+                stdout.trim_end().len(),
+                4 + width,
+                "width {width}: bytes dropped"
+            );
+            assert!(
+                parsed.get("truncated").is_none(),
+                "width {width}: cut for nothing"
+            );
+        } else {
+            assert!(
+                stdout.len() > 3_000,
+                "width {width}: only {} B came back",
+                stdout.len()
+            );
+            assert!(
+                stdout.contains("bytes shown"),
+                "width {width}: a clipped match must say so"
+            );
+            assert_eq!(parsed["truncated"], true, "width {width}: {text:.200}");
+        }
     }
 }
 
@@ -3430,6 +3508,285 @@ async fn a_stored_stderr_line_one_byte_over_the_budget_is_cut_and_says_so() {
         got.contains("of 2001 bytes shown"),
         "the total names the stored stream: {:.0}",
         got
+    );
+}
+// ---- stderr that escapes to more bytes than it holds, and the query's own stderr ----
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_control_character_stored_stderr_keeps_one_handle_and_the_answer() {
+    // 50,000 x \x01 is 50,000 raw bytes and 300,000 serialized. A raw-byte cut of 2,000 serialized
+    // to ~12 KB, so the response was re-buffered under `@tool_*` and the answer (`2`) hidden.
+    let (_dir, ctx) = project_ctx().await;
+    let (_id, text, parsed) =
+        query_stored(&ctx, "a1\na2\nb\n".into(), "\u{1}".repeat(50_000), |id| {
+            format!("grep -c a {id}")
+        })
+        .await;
+
+    assert!(!has_tool_handle(&text), "re-buffered: {text:.200}");
+    assert_eq!(
+        parsed["stdout"].as_str().unwrap_or_default().trim(),
+        "2",
+        "the query's own answer must be in the response: {text:.200}"
+    );
+    assert!(parsed["stderr"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("bytes shown"));
+    assert!(
+        text.len() <= 10_003,
+        "{} B compact is over the limit",
+        text.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wide_stdout_beside_a_control_character_stderr_is_never_zero_bytes() {
+    // The bounded stderr used to serialize to ~12 KB, which drove the stdout budget to ZERO and
+    // `clip_to_bytes(line, 0)` returned nothing: the "never zero bytes of a non-empty result"
+    // rule broken by its own caller.
+    let (_dir, ctx) = project_ctx().await;
+    let (_id, text, parsed) =
+        query_stored(&ctx, "a".repeat(20_000), "\u{1}".repeat(50_000), |id| {
+            format!("cat {id}")
+        })
+        .await;
+
+    let stdout = parsed["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("zero bytes of a non-empty result: {text:.300}"));
+    assert!(
+        stdout.starts_with("aaaa") && stdout.len() > 3_000,
+        "{} B",
+        stdout.len()
+    );
+    assert!(!has_tool_handle(&text), "{text:.200}");
+    assert!(text.len() <= 10_003, "{} B compact", text.len());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_query_own_stderr_is_bounded_and_its_marker_does_not_name_a_stored_handle() {
+    // The reviewer's input: 77 stored lines of 100 B (7,777 B of stdout), queried with an awk that
+    // also writes 5,000 B to ITS OWN stderr. That stderr is stored nowhere, so a marker saying
+    // `all of it: @cmd_X.err` is false, and unbounded it is 5 KB the response cannot carry.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=77)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let awk = |id: &str, tail: &str| {
+        format!(
+            "awk '{{print}} END{{ for(i=0;i<5000;i++) s=s \"E\"; print s | \"cat 1>&2\"}}' {id}{tail}"
+        )
+    };
+    let (id, text, parsed) = query_stored(&ctx, stdout, String::new(), |id| awk(id, "")).await;
+
+    assert!(!has_tool_handle(&text), "{text:.200}");
+    assert_eq!(
+        parsed["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .lines()
+            .count(),
+        77,
+        "the response fits, so the whole stdout comes back: {text:.200}"
+    );
+    assert!(
+        parsed.get("truncated").is_none(),
+        "cut for nothing: {text:.200}"
+    );
+    let stderr = parsed["stderr"].as_str().expect("the query's own stderr");
+    assert!(stderr.contains("bytes shown"), "{stderr:.0}");
+    assert!(stderr.contains("stored nowhere"), "{stderr:.0}");
+    assert!(
+        !stderr.contains(&format!("{id}.err")),
+        "the marker names a handle that does not hold this stream"
+    );
+    assert!(
+        crate::util::text::json_escaped_len(stderr) <= 2_000,
+        "{} B escaped",
+        crate::util::text::json_escaped_len(stderr)
+    );
+
+    // FOLLOW the rerun route the marker gives: it returns a window of the stream that was cut.
+    let (t2, p2) = buffer_query(&ctx, awk(&id, " 2>&1 >/dev/null | cut -c1-4000")).await;
+    let window = p2["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the rerun route returned nothing: {t2:.300}"));
+    assert_eq!(
+        window.trim_end(),
+        "E".repeat(4_000),
+        "a window of the cut stream"
+    );
+}
+
+// ---- the counters and the late keys are inside the gate, at the exact edge ----
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_stderr_counters_are_inside_the_gate_at_the_exact_edge() {
+    // Stored stderr of 25 lines is cut to 20, so the response carries `stderr_shown` and
+    // `stderr_total`. Sized from a MEASURED response, not a constant: stdout of N 'a' bytes makes
+    // the compact response `base + N`, so N* lands it exactly on 10,003. A gate that forgot the
+    // counters would call N*+1 small and the response would go over the limit.
+    let stderr: String = (0..25).map(|i| format!("e{i:02}\n")).collect();
+    let probe = |n: usize| {
+        let stderr = stderr.clone();
+        async move {
+            let (_dir, ctx) = project_ctx().await;
+            let (_id, text, parsed) =
+                query_stored(&ctx, "a".repeat(n), stderr, |id| format!("cat {id}")).await;
+            (text, parsed)
+        }
+    };
+    let (small, _) = probe(100).await;
+    let n_edge = 10_003 - (small.len() - 100);
+
+    let (at, at_parsed) = probe(n_edge).await;
+    assert_eq!(at.len(), 10_003, "the measured size is not the edge");
+    assert!(at_parsed.get("truncated").is_none(), "cut for nothing");
+    assert_eq!(at_parsed["stderr_shown"], 20);
+
+    let (over, over_parsed) = probe(n_edge + 1).await;
+    assert_eq!(over_parsed["truncated"], true, "one byte over must be cut");
+    assert!(!has_tool_handle(&over), "{over:.200}");
+    assert!(
+        over.len() <= 10_003,
+        "{} B: the counters were not counted by the gate",
+        over.len()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
+    // `redacted_credentials` and `unfiltered_output_skipped` used to be added by the caller AFTER
+    // the gate ran, so a run at exactly the limit that also redacted a credential was re-buffered
+    // under `@tool_*` while the same run without one stayed inline.
+    use super::output::{handle_successful_output_with, LateKeys};
+    let (_dir, ctx) = project_ctx().await;
+    let run = |n: usize, late: LateKeys| {
+        let ctx = &ctx;
+        async move {
+            handle_successful_output_with(
+                "echo hi",
+                "a".repeat(n),
+                String::new(),
+                0,
+                false,
+                None,
+                std::path::Path::new("."),
+                ctx,
+                late,
+            )
+            .await
+            .unwrap()
+        }
+    };
+    for (name, make, key_len) in [
+        (
+            "redacted_credentials",
+            Box::new(|| LateKeys {
+                redacted: 1,
+                tee_skipped: None,
+            }) as Box<dyn Fn() -> LateKeys>,
+            json!({"exit_code": 0, "stdout": "", "redacted_credentials": 1})
+                .to_string()
+                .len(),
+        ),
+        (
+            "unfiltered_output_skipped",
+            Box::new(|| LateKeys {
+                redacted: 0,
+                tee_skipped: Some("full".into()),
+            }),
+            json!({"exit_code": 0, "stdout": "", "unfiltered_output_skipped": "full"})
+                .to_string()
+                .len(),
+        ),
+    ] {
+        let n = 10_003 - key_len;
+        let at = run(n, make()).await;
+        assert!(
+            at.get("output_id").is_none(),
+            "{name}: a response ON the limit was summarized"
+        );
+        assert_eq!(at.to_string().len(), 10_003, "{name}: not on the edge");
+
+        let over = run(n + 1, make()).await;
+        assert!(
+            over["output_id"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("@cmd_"),
+            "{name}: one byte over must take the summary arm, not be re-buffered later"
+        );
+
+        // The control: without the key the same stdout fits whole, so the key is what tipped it.
+        let control = run(n + 1, LateKeys::default()).await;
+        assert!(
+            control.get("output_id").is_none(),
+            "{name}: the key is not what tipped it"
+        );
+    }
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn a_tee_capture_behind_an_empty_stdout_is_inside_the_gate_at_the_exact_edge() {
+    // A capture behind an EMPTY filtered stdout adds the tee keys AND an explicit `"stdout":""`.
+    // The size is taken from a MEASURED response: a run with an empty `unfiltered_output_skipped`
+    // gives the base length, so a note of `10,003 - base` bytes puts the response exactly on the
+    // limit. A gate that forgot either the tee keys or the empty-stdout key would call one byte
+    // over small, and the response would go over the limit.
+    use super::output::{handle_successful_output_with, LateKeys};
+    let (dir, ctx) = project_ctx().await;
+    let capture = dir.path().join("capture.txt");
+    let run = |note: usize| {
+        let (ctx, capture) = (&ctx, capture.clone());
+        async move {
+            std::fs::write(&capture, "captured\n").unwrap();
+            handle_successful_output_with(
+                "echo hi",
+                String::new(),
+                String::new(),
+                0,
+                false,
+                Some(super::inner::TmpfileGuard(
+                    capture.to_string_lossy().into_owned(),
+                )),
+                std::path::Path::new("."),
+                ctx,
+                LateKeys {
+                    redacted: 0,
+                    tee_skipped: Some("n".repeat(note)),
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let base = run(0).await;
+    assert!(base["unfiltered_output"].is_string(), "{base}");
+    assert_eq!(base["stdout"], "", "{base}");
+    let note_edge = 10_003 - base.to_string().len();
+
+    let at = run(note_edge).await;
+    assert!(
+        at.get("output_id").is_none(),
+        "a response ON the limit was summarized: {at}"
+    );
+    assert_eq!(at.to_string().len(), 10_003, "not on the edge");
+
+    let over = run(note_edge + 1).await;
+    assert!(
+        over["output_id"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("@cmd_"),
+        "one byte over must take the summary arm: {:.200}",
+        over.to_string()
     );
 }
 

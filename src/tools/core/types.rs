@@ -55,8 +55,16 @@ pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
 /// limit": a gate that approximated it (the raw-byte comparison in `run_command`) chose the
 /// inline arm for responses `call_content` then buffered anyway.
 pub(crate) fn exceeds_inline_limit_len(len: usize) -> bool {
-    len / 4 > MAX_INLINE_TOKENS
+    len > INLINE_MAX_RESPONSE_LEN
 }
+
+/// The largest serialized response length that is NOT over the inline limit: `len / 4` must not
+/// exceed `MAX_INLINE_TOKENS`, so 10,003 for 2,500 tokens (10,004 is the first over). A budget
+/// computed against a response skeleton subtracts from this, so a response built to it lands ON
+/// the edge, not a reserve short of it.
+// cap-class: NOT_A_CAP — the edge of `tool_output.inline_tokens` written in bytes, derived from MAX_INLINE_TOKENS, which carries that cap; this adds no bound of its own
+pub(crate) const INLINE_MAX_RESPONSE_LEN: usize = (MAX_INLINE_TOKENS + 1) * 4 - 1;
+
 /// The fewest bytes of one string field that [`clip_prebuffered_envelope`] will keep.
 ///
 /// A FLOOR, where the other caps in this file are ceilings: clipping stops at this much

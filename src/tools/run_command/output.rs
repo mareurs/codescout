@@ -429,15 +429,6 @@ pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<Str
 // cap-class: RESULT_CAP run_command.buffer_stderr_bytes — probed
 const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
 
-/// Escaped bytes a buffer-query response spends on everything that is NOT the stdout and stderr
-/// text: the keys (`exit_code`, `truncated`, `stdout_shown`, `stdout_total`, `stderr_shown`,
-/// `stderr_total`, `hint`, about 160 B) and the longest hint `capped_hint` composes (about 425 B
-/// with the wide-line sentence and a 7-digit total). 300 B was reserved here before, which was
-/// below even the old hint plus its keys, so a truncated response could serialize past the
-/// inline limit by the difference and be re-buffered under `@tool_*`. Pinned by
-/// `the_buffer_query_overhead_covers_the_longest_hint_and_every_key`.
-const BUFFER_QUERY_JSON_OVERHEAD: usize = 800;
-
 /// The handle the caller's buffer query names (`@cmd_0bdbc0aa`), read from the command text.
 /// `@file_*` handles count too; an `.err` suffix is dropped, so the result is always the bare
 /// handle and a caller can append `.err` or not.
@@ -455,20 +446,38 @@ fn queried_ref(command: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
-/// The stored stderr a buffer query carries: at most `max_lines` lines AND at most
-/// `BUFFER_STDERR_BYTE_BUDGET` bytes, the latter by eliding the MIDDLE behind a marker that names
-/// the `.err` handle holding all of it. Returns `(text, lines_shown, lines_total)` like
-/// `truncate_lines`; `lines_total` counts the stored stream, so a wide single line reads `1/1`
-/// and the marker, which travels with the data, is what says it was cut.
-fn bound_buffer_stderr(stored: &str, max_lines: usize, query: &str) -> (String, usize, usize) {
-    let (by_lines, shown, total) = crate::tools::command_summary::truncate_lines(stored, max_lines);
-    let remedy = match queried_ref(query) {
-        Some(handle) => format!("all of it: {handle}.err"),
-        None => "all of it: the stored buffer's `.err` handle".to_string(),
+/// The stderr a buffer query carries: at most `max_lines` lines AND at most
+/// `BUFFER_STDERR_BYTE_BUDGET` JSON-ESCAPED bytes, marker included, the latter by eliding the
+/// MIDDLE. Returns `(text, lines_shown, lines_total)` like `truncate_lines`; `lines_total` counts
+/// the stream, so a wide single line reads `1/1` and the marker, which travels with the data, is
+/// what says it was cut.
+///
+/// Escaped, not raw: a control character is 1 byte here and 6 in the response, so a raw cut of
+/// 2,000 B of `\x01` serialized to ~12 KB and the response was re-buffered under `@tool_*`.
+///
+/// `own` says where the text came from, which decides what the marker may promise. The entry's
+/// STORED stderr is behind `<handle>.err`; the query's OWN stderr (an `awk`'s, a pipeline's) is
+/// stored nowhere, so naming `.err` for it would send the reader to a stream that does not hold it.
+fn bound_buffer_stderr(
+    stderr: &str,
+    max_lines: usize,
+    query: &str,
+    own: bool,
+) -> (String, usize, usize) {
+    let (by_lines, shown, total) = crate::tools::command_summary::truncate_lines(stderr, max_lines);
+    let remedy = if own {
+        "this is the query's own stderr and is stored nowhere: rerun the query with \
+         `2>&1 >/dev/null | cut -c1-4000` appended to read a window of it"
+            .to_string()
+    } else {
+        match queried_ref(query) {
+            Some(handle) => format!("all of it: {handle}.err"),
+            None => "all of it: the stored buffer's `.err` handle".to_string(),
+        }
     };
-    let bounded = crate::util::text::elide_middle_bytes(
-        by_lines,
-        stored.len(),
+    let bounded = crate::util::text::elide_middle_escaped(
+        &by_lines,
+        stderr.len(),
         BUFFER_STDERR_BYTE_BUDGET,
         "stderr",
         &remedy,
@@ -531,34 +540,34 @@ fn capped_hint(
     hint
 }
 
-/// The hint on the banded arm (output a few hundred bytes under the summary threshold), chosen by
-/// the KIND of ref the caller queried. `read_file(.., json_path=..)` reads `@tool_*` refs only and
-/// is refused on `@cmd_*` / `@file_*`; this arm used to say it for every ref, with a literal
-/// `@tool_abc` in place of the handle, so on the refs `run_command` normally takes it named a
-/// route that could not work.
-fn banded_hint(query: &str, shown: usize, total: usize, clipped_wide: bool) -> String {
+/// The hint on a truncated buffer query, chosen by the KIND of ref the caller queried.
+/// `read_file(.., json_path=..)` reads `@tool_*` refs only and is refused on `@cmd_*` / `@file_*`;
+/// a hint used to say it for every ref, with a literal `@tool_abc` in place of the handle, so on
+/// the refs `run_command` normally takes it named a route that could not work.
+fn truncation_hint(
+    query: &str,
+    shown: usize,
+    total: usize,
+    stderr_note: &str,
+    clipped_wide: bool,
+) -> String {
     match queried_ref(query) {
         Some(r) if r.starts_with("@tool_") => format!(
             "Output cut to fit the response ({shown}/{total} lines shown). This ref holds compact \
              JSON: read one field with read_file(\"{r}\", json_path=\"$.<field>\"), or browse the \
              pretty-printed result with read_file(\"{r}\", start_line=N, end_line=M)."
         ),
-        _ => capped_hint(query, shown, total, "", clipped_wide),
+        _ => capped_hint(query, shown, total, stderr_note, clipped_wide),
     }
 }
-
-/// Serialized bytes `unfiltered_output`, `unfiltered_output_lines` and the two truncation flags add
-/// when a tee capture is attached: the handle (`@cmd_` + 8 hex), the line count, and the keys.
-const TEE_KEYS_LEN: usize = 160;
-
-/// Serialized bytes the `stderr_shown` / `stderr_total` counters add to a buffer-query response.
-const BUFFER_QUERY_COUNTER_KEYS_LEN: usize = 48;
 
 /// Byte ceiling on the `wip_authors` diagnostic a red run carries.
 ///
 /// The diagnostic lists every uncommitted file the failure names, with who wrote it, so its size is
-/// files x peers and nothing else bounds it. Measured 2026-10-05 against `scripts/attribute-red.py`:
-/// a red naming 5 dirty files made a 1,466 B answer, 150 made 35,976 B. At that size the answer
+/// files x peers and nothing else bounds it. Measured 2026-10-05 against `scripts/attribute-red.py`
+/// on a probe repo: a red naming 5 dirty files made a 1,466 B answer and one naming 150 made
+/// 35,976 B (the test fixture's longer paths make its 150-file answer 36,277 B). At that size the
+/// answer
 /// alone pushed the response over the inline limit, and the only thing standing between the caller
 /// and a content-free `@tool_*` envelope was a backstop in `call_content` whose marker says the
 /// tool's own buffer holds the cut text. For this field that is false: the diagnostic is computed
@@ -585,27 +594,98 @@ pub(super) fn bound_wip_authors(text: String) -> String {
     )
 }
 
-/// Bytes `handle_successful_output` adds to the response BEYOND the two streams, for the summary-or-
-/// inline gate: each present diagnostic (`,"key":"` + its escaped text + `"`), the tee keys when a
-/// capture is attached, and the counters a buffer query carries. Without it the gate judged the
-/// streams alone and a failing run whose `wip_authors` was 3 KB could be called small.
-fn response_extras_len(
-    diagnostics: &[(&str, Option<&str>)],
-    tee: bool,
-    buffer_only: bool,
-) -> usize {
-    let diag: usize = diagnostics
-        .iter()
-        .filter_map(|(key, value)| {
-            value.map(|v| key.len() + 6 + crate::util::text::json_escaped_len(v))
-        })
-        .sum();
-    diag + if tee { TEE_KEYS_LEN } else { 0 }
-        + if buffer_only {
-            BUFFER_QUERY_COUNTER_KEYS_LEN
+/// Keys the CALLER of `handle_successful_output_with` knows and the response must also carry.
+#[derive(Default)]
+pub(crate) struct LateKeys {
+    /// Credentials redacted from the command's own streams: the `redacted_credentials` note.
+    pub redacted: usize,
+    /// Why a wanted tee capture was not made: `unfiltered_output_skipped`.
+    pub tee_skipped: Option<String>,
+}
+
+/// What `"stdout":""` adds to a response that had no `stdout` key. The tee block inserts it when a
+/// capture sits behind an empty filtered stdout.
+const EMPTY_STDOUT_KEY: &str = r#","stdout":"""#;
+
+/// Every key attached to the response AFTER the streams, as one map: the four diagnostics, the tee
+/// keys, the redaction note and the tee-skipped note. Built once, MEASURED by the summary-or-inline
+/// gate and then APPLIED by `attach`, so the gate cannot judge keys the response does not carry or
+/// miss keys it does.
+fn attachments(
+    diagnostics: &[(&str, &Option<String>)],
+    unfiltered: &Option<(
+        String,
+        Option<crate::tools::output_buffer::Truncation>,
+        usize,
+    )>,
+    redacted: usize,
+    tee_skipped: &Option<String>,
+) -> serde_json::Map<String, Value> {
+    let mut keys = serde_json::Map::new();
+    if let Some((ref_id, truncation, line_count)) = unfiltered {
+        keys.insert("unfiltered_output".into(), json!(ref_id));
+        keys.insert("unfiltered_output_lines".into(), json!(line_count));
+        if let Some(t) = truncation {
+            keys.insert("unfiltered_truncated".into(), json!(true));
+            // `unfiltered_output_lines` describes the STREAM; this describes the HANDLE sitting
+            // next to it. Naming only the first left a reader to assume one number covered both,
+            // which is the misread this key exists to prevent.
+            keys.insert("unfiltered_buffered_lines".into(), json!(t.kept_lines));
+        }
+    }
+    for (key, value) in diagnostics {
+        if let Some(text) = value {
+            keys.insert((*key).into(), json!(text));
+        }
+    }
+    let mut note = json!({});
+    note_in(&mut note, redacted);
+    if let Value::Object(note) = note {
+        keys.extend(note);
+    }
+    if let Some(why) = tee_skipped {
+        keys.insert("unfiltered_output_skipped".into(), json!(why));
+    }
+    keys
+}
+
+/// Apply [`attachments`] to a response. A tee capture behind a response with no `stdout` gets an
+/// explicit `"stdout": ""`, so the response is not read as "nothing happened".
+fn attach(result: &mut Value, keys: serde_json::Map<String, Value>, tee_present: bool) {
+    let Some(obj) = result.as_object_mut() else {
+        return;
+    };
+    if tee_present && !obj.contains_key("stdout") {
+        obj.insert("stdout".into(), json!(""));
+    }
+    obj.extend(keys);
+}
+
+/// The serialized bytes `keys` add to a response that already has other keys: each is
+/// `,"name":value`, so the object's own length minus its braces plus one comma. `0` for none.
+/// MEASURED from the built keys, never a reserve: reserves for these were 160 B for the tee keys
+/// (they take 66 B, or 126 B with the two truncation keys) and 48 B for the counters (they take
+/// 36 B), so each reserve wrongly summarized output that fit.
+fn extras_len(keys: &serde_json::Map<String, Value>, empty_stdout_key: bool) -> usize {
+    let keys_len = if keys.is_empty() {
+        0
+    } else {
+        Value::Object(keys.clone()).to_string().len() - 1
+    };
+    keys_len
+        + if empty_stdout_key {
+            EMPTY_STDOUT_KEY.len()
         } else {
             0
         }
+}
+
+/// Escaped bytes of `stdout` text that fit beside `skeleton`, a copy of the response WITHOUT its
+/// `stdout` key: the inline limit minus the skeleton's compact length minus what the key itself
+/// costs. A response built to this lands ON the limit, which is what the limit is for.
+fn inline_stdout_room(skeleton: &Value) -> usize {
+    crate::tools::INLINE_MAX_RESPONSE_LEN
+        .saturating_sub(skeleton.to_string().len() + EMPTY_STDOUT_KEY.len())
 }
 
 /// Build the response for a command that ran to completion — at any exit code.
@@ -617,8 +697,38 @@ fn response_extras_len(
 /// and rejected: every one is consumed exactly once by a different concern (two move
 /// large `String`s, one is a drop guard), so a struct buys a name and costs the move
 /// semantics that keep the copies down on the hot path.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_successful_output(
+    original_command: &str,
+    raw_stdout: String,
+    raw_stderr: String,
+    exit_code: i32,
+    buffer_only: bool,
+    unfiltered_tmpfile: Option<TmpfileGuard>,
+    work_dir: &std::path::Path,
+    ctx: &ToolContext,
+) -> anyhow::Result<Value> {
+    handle_successful_output_with(
+        original_command,
+        raw_stdout,
+        raw_stderr,
+        exit_code,
+        buffer_only,
+        unfiltered_tmpfile,
+        work_dir,
+        ctx,
+        LateKeys::default(),
+    )
+    .await
+}
+
+/// [`handle_successful_output`] for a caller that knows keys the response must also carry
+/// (`LateKeys`). They are passed IN, not added afterwards, because the summary-or-inline gate
+/// measures the response including them: a key added after the gate ran could tip a response
+/// that exactly fit over the inline limit and have it re-buffered under `@tool_*`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_successful_output_with(
     original_command: &str,
     raw_stdout: String,
     raw_stderr: String,
@@ -630,6 +740,7 @@ pub(crate) async fn handle_successful_output(
     // has it, from `resolve_work_dir`.
     work_dir: &std::path::Path,
     ctx: &ToolContext,
+    late_keys: LateKeys,
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
         count_lines, detect_command_type, inline_response_exceeds_limit, strip_ansi_codes,
@@ -786,12 +897,15 @@ pub(crate) async fn handle_successful_output(
     // anti-correlated with need: the more precise the query, the more certain the loss.
     // BUG docs/issues/archive/2026-09-14-every-reader-of-a-cmd-buffer-takes-stdout-only-so-the-stored-stderr-reaches-nobody.md
     //
-    // Deliberately NOT fed into `needs_summary`: that predicate decides whether a new
-    // buffer ref is minted, and widening its input would move the buffering threshold
-    // for every caller. This changes what a buffer query REPORTS, never what it stores.
+    // The bounded stderr IS fed into the summary-or-inline gate below (`stderr_cut`): that gate
+    // measures the response an arm will actually emit, and that response carries this stderr.
+    // What this never changes is what is STORED.
     // cap-class: RESULT_CAP run_command.stderr_lines — probed
     const STDERR_BUDGET: usize = 20;
-    let buffer_stderr: String = if buffer_only && raw_stderr.is_empty() {
+    // Where the stderr a buffer query carries comes from decides what its marker may promise: the
+    // entry's STORED stderr is behind `<handle>.err`, the query's OWN stderr is stored nowhere.
+    let stderr_is_stored = buffer_only && raw_stderr.is_empty();
+    let buffer_stderr: String = if stderr_is_stored {
         original_command
             .find("@cmd_")
             .or_else(|| original_command.find("@file_"))
@@ -806,50 +920,105 @@ pub(crate) async fn handle_successful_output(
     } else {
         raw_stderr.clone()
     };
+    // Bounded ONCE, here: the gate and every arm below read this one value, so they cannot
+    // disagree about what the response carries.
+    let stderr_cut: Option<(String, usize, usize)> = buffer_only.then(|| {
+        bound_buffer_stderr(
+            &buffer_stderr,
+            STDERR_BUDGET,
+            original_command,
+            !stderr_is_stored,
+        )
+    });
+
+    // Every key attached after the streams, built ONCE: the gate measures it, the end of this
+    // function applies it. The two cannot drift because there is one map.
+    let late = attachments(
+        &[
+            ("shell_cause", &shell_cause),
+            ("wip_authors", &wip_authors),
+            ("empty_test_selection", &empty_selection),
+            ("partial_test_selection", &partial_selection),
+        ],
+        &unfiltered_ref,
+        tee_redacted + late_keys.redacted,
+        &late_keys.tee_skipped,
+    );
 
     // --- Step 6: Decide whether to buffer + summarize ---
     //
     // Decided on the SERIALIZED response, not the raw streams: see `inline_response_exceeds_limit`.
-    // For a buffer query the stderr that counts is the bounded stored one, because that is what the
-    // response emits.
-    let gate_stderr = if buffer_only {
-        bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command).0
-    } else {
-        raw_stderr.clone()
+    // The extras are the exact serialized cost of the keys attached after the streams: the
+    // diagnostics, the tee keys, the redaction note, and, for a buffer query, the stderr counters.
+    let stderr_for_gate: &str = match &stderr_cut {
+        Some((text, _, _)) => text,
+        None => &raw_stderr,
     };
-    let extras = response_extras_len(
-        &[
-            ("shell_cause", shell_cause.as_deref()),
-            ("wip_authors", wip_authors.as_deref()),
-            ("empty_test_selection", empty_selection.as_deref()),
-            ("partial_test_selection", partial_selection.as_deref()),
-        ],
-        unfiltered_ref.is_some(),
-        buffer_only,
+    let mut gate_keys = late.clone();
+    if let Some((_, shown, total)) = &stderr_cut {
+        if shown < total {
+            gate_keys.insert("stderr_shown".into(), json!(shown));
+            gate_keys.insert("stderr_total".into(), json!(total));
+        }
+    }
+    let extras = extras_len(
+        &gate_keys,
+        unfiltered_ref.is_some() && raw_stdout.is_empty(),
     );
     let summary_needed =
-        inline_response_exceeds_limit(exit_code, &raw_stdout, &gate_stderr, extras);
+        inline_response_exceeds_limit(exit_code, &raw_stdout, stderr_for_gate, extras);
     let mut result = if summary_needed {
-        if buffer_only {
+        if let Some((stderr_out, stderr_shown, stderr_total)) = stderr_cut.clone() {
             // Buffer-only: return inline, never create a new buffer ref (avoids infinite loop).
-            let stderr_budget = STDERR_BUDGET.min(count_lines(&buffer_stderr));
-            let stdout_budget = BUFFER_QUERY_INLINE_CAP - stderr_budget;
+            let line_budget =
+                BUFFER_QUERY_INLINE_CAP - STDERR_BUDGET.min(count_lines(&buffer_stderr));
+            let stdout_lines = count_lines(&raw_stdout);
+            let stderr_note = if stderr_total > 0 {
+                format!(", stderr {stderr_shown}/{stderr_total}")
+            } else {
+                String::new()
+            };
+            let wide_remedy = wide_line_remedy(original_command);
 
-            let (stderr_out, stderr_shown, stderr_total) =
-                bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
-
-            // Byte budget: keep final JSON under TOOL_OUTPUT_BUFFER_THRESHOLD to avoid re-buffering loop.
-            const JSON_OVERHEAD: usize = BUFFER_QUERY_JSON_OVERHEAD;
-            let stdout_byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
-                .saturating_sub(JSON_OVERHEAD)
-                .saturating_sub(crate::util::text::json_escaped_len(&stderr_out));
-
-            let cut = truncate_lines_and_bytes(
-                &raw_stdout,
-                stdout_budget,
-                stdout_byte_budget,
-                &wide_line_remedy(original_command),
-            );
+            // The room for stdout text is what is left of the inline limit after the truncated
+            // response's OTHER keys, MEASURED from a skeleton that has them all (a stdout-less
+            // copy of the response about to be built, its hint at its widest: `shown` at its
+            // largest possible value, `total`). It was a reserve of 300 B and then 800 B. Measured,
+            // for a one-line query the keys and hint take 211 B (383 B with the clipped-line
+            // sentence), which leaves room for 9,780 B of stdout where the 800 B reserve left 9,200 B.
+            let room_for = |clipped_wide: bool| {
+                let mut skeleton = json!({
+                    "exit_code": exit_code,
+                    "truncated": true,
+                    "stdout_shown": stdout_lines,
+                    "stdout_total": stdout_lines,
+                    "hint": truncation_hint(
+                        original_command, stdout_lines, stdout_lines, &stderr_note, clipped_wide,
+                    ),
+                });
+                if !stderr_out.is_empty() {
+                    skeleton["stderr"] = json!(stderr_out);
+                }
+                if stderr_total > 0 {
+                    skeleton["stderr_shown"] = json!(stderr_shown);
+                    skeleton["stderr_total"] = json!(stderr_total);
+                }
+                for (key, value) in &late {
+                    skeleton[key.as_str()] = value.clone();
+                }
+                inline_stdout_room(&skeleton)
+            };
+            let mut cut =
+                truncate_lines_and_bytes(&raw_stdout, line_budget, room_for(false), &wide_remedy);
+            if cut.clipped_wide {
+                // The clipped-line sentence makes the hint longer; budget for it and cut again.
+                cut = truncate_lines_and_bytes(
+                    &raw_stdout,
+                    line_budget,
+                    room_for(true),
+                    &wide_remedy,
+                );
+            }
             let clipped_wide = cut.clipped_wide;
             let (stdout_out, stdout_shown, stdout_total) = (cut.text, cut.shown, cut.total);
 
@@ -871,12 +1040,7 @@ pub(crate) async fn handle_successful_output(
                     result["stderr_shown"] = json!(stderr_shown);
                     result["stderr_total"] = json!(stderr_total);
                 }
-                let stderr_note = if stderr_total > 0 {
-                    format!(", stderr {stderr_shown}/{stderr_total}")
-                } else {
-                    String::new()
-                };
-                result["hint"] = json!(capped_hint(
+                result["hint"] = json!(truncation_hint(
                     original_command,
                     stdout_shown,
                     stdout_total,
@@ -884,75 +1048,56 @@ pub(crate) async fn handle_successful_output(
                     clipped_wide,
                 ));
             }
-            // buffer_only => tee injection was skipped (unfiltered_tmpfile is None).
-            // This path returns early, so it needs its own attachment — the one at the
-            // bottom of the function cannot reach it.
-            if let Some(cause) = shell_cause {
-                result["shell_cause"] = json!(cause);
-            }
-            if let Some(who) = wip_authors {
-                result["wip_authors"] = json!(who);
-            }
-            if let Some(empty) = empty_selection {
-                result["empty_test_selection"] = json!(empty);
-            }
-            if let Some(partial) = partial_selection {
-                result["partial_test_selection"] = json!(partial);
-            }
-            return Ok(result);
-        }
-
-        let output_id = ctx.output_buffer.store(
-            original_command.to_string(),
-            raw_stdout.clone(),
-            raw_stderr.clone(),
-            exit_code,
-        );
-
-        let cmd_type = detect_command_type(original_command);
-        let cmd_summary = match cmd_type {
-            CommandType::Test => summarize_test_output(&raw_stdout, &raw_stderr, exit_code),
-            CommandType::Build => summarize_build_output(&raw_stdout, &raw_stderr, exit_code),
-            CommandType::Generic => summarize_generic(&raw_stdout, &raw_stderr, exit_code),
-        };
-
-        // Rebuild with correct field order so output_id appears before content fields.
-        rebuild_buffered_summary(cmd_summary, &output_id)
-    } else {
-        // Short output — apply byte budget for buffer-only to prevent re-buffering loop.
-        if buffer_only
-            && raw_stdout.len() + raw_stderr.len()
-                > crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD.saturating_sub(300)
-        {
-            const JSON_OVERHEAD: usize = BUFFER_QUERY_JSON_OVERHEAD;
-            // Capped like the summarized path above, then stdout is budgeted against
-            // what the stderr ACTUALLY costs. Budgeting against `raw_stderr` here was
-            // wrong twice: on a buffer query it is empty, so it under-counted by the
-            // whole stored stream, and it was never the text being emitted.
-            //
-            // This arm is entered only when the gate (`inline_response_exceeds_limit`, which counts
-            // the BOUNDED stored stderr it will emit) says the response fits AND stdout is over the
-            // arm's 9,700 B guard. That leaves room for at most ~226 B of stderr, and under the 20
-            // line cap anything that small is under `BUFFER_STDERR_BYTE_BUDGET`, so the byte bound is a
-            // no-op HERE. It is kept so the three arms share one helper and cannot drift; swapping
-            // it for a lines-only cut is an equivalent mutant (2026-10-05 mutation run).
-            let (stderr_out, stderr_shown, stderr_total) =
-                bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
-            let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
-                .saturating_sub(JSON_OVERHEAD)
-                .saturating_sub(crate::util::text::json_escaped_len(&stderr_out));
-            let cut = truncate_lines_and_bytes(
-                &raw_stdout,
-                BUFFER_QUERY_INLINE_CAP,
-                byte_budget,
-                &wide_line_remedy(original_command),
+            result
+        } else {
+            let output_id = ctx.output_buffer.store(
+                original_command.to_string(),
+                raw_stdout.clone(),
+                raw_stderr.clone(),
+                exit_code,
             );
-            let clipped_wide = cut.clipped_wide;
-            let (stdout_out, stdout_shown, stdout_total) = (cut.text, cut.shown, cut.total);
-            let mut r = json!({"exit_code": exit_code});
-            if !stdout_out.is_empty() {
-                r["stdout"] = json!(stdout_out);
-            }
+
+            let cmd_type = detect_command_type(original_command);
+            let cmd_summary = match cmd_type {
+                CommandType::Test => summarize_test_output(&raw_stdout, &raw_stderr, exit_code),
+                CommandType::Build => summarize_build_output(&raw_stdout, &raw_stderr, exit_code),
+                CommandType::Generic => summarize_generic(&raw_stdout, &raw_stderr, exit_code),
+            };
+
+            // Rebuild with correct field order so output_id appears before content fields.
+            rebuild_buffered_summary(cmd_summary, &output_id)
+        }
+    } else if let Some(c) = (!buffer_only
+        && detect_command_type(original_command) == CommandType::Test)
+        .then(|| crate::tools::libtest_compact::compact_libtest_output(&raw_stdout, &raw_stderr))
+        .flatten()
+    {
+        // A short libtest run is ~40% cargo progress and empty sibling targets
+        // (docs/research/2026-09-24-rtk-evaluation.pdf § 7). Compacted only when that
+        // pays; otherwise the raw arm below returns it exactly as before.
+        compacted_test_response(
+            c,
+            original_command,
+            &raw_stdout,
+            &raw_stderr,
+            exit_code,
+            ctx,
+        )
+    } else {
+        // The response fits: the gate above measured exactly this object. A buffer query's
+        // output is returned WHOLE here, at any line count: there is no second, narrower cap for
+        // output the gate has already said fits (an arm that cut at 9,700 B did exactly that, for
+        // nothing, while the gate measured the real size).
+        let mut r = json!({"exit_code": exit_code});
+        if !raw_stdout.is_empty() {
+            r["stdout"] = json!(raw_stdout);
+        }
+        if let Some((stderr_out, stderr_shown, stderr_total)) = &stderr_cut {
+            // THE REPRODUCED PATH. `grep -c MARKER @cmd_abc` returns two bytes, so
+            // `needs_summary` is false and control arrives HERE — which is exactly
+            // the query whose `0` a reader cannot tell apart from a stream that was
+            // never surfaced. Bounded like the summary arm so a large stored stderr
+            // cannot re-trigger buffering on a query whose own output was short.
             if !stderr_out.is_empty() {
                 r["stderr"] = json!(stderr_out);
             }
@@ -960,95 +1105,19 @@ pub(crate) async fn handle_successful_output(
                 r["stderr_shown"] = json!(stderr_shown);
                 r["stderr_total"] = json!(stderr_total);
             }
-            if stdout_shown < stdout_total || clipped_wide {
-                r["truncated"] = json!(true);
-                r["hint"] = json!(banded_hint(
-                    original_command,
-                    stdout_shown,
-                    stdout_total,
-                    clipped_wide,
-                ));
-            }
-            r
-        } else if let Some(c) = (!buffer_only
-            && detect_command_type(original_command) == CommandType::Test)
-            .then(|| {
-                crate::tools::libtest_compact::compact_libtest_output(&raw_stdout, &raw_stderr)
-            })
-            .flatten()
-        {
-            // A short libtest run is ~40% cargo progress and empty sibling targets
-            // (docs/research/2026-09-24-rtk-evaluation.pdf § 7). Compacted only when that
-            // pays; otherwise the raw arm below returns it exactly as before.
-            compacted_test_response(
-                c,
-                original_command,
-                &raw_stdout,
-                &raw_stderr,
-                exit_code,
-                ctx,
-            )
-        } else {
-            let mut r = json!({"exit_code": exit_code});
-            if !raw_stdout.is_empty() {
-                r["stdout"] = json!(raw_stdout);
-            }
-            if buffer_only {
-                // THE REPRODUCED PATH. `grep -c MARKER @cmd_abc` returns two bytes, so
-                // `needs_summary` is false and control arrives HERE — which is exactly
-                // the query whose `0` a reader cannot tell apart from a stream that was
-                // never surfaced. Capped like the path above so a large stored stderr
-                // cannot re-trigger buffering on a query whose own output was short.
-                let (stderr_out, stderr_shown, stderr_total) =
-                    bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
-                if !stderr_out.is_empty() {
-                    r["stderr"] = json!(stderr_out);
-                }
-                if stderr_shown < stderr_total {
-                    r["stderr_shown"] = json!(stderr_shown);
-                    r["stderr_total"] = json!(stderr_total);
-                }
-            } else if !raw_stderr.is_empty() {
-                // Ordinary command: unchanged, uncapped. The cap above is a property of
-                // reading someone else's stored stream, not of stderr generally.
-                r["stderr"] = json!(raw_stderr);
-            }
-            r
+        } else if !raw_stderr.is_empty() {
+            // Ordinary command: unchanged, uncapped. The cap above is a property of
+            // reading someone else's stored stream, not of stderr generally.
+            r["stderr"] = json!(raw_stderr);
         }
+        r
     };
 
-    // Attach unfiltered_output ref if we captured via tee. A non-empty capture behind an
-    // empty filtered `stdout` is exactly the case docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md
+    // Attach everything built into `late` above. A non-empty tee capture behind an empty filtered
+    // `stdout` is exactly the case docs/issues/archive/2026-08-26-unfiltered-output-ref-carries-no-size-signal.md
     // covers: without an explicit `"stdout": ""` and a line count, the response looks
     // identical whether the ref holds 2 lines or 20,000.
-    if let Some((ref ref_id, truncation, line_count)) = unfiltered_ref {
-        note_in(&mut result, tee_redacted);
-        if result.get("stdout").is_none() {
-            result["stdout"] = json!("");
-        }
-        result["unfiltered_output"] = json!(ref_id);
-        result["unfiltered_output_lines"] = json!(line_count);
-        if let Some(t) = truncation {
-            result["unfiltered_truncated"] = json!(true);
-            // `unfiltered_output_lines` describes the STREAM; this describes the
-            // HANDLE sitting next to it. Naming only the first left a reader to
-            // assume one number covered both, which is the misread this bug is.
-            result["unfiltered_buffered_lines"] = json!(t.kept_lines);
-        }
-    }
-
-    if let Some(cause) = shell_cause {
-        result["shell_cause"] = json!(cause);
-    }
-    if let Some(who) = wip_authors {
-        result["wip_authors"] = json!(who);
-    }
-    if let Some(empty) = empty_selection {
-        result["empty_test_selection"] = json!(empty);
-    }
-    if let Some(partial) = partial_selection {
-        result["partial_test_selection"] = json!(partial);
-    }
+    attach(&mut result, late, unfiltered_ref.is_some());
 
     Ok(result)
 }
@@ -1298,85 +1367,6 @@ mod tests {
             .is_none()
         );
     }
-    /// The reserve for everything that is not stdout/stderr text must cover the LONGEST hint and
-    /// every key a truncated buffer-query response can carry. 300 B did not, and a clipped
-    /// response serialized 43 B past the inline limit and was re-buffered under `@tool_*`.
-    #[test]
-    fn the_buffer_query_overhead_covers_the_longest_hint_and_every_key() {
-        // Worst case on every axis: a 7-digit total, 100 shown, a stderr note, the wide-line
-        // sentence, a ranged sed whose first line is 7 digits, and a long handle.
-        let query = "sed -n '1000000,1000099p' @cmd_0bf0a111";
-        let hint = capped_hint(query, 100, 9_999_999, ", stderr 20/20", true);
-        let non_text = json!({
-            "exit_code": -1, "stdout": "", "stderr": "", "truncated": true,
-            "stdout_shown": 100, "stdout_total": 9_999_999,
-            "stderr_shown": 20, "stderr_total": 20, "hint": hint,
-        })
-        .to_string()
-        .len();
-        assert!(
-            non_text <= BUFFER_QUERY_JSON_OVERHEAD,
-            "keys plus hint take {non_text} B but only {BUFFER_QUERY_JSON_OVERHEAD} are reserved"
-        );
-    }
-    #[test]
-    fn response_extras_len_counts_diagnostics_tee_keys_and_counters() {
-        // A present diagnostic costs `,"key":"` (key + 6) plus its escaped text.
-        let two_quotes = "\"\"";
-        assert_eq!(
-            response_extras_len(&[("shell_cause", Some(two_quotes))], false, false),
-            "shell_cause".len() + 6 + 4,
-            "quotes escape to two bytes each"
-        );
-        // An absent one costs nothing.
-        assert_eq!(
-            response_extras_len(&[("wip_authors", None)], false, false),
-            0
-        );
-        assert_eq!(response_extras_len(&[], true, false), TEE_KEYS_LEN);
-        assert_eq!(
-            response_extras_len(&[], false, true),
-            BUFFER_QUERY_COUNTER_KEYS_LEN
-        );
-        assert_eq!(
-            response_extras_len(&[("a", Some("x"))], true, true),
-            "a".len() + 6 + 1 + TEE_KEYS_LEN + BUFFER_QUERY_COUNTER_KEYS_LEN,
-            "the three parts add"
-        );
-    }
-    /// `TEE_KEYS_LEN` and `BUFFER_QUERY_COUNTER_KEYS_LEN` are RESERVES for keys the gate cannot see
-    /// yet, so the test above, which compares each constant to itself, would pass at 0. These
-    /// measure the worst real serialization: a 13-char handle, 7-digit counts, every key present.
-    #[test]
-    fn the_tee_and_counter_reserves_cover_the_real_keys() {
-        let tee = json!({
-            "unfiltered_output": "@cmd_0bf0a111",
-            "unfiltered_output_lines": 9_999_999,
-            "unfiltered_truncated": true,
-            "unfiltered_buffered_lines": 9_999_999,
-            "stdout": "",
-        })
-        .to_string()
-        .len()
-            - 2; // the outer braces are not a key's cost
-        assert!(
-            tee <= TEE_KEYS_LEN,
-            "tee keys serialize to {tee} B but {TEE_KEYS_LEN} are reserved"
-        );
-        assert!(
-            tee + 40 > TEE_KEYS_LEN,
-            "{TEE_KEYS_LEN} B reserved for {tee} B: a reserve this loose starts buffering output that fits"
-        );
-        let counters = json!({"stderr_shown": 20, "stderr_total": 9_999_999})
-            .to_string()
-            .len()
-            - 2;
-        assert!(counters <= BUFFER_QUERY_COUNTER_KEYS_LEN, "{counters} B");
-        assert!(
-            counters + 20 > BUFFER_QUERY_COUNTER_KEYS_LEN,
-            "{BUFFER_QUERY_COUNTER_KEYS_LEN} B reserved for {counters} B"
-        );
-    }
 
     /// A page hint counts the lines of the output it follows. After `sed -n '2,101p'` those start
     /// at 2, so the next page is 102.., not 1.. — which sent a reader back to the top.
@@ -1390,6 +1380,147 @@ mod tests {
         assert!(
             !plain.contains("grep -o"),
             "the wide-line sentence only appears when a line was clipped"
+        );
+    }
+    // -- the gate and the budgets measure the response; nothing here is a reserve --
+
+    fn full_attachments() -> serde_json::Map<String, Value> {
+        attachments(
+            &[
+                ("shell_cause", &Some("a \"quoted\"\ncause".to_string())),
+                ("wip_authors", &Some("w".repeat(40))),
+                ("empty_test_selection", &None),
+                ("partial_test_selection", &None),
+            ],
+            &Some((
+                "@cmd_0bf0a111".to_string(),
+                Some(crate::tools::output_buffer::Truncation {
+                    kept_lines: 5,
+                    total_lines: 9_999_999,
+                }),
+                9_999_999,
+            )),
+            3,
+            &Some("no space left".to_string()),
+        )
+    }
+
+    /// `extras_len` must equal what the keys really add, computed from a BUILT response and not
+    /// from any constant: reserves for these keys were 160 B and 48 B and each was wrong.
+    #[test]
+    fn extras_len_is_the_exact_serialized_cost_of_the_attached_keys() {
+        let keys = full_attachments();
+        for expected in [
+            "unfiltered_output",
+            "unfiltered_output_lines",
+            "unfiltered_truncated",
+            "unfiltered_buffered_lines",
+            "shell_cause",
+            "wip_authors",
+            "redacted_credentials",
+            "unfiltered_output_skipped",
+        ] {
+            assert!(keys.contains_key(expected), "missing {expected}: {keys:?}");
+        }
+        assert!(
+            !keys.contains_key("empty_test_selection"),
+            "an absent diagnostic is not a key"
+        );
+
+        let base = json!({"exit_code": 0, "stdout": "x"});
+        let mut with = base.clone();
+        with.as_object_mut().unwrap().extend(keys.clone());
+        assert_eq!(
+            with.to_string().len() - base.to_string().len(),
+            extras_len(&keys, false),
+            "the gate's extras are not what the keys cost"
+        );
+
+        assert_eq!(extras_len(&serde_json::Map::new(), false), 0);
+        assert_eq!(
+            extras_len(&serde_json::Map::new(), true),
+            json!({"exit_code": 0, "stdout": ""}).to_string().len()
+                - json!({"exit_code": 0}).to_string().len(),
+            "an explicit empty stdout costs what the key costs"
+        );
+    }
+
+    #[test]
+    fn a_redaction_count_of_zero_adds_no_key() {
+        let keys = attachments(&[], &None, 0, &None);
+        assert!(keys.is_empty(), "{keys:?}");
+    }
+
+    #[test]
+    fn attach_adds_an_empty_stdout_only_to_a_tee_capture_that_has_none() {
+        let mut no_stdout = json!({"exit_code": 0});
+        attach(&mut no_stdout, serde_json::Map::new(), true);
+        assert_eq!(no_stdout["stdout"], "");
+        let mut has_stdout = json!({"exit_code": 0, "stdout": "kept"});
+        attach(&mut has_stdout, serde_json::Map::new(), true);
+        assert_eq!(has_stdout["stdout"], "kept");
+        let mut no_tee = json!({"exit_code": 0});
+        attach(&mut no_tee, serde_json::Map::new(), false);
+        assert!(no_tee.get("stdout").is_none());
+    }
+
+    /// A response built to `inline_stdout_room` lands exactly ON the limit and one byte more is
+    /// over it, at the COMPACT length `call_content` measures.
+    #[test]
+    fn the_stdout_room_lands_the_response_exactly_on_the_limit() {
+        let skeleton = json!({"exit_code": 0, "truncated": true, "hint": "h", "stderr": "e\n"});
+        let room = inline_stdout_room(&skeleton);
+        let build = |n: usize| {
+            let mut r = skeleton.clone();
+            r["stdout"] = json!("a".repeat(n));
+            r.to_string().len()
+        };
+        assert_eq!(build(room), crate::tools::INLINE_MAX_RESPONSE_LEN);
+        assert!(!crate::tools::exceeds_inline_limit_len(build(room)));
+        assert!(crate::tools::exceeds_inline_limit_len(build(room + 1)));
+    }
+
+    /// `INLINE_MAX_RESPONSE_LEN` is the same edge `exceeds_inline_limit_len` draws.
+    #[test]
+    fn the_named_limit_is_the_edge_the_predicate_draws() {
+        let edge = crate::tools::INLINE_MAX_RESPONSE_LEN;
+        assert!(!crate::tools::exceeds_inline_limit_len(edge));
+        assert!(crate::tools::exceeds_inline_limit_len(edge + 1));
+        assert!(!crate::tools::exceeds_inline_limit(&"a".repeat(edge)));
+        assert!(crate::tools::exceeds_inline_limit(&"a".repeat(edge + 1)));
+        assert_eq!(edge, 10_003);
+    }
+
+    /// The marker's remedy must be TRUE of where the text came from: a stored stderr names the
+    /// `.err` handle; the query's own stderr, stored nowhere, must not.
+    #[test]
+    fn a_stderr_marker_promises_only_what_its_source_can_deliver() {
+        let wide = "e".repeat(5_000);
+        let (stored, ..) = bound_buffer_stderr(&wide, 20, "grep -c a @cmd_0bf0a111", false);
+        assert!(
+            stored.contains("all of it: @cmd_0bf0a111.err"),
+            "{stored:.0}"
+        );
+        let (own, ..) = bound_buffer_stderr(&wide, 20, "awk 1 @cmd_0bf0a111", true);
+        assert!(own.contains("stored nowhere"), "{own:.0}");
+        assert!(
+            !own.contains(".err"),
+            "the query's own stderr is not behind an `.err` handle: {own:.0}"
+        );
+        assert!(own.contains("2>&1 >/dev/null | cut -c1-4000"));
+    }
+
+    /// Control characters serialize to 6 bytes, so the stderr bound is in ESCAPED bytes: 50,000
+    /// `\x01` must come back inside the budget, marker included.
+    #[test]
+    fn a_control_character_stderr_is_bounded_in_escaped_bytes() {
+        let text = "\u{1}".repeat(50_000);
+        let (cut, ..) = bound_buffer_stderr(&text, 20, "grep -c a @cmd_0bf0a111", false);
+        let escaped = crate::util::text::json_escaped_len(&cut);
+        assert!(escaped <= BUFFER_STDERR_BYTE_BUDGET, "{escaped} B escaped");
+        assert!(
+            escaped + 20 > BUFFER_STDERR_BYTE_BUDGET,
+            "{escaped} B of {BUFFER_STDERR_BYTE_BUDGET}: the cut kept far less than fits"
         );
     }
 
