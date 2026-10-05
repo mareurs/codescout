@@ -1073,11 +1073,14 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // `preview`, marker `bytes shown`) is pinned by
         // `a_file_of_few_very_wide_lines_is_summarised_inline_with_one_handle` and
         // `a_wide_config_preview_is_summarised_inline_with_one_handle`, which a row cannot
-        // also cite. Marker written by production in `file_summary::cut_array_middle`.
+        // also cite. Marker written by production in `file_summary::cut_array_middle` and
+        // carried into the hint by `read_full_file`. MUTATION (2026-10-05, 38 mutants, all
+        // killed): R2 deletes the line that appends the cut note to the hint; the cited test
+        // goes red.
         id: "file_summary.summary_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("entries omitted"),
-            mutation: Mutation::NotYet("mutation run pending: see the commit that adds this row"),
+            mutation: Mutation::Killed,
             cited_test: "a_source_file_with_many_symbols_is_summarised_inline_with_one_handle",
         },
     },

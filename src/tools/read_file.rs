@@ -2547,6 +2547,28 @@ mod tests {
         assert!(text.contains("sections omitted"), "{text:.600}");
         assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
     }
+    #[tokio::test]
+    async fn a_single_enormous_yaml_key_is_bounded_too() {
+        // ONE top-level key of 20 KB: the `sections` array has a single entry, so a bound that
+        // only looks at arrays of two or more lets the whole thing through to a second handle.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("one.yaml");
+        std::fs::write(&path, format!("{}: 1\n", "k".repeat(20_000))).unwrap();
+
+        let text = read_text(&path).await;
+
+        assert!(
+            !text.contains("@tool_"),
+            "a second handle was minted: {text:.300}"
+        );
+        assert_eq!(handles_in(&text).len(), 1, "{text:.300}");
+        assert!(text.contains("entries omitted"), "{text:.300}");
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "{} B",
+            text.len()
+        );
+    }
 
     #[tokio::test]
     async fn a_wide_toml_shows_its_gap_line_between_the_kept_sections() {

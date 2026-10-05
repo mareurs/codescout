@@ -1242,10 +1242,10 @@ pub(crate) fn bound_summary(mut summary: Value, file_id: &str) -> (Value, Vec<St
     let mut found: Vec<(String, String)> = Vec::new(); // (parent pointer, key)
     for (k, v) in summary.as_object().into_iter().flatten() {
         match v {
-            Value::Array(a) if a.len() > 1 => found.push((String::new(), k.clone())),
+            Value::Array(a) if !a.is_empty() => found.push((String::new(), k.clone())),
             Value::Object(inner) => {
                 for (ik, iv) in inner {
-                    if iv.as_array().is_some_and(|a| a.len() > 1) {
+                    if iv.as_array().is_some_and(|a| !a.is_empty()) {
                         found.push((format!("/{k}"), ik.clone()));
                     }
                 }
