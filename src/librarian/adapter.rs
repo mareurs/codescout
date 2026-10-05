@@ -1423,57 +1423,59 @@ mod tests {
         );
     }
 
-    /// A librarian tool that answers with a fixed payload, so the REAL adapter's `call_content`
-    /// runs over a result of the reported shape without needing a catalog full of artifacts.
-    struct FixedPayloadTool(Value);
-
-    #[async_trait::async_trait]
-    impl crate::librarian::tools::Tool for FixedPayloadTool {
-        fn name(&self) -> &'static str {
-            "librarian"
-        }
-        fn description(&self) -> &'static str {
-            "fixed payload"
-        }
-        fn input_schema(&self) -> Value {
-            json!({ "type": "object" })
-        }
-        async fn call(&self, _ctx: &LibToolContext, _args: Value) -> Result<Value> {
-            Ok(self.0.clone())
-        }
-    }
-
-    /// REACH and REMEDY for D2: through the adapter's real `call_content`, then FOLLOW the hint
-    /// with a real `read_file`. Before the fix the hint was `$.included_ids[*]` and following it
-    /// returned 21 ids; the route a caller needs returns the markdown.
+    /// REACH and REMEDY for D2, through the REAL `librarian(action="context")`: the real tool over
+    /// a real catalog of 40 artifacts on disk, wrapped in the real adapter, driven through
+    /// `call_content`, with the hint then FOLLOWED by a real `read_file`. A test over a fixed
+    /// payload would stay green if the real tool grew a record field that re-broke D2; this one
+    /// reads whatever the tool actually returns. Before the fix the hint was
+    /// `$.included_ids[*]` (ids), and following it returned ids, not the packed text.
     #[tokio::test]
     async fn an_overflowing_librarian_context_hints_the_markdown_and_it_returns_it() {
+        use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
         use crate::tools::hint_probe::{envelope_of, follow_hint};
         let tmp = tempfile::TempDir::new().unwrap();
-        let core = core_ctx_for_guard(tmp.path()).await;
-        let lib_ctx = Arc::new(
-            crate::librarian::tools::TestToolContextBuilder::new(
-                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+        let root = tmp.path();
+        let core = core_ctx_for_guard(root).await;
+
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        for i in 0..40 {
+            let path = root.join(format!("auth_{i:02}.md"));
+            std::fs::write(
+                &path,
+                format!(
+                    "# Auth {i:02}\n{}",
+                    format!("an artifact body line of artifact {i:02}\n").repeat(60)
+                ),
             )
-            .build(),
-        );
-        let ids: Vec<String> = (0..21).map(|i| format!("{i:016x}")).collect();
-        let markdown = format!(
-            "## packed context — FIRST-LINE-MARKER\n{}",
-            "an artifact body line\n".repeat(2_000)
+            .unwrap();
+            upsert(
+                &cat,
+                &TestArtifactRowBuilder::new(&format!("r/auth_{i:02}.md"))
+                    .with_abs_path(&path)
+                    .with_title(format!("Auth {i:02}"))
+                    .build(),
+            )
+            .unwrap();
+        }
+        let lib_ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(cat)
+                .with_root(crate::librarian::workspace::Root {
+                    name: "r".into(),
+                    path: root.to_path_buf(),
+                })
+                .build(),
         );
         let adapter = LibrarianAdapter {
-            inner: Arc::new(FixedPayloadTool(json!({
-                "markdown": markdown,
-                "included_ids": ids,
-                "scope": { "applied": "project" },
-            }))),
+            inner: lib_all_tools()
+                .into_iter()
+                .find(|t| t.name() == "librarian")
+                .expect("the `librarian` tool must be registered"),
             ctx: lib_ctx,
         };
 
         let content = crate::tools::Tool::call_content(
             &adapter,
-            json!({ "action": "context", "topic": "x" }),
+            json!({ "action": "context", "topic": "auth", "max_tokens": 12000 }),
             &core,
         )
         .await
@@ -1484,36 +1486,54 @@ mod tests {
                 .as_str()
                 .unwrap_or("")
                 .starts_with("@tool_"),
-            "the result must overflow, or this checks nothing: {envelope}"
+            "the real context result must overflow, or this checks nothing: {envelope}"
         );
+
+        // The shape D2 is about: an id index beside a markdown string. If the real tool stops
+        // returning that, the precondition fails by name instead of the test passing on a
+        // payload that no longer has the defect's shape.
+        let handle = envelope["output_id"].as_str().unwrap();
+        let ids = crate::tools::Tool::call(
+            &crate::tools::read_file::ReadFile,
+            json!({ "path": handle, "json_path": "$.included_ids" }),
+            &core,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("the real result has no `included_ids`: {e}"));
+        assert_eq!(ids["value_type"], "array", "precondition: {ids}");
 
         let (jp, followed) = follow_hint(&envelope, &core).await;
         assert_eq!(
             jp, "$.markdown",
-            "the hint must name the payload, not the ids"
+            "the hint must name the packed text, not the id list"
         );
         let value =
             followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
-        // The extracted string is itself over the inline budget, so it is parked under a
-        // `@file_*` handle: read its first line through that handle.
         assert_eq!(
             value["value_type"], "string",
             "{jp:?} must project the text: {value}"
         );
+        // The text is over the inline budget, so it is parked under a `@file_*` handle: its
+        // first artifact, and the packing of the others, must be findable through it.
         let file_id = value["file_id"]
             .as_str()
             .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
-        let first = crate::tools::Tool::call(
-            &crate::tools::read_file::ReadFile,
-            json!({ "path": file_id, "start_line": 1, "end_line": 1 }),
+        let out = crate::tools::Tool::call(
+            &crate::tools::run_command::RunCommand,
+            json!({ "command": format!("grep -c 'an artifact body line' {file_id}") }),
             &core,
         )
         .await
-        .unwrap_or_else(|e| panic!("reading line 1 of {file_id} failed: {e}"))
-        .to_string();
+        .unwrap_or_else(|e| panic!("searching the projected markdown failed: {e}"));
+        let matches: u64 = out["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .parse()
+            .unwrap_or(0);
         assert!(
-            first.contains("FIRST-LINE-MARKER"),
-            "the route {jp:?} must return the markdown, starting at its first line: {first:.300}"
+            matches > 0,
+            "the route {jp:?} must return the packed artifact text; grep -c counted {matches}: {out}"
         );
     }
 
