@@ -1643,6 +1643,74 @@ async fn a_clip_that_still_cannot_fit_hands_the_original_to_the_buffer_unclipped
         parsed["buffered_bytes"]
     );
 }
+#[tokio::test]
+async fn two_control_character_fields_just_over_the_clip_floor_are_buffered_not_clipped() {
+    // `PREBUFFERED_FIELD_FLOOR` is in RAW bytes, but the fit is measured on SERIALIZED bytes,
+    // and `\x01` serializes to six (`\u0001`). Two fields of 1,500 are over the floor, so they
+    // are clip candidates; but the floor keeps 1,000 raw bytes of each, which is 2 x 6,000
+    // serialized, still over `INLINE_BYTE_BUDGET`. The clip therefore gives up and the envelope
+    // takes the `@tool_*` fallback with the ORIGINAL behind it.
+    //
+    // This pins that behaviour as it is. Changing the floor's unit (to serialized bytes, say)
+    // would make this envelope clippable and turn this test red, which is the point: that is a
+    // contract change for every tool that pre-buffers, and it should be a deliberate one. The
+    // guide sentence in `progressive-disclosure.md` ("or in strings the clip stops cutting at
+    // 1,000 raw bytes each") describes the same edge.
+    let field = "\u{1}".repeat(1_500);
+    let val = serde_json::json!({
+        "output_id": "@cmd_own9",
+        "first": field.clone(),
+        "second": field,
+    });
+    let serialized = val.to_string().len();
+    assert!(
+        serialized > 18_000,
+        "fixture must serialize at six bytes per character: {serialized} B"
+    );
+    // Two fields kept at the 1,000-byte floor, serialized the way the fit measures them.
+    let at_floor = serde_json::to_string(&"\u{1}".repeat(1_000)).unwrap().len();
+    assert!(
+        2 * at_floor > INLINE_BYTE_BUDGET,
+        "fixture must stay over the budget even with both fields at the floor: {at_floor} B each"
+    );
+
+    assert_eq!(
+        clip_prebuffered_envelope(val.clone(), false),
+        val,
+        "an envelope that cannot fit with every field at the floor is returned unchanged"
+    );
+
+    let ctx = bare_ctx().await;
+    let tool = EchoTool {
+        result: val.clone(),
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("primary block is not JSON ({e}): {text:.200}"));
+    let handle = parsed["output_id"].as_str().unwrap();
+    assert!(
+        handle.starts_with("@tool_"),
+        "the unclipped envelope must be buffered under @tool_: {text:.200}"
+    );
+    assert!(
+        parsed.get("first").is_none() && parsed.get("second").is_none(),
+        "nothing was clipped inline: {text:.200}"
+    );
+    let stored: serde_json::Value =
+        serde_json::from_str(&ctx.output_buffer.get_stream(handle).unwrap()).unwrap();
+    assert_eq!(
+        stored, val,
+        "the buffer must hold the original, not a clipped copy"
+    );
+}
 
 #[tokio::test]
 async fn an_envelope_without_its_own_handle_still_buffers_under_a_tool_handle() {
