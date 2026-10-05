@@ -427,7 +427,7 @@ pub(crate) fn substitution_diagnostic(command: &str, stderr: &str) -> Option<Str
 /// `TOOL_OUTPUT_BUFFER_THRESHOLD`: the stdout budget below is computed from what this ACTUALLY
 /// emitted.
 // cap-class: RESULT_CAP run_command.buffer_stderr_bytes — probed
-pub(super) const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
+const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
 
 /// Escaped bytes a buffer-query response spends on everything that is NOT the stdout and stderr
 /// text: the keys (`exit_code`, `truncated`, `stdout_shown`, `stdout_total`, `stderr_shown`,
@@ -929,6 +929,13 @@ pub(crate) async fn handle_successful_output(
             // what the stderr ACTUALLY costs. Budgeting against `raw_stderr` here was
             // wrong twice: on a buffer query it is empty, so it under-counted by the
             // whole stored stream, and it was never the text being emitted.
+            //
+            // This arm is entered only when the gate (`inline_response_exceeds_limit`, which counts
+            // the BOUNDED stored stderr it will emit) says the response fits AND stdout is over the
+            // arm's 9,700 B guard. That leaves room for at most ~226 B of stderr, and under the 20
+            // line cap anything that small is under `BUFFER_STDERR_BYTE_BUDGET`, so the byte bound is a
+            // no-op HERE. It is kept so the three arms share one helper and cannot drift; swapping
+            // it for a lines-only cut is an equivalent mutant (2026-10-05 mutation run).
             let (stderr_out, stderr_shown, stderr_total) =
                 bound_buffer_stderr(&buffer_stderr, STDERR_BUDGET, original_command);
             let byte_budget = crate::tools::TOOL_OUTPUT_BUFFER_THRESHOLD
@@ -1335,6 +1342,39 @@ mod tests {
             response_extras_len(&[("a", Some("x"))], true, true),
             "a".len() + 6 + 1 + TEE_KEYS_LEN + BUFFER_QUERY_COUNTER_KEYS_LEN,
             "the three parts add"
+        );
+    }
+    /// `TEE_KEYS_LEN` and `BUFFER_QUERY_COUNTER_KEYS_LEN` are RESERVES for keys the gate cannot see
+    /// yet, so the test above, which compares each constant to itself, would pass at 0. These
+    /// measure the worst real serialization: a 13-char handle, 7-digit counts, every key present.
+    #[test]
+    fn the_tee_and_counter_reserves_cover_the_real_keys() {
+        let tee = json!({
+            "unfiltered_output": "@cmd_0bf0a111",
+            "unfiltered_output_lines": 9_999_999,
+            "unfiltered_truncated": true,
+            "unfiltered_buffered_lines": 9_999_999,
+            "stdout": "",
+        })
+        .to_string()
+        .len()
+            - 2; // the outer braces are not a key's cost
+        assert!(
+            tee <= TEE_KEYS_LEN,
+            "tee keys serialize to {tee} B but {TEE_KEYS_LEN} are reserved"
+        );
+        assert!(
+            tee + 40 > TEE_KEYS_LEN,
+            "{TEE_KEYS_LEN} B reserved for {tee} B: a reserve this loose starts buffering output that fits"
+        );
+        let counters = json!({"stderr_shown": 20, "stderr_total": 9_999_999})
+            .to_string()
+            .len()
+            - 2;
+        assert!(counters <= BUFFER_QUERY_COUNTER_KEYS_LEN, "{counters} B");
+        assert!(
+            counters + 20 > BUFFER_QUERY_COUNTER_KEYS_LEN,
+            "{BUFFER_QUERY_COUNTER_KEYS_LEN} B reserved for {counters} B"
         );
     }
 

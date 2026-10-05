@@ -3228,10 +3228,12 @@ async fn a_run_whose_diagnostic_tips_it_over_the_limit_is_summarized() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_banded_buffer_query_bounds_a_wide_stored_stderr_by_bytes() {
-    // The narrow band between `TOOL_OUTPUT_BUFFER_THRESHOLD - 300` and the summary threshold:
-    // ~9.8 KB of stdout is over the first and under the second, so it takes the third arm. It
-    // overflowed by its own arithmetic (raw-byte budget, 300 B overhead) before the budgets
-    // were measured in escaped bytes with an honest overhead.
+    // The narrow band under the inline limit: ~9.8 KB of stdout with a wide stored stderr beside it.
+    // Since the gate counts the BOUNDED stored stderr this query will emit, this lands in the
+    // summary arm; the banded arm is entered only when that stderr is ~226 B or less, where the
+    // 2,000 B byte bound is a no-op (see the comment at that arm's `bound_buffer_stderr`). It
+    // overflowed by its own arithmetic (raw-byte budget, 300 B overhead) before the budgets were
+    // measured in escaped bytes with an honest overhead.
     let (_dir, ctx) = project_ctx().await;
     let stdout: String = (1..=98)
         .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
@@ -3397,7 +3399,9 @@ async fn a_comma_free_wide_match_returns_real_bytes_in_both_arms() {
 #[tokio::test]
 async fn a_stored_stderr_line_of_exactly_the_budget_is_returned_whole() {
     let (_dir, ctx) = project_ctx().await;
-    let stderr = "e".repeat(super::output::BUFFER_STDERR_BYTE_BUDGET);
+    // The literal 2,000, not the constant: a test that reads the constant moves its own edge when
+    // the constant is bumped, and a +1 mutation of the budget survived exactly that way.
+    let stderr = "e".repeat(2_000);
     let id = ctx
         .output_buffer
         .store("cmd".into(), "a\nb\n".into(), stderr.clone(), 0);
@@ -3414,7 +3418,7 @@ async fn a_stored_stderr_line_of_exactly_the_budget_is_returned_whole() {
 #[tokio::test]
 async fn a_stored_stderr_line_one_byte_over_the_budget_is_cut_and_says_so() {
     let (_dir, ctx) = project_ctx().await;
-    let stderr = "e".repeat(super::output::BUFFER_STDERR_BYTE_BUDGET + 1);
+    let stderr = "e".repeat(2_001);
     let id = ctx
         .output_buffer
         .store("cmd".into(), "a\nb\n".into(), stderr, 0);
@@ -3423,10 +3427,7 @@ async fn a_stored_stderr_line_one_byte_over_the_budget_is_cut_and_says_so() {
     let got = parsed["stderr"].as_str().unwrap_or_default();
     assert!(got.contains("bytes shown"), "{text:.200}");
     assert!(
-        got.contains(&format!(
-            "of {} bytes shown",
-            super::output::BUFFER_STDERR_BYTE_BUDGET + 1
-        )),
+        got.contains("of 2001 bytes shown"),
         "the total names the stored stream: {:.0}",
         got
     );
