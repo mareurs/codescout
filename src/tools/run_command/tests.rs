@@ -2220,6 +2220,175 @@ async fn run_command_large_output_stored_in_buffer() {
         "buffered stdout should contain '3000\\n'"
     );
 }
+/// REACH test for the byte bound on `summarize_generic`, through the surface a caller sees.
+///
+/// BUG docs/issues/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md
+///
+/// One 95 KB line is "1 line", so the line-only summary returned it verbatim, the response
+/// overflowed AGAIN in `call_content`, and the caller got a `@tool_*` envelope whose summary
+/// carried no content and whose hint, `json_path="$.field"`, no `read_file` route can honour.
+/// This asserts the response is the small `@cmd_*` envelope instead, still carries the
+/// document's two ends, and that the handle it names really holds the whole document — the
+/// recovery route (`grep`/`jq`/`sed` on `@cmd_*`) is only real if the data is behind it.
+///
+/// The unit tests in `command_summary.rs` pin the bound; only this one pins that
+/// `handle_successful_output` routes the generic arm through it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_huge_stdout_line_is_summarized_inline_not_rebuffered() {
+    let (_dir, ctx) = project_ctx().await;
+    let content = RunCommand
+        .call_content(
+            json!({
+                "command": "yes 'abcdefghij' | tr -d '\\n' | head -c 95000",
+                "timeout_secs": 10,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    let response: Value = serde_json::from_str(text).unwrap_or_else(|e| {
+        panic!(
+            "response is not JSON ({e}); starts {:?}",
+            &text[..text.len().min(200)]
+        )
+    });
+
+    let output_id = response["output_id"].as_str().expect("an output_id");
+    assert!(
+        output_id.starts_with("@cmd_"),
+        "a second, `@tool_*` buffering means the summary did not bound the line: {output_id}"
+    );
+    assert!(
+        response.get("buffered_bytes").is_none(),
+        "`buffered_bytes` is the `@tool_*` re-buffering envelope's field: {response}"
+    );
+    let stdout = response["stdout"].as_str().expect("an inline stdout");
+    assert!(
+        stdout.contains("bytes shown"),
+        "no elision marker: {:?}",
+        &stdout[..stdout.len().min(120)]
+    );
+    assert!(
+        stdout.starts_with("abcdefghij"),
+        "the head of the output is missing"
+    );
+
+    let held = ctx
+        .output_buffer
+        .get_stream(output_id)
+        .expect("the handle resolves");
+    assert_eq!(
+        held.len(),
+        95_000,
+        "the handle must hold the WHOLE stream the summary elided"
+    );
+}
+/// REACH test for the byte bound on the `test` envelope's `failures` field.
+///
+/// BUG docs/issues/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
+///
+/// The command ends in `echo cargo test` only so `detect_command_type` classifies the run as
+/// a test run; the `failures:` block is printed by `printf`. One 60 KB line used to push the
+/// envelope past the inline budget, so the response became a `@tool_*` envelope with a
+/// one-line summary and no failure text. Asserting `type` first keeps a misclassification from
+/// passing this vacuously: a `generic` envelope has no `failures` key to bound.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_huge_failure_line_is_summarized_inline_not_rebuffered() {
+    let (_dir, ctx) = project_ctx().await;
+    let content = RunCommand
+        .call_content(
+            json!({
+                "command": "printf 'failures:\\n%s\\nfailures:\\n' \"$(head -c 60000 /dev/zero | tr '\\0' x)\"; echo cargo test",
+                "timeout_secs": 10,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    let response: Value = serde_json::from_str(text).unwrap_or_else(|e| {
+        panic!(
+            "response is not JSON ({e}); starts {:?}",
+            text.chars().take(200).collect::<String>()
+        )
+    });
+
+    let output_id = response["output_id"].as_str().expect("an output_id");
+    assert!(
+        output_id.starts_with("@cmd_"),
+        "a `@tool_*` handle means `failures` re-buffered the response: {output_id}"
+    );
+    assert!(
+        response.get("buffered_bytes").is_none(),
+        "re-buffering envelope: {response}"
+    );
+    assert_eq!(
+        response["type"], "test",
+        "the run must classify as a test run: {response}"
+    );
+    let failures = response["failures"].as_str().expect("an inline `failures`");
+    assert!(
+        failures.contains("bytes shown"),
+        "no elision marker: {:?}",
+        failures.chars().take(120).collect::<String>()
+    );
+    assert!(
+        failures.starts_with("failures:"),
+        "the head of the section is missing"
+    );
+}
+
+/// The `build` envelope's `first_error`, through the same surface. Same `echo` classification
+/// trick; the error line carries a rustc-style code so `rust_error_code_re` selects it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_huge_error_block_is_summarized_inline_not_rebuffered() {
+    let (_dir, ctx) = project_ctx().await;
+    let content = RunCommand
+        .call_content(
+            json!({
+                "command": "printf 'error[E0308]: mismatched types\\n%s\\n' \"$(head -c 60000 /dev/zero | tr '\\0' x)\"; echo cargo build",
+                "timeout_secs": 10,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = content[0].as_text().map(|t| t.text.as_str()).unwrap_or("");
+    let response: Value = serde_json::from_str(text).unwrap_or_else(|e| {
+        panic!(
+            "response is not JSON ({e}); starts {:?}",
+            text.chars().take(200).collect::<String>()
+        )
+    });
+
+    assert!(
+        response["output_id"]
+            .as_str()
+            .expect("an output_id")
+            .starts_with("@cmd_"),
+        "a `@tool_*` handle means `first_error` re-buffered the response: {response}"
+    );
+    assert!(
+        response.get("buffered_bytes").is_none(),
+        "re-buffering envelope: {response}"
+    );
+    assert_eq!(
+        response["type"], "build",
+        "the run must classify as a build: {response}"
+    );
+    let first_error = response["first_error"]
+        .as_str()
+        .expect("an inline `first_error`");
+    assert!(first_error.contains("bytes shown"), "no elision marker");
+    assert!(
+        first_error.starts_with("error[E0308]"),
+        "the error line itself is missing"
+    );
+}
 
 #[cfg(unix)]
 #[tokio::test]

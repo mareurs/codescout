@@ -1017,6 +1017,38 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds ONE 95,000 B line through `RunCommand`'s real `call_content` surface
+        // against `GENERIC_FIELD_BYTE_BUDGET` 2,000 — one line satisfies `HEAD_LINES +
+        // TAIL_LINES` outright, so only the byte bound can bind. It drives the STDOUT
+        // stream only; the stderr stream of the same constant is pinned by
+        // `summarize_generic_bounds_a_huge_stderr_and_leaves_a_short_stdout_alone`, which
+        // cannot be cited because its marker assertions live in a shared helper this gate's
+        // body scan does not follow. Marker written by production in `bound_stream_bytes`.
+        id: "command_summary.generic_field_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_huge_stdout_line_is_summarized_inline_not_rebuffered",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds ONE 60,000 B line inside a `failures:` block through `RunCommand`'s
+        // real `call_content` surface against `FAILURE_FIELD_BYTE_BUDGET` 5,000. The field
+        // has no line bound, so only the byte bound can bind. It drives `failures` only;
+        // the `first_error` site of the same constant is pinned by
+        // `a_huge_error_block_is_summarized_inline_not_rebuffered`,
+        // which cannot also be cited because a row names ONE test. Marker written by
+        // production in `bound_stream_bytes`.
+        id: "command_summary.failure_field_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_huge_failure_line_is_summarized_inline_not_rebuffered",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked
         // separately and does NOT bind here (9,060 B available vs 5,760 B kept), so the
