@@ -1247,6 +1247,49 @@ impl WalkAudit {
         root.ancestors().any(|a| a.join(".git").exists())
     }
 
+    /// Whether any admitting glob could land on, or under, a dot-prefixed entry at the walk
+    /// root — the only entries `hidden_at_root` names and the only ones the hidden clause's
+    /// remedy is offered for.
+    ///
+    /// Globs are matched against paths relative to the walk root with gitignore semantics, so
+    /// reachability is decided by the glob's first path segment:
+    ///
+    /// - **no slash** (a trailing one does not count): the pattern floats and matches at any
+    ///   depth, under a dot directory as readily as anywhere — reachable;
+    /// - **a slash**: the pattern is anchored, and its first segment must match the root entry
+    ///   itself. A first segment that opens with a literal non-dot character (`docs`, `src*`)
+    ///   cannot match a dot-prefixed name; one that opens with `.`, a wildcard, a class, a
+    ///   brace group or an escape might — reachable, deliberately over-approximated.
+    ///
+    /// Two inputs are never narrowed on. An **absolute** glob (inside the root, or it would
+    /// have been refused) carries the root's own path as its leading segments, so the part
+    /// that decides reachability comes later and this test cannot see it. A **negation**
+    /// excludes and never admits, so a list with no admitting glob is as wide as no glob. In
+    /// both, and for an empty list, the answer is `true`: the over-approximation keeps the
+    /// warning, which is the status quo, rather than dropping a remedy that might be real.
+    ///
+    /// What this does not claim: that nothing hidden is pruned. `src/*.rs` can still miss
+    /// `src/.x.rs` and `src/**/*.rs` can still miss `src/.gen/`; the clause never named
+    /// those, so dropping it removes a cause that was asserted without being checked, not one
+    /// that was ruled out. See
+    /// `docs/issues/2026-09-24-residual-grep-hidden-paths-warning-checks-its-premise.md`.
+    fn globs_can_reach_a_root_dot_entry(globs: &[String]) -> bool {
+        let mut admitting = globs.iter().filter(|g| !g.starts_with('!')).peekable();
+        if admitting.peek().is_none() {
+            return true;
+        }
+        admitting.any(|g| {
+            // A leading `/` is absolute to `Path` too, which is the safe direction here.
+            if std::path::Path::new(g.as_str()).is_absolute() {
+                return true;
+            }
+            match g.trim_end_matches('/').split_once('/') {
+                None => true, // floats
+                Some((first, _)) => first.starts_with(['.', '*', '?', '[', '{', '\\']),
+            }
+        })
+    }
+
     /// The warning for a zero-match result, or `None` when the zero can be trusted.
     ///
     /// `None` is load-bearing: a clean walk over a tree with no hidden entries must return a
@@ -1260,6 +1303,12 @@ impl WalkAudit {
     /// the real one. The clause claims only what the counter proves — that nothing under this
     /// root passed the filter — and offers the anchoring mismatch as the thing to check,
     /// since an empty tree produces the same count.
+    ///
+    /// The hidden clause additionally needs a glob that could land under a root dot entry
+    /// (`globs_can_reach_a_root_dot_entry`). A glob anchored under a visible first segment
+    /// cannot, so naming `.github/` beside `docs/issues/*.md` blamed a directory the query
+    /// could never have touched — measured on 37 glob-starved zeros, most of them of that
+    /// shape.
     ///
     /// The gitignore clause is the one condition keyed on an argument rather than a counter.
     /// `include_hidden` lifts the dotfile filter and nothing else, so acting on the hidden
@@ -1276,7 +1325,10 @@ impl WalkAudit {
         include_hidden: bool,
         globs: &[String],
     ) -> Option<String> {
-        let hidden = if include_hidden {
+        // The hidden clause names root entries and offers `include_hidden` as the way into
+        // them. That is a claim about THIS query only when a glob could land under one — see
+        // `globs_can_reach_a_root_dot_entry`.
+        let hidden = if include_hidden || !Self::globs_can_reach_a_root_dot_entry(globs) {
             Vec::new()
         } else {
             Self::hidden_at_root(root)
@@ -1297,11 +1349,11 @@ impl WalkAudit {
         if starved {
             msg.push_str(&format!(
                 " No file under '{}' passed the glob filter ({}), so none was opened — this \
-                     zero is about the file filter, not the pattern. Globs are matched against a \
-                     walk rooted there, so they resolve relative to THAT root and not the project \
-                     root: when `path` narrows the search, a project-root-relative glob such as \
-                     `src/foo.rs` cannot match. Drop the leading segments `path` already supplies, \
-                     or omit `path` and let the glob carry the whole route.",
+                         zero is about the file filter, not the pattern. Globs are matched against a \
+                         walk rooted there, so they resolve relative to THAT root and not the project \
+                         root: when `path` narrows the search, a project-root-relative glob such as \
+                         `src/foo.rs` cannot match. Drop the leading segments `path` already supplies, \
+                         or omit `path` and let the glob carry the whole route.",
                 root.display(),
                 globs.join(", ")
             ));
@@ -1309,8 +1361,8 @@ impl WalkAudit {
         if self.errors > 0 {
             msg.push_str(&format!(
                 " The walk could not read {} entr{} — re-run, and if it persists check for \
-                     unreadable directories or file-descriptor exhaustion from many concurrent \
-                     searches.",
+                         unreadable directories or file-descriptor exhaustion from many concurrent \
+                         searches.",
                 self.errors,
                 if self.errors == 1 { "y" } else { "ies" }
             ));
@@ -1320,9 +1372,9 @@ impl WalkAudit {
             let more = hidden.len() - shown.len();
             msg.push_str(&format!(
                 " Hidden paths were not searched, including {}{} at the search root. Pass \
-                     include_hidden=true to search them — a glob cannot re-admit them, because \
-                     overrides are applied inside a walk that has already pruned the parent \
-                     directory. `.git` and `.codescout` are excluded from this list.",
+                         include_hidden=true to search them — a glob cannot re-admit them, because \
+                         overrides are applied inside a walk that has already pruned the parent \
+                         directory. `.git` and `.codescout` are excluded from this list.",
                 shown.join(", "),
                 if more > 0 {
                     format!(" and {more} more")
@@ -1334,10 +1386,10 @@ impl WalkAudit {
         if unlifted_gitignore {
             msg.push_str(
                 " include_hidden=true lifts the dotfile filter only. Gitignore rules are a \
-                     second and independent exclusion that no grep argument lifts, and they apply \
-                     at every depth — a nested .gitignore prunes its own subtree, so a match can \
-                     sit under a path that is not itself ignored. Reach one with a shell `grep`, \
-                     or `git grep --no-index`.",
+                         second and independent exclusion that no grep argument lifts, and they apply \
+                         at every depth — a nested .gitignore prunes its own subtree, so a match can \
+                         sit under a path that is not itself ignored. Reach one with a shell `grep`, \
+                         or `git grep --no-index`.",
             );
         }
         Some(msg)
@@ -2885,6 +2937,127 @@ mod tests {
         );
         assert!(w.contains(".github/"), "must name the pruned entry: {w}");
         assert!(w.contains("include_hidden"), "must name the remedy: {w}");
+    }
+    /// Fixture for the hidden-remedy premise tests: a visible `src/a.rs` that does not hold
+    /// the pattern, and a pruned `.github/ci.yml` that does. Searched from the tree root, so
+    /// `hidden_at_root` names `.github/`.
+    async fn hidden_dir_holds_the_pattern() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".github")).unwrap();
+        std::fs::write(dir.path().join(".github/ci.yml"), "TARGET_NAME\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn main() {}\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        (dir, ctx)
+    }
+
+    /// The warning for a zero-match search of the fixture under `glob`, or `""` when none.
+    async fn zero_warning_under_glob(
+        dir: &std::path::Path,
+        ctx: &ToolContext,
+        glob: Value,
+    ) -> String {
+        let res = Grep
+            .call(
+                json!({
+                    "pattern": "TARGET_NAME",
+                    "path": dir.to_str().unwrap(),
+                    "glob": glob,
+                }),
+                ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(res["total"].as_u64().unwrap(), 0, "precondition: {res}");
+        res["completeness_warning"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// The hidden-paths clause asserts a remedy (`include_hidden=true`) and names root
+    /// entries as the thing a pattern could be hiding in. That is only a claim about this
+    /// query when a glob could reach those entries. A glob anchored under a visible first
+    /// segment (`docs/x.md`, `src/*.rs`) cannot match anything under a root-level dot entry
+    /// — and `include_hidden` does not change that — so naming `.github/` beside it blames a
+    /// directory the query could not have touched, and ends the search for the real cause.
+    ///
+    /// Measured on this project's `usage.db` (2026-10-05): 37 of the 242 grep zeros that
+    /// carried the hidden clause were glob-starved, and 23 of those 37 used only globs
+    /// anchored under a visible first segment (`docs/issues/*.md`, `src/**/*.rs`,
+    /// `tests/cap_probe.rs`, ...). The other 14 were dot-anchored (`.github/workflows/*.yml`),
+    /// floating (`*.mjs`) or a buffer ref, and keep the clause.
+    #[tokio::test]
+    async fn a_glob_anchored_under_a_visible_dir_does_not_name_the_hidden_remedy() {
+        let (dir, ctx) = hidden_dir_holds_the_pattern().await;
+
+        // Starved: nothing under `src/` is named `nope.rs`, so no file was opened.
+        let starved = zero_warning_under_glob(dir.path(), &ctx, json!("src/nope.rs")).await;
+        assert!(
+            starved.contains("passed the glob filter"),
+            "precondition: this zero is glob-starved and must say so: {starved}"
+        );
+        assert!(
+            !starved.contains("include_hidden") && !starved.contains(".github/"),
+            "no glob here can reach `.github/`, so the hidden remedy is an unchecked cause: \
+             {starved}"
+        );
+
+        // Not starved: the glob admits `src/a.rs` and the pattern is absent from it. Same
+        // premise failure, and the zero is otherwise trustworthy — a bare zero.
+        let admitted = zero_warning_under_glob(dir.path(), &ctx, json!("src/*.rs")).await;
+        assert!(
+            !admitted.contains("include_hidden") && !admitted.contains(".github/"),
+            "an anchored glob that admits files cannot reach `.github/` either: {admitted}"
+        );
+
+        // Array form goes through the same predicate: every glob is anchored under `src/`.
+        let array =
+            zero_warning_under_glob(dir.path(), &ctx, json!(["src/nope.rs", "src/b/*.rs"])).await;
+        assert!(
+            !array.contains("include_hidden"),
+            "every glob in the array is anchored under a visible dir: {array}"
+        );
+    }
+
+    /// Positive twin of the test above: each of these globs CAN reach a root dot entry, so
+    /// narrowing on them would hide a remedy that is real. A narrowing that fired on every
+    /// glob would pass the test above and fail here.
+    #[tokio::test]
+    async fn a_glob_that_can_reach_a_hidden_root_entry_still_names_the_remedy() {
+        let (dir, ctx) = hidden_dir_holds_the_pattern().await;
+        let abs_inside = format!("{}/.github/ci.yml", dir.path().display());
+        for glob in [
+            // dot-anchored: the pattern's own target is the pruned directory
+            json!(".github/*.yml"),
+            // floating: a basename glob matches at any depth, including under `.github/`
+            json!("*.yml"),
+            // wildcard-leading first segment
+            json!("**/ci.yml"),
+            // one reaching glob among anchored ones is enough
+            json!(["src/nope.rs", ".github/ci.yml"]),
+            // absolute and INSIDE the root: its first segment is the root's own path, and
+            // the part that decides reachability comes after it
+            json!(abs_inside),
+        ] {
+            let w = zero_warning_under_glob(dir.path(), &ctx, glob.clone()).await;
+            assert!(
+                w.contains("include_hidden") && w.contains(".github/"),
+                "glob {glob} can reach `.github/`, so the zero must still name it: {w}"
+            );
+        }
+    }
+
+    /// A negation excludes; it never admits, so it is not a reason to think hidden entries
+    /// are out of reach. With only negations the walk is as wide as with no glob at all.
+    #[tokio::test]
+    async fn a_negation_only_glob_keeps_the_hidden_remedy() {
+        let (dir, ctx) = hidden_dir_holds_the_pattern().await;
+        let w = zero_warning_under_glob(dir.path(), &ctx, json!("!src/skip.rs")).await;
+        assert!(
+            w.contains("include_hidden") && w.contains(".github/"),
+            "a negation admits nothing and narrows nothing: {w}"
+        );
     }
 
     #[tokio::test]
