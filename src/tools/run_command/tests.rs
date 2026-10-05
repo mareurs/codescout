@@ -3789,6 +3789,75 @@ async fn a_tee_capture_behind_an_empty_stdout_is_inside_the_gate_at_the_exact_ed
         over.to_string()
     );
 }
+#[cfg(unix)]
+#[tokio::test]
+async fn a_truncated_page_fills_the_limit_to_within_one_line() {
+    // 130 lines of 100 B (13 KB) cut by BYTES: the page must end within one line of the limit,
+    // not a reserve short of it. A page budgeted for the clipped-line sentence it does not carry
+    // (172 B) or for an 800 B reserve ends two lines short, and this fails.
+    let (_dir, ctx) = project_ctx().await;
+    let stdout: String = (1..=130)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let (_id, text, parsed) =
+        query_stored(&ctx, stdout, String::new(), |id| format!("cat {id}")).await;
+
+    assert_eq!(parsed["truncated"], true, "{text:.200}");
+    assert!(
+        text.len() <= 10_003,
+        "{} B compact is over the limit",
+        text.len()
+    );
+    let slack = 10_003 - text.len();
+    assert!(
+        slack < 100,
+        "the page stops {slack} B short of the limit: more than a whole 100 B line would have fit"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_truncated_page_counts_the_late_keys_it_carries() {
+    // A buffer query cut by bytes also carries a late key (`unfiltered_output_skipped`, 400 B
+    // here). The page room is measured from a skeleton that has every key; one that left the late
+    // keys out sends the page 400 B over the limit.
+    use super::output::{handle_successful_output_with, LateKeys};
+    let (_dir, ctx) = project_ctx().await;
+    let wide: String = (1..=130)
+        .map(|i| format!("row{i:03} {}\n", "r".repeat(92)))
+        .collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), wide.clone(), String::new(), 0);
+    let result = handle_successful_output_with(
+        &format!("cat {id}"),
+        wide,
+        String::new(),
+        0,
+        true,
+        None,
+        std::path::Path::new("."),
+        &ctx,
+        LateKeys {
+            redacted: 0,
+            tee_skipped: Some("n".repeat(400)),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result["truncated"], true, "{:.200}", result.to_string());
+    assert!(
+        result["unfiltered_output_skipped"].is_string(),
+        "the late key is attached"
+    );
+    let len = result.to_string().len();
+    assert!(
+        len <= 10_003,
+        "{len} B compact: the page did not count its late key"
+    );
+    assert!(10_003 - len < 100, "{} B short of the limit", 10_003 - len);
+}
 
 #[cfg(unix)]
 #[tokio::test]
