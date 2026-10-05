@@ -493,6 +493,109 @@ async fn list_after_writes() {
         .collect();
     assert_eq!(topics, vec!["a-topic", "b-topic"]);
 }
+/// D1 of the hint-family sweep, REACH and REMEDY. `Memory::json_path_hint` returned the constant
+/// `$.field` whenever the payload had no `content` string, bypassing the default's array
+/// detection. A `memory(recall)` of 48 results (11,517 B, keys `results`, `count`, `has_more`)
+/// advertised `$.field`, and following it failed with `path segment 'field' not found`.
+///
+/// This goes through the real `call_content` and then FOLLOWS the hint with a real `read_file`
+/// on the same buffer — the check an agent performs. Asserting the hint's text would pass
+/// whatever the route does. `list` is the overflowing action because it needs no embedder;
+/// it carries the same shape (an array under a named key beside small scalars).
+#[tokio::test]
+async fn an_overflowing_memory_list_hints_a_path_that_returns_the_topics() {
+    use crate::tools::hint_probe::{envelope_of, follow_hint};
+    let (_dir, ctx) = test_ctx_with_project().await;
+    for i in 0..260 {
+        Memory
+            .call(
+                json!({
+                    "action": "write",
+                    "topic": format!("overflow-probe-topic-with-a-long-name-{i:04}"),
+                    "content": "x",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+    }
+
+    let content = Memory
+        .call_content(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
+    let envelope = envelope_of(&content);
+    assert!(
+        envelope["output_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("@tool_"),
+        "the list must overflow, or this test checks nothing: {envelope}"
+    );
+
+    let (jp, followed) = follow_hint(&envelope, &ctx).await;
+    let value =
+        followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
+    // The projected array is itself over the inline budget, so it comes back parked under a
+    // `@file_*` handle (one line per topic between the brackets). Read its first and last
+    // lines through that handle: the route must deliver the topics, not merely not error.
+    assert_eq!(
+        value["value_type"], "array",
+        "{jp:?} must project an array: {value}"
+    );
+    let file_id = value["file_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
+    let line = |n: u64| {
+        let ctx = &ctx;
+        async move {
+            crate::tools::read_file::ReadFile
+                .call(
+                    json!({ "path": file_id, "start_line": n, "end_line": n }),
+                    ctx,
+                )
+                .await
+                .unwrap_or_else(|e| panic!("reading line {n} of {file_id} failed: {e}"))
+                .to_string()
+        }
+    };
+    assert!(
+        line(2)
+            .await
+            .contains("overflow-probe-topic-with-a-long-name-0000"),
+        "the first line of the projected array must be the first topic"
+    );
+    assert!(
+        line(261)
+            .await
+            .contains("overflow-probe-topic-with-a-long-name-0259"),
+        "the last line of the projected array must be the last topic"
+    );
+}
+
+/// The decision itself, in the three shapes it must tell apart. A `content` string keeps
+/// pointing at itself; a payload with an array points at the array (this is the row that was
+/// `$.field`); a payload with neither falls to the default's own placeholder, which is
+/// deliberate and pinned in `core/types.rs`.
+#[test]
+fn memory_hint_uses_array_detection_when_the_payload_has_no_content() {
+    assert_eq!(
+        Memory.json_path_hint(&json!({ "content": "x" })),
+        "$.content"
+    );
+    assert_eq!(
+        Memory.json_path_hint(&json!({
+            "results": [{ "topic": "a" }, { "topic": "b" }],
+            "count": 2,
+            "has_more": false,
+        })),
+        "$.results[*]"
+    );
+    assert_eq!(
+        Memory.json_path_hint(&json!({ "status": "ok" })),
+        crate::tools::default_json_path_hint(&json!({ "status": "ok" }))
+    );
+}
 
 #[tokio::test]
 async fn delete_removes_entry() {

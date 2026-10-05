@@ -44,6 +44,9 @@ pub use run_command::RunCommand;
 pub mod guide;
 pub mod guide_ledger;
 pub mod guide_rearm;
+/// Test instrument: follow an overflow envelope's own recovery hint with a real `read_file`.
+#[cfg(test)]
+pub(crate) mod hint_probe;
 
 #[cfg(unix)]
 pub mod peer;

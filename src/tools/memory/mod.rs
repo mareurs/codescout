@@ -1255,10 +1255,15 @@ impl Tool for Memory {
     }
 
     fn json_path_hint(&self, val: &Value) -> String {
+        // `memory(recall)` and `memory(list)` answer with an array under a named key
+        // (`results`, `topics`), so a payload with no `content` string falls to the shared
+        // default, which names that array. This used to return the constant `$.field`,
+        // which exists in no memory payload: a 48-result recall advertised it and
+        // following it failed with `path segment 'field' not found`.
         if val["content"].is_string() {
             "$.content".to_string()
         } else {
-            "$.field".to_string()
+            crate::tools::default_json_path_hint(val)
         }
     }
 }
