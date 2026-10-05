@@ -692,6 +692,33 @@ fn fit_envelope_accepts_an_envelope_that_lands_exactly_on_the_target_in_one_pass
     }
     panic!("no hint padding of 0..400 lands the envelope exactly on {SUMMARY_ENVELOPE_BUDGET} B");
 }
+#[test]
+fn fit_envelope_subtracts_what_the_envelope_costs_around_the_summary() {
+    // E3. 2,000 B of the envelope are NOT summary. Cutting the summary to the whole 9,000 B
+    // target (the overhead not subtracted) leaves the envelope ~2,000 B over, so a second pass
+    // is forced; cutting to 9,000 minus the measured overhead fits on the FIRST: three finish
+    // calls (whole, overhead probe, one pass), the envelope within the target.
+    let summary = serde_json::json!({"type": "source", "symbols": numbered_entries(400)});
+    let calls = std::cell::Cell::new(0);
+    let finish = |s: serde_json::Value, notes: &[String]| {
+        calls.set(calls.get() + 1);
+        serde_json::json!({"s": s, "hint": notes.join(" "), "pad": "p".repeat(2_000)})
+    };
+
+    let got = fit_envelope(summary, "@file_t", finish);
+
+    assert_eq!(
+        calls.get(),
+        3,
+        "the overhead must be priced in before the first cut"
+    );
+    assert!(
+        ser_len(&got) <= SUMMARY_ENVELOPE_BUDGET,
+        "{} B",
+        ser_len(&got)
+    );
+    assert!(got["s"].get("summary_omitted").is_none());
+}
 
 #[test]
 fn fit_envelope_converges_in_exactly_two_passes_when_the_notes_overshoot_the_slack() {
