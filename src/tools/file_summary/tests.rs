@@ -570,6 +570,172 @@ fn cut_array_middle_cuts_at_exactly_one_more_entry_than_fits_and_not_before() {
     assert_eq!(kept_and_omitted(19, 36), Some((18, 1)));
     assert_eq!(kept_and_omitted(20, 36), Some((18, 2)));
 }
+// ---- a line route is offered only when the entries are in line order ----
+//
+// `summarize_toml` lists flat keys through `toml::Table`, which is ALPHABETICAL, not by line,
+// while `cut_array_middle` read the gap as "the line after the last kept head entry up to the line
+// before the first kept tail entry", which holds only when lines ascend. With keys written
+// z..a the gap came out `from_line: 15, to_line: 4` and the hint's ready-made
+// `read_file(start_line=15, end_line=4)` failed with "invalid line range".
+
+fn keyed_lines(lines: &[u64]) -> Vec<serde_json::Value> {
+    lines
+        .iter()
+        .map(|l| serde_json::json!({"key": format!("{}{l:03}", "k".repeat(30)), "line": l}))
+        .collect()
+}
+
+fn cut_keys(lines: &[u64], allowance: usize) -> (serde_json::Value, String) {
+    let mut summary = serde_json::json!({"type": "toml", "keys": []});
+    let note = cut_array_middle(
+        &mut summary,
+        "",
+        "keys",
+        keyed_lines(lines),
+        allowance,
+        "@file_t",
+    )
+    .expect("the array must be cut");
+    (summary, note)
+}
+
+#[test]
+fn cut_array_middle_gives_no_line_route_when_the_lines_run_backwards() {
+    let lines: Vec<u64> = (1..=60).rev().collect();
+    let (cut, note) = cut_keys(&lines, 600);
+    assert!(
+        cut["keys_omitted"]["from_line"].is_null(),
+        "{}",
+        cut["keys_omitted"]
+    );
+    assert!(
+        cut["keys_omitted"]["to_line"].is_null(),
+        "{}",
+        cut["keys_omitted"]
+    );
+    assert!(note.contains("read the file in ranges with"), "{note}");
+    assert!(
+        note.contains("start_line=N, end_line=M"),
+        "no ready-made call may carry made-up numbers: {note}"
+    );
+    assert!(cut["keys_omitted"]["count"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn cut_array_middle_gives_no_line_route_when_one_omitted_entry_is_out_of_order() {
+    // Ascending everywhere the kept entries are, but one line in the OMITTED middle breaks the
+    // order: the gap's end points would be wrong for the omitted region, so no route is offered.
+    let mut lines: Vec<u64> = (1..=60).collect();
+    lines.swap(28, 31);
+    let (cut, note) = cut_keys(&lines, 600);
+    let after = cut["keys_omitted"]["after"].as_u64().unwrap() as usize;
+    assert!(
+        after < 28,
+        "the swapped entries must be in the omitted region: after={after}"
+    );
+    assert!(
+        cut["keys_omitted"]["from_line"].is_null(),
+        "{}",
+        cut["keys_omitted"]
+    );
+    assert!(note.contains("start_line=N"), "{note}");
+}
+
+#[test]
+fn cut_array_middle_gives_no_line_route_when_an_entry_has_no_line() {
+    let mut entries = keyed_lines(&(1..=60).collect::<Vec<_>>());
+    entries[10] = serde_json::json!({"key": "k".repeat(33)});
+    let mut summary = serde_json::json!({"type": "toml", "keys": []});
+    let note = cut_array_middle(&mut summary, "", "keys", entries, 600, "@file_t").unwrap();
+    assert!(summary["keys_omitted"]["from_line"].is_null());
+    assert!(note.contains("start_line=N"), "{note}");
+}
+
+#[test]
+fn cut_array_middle_still_gives_the_exact_route_when_the_lines_ascend() {
+    // The control: lines ascend, so the route is the exact gap, and a line of 0 (a key the
+    // summarizer could not find) or a repeat would not be "ascending".
+    let lines: Vec<u64> = (1..=60).collect();
+    let (cut, note) = cut_keys(&lines, 600);
+    let after = cut["keys_omitted"]["after"].as_u64().unwrap();
+    let count = cut["keys_omitted"]["count"].as_u64().unwrap();
+    assert_eq!(cut["keys_omitted"]["from_line"], after + 1);
+    assert_eq!(cut["keys_omitted"]["to_line"], after + count);
+    assert!(
+        note.contains(&format!(
+            "start_line={}, end_line={}",
+            after + 1,
+            after + count
+        )),
+        "{note}"
+    );
+    // Equal neighbours are not strictly ascending: the gap would be ambiguous.
+    let (dup, _) = cut_keys(
+        &[1, 2, 3, 3]
+            .repeat(15)
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(i, l)| l + (i as u64 / 4) * 3)
+            .collect::<Vec<_>>(),
+        600,
+    );
+    assert!(
+        dup["keys_omitted"]["from_line"].is_null(),
+        "{}",
+        dup["keys_omitted"]
+    );
+}
+
+#[test]
+fn the_other_key_sources_list_their_entries_in_line_order() {
+    // The assumption `cut_array_middle` makes, checked at every source of `line`d entries rather
+    // than only the one that broke: YAML top-level keys and TOML table headers are found by
+    // scanning the file top to bottom, whatever order the names sort in.
+    let yaml: String = (0..40).rev().map(|i| format!("key{i:02}: 1\n")).collect();
+    let sections = summarize_yaml(&yaml);
+    let lines: Vec<u64> = sections["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].as_u64().unwrap())
+        .collect();
+    assert!(
+        lines.windows(2).all(|w| w[0] < w[1]),
+        "yaml sections: {lines:?}"
+    );
+
+    let toml: String = (0..40)
+        .rev()
+        .map(|i| format!("[t{i:02}]\nv = 1\n"))
+        .collect();
+    let sections = summarize_toml(&toml);
+    let lines: Vec<u64> = sections["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].as_u64().unwrap())
+        .collect();
+    assert!(
+        lines.windows(2).all(|w| w[0] < w[1]),
+        "toml tables: {lines:?}"
+    );
+
+    // The one that is NOT: flat TOML keys come from `toml::Table`, alphabetical. Pinned here so
+    // the guard in `cut_array_middle` is known to be load-bearing, not hypothetical.
+    let flat: String = (0..30).rev().map(|i| format!("key{i:02} = 1\n")).collect();
+    let keys = summarize_toml(&flat);
+    let lines: Vec<u64> = keys["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].as_u64().unwrap())
+        .collect();
+    assert!(
+        lines.windows(2).all(|w| w[0] > w[1]),
+        "flat toml keys: {lines:?}"
+    );
+}
 
 #[test]
 fn bound_summary_gives_the_first_of_two_arrays_the_rounded_down_share() {

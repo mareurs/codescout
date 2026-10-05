@@ -2881,6 +2881,111 @@ mod tests {
         let text = assert_inline_with_one_handle(&path, "one huge JSON key").await;
         assert!(text.contains("entries omitted"), "{text:.300}");
     }
+    // ---- TOML flat keys: the route the hint names must work ----
+
+    /// `n` flat TOML keys of 600 B each, written in line order `order` (names `kNN`).
+    fn wide_flat_toml(order: impl Iterator<Item = usize>) -> String {
+        order
+            .map(|i| format!("{}{i:02} = 1\n", "k".repeat(600)))
+            .collect()
+    }
+
+    /// The `(start_line, end_line)` pairs with real numbers in a hint (the generic `N`/`M`
+    /// placeholders do not match).
+    fn numeric_routes(hint: &str) -> Vec<(u64, u64)> {
+        let re = regex::Regex::new(r"start_line=(\d+), end_line=(\d+)").unwrap();
+        re.captures_iter(hint)
+            .map(|c| (c[1].parse().unwrap(), c[2].parse().unwrap()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_toml_whose_keys_sort_against_their_line_order_offers_no_false_route() {
+        // Written z..a: alphabetical order is the REVERSE of line order. The gap used to come
+        // out `from_line: 15, to_line: 4` and the hint offered an impossible range.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reversed.toml");
+        std::fs::write(&path, wide_flat_toml((0..20).rev())).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let gap = &value["keys_omitted"];
+        assert!(
+            gap["count"].as_u64().unwrap() > 0,
+            "nothing was cut: {value:.200}"
+        );
+        assert!(
+            gap["from_line"].is_null() && gap["to_line"].is_null(),
+            "{gap}"
+        );
+        let hint = value["overflow"]["hint"].as_str().unwrap();
+        assert!(
+            numeric_routes(hint).is_empty(),
+            "a made-up line range in: {hint}"
+        );
+        assert!(
+            hint.contains("keys:") && hint.contains("entries omitted"),
+            "{hint}"
+        );
+
+        // Follow the route the hint DOES name: read the file in ranges from its handle.
+        let file_id = value["file_id"].as_str().unwrap();
+        let followed = ReadFile
+            .call(
+                json!({ "path": file_id, "start_line": 1, "end_line": 2 }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            followed["content"]
+                .as_str()
+                .unwrap()
+                .starts_with(&"k".repeat(600)),
+            "{followed:.200}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_toml_whose_keys_are_in_line_order_offers_a_route_that_returns_the_gap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ordered.toml");
+        std::fs::write(&path, wide_flat_toml(0..20)).unwrap();
+        let ctx = test_ctx().await;
+        let value = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+
+        let after = value["keys_omitted"]["after"].as_u64().unwrap() as usize;
+        let hint = value["overflow"]["hint"].as_str().unwrap();
+        let routes = numeric_routes(hint);
+        assert_eq!(routes.len(), 1, "{hint}");
+        let (start, end) = routes[0];
+        assert!(
+            start <= end,
+            "an impossible range was offered: {start}-{end}"
+        );
+
+        // Follow it: the lines it names are exactly the omitted keys, the first one first.
+        let file_id = value["file_id"].as_str().unwrap();
+        let followed = ReadFile
+            .call(
+                json!({ "path": file_id, "start_line": start, "end_line": end }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let content = followed["content"].as_str().unwrap();
+        assert!(
+            content.starts_with(&format!("{}{after:02}", "k".repeat(600))),
+            "line {start} is not the first omitted key (index {after}): {content:.40}"
+        );
+        assert_eq!(content.lines().count() as u64, end - start + 1);
+    }
 
     #[tokio::test]
     async fn a_multi_heading_read_keeps_its_coverage_and_drops_only_the_duplicate() {

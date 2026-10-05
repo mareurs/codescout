@@ -1427,12 +1427,18 @@ pub(crate) fn cut_array_middle(
     // Entries name their line `line` (symbols, sections, headings in a file summary) or `l`
     // (the compact heading map `read_markdown` returns).
     let line_of = |e: &Value| e["line"].as_u64().or_else(|| e["l"].as_u64());
-    let from = entries.get(head).and_then(line_of);
-    let to = if tail > 0 {
-        entries
-            .get(total - tail)
-            .and_then(line_of)
-            .map(|l| l.saturating_sub(1))
+    // The gap is "the line after the last kept head entry up to the line before the first kept
+    // tail entry", which is the omitted entries' lines ONLY when lines strictly ascend through the
+    // WHOLE array: kept AND omitted, since an omitted entry out of order moves the gap too. Flat
+    // TOML keys are listed through `toml::Table`, which is alphabetical, so a file written z..a
+    // produced `from_line: 15, to_line: 4` and a ready-made `read_file(start_line=15,
+    // end_line=4)` that fails with "invalid line range". Without a monotonic array no range is
+    // reported (the markers are null and the note is the generic one, which carries no numbers).
+    let lines: Vec<Option<u64>> = entries.iter().map(line_of).collect();
+    let in_line_order = lines.iter().all(Option::is_some) && lines.windows(2).all(|w| w[0] < w[1]);
+    let from = if in_line_order { lines[head] } else { None };
+    let to = if in_line_order && tail > 0 {
+        lines[total - tail].map(|l| l.saturating_sub(1))
     } else {
         None
     };
