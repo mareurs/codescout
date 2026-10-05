@@ -2870,6 +2870,76 @@ mod tests {
         assert_eq!(value["sections"].as_array().unwrap().len(), 2);
         assert!(value.get("sections_omitted").is_none());
     }
+    #[tokio::test]
+    async fn a_single_enormous_json_key_is_bounded_too() {
+        // ONE top-level key of 20 KB in a VALID object: `schema.keys` has a single entry, one
+        // level down, so a nested collector that only takes arrays of two or more lets it through.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("one.json");
+        std::fs::write(&path, format!("{{\"{}\": 1}}", "k".repeat(20_000))).unwrap();
+
+        let text = assert_inline_with_one_handle(&path, "one huge JSON key").await;
+        assert!(text.contains("entries omitted"), "{text:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_keeps_its_coverage_and_drops_only_the_duplicate() {
+        // A third, unread heading makes `coverage` non-empty. The duplicate `sections` is the
+        // first thing to go and it is enough: `coverage` must survive. A drop order of
+        // coverage-first, or dropping both once the response is over, would lose it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-cov.md");
+        std::fs::write(&path, format!("{}\n## M3\nshort\n", two_sections(4_500))).unwrap();
+        let ctx = test_ctx().await;
+
+        let value = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "headings": ["## M1", "## M2"] }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(value.get("sections").is_none() && value["sections_omitted"] == true);
+        assert!(
+            value.get("coverage_omitted").is_none(),
+            "coverage was dropped too"
+        );
+        assert_eq!(value["coverage"]["unread"][0], "## M3", "{value:.300}");
+    }
+
+    #[tokio::test]
+    async fn a_multi_heading_read_whose_content_serializes_over_the_limit_takes_the_error_path() {
+        // Two sections of 3,000 quotes: the joined content is ~6 KB RAW, under the limit, but
+        // ~12 KB serialized. The oversized test must measure what lands in the response.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("multi-quotes.md");
+        let body = format!(
+            "## Q1\n{}\n\n## Q2\n{}\n",
+            "\"".repeat(3_000),
+            "\"".repeat(3_000)
+        );
+        std::fs::write(&path, &body).unwrap();
+        assert!(body.len() < 10_003);
+        let ctx = test_ctx().await;
+
+        let err = ReadFile
+            .call(
+                json!({ "path": path.to_str().unwrap(), "headings": ["## Q1", "## Q2"] }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .expect("an over-limit combined read is a RecoverableError");
+        assert!(
+            rec.message.contains("exceeds inline threshold"),
+            "{}",
+            rec.message
+        );
+        assert!(rec.extra["file_id"].is_string());
+    }
 
     // ---- JSON escaping must not break the one-handle guarantee ----
     //
