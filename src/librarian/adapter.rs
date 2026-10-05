@@ -228,6 +228,13 @@ fn scoped_body_hint(val: &Value) -> Option<String> {
 /// `body`. And a string that does not outweigh the index (a short note beside 200 ids) keeps
 /// it too, because then the ids ARE the bulk.
 ///
+/// **Bulk decides, on purpose, even when the index is a list of useful strings.** A 12,000 B
+/// `report` beside 200 file paths hints `$.report`, where the default said `$.paths[*]`. The rule
+/// cannot know which of the two the caller wants, so it follows the bytes: the field that holds
+/// most of the buffer is the one an agent is least able to reach by line-slicing it. Neither is
+/// lost: both are one `json_path` away by key, and a wrong guess is answered by an error that
+/// lists the keys. Pinned by `bulk_decides_between_a_report_and_a_list_of_paths`, on both sides.
+///
 /// Scoped to the librarian adapter, like [`scoped_body_hint`] and for the same reason: the
 /// default is right for `find`, `graph`, `state_at`, `link_scan` and the rest.
 fn dominant_text_hint(val: &Value) -> Option<String> {
@@ -1289,6 +1296,42 @@ mod tests {
             assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
         }
     }
+    /// The reviewer's worse-hint case, decided and pinned instead of left accidental. A 12,000 B
+    /// report beside 200 path strings (~8.4 KB serialized) hints the REPORT; make the paths the
+    /// larger half and it hints the paths. Both sides, so neither a rule that always prefers the
+    /// text nor one that never does can pass. The sizes are asserted, so a change to the fixture
+    /// cannot silently move a row across the line it is there to test.
+    #[test]
+    fn bulk_decides_between_a_report_and_a_list_of_paths() {
+        let paths = |len: usize| -> Value {
+            json!((0..200)
+                .map(|i| format!("{}{i:03}", "p".repeat(len)))
+                .collect::<Vec<_>>())
+        };
+        let small_paths = paths(36); // ~200 * 43 B ≈ 8.6 KB
+        let big_paths = paths(80); // ~200 * 87 B ≈ 17.4 KB
+        let report = "r".repeat(12_000);
+        assert!(
+            small_paths.to_string().len() < report.len(),
+            "fixture: paths must be the smaller half"
+        );
+        assert!(
+            big_paths.to_string().len() > report.len(),
+            "fixture: paths must be the larger half"
+        );
+
+        assert_eq!(
+            dominant_text_hint(&json!({ "report": report, "paths": small_paths })).as_deref(),
+            Some("$.report"),
+            "the report holds the bulk, so it is hinted"
+        );
+        assert_eq!(
+            dominant_text_hint(&json!({ "report": report, "paths": big_paths })),
+            None,
+            "the path list holds the bulk, so the default (`$.paths[*]`) stays"
+        );
+    }
+
     /// `scan_arrays` calls an array "records" when any element is an object OR an array. The
     /// table has object elements only, so the array half of that test was unguarded: a grid
     /// (`[[1, 2]]`) read as an index of scalars would hand the prose the win over a result set.
