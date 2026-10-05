@@ -648,12 +648,33 @@ fn eval_segments(root: &Value, segments: &[Segment]) -> Result<Value, Recoverabl
 
     let base = eval_segments(root, &segments[..pos])?;
     let Some(arr) = base.as_array() else {
+        // The hint says what WAS found, because "found object" alone sends a caller to guess.
+        // An object lists its keys through the same `describe_keys` the key-miss error uses;
+        // a string says how big it is and that it is text — a JSON document inside a string
+        // is one string value to `json_path`, which is exactly how `run_command`'s `stdout`
+        // looked to it. The message text itself is classified by `usage/db.rs`
+        // (`json_path_shape_mismatch`) and stays as it was.
+        let hint = match &base {
+            Value::Object(obj) => format!(
+                "Use '[*]' only where the value is an array. This object has the keys: {}. \
+                 Name one of them first, or drop '[*]' to address the object itself.",
+                describe_keys(obj)
+            ),
+            Value::String(s) => format!(
+                "This value is text of {} bytes, not an array, so '[*]' cannot project it. \
+                 Drop '[*]' to read the text. JSON stored inside a string cannot be projected \
+                 by json_path; parse the text with a shell tool such as jq.",
+                s.len()
+            ),
+            _ => "Use '[*]' only where the value is an array. Drop it to address the value itself."
+                .to_string(),
+        };
         return Err(RecoverableError::with_hint(
             format!(
                 "json_path '[*]' needs an array, found {}",
                 json_type_name(&base)
             ),
-            "Use '[*]' only where the value is an array. Drop it to address the value itself.",
+            hint,
         ));
     };
 
@@ -853,6 +874,37 @@ fn unsupported_bracket(s: &str) -> RecoverableError {
     )
 }
 
+/// The keys of `obj` as a hint line: all of them when there are few, otherwise the first
+/// `HEAD`, a count of what was elided, and the last `TAIL`.
+///
+/// ONE function for every error that tells a caller what keys an object has: the key-miss
+/// error in [`resolve_json_segment`] and the `[*]`-on-an-object error in [`eval_segments`].
+/// They were two readers of the same fact, and the second had no way to name a key at all,
+/// so a caller who projected `$[*].name` over a `run_command` envelope could not learn the
+/// data sat under `stdout`. A copy of the window here would drift from the original, so there
+/// is exactly one, and `wildcard_on_a_wide_object_states_its_elision_and_keeps_the_tail`
+/// fails if the two errors ever render a different one.
+///
+/// The window is the decision recorded at the key-miss site: `serde_json` is built with
+/// `preserve_order`, so `keys()` is insertion order and head-only truncation drops the keys
+/// added LAST, which in a report object are the newest and the ones a caller is reaching
+/// for. Keep both ends and state the elision.
+fn describe_keys(obj: &serde_json::Map<String, Value>) -> String {
+    const HEAD: usize = 7;
+    const TAIL: usize = 3;
+    let names: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
+    if names.len() > HEAD + TAIL {
+        format!(
+            "{} … (+{} more) … {}",
+            names[..HEAD].join(", "),
+            names.len() - HEAD - TAIL,
+            names[names.len() - TAIL..].join(", "),
+        )
+    } else {
+        names.join(", ")
+    }
+}
+
 fn resolve_json_segment<'a>(
     value: &'a Value,
     seg: &Segment,
@@ -880,22 +932,9 @@ fn resolve_json_segment<'a>(
                 // away from where it was needed. Keep both ends and state the elision;
                 // the rationale and the archived bug file for the heading half live on
                 // `resolve_section_range`'s own HEAD/TAIL constants.
-                const HEAD: usize = 7;
-                const TAIL: usize = 3;
-                let names: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
-                let available = if names.len() > HEAD + TAIL {
-                    format!(
-                        "{} … (+{} more) … {}",
-                        names[..HEAD].join(", "),
-                        names.len() - HEAD - TAIL,
-                        names[names.len() - TAIL..].join(", "),
-                    )
-                } else {
-                    names.join(", ")
-                };
                 RecoverableError::with_hint(
                     format!("path segment '{}' not found", k),
-                    format!("Available keys: {}", available),
+                    format!("Available keys: {}", describe_keys(obj)),
                 )
             }),
             other => Err(RecoverableError::with_hint(

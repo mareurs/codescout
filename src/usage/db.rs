@@ -424,6 +424,16 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
 /// can re-classify historical `error_msg` values with the same logic
 /// `write_content` applies to new rows.
 pub(crate) fn normalize_err_family(tool_name: &str, msg: &str) -> Option<&'static str> {
+    // FIRST, before any substring scan below: the `[*]` shape error's hint lists the object's
+    // KEYS, and key names are data this function does not control. A key like `heading Fix`
+    // beside `x not found` used to satisfy the `heading_not_found` rule (and `index is locked`
+    // the `lsp_index_locked` one), re-routing a shape error into an unrelated family and
+    // corrupting both counts. The message's own fixed prefix is the only part that says what
+    // kind of error this is, so it alone decides. Pinned with hostile key names by
+    // `a_json_path_shape_error_classifies_the_same_whatever_the_key_names_say`.
+    if msg.starts_with("json_path '[*]' needs an array, found ") {
+        return Some("json_path_shape_mismatch");
+    }
     // infra / tool-class (excluded from the probe's code-class score)
     if msg.contains("index is locked") {
         return Some("lsp_index_locked");
@@ -3066,6 +3076,51 @@ mod tests {
                 want,
                 "tool={tool_name} msg={msg}"
             );
+        }
+    }
+    /// The `[*]`-on-an-object error now lists the object's KEYS in its hint, and keys are data
+    /// the classifier does not control. `normalize_err_family` scans the whole rendered text with
+    /// substring rules, so a key that happens to contain a phrase a rule looks for used to
+    /// re-route the whole error: `heading Fix` plus `x not found` read as `heading_not_found`,
+    /// `index is locked` as `lsp_index_locked`. This renders the REAL error with such keys and
+    /// classifies the REAL text, so it is the family of what an agent actually produces that is
+    /// pinned, and not of a hand-typed sample. Ordinary keys must classify the same way.
+    #[test]
+    fn a_json_path_shape_error_classifies_the_same_whatever_the_key_names_say() {
+        use crate::tools::file_summary::extract_json_path;
+        let hostile: &[&[&str]] = &[
+            &["type", "stdout", "output_id"],
+            &["heading Fix", "x not found"],
+            &["heading not found"],
+            &["path segment a not found"],
+            &["index is locked", "LSP server is not running"],
+            &[
+                "Failed to spawn mux",
+                "mux startup failed",
+                "LSP server disconnected",
+            ],
+            &["json_path is only supported on"],
+        ];
+        for keys in hostile {
+            let mut obj = serde_json::Map::new();
+            for k in *keys {
+                obj.insert((*k).to_string(), serde_json::json!(1));
+            }
+            let content = serde_json::to_string(&serde_json::Value::Object(obj)).unwrap();
+            let rendered = extract_json_path(&content, "$[*]")
+                .expect_err("[*] on an object must fail")
+                .to_string();
+            assert!(
+                keys.iter().all(|k| rendered.contains(k)),
+                "precondition: the rendered error must carry the keys, or this checks nothing: {rendered}"
+            );
+            for tool in ["read_file", "edit_markdown", "read_markdown"] {
+                assert_eq!(
+                    normalize_err_family(tool, &rendered),
+                    Some("json_path_shape_mismatch"),
+                    "keys {keys:?} re-routed the error for tool {tool}: {rendered}"
+                );
+            }
         }
     }
 

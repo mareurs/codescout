@@ -493,6 +493,148 @@ async fn list_after_writes() {
         .collect();
     assert_eq!(topics, vec!["a-topic", "b-topic"]);
 }
+/// D1 of the hint-family sweep, REACH and REMEDY. `Memory::json_path_hint` returned the constant
+/// `$.field` whenever the payload had no `content` string, bypassing the default's array
+/// detection. A `memory(recall)` of 48 results (11,517 B, keys `results`, `count`, `has_more`)
+/// advertised `$.field`, and following it failed with `path segment 'field' not found`.
+///
+/// This goes through the real `call_content` and then FOLLOWS the hint with a real `read_file`
+/// on the same buffer — the check an agent performs. Asserting the hint's text would pass
+/// whatever the route does. `list` is the overflowing action because it needs no embedder;
+/// it carries the same shape (an array under a named key beside small scalars).
+#[tokio::test]
+async fn an_overflowing_memory_list_hints_a_path_that_returns_the_topics() {
+    use crate::tools::hint_probe::{envelope_of, follow_hint};
+    let (_dir, ctx) = test_ctx_with_project().await;
+    for i in 0..260 {
+        Memory
+            .call(
+                json!({
+                    "action": "write",
+                    "topic": format!("overflow-probe-topic-with-a-long-name-{i:04}"),
+                    "content": "x",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+    }
+
+    let content = Memory
+        .call_content(json!({ "action": "list" }), &ctx)
+        .await
+        .unwrap();
+    let envelope = envelope_of(&content);
+    assert!(
+        envelope["output_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("@tool_"),
+        "the list must overflow, or this test checks nothing: {envelope}"
+    );
+
+    let (jp, followed) = follow_hint(&envelope, &ctx).await;
+    let value =
+        followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
+    // The projected array is itself over the inline budget, so it comes back parked under a
+    // `@file_*` handle (one line per topic between the brackets). Read its first and last
+    // lines through that handle: the route must deliver the topics, not merely not error.
+    assert_eq!(
+        value["value_type"], "array",
+        "{jp:?} must project an array: {value}"
+    );
+    let file_id = value["file_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
+    let line = |n: u64| {
+        let ctx = &ctx;
+        async move {
+            crate::tools::read_file::ReadFile
+                .call(
+                    json!({ "path": file_id, "start_line": n, "end_line": n }),
+                    ctx,
+                )
+                .await
+                .unwrap_or_else(|e| panic!("reading line {n} of {file_id} failed: {e}"))
+                .to_string()
+        }
+    };
+    assert!(
+        line(2)
+            .await
+            .contains("overflow-probe-topic-with-a-long-name-0000"),
+        "the first line of the projected array must be the first topic"
+    );
+    assert!(
+        line(261)
+            .await
+            .contains("overflow-probe-topic-with-a-long-name-0259"),
+        "the last line of the projected array must be the last topic"
+    );
+}
+
+/// The hint's decision, tested by FOLLOWING it for each payload shape memory can overflow with.
+/// A `content` string hints itself and its route returns that text; an array under a named key
+/// hints the array and its route returns the rows. (A payload with neither gets the shared
+/// default's placeholder, pinned on purpose in `core/types.rs`; it is a placeholder and
+/// following it is expected to fail, so it has no row here.) This replaces a test that compared
+/// the hint to a string: the strings it compared are what a following test now exercises.
+#[tokio::test]
+async fn memory_hints_lead_to_the_data_for_each_payload_shape() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let text = "memory text ".repeat(50);
+    let content = json!({ "content": text, "topic": "t" });
+    let rows = json!({
+        "results": [{ "topic": "row-a" }, { "topic": "row-b" }, { "topic": "row-c" }],
+        "count": 3,
+        "has_more": false,
+    });
+
+    let jp = Memory.json_path_hint(&content);
+    let got = crate::tools::hint_probe::follow_path_on(&content, &jp, &ctx)
+        .await
+        .unwrap_or_else(|e| panic!("content route {jp:?} failed: {e}"));
+    assert_eq!(got["value_type"], "string", "{jp:?}: {got}");
+    assert!(
+        got.to_string().contains("memory text"),
+        "{jp:?} must return the text: {got}"
+    );
+
+    let jp = Memory.json_path_hint(&rows);
+    let got = crate::tools::hint_probe::follow_path_on(&rows, &jp, &ctx)
+        .await
+        .unwrap_or_else(|e| panic!("array route {jp:?} failed: {e}"));
+    assert_eq!(got["value_type"], "array", "{jp:?}: {got}");
+    let rendered = got.to_string();
+    assert!(
+        rendered.contains("row-a") && rendered.contains("row-c"),
+        "{jp:?} must return the rows, first to last: {rendered}"
+    );
+}
+/// An EMPTY array is still the answer. `{"results": [], ...}` is a real payload (a recall that
+/// matched nothing, beside a note long enough to overflow), and the route `$.results[*]` is valid
+/// on it: it projects to `[]`. A default that skipped empty arrays when choosing the largest
+/// would fall to the `$.field` placeholder instead, and following THAT fails with
+/// `path segment 'field' not found`. Asserted by following the hint on a real buffer, so it fails
+/// on the behaviour and not on a spelling.
+#[tokio::test]
+async fn a_hint_naming_an_empty_array_is_a_route_that_works() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    let payload = json!({ "results": [], "count": 0, "has_more": false });
+    let jp = Memory.json_path_hint(&payload);
+    let id = ctx.output_buffer.store_tool("memory", payload.to_string());
+
+    let value = crate::tools::read_file::ReadFile
+        .call(json!({ "path": id, "json_path": jp }), &ctx)
+        .await
+        .unwrap_or_else(|e| {
+            panic!("following the hinted route {jp:?} on an empty array failed: {e}")
+        });
+    assert_eq!(
+        value["value_type"], "array",
+        "the route {jp:?} must project the (empty) array: {value}"
+    );
+}
 
 #[tokio::test]
 async fn delete_removes_entry() {

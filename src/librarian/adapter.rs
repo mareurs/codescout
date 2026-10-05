@@ -210,6 +210,81 @@ fn scoped_body_hint(val: &Value) -> Option<String> {
     let scoped = val.get("body_meta").is_some_and(Value::is_object);
     (scoped && val.get("body").is_some()).then(|| "$.body".to_string())
 }
+/// `Some("$.<key>")` when a buffered librarian result is mostly **text** and its only arrays are
+/// indexes, `None` to leave the general heuristic in place.
+///
+/// `default_json_path_hint` picks the largest array by element COUNT. A string is never a
+/// candidate for it, so `librarian(action="context")` — `{markdown, included_ids[21], scope}`,
+/// 48,839 B measured 2026-10-05 — advertised `$.included_ids[*]`: 21 opaque ids, while the packed
+/// artifacts the caller asked for sat at `$.markdown`. The envelope's own summary line even
+/// said `$.markdown starts: …`, so the summary and the hint disagreed about where the content
+/// was.
+///
+/// **The rule: an array of scalars is an index, and a text field that outweighs it is the
+/// payload.** It is deliberately not "prefer strings over arrays". An array of RECORDS is a
+/// result set, and projecting a field across it is worth more than a prose blob beside it, so
+/// the presence of any array of records anywhere within the default's own depth bound keeps
+/// the default — an augmented tracker's `$.augmentation.params.tasks[*]` still wins over its
+/// `body`. And a string that does not outweigh the index (a short note beside 200 ids) keeps
+/// it too, because then the ids ARE the bulk.
+///
+/// **Bulk decides, on purpose, even when the index is a list of useful strings.** A 12,000 B
+/// `report` beside 200 file paths hints `$.report`, where the default said `$.paths[*]`. The rule
+/// cannot know which of the two the caller wants, so it follows the bytes: the field that holds
+/// most of the buffer is the one an agent is least able to reach by line-slicing it. Neither is
+/// lost: both are one `json_path` away by key, and a wrong guess is answered by an error that
+/// lists the keys. Pinned by `bulk_decides_between_a_report_and_a_list_of_paths`, on both sides.
+///
+/// Scoped to the librarian adapter, like [`scoped_body_hint`] and for the same reason: the
+/// default is right for `find`, `graph`, `state_at`, `link_scan` and the rest.
+fn dominant_text_hint(val: &Value) -> Option<String> {
+    let obj = val.as_object()?;
+    let (key, text) = obj
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
+        .max_by_key(|(_, s)| s.len())?;
+    // `$.key` can only be written for a plain identifier; anything else is left to the
+    // default rather than guessed at. (An empty string needs no guard of its own: its length
+    // is 0, which never outweighs the index, so the size check below already declines it.)
+    if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    let mut has_records = false;
+    let mut largest_index_bytes = 0;
+    scan_arrays(val, 0, &mut has_records, &mut largest_index_bytes);
+    if has_records || text.len() <= largest_index_bytes {
+        return None;
+    }
+    Some(format!("$.{key}"))
+}
+
+/// What arrays does `v` hold, within the depth `default_json_path_hint` itself searches?
+///
+/// Records the presence of any array whose elements are objects or arrays (`has_records`) and
+/// the serialized size of the largest array of scalars (`largest_index_bytes`). Descends through
+/// objects only, never into arrays, and stops at `ARRAY_SEARCH_MAX_DEPTH` — the SAME constant
+/// `find_largest_array` in `core/types.rs` uses, so this rule and the default it defers to cannot
+/// disagree about which arrays exist.
+fn scan_arrays(v: &Value, depth: usize, has_records: &mut bool, largest_index_bytes: &mut usize) {
+    let Some(map) = v.as_object() else {
+        return;
+    };
+    for child in map.values() {
+        match child {
+            Value::Array(items) => {
+                if items.iter().any(|e| e.is_object() || e.is_array()) {
+                    *has_records = true;
+                } else {
+                    *largest_index_bytes = (*largest_index_bytes).max(child.to_string().len());
+                }
+            }
+            Value::Object(_) if depth < crate::tools::ARRAY_SEARCH_MAX_DEPTH => {
+                scan_arrays(child, depth + 1, has_records, largest_index_bytes)
+            }
+            _ => {}
+        }
+    }
+}
 
 struct LibrarianAdapter {
     inner: Arc<dyn crate::librarian::tools::Tool>,
@@ -479,7 +554,9 @@ impl crate::tools::Tool for LibrarianAdapter {
     /// `librarian_compact_summary`.
     /// docs/issues/archive/2026-09-01-heading-scoped-get-overflow-hint-points-at-metadata.md
     fn json_path_hint(&self, val: &Value) -> String {
-        scoped_body_hint(val).unwrap_or_else(|| crate::tools::default_json_path_hint(val))
+        scoped_body_hint(val)
+            .or_else(|| dominant_text_hint(val))
+            .unwrap_or_else(|| crate::tools::default_json_path_hint(val))
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -1129,6 +1206,377 @@ mod tests {
             scoped_body_hint(&payload).unwrap_or(default),
             "$.body",
             "the override must win for a scoped read"
+        );
+    }
+    /// D2 of the hint-family sweep. One row per way the rule can be wrong, each built so only
+    /// ITS condition decides the answer: the rows that must say `None` use a string that WOULD
+    /// win on size, so a `None` proves the records / index check fired and not that the text
+    /// was merely too short.
+    #[test]
+    fn a_text_field_that_outweighs_an_index_array_is_the_hinted_payload() {
+        let ids: Vec<String> = (0..21).map(|i| format!("{i:016x}")).collect();
+        let long = "packed artifact text\n".repeat(2_000);
+        for (label, payload, expect) in [
+            (
+                "librarian(context) — the reported case: ids index, markdown payload",
+                json!({ "markdown": long, "included_ids": ids, "scope": { "applied": "project" } }),
+                Some("$.markdown"),
+            ),
+            (
+                "no array at all, one large string",
+                json!({ "markdown": long, "scope": { "applied": "project" } }),
+                Some("$.markdown"),
+            ),
+            (
+                "a full get with an index array (tags) and no records: the body is the payload",
+                json!({ "id": "x", "body": long, "tags": ["a", "b", "c"] }),
+                Some("$.body"),
+            ),
+            (
+                "an array of RECORDS anywhere within depth: keep the default even though the \
+                 string is far larger",
+                json!({
+                    "body": long,
+                    "augmentation": { "params": { "tasks": [{ "id": "T-1" }, { "id": "T-2" }] } },
+                }),
+                None,
+            ),
+            (
+                "find — records only",
+                json!({ "count": 2, "items": [{ "id": "a" }, { "id": "b" }] }),
+                None,
+            ),
+            (
+                "a string SMALLER than the index it sits beside: the ids are the bulk",
+                json!({ "note": "short", "ids": (0..300).map(|i| format!("{i:016x}")).collect::<Vec<_>>() }),
+                None,
+            ),
+            (
+                "the unit is BYTES, not items: 1,000 B of text beside 300 short ids. The ids \
+                     are 300 items but ~2.1 KB, so by bytes they outweigh the text; compared by \
+                     item count, 1,000 would beat 300 and hand the text the win",
+                json!({
+                    "note": "n".repeat(1_000),
+                    "ids": (0..300).map(|i| format!("i{i:03}")).collect::<Vec<_>>(),
+                }),
+                None,
+            ),
+            (
+                "no string field at all",
+                json!({ "count": 3, "ids": ["a", "b", "c"] }),
+                None,
+            ),
+            (
+                "a key that cannot be written as `$.key` is not guessed at",
+                json!({ "a.b": long, "ids": ["a"] }),
+                None,
+            ),
+        ] {
+            assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
+    /// The comparison's edge, derived and not cited: the index is `["a","b","c"]` and its byte
+    /// size is measured from the payload. A text that exactly TIES the index does not outweigh
+    /// it (the ids stay the answer); one byte over does. The two rows either side keep a
+    /// comparison written the wrong way round from passing on the tie alone.
+    #[test]
+    fn the_text_must_strictly_outweigh_the_index_at_a_tie() {
+        let ids = json!(["a", "b", "c"]);
+        let n = ids.to_string().len();
+        for (label, text_len, expect) in [
+            ("one byte under the index", n - 1, None),
+            ("an exact tie: the index is not outweighed", n, None),
+            (
+                "one byte over: the text outweighs the index",
+                n + 1,
+                Some("$.note"),
+            ),
+        ] {
+            let payload = json!({ "note": "n".repeat(text_len), "ids": ids });
+            assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
+    /// The reviewer's worse-hint case, decided and pinned instead of left accidental. A 12,000 B
+    /// report beside 200 path strings (~8.4 KB serialized) hints the REPORT; make the paths the
+    /// larger half and it hints the paths. Both sides, so neither a rule that always prefers the
+    /// text nor one that never does can pass. The sizes are asserted, so a change to the fixture
+    /// cannot silently move a row across the line it is there to test.
+    #[test]
+    fn bulk_decides_between_a_report_and_a_list_of_paths() {
+        let paths = |len: usize| -> Value {
+            json!((0..200)
+                .map(|i| format!("{}{i:03}", "p".repeat(len)))
+                .collect::<Vec<_>>())
+        };
+        let small_paths = paths(36); // ~200 * 43 B ≈ 8.6 KB
+        let big_paths = paths(80); // ~200 * 87 B ≈ 17.4 KB
+        let report = "r".repeat(12_000);
+        assert!(
+            small_paths.to_string().len() < report.len(),
+            "fixture: paths must be the smaller half"
+        );
+        assert!(
+            big_paths.to_string().len() > report.len(),
+            "fixture: paths must be the larger half"
+        );
+
+        assert_eq!(
+            dominant_text_hint(&json!({ "report": report, "paths": small_paths })).as_deref(),
+            Some("$.report"),
+            "the report holds the bulk, so it is hinted"
+        );
+        assert_eq!(
+            dominant_text_hint(&json!({ "report": report, "paths": big_paths })),
+            None,
+            "the path list holds the bulk, so the default (`$.paths[*]`) stays"
+        );
+    }
+
+    /// `scan_arrays` calls an array "records" when any element is an object OR an array. The
+    /// table has object elements only, so the array half of that test was unguarded: a grid
+    /// (`[[1, 2]]`) read as an index of scalars would hand the prose the win over a result set.
+    /// The scalar rows prove the converse: an array of numbers is an index, not records.
+    #[test]
+    fn an_array_of_arrays_is_records_and_an_array_of_scalars_is_an_index() {
+        let long = "packed artifact text\n".repeat(2_000);
+        for (label, payload, expect) in [
+            (
+                "a grid: elements are arrays, so it is a result set",
+                json!({ "body": long, "grid": [[1, 2], [3, 4]] }),
+                None,
+            ),
+            (
+                "a mixed array with one array element is still records",
+                json!({ "body": long, "mixed": [1, [2]] }),
+                None,
+            ),
+            (
+                "an array of numbers is an index",
+                json!({ "body": long, "nums": [1, 2, 3] }),
+                Some("$.body"),
+            ),
+            (
+                "an array of strings is an index",
+                json!({ "body": long, "names": ["a", "b"] }),
+                Some("$.body"),
+            ),
+        ] {
+            assert_eq!(dominant_text_hint(&payload).as_deref(), expect, "{label}");
+        }
+    }
+    /// `payload` with `objects` levels of nesting around a records array, beside a large `body`.
+    fn nested_records(objects: usize) -> Value {
+        let mut inner = json!({ "rows": [{ "id": 1 }, { "id": 2 }] });
+        for level in 0..objects {
+            inner = json!({ format!("o{level}"): inner });
+        }
+        let mut payload = json!({ "body": "packed artifact text\n".repeat(2_000) });
+        payload["wrap"] = inner;
+        payload
+    }
+
+    /// The text rule defers to the default whenever records exist "within the default's own
+    /// depth", so the two must see the same arrays at EVERY depth, not at the one the doc
+    /// comment names. `wrap` is one object, so `n` extra levels put the records `n + 1` objects
+    /// deep. For each depth the default either finds the array (its hint ends in `[*]`) or falls
+    /// to the placeholder; the text rule must say `None` exactly when the default found it.
+    /// Shrinking or growing `scan_arrays`' bound alone breaks the agreement at the edge, which
+    /// is what a hand-kept "keep the two equal" comment could not enforce.
+    #[test]
+    fn the_text_rule_and_the_default_agree_at_every_depth() {
+        let mut saw_visible = false;
+        let mut saw_hidden = false;
+        for objects in 0..=8 {
+            let payload = nested_records(objects);
+            let default_sees = crate::tools::default_json_path_hint(&payload).ends_with("[*]");
+            let rule_defers = dominant_text_hint(&payload).is_none();
+            assert_eq!(
+                rule_defers,
+                default_sees,
+                "at {objects} extra levels the default {} the records but the text rule {}",
+                if default_sees { "sees" } else { "does not see" },
+                if rule_defers {
+                    "defers"
+                } else {
+                    "does not defer"
+                },
+            );
+            saw_visible |= default_sees;
+            saw_hidden |= !default_sees;
+        }
+        assert!(
+            saw_visible && saw_hidden,
+            "the sweep must cross the default's depth bound, or it checks no edge"
+        );
+    }
+
+    /// The edge by name, so a failure reads as a depth and not as a loop index. Four nested
+    /// objects around the array is what the default reaches (`$.a.b.c.d.rows[*]`); five is
+    /// past it.
+    #[test]
+    fn records_at_the_defaults_depth_bound_keep_the_default() {
+        let long = "packed artifact text\n".repeat(2_000);
+        let at_bound =
+            json!({ "body": long, "a": { "b": { "c": { "d": { "rows": [{ "id": 1 }] } } } } });
+        assert_eq!(
+            crate::tools::default_json_path_hint(&at_bound),
+            "$.a.b.c.d.rows[*]",
+            "precondition: the default reaches four nested objects"
+        );
+        assert_eq!(
+            dominant_text_hint(&at_bound),
+            None,
+            "records at the bound keep the default"
+        );
+
+        let past_bound = json!({ "body": long, "a": { "b": { "c": { "d": { "e": { "rows": [{ "id": 1 }] } } } } } });
+        assert_eq!(
+            crate::tools::default_json_path_hint(&past_bound),
+            "$.field",
+            "precondition: the default does not reach five nested objects"
+        );
+        assert_eq!(
+            dominant_text_hint(&past_bound).as_deref(),
+            Some("$.body"),
+            "records the default cannot see do not hold the rule back"
+        );
+    }
+
+    /// A scoped read keeps `$.body` even when a larger string sits beside it. Asserted at the
+    /// TRAIT METHOD: `scoped_body_hint` alone cannot tell which of the two rules
+    /// `json_path_hint` consults first, and swapping them must fail here. The precondition
+    /// proves the text rule WOULD have said something else, so the order is what is decided.
+    #[test]
+    fn the_scoped_body_hint_still_outranks_the_text_rule() {
+        let payload = json!({
+            "body": "## Index\n",
+            "body_meta": { "heading": "## Index" },
+            "markdown": "m".repeat(40_000),
+        });
+        assert_eq!(
+            dominant_text_hint(&payload).as_deref(),
+            Some("$.markdown"),
+            "precondition: the text rule alone would name the larger string"
+        );
+        let adapter = adapter_for_test();
+        assert_eq!(
+            crate::tools::Tool::json_path_hint(&adapter, &payload),
+            "$.body",
+            "a scoped read's body must outrank the text rule"
+        );
+    }
+
+    /// REACH and REMEDY for D2, through the REAL `librarian(action="context")`: the real tool over
+    /// a real catalog of 40 artifacts on disk, wrapped in the real adapter, driven through
+    /// `call_content`, with the hint then FOLLOWED by a real `read_file`. A test over a fixed
+    /// payload would stay green if the real tool grew a record field that re-broke D2; this one
+    /// reads whatever the tool actually returns. Before the fix the hint was
+    /// `$.included_ids[*]` (ids), and following it returned ids, not the packed text.
+    #[tokio::test]
+    async fn an_overflowing_librarian_context_hints_the_markdown_and_it_returns_it() {
+        use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
+        use crate::tools::hint_probe::{envelope_of, follow_hint};
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let core = core_ctx_for_guard(root).await;
+
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+        for i in 0..40 {
+            let path = root.join(format!("auth_{i:02}.md"));
+            std::fs::write(
+                &path,
+                format!(
+                    "# Auth {i:02}\n{}",
+                    format!("an artifact body line of artifact {i:02}\n").repeat(60)
+                ),
+            )
+            .unwrap();
+            upsert(
+                &cat,
+                &TestArtifactRowBuilder::new(&format!("r/auth_{i:02}.md"))
+                    .with_abs_path(&path)
+                    .with_title(format!("Auth {i:02}"))
+                    .build(),
+            )
+            .unwrap();
+        }
+        let lib_ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(cat)
+                .with_root(crate::librarian::workspace::Root {
+                    name: "r".into(),
+                    path: root.to_path_buf(),
+                })
+                .build(),
+        );
+        let adapter = LibrarianAdapter {
+            inner: lib_all_tools()
+                .into_iter()
+                .find(|t| t.name() == "librarian")
+                .expect("the `librarian` tool must be registered"),
+            ctx: lib_ctx,
+        };
+
+        let content = crate::tools::Tool::call_content(
+            &adapter,
+            json!({ "action": "context", "topic": "auth", "max_tokens": 12000 }),
+            &core,
+        )
+        .await
+        .unwrap();
+        let envelope = envelope_of(&content);
+        assert!(
+            envelope["output_id"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("@tool_"),
+            "the real context result must overflow, or this checks nothing: {envelope}"
+        );
+
+        // The shape D2 is about: an id index beside a markdown string. If the real tool stops
+        // returning that, the precondition fails by name instead of the test passing on a
+        // payload that no longer has the defect's shape.
+        let handle = envelope["output_id"].as_str().unwrap();
+        let ids = crate::tools::Tool::call(
+            &crate::tools::read_file::ReadFile,
+            json!({ "path": handle, "json_path": "$.included_ids" }),
+            &core,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("the real result has no `included_ids`: {e}"));
+        assert_eq!(ids["value_type"], "array", "precondition: {ids}");
+
+        let (jp, followed) = follow_hint(&envelope, &core).await;
+        assert_eq!(
+            jp, "$.markdown",
+            "the hint must name the packed text, not the id list"
+        );
+        let value =
+            followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
+        assert_eq!(
+            value["value_type"], "string",
+            "{jp:?} must project the text: {value}"
+        );
+        // The text is over the inline budget, so it is parked under a `@file_*` handle: its
+        // first artifact, and the packing of the others, must be findable through it.
+        let file_id = value["file_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
+        let out = crate::tools::Tool::call(
+            &crate::tools::run_command::RunCommand,
+            json!({ "command": format!("grep -c 'an artifact body line' {file_id}") }),
+            &core,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("searching the projected markdown failed: {e}"));
+        let matches: u64 = out["stdout"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        assert!(
+            matches > 0,
+            "the route {jp:?} must return the packed artifact text; grep -c counted {matches}: {out}"
         );
     }
 

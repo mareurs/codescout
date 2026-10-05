@@ -1328,6 +1328,156 @@ fn wildcard_on_a_non_array_says_so() {
         "got: {msg}"
     );
 }
+/// D3 of the hint-family sweep. `[*]` on an object said `found object` and named no keys, so a
+/// caller who had projected `$[*].name` over a `run_command` envelope could not learn that
+/// the data sat under `stdout`: the only way forward was another failed call. The key-miss
+/// error already lists keys (`resolve_json_segment`); this one must too, and from the SAME
+/// code, so the two cannot disagree about which keys exist or how a long list is cut.
+///
+/// The message text `needs an array, found object` is classified by `usage/db.rs`
+/// (`json_path_shape_mismatch`) and must not move; only the hint grows.
+#[test]
+fn wildcard_on_an_object_names_the_keys_it_found() {
+    // The shape of a `run_command` envelope: the data is under `stdout`, not at the root.
+    let content = r#"{"type":"generic","exit_code":0,"output_id":"@cmd_x","stdout":"[1,2,3]"}"#;
+    let err = extract_json_path(content, "$[*].name")
+        .expect_err("[*] on an object must fail")
+        .to_string();
+    assert!(
+        err.contains("needs an array, found object"),
+        "the classified message text must not move: {err}"
+    );
+    for key in ["type", "exit_code", "output_id", "stdout"] {
+        assert!(
+            err.contains(key),
+            "the error must name the key {key:?}: {err}"
+        );
+    }
+    // REMEDY: the key the error points at is a route that works.
+    assert!(
+        extract_json_path(content, "$.stdout").is_ok(),
+        "the named key must be addressable"
+    );
+}
+
+/// The key list on this error is the SAME window as the key-miss error's, elision marker
+/// and kept tail included. A copy would drift; this fails if the two are not one function.
+#[test]
+fn wildcard_on_a_wide_object_states_its_elision_and_keeps_the_tail() {
+    let mut obj = serde_json::Map::new();
+    for i in 0..13 {
+        obj.insert(format!("k{i:02}"), serde_json::json!(i));
+    }
+    let content = serde_json::to_string(&serde_json::Value::Object(obj)).unwrap();
+    let wildcard = extract_json_path(&content, "$[*]").unwrap_err().to_string();
+    let key_miss = extract_json_path(&content, "$.absent")
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        wildcard.contains("(+3 more)"),
+        "must state its elision: {wildcard}"
+    );
+    assert!(
+        wildcard.contains("k12") && wildcard.contains("k11") && wildcard.contains("k10"),
+        "must keep the last-inserted keys: {wildcard}"
+    );
+    // One function: whatever window the key-miss error shows appears verbatim in this one.
+    let window = key_miss
+        .split("Available keys: ")
+        .nth(1)
+        .expect("the key-miss error lists its keys");
+    assert!(
+        wildcard.contains(window.trim()),
+        "the two errors must render the same key window.\n key-miss: {window}\n wildcard: {wildcard}"
+    );
+}
+/// The key window's EDGE. The 13-key test sits well past the cap, and the 3-key one well under:
+/// neither distinguishes `names.len() > HEAD + TAIL` from `>=`, or a cap that quietly became
+/// `HEAD + TAIL + 2`. Exactly 10 keys fits the window (HEAD 7 + TAIL 3) and must be listed whole
+/// with no marker; exactly 11 is the first count that elides, one key, and must say `(+1 more)`.
+/// Asserted through BOTH errors that render the window, so neither can grow its own copy.
+#[test]
+fn the_key_window_elides_from_the_eleventh_key_and_not_before() {
+    fn object_of(n: usize) -> String {
+        let mut obj = serde_json::Map::new();
+        for i in 0..n {
+            obj.insert(format!("k{i:02}"), serde_json::json!(i));
+        }
+        serde_json::to_string(&serde_json::Value::Object(obj)).unwrap()
+    }
+    let errors = |n: usize| {
+        let content = object_of(n);
+        [
+            extract_json_path(&content, "$[*]").unwrap_err().to_string(),
+            extract_json_path(&content, "$.absent")
+                .unwrap_err()
+                .to_string(),
+        ]
+    };
+
+    for err in errors(10) {
+        assert!(
+            !err.contains("more"),
+            "10 keys fit the window and must not be elided: {err}"
+        );
+        for i in 0..10 {
+            assert!(
+                err.contains(&format!("k{i:02}")),
+                "10 keys must all be listed: {err}"
+            );
+        }
+    }
+    for err in errors(11) {
+        assert!(
+            err.contains("(+1 more)"),
+            "11 keys is the first count that elides: {err}"
+        );
+        assert!(
+            !err.contains("k07"),
+            "the one elided key must be the middle one: {err}"
+        );
+        assert!(
+            err.contains("k06")
+                && err.contains("k08")
+                && err.contains("k00")
+                && err.contains("k10"),
+            "both ends of the window must survive: {err}"
+        );
+    }
+}
+
+/// `[*]` on a string. A JSON document inside a string is the case that started this family
+/// (`run_command`'s `stdout`): `json_path` addresses JSON VALUES, and a string is one value.
+/// The error says what it found, how big it is, and that it is not an array, and then the route
+/// it names, "drop `[*]` to read the text", is RUN: it must return exactly that string, whole.
+#[test]
+fn wildcard_on_a_string_says_how_big_it_is_and_that_it_is_text() {
+    let body = "x".repeat(1_234);
+    let content = format!(r#"{{"stdout":"{body}"}}"#);
+    let err = extract_json_path(&content, "$.stdout[*]")
+        .expect_err("[*] on a string must fail")
+        .to_string();
+    assert!(err.contains("needs an array, found string"), "{err}");
+    assert!(
+        err.contains("1234"),
+        "the error must give the string's size: {err}"
+    );
+    assert!(
+        err.contains("text") && err.contains("jq"),
+        "the error must say it is text and name the route that can parse it: {err}"
+    );
+
+    // The route the error names: drop `[*]`. It must work and return the text itself.
+    let (text, type_name, _count) = extract_json_path(&content, "$.stdout")
+        .expect("the route the error names, without `[*]`, must work");
+    assert_eq!(type_name, "string");
+    assert_eq!(
+        text.trim_matches('"'),
+        body,
+        "dropping `[*]` must return the whole 1,234-byte text, as the error promises"
+    );
+}
 
 /// A projection that silently dropped rows would be the same defect class as the
 /// self-refuting "Showing N of N" and the unmarked buffered summary: a short result
