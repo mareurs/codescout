@@ -14073,8 +14073,13 @@ mod guide_hint_tests {
     async fn a_declared_section_still_arrives_once_the_content_topic_is_spent() {
         let (_dir, server) = make_server().await;
 
-        // 1 — a create under docs/trackers/ must still deliver the tracker guide
-        //     whole. This is the behaviour `32736ca0` bought and
+        // 1 — a create under docs/trackers/ must still route to the tracker guide
+        //     first. `tracker-conventions` is over the auto-inject bound, so what
+        //     arrives is its POINTER (the body would be 59 KB the harness may
+        //     save to disk unread — see
+        //     `an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped`),
+        //     but the result-based topic still goes first and still claims the
+        //     call. This is the behaviour `32736ca0` bought and
         //     `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`
         //     protects; the fallthrough must not cost it.
         let created = call_tool(
@@ -14090,8 +14095,10 @@ mod guide_hint_tests {
         )
         .await;
         assert!(
-            content_carries_guide_body(&created, "tracker-conventions"),
-            "the result-based topic must still go first and still ship whole, got: {}",
+            guide_blocks(&created)
+                .join("")
+                .contains("get_guide(\"tracker-conventions\")"),
+            "the result-based topic must still go first and still claim the call, got: {}",
             guide_blocks(&created)
                 .join("")
                 .chars()
@@ -14118,9 +14125,89 @@ mod guide_hint_tests {
             guide.chars().take(300).collect::<String>()
         );
         assert!(
-            !content_carries_guide_body(&out, "tracker-conventions"),
-            "one topic per call — the spent whole guide must not ride along again"
+            !content_carries_guide_body(&out, "tracker-conventions")
+                && !guide.contains("get_guide(\"tracker-conventions\")"),
+            "one topic per call — the spent pointer must not ride along again"
         );
+    }
+    /// A guide too large to auto-inject is pointed at, not delivered and not
+    /// stamped as delivered.
+    ///
+    /// The harness may save an oversized tool result to disk and show the model
+    /// only a ~2 KB preview of block 0; the guide is always a later block, so a
+    /// 59 KB `tracker-conventions` shipped whole could be marked delivered while
+    /// the model never saw a byte of it
+    /// (`docs/issues/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
+    ///
+    /// Asserted on the LEDGER as well as the blocks: a response-shape check alone
+    /// is satisfied by a block that is stamped and then dropped by the client.
+    /// The explicit fetch is asserted too, so the pointer is shown to lead
+    /// somewhere: `get_guide` must still return the full body, and stamping on
+    /// that deliberate read is what retires the topic.
+    ///
+    /// Positive twin (a small whole-topic guide still ships whole and stamps):
+    /// `guide_emit::tests::a_non_declaring_topic_ships_whole_and_stamps_the_bare_topic`.
+    #[tokio::test]
+    async fn an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped() {
+        let (_dir, server) = make_server().await;
+        let ledger = server.live_ledger();
+
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/trackers/oversize-pointer-probe.md",
+                "kind": "tracker",
+                "title": "oversize pointer probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+
+        assert!(
+            !content_carries_guide_body(&created, "tracker-conventions"),
+            "a guide over the auto-inject bound must not ship its body inline"
+        );
+        let guide = guide_blocks(&created).join("");
+        assert!(
+            guide.contains("get_guide(\"tracker-conventions\")"),
+            "the pointer must name the explicit fetch, got: {guide}"
+        );
+        assert!(
+            guide.len() < 1_024,
+            "a pointer is a line, not a body — got {} B",
+            guide.len()
+        );
+        let hint = extract_hint(&created).unwrap_or_default();
+        assert!(
+            hint.contains("get_guide(\"tracker-conventions\")") && !hint.contains("do not re-call"),
+            "the _guide_hint must not promise a body that did not ship, got: {hint}"
+        );
+        assert!(
+            !ledger.lock().contains("tracker-conventions"),
+            "an undelivered guide must not be marked delivered — it is what \
+             suppresses the guide for the rest of the session"
+        );
+
+        // The pointer leads somewhere: an explicit fetch returns the whole body,
+        // and that deliberate read is what stamps the topic.
+        let fetched = call_tool(
+            &server,
+            "get_guide",
+            json!({"topic": "tracker-conventions"}),
+        )
+        .await;
+        let fetched_len: usize = fetched
+            .iter()
+            .filter_map(|c| c.as_text())
+            .map(|t| t.text.len())
+            .sum();
+        assert!(
+            fetched_len > crate::tools::guide_emit::MAX_AUTO_INJECT_GUIDE_BYTES,
+            "an explicit get_guide must still return the full body, got {fetched_len} B"
+        );
+        assert!(ledger.lock().contains("tracker-conventions"));
     }
 
     /// A call that delivers nothing must not refresh the stamps it did not use.
