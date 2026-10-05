@@ -352,7 +352,8 @@ pub(super) async fn worktree_read_notice(
 /// resolved against the project root, so naming a checkout would mislead:
 /// `approve_write` grants a scope rather than writing a file, and the library
 /// registry is global rather than per-project.
-const WRITE_ROOT_ANNOTATION_EXEMPT: &[&str] = &["approve_write", "register_library", "library"];
+pub(crate) const WRITE_ROOT_ANNOTATION_EXEMPT: &[&str] =
+    &["approve_write", "register_library", "library"];
 
 /// Name the checkout an UNPINNED write landed in, when the repo has linked
 /// worktrees.

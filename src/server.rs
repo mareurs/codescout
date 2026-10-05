@@ -7506,6 +7506,161 @@ mod tests {
         );
     }
 
+    /// Why a `path~` selector served by `tool` could never match, or `None` if it can.
+    ///
+    /// The router matches `path~` against the path `call_content` annotates onto a WRITE
+    /// response, and that annotation (`write_path`) is read from the literal input key `path`
+    /// and skipped for `WRITE_ROOT_ANNOTATION_EXEMPT` tools. So three shapes are dead on
+    /// arrival, none of which `parse_shape` or the tool-existence check can see: the tool
+    /// is not a write call under this selector's action, it is exempt from the annotation,
+    /// or it names its target under another key. A selector with no `path~` predicate asks
+    /// nothing of the tool and is never a defect here.
+    ///
+    /// Reads the tool's own `is_write` and schema rather than a restated list, so a new
+    /// write tool is judged by what it declares. Pure over `(tool, selector)` so the red
+    /// case can be driven from a fixture.
+    fn path_predicate_defect(
+        tool: &dyn Tool,
+        sel: &crate::operator_rules::rule::Selector,
+    ) -> Option<String> {
+        sel.path_contains.as_ref()?;
+        let probe = match &sel.action {
+            Some(a) => serde_json::json!({ "action": a }),
+            None => serde_json::json!({}),
+        };
+        if !tool.is_write(&probe) {
+            return Some(format!(
+                "serves `{}` with a `path~` predicate, but that is not a write call under this \
+             selector — the path is annotated only onto write responses, so it can never match",
+                tool.name()
+            ));
+        }
+        if crate::tools::WRITE_ROOT_ANNOTATION_EXEMPT.contains(&tool.name()) {
+            return Some(format!(
+                "serves `{}` with a `path~` predicate, but `{}` is exempt from the write-path \
+             annotation, so it can never match",
+                tool.name(),
+                tool.name()
+            ));
+        }
+        let has_path = tool
+            .input_schema()
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .is_some_and(|p| p.contains_key("path"));
+        if !has_path {
+            return Some(format!(
+                "serves `{}` with a `path~` predicate, but `{}` has no `path` parameter and \
+             `call_content` captures the write path only from `input[\"path\"]` — the rule \
+             would be dead. Either name the target `path`, or teach `write_path` this tool's key",
+                tool.name(),
+                tool.name()
+            ));
+        }
+        None
+    }
+
+    /// `path_predicate_defect`, driven from fixtures: the live `path~` targets are clean, and
+    /// each dead shape is named. The controls pin WHY each fixture is dead, so a tool gaining
+    /// or losing a `path` parameter reds here rather than turning a case vacuous.
+    #[tokio::test]
+    async fn a_path_predicate_on_a_tool_that_cannot_deliver_it_is_a_defect() {
+        use crate::operator_rules::rule::Selector;
+        let (_dir, server) = make_server().await;
+        let tool = |n: &str| {
+            server
+                .tools
+                .iter()
+                .find(|t| t.name() == n)
+                .unwrap_or_else(|| panic!("control: fixture tool `{n}` is not registered"))
+                .clone()
+        };
+        let sel = |tool: &str, action: Option<&str>, path: Option<&str>| Selector {
+            tool: tool.to_string(),
+            action: action.map(str::to_string),
+            path_contains: path.map(str::to_string),
+        };
+        let has_path = |t: &dyn Tool| {
+            t.input_schema()
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .is_some_and(|p| p.contains_key("path"))
+        };
+
+        // Positive twin: the shapes the live ledger actually serves.
+        for n in ["edit_file", "create_file"] {
+            let t = tool(n);
+            assert!(has_path(t.as_ref()), "control: `{n}` must carry `path`");
+            assert_eq!(
+                path_predicate_defect(t.as_ref(), &sel(n, None, Some("/.claude"))),
+                None,
+                "`{n}(path~…)` is deliverable and must not be a defect"
+            );
+        }
+
+        // A write tool keyed differently: `memory.write` writes but has no `path` parameter.
+        let memory = tool("memory");
+        assert!(
+            memory.is_write(&serde_json::json!({"action": "write"})),
+            "control: memory.write must be a write call"
+        );
+        assert!(
+            !has_path(memory.as_ref()),
+            "control: memory must have no `path`"
+        );
+        let d = path_predicate_defect(
+            memory.as_ref(),
+            &sel("memory", Some("write"), Some("/.claude")),
+        )
+        .expect("a write tool without a `path` parameter must be a defect");
+        assert!(d.contains("no `path` parameter"), "wrong defect: {d}");
+
+        // A tool that carries `path` but does not write: nothing is annotated onto its result.
+        let read = tool("read_file");
+        assert!(
+            has_path(read.as_ref()),
+            "control: read_file must carry `path`"
+        );
+        assert!(
+            !read.is_write(&serde_json::json!({})),
+            "control: read_file reads"
+        );
+        let d = path_predicate_defect(read.as_ref(), &sel("read_file", None, Some("/.claude")))
+            .expect("a read tool with `path~` must be a defect");
+        assert!(d.contains("not a write call"), "wrong defect: {d}");
+
+        // The same tool under a non-write action of an action-dispatched tool.
+        let d = path_predicate_defect(
+            memory.as_ref(),
+            &sel("memory", Some("read"), Some("/.claude")),
+        )
+        .expect("a non-write action with `path~` must be a defect");
+        assert!(d.contains("not a write call"), "wrong defect: {d}");
+
+        // Exempt from the annotation although it writes and has `path`.
+        let approve = tool("approve_write");
+        assert!(
+            approve.is_write(&serde_json::json!({})) && has_path(approve.as_ref()),
+            "control: approve_write must write and carry `path` so only the exemption makes it dead"
+        );
+        let d = path_predicate_defect(
+            approve.as_ref(),
+            &sel("approve_write", None, Some("/.claude")),
+        )
+        .expect("an annotation-exempt tool with `path~` must be a defect");
+        assert!(d.contains("exempt"), "wrong defect: {d}");
+
+        // No `path~` predicate asks nothing of the tool: never a defect, whatever the tool is.
+        assert_eq!(
+            path_predicate_defect(memory.as_ref(), &sel("memory", Some("write"), None)),
+            None
+        );
+        assert_eq!(
+            path_predicate_defect(read.as_ref(), &sel("read_file", None, None)),
+            None
+        );
+    }
+
     /// Every `triggered` rule must name a tool that can actually deliver it — or declare, by
     /// id, that it cannot.
     ///
@@ -7544,6 +7699,7 @@ mod tests {
     /// | stale exemption | add `OP-9` to `HARNESS_BLOCKED` | fires, naming `OP-9` |
     /// | selector precondition | — | **not exercised here.** A tool returning `None` reds `every_registered_tool_supplies_a_selector_key` too, so this arm is a second, better-located signal rather than the only one |
     /// | action enum | — | **NOT exercised, and left unclaimed.** Reaching it means mutating `Serves:` in the live ledger, a guarded artifact and a real corpus. The arm is written and untested; do not read this gate's green as covering it |
+    /// | `path~` predicate | `path_predicate_defect` returns `None` unconditionally | the fixture test `a_path_predicate_on_a_tool_that_cannot_deliver_it_is_a_defect` fires. **The arm's call site here is only exercised by the live corpus (`edit_file` / `create_file`, both clean)** — a dead live rule is not authored to prove it, so the helper's red lives in the fixture test |
     #[tokio::test]
     async fn every_triggered_rule_names_a_tool_that_can_deliver_it() {
         use crate::operator_rules::rule::{Binding, Status};
@@ -7626,6 +7782,13 @@ mod tests {
                             allowed.join(", ")
                         }
                     );
+                }
+                // A `path~` predicate matches against the path the router captured from a
+                // WRITE call's `path` key (`call_content`'s `write_path`). A rule serving a
+                // tool that does not write, or writes under another key, gets no path to
+                // match — dead exactly as the unregistered-tool case, and just as silent.
+                if let Some(defect) = path_predicate_defect(tool.as_ref(), sel) {
+                    panic!("{} {defect}", rule.id);
                 }
                 checked += 1;
             }
