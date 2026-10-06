@@ -551,8 +551,9 @@ fn clamp_over_budget_line(chunk: String, room: usize) -> (String, bool) {
 // cap-class: NOT_A_CAP — the text a cut line ends with; the cut's bound is the page's room.
 const OVER_BUDGET_MARKER: &str = "\n…[truncated: this line is wider than the inline budget]";
 
-/// What a page of [`read_from_buffer`] has left for `content`, in serialized bytes: the
-/// response limit less every other key the page can carry.
+/// What a page has left for `content`, in serialized bytes: the response limit less every
+/// other key the page can carry. Used by every paging range arm: [`read_from_buffer`],
+/// [`read_with_line_range`] and the markdown range arm (`read_markdown_line_range`).
 ///
 /// `widest` is the page's response with `content` set to `""` and every optional key present
 /// at the widest value it can take. The real page carries a subset of those keys with values
