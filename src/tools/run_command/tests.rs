@@ -4818,6 +4818,38 @@ async fn a_next_page_hint_on_an_err_query_names_the_err_stream_and_that_route_wo
         "following the hint must return the next page of stderr, got: {body:.200} (route {route})"
     );
 }
+// The wide-line remedy, in the clipped line's marker AND in the hint, must read the stream the
+// query read: `cut -c1-4000 @cmd_X` on a wide STDERR line cuts stdout instead.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wide_line_remedy_on_an_err_query_names_the_err_stream() {
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx.output_buffer.store(
+        "cmd".into(),
+        "x\n".into(),
+        format!("{}\n", "a".repeat(30_000)),
+        0,
+    );
+
+    let resp = RunCommand
+        .call(
+            json!({ "command": format!("cat {id}.err"), "timeout_secs": 5 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let remedy = format!("cut -c1-4000 {id}.err");
+    let stdout = resp["stdout"].as_str().unwrap_or("");
+    let hint = resp["hint"].as_str().unwrap_or("");
+    assert!(
+        stdout.contains(&remedy),
+        "the clipped line's marker must name `{id}.err`: {stdout:.0}"
+    );
+    assert!(
+        hint.contains(&remedy),
+        "the hint must name `{id}.err`: {hint}"
+    );
+}
 
 // Fix C: when the first run_command looks like a plain file read (cat file),
 // the buffer creation hint should suggest read_file as an alternative.
