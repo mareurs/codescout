@@ -1124,10 +1124,13 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // the limit and a hint route that reads the value to the end. Measured before the clip:
         // a 6 KB YAML key made a 12,287 B response with a `@file_*` and a `@tool_*` handle.
         // Marker written by production in `read_file::clip_input_echo` (`elide_middle_escaped`).
+        // MUTATION (2026-10-06): `clip_input_echo` returning its input whole turns the cited
+        // test red (two handles); so do `breadcrumb` leaving the droppable list and the
+        // `@tool_*` arm echoing `jp` raw.
         id: "read_file.input_echo_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("the rest is the value you passed"),
-            mutation: Mutation::NotYet("mutation run pending in this branch"),
+            mutation: Mutation::Killed,
             cited_test: "an_overlong_json_path_or_key_echo_keeps_one_handle",
         },
     },
