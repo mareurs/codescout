@@ -96,7 +96,7 @@ All in `src/tools/command_summary.rs` unless stated. Each was red before the fix
 
 ## Workarounds
 
-Read the raw output through the handle named in the summary: `run_command("grep -n 'panicked' @cmd_0b9aeafe")`.
+Read the raw output through the handle named in the summary: `run_command("grep -n 'panicked' @cmd_0b9aeafe")`. This returns whole matching lines, so on a single wide line it returns the line or nothing; `grep -o 'panicked.\{0,200\}'` reads a window of it (added 2026-10-06, see `docs/issues/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools-and-five-gaps-stay-open.md`).
 
 ## Resume
 

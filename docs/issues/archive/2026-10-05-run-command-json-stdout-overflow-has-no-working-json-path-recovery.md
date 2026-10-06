@@ -81,7 +81,7 @@ Verified 2026-10-05 by reading the source and by live runs on the pre-fix binary
 4. `read_file` refuses `json_path` on any ref that does not start with `@tool_` (`read_from_buffer`, `src/tools/read_file.rs`). The `@cmd_X` handle is the one that holds the raw JSON text, so it is the handle that would work, and it is refused.
 5. The shape-mismatch error (`eval_segments`, `src/tools/file_summary/file_summary.rs`) names the type it found and not its keys, so the caller cannot learn that the data sits under `stdout`.
 
-Items 1 to 5 stay true and stay unfixed. They only matter because of item 0: with a bounded summary, the `run_command` response is the small `@cmd_*` envelope, and no `@tool_*` handle or `$.field` hint is produced for this class of output. The recovery route for a `@cmd_*` handle is `jq`, `grep` or `sed` through `run_command`, and that route already worked (see Workarounds).
+Items 1 to 5 stay true and stay unfixed. They only matter because of item 0: with a bounded summary, the `run_command` response is the small `@cmd_*` envelope, and no `@tool_*` handle or `$.field` hint is produced for this class of output. The recovery route for a `@cmd_*` handle is `jq` through `run_command`, which reads the raw JSON document (see Workarounds). **Corrected 2026-10-06:** this said `jq`, `grep` or `sed`. `grep` and `sed` read line by line, so on a single wide line they return the whole line or nothing; see `docs/issues/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools-and-five-gaps-stay-open.md`.
 
 The doc comment on `default_json_path_hint` states the standard the old output missed: *"A hint that cannot work for the result it is attached to is worse than no hint: it converts a lookup into a failed call."*
 
@@ -108,7 +108,7 @@ Fixed 2026-10-05 in `e833abeb` on `experiments` (patch-id `faf97e30544df47032c96
 - A stream within the budget is returned unchanged, so no short output changes.
 - Cuts fall on `char` boundaries (`clip_to_bytes`, and the new `clip_tail_to_bytes`).
 
-The response for the Reproduction is now the small `@cmd_*` envelope with the document's head and tail inline. No `@tool_*` handle and no `$.field` hint is produced. The `@cmd_*` handle holds the whole stream, and `jq`, `grep` and `sed` through `run_command` read it (Workarounds).
+The response for the Reproduction is now the small `@cmd_*` envelope with the document's head and tail inline. No `@tool_*` handle and no `$.field` hint is produced. The `@cmd_*` handle holds the whole stream, and `jq` through `run_command` reads it (Workarounds). **Corrected 2026-10-06:** this said `jq`, `grep` and `sed`. On a single wide line `grep` and `sed` do not work; `grep -o 'TEXT.\{0,200\}'` and `cut -c1-4000` do.
 
 **Options (a), (b) and (c) from the filing were not implemented.** They repair the recovery route for a `@tool_*` handle, which this class of output no longer reaches. They stay open as separate work if another tool produces a scalar-shaped overflow. Not measured: whether any tool other than `run_command` does.
 
