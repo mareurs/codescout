@@ -8455,3 +8455,103 @@ async fn a_refreshed_file_handle_prices_its_refresh_line_in_every_query() {
         "refresh sweep: whole {whole}, cut {cut}, summarized {summarized}, largest {largest} B"
     );
 }
+
+// ---- a libtest run naming a stale `@file_*` handle is not compacted out of its refresh line ----
+//
+// `compacted_fits` does not price `LateKeys::stdout_prefix`, and the compacted arm does not
+// prepend it, so such a run must take the raw gate. Without that guard the refresh line was simply
+// absent from a compacted response.
+
+/// `blocks` empty libtest targets (each dropped by compaction) and one passing test: the shape a
+/// filtered `cargo test` prints, as a file so its path makes the command not a buffer query.
+fn libtest_noise(blocks: usize) -> String {
+    let empty = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; \
+                 3 filtered out; finished in 0.00s\n\n";
+    format!(
+        "{}running 1 test\ntest a ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; \
+         0 measured; 0 filtered out; finished in 0.00s\n\n",
+        empty.repeat(blocks)
+    )
+}
+
+/// Store `body` behind a `@file_*` handle that is stale (the file is newer than the entry), so the
+/// next command naming it re-reads it and says so.
+fn stale_file_handle(ctx: &ToolContext, path: &std::path::Path, body: &str) -> String {
+    std::fs::write(path, body).unwrap();
+    let id = ctx
+        .output_buffer
+        .store_file(path.to_string_lossy().to_string(), "original".into());
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(future)).unwrap();
+    id
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_compactable_test_run_keeps_the_refresh_line_of_a_stale_handle() {
+    let (dir, ctx) = project_ctx().await;
+    std::fs::write(dir.path().join("noise.txt"), libtest_noise(60)).unwrap();
+    let id = stale_file_handle(&ctx, &dir.path().join("stale.txt"), "PAYLOAD\n");
+    let (text, parsed) = buffer_query(&ctx, format!("cat {id} ./noise.txt; echo cargo test")).await;
+    let stdout = parsed["stdout"].as_str().unwrap_or_default();
+    assert!(
+        stdout.starts_with(&format!("↻ {id} refreshed from disk")),
+        "the refresh line is missing: {text:.400}"
+    );
+    assert!(stdout.contains("PAYLOAD"), "{text:.400}");
+    assert!(!has_tool_handle(&text), "{text:.300}");
+}
+
+// The same command across the response's byte edge, in the escape classes, with the payload behind
+// the stale handle growing: one handle at most, no response over the limit, the line always shown.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_test_run_naming_a_stale_handle_keeps_one_handle_across_the_byte_edge() {
+    let (dir, ctx) = project_ctx().await;
+    let noise = libtest_noise(20);
+    let noise_cost = serde_json::to_string(&noise).unwrap().len() - 2;
+    std::fs::write(dir.path().join("noise.txt"), &noise).unwrap();
+    let path = dir.path().join("stale.txt");
+    let (mut inline, mut summarized, mut largest) = (0, 0, 0);
+    let mut failures = Vec::new();
+    for unit in ["a", "\"", "\u{1}"] {
+        for total in (9_300..=10_500usize).step_by(50) {
+            let width = (total.saturating_sub(noise_cost) / 30).saturating_sub(2);
+            let line = unit.repeat((width / escaped_unit_len(unit)).max(1));
+            let id = stale_file_handle(&ctx, &path, &format!("{}\n", vec![line; 30].join("\n")));
+            let command = format!("cat {id} ./noise.txt; echo cargo test");
+            let (text, parsed) = buffer_query(&ctx, command).await;
+            let own_id = parsed["output_id"].as_str().unwrap_or_default();
+            let refreshed = parsed["stdout"]
+                .as_str()
+                .is_some_and(|s| s.starts_with(&format!("↻ {id} refreshed from disk")));
+            if has_tool_handle(&text)
+                || !(own_id.is_empty() || own_id.starts_with("@cmd_"))
+                || text.len() > crate::tools::INLINE_MAX_RESPONSE_LEN
+                || !refreshed
+            {
+                failures.push(format!("{unit:?} {total}: {} B: {text:.300}", text.len()));
+                continue;
+            }
+            largest = largest.max(text.len());
+            if own_id.is_empty() {
+                inline += 1;
+            } else {
+                summarized += 1;
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} runs broke the one-handle limit; first: {:#?}",
+        failures.len(),
+        &failures[..failures.len().min(3)]
+    );
+    assert!(
+        inline > 0 && summarized > 0,
+        "inline {inline}, summarized {summarized}"
+    );
+    eprintln!(
+        "stale test run sweep: inline {inline}, summarized {summarized}, largest {largest} B"
+    );
+}

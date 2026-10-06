@@ -1194,7 +1194,11 @@ pub(crate) async fn handle_successful_output_with(
                 // Rebuild with correct field order so output_id appears before content fields.
                 let mut response = rebuild_buffered_summary(cmd_summary, &output_id);
                 attach(&mut response, late.clone(), tee_present);
-                if let Some(text) = response.get("stdout").and_then(Value::as_str) {
+                // Inside the render, so `fit_summary` measures it. A summary with no `stdout` (a
+                // test or build summary) gets one holding just the refresh line, which was
+                // otherwise never delivered on that shape.
+                if !prefix.is_empty() {
+                    let text = response.get("stdout").and_then(Value::as_str).unwrap_or("");
                     response["stdout"] = json!(with_prefix(text));
                 }
                 response
