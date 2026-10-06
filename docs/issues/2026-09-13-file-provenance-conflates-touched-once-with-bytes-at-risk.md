@@ -1,14 +1,15 @@
 ---
 id: '1f3b31d9b51371c6'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: file-provenance conflates "touched this path once" with "has bytes at risk right now"'
 tags:
 - cluster/addressing-without-an-escape-hatch
 - provenance
 - shared-checkout
 topic: shared-checkout authorship
-unverified: 'PARTIAL FIX (6f6fdc96): a refused write and a clean path no longer read as bytes at risk. Instance 2 (a dirty path whose peer bytes were already committed) still prints SHARED and is NOT fixed; see ## Partial fix.'
+closed: 2026-10-06
+unverified: STANDING — the fix sets a peer aside only inside the commit's own second, so an uncommitted edit that merely moves a block already in HEAD reads as set aside in that second. The original incident could not be replayed; the filed shape was rebuilt in a throwaway repo.
 ---
 
 # BUG: file-provenance conflates "touched this path once" with "has bytes at risk right now"
@@ -139,18 +140,31 @@ Tests added: `tests/file-provenance.sh` grows from 197 to 223 assertions (every 
 
 What is NOT covered:
 
-- **Instance 2 as filed is not fixed.** A DIRTY path where a peer's bytes were already committed still prints `SHARED`, because git dirtiness is per path and cannot separate the asker's uncommitted bytes from a peer's committed ones. `src/tools/session_key.rs` in the filed case had 99 uncommitted insertions from `aa272bed`, so it is dirty and would still print `SHARED` naming `55515bc5`.
-- **Suspect, unverified:** `last_commit_time` (`scripts/file-provenance.py:905-910`) reads `git log -1 --format=%cI`, which has second resolution, so a write in the same second as the commit may count as in-window. Read at the bytes; the in-window effect was not reproduced.
+- **Instance 2 as filed was not fixed when this was written; it is now (see `## Second fix`).** A DIRTY path where a peer's bytes were already committed still prints `SHARED`, because git dirtiness is per path and cannot separate the asker's uncommitted bytes from a peer's committed ones. `src/tools/session_key.rs` in the filed case had 99 uncommitted insertions from `aa272bed`, so it is dirty and would still print `SHARED` naming `55515bc5`.
+- **Suspect, since CONFIRMED as the cause (see `## Second fix`):** `last_commit_time` (`scripts/file-provenance.py:905-910`) reads `git log -1 --format=%cI`, which has second resolution, so a write in the same second as the commit may count as in-window. Read at the bytes; the in-window effect was not reproduced.
 - A refused `workspace(activate)` is still treated as moving the active tree (pre-existing).
 - A harness `is_error` on a codescout write is treated as nothing-written; a timeout where the write landed would be missed (theoretical, not observed).
 - The sibling bug `2026-09-19-file-provenance-answers-at-session-grain-so-sibling-subagents-are-one-writer` was not touched.
 
+## Second fix (2026-10-06)
+
+- **SHA:** `4d49908a` (`experiments`)
+- **patch-id:** `84231299b0a78b797a8fece7987660cdf9112ca7`
+
+Instance 2 as filed, fixed. The window floor is the last commit's time, which git reports to the second (`%cI`). A write that the commit took can fall inside that commit's own second, and a dirty path cannot discount it, because the CLEAN verdict does not apply. The filed case had this shape: the peer's `create_file` landed 0.4 s into the second of the commit that took it, and the asker then added 99 lines. The original transcript is gone, so the fork that fixed it rebuilt the shape in a throwaway repo. Before the fix it printed `SHARED` naming the peer. After the fix it prints `MINE` with a note.
+
+`scripts/file-provenance.py` now sets a peer aside only when all of these hold: its write is dated inside `[floor, floor + 1 s)`; its text is known and at least 24 characters; every piece of that text is in `HEAD`; and the worktree holds no more copies of the text than `HEAD` does. Shell and `doc()` writes, short strings, writes outside that second, `--since` and `--all` runs and the asker's own writes are always counted. A set-aside session appears in a note, not as a co-writer, and a path with no other writer on record prints `UNKNOWN` with a cause line. `scan()` keeps its signature. A new `scan_with_evidence()` also returns the written text.
+
+Tests: `tests/file-provenance.sh` grows from 223 to 244 assertions (re-run for this record: `passed=244 failed=0`). The seven new negatives each have a twin that must still name the writer. Without the fix exactly those seven fail (reported by the fork). Five targeted mutations each turned its twin red: no copy-count check, no upper bound on the second, not excluding the asker, no minimum length, and letting `--since` absorb. A sixth, `--all` absorbing, is equivalent because the floor is `None` there (reported by the fork). The full gate ran green on the integrated tree on 2026-10-06.
+
+Accepted residue: an uncommitted edit that only moves a block already in `HEAD` leaves the copy count unchanged, so its author would read as set aside, and only when the move lands in the commit's own second. The original incident could not be replayed.
+
 ## Resume
 
-Instance 1 is fixed and instance 2's CLEAN-path half is fixed, on `experiments` (local, not pushed at the time of writing). Status stays `open`. Remaining, and who decides:
+Instance 1, instance 2's CLEAN-path half and instance 2 as filed are all fixed on `experiments` (local, not pushed). Status flipped to `fixed` on 2026-10-06 with a STANDING caveat. The notes below are the earlier plan, kept for the record:
 
-1. Marius decides whether a DIRTY path with a peer whose bytes were already committed (instance 2 as filed) is its own class or is accepted as a known limit. The candidate claim is still *"a window over history, used to answer a question about the present, cannot subtract what has since been absorbed"*, which would also cover the mtime-versus-authorial-write confusion seen the same day. Per-path git dirtiness cannot separate those bytes; a fix would need per-hunk attribution (for example `git blame` or a diff against the peer's commit).
-2. Check whether `last_commit_time`'s second-resolution `%cI` lets a same-second write count as in-window, with a fixture, before acting on it.
+1. RESOLVED 2026-10-06 (`## Second fix`): instance 2 as filed was the commit's own second, not a class of its own, and it is fixed. The text that follows is the original reasoning. The candidate claim is still *"a window over history, used to answer a question about the present, cannot subtract what has since been absorbed"*, which would also cover the mtime-versus-authorial-write confusion seen the same day. Per-path git dirtiness cannot separate those bytes; a fix would need per-hunk attribution (for example `git blame` or a diff against the peer's commit).
+2. DONE 2026-10-06: it does, and that was the cause (`## Second fix`).
 3. Keep this file's relation to the archived sibling (`2026-09-13-file-provenance-reads-a-commit-time-as-proof-the-writes-are-in-head`) and to the unfixed `2026-09-19-file-provenance-answers-at-session-grain-...` in mind: a change to the window that narrows false positives can widen the false-negative direction.
 
 ## References
