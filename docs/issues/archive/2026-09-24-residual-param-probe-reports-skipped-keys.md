@@ -1,5 +1,5 @@
 ---
-id: '7c8a5ba864bc8398'
+id: 7b40e1fe5ddced5b
 kind: bug
 status: fixed
 title: 'RESIDUAL: Report the count of param keys the probe skips (accepts_any_json / unlabelled) so the sweep''s coverage is visible'

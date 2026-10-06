@@ -1272,7 +1272,7 @@ impl WalkAudit {
     /// `src/.x.rs` and `src/**/*.rs` can still miss `src/.gen/`; the clause never named
     /// those, so dropping it removes a cause that was asserted without being checked, not one
     /// that was ruled out. See
-    /// `docs/issues/2026-09-24-residual-grep-hidden-paths-warning-checks-its-premise.md`.
+    /// `docs/issues/archive/2026-09-24-residual-grep-hidden-paths-warning-checks-its-premise.md`.
     fn globs_can_reach_a_root_dot_entry(globs: &[String]) -> bool {
         let mut admitting = globs.iter().filter(|g| !g.starts_with('!')).peekable();
         if admitting.peek().is_none() {

@@ -587,7 +587,7 @@ The real finding underneath is smaller — the `call_edges` table in `usage.db` 
 - **negative:**
 
 ```
-The real finding underneath is smaller — the `call_edges` table in `usage.db` is vestigial, filed as `c4e0c5cc182997ba`.
+The real finding underneath is smaller — the `call_edges` table in `usage.db` is vestigial, filed as `dd1dfa31622030d5`.
 ```
 
   with the replacement account added directly below it:

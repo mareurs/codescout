@@ -1,5 +1,5 @@
 ---
-id: fb147f71da8e15ab
+id: f83800252aaff4a4
 kind: bug
 status: fixed
 title: 'RESIDUAL: Add a write-time/CI gate refusing a terminal-status or archived bug file that lacks the fix SHA + patch-id pair'

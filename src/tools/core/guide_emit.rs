@@ -50,7 +50,7 @@ pub(crate) enum GuideDeliveryShape {
 /// A guide is a later content block, and the harness may save an oversized
 /// tool result to disk and show the model only a ~2 KB preview of block 0 — so
 /// anything auto-injected into such a result is stamped delivered and never
-/// read (`docs/issues/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
+/// read (`docs/issues/archive/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
 /// The cut-off is not known: the smallest harness-saved result measured was
 /// 29.4 KB (64 saved results across one profile's transcripts, 2026-09-24).
 /// The bound is chosen so that guide + a primary block at its own inline cap

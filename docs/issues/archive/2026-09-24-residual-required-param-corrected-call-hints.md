@@ -1,5 +1,5 @@
 ---
-id: '36a0d5c7cb3fd4db'
+id: 4e554afd1a80957e
 kind: bug
 status: fixed
 title: 'RESIDUAL: Add with_hint corrected-call suggestions to the 8 required-param failure sites that name their action but offer no corrected call'

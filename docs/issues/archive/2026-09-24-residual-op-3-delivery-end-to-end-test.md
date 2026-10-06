@@ -1,5 +1,5 @@
 ---
-id: '6c50a7804a8e077c'
+id: ebf0717773c5c697
 kind: bug
 status: fixed
 title: 'RESIDUAL: Write an end-to-end test driving memory(action=''write'') through call_content and asserting OP-3 delivery (the OP-4 sibling test in record 47 shows it is writable)'

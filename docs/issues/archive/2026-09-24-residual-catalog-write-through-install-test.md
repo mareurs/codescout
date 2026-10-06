@@ -1,5 +1,5 @@
 ---
-id: d1e3857d61e301cd
+id: 8d578fe8206a10be
 kind: bug
 status: fixed
 title: 'RESIDUAL: Add a test that reds when the server-side catalog write-through install (src/server.rs:374 at filing) is removed'

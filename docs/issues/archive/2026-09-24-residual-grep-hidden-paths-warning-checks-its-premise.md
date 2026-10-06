@@ -1,5 +1,5 @@
 ---
-id: '9278fa8a4e651b43'
+id: 7b46ead954f2884f
 kind: bug
 status: fixed
 title: 'RESIDUAL: Make grep''s hidden-paths completeness warning check that hidden pruning could explain the zero before asserting its remedy'

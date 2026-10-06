@@ -1110,7 +1110,7 @@ fn insert_before() {
         "# Title\n## Prerequisites\ninstall stuff\n## Setup\ncontent\n"
     );
 }
-/// The repro from `docs/issues/2026-10-02-edit-file-insert-before-with-a-headingless-body-lands-in-the-previous-section.md`.
+/// The repro from `docs/issues/archive/2026-10-02-edit-file-insert-before-with-a-headingless-body-lands-in-the-previous-section.md`.
 const HEADINGLESS_INSERT_FIXTURE: &str =
     "# Title\n\nIntro paragraph.\n\n## First\n\nFirst body.\n\n## Second\n\nSecond body.\n";
 

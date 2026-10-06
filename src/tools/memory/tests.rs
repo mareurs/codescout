@@ -24,7 +24,7 @@ fn lsp() -> Arc<dyn crate::lsp::LspProvider> {
 /// readers are already in. Locking against annotated tests is all `serial` can do — see
 /// `docs/conventions/test-env-isolation.md` — which is why
 /// `tests/env_mutation_isolation.rs` refuses a `temp_env` user that does not carry it.
-/// docs/issues/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md.
+/// docs/issues/archive/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md.
 #[test]
 #[serial_test::serial]
 fn resolved_chunk_budget_reflects_the_projects_configured_model() {

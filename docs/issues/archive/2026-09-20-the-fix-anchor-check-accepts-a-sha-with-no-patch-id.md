@@ -1,5 +1,5 @@
 ---
-id: '5394e9b7bdd83069'
+id: e21e435d493ff5ee
 kind: bug
 status: fixed
 title: 'BUG: terminal_status_without_fix_anchor accepts a SHA with no patch-id, discharging on the half that dies at rebase'

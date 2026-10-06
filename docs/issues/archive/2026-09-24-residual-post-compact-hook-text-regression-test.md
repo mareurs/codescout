@@ -1,5 +1,5 @@
 ---
-id: f30564da22944782
+id: bfc9dae26e0278a8
 kind: bug
 status: fixed
 title: 'RESIDUAL: Add a test asserting the post-compact hook text so the corrected messaging cannot silently regress'

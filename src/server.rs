@@ -14137,7 +14137,7 @@ mod guide_hint_tests {
     /// only a ~2 KB preview of block 0; the guide is always a later block, so a
     /// 59 KB `tracker-conventions` shipped whole could be marked delivered while
     /// the model never saw a byte of it
-    /// (`docs/issues/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
+    /// (`docs/issues/archive/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
     ///
     /// Asserted on the LEDGER as well as the blocks: a response-shape check alone
     /// is satisfied by a block that is stamped and then dropped by the client.

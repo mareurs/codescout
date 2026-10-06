@@ -46,7 +46,7 @@ until the third existed. Where no escape is affordable, say so **at the refusal 
 documented limitation and a silent reinterpretation cost a reader very different amounts. The
 corpus states the point better than this section can — an entry id cannot be *mentioned* without
 citing it, the only escape being a fenced block, so
-`docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md` is this class
+`docs/issues/archive/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md` is this class
 holding about the very ledger that records it.
 
 **Recording history is where this class bites hardest, so record less of it.** A superseded

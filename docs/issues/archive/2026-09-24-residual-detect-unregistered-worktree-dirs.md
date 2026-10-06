@@ -1,5 +1,5 @@
 ---
-id: '1e153b9a3d5bb333'
+id: 61354f71d6fd21ca
 kind: bug
 status: fixed
 title: 'RESIDUAL: Build a detector (doctor/probe) for .worktrees/ entries that are not registered worktrees, since both git worktree list and git status are blind to them'

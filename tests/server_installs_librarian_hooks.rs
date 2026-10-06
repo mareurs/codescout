@@ -12,7 +12,7 @@
 //! in reads as fully covered — `bug-fix-session-log:W-73`. The server-side install was named
 //! as untested in
 //! `docs/issues/archive/2026-08-29-edit-markdown-frontmatter-desyncs-catalog-status.md`
-//! and tracked by `docs/issues/2026-09-24-residual-catalog-write-through-install-test.md`.
+//! and tracked by `docs/issues/archive/2026-09-24-residual-catalog-write-through-install-test.md`.
 //!
 //! ## Why a spawned binary and not `CodeScoutServer::from_parts_with_env`
 //!

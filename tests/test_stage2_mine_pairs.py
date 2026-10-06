@@ -220,7 +220,7 @@ class MineKeepsEachSidesContext(unittest.TestCase):
 class TwinInContextBefore(unittest.TestCase):
     """`twin_in_context_before`: the correction already sits in the positive's own context window.
 
-    docs/issues/2026-10-01-residual-mined-rows-with-the-twin-already-in-context-before.md: the
+    docs/issues/archive/2026-10-01-residual-mined-rows-with-the-twin-already-in-context-before.md: the
     freeze builds a mined positive from `context_before` and its negative from `context_after`
     (the twin), so a row whose `context_before` already contains the twin hands the model the
     correction beside the sentence it corrects -- the label leak the miner's context re-centring

@@ -1,5 +1,5 @@
 ---
-id: '1dce65964572186a'
+id: 1912bb6e54144e18
 kind: bug
 status: mitigated
 title: 'BUG: a guide auto-injected into a result the harness saves to disk is marked delivered, and the model sees only a 2 KB preview'

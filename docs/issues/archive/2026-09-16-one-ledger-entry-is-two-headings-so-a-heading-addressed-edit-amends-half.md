@@ -1,5 +1,5 @@
 ---
-id: '6cd56693dd5a95db'
+id: 12ee75053dc9b31c
 kind: bug
 status: fixed
 title: 'BUG: one ledger entry is two headings apart, so a heading-addressed edit amends half of it and reports success'

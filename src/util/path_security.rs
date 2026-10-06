@@ -866,7 +866,7 @@ fn executed_command(mut tokens: Vec<String>) -> Vec<String> {
 /// that has nothing to do with it. Only this gate cares that `xargs`'s reader gets its PATHS on
 /// stdin: the segment names no file, so a path-based verdict finds nothing to refuse, and the
 /// second field lets the caller refuse it on that ground instead.
-/// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+/// docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
 fn executed_reader_command(tokens: Vec<String>) -> (Vec<String>, bool) {
     let mut exec = executed_command(tokens);
     let mut stdin_fed = false;
@@ -1261,7 +1261,7 @@ fn pipeline_segments(command: &str) -> Vec<String> {
     // the reverse, `rg … & echo b | tail`, was refused for a pipe `rg` never feeds.
     // `split_outside_quotes` matches this entry only where `is_background_ampersand` agrees, so
     // `2>&1`, `>&2`, `&>`, `<&3` and `|&` stay whole.
-    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    // docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     split_outside_quotes(command, &["&&", "||", ";", "\n", "&"])
 }
 
@@ -1380,7 +1380,7 @@ fn il3_offending_lead(segment: &str) -> Option<String> {
     // `|`. Split on `|` alone it left the downstream stage as `& tail -1`, whose head is `&`,
     // not a trimmer, and `rg … |& tail` passed. A lone `&` never reaches here: `pipeline_segments`
     // already ended the segment at it, and `is_background_ampersand` keeps `|&` whole there.
-    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    // docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     let stages = split_outside_quotes(segment, &["|&", "|"]);
     let (pre_pipe, downstream) = match stages.split_first() {
         Some((first, rest)) if !rest.is_empty() => (first.clone(), rest),
@@ -1953,7 +1953,7 @@ fn split_outside_quotes(s: &str, seps: &[&str]) -> Vec<String> {
 /// Judged by its neighbours, which is enough because the caller has already skipped quotes and
 /// escapes: a `&` directly after `>`, `<`, `|` or `&` is the second half of `>&`, `<&`, `|&` or
 /// `&&`, and one directly before `>` or `&` is the first half of `&>` or `&&`.
-/// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+/// docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
 fn is_background_ampersand(s: &str, at: usize) -> bool {
     let before = s[..at].chars().next_back();
     let after = s[at + 1..].chars().next();
@@ -1966,7 +1966,7 @@ fn is_background_ampersand(s: &str, at: usize) -> bool {
 /// the background and runs the one on its right, so `echo b & cat src/main.rs` reads source on
 /// its right-hand side. With `&` in neither separator list that was ONE segment whose head was
 /// `echo`, and the gate never saw the `cat`.
-/// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+/// docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
 ///
 /// **A stage separator, deliberately NOT a run separator.** Runs (`&&`, `||`, `;`, newline) are
 /// the unit a `cd` can move, because they execute in sequence in the same shell. A backgrounded
@@ -4354,7 +4354,7 @@ mod tests {
     /// stage as `& cat src/main.rs`, headed by `&`, so the reader behind it was never examined.
     /// Measured 2026-09-30 on the live binary: `echo x |& cat build.rs | wc -l` returned the file,
     /// where `echo x 2>&1 | cat build.rs | wc -l` is refused.
-    /// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    /// docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     #[test]
     fn source_gate_sees_a_reader_behind_pipe_ampersand() {
         for cmd in ["echo x |& cat src/main.rs", "ls |& head -5 src/lib.rs"] {
@@ -4547,7 +4547,7 @@ mod tests {
     }
     // ── Source gate: background `&` ──────────────────────────────────────
     //
-    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    // docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     //
     // The gate names a segment's PROGRAM by its first token, and no separator list contained a
     // lone `&`, so `echo b & cat src/main.rs` was one segment headed by `echo`. This section
@@ -4619,7 +4619,7 @@ mod tests {
     }
     // ── Source gate: wrappers that run a reader — `sudo`, `xargs` ────────
     //
-    // docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    // docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     //
     // Since PR #29 the gate classifies a segment by `executed_command`, which skips `env`, `FOO=1`,
     // `time`, `nohup` and friends (measured live 2026-09-30). Two wrappers were left: `sudo`, whose
@@ -5600,7 +5600,7 @@ EOF"#;
     /// read as `echo x & rg …`, headed by `echo`, so an unbounded producer passed and the trimmer
     /// hid its output. Measured 2026-09-30 on the live binary: exit 0, where `rg … | tail`
     /// alone is refused.
-    /// docs/issues/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
+    /// docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     #[test]
     fn il3_sees_an_unbounded_producer_after_a_background_ampersand() {
         for cmd in [

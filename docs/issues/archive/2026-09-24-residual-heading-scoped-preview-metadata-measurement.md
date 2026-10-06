@@ -1,5 +1,5 @@
 ---
-id: '043c453c34469482'
+id: 9bd90d31620bfabf
 kind: bug
 status: fixed
 title: 'RESIDUAL: Measure whether envelope metadata pushes otherwise-inlinable heading-scoped sections over the 9 KB inline budget, and suppress preview.headings if it does'

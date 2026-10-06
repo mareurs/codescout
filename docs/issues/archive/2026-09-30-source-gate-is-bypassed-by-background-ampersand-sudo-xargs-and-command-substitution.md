@@ -1,5 +1,5 @@
 ---
-id: a703b36da995dab3
+id: fc05dd02b840ef58
 kind: bug
 status: mitigated
 title: 'BUG: the source-file gate is bypassed by a background `&`, a `sudo`/`xargs` wrapper, and a command substitution'

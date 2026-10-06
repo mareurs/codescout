@@ -2990,7 +2990,7 @@ fn worktree_residue_sessions(dir: &Path) -> Vec<String> {
 /// `.gitignore`'s `.worktrees/` and cannot see it either. Two correct instruments whose blind
 /// spots coincide, so their agreement is one blind spot counted twice.
 /// docs/issues/archive/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md
-/// docs/issues/2026-09-24-residual-detect-unregistered-worktree-dirs.md
+/// docs/issues/archive/2026-09-24-residual-detect-unregistered-worktree-dirs.md
 ///
 /// **It regenerates, which is why a one-time cleanup was not a fix.** Measured 2026-09-02 and
 /// again 2026-10-05: a different member each time (`audit-shards-t7`, then
@@ -6855,7 +6855,7 @@ fn declares_no_fix_commit(content: &str) -> bool {
 /// the diff — is the half that survives. A record with only the SHA reads as anchored until the
 /// next rebase, at which point `archived_fix_sha_unresolvable` finds the SHA dead and the
 /// patch-id that would have recovered it was never required.
-/// docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
+/// docs/issues/archive/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
 ///
 /// **Both parser and `declares_fix_anchor` stay as they were**: [`structured_fix_pointers`]
 /// returns the patch-id as an `Option` deliberately, and it has two other consumers whose
@@ -7176,7 +7176,7 @@ fn commit_like_hashes(content: &str) -> Vec<String> {
 /// previously discharged outright, though the SHA is the half that orphans at rebase
 /// ([`declares_fix_pair`]). Each is admitted under its OWN name, so each is counted under its own
 /// name when scoped out, and both are in `ROW_GRAIN_SCOPED_CHECKS`.
-/// docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
+/// docs/issues/archive/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
 fn scan_terminal_status_without_fix_anchor(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -7213,7 +7213,7 @@ fn scan_terminal_status_without_fix_anchor(
         }
         // A SHA is declared and no patch-id parses next to it. Its own check name, so the
         // absent-anchor population above does not move and the state is queryable by name.
-        // docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
+        // docs/issues/archive/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
         if declares_fix_anchor(&content) {
             if !scope.admit("fix_anchor_missing_patch_id", id, abs_path) {
                 continue;
@@ -11036,7 +11036,7 @@ mod tests {
     }
 
     /// Regression for
-    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`.
+    /// `docs/issues/archive/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`.
     ///
     /// A record declaring `- **SHA:**` and no patch-id was discharged by `is_empty()` on the
     /// pointer list, though the SHA is the half that dies at rebase. It must now be reported —

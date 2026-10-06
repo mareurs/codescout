@@ -653,7 +653,7 @@ mod required_param_routing_tests {
             ("timeline", timeline::call(&c, json!({})).await.unwrap_err()),
             // Residual 8 of the 2026-08-27 parent: they named an action but offered no
             // corrected call, and four of them built the LIBRARIAN's error type.
-            // docs/issues/2026-09-24-residual-required-param-corrected-call-hints.md
+            // docs/issues/archive/2026-09-24-residual-required-param-corrected-call-hints.md
             ("update", update::call(&c, json!({})).await.unwrap_err()),
             ("move", mv::call(&c, json!({})).await.unwrap_err()),
             ("delete", delete::call(&c, json!({})).await.unwrap_err()),

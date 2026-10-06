@@ -1,5 +1,5 @@
 ---
-id: '74479042d0911bf3'
+id: 5eedf8cca13b2c98
 kind: bug
 status: fixed
 title: 'RESIDUAL: Capture the operator-rule path predicate from each write tool''s actual target key (not only input[''path''])'

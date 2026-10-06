@@ -1,5 +1,5 @@
 ---
-id: c4e0c5cc182997ba
+id: dd1dfa31622030d5
 kind: bug
 status: fixed
 title: usage.db creates a call_edges table on every open that no code path has ever read or written

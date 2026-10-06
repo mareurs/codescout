@@ -1330,7 +1330,7 @@ mod tests {
     /// the step must name exactly the tables `open_db` creates — per member, in both
     /// directions, so a table added to `open_db` and forgotten here is as loud as a
     /// table dropped from `open_db` and left here.
-    /// docs/issues/2026-09-21-usage-db-creates-a-call-edges-table-nothing-ever-reads.md
+    /// docs/issues/archive/2026-09-21-usage-db-creates-a-call-edges-table-nothing-ever-reads.md
     #[test]
     fn analyze_usage_clear_step_names_exactly_the_tables_open_db_creates() {
         let path =

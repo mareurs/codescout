@@ -9,7 +9,7 @@ one) from two sources:
     correction-shaped selector (R90), attributed to its origin by blaming the REMOVED
     side of each hunk at the commit's parent (R88, R91) -- never the correcting commit's
     own `Session-Id`, which names who committed, not who wrote the corrected lines
-    (docs/issues/2026-09-22-a-session-id-trailer-names-who-committed-not-who-wrote-the-line.md).
+    (docs/issues/archive/2026-09-22-a-session-id-trailer-names-who-committed-not-who-wrote-the-line.md).
 
 Recall-oriented by design: a false candidate costs one judge call later and is not a
 bias, so no lexical filter is applied to operator candidates (R89).

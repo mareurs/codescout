@@ -1,5 +1,5 @@
 ---
-id: '4cc587904a3dd44e'
+id: 9fdf4a786f66b976
 kind: bug
 status: fixed
 title: 'BUG: the source-file gate reads tail inside a quoted, hyphenated filename as the tail command'

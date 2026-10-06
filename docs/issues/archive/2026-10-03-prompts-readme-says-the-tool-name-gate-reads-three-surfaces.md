@@ -1,5 +1,5 @@
 ---
-id: '85ea79df030f3512'
+id: 73093ff9a7a07d30
 kind: bug
 status: fixed
 title: 'BUG: src/prompts/README.md says the tool-name gate reads three prompt surfaces; it reads four, and the docs disagree on which surface is "the fourth"'

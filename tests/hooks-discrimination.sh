@@ -53,7 +53,7 @@ hasnt() { printf '%s' "$2" | grep -qF "$3" && no "$1" "must NOT contain: $3" || 
 # always together, because they are ONE absent file observed at three points. Read at face
 # value they said "your change broke three stage-log cases", which was false, and the
 # natural next action was to go debug a working change
-# (docs/issues/2026-09-16-three-hooks-discrimination-cases-failed-once-and-did-not-reproduce.md).
+# (docs/issues/archive/2026-09-16-three-hooks-discrimination-cases-failed-once-and-did-not-reproduce.md).
 #
 # This does NOT make the suite deterministic -- the hook still fires or does not. It makes
 # the first failure name the reason. It deliberately does not SKIP the cases below: a skip

@@ -397,7 +397,7 @@ fn apply_body_edits(working: &str, edits: &[Value], consumed: &mut Vec<String>) 
 /// `##`), and the row is a table line whose FIRST cell is exactly that id, compared before and
 /// after the whole batch — so a batch that amends the row as well stays silent, and so does an
 /// entry that has no row. See
-/// `docs/issues/2026-09-16-one-ledger-entry-is-two-headings-so-a-heading-addressed-edit-amends-half.md`.
+/// `docs/issues/archive/2026-09-16-one-ledger-entry-is-two-headings-so-a-heading-addressed-edit-amends-half.md`.
 fn untouched_index_rows(before: &str, after: &str, edits: &[Value]) -> Vec<String> {
     static ENTRY_HEADING: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"^(?:#{2,}\s+)?([A-Z]{1,3}-\d+)\b").expect("static regex")
@@ -3819,7 +3819,7 @@ text
     }
 
     /// Regression for
-    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`: the
+    /// `docs/issues/archive/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`: the
     /// archive guard accepted a SHA with no patch-id, the half that orphans at the next rebase.
     ///
     /// The guard now demands the pair, with a hint of its own — an author who wrote a SHA and
@@ -3960,7 +3960,7 @@ text
         .expect("only the flip to `archived` leaves doctor's population");
     }
     // ── An entry is two surfaces: a `## F-N — …` section and a `| F-N | … |` Index row ──
-    // docs/issues/2026-09-16-one-ledger-entry-is-two-headings-so-a-heading-addressed-edit-amends-half.md
+    // docs/issues/archive/2026-09-16-one-ledger-entry-is-two-headings-so-a-heading-addressed-edit-amends-half.md
 
     const LEDGER: &str = "# Ledger\n\n## Index\n\n| id | title |\n|---|---|\n\
         | F-1 | has a row |\n\n## F-1 — has a row\n\nfigure: 10\n\n\

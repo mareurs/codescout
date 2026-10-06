@@ -2807,7 +2807,7 @@ mod tests {
     }
 
     /// Regression for
-    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`, at the
+    /// `docs/issues/archive/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`, at the
     /// move surface: the SHA half alone dies at rebase, so the move guard demands the pair too.
     /// The anchored move above is the positive twin (both bullets pass).
     #[tokio::test]

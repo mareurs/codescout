@@ -225,7 +225,7 @@ fn every_allowlisted_file_still_has_a_site() {
 // against other `serial` tests (`docs/conventions/test-env-isolation.md`), so it cannot
 // protect an untagged reader. What it does buy is the pair that matters in practice — a
 // `temp_env` window and the `serial` tests that read the same variables as ground truth.
-// `docs/issues/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md`
+// `docs/issues/archive/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md`
 // is the measured case: a bare `#[test]` unset window overlapped a `serial` reader's
 // "ambient url is set, skip" guard, the ambient value was restored under it, and the
 // reader reported `remote-http` in 20 of 30 runs. The scan makes that omission a red
@@ -340,7 +340,7 @@ fn every_src_function_that_uses_temp_env_is_serial() {
          and restores the ambient values afterwards. A bare `#[test]` doing that races \
          every `#[serial]` test that reads the same variables as ground truth — it can \
          pass such a reader's skip-guard inside the window and then hand it the restored \
-         value (docs/issues/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md). \
+         value (docs/issues/archive/2026-09-24-bare-model-status-test-flips-to-remote-http-under-the-full-lane.md). \
          Add `#[serial_test::serial]` (default group), or — better — stop mutating env: \
          docs/conventions/test-env-isolation.md option A. A `use` of the crate is also \
          refused, because it lets later calls hide from this scan: call it by its full path.",

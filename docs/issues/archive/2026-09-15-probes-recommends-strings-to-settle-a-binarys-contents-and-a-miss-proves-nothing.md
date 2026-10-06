@@ -1,5 +1,5 @@
 ---
-id: ded9143998081efc
+id: b3020ef780a456ee
 kind: bug
 status: fixed
 title: 'BUG: PROBES.md offers inspection as co-equal to a behavioural probe, and every inspection instrument''s miss proves nothing'

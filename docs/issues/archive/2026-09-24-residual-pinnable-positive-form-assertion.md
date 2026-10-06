@@ -1,5 +1,5 @@
 ---
-id: '60ac58939c731ae3'
+id: c72461fd60b38b34
 kind: bug
 status: fixed
 title: 'RESIDUAL: Build the positive-form assertion: every name listed in the pinnable check is produced by a registered tool'
