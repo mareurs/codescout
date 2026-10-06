@@ -69,7 +69,51 @@ for bad in '../x' 'a b' 'a/b'; do
     run "$bad" set "why"
     eq "set with invalid session id '$bad' exits 2" "$EC" 2
     eq "set with invalid session id '$bad' creates no ref" "$(holds)" ""
+    has "set with invalid session id '$bad' prints a message" "$OUT" "CLAUDE_CODE_SESSION_ID"
 done
+
+echo "== set: reason shapes"
+new_repo
+run "$SID" set
+eq "set with no reason exits 0" "$EC" 0
+eq "empty reason writes exactly 'reason: '" "$(git -C "$REPO" cat-file -p "refs/holds/$SID" | sed -n 1p)" "reason: "
+
+new_repo
+run "$SID" set waiting for the operator
+eq "multi-argument reason is joined with spaces" "$(git -C "$REPO" cat-file -p "refs/holds/$SID" | sed -n 1p)" "reason: waiting for the operator"
+
+new_repo
+run "$SID" set "$(printf 'line one\nline two\tTabbed\r')"
+eq "newline reason exits 0" "$EC" 0
+B="$(git -C "$REPO" cat-file -p "refs/holds/$SID")"
+eq "newline reason leaves exactly three lines" "$(printf '%s\n' "$B" | grep -c '')" 3
+eq "newline reason is flattened onto line 1" "$(printf '%s\n' "$B" | sed -n 1p)" "reason: line one line two Tabbed "
+case "$(printf '%s\n' "$B" | sed -n 2p)" in
+    set-at:\ ????-??-??T??:??:??Z) ok "newline reason: line 2 is still set-at" ;;
+    *) no "newline reason: line 2 is still set-at" "got: $(printf '%s\n' "$B" | sed -n 2p)" ;;
+esac
+case "$(printf '%s\n' "$B" | sed -n 3p)" in
+    head:\ *) ok "newline reason: line 3 still starts with head:" ;;
+    *) no "newline reason: line 3 still starts with head:" "got: $(printf '%s\n' "$B" | sed -n 3p)" ;;
+esac
+
+new_repo
+HIJ="$(printf 'sneaky\nset-at: 1999-01-01T00:00:00Z')"
+run "$SID" set "$HIJ"
+B="$(git -C "$REPO" cat-file -p "refs/holds/$SID")"
+case "$(printf '%s\n' "$B" | sed -n 2p)" in
+    set-at:\ 1999*) no "hijack: stored set-at is the real time, not 1999" "got: $(printf '%s\n' "$B" | sed -n 2p)" ;;
+    set-at:\ ????-??-??T??:??:??Z) ok "hijack: stored set-at is the real time, not 1999" ;;
+    *) no "hijack: stored set-at is the real time, not 1999" "got: $(printf '%s\n' "$B" | sed -n 2p)" ;;
+esac
+run "$SID" set "$HIJ again"
+B="$(git -C "$REPO" cat-file -p "refs/holds/$SID")"
+eq "hijack: second set exits 0" "$EC" 0
+case "$(printf '%s\n' "$B" | sed -n 2p)" in
+    set-at:\ 1999*) no "hijack: set-at after a SECOND set is not 1999" "got: $(printf '%s\n' "$B" | sed -n 2p)" ;;
+    set-at:\ ????-??-??T??:??:??Z) ok "hijack: set-at after a SECOND set is not 1999" ;;
+    *) no "hijack: set-at after a SECOND set is not 1999" "got: $(printf '%s\n' "$B" | sed -n 2p)" ;;
+esac
 
 echo "== set: blob format"
 new_repo
@@ -115,6 +159,22 @@ run "$SID" release
 eq "release of an absent hold exits 0" "$EC" 0
 has "release of an absent hold says no hold" "$OUT" "no hold"
 
+# Collateral: releasing another sid must leave the caller's own hold alone.
+new_repo
+run "$SID" set "mine"
+run "$OTHER" set "theirs"
+run "$SID" release "$OTHER"
+eq "release of another sid exits 0 (collateral case)" "$EC" 0
+eq "releasing another sid leaves the caller's own hold present" "$(holds)" "refs/holds/$SID"
+
+# Invalid sid arguments: message, exit 0, other holds intact.
+for bad in '../x' 'a/b'; do
+    run "$SID" release "$bad"
+    eq "release '$bad' exits 0" "$EC" 0
+    has "release '$bad' prints a message" "$OUT" "no session id"
+    eq "release '$bad' leaves other holds intact" "$(holds)" "refs/holds/$SID"
+done
+
 echo "== list"
 new_repo
 run "$SID" list
@@ -139,6 +199,18 @@ case "$(printf '%s' "$SIDROW" | cut -f3)" in
     ''|*[!0-9a-z]*) no "list row has a non-empty age column" "got: $(printf '%s' "$SIDROW" | cut -f3)" ;;
     *) ok "list row has a non-empty age column" ;;
 esac
+
+echo
+echo "== list without resolve-sids.sh beside the script"
+ALONE="$(mktemp -d "$SCRATCH/alone-XXXXXX")"
+cp "$SCRIPT" "$ALONE/hold-publish.sh"
+OUT="$(cd "$REPO" && HOME="$FAKEHOME" CLAUDE_CODE_SESSION_ID="$SID" bash "$ALONE/hold-publish.sh" list 2>&1)"
+EC=$?
+eq "list with the helper missing exits 0" "$EC" 0
+eq "list with the helper missing still prints both holds" "$(printf '%s\n' "$OUT" | grep -c .)" 2
+eq "list with the helper missing marks the first row ?" "$(printf '%s\n' "$OUT" | grep -F "$SID" | cut -f2)" "?"
+eq "list with the helper missing marks the second row ?" "$(printf '%s\n' "$OUT" | grep -F "$OTHER" | cut -f2)" "?"
+hasnt "list with the helper missing reports no 'command not found'" "$OUT" "command not found"
 
 echo
 echo "PASS: $PASS  FAIL: $FAIL"

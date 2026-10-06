@@ -35,7 +35,8 @@ case "$cmd" in
             printf 'hold-publish: CLAUDE_CODE_SESSION_ID is empty or not [A-Za-z0-9-]+; cannot record a hold\n' >&2
             exit 2
         fi
-        reason="$*"
+        # Flatten: a newline would shift the blob's fixed line layout, a tab would break `list` columns.
+        reason="$(printf '%s' "$*" | tr '\n\r\t' '   ')"
         ref="refs/holds/$sid"
         head="$(git rev-parse HEAD 2>/dev/null)" || head=""
         set_at=""
@@ -81,6 +82,7 @@ case "$cmd" in
             reason="$(printf '%s\n' "$body" | sed -n 's/^reason: //p' | sed -n 1p)"
             set_at="$(printf '%s\n' "$body" | sed -n 's/^set-at: //p' | sed -n 1p)"
             age="?"
+            # GNU date only (-d); on other dates it fails and the age stays "?".
             if t="$(date -d "$set_at" +%s 2>/dev/null)"; then
                 d=$((now - t))
                 if [ "$d" -lt 60 ]; then age="${d}s"
