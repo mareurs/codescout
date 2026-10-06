@@ -596,40 +596,20 @@ fn read_markdown_line_range(
             v
         };
         // `coverage` has no length of its own. It rides in the skeleton, and is dropped
-        // (marked `coverage_omitted`) only when it would cost the page its first line whole:
-        // content first, as `drop_to_fit` orders it for the inline arm.
+        // (marked `coverage_omitted`) only when it is over the limit alone or would cost the
+        // page its first line whole: the rule `read_with_line_range` shares.
         let skeleton = base(
             end,
             Some(next_at(end.saturating_add(1))),
             true,
             String::new(),
         );
-        let with_cov = match &md_cov {
-            Some(c) => {
-                let mut v = skeleton.clone();
-                v["coverage"] = c.clone();
-                with_format(v)
-            }
-            None => with_format(skeleton.clone()),
-        };
-        let mut page = crate::tools::read_file::buffer_page(
+        let (page, keep_cov) = crate::tools::read_file::page_beside_coverage(
             &content,
-            crate::tools::read_file::buffer_page_room(&with_cov),
+            &skeleton,
+            md_cov.as_ref(),
+            with_format,
         );
-        let mut keep_cov = md_cov.is_some();
-        if keep_cov && (crate::tools::exceeds_inline_limit(&with_cov.to_string()) || page.3) {
-            let without = finalize_dropped(skeleton, &["coverage"]);
-            let alt = crate::tools::read_file::buffer_page(
-                &content,
-                crate::tools::read_file::buffer_page_room(&without),
-            );
-            // A line cut either way keeps `coverage`: dropping it would buy bytes of a line
-            // the caller must `grep -o` for anyway.
-            if crate::tools::exceeds_inline_limit(&with_cov.to_string()) || !alt.3 {
-                page = alt;
-                keep_cov = false;
-            }
-        }
         let (chunk, lines_shown, complete, line_truncated) = page;
         let orig_end = orig_start + lines_shown.saturating_sub(1);
         // `complete == false` means the room stopped the page short of `end`, and the valve

@@ -578,6 +578,46 @@ pub(super) fn buffer_page(body: &str, room: usize) -> (String, usize, bool, bool
     let (chunk, line_truncated) = clamp_over_budget_line(chunk, room);
     (chunk, lines_shown, complete, line_truncated)
 }
+/// One page of a buffered range read that may carry `coverage` beside it, and whether it does.
+///
+/// `coverage` names every unread heading of a markdown file and has no length of its own. It
+/// rides in the skeleton and is dropped (the response then marks `coverage_omitted`) in two
+/// cases only: when the skeleton with it is over the limit by itself, so no page fits beside it,
+/// or when it would cost the page its first line whole and the line shows whole without it. A
+/// line cut either way keeps `coverage`: dropping it would buy bytes of a line the caller must
+/// `grep -o` for anyway. Shared by [`read_with_line_range`] and the markdown range arm, so the
+/// two arms that serve a markdown range decide alike. `skeleton` is the page with `content`
+/// empty and every other key at its widest; `finish` adds what the caller's response adds to
+/// every return shape (`format`, `source`), so the room is measured on what is returned.
+pub(crate) fn page_beside_coverage(
+    content: &str,
+    skeleton: &Value,
+    coverage: Option<&Value>,
+    finish: impl Fn(Value) -> Value,
+) -> ((String, usize, bool, bool), bool) {
+    let with_cov = {
+        let mut v = skeleton.clone();
+        if let Some(c) = coverage {
+            v["coverage"] = c.clone();
+        }
+        finish(v)
+    };
+    let mut page = buffer_page(content, buffer_page_room(&with_cov));
+    let mut keep = coverage.is_some();
+    if keep {
+        let over_alone = crate::tools::exceeds_inline_limit(&with_cov.to_string());
+        if over_alone || page.3 {
+            let mut without = skeleton.clone();
+            without["coverage_omitted"] = json!(true);
+            let alt = buffer_page(content, buffer_page_room(&finish(without)));
+            if over_alone || !alt.3 {
+                page = alt;
+                keep = false;
+            }
+        }
+    }
+    (page, keep)
+}
 
 /// The advisory attached whenever [`clamp_over_budget_line`] cuts.
 ///
@@ -955,14 +995,11 @@ fn read_with_line_range(
         None
     };
 
-    // Every response below carries `source` and `coverage` beside the content, so both arms
-    // are decided and sized with them in.
-    let extras = |mut v: Value| -> Value {
+    // Every response below carries `source` beside the content, and `coverage` or its
+    // `coverage_omitted` marker, so both arms are decided and sized with them in.
+    let with_source = |mut v: Value| -> Value {
         if source_tag != "project" {
             v["source"] = json!(source_tag);
-        }
-        if let Some(c) = &md_cov {
-            v["coverage"] = c.clone();
         }
         v
     };
@@ -970,11 +1007,22 @@ fn read_with_line_range(
     // Inline when the RESPONSE fits, not when the slice's raw bytes do: a 12 KB line of
     // ASCII, or 9,990 B of escaped text, went inline here and was buffered by `call_content`
     // under `@tool_*`. The raw pre-check only skips a candidate that cannot fit (escaping
-    // never shrinks a string).
+    // never shrinks a string). `coverage` has no length of its own (600 unread headings are
+    // about 33 KB), so it goes first, marked `coverage_omitted`, as the markdown range arm
+    // drops it: a short range must not be buffered for it.
     if !crate::tools::exceeds_inline_limit(&content) {
-        let inline = extras(json!({ "content": &content }));
+        let mut inline = with_source(json!({ "content": &content }));
+        if let Some(c) = &md_cov {
+            inline["coverage"] = c.clone();
+        }
         if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
             return Ok(inline);
+        }
+        if md_cov.is_some() {
+            let lean = with_source(json!({ "content": &content, "coverage_omitted": true }));
+            if !crate::tools::exceeds_inline_limit(&lean.to_string()) {
+                return Ok(lean);
+            }
         }
     }
 
@@ -1006,8 +1054,9 @@ fn read_with_line_range(
     let orig_start = start as usize;
     // The page sized with every other key counted at its widest: `shown_lines` ends at most
     // at `end` and `next` resumes at most at `end + 1`. The over-wide-line hint names the
-    // slice's own handle, where `grep -o` reaches the line.
-    let widest = extras(json!({
+    // slice's own handle, where `grep -o` reaches the line. `coverage` is decided beside it by
+    // the rule the markdown range arm uses ([`page_beside_coverage`]).
+    let widest = json!({
         "content": "",
         "file_id": file_id,
         "total_lines": file_total_lines,
@@ -1019,9 +1068,9 @@ fn read_with_line_range(
             "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
             end.saturating_add(1)
         ),
-    }));
-    let (chunk, lines_shown, complete, line_truncated) =
-        buffer_page(&content, buffer_page_room(&widest));
+    });
+    let ((chunk, lines_shown, complete, line_truncated), keep_cov) =
+        page_beside_coverage(&content, &widest, md_cov.as_ref(), with_source);
     let orig_end = orig_start + lines_shown.saturating_sub(1);
     let mut result = json!({
         "content": chunk,
@@ -1042,7 +1091,12 @@ fn read_with_line_range(
             orig_end + 1
         ));
     }
-    Ok(extras(result))
+    match &md_cov {
+        Some(c) if keep_cov => result["coverage"] = c.clone(),
+        Some(_) => result["coverage_omitted"] = json!(true),
+        None => {}
+    }
+    Ok(with_source(result))
 }
 
 /// The overflow hint for a whole-file read that was summarised instead of returned.
