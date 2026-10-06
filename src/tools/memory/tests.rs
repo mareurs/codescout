@@ -2927,6 +2927,46 @@ async fn memory_read_falls_back_to_the_other_layout_and_names_the_write_target()
         "write_target must name where a write would land instead: {read:?}"
     );
 }
+// `resolved_from` and `write_target` ride in the response, so the inline-or-buffered decision must
+// count them: a read from the OTHER layout whose content alone fits but whose content plus those two
+// paths does not must come back as one `file_id`, not as an inline response `call_content` then
+// re-buffers under `@tool_*`. Sweeps the ~125 B window the two paths open at the edge.
+#[tokio::test]
+async fn a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_gate() {
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    let mut buffered = 0;
+    let mut inline = 0;
+    for n in 9_800..=9_990 {
+        let topic = format!("shadow-{n}");
+        seed(&local_layout_dir(&root), &topic, &"a".repeat(n));
+        let read = Memory
+            .call(
+                json!({ "action": "read", "topic": topic, "project_id": "svc" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(
+            read.get("resolved_from").is_some() && read.get("write_target").is_some(),
+            "n={n}: the provenance keys must be present in either arm: {read:.200}"
+        );
+        let text = read.to_string();
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "n={n}: the returned response is {} B and would be re-buffered under @tool_*",
+            text.len()
+        );
+        if read.get("file_id").is_some() {
+            buffered += 1;
+        } else {
+            inline += 1;
+        }
+    }
+    assert!(
+        buffered > 0 && inline > 0,
+        "the sweep must cross the edge: {inline} inline, {buffered} buffered"
+    );
+}
 
 /// Negative control for the test above: a topic served FROM the write target
 /// carries no provenance fields at all. Without this, a formatter that always
