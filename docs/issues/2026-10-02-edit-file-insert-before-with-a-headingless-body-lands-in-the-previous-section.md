@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-10-06
 opened: 2026-10-02
 owner: marius
 related: []
@@ -68,7 +68,7 @@ exposed by `edit_file`'s markdown grammar; the implementation is under `src/tool
 
 ## Root cause
 
-Not investigated. Only the observable behavior was checked. The schema text for `body` reads
+Established while fixing it (`46e26fa3`): the insert splice lands at the anchor heading's line start, which is the END of the preceding section, so a body that does not open with its own heading line adds no section and its text joins whatever precedes the anchor. (Earlier text of this section: only the observable behavior had been checked.) The schema text for `body` reads
 "the section's new body text for replace/insert actions (heading preserved on replace)", and the
 action description says insert adds "a sibling section". Neither says that for insert the heading
 must be written into `body`, and `replace` explicitly does NOT need it. So a caller who follows
@@ -85,21 +85,24 @@ None. Not investigated.
 
 ## Fix
 
-Not implemented. Two options, either alone would close it:
-
-1. **Refuse or warn** when an insert action's `body` has no leading heading line at the level of
-   the anchor, naming the fix ("insert adds a sibling section; put its heading in body").
-   `RecoverableError` with a hint fits the repo's error convention.
-2. **Make the schema say so.** State in the `body` description that for insert the new section's
-   own heading line must be included. Cheaper, and does not help a caller who does not read it.
-
-Option 1 is the stronger one: the failing case looks exactly like success, which is this repo's
-own definition of a guard that nothing observes.
+Option 1 was implemented, for `insert_before` only. `insert_after` was deliberately NOT changed, although the bug text asks for it too. A headingless `insert_after` body with the default `at="end-of-section"` lands at the end of the TARGET section, which is the documented append-to-section use, and the new refusal hint itself sends callers there; refusing it would break that use and would not stop any misfiled text, since the text goes where the caller pointed. `insert_before` has no such use, because its splice point is the end of a different section from the one named. `plan_section_edit` in `src/tools/markdown/edit_markdown.rs` now refuses an `insert_before` whose first non-blank body line is not an ATX heading (`opens_with_heading`, which reuses `heading_level`, so `#hashtag` and seven hashes do not count), with a `RecoverableError` whose hint shows a heading-led corrected call. Single edits, `edits[]` batches and `doc(update, body_edits)` all route through `plan_section_edit`, so all three are covered. Option 2 was applied as well: the `body` schema description in `src/tools/edit_file/mod.rs` states that insert_before's body must start with its own heading line, and the `LONG_DOCS` table says the same. To keep the tool-surface byte budget unchanged (the budget was not raised), an equal sentence, "'edit' performs scoped text replacement within the target section.", was removed from the `action` description.
 
 ## Tests added
 
-N/A: not fixed. A regression test for option 1 should assert that a headingless body on
-`insert_before` and on `insert_after` is refused, and that a body starting with a heading is not.
+In `src/tools/markdown/tests.rs`:
+
+- `a_headingless_insert_before_is_refused_and_writes_nothing` pins the single-edit refusal and that the file is unchanged.
+- `a_headingless_insert_before_in_a_batch_is_refused_and_writes_nothing` pins the same for an `edits[]` batch.
+- `an_insert_before_with_a_leading_heading_still_adds_the_section` pins that a heading-led body is still accepted and adds the section.
+- `insert_before_heading_detection_uses_the_first_non_blank_line` unit-tests the heading predicate.
+- `a_headingless_insert_after_still_appends_to_the_section` pins that `insert_after` is unchanged.
+
+Four existing tests that passed headingless `insert_before` bodies were changed to heading-led bodies: three in `src/tools/markdown/tests.rs` (`batch_coincident_insert_and_span_is_order_independent`, `plan_section_edit_insert_after_and_remove_match_legacy`, `every_advertised_batch_action_actually_dispatches`) and one in `src/librarian/tools/update.rs`. No dedicated test asserts the refusal through `doc(update, body_edits)`; that path is covered by sharing `plan_section_edit`.
+
+## Fix provenance
+
+- **SHA:** `46e26fa3` (`experiments`)
+- **patch-id:** `cd9242bf78375eeb081746d877380dd600389421`
 
 ## Workarounds
 
@@ -108,9 +111,7 @@ this session the second form was used to repair `CLAUDE.md` after the first call
 
 ## Resume
 
-Start at `src/tools/markdown/` and find where `insert_before` and `insert_after` splice `body`.
-Check whether the splice looks at `body`'s first line at all. Then decide between the two options
-above.
+Closed on 2026-10-06 by `46e26fa3` (local on `experiments`, not pushed at the time of writing), for `insert_before` only; `insert_after` is unchanged on purpose (see Fix). Residual follow-ups, listed and not filed: (1) the wrappers re-wrap this error with the generic hint "Check heading name and action." (seen in `src/librarian/tools/update.rs`'s body_edits path), so the structured `hint` field reads generic for this refusal; the specific corrected-call hint is not what that field carries. (2) There is no dedicated `doc(update, body_edits)` test of the refusal.
 
 ## References
 

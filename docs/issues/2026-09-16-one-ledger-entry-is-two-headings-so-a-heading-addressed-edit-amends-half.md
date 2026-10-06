@@ -1,7 +1,7 @@
 ---
 id: '6cd56693dd5a95db'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: one ledger entry is two headings apart, so a heading-addressed edit amends half of it and reports success'
 tags:
 - cluster/selector-narrower-than-its-population
@@ -9,7 +9,7 @@ tags:
 - doc-tool
 - trackers
 topic: librarian document editing
-closed: null
+closed: 2026-10-06
 opened: 2026-09-16
 severity: medium
 ---
@@ -94,23 +94,24 @@ actually lives under, before filing.
 
 ## Fix
 
-Not attempted, and the choice is a document-structure question rather than a tool one, which is
-why this file does not pick:
-
-- **Make the entry one surface.** What `tracker-conventions` already argues. Largest change;
-  four sessions write that ledger concurrently and the Index table is what makes it scannable.
-- **Have `append_entry`'s two-surface write be the only writer**, so amendments go through a
-  call that knows both halves — it already writes section and row in one `fs::write`.
-- **Name the other surface in the response.** Cheapest: when a `body_edits` heading matches an
-  entry-shaped heading (`^## [A-Z]+-\d+ —`), have the response note that an Index row for that
-  id exists and was not touched. Does not change any document, and closes the *silent* half.
+Implemented the third option only, the cheapest one: it names the other surface and closes the SILENT half of the defect. The two-surface document structure is unchanged: an entry is still a `## F-N — <title>` section plus a `| F-N | … |` Index row, a `body_edits` call still amends only the heading it is addressed to, and the first two options (one surface, or `append_entry` as the only writer) were not attempted. In `src/librarian/tools/update.rs`, `untouched_index_rows` (:401) takes the content before and after the whole `body_edits` batch plus the edits. For each edit whose `heading` starts with an entry id (`F-168`, optionally behind `##`), it finds the table lines whose first cell is exactly that id, and reports the id when such a row exists and is byte-identical before and after. The `update` response (:916) then carries `untouched_index_rows: [ids]` and appends a warning that names the row left untouched, appended to any existing `warning` rather than replacing it. A batch that also amends the row stays silent, as does an entry with no row and an edit to a non-entry heading. The detection is textual, so a `| F-N |` line inside a fenced block counts as a row.
 
 ## Tests added
 
-None — no fix chosen. The shape any guard needs: amend a section through `doc(update)` and
-assert the response mentions the untouched row; paired with an amendment to an entry that has
-**no** row, asserting silence. Without the pair, a response that always warns passes the first
-assertion.
+In `src/librarian/tools/update.rs`:
+
+- `amending_an_entry_section_names_the_index_row_it_left_untouched` (:3989) pins that amending a section whose Index row is untouched returns `untouched_index_rows == ["F-1"]`.
+- `amending_an_entry_that_has_no_index_row_is_silent` (:4014) is the paired silent case the bug asked for, so a response that always warns fails.
+- `an_edit_that_also_changes_the_index_row_is_silent` (:4030) pins that a batch that amends the row too does not warn.
+- `editing_a_non_entry_heading_never_looks_for_an_index_row` (:4050) pins that a non-entry heading is never matched against rows.
+- `untouched_index_rows_compares_the_row_lines_before_and_after` (:4065) unit-tests the predicate on the before/after row comparison.
+
+No integration test covers the path that appends to an already-present `warning`.
+
+## Fix provenance
+
+- **SHA:** `e0279e3d` (`experiments`)
+- **patch-id:** `70809e619922cd71984d31e7afe273d3c4127ede`
 
 ## Workarounds
 
@@ -128,9 +129,7 @@ what it did not.
 
 ## Resume
 
-Decide between the three options in § *Fix*. The third is cheap, changes no document, and
-closes the silent half rather than the split — it is the only one that does not need agreement
-from the sessions sharing the ledger.
+Closed on 2026-10-06 by `e0279e3d` (local on `experiments`, not pushed at the time of writing), for the silent half only: the response now names the untouched Index row, but an entry is still two headings and a section amendment still does not amend the row. Residual follow-ups, listed and not filed: (1) the guide conflict is untouched: `librarian.md:144` says to keep the table too if it reads well, while `tracker-conventions.md` (around :807) says not to hand-maintain an index beside sections. (2) The detection is textual, so a `| F-N |` line inside a fenced block counts as a row. (3) The branch that appends to an existing `warning` has no integration test. (4) Options 1 and 2 of the Fix section (one surface, or `append_entry` as the only writer) remain undone.
 
 ## References
 

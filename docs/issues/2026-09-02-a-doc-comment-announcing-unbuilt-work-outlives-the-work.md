@@ -158,11 +158,27 @@ Run `librarian(action="doctor")` before believing any claim about what the libra
 not check. Thirteen entry-validity findings were sitting unread in this project at the time of
 filing.
 
+## Partial fix (2026-10-06)
+
+- **SHA:** `5a9ff28b` (`experiments`)
+- **patch-id:** `dcb91d509bca46cf8b46f83afceb79e4588d5f9f`
+
+What is covered (comment-only, two instances):
+
+- `src/tools/symbol/call_graph/traversal.rs` lost its stale "Traversal engine is not yet wired into the tool (Task 10); suppress dead_code until then." comment AND the `#![allow(dead_code)]` it justified. The sweep brief reports `clippy -D warnings` stays clean in both the default and `--no-default-features` lanes, so the allow was hiding nothing; this bookkeeping pass did not re-run clippy. **Why this file's own regex missed it:** the removed line was a `//` line comment, and the population regex in `## Evidence` starts at `///`, so the population count there (3 live) was an undercount.
+- `src/retrieval/config.rs` `RetrievalConfig::dense_model_name` doc comment reworded from the code and the plan. It had said the shadow warning "lands with Task 5" of `docs/plans/2026-09-17-embedding-config-consolidation.md`. It now says Task 5 landed (5a `dotenv_shadowed_fields`, 5b the `CODESCOUT_EMBEDDING_*` family) WITHOUT a shadow warning for the `CODESCOUT_EMBEDDER_MODEL_NAME` override, and that the provenance that did land (`DotenvProvenance` on `EmbedEnv`) covers dotenv-versus-config for `url` / `model` / `api_key` only. This settles the "possible new instance, unconfirmed" note under `## Fix`: it was stale. The comment also states the override is read outside that path (`RetrievalConfig::from_env_and_project` calls `std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME")` directly, seen at `src/retrieval/config.rs:253`); whether the deprecated-alias machinery in `src/config/embedding_env.rs` also touches that variable was not examined here.
+
+Tests added: none, deliberately (comment-only; see `## Tests added`).
+
+What is NOT covered:
+
+- **The gate for the class** (a forward reference must name a symbol, and the symbol must not resolve) is not built. That is a decision at n=3, deliberately not built; the frontmatter `unverified:` caveat is kept for that reason. With `traversal.rs` found, the population is at least 4 instances, not 3.
+- `src/agent/mod.rs` (now line 809: "Level-2 sub-project pinning ... is not yet wired") is still true and was not touched. It is the next scheduled instance; this file's earlier `:687` and the `## Fix` sweep note's `:792` citations have both drifted.
+- The warning for `CODESCOUT_EMBEDDER_MODEL_NAME` overriding a configured `[embeddings].model` is genuinely unbuilt: build it or drop the idea.
+
 ## Resume
 
-Decide whether the § *Fix* mechanism is worth a gate at n=3. If not, at minimum re-run the
-population grep when `src/agent/mod.rs`'s level-2 pinning lands — that is the next scheduled
-instance, and it is predictable **by name and by file**, which is more than most classes offer.
+Both known stale forward references are fixed on `experiments` (local, not pushed at the time of writing). Status stays `open` because the class is still unguarded. Marius decides (1) whether the forward-reference gate is worth building now that the population is at least 4 and a `//`-comment instance was found that the filed regex could not see (widen the regex to `//`-style comments before re-deriving the count), and (2) whether the `CODESCOUT_EMBEDDER_MODEL_NAME` shadow warning is built or the idea dropped. Re-run the population grep (with `//`, not only `///`) when `src/agent/mod.rs`'s level-2 pinning lands.
 
 ## References
 

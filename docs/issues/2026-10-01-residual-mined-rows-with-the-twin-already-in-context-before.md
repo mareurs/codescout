@@ -1,12 +1,14 @@
 ---
 id: eb9014f896a48715
 kind: bug
-status: open
+status: fixed
 title: 'RESIDUAL: 10 mined candidates already carry the twin inside context_before, and nothing flags or excludes them'
 owners:
 - marius
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
+closed: 2026-10-06
+unverified: The T-set loop in freeze_stage2.py (:168-173) still builds mined positives from context_before with no twin check, there is no mining-time flag (gitlog.patch absent), and the freeze-level skip is not unit-tested; none of the ten rows is in a frozen set today, so no leak is observed.
 ---
 
 # RESIDUAL: 10 mined candidates already carry the twin inside context_before, and nothing flags or excludes them
@@ -34,8 +36,41 @@ It is not a drive-by, for two reasons that are facts about this tree and not pre
 
 ## Fix
 
-Not started. Options, none free: a boolean on each row at mining time (`twin_in_context_before`) so a consumer can exclude it, which needs `gitlog.patch` to regenerate; or a filter in the freeze step, which has to be shown not to change the frozen draw. The miner's own tests are in `tests/test_stage2_mine_pairs.py`, and a flag at mining time is where its end-to-end fixtures would extend.
+A guard, not a regeneration. `b45bcce4` (3 files, 59 insertions), on `experiments`:
+
+- `mine_pairs.twin_in_context_before(row)` in `docs/evals/data/2026-09-24-rule-tell/stage2/mine_pairs.py`: whitespace-normalised containment of the row's twin in its own `context_before`, and False for a row with no twin (an unguarded `"" in text` is True, which would flag the 9 twinless rows).
+- The mined-rows items loop in `docs/evals/data/2026-09-24-rule-tell/stage2/freeze_stage2.py` (`split == "rest"` rows, which feed the train / val / cal folds; the guard is at `:136`) skips a row for which it is True. The skip count is printed to stdout (`mined rows skipped, twin already in context_before:`) and deliberately not added to the manifest counter `n`, so the manifest bytes cannot move.
+
+The ten committed rows (0-based ids 267, 327, 439, 534, 592, 593, 677, 810, 929, 941) are exactly the rows the predicate flags. None reaches a frozen set, so the frozen data does not change: the freeze re-run at the time of the fix reproduced every per-set sha256, and `git diff --stat fac7abce HEAD -- docs/evals/data` shows only the two scripts (re-checked at HEAD `fda10a31`: `freeze_stage2.py` 5 insertions, `mine_pairs.py` 10 insertions).
+
+Not done:
+
+- The T-set loop (`freeze_stage2.py:168-173`) still builds mined positives from `r["context_before"]` with no twin check. None of the ten ids is in T today (see Evidence), so nothing leaks, but a re-draw into T would.
+- No mining-time flag on each row: `gitlog.patch` is not committed, so `mined-candidates.jsonl` cannot be regenerated here.
+- The skip is not unit-tested at freeze level; only a monkeypatch run, not committed, showed it is wired.
 
 ## Tests added
 
-None. The regression suite for the miner's context handling landed in `b3f08301` and covers the fixed behaviour; it does not cover this residual, which is unhandled behaviour and not a fixed one.
+Five tests in `tests/test_stage2_mine_pairs.py`, class `TwinInContextBefore` (run at HEAD `fda10a31`: 5 tests, OK):
+
+- `test_a_twin_inside_context_before_is_flagged` — the predicate returns True when the twin is in the window.
+- `test_the_comparison_ignores_whitespace_differences` — a twin split across a line break or double space still matches (the measurement was whitespace-normalised).
+- `test_a_twin_absent_from_context_before_is_not_flagged` — the negative twin of the first, so a predicate that is True for every row fails.
+- `test_a_row_with_no_twin_is_not_flagged` — `None` and `""` twins return False (the unguarded `"" in text` trap).
+- `test_the_committed_candidates_flag_exactly_the_ten_rows_the_issue_measured` — over the committed `mined-candidates.jsonl`, the flagged ids equal `[267, 327, 439, 534, 592, 593, 677, 810, 929, 941]`.
+
+The freeze-level skip in `freeze_stage2.py` has no test of its own.
+
+## Fix provenance
+
+- **SHA:** `b45bcce4` (`experiments`)
+- **patch-id:** `26c0c9fdaa143295cdfb4a8bf9ca813a717841ef`
+
+## Resume
+
+Closed on 2026-10-06 by `b45bcce4` as a guard on the latent defect; the frozen data was clean before and is unchanged. Residual follow-ups (listed, not filed):
+
+- Add the same `twin_in_context_before` check to the T-set loop in `freeze_stage2.py` (`:168-173`), or document why T is exempt.
+- A mining-time boolean (`twin_in_context_before`) on each row, once `gitlog.patch` is available to regenerate `mined-candidates.jsonl`.
+- A freeze-level test that the skip is wired (a row carrying its twin in `context_before` must not appear in the frozen output).
+- Surface the skip count in the manifest only if a re-freeze is ever accepted to change manifest bytes.

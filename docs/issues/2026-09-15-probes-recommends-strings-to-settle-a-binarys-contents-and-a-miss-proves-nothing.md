@@ -1,10 +1,11 @@
 ---
 id: ded9143998081efc
 kind: bug
-status: open
+status: fixed
 title: 'BUG: PROBES.md offers inspection as co-equal to a behavioural probe, and every inspection instrument''s miss proves nothing'
 tags:
 - cluster/selector-narrower-than-its-population
+closed: 2026-10-06
 ---
 
 ## Summary
@@ -140,6 +141,10 @@ sibling code path with a cost the sibling doesn't pay should count as recoverabl
 here answers a **different question** (does the binary have the behaviour), not the same statistic
 by another route, so this settles nothing either way on that boundary.
 
+**Fixed 2026-09-15 by `8289a448`** (`docs/PROBES.md`, 1 insertion, 1 deletion: the one row, which is now line 185). The row now says to probe a **behaviour**, "never the metadata, and never an inspection of the bytes alone", and says outright that "the inspection half was wrong and is corrected here 2026-09-15". It states the family property this file asked for: *every* inspection instrument (`strings`, `ldd`, `nm`, `objdump`, `readelf`) answers in one direction (a hit proves presence, a miss proves nothing, because absence is a property of the SCAN, not of the binary). It gives a behavioural probe as the example (point the binary at a scratch catalog and read the schema version it writes: `12` plus the v1 `artifact_vec` means a pre-v13 build), the CONTINGENT (`strings`) versus STRUCTURAL (`ldd`) split, the warning that a reader told only that `strings` is unreliable lands on the worse instrument, and the rule "use inspection to corroborate a positive, never to establish a negative". `strings` is demoted, not deleted, as the Fix below required. The Summary above quotes the row as it read before this commit.
+
+The text below is the proposal as written when the bug was filed.
+
 ## Fix
 
 Not designed, and the cheap half needs no diagnosis: **stop presenting the two as alternatives.**
@@ -171,18 +176,25 @@ exactly what happened one step later, and was called *"the decisive test"*. A ca
 instrument does not just under-cover the family, it actively routes the reader to a member with no
 conditions attached at all.
 
+## Tests added
+
+none: documentation fix. A row of prose in `docs/PROBES.md` has no behaviour to pin, and pinning its sentences would be the sentence-pinning `CLAUDE.md` § *Testing Discipline* advises against.
+
+## Fix provenance
+
+- **SHA:** `8289a448` (`experiments`)
+- **patch-id:** `b76bad201183222ddd1a5ca2307de786b8f5584a`
+
 ## Resume
 
-One build flag at a time on a fixed source tree — `--features server-stack` vs `local-embed`, then
-`lto`, then `codegen-units` — checking whether the control string survives `strings` in each. **Keep
-each binary**; the reason this bug cannot be closed from the existing evidence is that the
-interesting one was overwritten. If a flag is the differentiator, the caveat can name the *regime*
-rather than only the direction, which is strictly better.
+Closed on 2026-10-06 by `8289a448` (committed 2026-09-15, on `experiments`; the bug file was never closed). What remains is optional measurement, not a blocker, and is not filed:
+
+- The investigative remainder: one build flag at a time on a fixed source tree (`--features server-stack` vs `local-embed`, then `lto`, then `codegen-units`), checking whether the control string survives `strings` in each, **keeping each binary**. If a flag is the differentiator, the caveat could name the *regime* rather than only the direction. The row today says only that the regime cannot be told from the output.
+- Whether `nm`, `objdump` and `readelf` were each measured to answer one-directionally: the row asserts it for the family, but only `strings` and `ldd` were measured in this file.
 
 ## References
 
-- `docs/PROBES.md`:180 — the row recommending both instruments; unchanged as of `b4660a99`, and
-  `00be0fcf` did not touch it
+- `docs/PROBES.md`:185 — the row (it was `:180` when this was filed). Changed by `8289a448`; it was unchanged as of `b4660a99`, and `00be0fcf` did not touch it
 - `docs/trackers/embedder-stack-ops-session-log.md` `F-6` (`3cbaf75df04686dd`) — the incident, the
   first measurement, the retraction, and the `scripts/rb.sh` seam. **This file deliberately does not
   re-file that**; it is about the PROBES.md recommendation, which `F-6` does not own

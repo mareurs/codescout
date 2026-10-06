@@ -1,7 +1,7 @@
 ---
 id: '95f8edf02e65851e'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a Session-Id trailer names who committed, not who wrote the lines the commit changes'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
@@ -9,6 +9,7 @@ tags:
 - attribution
 - provenance
 - eval-corpus
+closed: 2026-10-06
 ---
 
 **Valid:** dated 2026-09-22
@@ -66,17 +67,19 @@ So roughly **one correction in six** attributes to the wrong session, and a furt
 
 ## Fix
 
-No code change proposed. The remedy is a reading rule, and it already has a caller:
+No code change. The remedy is a reading rule, and it is now written once, in a convention page: [`docs/conventions/session-id-trailer-attributes-the-committer.md`](../conventions/session-id-trailer-attributes-the-committer.md) (added by `39960f6b`, 74 lines, one new file).
 
-> To attribute a corrected claim to its author, blame the **removed** side of the hunk and take the **antecedent commit's** trailer — never the correcting commit's.
+> To attribute a corrected claim to its author, blame the **removed** side of the hunk at the parent and take the **antecedent commit's** trailer, read with git's own trailer parser — never the correcting commit's.
 
-`docs/evals/rule-injection-timing-preregistration.md` (`11f039dc91b862ec`, committed `645213ab`) applies this, and states its corpus as 120 commits across 45 sessions **because** of this defect. That is the cost made concrete: the naive reading would have inflated the corpus by 51% and seeded a replay experiment with transcripts that do not contain the violation being replayed.
+The page records the rule, why the failure is silent, and the 181 to 120 commits mis-attribution measurement (the census in Evidence above), and lists the two callers.
 
-Whether the rule belongs in `get_guide("tracker-conventions")`, in a `scripts/` helper, or only here is unadjudicated — one caller does not establish a convention.
+The earlier "one caller, not yet a convention" was stale when this was closed: `scripts/measure/miner.py` already encodes the rule in code (module docstring `:8-12`, which cites this bug file; `session_id_of` `:89-107` reads the trailer through `%(trailers:key=Session-Id,valueonly)`; `_blame_shas` `:173` blames at the parent over the old-side range; `_antecedents_of` `:209`; the antecedent's trailer is read at `:351`), and `docs/evals/rule-injection-timing-preregistration.md:76` sizes its corpus by it (120 commits across 45 sessions, not 181). Where the rule lives is therefore adjudicated: a convention page that both point to. It was not placed in `get_guide("tracker-conventions")` or in a `scripts/` helper of its own.
+
+Not done: the new page has no catalog `id` yet (a reindex mints one).
 
 ## Tests added
 
-None. There is no code path to guard; the defect is in how a trailer is read.
+none: documentation fix. There is no code path to guard; the defect is in how a trailer is read. The rule is exercised by `scripts/measure/miner.py` in its own right, not by a test added here.
 
 ## Workarounds
 
@@ -84,7 +87,17 @@ The blame step above. It costs one `git blame` per changed hunk and is what the 
 
 ## Resume
 
-Open questions: whether the 1-in-6 ratio holds outside the correction-shaped sample; whether pure additions (27 of 181) deserve a distinct treatment rather than exclusion; and whether a second caller appears, which would make this a convention rather than one analysis's private rule.
+Closed on 2026-10-06 by `39960f6b`, which writes the rule down once as a convention; the code that applies it predates this closure. Residual follow-ups (listed, not filed):
+
+- Whether the 1-in-6 ratio holds outside the correction-shaped sample is still unmeasured.
+- Whether pure additions (27 of 181) deserve a distinct treatment rather than exclusion is still open; `miner.py` handles one case (a retraction note blames the line it annotates).
+- The convention page was not yet catalogued when this closed (no `id`); confirm a reindex has minted one.
+- The convention page says the correcting commit's trailer is "used only to decide `self` versus `peer-session`", but `_commit_candidates_for_row` also reads it (`miner.py:330`) to resolve the candidate's own session `sid` (`:335-343`, used at `:363`) and to gate untrailered commits. That is the right frame (the session where the correction happened), but the sentence overstates how little the correcting trailer is used; worth tightening on the page.
+
+## Fix provenance
+
+- **SHA:** `39960f6b` (`experiments`)
+- **patch-id:** `336173f957ff0b980f838fd927e697be87a8a006`
 
 ## References
 

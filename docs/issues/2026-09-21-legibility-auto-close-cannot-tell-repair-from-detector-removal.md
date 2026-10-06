@@ -286,7 +286,7 @@ fields={…})` **per row** — never a `params` array rewrite, which replaces th
 
 ## Tests added
 
-N/A — no code change in this commit.
+Superseded 2026-10-06 by the partial fix below (commit `820a5d8c`): seven tests added in `src/librarian/tools/legibility_scan/mod.rs`, listed under `## Partial fix (2026-10-06)`. The original text read "N/A — no code change in this commit." The guard described next is what the first of them implements.
 
 Naming the guard the fix would owe, because the obvious one is vacuous: asserting that a closed row
 *has* a `closed_reason` is monotone under the field being defaulted, and asserting that the backlog
@@ -300,6 +300,32 @@ the claim, rather than that either is labelled.
 
 Read `docs/trackers/legibility-backlog.md` § *Verdicts* before trusting any `closed` row dated
 `2026-06-13`. There is no programmatic workaround: the information is not in the data.
+
+## Partial fix (2026-10-06)
+
+- **SHA:** `820a5d8c` (`experiments`)
+- **patch-id:** `dca79a68efd49ef14307f268af6829e03095b78e`
+
+What is covered. `reconcile` (`src/librarian/tools/legibility_scan/mod.rs`) now lets the row's own `defects` decide what absence from the current scan means. A row whose `defects` include a kind no scan can emit any more (checked against `LIVE_DEFECTS`, today `over_budget_body` and `un_mappable_file`) becomes status `retired` with `closed_reason: "detector_removed"` and no `after`. A row whose defects are all live and whose target still re-measures closes as `closed` / `refactored` with the `before → after` delta. A row whose defects are all live but whose target no longer resolves closes as `closed` / `symbol_gone` with no `after` (this also covers the renamed-or-deleted-symbol case noted in the 2026-09-25 re-verification). `CandidateRow.closed_reason` is `Option<String>` with `#[serde(default, skip_serializing_if = "Option::is_none")]`, so params written before the field load and round-trip unchanged. A `retired` row whose candidate returns re-opens like a `closed` one and has its reason cleared. `legibility_scan`'s result gains a `retired` count. `render_template.j2` and `docs/augmentations/docs-trackers-legibility-backlog.yaml` file refactored, target-gone, reason-not-recorded and retired rows under separate headings, and only the refactored table says "defects cleared".
+
+Correction to this file's `## Fix` and `## Tests added` text: the existing test `reconcile_opens_then_auto_closes_with_delta` needed no edit (the commit removes no test line). Its scan 2 hands `reconcile` an empty `current` with a live defect kind and a re-measurable target, which still closes as `refactored`; the detector-removal case is carried by the new tests instead.
+
+Tests added (all in `src/librarian/tools/legibility_scan/mod.rs`): `reconcile_tells_a_retired_detector_from_a_repaired_defect` (the two causes get different terminal states from byte-identical `current`), `reconcile_retires_a_row_carrying_any_retired_defect_kind`, `reconcile_closes_a_vanished_target_as_symbol_gone`, `every_producible_defect_kind_is_live_and_a_removed_one_is_not`, `reconcile_reopens_a_regressed_row_and_clears_its_reason`, `legacy_rows_without_closed_reason_load_and_round_trip_unchanged`, `render_files_retired_rows_outside_the_refactored_table`. Test names are taken from the commit diff; this bookkeeping pass did not re-run them.
+
+What is NOT covered:
+
+- **Cause 3 (threshold widening).** Raising `MAX_INLINE_TOKENS` still drops a marginal candidate out of `current` and closes it as `refactored`, because the row stores no threshold or detector version to compare against.
+- **The live tracker (artifact `cd886c414f6751b4`) was not touched.** Its closed rows have no `closed_reason` and will render under "reason not recorded" until retagged per row with `doc(action="update_entry", id="cd886c414f6751b4", entry_collection="candidates", entry_id=<key>, fields={...})`, never a params rewrite. The seven detector-removed rows named under `## Symptom (Effect)` should become `retired`; the twelve genuine closes (ten `src/lsp/client.rs::LspClient/*` rows, `LspManager/notify_file_changed`, `LspManager/shutdown_all`) should get `closed_reason: refactored`; the remaining closed rows need per-row judgement. The counts differ between sources in this file (19 versus 42 entries, 25 closed), so verify them at retag time.
+- **The live augmentation row's `render_template`** in the catalog is still the old text and must be re-attached with `doc(action="augment", merge=true, render_template=<new .j2>)`.
+- **A new `retired` status** was added to `BacklogParams`; consumers outside the files read for the commit were not checked.
+
+## Resume
+
+Code fix for causes 1 and 2 is in on `experiments` (local, not pushed at the time of writing). Status stays `open` because the defect is still observable in the live data and cause 3 is unaddressed. Remaining work, and who decides:
+
+1. Marius (or the integrator on his behalf): retag the live tracker rows per the list above, then re-attach the new `render_template` via `doc(action="augment", merge=true, ...)`. Do the per-row judgement for the closed rows that are neither the seven nor the twelve.
+2. Decide whether cause 3 warrants storing a threshold or detector version on the row, or is accepted as a known limit.
+3. Grep for consumers of `BacklogParams` status values outside `src/librarian/tools/legibility_scan/` for anything that assumes only `open` / `closed`.
 
 ## References
 

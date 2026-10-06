@@ -27,7 +27,28 @@ Remaining work split out of `docs/issues/archive/2026-09-02-greedy-name-regex-re
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+**Status stays `open`: the CI half is fixed, the self-identification test is not.**
+
+See `## Partial fix (2026-10-06)` below; this section is intentionally not a closure. The parent's design context is unchanged.
+
+## Partial fix (2026-10-06)
+
+The parent caveat's claim that the widened glob "has not yet run in CI, which invokes two named targets rather than the runner" was overtaken on 2026-09-10 and 2026-09-13 by two commits in the sibling repo, `claude-plugins` (branch `main`), both verified on 2026-10-06 against claude-plugins HEAD:
+
+- **SHA:** `claude-plugins:502365e` (branch: `main`; also in `feat/effort-steering-adapter`, `feat/effort-steering-core`, `fix/buddy-codex-summon`) — "ci: run the full hook + skill suite, and root-cause 5 of the 16". Adds the `full-suite` job ("full hook + skill suite (linux)", `ubuntu-latest`) to `.github/workflows/cross-platform-hooks.yml`, whose `Full suite` step is `run: bash tests/run-all.sh`; also touches `tests/run-all.sh` (adds the `CS_TEST_SKIP` deny-list: space-separated suite basenames, and the run FAILS if a name matches no discovered suite) and the plugin repo's `docs/issues/2026-08-05-test-run-all-pre-existing-failures-under-fresh-wsl.md`.
+- **patch-id:** `2f6476cdb53fab43250685fd76bc28141cb8147e`
+- **SHA:** `claude-plugins:8a95728` (branch: `main`; same other branches) — "fix(tests): make 4 of 5 ambient-config hook-test suites hermetic". Makes four suites independent of ambient `~/.claude*` config (`tests/test-pre-tool-guard.sh`, `test-rendezvous-isolation.sh`, `test-session-start.sh`, `test-worktree-activate.sh`) and shrinks the `CS_TEST_SKIP` list in the workflow to the one remaining suite.
+- **patch-id:** `cdd20df75ab5e2090b9b7eca431b125b8f926cc5`
+
+At the bytes: `.github/workflows/cross-platform-hooks.yml` lines ~65-116 hold the `full-suite` job (checkout, Python 3.13 + PyYAML, Node 24, then `bash tests/run-all.sh` with `CS_TEST_SKIP`); `tests/run-all.sh` builds its suite list from `test-*.sh`, `codescout-companion/hooks/*.test.sh`, `codescout-companion/skills/*/*.test.sh` (the skill glob that reaches `reaching-peer-sessions.test.sh`), hook and pi-extension `*.test.mjs`, and `effort-steering/**/*.test.mjs`. Linux only, by the job's own comment. I read the workflow and the runner; I did NOT open a CI run, so "it runs and is green in CI" is unverified here.
+
+Note: `CS_TEST_SKIP` lists `pre-tool-guard.test.sh` twice (workflow lines ~114-115). Harmless (the runner matches by basename), worth deleting the duplicate.
+
+**What remains (not done):** a test for the self-identification half of `bb14719` (the walk that terminates on socket presence rather than on `comm == claude`). `codescout-companion/skills/reaching-peer-sessions/reaching-peer-sessions.test.sh` (header, lines ~16-26) says it cannot be tested without editing the skill: `SKILL.md`'s walk reads `/proc` and `/run/user/<uid>/cc-socks` by hardcoded absolute path, and a source-text assertion would be a proxy, not the behaviour. It was verified by hand on 2026-09-03 only. Making it testable is a change to a shared skill in the plugin repo (parameterise the two roots, then drive it against a fixture tree); size M. The `claude-plugins` repo is out of scope for this sweep.
+
+## Resume
+
+Status stays `open` (partial). Next action: in `/home/marius/work/claude/claude-plugins`, make the two roots in `codescout-companion/skills/reaching-peer-sessions/SKILL.md`'s self-identification walk overridable (env var or argument defaulting to `/proc` and `/run/user/$UID/cc-socks`), then add a fixture-driven case to `reaching-peer-sessions.test.sh` asserting the walk stops at the socket-owning ancestor whose `comm` is not `claude` (the old `comm`-based walk must fail it). Delete the duplicate `pre-tool-guard.test.sh` in `CS_TEST_SKIP` while there. Not filed as separate items.
 
 ## References
 

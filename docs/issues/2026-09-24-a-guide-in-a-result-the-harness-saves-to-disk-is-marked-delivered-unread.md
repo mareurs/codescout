@@ -1,17 +1,18 @@
 ---
 id: '1dce65964572186a'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a guide auto-injected into a result the harness saves to disk is marked delivered, and the model sees only a 2 KB preview'
 owners:
 - marius
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-10-06
 opened: 2026-09-24
 related:
 - docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md
 severity: medium
+unverified: 'Root cause not addressed: the ledger still stamps on push, so a guide block the harness drops is still marked delivered. Only the oversize-whole-topic case is mitigated (Fix 1). Fix 2 (serves: sections for tracker-conventions) and Fix 3 (shrink the guide) are not done. The 16 KiB bound is not mutation-checked (cap_probe row is Deferred) and the harness save threshold is still not determined. A pointer block lost to a saved-to-disk result spends its key and nothing re-points.'
 ---
 
 # BUG: a guide auto-injected into a result the harness saves to disk is marked delivered, and the model sees only a 2 KB preview
@@ -96,15 +97,25 @@ Across the same directory's transcripts: 64 saved results, the smallest `Output 
 
 ## Fix
 
-Not started. In order of how much they close:
+**Fix 1 shipped; Fixes 2 and 3 did not.** Status is `mitigated` because the root cause (the ledger stamps at push, before the client decides what the model sees) is unchanged.
 
-1. **Do not stamp what may not arrive.** When the answer plus guide blocks would exceed a conservative bound, ship a one-line pointer (`get_guide("<topic>")`, with its size) instead of the body, and leave the topic unstamped. The bound must sit below the smallest observed saved result (29.4 KB) since the threshold is not known. This closes the class for any future large guide.
-2. **Make `tracker-conventions` declare `serves:` sections**, as `librarian` does, so auto-injection ships a section. Fixes the instance that actually occurs; an explicit `get_guide("tracker-conventions")` would still return 59 KB and still be saved.
-3. Shrink the guide.
+1. **Do not stamp what may not arrive. DONE (mitigation).** `guide_blocks_for` no longer auto-injects a whole-topic guide larger than `MAX_AUTO_INJECT_GUIDE_BYTES` (16 KiB, `src/tools/core/guide_emit.rs`). It ships a one-line `get_guide("<topic>")` pointer carrying the size, does not stamp the bare topic, and stamps a separate `<topic>#<pointer>` key once, so the pointer cannot starve a declared section for the same call (`emit_guide_sections` stops at the first candidate that ships). An explicit `get_guide("<topic>")` still returns the full body and stamps the bare topic, so the pointer cannot loop. Today only `tracker-conventions` (~59 KB) is over the bound; the next-largest non-declaring guide (`iron-laws-detail`) is ~14.7 KB. `fda10a31` classifies the new constant as `RESULT_CAP guide_emit.auto_inject_bound` and adds a `Coverage::Deferred` row in `src/tools/core/cap_probe.rs`: it is NOT mutation-checked and no row is certified against that table's marker grammar.
+2. **Make `tracker-conventions` declare `serves:` sections. NOT DONE.** High risk: it trips `SECTION_WAIVERS`. Until then auto-injection of that topic is always the pointer, never a section.
+3. **Shrink the guide. NOT DONE.**
+
+Residual risks, not fixed:
+
+- If the pointer block is itself lost because the primary block was saved to disk, the `<topic>#<pointer>` key is already spent and nothing re-points. The model is then told nothing (the same silent-loss class, now for a ~1-line block).
+- Doc drift: the `<topic>#<pointer>` key is missing from the ledger-key tables in `src/engines/mod.rs` and from the `ledger_keys()` docs in `src/tools/guide_index.rs`, and the test doc comment at `src/server.rs:14051` still says `tracker-conventions` "ships WHOLE" (checked 2026-10-06: a grep for `#<pointer>` over `src/` finds the key only in `guide_emit.rs`).
 
 ## Tests added
 
-None — this record opens the defect. A fix under (1) wants a test that a guide which would push the response past the bound is NOT stamped and that a pointer ships instead — asserted on the ledger, since a response-shape assertion alone is satisfied by a stamped-and-dropped block.
+Added by `5d4ee239`, asserted on the ledger and not only on response shape:
+
+- `src/server.rs` `guide_hint_tests::an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped` (end to end through a `doc` create; also asserts the explicit fetch returns the whole body).
+- `src/tools/core/guide_emit.rs` tests: `an_oversize_whole_topic_guide_ships_a_pointer_and_does_not_stamp_the_topic`, `a_whole_topic_guide_within_the_bound_ships_whole_and_stamps` (positive twin), `a_spent_pointer_ships_nothing_and_still_leaves_the_topic_unstamped`, `an_explicitly_fetched_oversize_guide_is_not_pointed_at_again`.
+
+`fda10a31` adds no behavioural test; it adds the cap-class annotation and the Deferred `cap_probe.rs` row so `every_cap_constant_is_classified` passes. Test names are taken from the commit diff; this bookkeeping pass did not re-run them.
 
 ## Workarounds
 
@@ -112,7 +123,14 @@ When a `<persisted-output>` preview arrives from a codescout call, read the save
 
 ## Resume
 
-Decide between Fix 1 and Fix 2; 1 is the class fix.
+Mitigated, not fixed. Fix 1 is in on `experiments` (local, not pushed at the time of writing). Remaining, needs a human decision: Fix 2 (give `tracker-conventions` `serves:` sections, high risk against `SECTION_WAIVERS`) versus Fix 3 (shrink the 59 KB guide); and whether a pointer lost to a saved-to-disk result needs a re-point path. Small follow-up: add the `<topic>#<pointer>` key to the ledger-key tables in `src/engines/mod.rs` and the `ledger_keys()` docs in `src/tools/guide_index.rs`, and fix the "ships WHOLE" comment at `src/server.rs:14051`.
+
+## Fix provenance
+
+- **SHA:** `5d4ee239` (`experiments`)
+- **patch-id:** `a160bc04f6d668401d1e1713f7910630b72c795f`
+- **SHA:** `fda10a31` (`experiments`)
+- **patch-id:** `7cef622a70e375294f89c2cc41e0edf79dce3947`
 
 ## References
 

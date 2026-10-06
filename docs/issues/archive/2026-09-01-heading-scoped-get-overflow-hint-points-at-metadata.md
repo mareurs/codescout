@@ -11,7 +11,7 @@ opened: 2026-09-01
 owner: marius
 related: []
 severity: low
-unverified: "TRACKED 043c453c34469482 — The preview.headings suppression proposed in the original Fix section was NOT measured and NOT done - whether envelope metadata pushes otherwise-inlinable sections over the 9KB inline budget is still unknown. Nothing in the shipped fix depends on it; recorded because a reader may otherwise assume the whole Fix section landed. Also: the gate's default lane showed 1 failure at commit time (tests/issue_clusters.rs::every_declared_class_has_an_index_row), which was a peer's uncommitted work on issue-clusters.md - three classes declaring a Slug with no Index row yet, all three verified absent from HEAD - and not this change."
+unverified: "The preview.headings suppression proposed in the original Fix section was NOT done by this fix; it was done afterwards by docs/issues/archive/2026-09-01-a-scoped-read-is-billed-the-full-heading-map.md (f3a76f81, aee9dd6b, b9bcfee4). Whether envelope metadata pushes otherwise-inlinable sections over the 9KB inline budget was never measured; closure of the residual (superseded, measurement still unrun) recorded 2026-10-06 in docs/issues/2026-09-24-residual-heading-scoped-preview-metadata-measurement.md. Also: the gate's default lane showed 1 failure at commit time (tests/issue_clusters.rs::every_declared_class_has_an_index_row), which was a peer's uncommitted work on issue-clusters.md - three classes declaring a Slug with no Index row yet, all three verified absent from HEAD - and not this change."
 ---
 
 # BUG: a heading-scoped `artifact(get)` that overflows hints at `$.preview.headings[*]` — the metadata — instead of `$.body`, the section the caller asked for

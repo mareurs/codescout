@@ -182,7 +182,7 @@ denominator.
 
 ## Tests added
 
-**N/A — nothing is implemented.** When Tier 2 lands, the regression test must assert a `Bash`
+**Tier 1 tests added 2026-10-06 (commit `b1873d72`, listed under `## Partial fix (2026-10-06)`); Tier 2 is still nothing implemented.** When Tier 2 lands, the regression test must assert a `Bash`
 call produces a `tool_calls` row, and must **fail before the hook is installed** — the natural
 shape here is an absence assertion, which is monotone under "the recorder does nothing" and
 would pass against a stub. Pair it with a positive row-shape assertion, per `CLAUDE.md`
@@ -196,13 +196,27 @@ from `usage.db`. For a specific question, session transcripts under
 counted directly. Note that this is **per-profile**, so a count taken there must sweep all
 three profile directories or it reproduces the same class one level up.
 
+## Partial fix (2026-10-06)
+
+- **SHA:** `b1873d72` (`experiments`)
+- **patch-id:** `d2724049f0ae5eb7bacd3e7e0a9909898ed91d82`
+
+What is covered: **Tier 1 only.** New `usage::RECORDER_SCOPE` (`src/usage/mod.rs`) = "codescout MCP calls only; native harness tools (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded". It is carried as a `scope` field on the `doctor://tool-usage` `Report` (`src/mcp_resources/tool_usage.rs`) and on the dashboard `/api/usage` response when that response carries counts (`src/dashboard/api/usage.rs`, attached only when `available == true`). `src/dashboard/static/dashboard.js` renders it under the usage summary line, and `docs/manual/src/concepts/tool-usage-doctor.md` documents the field. `/api/lsp` (reads `lsp_events`, not `tool_calls`) and the no-DB `/api/usage` response deliberately carry no scope.
+
+Tests added (names read from the commit diff): `report_names_the_recorder_scope_beside_the_counts` and `non_usage_resource_does_not_carry_the_recorder_scope` in `src/mcp_resources/tool_usage.rs`; `usage_response_names_the_recorder_scope_beside_the_counts` (with an `/api/lsp` negative control) and `unavailable_usage_response_carries_no_scope` in `src/dashboard/routes.rs`. None of the four was re-run by this bookkeeping pass.
+
+What is NOT covered:
+
+- **Tier 2 (the H-8 recorder).** The write path (CLI subcommand, direct sqlite write or server endpoint) and what of the command to store are human decisions and remain open. Native `Read`, `Grep`, `Glob`, `Agent` and `WebFetch` calls are still unrecorded; Tier 1 only labels the gap.
+- `.claude/skills/analyze-usage/SKILL.md` (~255 and ~387) keeps its own scope notes and was not touched.
+- This file's Tier 1 text also lists "the `usage` tool" among readers of `tool_calls`. The commit changes `doctor://tool-usage` and the dashboard `/api/usage` only; a grep of `usage_stats_response` / `query_stats` callers found no other reader, but this pass did not exhaustively audit for one.
+- The file's slug and title are stale; the file says it is deliberately not renamed (a move would re-key the artifact id).
+
+Status stays `open` and the frontmatter `unverified:` caveat is kept: it concerns the Tier 2 write-path fork, the undiscovered eval artifact behind the memory `gotchas:493` claim, and Tier 2's missing demand argument, none of which this commit resolves.
+
 ## Resume
 
-Decide *Open question 1* (write path) and *Open question 2* (what of the command to store),
-then implement Tier 1 first — it is independent, needs no hook, and delivers the honesty half
-immediately. Tier 1's concrete next action: find every reader of `tool_calls`
-(`src/dashboard/api/usage.rs`, `src/dashboard/routes.rs`, the `usage` tool) and add the scope
-sentence to each response.
+Tier 1 is in on `experiments` (local, not pushed at the time of writing). Remaining, needs a human decision: Tier 2 (*Open question 1*, the write path, and *Open question 2*, what of the command to store), and whether Tier 2 still has a demand argument now that `permissions.deny` blocks native `Bash` in all three profiles (the `Bash` half is closed by policy; `Read`, `Grep`, `Glob`, `Agent`, `WebFetch` remain unrecorded). Smaller follow-ups: reconcile `.claude/skills/analyze-usage/SKILL.md` ~255 / ~387 with `RECORDER_SCOPE` so there is one wording, and retitle the file to the native-non-shell-tool blind spot (only if the id-rekey cost named in `## Summary` is judged acceptable).
 
 ## References
 

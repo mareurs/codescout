@@ -116,7 +116,7 @@ is untouched.
 
 ## Tests added
 
-None. The discriminating fixtures are: (a) a refused write in the transcript, asserting the session
+Superseded 2026-10-06 by the partial fix below (commit `6f6fdc96`; tests listed under `## Partial fix (2026-10-06)`). The original text read "None." The fixtures named next are the ones the commit implements, each negative with a landed-write positive twin. The discriminating fixtures are: (a) a refused write in the transcript, asserting the session
 is NOT named; (b) a committed write with a clean worktree at that path, asserting the same. Both are
 absence assertions, monotone under the scanner being disabled entirely — so each needs a positive
 twin (a real uncommitted peer write that MUST be named) in the same test.
@@ -127,11 +127,30 @@ When `fmt-mine.sh` or a provenance run returns SHARED and the named session is n
 `git log -1 --format=%H -- <path>` and `git diff --stat -- <path>` before concluding anything. A
 named session whose bytes are committed is not a co-owner of your working tree.
 
+## Partial fix (2026-10-06)
+
+- **SHA:** `6f6fdc96` (`experiments`)
+- **patch-id:** `5ff64bb6c5af618b40e2c52843bf4de467783ef5`
+
+What is covered. **Instance 1 (refused write):** `scan()` in `scripts/file-provenance.py` now pairs each `tool_use` with its `tool_result` by `tool_use_id` and drops the write targets of all-or-nothing calls (edits, creates, doc writes) whose result says they were refused. A codescout refusal is `{"ok": false}` text with `is_error` absent (the `RecoverableError` mapping), so `is_error` alone would not have fixed the case this bug was filed on; `is_error: true` (native tools) and `pending_ack` also count as refused. A call with no result on record, and every Bash / `run_command` call whatever its exit status, still counts (a failed shell command may have written). **Instance 2, the CLEAN-path half:** `main()` now prints a new first-column verdict token `CLEAN` where `SHARED` / `PEER` would have printed for a path git reports clean. `MINE`, `UNKNOWN` and untracked paths are unchanged. `scripts/fmt-mine.sh` now formats `CLEAN` rows. Behaviour change: a clean file needing rustfmt that a peer once wrote used to be a hard refusal and is now formatted.
+
+Tests added: `tests/file-provenance.sh` grows from 197 to 223 assertions (every negative paired with a landed-write twin; the section covers a codescout refusal, a native `is_error` refusal, a `pending_ack` park, a failed shell command that must still count, and CLEAN versus MINE / SHARED / PEER), and `tests/fmt-mine.sh` gains case 12 (CLEAN is formatted, not reported as a refusal). The assertion totals are quoted from the commit brief; this bookkeeping pass did not re-run the suites.
+
+What is NOT covered:
+
+- **Instance 2 as filed is not fixed.** A DIRTY path where a peer's bytes were already committed still prints `SHARED`, because git dirtiness is per path and cannot separate the asker's uncommitted bytes from a peer's committed ones. `src/tools/session_key.rs` in the filed case had 99 uncommitted insertions from `aa272bed`, so it is dirty and would still print `SHARED` naming `55515bc5`.
+- **Suspect, unverified:** `last_commit_time` (`scripts/file-provenance.py:905-910`) reads `git log -1 --format=%cI`, which has second resolution, so a write in the same second as the commit may count as in-window. Read at the bytes; the in-window effect was not reproduced.
+- A refused `workspace(activate)` is still treated as moving the active tree (pre-existing).
+- A harness `is_error` on a codescout write is treated as nothing-written; a timeout where the write landed would be missed (theoretical, not observed).
+- The sibling bug `2026-09-19-file-provenance-answers-at-session-grain-so-sibling-subagents-are-one-writer` was not touched.
+
 ## Resume
 
-Decide whether instance 2 is the same class or its own. If its own, the candidate claim is *"a
-window over history, used to answer a question about the present, cannot subtract what has since
-been absorbed"* — which would also cover the mtime-vs-authorial-write confusion seen the same day.
+Instance 1 is fixed and instance 2's CLEAN-path half is fixed, on `experiments` (local, not pushed at the time of writing). Status stays `open`. Remaining, and who decides:
+
+1. Marius decides whether a DIRTY path with a peer whose bytes were already committed (instance 2 as filed) is its own class or is accepted as a known limit. The candidate claim is still *"a window over history, used to answer a question about the present, cannot subtract what has since been absorbed"*, which would also cover the mtime-versus-authorial-write confusion seen the same day. Per-path git dirtiness cannot separate those bytes; a fix would need per-hunk attribution (for example `git blame` or a diff against the peer's commit).
+2. Check whether `last_commit_time`'s second-resolution `%cI` lets a same-second write count as in-window, with a fixture, before acting on it.
+3. Keep this file's relation to the archived sibling (`2026-09-13-file-provenance-reads-a-commit-time-as-proof-the-writes-are-in-head`) and to the unfixed `2026-09-19-file-provenance-answers-at-session-grain-...` in mind: a change to the window that narrows false positives can widen the false-negative direction.
 
 ## References
 

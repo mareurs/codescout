@@ -1,7 +1,7 @@
 ---
 id: '5394e9b7bdd83069'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: terminal_status_without_fix_anchor accepts a SHA with no patch-id, discharging on the half that dies at rebase'
 owners:
 - marius
@@ -84,23 +84,23 @@ is *a SHA bullet exists*.
 
 ## Fix
 
-Not implemented. Two directions, and the choice is about what a partial pointer means:
-
-1. **Require the pair.** Discharge only when at least one element has `Some(patch_id)`, and give the partial case its own detail text — *"a SHA is declared and no patch-id; the SHA orphans on the next rebase"*. This is strictly more findings, so it needs the same migration count `496dd63e` paid for: **how many live terminal records declare a SHA with no parseable patch-id?** Measure before shipping; that number is the whole cost.
-2. **Report the partial case as its own check name** rather than folding it into this one, so the existing check's population does not move and the new state is nameable in a query.
-
-Direction 2 is likelier right on the same reasoning `496dd63e` used: a change that can red an author's existing file is a different act from one that cannot, and this repo has paid once already for a check that began demanding a shape ~150 files did not have (`src/prompts/mod.rs:2075`).
-
-**Do not fix by tightening `structured_fix_pointers` itself.** It has two consumers since
-`496dd63e`, its `Option` is honest, and narrowing the parser to serve one caller's question would
-break the inverse property those two checks now hold — which is the property
-`de46d402441e1e2b` was closed to establish.
+Implemented Direction 2 of the plan (own check name) plus the Direction 1 demand at the archive transition, in `src/librarian/tools/doctor.rs`. A new predicate `declares_fix_pair` (`doctor.rs:6865`) is true when at least one `## Fix provenance` pointer carries a non-empty patch-id, or when `no_fix_commit:` is declared. `structured_fix_pointers` and `declares_fix_anchor` are unchanged, as the plan required. `terminal_status_without_fix_anchor` keeps its population; the new state, a SHA declared with no patch-id, is reported under its own check `fix_anchor_missing_patch_id`, whose detail names the consequence (the SHA orphans on the next rebase) and the remedy. `refuse_unanchored_archive` (`doctor.rs:6896`, called from `update.rs:749` and `mv.rs:243`) now demands the pair rather than any pointer, and a SHA with no patch-id is refused with its own hint rather than the "declares no fix anchor" text. Scope of "pair": at least ONE pointer carries a patch-id, so a multi-commit fix in which one SHA lacks its patch-id still passes (follow-up below). The live count of terminal bugs declaring a SHA with no patch-id was 0 at the time of the fix (sweep measurement, not re-measured here), so no existing record was newly redded.
 
 ## Tests added
 
-None. A regression test is cheap and specific, and needs both halves: a fixture declaring a SHA
-with no patch-id that **must** fire, paired with one declaring both that must stay silent. The
-absence half alone is monotone under removal of the check.
+In `src/librarian/tools/doctor.rs`:
+
+- `a_sha_with_no_patch_id_is_reported_under_its_own_check_name` (:11052) pins that SHA-only, same-line-patch-id and empty-patch-id fixtures fire `fix_anchor_missing_patch_id`, while a well-formed pair and a SHA with `no_fix_commit:` stay silent and a record with no pointer keeps the old check name.
+- `the_missing_patch_id_finding_names_the_consequence_and_the_remedy` (:11126) pins the finding text ("orphans", "patch-id", "git patch-id --stable", "own bullet").
+- `fix_anchor_missing_patch_id_does_not_report_a_row_under_a_sibling_root` (:11158) pins root scoping.
+- `terminal_status_without_fix_anchor_does_not_read_a_fenced_pair_as_a_declaration` (:11208) is the fence-escape test the sibling bug `de46d402441e1e2b` recorded as missing.
+
+In `src/librarian/tools/update.rs`: `archiving_a_bug_with_a_sha_and_no_patch_id_is_refused_with_its_own_hint` (:3830). In `src/librarian/tools/mv.rs`: `moving_a_bug_with_a_sha_and_no_patch_id_into_archive_is_refused_and_moves_nothing` (:2814).
+
+## Fix provenance
+
+- **SHA:** `00fe85d6` (`experiments`)
+- **patch-id:** `bc936a176841b57e16c11ed2d72933e53c5e8713`
 
 ## Workarounds
 
@@ -109,9 +109,7 @@ and in this check's failure text; neither is reached by an author who is getting
 
 ## Resume
 
-Open. Locus `src/librarian/tools/doctor.rs:6248` (parser) and `:6640` (the discharge). First
-step is the count named in Fix direction 1 — it decides between the two directions and nothing
-should be built before it exists.
+Closed on 2026-10-06 by `00fe85d6` (local on `experiments`, not pushed at the time of writing). Residual follow-ups, listed and not filed: (1) `declares_fix_pair` is satisfied by ONE pointer carrying a patch-id, so a multi-commit fix with several SHA bullets where one lacks its patch-id still passes; checking each pointer needs the same live-count migration measurement first. (2) Only the presence of a patch-id is checked, not that it matches the SHA above it.
 
 ## References
 
