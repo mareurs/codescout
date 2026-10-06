@@ -156,6 +156,11 @@ async fn page(
             shown.chars().any(|c| c != '\n') && !shown.starts_with("\n…"),
             "{label}: a truncated line kept no bytes"
         );
+        assert!(
+            v["hint"].as_str().is_some_and(|h| h.contains("grep -o")),
+            "{label}: a truncated line names no route off it: {:?}",
+            v["hint"]
+        );
     }
     (v, compact)
 }
@@ -391,6 +396,13 @@ async fn a_truncated_buffer_counts_its_notice_in_every_read() {
                     json!({ "path": r, "start_line": 1, "end_line": 100_000 }),
                 ] {
                     let label = format!("truncated {class}/{size}/{kept} {input}");
+                    let first = ReadFile.call(input.clone(), &ctx).await.unwrap();
+                    assert!(
+                        first["buffer_truncated"][0]
+                            .as_str()
+                            .is_some_and(|n| n.contains(&r)),
+                        "{label}: the read does not say the buffer is a prefix: {first:.300}"
+                    );
                     read_through(&ctx, input, &r, &label).await;
                 }
             }
