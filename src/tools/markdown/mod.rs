@@ -10,4 +10,6 @@ pub(crate) use edit_markdown::{edit, LONG_DOCS};
 pub(crate) use read_markdown::{format_read, is_markdown_target, read};
 
 #[cfg(test)]
+mod byte_edge_tests;
+#[cfg(test)]
 mod tests;

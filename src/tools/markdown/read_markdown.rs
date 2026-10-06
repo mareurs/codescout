@@ -221,6 +221,17 @@ fn finalize_multi(mut result: Value, dropped: &[&'static str]) -> Value {
     }
     result
 }
+/// A single-response candidate as RETURNED once `dropped` keys are gone: each removal marked
+/// `<key>_omitted: true`, and the `format` key `read()` adds, so the size [`drop_to_fit`]
+/// measures is the size returned.
+fn finalize_dropped(mut result: Value, dropped: &[&'static str]) -> Value {
+    if let Some(obj) = result.as_object_mut() {
+        for key in dropped {
+            obj.insert(format!("{key}_omitted"), json!(true));
+        }
+    }
+    with_format(result)
+}
 
 /// Remove top-level `keys` from `base`, in order, until the FINAL response (`finalize` applied
 /// to what is left and what was dropped) fits the inline limit. Returns the first candidate
@@ -255,18 +266,22 @@ fn drop_to_fit(
 /// made the error body 12,700 B, which `fit_envelope` cannot shrink because it is part of what
 /// the error adds AROUND the map. A prefix is enough to name the heading, and still resolves it:
 /// `read_file(heading=<prefix>)` matches by prefix. A clipped entry carries the true length as
-/// `h_bytes`, so the clip is a statement and not a silent edit.
+/// `h_bytes`, so the clip is a statement and not a silent edit. The cap counts SERIALIZED bytes
+/// (`json_escaped_len`), the unit the response is measured in: in raw bytes, 200 `\x01` escaped
+/// to 1,200 B per echo.
 // cap-class: RESULT_CAP read_markdown.heading_echo_bytes — probed
 const HEADING_ECHO_CLIP: usize = 200;
 
-/// `text` clipped to [`HEADING_ECHO_CLIP`] bytes on a character boundary, and its original
-/// length when it was clipped.
+/// `text` clipped to [`HEADING_ECHO_CLIP`] SERIALIZED bytes (its JSON-escaped length) on a
+/// character boundary, and its original raw length when it was clipped. The unit is what the
+/// echo costs in the response: a raw-byte clip of 200 control characters serialized to 1,200 B,
+/// once in each place the heading is echoed.
 fn clip_heading(text: &str) -> (String, Option<usize>) {
-    if text.len() <= HEADING_ECHO_CLIP {
+    if crate::util::text::json_escaped_len(text) <= HEADING_ECHO_CLIP {
         return (text.to_string(), None);
     }
     (
-        crate::util::text::clip_to_bytes(text, HEADING_ECHO_CLIP).to_string(),
+        crate::util::text::clip_head_escaped(text, HEADING_ECHO_CLIP).to_string(),
         Some(text.len()),
     )
 }
@@ -275,6 +290,7 @@ fn clip_heading(text: &str) -> (String, Option<usize>) {
 /// not-found, a buffered hint + `section_map` when the match is oversized, or
 /// the section content (+ coverage).
 fn read_markdown_single_heading(
+    path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
     ctx: &ToolContext,
@@ -291,12 +307,31 @@ fn read_markdown_single_heading(
                             .iter()
                             .map(|h| serde_json::json!({"h": h.text, "l": h.line}))
                             .collect();
-                    return Ok(json!({
-                        "ok": false,
-                        "error": format!("heading '{}' not found", heading_query),
-                        "headings": headings_json,
-                        "hint": "pick a heading from the list above, or use start_line/end_line",
-                    }));
+                    // The list has no length of its own (27.6 to 32.7 KB measured), and
+                    // `call_content` buffered it under `@tool_*`. `fit_envelope` builds the
+                    // whole response, measures it serialized, and cuts the list's MIDDLE only
+                    // by the excess, with an `entries omitted` note naming the lines to read
+                    // in the file the caller asked about (`path`, the route they already hold;
+                    // never a new handle). The query is echoed clipped, as every heading echo is.
+                    let error = format!("heading '{}' not found", clip_heading(heading_query).0);
+                    let finish = |mut result: Value, notes: &[String]| -> Value {
+                        let mut hint = String::from(
+                            "pick a heading from the list above, or use start_line/end_line",
+                        );
+                        for note in notes {
+                            hint.push(' ');
+                            hint.push_str(note);
+                        }
+                        result["ok"] = json!(false);
+                        result["error"] = json!(error);
+                        result["hint"] = json!(hint);
+                        with_format(result)
+                    };
+                    return Ok(crate::tools::file_summary::fit_envelope(
+                        json!({ "headings": headings_json }),
+                        path,
+                        finish,
+                    ));
                 }
                 return Err(e.into());
             }
@@ -310,10 +345,33 @@ fn read_markdown_single_heading(
         None,
     );
 
+    // The success response, built BEFORE deciding, because whether it fits is a fact about
+    // the SERIALIZED response and not the section's raw bytes: JSON escaping doubles every
+    // quote, backslash and newline and turns a control character into six bytes, so a section
+    // of 6,000 quotes (6 KB raw) was returned as a 12 KB success and buffered under `@tool_*`.
+    // It carries `format`, which `read()` adds, so the size measured is the size returned.
+    let success = {
+        let mut val = json!({
+            "content": section_result.content,
+            "lines": section_result.content.lines().count(),
+            "line_range": [section_result.line_range.0, section_result.line_range.1],
+            "breadcrumb": section_result.breadcrumb,
+            "siblings": section_result.siblings,
+        });
+        if let Some(c) = cov {
+            val["coverage"] = c;
+        }
+        // `coverage` (every unread heading) and `siblings` have no length of their own: a
+        // short section of a 1,000-heading file must not be refused for them, so they are
+        // dropped first, each marked `<key>_omitted`, and only a section that does not fit
+        // without them takes the oversized arm.
+        drop_to_fit(&val, &["coverage", "siblings"], finalize_dropped)
+    };
+
     // Oversized match — return ok:false with hint + nested section_map
     // + next_actions. The agent must pick a sub-heading or a line range, not
     // retry against the original path.
-    if crate::tools::exceeds_inline_limit(&section_result.content) {
+    if crate::tools::exceeds_inline_limit(&success.to_string()) {
         let file_id = ctx.output_buffer.store_file_excerpt(
             resolved.to_string_lossy().to_string(),
             section_result.content.clone(),
@@ -365,15 +423,26 @@ fn read_markdown_single_heading(
             let mut actions = Vec::new();
             if let Some(first) = nested.first() {
                 if let Some(h) = first.get("h").and_then(|v| v.as_str()) {
-                    // `{:?}` on the heading too — an unquoted `heading=### Sub A`
-                    // is not a call the caller can paste back.
-                    actions.push(format!("read_file({:?}, heading={:?})", file_id, h));
+                    // The heading is quoted as a JSON string, the form a caller passes it in:
+                    // `{:?}` wrote a control character as `\u{1}`, which no JSON parser reads,
+                    // and an unquoted `heading=### Sub A` is not a call the caller can paste back.
+                    let quoted = serde_json::to_string(h).unwrap_or_else(|_| format!("{h:?}"));
+                    actions.push(format!("read_file({:?}, heading={quoted})", file_id));
                 }
             }
+            // The range is sized in SERIALIZED bytes, the unit the read it names is judged
+            // in: `end_line=100` of a control-heavy section is 24 KB once escaped, and that
+            // read came back under a second `@tool_*` handle. At most 100 lines, at least one.
+            let (_, fit_lines, _) = crate::util::text::extract_lines_to_json_budget(
+                &section_result.content,
+                1,
+                100,
+                crate::tools::INLINE_BYTE_BUDGET,
+            );
             actions.push(format!(
                 "read_file({:?}, start_line=1, end_line={})",
                 file_id,
-                100.min(section_lines)
+                fit_lines.max(1)
             ));
             actions
         };
@@ -433,17 +502,7 @@ fn read_markdown_single_heading(
         return Err(err.into());
     }
 
-    let mut val = json!({
-        "content": section_result.content,
-        "lines": section_result.content.lines().count(),
-        "line_range": [section_result.line_range.0, section_result.line_range.1],
-        "breadcrumb": section_result.breadcrumb,
-        "siblings": section_result.siblings,
-    });
-    if let Some(c) = cov {
-        val["coverage"] = c;
-    }
-    Ok(val)
+    Ok(success)
 }
 
 /// Line-range read: validate the 1-indexed range, extract the slice, and either
@@ -492,8 +551,21 @@ fn read_markdown_line_range(
         Some(end),
     );
 
+    // The inline response, built BEFORE deciding: whether it fits is a fact about the
+    // SERIALIZED response, not the extract's raw bytes. 43 lines of `\x01` are under 2 KB raw
+    // and over 10 KB serialized, and were returned inline and buffered under `@tool_*`. The
+    // `coverage` list names every unread heading and has no length of its own, so it goes
+    // first (marked `coverage_omitted`); a response still over the limit is buffered here.
+    let inline = {
+        let mut result = json!({ "content": content });
+        if let Some(c) = &md_cov {
+            result["coverage"] = c.clone();
+        }
+        drop_to_fit(&result, &["coverage"], finalize_dropped)
+    };
+
     // Buffer large extracts
-    if crate::tools::exceeds_inline_limit(&content) {
+    if crate::tools::exceeds_inline_limit(&inline.to_string()) {
         let file_id = ctx
             .output_buffer
             .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
@@ -528,14 +600,11 @@ fn read_markdown_line_range(
         if let Some(c) = md_cov {
             result["coverage"] = c;
         }
-        return Ok(result);
+        // The chunk is bounded; `coverage` is not, so it is dropped when it is what overflows.
+        return Ok(drop_to_fit(&result, &["coverage"], finalize_dropped));
     }
 
-    let mut result = json!({ "content": content });
-    if let Some(c) = md_cov {
-        result["coverage"] = c;
-    }
-    Ok(result)
+    Ok(inline)
 }
 
 /// Add the `format` key every markdown response carries. `read()` adds it too, on whatever a
@@ -739,7 +808,7 @@ pub(crate) async fn read(input: Value, ctx: &ToolContext) -> Result<Value> {
     let res = if let Some(headings_arr) = headings_param {
         read_markdown_multi_heading(&text, &resolved, ctx, &headings_arr)
     } else if let Some(heading_query) = heading {
-        read_markdown_single_heading(&text, &resolved, ctx, heading_query)
+        read_markdown_single_heading(path, &text, &resolved, ctx, heading_query)
     } else if let (Some(start), Some(end)) = (start_line, end_line) {
         read_markdown_line_range(path, &text, &resolved, ctx, start, end)
     } else {
@@ -893,5 +962,21 @@ mod clip_heading_tests {
         assert!(clipped.len() <= HEADING_ECHO_CLIP && clipped.len() > HEADING_ECHO_CLIP - 3);
         assert!(clipped.chars().all(|c| c == '€'));
         assert_eq!(from, Some(300));
+    }
+    #[test]
+    fn the_clip_counts_serialized_bytes_not_raw_bytes() {
+        // 100 quotes are 100 raw bytes and 200 serialized: exactly the cap, so returned whole.
+        let fits = "\"".repeat(HEADING_ECHO_CLIP / 2);
+        assert_eq!(clip_heading(&fits), (fits.clone(), None));
+        // One more is 202 serialized: clipped back to the 100 that fit, with the raw length.
+        let over = "\"".repeat(HEADING_ECHO_CLIP / 2 + 1);
+        let (clipped, from) = clip_heading(&over);
+        assert_eq!(clipped, fits);
+        assert_eq!(from, Some(over.len()));
+        // A control character serializes to six bytes, so 200 of them keep 33.
+        let ctrl = "\u{1}".repeat(HEADING_ECHO_CLIP);
+        let (clipped, from) = clip_heading(&ctrl);
+        assert_eq!(clipped, "\u{1}".repeat(HEADING_ECHO_CLIP / 6));
+        assert_eq!(from, Some(HEADING_ECHO_CLIP));
     }
 }

@@ -2044,23 +2044,16 @@ mod tests {
         );
     }
 
-    /// REACH and REMEDY for D4, through the real `call_content`, on the one `read_file` payload
-    /// that still overflows to `@tool_*` WITHOUT a `content` string: a heading that is not in a
-    /// markdown file answers `{ok:false, error, headings:[{h,l}..], hint}`, and a file with
-    /// enough headings makes that list the whole payload. Such a payload reaches the shared
-    /// default's array detection in `ReadFile::json_path_hint`, which used to answer the
-    /// placeholder `$.field`. The route the envelope names is followed with a real `read_file`;
-    /// it must not be the placeholder, must project `headings`, and must come back as data.
-    ///
-    /// This replaces a test that overflowed a 450-symbol whole-file read. Whole-file summaries
-    /// are now bounded to the inline limit at the source (`fit_envelope`), so that read stays
-    /// inline and never spills; every other `read_file` payload that spills (line ranges,
-    /// `json_path`, `toml_key`, a heading read) carries `content` and hints `$.content`. If a
-    /// later change bounds this list too, `envelope_of` fails by name instead of letting the test
-    /// pass over an envelope that was never produced.
+    /// REACH and REMEDY through the real `call_content`: a heading that is not in a markdown file
+    /// answers `{ok:false, error, headings:[{h,l}..], hint}`, and a file with enough headings made
+    /// that list the whole payload. It used to spill under `@tool_*` (the one `read_file` payload
+    /// that did so WITHOUT a `content` string, which this test once pinned through
+    /// `ReadFile::json_path_hint`). The list is now bounded at the source by `fit_envelope`: its
+    /// MIDDLE is cut by the excess, the response stays inline with no handle, and the hint names
+    /// the omitted lines as a `read_file` range of the file the caller asked about. That route is
+    /// followed here and must come back as data holding a heading from the cut middle.
     #[tokio::test]
     async fn an_overflowing_missed_heading_list_hints_a_route_that_returns_data() {
-        use crate::tools::hint_probe::{envelope_of, follow_hint};
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
         let doc: String = (0..1500)
@@ -2070,47 +2063,47 @@ mod tests {
         let mut ctx = test_ctx().await;
         ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
 
-        let content = ReadFile
-            .call_content(
-                json!({ "path": "notes.md", "heading": "## no such heading" }),
+        let input = json!({ "path": "notes.md", "heading": "## no such heading" });
+        let content = ReadFile.call_content(input.clone(), &ctx).await.unwrap();
+        let text = content[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap_or_default();
+        assert!(!text.contains("@tool_"), "the list spilled: {text:.300}");
+        let result = ReadFile.call(input, &ctx).await.unwrap();
+        assert!(
+            !crate::tools::exceeds_inline_limit(&result.to_string()),
+            "{} B is over the inline limit",
+            result.to_string().len()
+        );
+        for name in ["Section number 0000", "Section number 1499"] {
+            assert!(text.contains(name), "both ends of the list survive: {name}");
+        }
+        let hint = result["hint"].as_str().unwrap();
+        assert!(hint.contains("entries omitted"), "{hint}");
+        let route =
+            regex::Regex::new(r#"read_file\(path="notes\.md", start_line=(\d+), end_line=(\d+)\)"#)
+                .unwrap()
+                .captures(hint)
+                .unwrap_or_else(|| panic!("the hint names no range of the file: {hint}"));
+        let followed = ReadFile
+            .call(
+                json!({
+                    "path": "notes.md",
+                    "start_line": route[1].parse::<u64>().unwrap(),
+                    "end_line": route[2].parse::<u64>().unwrap(),
+                }),
                 &ctx,
             )
             .await
-            .unwrap();
-        let envelope = envelope_of(&content);
-
-        let (jp, followed) = follow_hint(&envelope, &ctx).await;
-        assert_ne!(jp, "$.field", "the placeholder is not a route");
-        assert_eq!(
-            jp, "$.headings[*]",
-            "the array the payload is made of was expected"
+            .unwrap_or_else(|e| panic!("following the hinted route failed: {e}"));
+        // The first omitted heading is entry `after` of the list (entry i is `Section number i`).
+        let first_cut = result["headings_omitted"]["after"].as_u64().unwrap();
+        let first_cut = format!("Section number {first_cut:04}");
+        assert!(
+            followed["content"].as_str().unwrap().contains(&first_cut),
+            "the route must return the cut middle, from {first_cut:?}: {followed:.300}"
         );
-        let value =
-            followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
-        assert_eq!(
-            value["value_type"], "array",
-            "the route {jp:?} must come back as the array it projects: {value}"
-        );
-        // The type alone would pass for any array. The DATA must be there, first to last: the
-        // projection is far over the inline budget, so it is parked under its own `@file_*`
-        // handle, and the first and last heading must both be found in it exactly once.
-        let file_id = value["file_id"]
-            .as_str()
-            .unwrap_or_else(|| panic!("a 1500-heading projection must name its buffer: {value}"));
-        for name in ["Section number 0000", "Section number 1499"] {
-            let out = crate::tools::run_command::RunCommand
-                .call(
-                    json!({ "command": format!("grep -c '{name}' {file_id}") }),
-                    &ctx,
-                )
-                .await
-                .unwrap_or_else(|e| panic!("searching the projection for {name} failed: {e}"));
-            assert_eq!(
-                out["stdout"].as_str().map(str::trim),
-                Some("1"),
-                "the route {jp:?} must return every heading; {name} is not in {file_id}: {out}"
-            );
-        }
     }
 
     /// D4b, by FOLLOWING every route the hint offers on a real buffer of each ref kind.

@@ -1099,15 +1099,17 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test seeds
-        // ONE 12,000 B sub-heading against `HEADING_ECHO_CLIP` 200, through the real tool, and
-        // asserts the echoed text is a prefix of at most 200 B with its true length beside it as
-        // `h_bytes`. The error body without the clip was 12,643 B. Marker written by production
-        // in `read_markdown_single_heading`, from `clip_heading`.
+        // a 1,000-unit heading (and sub-heading) in six content classes (ASCII, `"`, `\`, `\x01`,
+        // `€`, a 4-byte emoji) against `HEADING_ECHO_CLIP` 200, through the real tool, and asserts
+        // each echo in `section_map` and `breadcrumb` serializes to at most 200 B plus its quotes,
+        // with its true raw length beside it as `h_bytes`. The unit is SERIALIZED bytes: a raw-byte
+        // clip of `\x01` echoed 1,200 B, of `"` 398 B (measured 2026-10-06, before the re-unit).
+        // Marker written by production in `read_markdown_single_heading`, from `clip_heading`.
         id: "read_markdown.heading_echo_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("h_bytes"),
             mutation: Mutation::Killed,
-            cited_test: "the_oversized_section_error_clips_a_huge_sub_heading_and_keeps_its_route",
+            cited_test: "a_control_char_heading_echo_is_clipped_in_escaped_bytes",
         },
     },
     ProbeRow {
