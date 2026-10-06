@@ -166,14 +166,17 @@ async fn page(
 }
 
 /// Read from `input` to the end, following every `next`. Returns the largest compact size seen.
+/// A `next` that carries `force=true` (a forced range of a real file) is followed with it.
 async fn read_through(
     ctx: &crate::tools::ToolContext,
     mut input: Value,
     input_ref: &str,
     label: &str,
 ) -> usize {
-    let route =
-        regex::Regex::new(r#"^read_file\("([^"]+)", start_line=(\d+), end_line=(\d+)\)$"#).unwrap();
+    let route = regex::Regex::new(
+        r#"^read_file\("([^"]+)", start_line=(\d+), end_line=(\d+)(, force=true)?\)$"#,
+    )
+    .unwrap();
     let mut largest = 0;
     let mut prev_start = 0u64;
     for _ in 0..400 {
@@ -196,6 +199,9 @@ async fn read_through(
         assert!(start > prev_start, "{label}: next does not advance");
         prev_start = start;
         input = json!({ "path": input_ref, "start_line": start, "end_line": c[3].parse::<u64>().unwrap() });
+        if c.get(4).is_some() {
+            input["force"] = json!(true);
+        }
     }
     panic!("{label}: next chain did not terminate");
 }
@@ -534,6 +540,9 @@ async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
     // A JSON string or array literal is a valid TOML basic string or inline array (`\uXXXX`,
     // `\"`, `\\`). The `toml` serializer overflows on these values in a debug build.
     let toml_text = |v: &Value| format!("k = {}\n", v["k"]);
+    // A JSON string or array literal is also a YAML double-quoted scalar or flow sequence
+    // (`\uXXXX`, `\"`, `\\`): a YAML key read takes the same `inline_or_file_id` as TOML.
+    let yaml_text = |v: &Value| format!("k: {}\n", v["k"]);
     let mut buffered = 0;
     for (class, unit) in CLASSES.into_iter().chain([("esc", "\u{1b}")]) {
         // One string value, and a value of many 40-unit lines.
@@ -552,6 +561,7 @@ async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
                     &json_text as &dyn Fn(&Value) -> String,
                 ),
                 ("toml", "toml", json!({ "toml_key": "k" }), &toml_text),
+                ("yaml", "yaml", json!({ "toml_key": "k" }), &yaml_text),
             ] {
                 for (shape, make) in [("one", &one as &dyn Fn(usize) -> Value), ("many", &many)] {
                     let n = units_for(size, |u| json_escaped_len(&text_of(&make(u))));
@@ -603,5 +613,290 @@ async fn a_toml_key_read_with_many_siblings_drops_them_from_the_handle_arm() {
         let (v, _) = page(&ctx, &input, "", &label).await;
         assert_eq!(v["siblings_omitted"], json!(true), "{label}: {v:.300}");
         assert!(v.get("file_id").is_some(), "{label}: {v:.300}");
+    }
+}
+
+/// The seven content classes: [`CLASSES`] and the escape character `\x1b`, which serializes to
+/// six bytes like `\x01` but is the one terminal output carries.
+const CLASSES7: [(&str, &str); 7] = [
+    ("ascii", "a"),
+    ("quote", "\""),
+    ("backslash", "\\"),
+    ("control", "\u{1}"),
+    ("esc", "\u{1b}"),
+    ("euro", "\u{20ac}"),
+    ("emoji", "\u{1F600}"),
+];
+
+/// Bodies swept across the edge for a range read: multi-line payloads near 10,003 B in 50 B
+/// steps, 5 B steps where the response crosses the limit, a short one, and one line of 12 KB
+/// and of 60 KB.
+fn edge_bodies(unit: &str) -> Vec<(String, String)> {
+    sweep()
+        .chain((9_950..=10_010).step_by(5))
+        .map(|s| (format!("lines{s}"), payload(unit, s)))
+        .chain([
+            ("short".into(), unit.repeat(10)),
+            ("one12k".into(), one_line(unit, 12_000)),
+            ("one60k".into(), one_line(unit, 60_000)),
+        ])
+        .collect()
+}
+
+/// `n` sections `## Section NNNN <40 x 'w'>`: a heading list, and so a `coverage.unread`, far
+/// over the inline limit once 600 of them are unread (about 33 KB).
+fn many_sections(n: usize) -> String {
+    (1..=n)
+        .map(|i| format!("## Section {i:04} {}\nbody {i}\n\n", "w".repeat(40)))
+        .collect()
+}
+
+/// `read_with_line_range` put `coverage` in both arms unconditionally. On a markdown file read
+/// with `force=true` whose unread headings alone serialize past the limit, no page fits beside
+/// it, and `call_content` buffered the response under `@tool_*` (beside the `file_id`, when the
+/// range was buffered). It is dropped, marked `coverage_omitted`, as the markdown range arm drops
+/// it: when it is over the limit alone, or when a line would show whole without it.
+#[tokio::test]
+async fn a_forced_markdown_range_whose_coverage_alone_overflows_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let sections = many_sections(600);
+    let prime = |p: &str| json!({ "path": p, "start_line": 1, "end_line": 1, "force": true });
+    let mut omitted = 0;
+    let mut largest = 0;
+    for (class, unit) in CLASSES7 {
+        for (shape, body) in edge_bodies(unit) {
+            let p = dir.path().join(format!("cov-{class}-{shape}.md"));
+            std::fs::write(&p, format!("# Top\n{body}\n{sections}")).unwrap();
+            let path = p.to_str().unwrap().to_string();
+            ReadFile.call(prime(&path), &ctx).await.unwrap();
+            let n = body.lines().count();
+            let input = json!({ "path": path, "start_line": 2, "end_line": n + 1, "force": true });
+            let label = format!("forced md range {class}/{shape}");
+            let (v, _) = page(&ctx, &input, &path, &label).await;
+            // Unread headings remain on every page, so each carries `coverage` or the marker
+            // that it was dropped, never neither; and a short range stays inline.
+            assert!(
+                v.get("coverage").is_some() != (v["coverage_omitted"] == json!(true)),
+                "{label}: coverage and its marker disagree: {v:.300}"
+            );
+            if shape == "short" {
+                assert!(
+                    v.get("file_id").is_none(),
+                    "{label}: a short range was buffered"
+                );
+            }
+            omitted += usize::from(v["coverage_omitted"] == json!(true));
+            largest = largest.max(read_through(&ctx, input, &path, &label).await);
+        }
+    }
+    assert!(omitted > 0, "no response marked coverage_omitted");
+    eprintln!("forced md range with oversized coverage: largest response = {largest} B");
+}
+/// A `json_path` (or `toml_key`) is the caller's own input and has no length of its own. It was
+/// echoed whole as `path` (or `breadcrumb`) and inside the `hint` of the `file_id` arm, so a
+/// path of several KB pushed a response that already carried a `file_id` over the limit, and
+/// `call_content` buffered it again under `@tool_*`: measured before, a 6 KB YAML key made a
+/// 12,287 B response with two handles. Each echo is clipped in ESCAPED bytes with a visible
+/// marker; the routes name the handle, never the echo. A key of 40 segments of 290 B each makes
+/// `breadcrumb` long though every entry fits: it is dropped, marked `breadcrumb_omitted`.
+#[tokio::test]
+async fn an_overlong_json_path_or_key_echo_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let hint_route =
+        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=N, end_line=M\)"#).unwrap();
+    let mut resolved = BTreeSet::new();
+    let mut clipped = 0;
+    let segments: Vec<String> = (0..40)
+        .map(|i| format!("s{i:02}{}", "q".repeat(287)))
+        .collect();
+    let deep = dir.path().join("deep.toml");
+    std::fs::write(
+        &deep,
+        format!("{} = \"{}\"\n", segments.join("."), "a".repeat(12_000)),
+    )
+    .unwrap();
+    let deep_case = json!({ "path": deep.to_str().unwrap(), "toml_key": segments.join(".") });
+    let (v, _) = page(&ctx, &deep_case, "", "echo deep toml").await;
+    assert_eq!(v["breadcrumb_omitted"], json!(true), "deep toml: {v:.300}");
+    for (class, unit) in CLASSES7 {
+        for key_bytes in [3_000usize, 6_000, 9_000, 12_000] {
+            let key = one_line(unit, key_bytes);
+            for (vshape, value) in [("tiny", "x".to_string()), ("wide", "a".repeat(12_000))] {
+                let doc = json!({ key.clone(): value });
+                let stem = format!("k-{class}-{key_bytes}-{vshape}");
+                let json_file = dir.path().join(format!("{stem}.json"));
+                std::fs::write(&json_file, doc.to_string()).unwrap();
+                let yaml_file = dir.path().join(format!("{stem}.yaml"));
+                std::fs::write(&yaml_file, format!("{key}: {value}\n")).unwrap();
+                let toml_file = dir.path().join(format!("{stem}.toml"));
+                std::fs::write(&toml_file, format!("{key} = \"{value}\"\n")).unwrap();
+                let tool_ref = ctx.output_buffer.store_tool("probe", doc.to_string());
+                let bracket = format!("$[{}]", serde_json::to_string(&key).unwrap());
+                let cases = [
+                    (
+                        "json-dot",
+                        json!({ "path": json_file.to_str().unwrap(), "json_path": format!("$.{key}") }),
+                    ),
+                    (
+                        "json-bracket",
+                        json!({ "path": json_file.to_str().unwrap(), "json_path": bracket }),
+                    ),
+                    (
+                        "tool-dot",
+                        json!({ "path": tool_ref, "json_path": format!("$.{key}") }),
+                    ),
+                    (
+                        "tool-bracket",
+                        json!({ "path": tool_ref, "json_path": bracket }),
+                    ),
+                    (
+                        "yaml",
+                        json!({ "path": yaml_file.to_str().unwrap(), "toml_key": key }),
+                    ),
+                    (
+                        "toml",
+                        json!({ "path": toml_file.to_str().unwrap(), "toml_key": key }),
+                    ),
+                ];
+                for (fmt, input) in cases {
+                    let label = format!("echo {fmt} {class}/{key_bytes}/{vshape}");
+                    if ReadFile.call(input.clone(), &ctx).await.is_err() {
+                        continue;
+                    }
+                    resolved.insert(format!("{fmt}/{class}"));
+                    let input_ref = if fmt.starts_with("tool") {
+                        tool_ref.as_str()
+                    } else {
+                        ""
+                    };
+                    let (v, _) = page(&ctx, &input, input_ref, &label).await;
+                    let text = v.to_string();
+                    // Every key here is over the clip, and every response echoes it at least once.
+                    assert!(
+                        text.contains("bytes shown; the rest is the value you passed"),
+                        "{label}: the echo carries no marker: {text:.300}"
+                    );
+                    clipped += 1;
+                    let Some(fid) = v["file_id"].as_str() else {
+                        continue;
+                    };
+                    let hint = v["hint"].as_str().unwrap_or_default();
+                    let c = hint_route.captures(hint).unwrap_or_else(|| {
+                        panic!("{label}: the hint names no line route: {hint:.300}")
+                    });
+                    assert_eq!(&c[1], fid, "{label}: the hint names another handle");
+                    let total = v["total_lines"].as_u64().unwrap();
+                    let route = json!({ "path": fid, "start_line": 1, "end_line": total });
+                    read_through(&ctx, route, fid, &label).await;
+                }
+            }
+        }
+    }
+    eprintln!("overlong echo: resolved {resolved:?}");
+    for must in [
+        "json-dot/ascii",
+        "json-bracket/ascii",
+        "tool-dot/ascii",
+        "yaml/ascii",
+    ] {
+        assert!(
+            resolved.contains(must),
+            "{must} never resolved: {resolved:?}"
+        );
+    }
+    assert!(clipped > 0, "no echo was clipped");
+}
+
+/// `heading=` on a NON-markdown real file. Measured: what arm serves it, and how large its
+/// response is when the heading is the caller's 12 KB of each class.
+#[tokio::test]
+async fn heading_on_a_non_markdown_file_is_refused_within_the_limit() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("plain.txt");
+    std::fs::write(&p, "## A\nbody\n").unwrap();
+    for (class, unit) in CLASSES7 {
+        for bytes in [10usize, 12_000] {
+            let heading = one_line(unit, bytes);
+            let input = json!({ "path": p.to_str().unwrap(), "heading": heading });
+            let label = format!("heading on txt {class}/{bytes}");
+            let (body, compact) = match ReadFile.call(input.clone(), &ctx).await {
+                Ok(v) => (v.clone(), v.to_string().len()),
+                Err(e) => {
+                    let rec = e
+                        .downcast_ref::<crate::tools::RecoverableError>()
+                        .unwrap_or_else(|| panic!("{label}: not recoverable: {e}"));
+                    let mut b =
+                        json!({ "error": rec.message, "hint": rec.hint().unwrap_or_default() });
+                    for (k, val) in rec.extra.iter() {
+                        b[k] = val.clone();
+                    }
+                    let n = b.to_string().len();
+                    (b, n)
+                }
+            };
+            eprintln!("{label}: {compact} B: {body:.160}");
+            assert!(
+                !crate::tools::exceeds_inline_limit_len(compact),
+                "{label}: {compact} B is over the inline limit"
+            );
+            let blocks = ReadFile.call_content(input.clone(), &ctx).await;
+            if let Ok(blocks) = blocks {
+                let text = crate::tools::hint_probe::primary_text(&blocks);
+                assert!(
+                    handles_in(&text).is_empty(),
+                    "{label}: minted a handle: {text:.300}"
+                );
+            }
+        }
+    }
+}
+
+/// A file of a registered library carries `source: "lib:<name>"`, beside the content in both
+/// range arms and in the inline whole-file arm. Measured at the edge in every class, with a
+/// short library name and a 2 KB one (a name is the caller's, given to `library(register)`).
+#[tokio::test]
+async fn a_library_file_read_counts_its_source_tag() {
+    let proj = tempfile::tempdir().unwrap();
+    let lib = tempfile::tempdir().unwrap();
+    for name in ["mylib".to_string(), "n".repeat(2_000)] {
+        let ctx = {
+            let mut c = ctx().await;
+            c.agent = Agent::new(Some(proj.path().to_path_buf())).await.unwrap();
+            {
+                let mut inner = c.agent.inner.write().await;
+                let project = inner.active_project_mut().unwrap();
+                project.library_registry.register(
+                    name.clone(),
+                    lib.path().to_path_buf(),
+                    "rust".to_string(),
+                    crate::library::registry::DiscoveryMethod::Manual,
+                    true,
+                );
+            }
+            c
+        };
+        let mut tagged = 0;
+        let mut largest = 0;
+        for (class, unit) in CLASSES7 {
+            for (shape, body) in edge_bodies(unit) {
+                let p = lib
+                    .path()
+                    .join(format!("{}-{class}-{shape}.txt", name.len()));
+                std::fs::write(&p, &body).unwrap();
+                let path = p.to_str().unwrap().to_string();
+                let label = format!("lib {} {class}/{shape}", name.len());
+                let range = json!({ "path": path, "start_line": 1, "end_line": 100_000 });
+                let (v, _) = page(&ctx, &range, &path, &label).await;
+                tagged += usize::from(v["source"] == json!(format!("lib:{name}")));
+                largest = largest.max(read_through(&ctx, range, &path, &label).await);
+                largest =
+                    largest.max(read_through(&ctx, json!({ "path": path }), &path, &label).await);
+            }
+        }
+        assert!(tagged > 0, "no response carried the lib:{} tag", name.len());
+        eprintln!("lib name {} B: largest response = {largest} B", name.len());
     }
 }

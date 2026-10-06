@@ -1104,12 +1104,34 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // each echo in `section_map` and `breadcrumb` serializes to at most 200 B plus its quotes,
         // with its true raw length beside it as `h_bytes`. The unit is SERIALIZED bytes: a raw-byte
         // clip of `\x01` echoed 1,200 B, of `"` 398 B (measured 2026-10-06, before the re-unit).
+        // An echo quoted inside another string (`next_actions`, the message) is clipped against
+        // its doubly-escaped length (`clip_heading_embedded`), and the cited test asserts it
+        // costs at most 200 B there too: before, `"` cost 396 B in `next_actions`.
         // Marker written by production in `read_markdown_single_heading`, from `clip_heading`.
         id: "read_markdown.heading_echo_bytes",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("h_bytes"),
             mutation: Mutation::Killed,
             cited_test: "a_control_char_heading_echo_is_clipped_in_escaped_bytes",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // passes a `json_path` (dot and bracket form, on a real JSON file and on a `@tool_*`
+        // ref) and a `toml_key` (YAML and TOML) of 3, 6, 9 and 12 KB in seven content classes
+        // (ASCII, `"`, `\`, `\x01`, `\x1b`, `€`, a 4-byte emoji) against `INPUT_ECHO_CLIP` 300,
+        // through the real tool, and asserts one handle at most, no `@tool_*`, a response within
+        // the limit and a hint route that reads the value to the end. Measured before the clip:
+        // a 6 KB YAML key made a 12,287 B response with a `@file_*` and a `@tool_*` handle.
+        // Marker written by production in `read_file::clip_input_echo` (`elide_middle_escaped`).
+        // MUTATION (2026-10-06): `clip_input_echo` returning its input whole turns the cited
+        // test red (two handles); so do `breadcrumb` leaving the droppable list and the
+        // `@tool_*` arm echoing `jp` raw.
+        id: "read_file.input_echo_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("the rest is the value you passed"),
+            mutation: Mutation::Killed,
+            cited_test: "an_overlong_json_path_or_key_echo_keeps_one_handle",
         },
     },
     ProbeRow {
