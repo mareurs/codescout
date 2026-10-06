@@ -547,17 +547,20 @@ fn clamp_over_budget_line(chunk: String, room: usize) -> (String, bool) {
 const OVER_BUDGET_MARKER: &str = "\n…[truncated: this line is wider than the inline budget]";
 
 /// What a page of [`read_from_buffer`] has left for `content`, in serialized bytes: the
-/// response limit less every other key the page can carry, capped at `INLINE_BYTE_BUDGET`.
+/// response limit less every other key the page can carry.
 ///
 /// `widest` is the page's response with `content` set to `""` and every optional key present
 /// at the widest value it can take. The real page carries a subset of those keys with values
 /// no wider, so a `content` whose ESCAPED length fits this room keeps the compact response
 /// within the limit `call_content` judges it by. A room counted in raw bytes, or with the
 /// other keys left out, let that response be buffered again under a second handle.
+///
+/// No `INLINE_BYTE_BUDGET` margin on top: that 10% existed for estimates in the wrong unit,
+/// and this one is exact. `call_content` measures the value this function's caller returns;
+/// what it adds afterwards (`_guide_hint`, parameter corrections) is added after the
+/// buffering decision.
 fn buffer_page_room(widest: &Value) -> usize {
-    crate::tools::INLINE_MAX_RESPONSE_LEN
-        .saturating_sub(widest.to_string().len())
-        .min(crate::tools::INLINE_BYTE_BUDGET)
+    crate::tools::INLINE_MAX_RESPONSE_LEN.saturating_sub(widest.to_string().len())
 }
 
 /// One page of `body`, from its first line, whose content fits `room` serialized bytes.
