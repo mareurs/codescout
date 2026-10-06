@@ -76,6 +76,82 @@ pub(crate) const INLINE_MAX_RESPONSE_LEN: usize = (MAX_INLINE_TOKENS + 1) * 4 - 
 // cap-class: RESULT_CAP tool_output.prebuffered_field_floor — probed
 const PREBUFFERED_FIELD_FLOOR: usize = 1_000;
 
+/// The reserved top-level key under which a summarizer records the fields it CUT: an array of
+/// field names, e.g. `"_cut_fields": ["stdout", "stderr"]`.
+///
+/// **Why a record, and not the field's text.** [`clip_prebuffered_envelope`] must not cut a field a
+/// second time: the first cut's marker describes the SOURCE stream, and a second cut drops that
+/// marker and reports the length of the cut text as the total. It used to decide "already cut" by
+/// matching the marker text in the field, but the field holds the program's own bytes, and a program
+/// can print `--- 5 lines omitted ---`: a parser over a namespace with no disambiguator
+/// (`docs/conventions/parsers-over-a-namespace.md`). A program-printed marker spared its field, and a
+/// 16 KB envelope went behind a second `@tool_*` handle. The record is that disambiguator.
+///
+/// **Why it cannot be forged by a program.** A program's output only ever becomes the string VALUE
+/// of a key the Rust code chose (`stdout`, `stderr`, `failures`, ...), never a key, so no byte a
+/// program prints can create this key; and its value is written only by [`record_cut`], from field
+/// names that are literals at every call site. Text that looks like the record inside a stream is a
+/// string like any other.
+///
+/// **Why in the envelope, and not a typed side channel.** The record has to travel from the
+/// summarizers (pure functions over text, which know nothing of `ToolContext`) through
+/// `fit_summary`, `rebuild_buffered_summary` and `run_command`'s late keys to the backstop in
+/// `call_content`. A key in the `Value` they already pass rides that path with no new plumbing and
+/// no change to the `Tool` trait; a side channel would have to be threaded through every one of
+/// those signatures, or kept in global state keyed by the result, which nothing could clear on an
+/// error path. The cost of the key is that it is RESERVED in every tool's top-level result: the
+/// backstop removes whatever sits under it, record or not, before anything is measured or
+/// delivered, so it never reaches the caller and no response grows by it. No tool authors this key
+/// for its own data.
+pub(crate) const CUT_FIELDS_KEY: &str = "_cut_fields";
+
+/// Record in `envelope` that `field` was cut by a summarizer and carries that summarizer's marker,
+/// so the backstop leaves it whole. See [`CUT_FIELDS_KEY`]. `field` must be a key the caller chose,
+/// never text derived from a program's output. A no-op on a non-object.
+pub(crate) fn record_cut(envelope: &mut Value, field: &str) {
+    let Some(obj) = envelope.as_object_mut() else {
+        return;
+    };
+    let entry = obj
+        .entry(CUT_FIELDS_KEY)
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Value::Array(names) = entry {
+        if !names.iter().any(|n| n.as_str() == Some(field)) {
+            names.push(Value::String(field.to_owned()));
+        }
+    }
+}
+
+/// Remove the cut record from `envelope` and return the field names it held. The key is removed
+/// whatever it holds; only an array of strings is read as a record, so anything else spares nothing.
+fn take_cut_record(envelope: &mut Value) -> Vec<String> {
+    match envelope
+        .as_object_mut()
+        .and_then(|obj| obj.remove(CUT_FIELDS_KEY))
+    {
+        Some(Value::Array(names)) => names
+            .into_iter()
+            .filter_map(|n| match n {
+                Value::String(s) => Some(s),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The serialized length `value` will have when delivered: without its cut record, which the
+/// backstop strips. A budget measured against a response that still carries the record must use
+/// this, or it would cut text to make room for bytes the caller never receives.
+pub(crate) fn delivered_len(value: &Value) -> usize {
+    if value.get(CUT_FIELDS_KEY).is_none() {
+        return value.to_string().len();
+    }
+    let mut stripped = value.clone();
+    take_cut_record(&mut stripped);
+    stripped.to_string().len()
+}
+
 /// Keep a result that already carries its own handle to exactly that one handle.
 ///
 /// A tool that pre-buffers (`run_command` stores its raw stream behind `@cmd_*`) returns an
@@ -93,8 +169,15 @@ const PREBUFFERED_FIELD_FLOOR: usize = 1_000;
 /// [`PREBUFFERED_FIELD_FLOOR`], is returned unchanged for the caller to buffer as before.
 /// A result without its own `output_id` is never touched: nothing would hold the rest of it.
 ///
-/// `force_inline` tools opt out of overflow handling altogether, so they are returned as built.
-pub(crate) fn clip_prebuffered_envelope(val: Value, force_inline: bool) -> Value {
+/// A field a summarizer already cut is named in the envelope's cut record ([`CUT_FIELDS_KEY`]) and
+/// is left whole: its marker's numbers describe the source, and a second cut would lose them. The
+/// record is the ONLY thing consulted for that, never the field's text, which a program can make
+/// look like a marker. It is removed here on every path, so it is never delivered.
+///
+/// `force_inline` tools opt out of overflow handling altogether, so they are returned as built
+/// (less the record).
+pub(crate) fn clip_prebuffered_envelope(mut val: Value, force_inline: bool) -> Value {
+    let already_cut = take_cut_record(&mut val);
     if force_inline {
         return val;
     }
@@ -115,15 +198,14 @@ pub(crate) fn clip_prebuffered_envelope(val: Value, force_inline: bool) -> Value
         .into_iter()
         .flatten()
         .filter(|(k, _)| k.as_str() != "output_id")
+        // A field the tool already cut keeps its marker, whose total names the SOURCE stream;
+        // cutting it again would drop that marker and report the length of the cut text as the
+        // total. The other fields are clipped instead, or, when they cannot make the envelope fit,
+        // the whole envelope goes behind `@tool_*` below, where nothing was cut at all.
+        .filter(|(k, _)| !already_cut.contains(k))
         .filter_map(|(k, v)| {
             v.as_str()
                 .filter(|s| s.len() > PREBUFFERED_FIELD_FLOOR)
-                // A field the tool already cut keeps its marker, whose total names the SOURCE
-                // stream; cutting it again would drop that marker and report the length of the
-                // cut text as the total. The other fields are clipped instead, or, when they
-                // cannot make the envelope fit, the whole envelope goes behind `@tool_*` below,
-                // where nothing was cut at all.
-                .filter(|s| !crate::util::text::carries_elision_marker(s))
                 .map(|s| (k.clone(), s.to_owned()))
         })
         .collect();

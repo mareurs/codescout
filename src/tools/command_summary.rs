@@ -103,8 +103,9 @@ const GENERIC_FIELD_BYTE_BUDGET: usize = 2000;
 // cap-class: RESULT_CAP command_summary.failure_field_bytes — probed
 const FAILURE_FIELD_BYTE_BUDGET: usize = 5000;
 
-/// Leading token of the marker prefixed to a `stderr` field that was cut; defined in `util::text`
-/// beside the one detector of every summarizer marker, `carries_elision_marker`.
+/// Leading token of the marker prefixed to a `stderr` field that was cut; defined in `util::text`.
+/// The marker is for the reader only: whether a field was cut is told to the backstop by the
+/// envelope's cut record (`crate::tools::record_cut`), never by this text, which a program can print.
 pub(crate) use crate::util::text::STDERR_TAIL_MARKER;
 
 /// Stands for the envelope's own `output_id` inside a summarized `stderr` field's remedy.
@@ -158,9 +159,11 @@ const SUMMARY_TEXT_FIELDS: [&str; 4] = ["stdout", "stderr", "failures", "first_e
 /// A response whose skeleton alone is over the limit comes back as built; the backstop in
 /// `call_content` is for that.
 pub(crate) fn fit_summary(render: impl Fn(&SummaryBudget) -> Value) -> Value {
-    use crate::tools::{exceeds_inline_limit_len, INLINE_MAX_RESPONSE_LEN};
+    use crate::tools::{delivered_len, exceeds_inline_limit_len, INLINE_MAX_RESPONSE_LEN};
+    // Measured as DELIVERED, without the cut record the summarizers attach: the backstop strips it,
+    // so counting it here would cut text to make room for bytes the caller never receives.
     let natural = render(&SummaryBudget::default());
-    if !exceeds_inline_limit_len(natural.to_string().len()) {
+    if !exceeds_inline_limit_len(delivered_len(&natural)) {
         return natural;
     }
     let mut skeleton = natural.clone();
@@ -171,7 +174,7 @@ pub(crate) fn fit_summary(render: impl Fn(&SummaryBudget) -> Value) -> Value {
             skeleton[key] = json!("");
         }
     }
-    let room = INLINE_MAX_RESPONSE_LEN.saturating_sub(skeleton.to_string().len());
+    let room = INLINE_MAX_RESPONSE_LEN.saturating_sub(delivered_len(&skeleton));
     let mut budget = SummaryBudget::default();
     for (key, share) in share_room(&wanted, room) {
         match key {
@@ -394,6 +397,24 @@ pub(crate) fn inline_response_exceeds_limit(
     exceeds_inline_limit_len(Value::Object(response).to_string().len() + extras)
 }
 
+/// [`elide_middle_escaped`], and whether it CUT `text`, for the envelope's cut record
+/// (`crate::tools::record_cut`).
+///
+/// Told apart by construction, not by the text: `elide_middle_escaped` returns `text` unchanged
+/// exactly when it fits, and a cut serializes to at most `max_escaped` bytes, fewer than `text`'s own,
+/// so a cut can never equal its input. Nothing here looks at the marker.
+fn elide_noting_cut(
+    text: &str,
+    original_len: usize,
+    max_escaped: usize,
+    label: &str,
+    remedy: &str,
+) -> (String, bool) {
+    let out = elide_middle_escaped(text, original_len, max_escaped, label, remedy);
+    let cut = out != text;
+    (out, cut)
+}
+
 /// Render the `stderr` field for a summarized envelope: the LAST lines, bounded
 /// in both lines and bytes, behind an explicit marker when anything was cut.
 ///
@@ -417,8 +438,9 @@ pub(crate) fn inline_response_exceeds_limit(
 /// by the `.err` suffix, so it sent readers away from the stream it described.
 ///
 /// Returns `None` for empty stderr so the key is omitted rather than rendered
-/// empty, matching [`summarize_generic`].
-fn summarize_stderr(stderr: &str, share: Option<usize>) -> Option<String> {
+/// empty, matching [`summarize_generic`]. The flag says whether the field was CUT (it carries the
+/// tail header), for the caller to put in the envelope's cut record.
+fn summarize_stderr(stderr: &str, share: Option<usize>) -> Option<(String, bool)> {
     if stderr.is_empty() {
         return None;
     }
@@ -491,14 +513,17 @@ fn summarize_stderr(stderr: &str, share: Option<usize>) -> Option<String> {
     // a `\r\n` stream undercounts.
     let nothing_cut = dropped == 0 && !clipped && progress == 0;
     if nothing_cut && json_escaped_len(stderr) <= body_budget {
-        return Some(stderr.to_string());
+        return Some((stderr.to_string(), false));
     }
 
     let notes = stderr_notes(progress, dropped, clipped, nothing_cut);
-    Some(format!(
-        "{}{}",
-        stderr_header(&notes, kept.len(), total),
-        kept.join("\n"),
+    Some((
+        format!(
+            "{}{}",
+            stderr_header(&notes, kept.len(), total),
+            kept.join("\n"),
+        ),
+        true,
     ))
 }
 /// The cuts a summarized stderr announces, in the order the header lists them.
@@ -581,20 +606,27 @@ pub(crate) fn summarize_test_output_within(
         // The section can come from either stream (`combined`), so the marker names both
         // handles rather than claiming one.
         let len = f.len();
-        result["failures"] = Value::String(elide_middle_escaped(
+        let (failures, cut) = elide_noting_cut(
             &f,
             len,
             ceiling(FAILURE_FIELD_BYTE_BUDGET, budget.detail),
             "failures",
             "all of it: output_id (stdout) or output_id.err (stderr)",
-        ));
+        );
+        result["failures"] = Value::String(failures);
+        if cut {
+            crate::tools::record_cut(&mut result, "failures");
+        }
     }
     // A test harness writes its RESULTS to stdout, so a test run's stderr is the
     // compiler's diagnostics and any wrapper script's commentary — exactly what a
     // reader wants when the news is bad, and until 2026-09-14 the only shape that
     // never carried it. BUG docs/issues/archive/2026-09-14-run-commands-test-envelope-drops-the-stderr-a-wrapper-puts-its-verdict-on.md
-    if let Some(err) = summarize_stderr(stderr, budget.stderr) {
+    if let Some((err, cut)) = summarize_stderr(stderr, budget.stderr) {
         result["stderr"] = Value::String(err);
+        if cut {
+            crate::tools::record_cut(&mut result, "stderr");
+        }
     }
 
     result
@@ -654,19 +686,26 @@ pub(crate) fn summarize_build_output_within(
     }
     if let Some(err) = first_error {
         let len = err.len();
-        result["first_error"] = Value::String(elide_middle_escaped(
+        let (first_error, cut) = elide_noting_cut(
             &err,
             len,
             ceiling(FAILURE_FIELD_BYTE_BUDGET, budget.detail),
             "first_error",
             "all of it: output_id (stdout) or output_id.err (stderr)",
-        ));
+        );
+        result["first_error"] = Value::String(first_error);
+        if cut {
+            crate::tools::record_cut(&mut result, "first_error");
+        }
     }
     // Same omission, same fix. `first_error` mines the HEAD of the combined stream;
     // this carries the TAIL, which is where a wrapper's verdict and the final
     // `error: could not compile` line both live.
-    if let Some(err) = summarize_stderr(stderr, budget.stderr) {
+    if let Some((err, cut)) = summarize_stderr(stderr, budget.stderr) {
         result["stderr"] = Value::String(err);
+        if cut {
+            crate::tools::record_cut(&mut result, "stderr");
+        }
     }
 
     result
@@ -695,7 +734,8 @@ pub(crate) fn summarize_generic_within(
     let stdout_lines: Vec<&str> = stdout.lines().collect();
     let total_stdout_lines = stdout_lines.len();
 
-    let summarized_stdout = if total_stdout_lines > HEAD_LINES + TAIL_LINES {
+    let line_cut = total_stdout_lines > HEAD_LINES + TAIL_LINES;
+    let summarized_stdout = if line_cut {
         let head: Vec<&str> = stdout_lines[..HEAD_LINES].to_vec();
         let tail: Vec<&str> = stdout_lines[total_stdout_lines - TAIL_LINES..].to_vec();
         let omitted = total_stdout_lines - HEAD_LINES - TAIL_LINES;
@@ -708,7 +748,7 @@ pub(crate) fn summarize_generic_within(
     } else {
         stdout.to_string()
     };
-    let summarized_stdout = elide_middle_escaped(
+    let (summarized_stdout, byte_cut) = elide_noting_cut(
         &summarized_stdout,
         stdout.len(),
         ceiling(GENERIC_FIELD_BYTE_BUDGET, budget.stdout),
@@ -723,15 +763,24 @@ pub(crate) fn summarize_generic_within(
 
     if !summarized_stdout.is_empty() {
         result["stdout"] = Value::String(summarized_stdout);
+        // Either cut writes its marker: the line elision's `--- N lines omitted ---`, the byte
+        // elision's `bytes shown` line. The flag, not the text: a program can print either.
+        if line_cut || byte_cut {
+            crate::tools::record_cut(&mut result, "stdout");
+        }
     }
     if !stderr.is_empty() {
-        result["stderr"] = Value::String(elide_middle_escaped(
+        let (err, cut) = elide_noting_cut(
             stderr,
             stderr.len(),
             ceiling(GENERIC_FIELD_BYTE_BUDGET, budget.stderr),
             "stderr",
             "all of it: output_id.err",
-        ));
+        );
+        result["stderr"] = Value::String(err);
+        if cut {
+            crate::tools::record_cut(&mut result, "stderr");
+        }
     }
 
     result
@@ -1619,9 +1668,10 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     }
     // -- fit_summary / share_room: the summary is budgeted in the unit the limit counts --
 
-    /// The serialized length `call_content` measures.
+    /// The serialized length `call_content` measures: after the backstop has stripped the cut record,
+    /// which is never delivered.
     fn wire_len(v: &Value) -> usize {
-        v.to_string().len()
+        crate::tools::delivered_len(v)
     }
 
     #[test]
@@ -1653,6 +1703,38 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         let summary = summarize_generic("ok\n", "warn\n", 0);
         let fitted = fit_summary(|b| summarize_generic_within("ok\n", "warn\n", 0, b));
         assert_eq!(fitted, summary);
+    }
+    /// The cut record is stripped by the backstop before delivery, so `fit_summary` measures without it: a
+    /// summary that fits AS DELIVERED is returned as built, even when the record would push the measured
+    /// bytes over the limit. Counting it cut text to make room for bytes the caller never receives.
+    #[test]
+    fn fit_summary_does_not_count_the_cut_record_it_never_delivers() {
+        use crate::tools::{delivered_len, record_cut, CUT_FIELDS_KEY, INLINE_MAX_RESPONSE_LEN};
+        let render = |b: &SummaryBudget| {
+            let mut v = json!({"type": "generic", "exit_code": 0, "stdout": ""});
+            let room = INLINE_MAX_RESPONSE_LEN - v.to_string().len();
+            v["stdout"] = json!(if b.stdout.is_none() {
+                "s".repeat(room)
+            } else {
+                "refit".to_string()
+            });
+            record_cut(&mut v, "stdout");
+            v
+        };
+        let fitted = fit_summary(render);
+        assert!(
+            fitted.get(CUT_FIELDS_KEY).is_some(),
+            "the record rides to the backstop"
+        );
+        assert_eq!(delivered_len(&fitted), INLINE_MAX_RESPONSE_LEN);
+        assert!(
+            fitted.to_string().len() > INLINE_MAX_RESPONSE_LEN,
+            "fixture: the record must push the undelivered bytes over"
+        );
+        assert_ne!(
+            fitted["stdout"], "refit",
+            "a response that fits as delivered was cut"
+        );
     }
 
     #[test]
@@ -1726,7 +1808,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             .map(|_| format!("{}\n", "\u{1}".repeat(100)))
             .collect();
         for share in [400usize, 700, 1_500, 5_000] {
-            let field = summarize_stderr(&stderr, Some(share)).unwrap();
+            let field = summarize_stderr(&stderr, Some(share)).unwrap().0;
             // The handle replaces the placeholder in `rebuild_buffered_summary`.
             let live = field.replace(OUTPUT_ID_PLACEHOLDER, "@cmd_00000000");
             assert!(
@@ -1737,7 +1819,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             assert!(live.contains("--- stderr TAIL:"), "share {share}");
         }
         // And a share bigger than the natural ceiling does not raise the ceiling.
-        let field = summarize_stderr(&stderr, Some(1_000_000)).unwrap();
+        let field = summarize_stderr(&stderr, Some(1_000_000)).unwrap().0;
         assert!(json_escaped_len(&field) <= STDERR_SUMMARY_BYTE_BUDGET + 400);
     }
     #[test]
@@ -1750,7 +1832,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         let widest = stderr_header(&stderr_notes(0, 40, true, true), 40, 40);
         let share = json_escaped_len(&widest) + OUTPUT_ID_GROWTH + 71;
 
-        let field = summarize_stderr(&stderr, Some(share)).unwrap();
+        let field = summarize_stderr(&stderr, Some(share)).unwrap().0;
 
         assert!(field.contains("5 of 40 line(s) shown"), "{field:.160}");
         let live = field.replace(OUTPUT_ID_PLACEHOLDER, "@cmd_00000000");
@@ -1830,7 +1912,7 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             json_escaped_len(&stderr) > STDERR_SUMMARY_BYTE_BUDGET,
             "fixture: the stream must overflow the budget escaped"
         );
-        let field = summarize_stderr(&stderr, None).unwrap();
+        let field = summarize_stderr(&stderr, None).unwrap().0;
         assert!(
             field.contains("line terminators normalized"),
             "{field:.200}"
