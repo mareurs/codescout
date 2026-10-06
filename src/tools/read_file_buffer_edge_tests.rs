@@ -308,3 +308,23 @@ async fn two_thousand_control_bytes_on_one_line_keep_one_handle() {
     );
     eprintln!("2000 x \\x01: response judged = {compact} B");
 }
+
+/// The valve's guarantee at the clamp, where no page reaches it: a room smaller than the
+/// marker still keeps the line's first character, never zero bytes of a non-empty line.
+#[test]
+fn clamp_keeps_a_character_of_the_line_in_a_room_too_small_for_one() {
+    for (class, unit) in CLASSES {
+        let line = unit.repeat(40);
+        for room in [0, 1, 5, 20] {
+            let (out, cut) = super::clamp_over_budget_line(line.clone(), room);
+            assert!(
+                cut,
+                "{class}/{room}: a line wider than the room was not cut"
+            );
+            assert!(
+                out.starts_with(unit),
+                "{class}/{room}: no character of the line survived: {out:?}"
+            );
+        }
+    }
+}
