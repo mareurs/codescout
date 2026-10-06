@@ -1748,11 +1748,12 @@ async fn a_prebuffered_envelope_within_the_budget_is_untouched() {
     );
     assert!(!stdout.contains("bytes shown"));
 }
-/// A field that already carries an `... of M bytes shown` marker was cut from a STREAM of `M`
+/// A field a summarizer cut (named in the envelope's cut record) carries an `... of M bytes shown`
+/// marker: it was cut from a STREAM of `M`
 /// bytes. Cutting the cut text again drops that marker and writes a new one whose total is the
 /// length of the already-cut text, so a 50,000 B stream read "1000 of 2065 bytes shown". The
 /// backstop must not do that: it clips the OTHER fields, or, when they cannot make the envelope fit,
-/// hands the original back for the `@tool_*` buffer, which holds every byte.
+/// hands the original back (less the record) for the `@tool_*` buffer, which holds every byte.
 #[test]
 fn a_field_that_already_carries_a_marker_is_never_clipped_again() {
     let marked = format!(
@@ -1767,12 +1768,14 @@ fn a_field_that_already_carries_a_marker_is_never_clipped_again() {
         "stdout": marked,
         "stderr": "e".repeat(3_000),
     });
+    let mut recorded = val.clone();
+    crate::tools::record_cut(&mut recorded, "stdout");
     assert!(
         exceeds_inline_limit(&val.to_string()),
         "fixture must overflow"
     );
 
-    let out = clip_prebuffered_envelope(val.clone(), false);
+    let out = clip_prebuffered_envelope(recorded, false);
 
     assert_eq!(
         out, val,
@@ -1787,15 +1790,23 @@ fn a_marked_field_is_spared_while_an_unmarked_one_is_clipped() {
         "h".repeat(1_500),
         "t".repeat(1_500)
     );
-    let val = serde_json::json!({
+    let mut val = serde_json::json!({
         "output_id": "@cmd_own9",
         "stdout": marked.clone(),
         "stderr": "e".repeat(20_000),
     });
+    crate::tools::record_cut(&mut val, "stdout");
 
     let out = clip_prebuffered_envelope(val, false);
 
-    assert_eq!(out["stdout"], marked, "the marked field must be untouched");
+    assert!(
+        out.get(crate::tools::CUT_FIELDS_KEY).is_none(),
+        "the record is delivered"
+    );
+    assert_eq!(
+        out["stdout"], marked,
+        "the recorded field must be untouched"
+    );
     let stderr = out["stderr"].as_str().unwrap();
     assert!(
         stderr.contains("of 20000 bytes shown"),
@@ -1806,61 +1817,115 @@ fn a_marked_field_is_spared_while_an_unmarked_one_is_clipped() {
         "the envelope must fit"
     );
 }
-/// Every marker a summarizer writes, as the summarizer writes it, padded so the marked field is the
-/// LARGEST and the envelope cannot fit without cutting it.
-fn summarizer_marked_fields() -> Vec<(&'static str, String)> {
+
+/// Every summarizer cut that writes a marker, as the summarizer returns it: its OWN envelope, cut
+/// record included, with the cut field padded so it is the LARGEST and the envelope cannot fit without
+/// cutting it. Nothing here writes the record; each case is `(name, field, envelope, marker text)`.
+fn summarizer_marked_fields() -> Vec<(&'static str, &'static str, serde_json::Value, &'static str)>
+{
+    use crate::tools::command_summary::{
+        summarize_build_output, summarize_generic, summarize_test_output,
+    };
     let warnings: String = (0..200).map(|i| format!("warning line {i}\n")).collect();
-    let tail =
-        crate::tools::command_summary::summarize_test_output("running 0 tests\n", &warnings, 0)
-            ["stderr"]
-            .as_str()
-            .unwrap()
-            .to_string();
-    assert!(tail.starts_with("--- stderr TAIL:"), "{tail:.200}");
     let lines: String = (0..300).map(|i| format!("{i}\n")).collect();
-    let omitted = crate::tools::command_summary::summarize_generic(&lines, "", 0)["stdout"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(omitted.contains(" lines omitted ---\n"), "{omitted:.200}");
-    assert!(
-        !omitted.contains("bytes shown"),
-        "the fixture must carry ONLY the line marker: {omitted:.0}"
-    );
-    let bytes = crate::util::text::elide_middle_escaped(
-        &"b".repeat(50_000),
-        50_000,
-        9_000,
-        "stdout",
-        "all of it: @cmd_own9",
-    );
+    let wide = "b".repeat(50_000);
+    let failures = format!("failures:\n{}\nfailures:\n", "f".repeat(20_000));
+    let build = format!("error[E0308]: x\n{}\n", "x".repeat(20_000));
     vec![
-        ("bytes shown", bytes),
-        ("stderr TAIL", format!("{tail}\n{}", "x".repeat(9_000))),
-        ("lines omitted", format!("{}\n{omitted}", "h".repeat(9_000))),
+        (
+            "test stderr tail",
+            "stderr",
+            summarize_test_output("running 0 tests\n", &warnings, 0),
+            "--- stderr TAIL:",
+        ),
+        (
+            "build stderr tail",
+            "stderr",
+            summarize_build_output("", &warnings, 0),
+            "--- stderr TAIL:",
+        ),
+        (
+            "generic stdout lines omitted",
+            "stdout",
+            summarize_generic(&lines, "", 0),
+            " lines omitted ---\n",
+        ),
+        (
+            "generic stdout bytes shown",
+            "stdout",
+            summarize_generic(&wide, "", 0),
+            "bytes shown",
+        ),
+        (
+            "generic stderr bytes shown",
+            "stderr",
+            summarize_generic("", &wide, 0),
+            "bytes shown",
+        ),
+        (
+            "test failures",
+            "failures",
+            summarize_test_output(&failures, "", 101),
+            "bytes shown",
+        ),
+        (
+            "build first_error",
+            "first_error",
+            summarize_build_output(&build, "", 101),
+            "bytes shown",
+        ),
     ]
 }
 
 /// A field a summarizer already cut carries a marker whose numbers describe the SOURCE; cutting it
-/// again drops or doubles that marker. Every marker the summarizers write must spare its field,
-/// not only the `bytes shown` one: a `--- stderr TAIL:` header or a `--- N lines omitted ---` line
-/// was re-cut, and the clip's own marker then reported the cut text's length as the total.
+/// again drops or doubles that marker. Every cut a summarizer makes must spare its field, through the
+/// summarizer's own cut record and nothing else: the record is stripped, and the field is left whole
+/// however its text reads. A summary that cut NOTHING carries no record, even when the program
+/// printed a marker-shaped line into it.
 #[test]
 fn every_summarizer_marker_spares_its_field_from_a_second_cut() {
-    for (name, marked) in summarizer_marked_fields() {
-        let val = serde_json::json!({
-            "output_id": "@cmd_own9",
-            "stdout": marked,
-            "other": "e".repeat(3_000),
-        });
+    for (name, field, mut envelope, marker) in summarizer_marked_fields() {
+        let text = envelope[field].as_str().unwrap_or_default().to_string();
+        assert!(text.contains(marker), "{name}: no marker: {text:.200}");
+        assert_eq!(
+            envelope[crate::tools::CUT_FIELDS_KEY],
+            serde_json::json!([field]),
+            "{name}: the summarizer must record exactly the field it cut"
+        );
+        envelope[field] = serde_json::json!(format!("{text}\n{}", "p".repeat(12_000)));
+        envelope["output_id"] = serde_json::json!("@cmd_own9");
+        envelope["other"] = serde_json::json!("e".repeat(3_000));
         assert!(
-            exceeds_inline_limit(&val.to_string()),
+            exceeds_inline_limit(&envelope.to_string()),
             "{name}: fixture must overflow"
         );
+        let mut expected = envelope.clone();
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove(crate::tools::CUT_FIELDS_KEY);
         assert_eq!(
-            clip_prebuffered_envelope(val.clone(), false),
-            val,
-            "{name}: a marked field was cut a second time"
+            clip_prebuffered_envelope(envelope, false),
+            expected,
+            "{name}: a recorded field was cut a second time, or the record was delivered"
+        );
+    }
+
+    // Nothing cut, nothing recorded: a short stream, and one whose lines include the markers'
+    // shapes, printed by the program and within every bound.
+    let printed = format!(
+        "a\n--- 5 lines omitted ---\n--- stdout: 1 of 2 bytes shown; R ---\n{} 1 of 2 line(s) shown. \
+         Full stderr: x ---\nb\n",
+        crate::util::text::STDERR_TAIL_MARKER
+    );
+    for summary in [
+        crate::tools::command_summary::summarize_generic(&printed, &printed, 0),
+        crate::tools::command_summary::summarize_test_output(&printed, &printed, 0),
+        crate::tools::command_summary::summarize_build_output(&printed, &printed, 0),
+    ] {
+        assert!(
+            summary.get(crate::tools::CUT_FIELDS_KEY).is_none(),
+            "an uncut summary carries a record: {summary}"
         );
     }
 }
@@ -1976,6 +2041,138 @@ fn a_force_inline_tool_is_never_clipped() {
         val,
         "the same value IS clipped for a tool that did not opt out"
     );
+}
+/// A program can print text that LOOKS like a summarizer's marker: a whole line
+/// `--- N lines omitted ---`, a line `--- <label>: N of M bytes shown; ... ---`, a stream that opens
+/// with a full `--- stderr TAIL: ... ---` header, or a line naming the provenance key. None of that was
+/// cut by a summarizer, so the backstop must clip the field like any other, behind its OWN marker,
+/// until the envelope fits. Matching the field's text took each of the first three for "already cut"
+/// and left a 16 KB field uncut, so `call_content` buffered the envelope a second time.
+#[test]
+fn a_program_printed_marker_line_does_not_spare_its_field_from_the_backstop() {
+    let header = format!(
+        "{} 3 earlier line(s) dropped; 2 of 5 line(s) shown. Full stderr: \
+         read_file(\"@cmd_0000aaaa.err\") ---",
+        crate::util::text::STDERR_TAIL_MARKER
+    );
+    let shapes = [
+        (
+            "bytes shown",
+            "--- stdout: 5 of 100 bytes shown; all of it: output_id ---".to_string(),
+        ),
+        ("stderr TAIL", header),
+        ("lines omitted", "--- 5 lines omitted ---".to_string()),
+        (
+            "record-looking",
+            r#"{"_cut_fields":["stdout","stderr","failures"]}"#.to_string(),
+        ),
+    ];
+    let lines: Vec<String> = (0..880).map(|i| format!("program line {i:04}\n")).collect();
+    let (front, back) = (lines[..440].concat(), lines[440..].concat());
+    let filler = lines.concat();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let (mut smallest, mut largest) = (usize::MAX, 0);
+    for (shape, line) in &shapes {
+        for (position, text) in [
+            ("start", format!("{line}\n{filler}")),
+            ("middle", format!("{front}{line}\n{back}")),
+            ("end", format!("{filler}{line}")),
+        ] {
+            for stream in ["stdout", "stderr"] {
+                let val = serde_json::json!({
+                    "exit_code": 0,
+                    "output_id": "@cmd_0000beef",
+                    stream: text,
+                });
+                assert!(
+                    exceeds_inline_limit(&val.to_string()),
+                    "{shape} {position} {stream}: fixture must overflow"
+                );
+                let out = clip_prebuffered_envelope(val.clone(), false);
+                let route = if stream == "stderr" {
+                    "the whole stream is @cmd_0000beef.err ---"
+                } else {
+                    "the whole stream is @cmd_0000beef ---"
+                };
+                let field = out[stream].as_str().unwrap_or_default();
+                let bytes = out.to_string().len();
+                (smallest, largest) = (smallest.min(bytes), largest.max(bytes));
+                if exceeds_inline_limit(&out.to_string()) || !field.contains(route) {
+                    failures.push(format!(
+                        "{shape} {position} {stream}: {} B in, {bytes} B out, own marker: {}",
+                        val.to_string().len(),
+                        field.contains(route)
+                    ));
+                }
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 24);
+    eprintln!("program-printed markers: {checked} envelopes clipped to {smallest}..={largest} B");
+    assert!(
+        failures.is_empty(),
+        "{} of {checked} program-printed markers spared their field: {failures:#?}",
+        failures.len()
+    );
+}
+
+/// The provenance key is RESERVED in every tool's top-level result: whatever sits under it is
+/// removed before delivery, and only an array of field names is read as a record. A tool that put its
+/// own data there would lose it, which no tool does (the name is authored only by the summarizers'
+/// record writer); a non-array value spares nothing, so a field beside it is still clipped.
+#[test]
+fn the_cut_record_key_is_reserved_and_never_delivered() {
+    // No handle, fits: the key is still removed.
+    let small = serde_json::json!({"a": 1, "_cut_fields": "tool data"});
+    assert_eq!(
+        clip_prebuffered_envelope(small, false),
+        serde_json::json!({"a": 1})
+    );
+    // A force_inline tool is returned as built, less the reserved key.
+    let forced = serde_json::json!({"output_id": "@cmd_0000beef", "_cut_fields": ["stdout"], "stdout": "z".repeat(40_000)});
+    let out = clip_prebuffered_envelope(forced, true);
+    assert!(out.get("_cut_fields").is_none(), "{out:.200}");
+    assert_eq!(out["stdout"].as_str().unwrap().len(), 40_000);
+    // Not an array of names: no field is spared, the oversized one is clipped.
+    for bogus in [
+        serde_json::json!("stdout"),
+        serde_json::json!({"stdout": true}),
+        serde_json::json!([["stdout"]]),
+    ] {
+        let val = serde_json::json!({
+            "output_id": "@cmd_0000beef",
+            "_cut_fields": bogus,
+            "stdout": "z".repeat(40_000),
+        });
+        let out = clip_prebuffered_envelope(val, false);
+        assert!(out.get("_cut_fields").is_none(), "{bogus}: {out:.200}");
+        assert!(
+            !exceeds_inline_limit(&out.to_string()),
+            "{bogus}: {} B",
+            out.to_string().len()
+        );
+        assert!(out["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("the whole stream is @cmd_0000beef ---"));
+    }
+}
+/// The record is a set of names: recording a field twice names it once, and a non-object is left alone.
+#[test]
+fn record_cut_names_each_field_once() {
+    let mut v = serde_json::json!({"stdout": "x"});
+    crate::tools::record_cut(&mut v, "stdout");
+    crate::tools::record_cut(&mut v, "stderr");
+    crate::tools::record_cut(&mut v, "stdout");
+    assert_eq!(
+        v[crate::tools::CUT_FIELDS_KEY],
+        serde_json::json!(["stdout", "stderr"])
+    );
+    let mut s = serde_json::json!("not an object");
+    crate::tools::record_cut(&mut s, "stdout");
+    assert_eq!(s, serde_json::json!("not an object"));
 }
 
 // ---- truncate_compact tests ----

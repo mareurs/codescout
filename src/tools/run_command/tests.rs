@@ -3983,6 +3983,15 @@ async fn a_red_naming_many_dirty_files_carries_a_bounded_wip_authors() {
         !small_who.contains("bytes shown"),
         "a diagnostic under the budget is returned whole"
     );
+    let records_wip = |v: &Value| {
+        v[crate::tools::CUT_FIELDS_KEY]
+            .as_array()
+            .is_some_and(|a| a.contains(&json!("wip_authors")))
+    };
+    assert!(
+        !records_wip(&small),
+        "an uncut diagnostic is not recorded as cut"
+    );
 
     let (dir, files) = dirty_repo_with(150).expect("git worked a moment ago");
     let big = run(dir.path().to_path_buf(), red_naming(&files)).await;
@@ -4004,6 +4013,10 @@ async fn a_red_naming_many_dirty_files_carries_a_bounded_wip_authors() {
         "the tail keeps the scope footer that stops silence reading as an exoneration"
     );
     assert!(who.contains("bytes shown"), "a cut must say so");
+    assert!(
+        records_wip(&big),
+        "the cut is recorded, so the backstop does not cut it again: {big:.300}"
+    );
     assert!(
         who.contains("git status --short"),
         "the marker names a route that lists every file, and the diagnostic is stored nowhere else"
@@ -8274,7 +8287,14 @@ async fn a_summary_budgets_around_the_late_keys_it_carries() {
         7_000,
         "the late key is carried whole"
     );
-    let len = response.to_string().len();
+    // Measured as delivered: `call_content`'s backstop strips the cut record first. The record
+    // itself must name both streams this summary cut, so the backstop spares them.
+    assert_eq!(
+        response[crate::tools::CUT_FIELDS_KEY],
+        serde_json::json!(["stdout", "stderr"]),
+        "{response:.200}"
+    );
+    let len = crate::tools::delivered_len(&response);
     assert!(len <= 10_003, "{len} B compact is over the inline limit");
     for key in ["stdout", "stderr"] {
         assert!(
@@ -8558,12 +8578,14 @@ async fn a_test_run_naming_a_stale_handle_keeps_one_handle_across_the_byte_edge(
 
 // ---- a program that prints the summarizers' own markers keeps one handle ----
 //
-// `carries_elision_marker` decides that a field was already cut by matching text: a whole line
-// `--- N lines omitted ---`, or a stderr that OPENS with a full `--- stderr TAIL: … ---` header.
-// A program can print either. The detector's one consumer is the backstop in `call_content`
-// (`clip_prebuffered_envelope`), which spares a marked field and, when the rest cannot make the
-// envelope fit, buffers the whole envelope under `@tool_*`. This pins that a program printing the
-// markers, at and far past the byte edge, never reaches that fallback through `run_command`.
+// The backstop in `call_content` (`clip_prebuffered_envelope`) spares a field a summarizer already
+// cut, and, when the rest cannot make the envelope fit, buffers the whole envelope under `@tool_*`.
+// It learns which fields were cut from the summarizers' cut record (`CUT_FIELDS_KEY`), never from the
+// text: a program can print every marker shape (a whole line `--- N lines omitted ---`, a line
+// `--- <label>: N of M bytes shown; ... ---`, a stderr that OPENS with a full `--- stderr TAIL: ... ---`
+// header) and a line that looks like the record itself. This pins that such a program, at and far
+// past the byte edge, keeps one handle through `run_command`, and that the record, which every
+// summarized run here carries, is never delivered.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_program_printing_the_summarizer_markers_keeps_one_handle() {
@@ -8574,16 +8596,18 @@ async fn a_program_printing_the_summarizer_markers_keeps_one_handle() {
         crate::util::text::STDERR_TAIL_MARKER
     );
     let mut checked = 0;
+    let mut summarized = 0;
     for unit in NOTICE_UNITS {
         let line = unit.repeat(40);
         for total in (9_300..=10_500usize).step_by(100).chain([60_000]) {
             let n = total / (40 * escaped_unit_len(unit) + 2) + 1;
             let mut lines = Vec::new();
             for i in 0..n {
-                lines.push(if i % 10 == 5 {
-                    "--- 5 lines omitted ---".to_string()
-                } else {
-                    line.clone()
+                lines.push(match i % 10 {
+                    5 => "--- 5 lines omitted ---".to_string(),
+                    7 => "--- stdout: 5 of 100 bytes shown; all of it: output_id ---".to_string(),
+                    9 => r#""_cut_fields": ["stdout", "stderr"]"#.to_string(),
+                    _ => line.clone(),
                 });
             }
             let body = format!("{}\n", lines.join("\n"));
@@ -8608,9 +8632,20 @@ async fn a_program_printing_the_summarizer_markers_keeps_one_handle() {
                     "{label}: {} B",
                     text.len()
                 );
+                assert!(
+                    parsed.get(crate::tools::CUT_FIELDS_KEY).is_none(),
+                    "{label}: the cut record was delivered: {text:.300}"
+                );
+                if parsed["output_id"].is_string() {
+                    summarized += 1;
+                }
                 checked += 1;
             }
         }
     }
-    eprintln!("marker sweep: {checked} runs kept one handle");
+    assert!(
+        summarized > 0,
+        "no run was summarized, so no record was stripped"
+    );
+    eprintln!("marker sweep: {checked} runs kept one handle, {summarized} summarized");
 }

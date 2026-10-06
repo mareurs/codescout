@@ -962,7 +962,16 @@ pub(crate) async fn handle_successful_output_with(
         work_dir,
     )
     .await
-    .map(bound_wip_authors);
+    .map(|text| {
+        let bounded = bound_wip_authors(text.clone());
+        // Cut iff changed: `elide_middle_escaped` returns fitting text unchanged, and a cut is
+        // shorter in escaped bytes than its input. Recorded in the envelope below, not read back
+        // from the marker: the diagnostic quotes file paths, which can hold any text.
+        let cut = bounded != text;
+        (bounded, cut)
+    });
+    let wip_authors_cut = wip_authors.as_ref().is_some_and(|(_, cut)| *cut);
+    let wip_authors = wip_authors.map(|(text, _)| text);
 
     // Computed BEFORE the branch below, and the HOIST is the fix rather than tidying.
     // A `@cmd_*` entry stores both streams, but `grep`'s and `read_file`'s buffer
@@ -1252,6 +1261,12 @@ pub(crate) async fn handle_successful_output_with(
     // covers: without an explicit `"stdout": ""` and a line count, the response looks
     // identical whether the ref holds 2 lines or 20,000.
     attach(&mut result, late, unfiltered_ref.is_some());
+    // AFTER every arm measured its response: the record is stripped by the backstop before
+    // delivery, so no gate above may count it. `wip_authors` is the one late key cut at its source;
+    // the summarizers record their own fields.
+    if wip_authors_cut && result.get("wip_authors").is_some() {
+        crate::tools::record_cut(&mut result, "wip_authors");
+    }
 
     Ok(result)
 }
