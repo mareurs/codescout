@@ -38,8 +38,7 @@ calls emitted `@tool_*`, 69 of them naming a `@cmd_` handle.
 A result that already carries a string `output_id` keeps exactly that handle.
 `clip_prebuffered_envelope` clips the envelope's oversized top-level string fields, largest
 first and only as much as needed, until it fits `INLINE_BYTE_BUDGET`. Each clipped field gets
-a marker (`<shown> of <total> bytes shown; cut to fit the response budget; the tool's own
-buffer is <handle>`). The fit is measured on the serialized envelope.
+a marker (`<shown> of <total> bytes shown; cut to fit the response budget; the whole stream is <handle>` for a `@cmd_` handle's stdout, `the whole stream is <handle>.err` for its stderr, and `this field is built by the tool and stored nowhere, <handle> holds the output it was built from` for every other field and handle kind). The fit is measured on the serialized envelope.
 
 An envelope that cannot fit with every field at `PREBUFFERED_FIELD_FLOOR` (1,000 B) is
 returned unchanged, and `call_content` buffers the ORIGINAL under `@tool_*` as before. A
@@ -67,7 +66,7 @@ The elision helper moved to `util::text::elide_middle_bytes`, so `core` does not
 - **Known gap.** `read_file`, `read_markdown` and `memory` return their handle as `file_id`,
   so this rule does not fire for them. `read_file` of a whole source file returned
   `@tool_*` and `@file_*` together when this ADR was written. The sibling sweep
-  (`docs/issues/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools-and-five-gaps-stay-open.md`)
+  (`docs/issues/archive/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools.md`)
   bounds its summary, so a read returns one handle, and a byte-edge sweep of the merged tip found no
   response with two. These tools still do not pass through `clip_prebuffered_envelope`: each bounds
   its own summary.
