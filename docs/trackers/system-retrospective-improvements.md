@@ -62,7 +62,7 @@ Birds-eye retrospective (2026-09-01) synthesized from three sweeps: the session-
 
 ## SRI-4 — Escape hatches for IC-6 top offenders
 
-**Why:** IC-6 (addressing-without-an-escape-hatch) is the largest class (27 instances, 5 subsystems). Flagship: `link_scan` binds any `[A-Z]{1,3}-\d+` token, backticks included — an entry id cannot be *mentioned* without being cited, so the ledger cannot describe its own bugs (`docs/issues/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`).
+**Why:** IC-6 (addressing-without-an-escape-hatch) is the largest class (27 instances, 5 subsystems). Flagship: `link_scan` binds any `[A-Z]{1,3}-\d+` token, backticks included — an entry id cannot be *mentioned* without being cited, so the ledger cannot describe its own bugs (`docs/issues/archive/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`).
 
 **Shape:** per the CLAUDE.md § Parsers Over a Namespace contract — every parser owes an escape and a disambiguator, answered *in the code*. Start with link_scan (inline escape syntax), then the identical-headings disambiguator gap (`occurrence` exists — verify the refusal sites actually prescribe it).
 
