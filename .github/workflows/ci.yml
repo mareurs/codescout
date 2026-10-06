@@ -106,6 +106,7 @@ jobs:
           git config --global user.name  CI
           git config --global init.defaultBranch master
       - run: bash tests/pre-push-foreign-session-guard.sh
+      - run: bash tests/hold-publish.sh
 
   # ITS OWN JOB, for the reason `push-guard-tests` gives above: `shell-tests` is the known-flaky
   # lane, and this suite's value is that R1-R3 are readable as the reproduction of

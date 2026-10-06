@@ -301,8 +301,35 @@ the working tree for every session in it.
 **Scope.** This rule covers the author side. The pusher side is separate: re-derive the range and send the
 decided set by SHA. That rule is in `docs/RELEASE.md` § *Concurrent-Work Rules*.
 
-**Status.** This is a policy, not a mechanism. No hook reminds a session at the moment of the commit. The
-open question of a mechanism is recorded in
+**Status.** The policy now has a mechanism, on the push side. A session that must withhold its work runs
+`scripts/hold-publish.sh set <reason>`. That writes a ref `refs/holds/<session-id>` in the shared repo.
+`scripts/hold-publish.sh release [sid]` drops it. `scripts/hold-publish.sh list` shows every hold. The pre-existing
+pre-push guard, `scripts/pre-push-foreign-session-guard.sh`, refuses a push that carries any commit whose
+`Session-Id` trailer has a hold. It refuses before it reads `CODESCOUT_PUSH_ACK`, so `CODESCOUT_PUSH_ACK=all` does
+not clear a hold. It checks every pushed ref except a deletion, so a tag or a `refs/wip/*` push is covered too, and it
+refuses when it cannot list a push range while any hold exists. It names the reason, the age and the release
+command. When something unpublished sits below the oldest held commit it also names the prefix push that is still
+allowed; otherwise it prints "There is no prefix to push".
+
+**Limits of the mechanism.**
+
+- A commit with no `Session-Id` trailer is not matched. The guard cannot tell whose it is.
+- A hold covers the whole session, not one commit.
+- Nothing forces a session to set a hold. The hold is only as good as that habit.
+- `release` is a convention. Nothing proves that the caller is the operator when it drops another session's hold.
+- Nothing stops a session from committing a change its operator said to hold. The rule above is still the only
+  protection on the commit side.
+- A push from a terminal with no `CLAUDE_CODE_SESSION_ID` publishes held commits silently. That is by design: the
+  guard has no pusher to compare against.
+- A squash merge of a held branch by another session launders the trailer: only the pusher's sid survives, in the
+  body. A cherry-pick keeps the trailer and is refused.
+- The hold is enforced only by a checkout whose `scripts/pre-push-foreign-session-guard.sh` has the hold check (the
+  shim runs the toplevel's script). A worktree or branch that predates the merge does not enforce it.
+- A trailer outside the message's final paragraph is invisible to the guard. This was already true.
+- A commit already on any remote-tracking ref counts as published: a new branch is scanned with `--not --remotes`.
+- The one-line warning for an unreadable hold store covers hard git failures only (an exit other than 0 or 1). a store failure that git itself reports as "no such ref" (a permission-denied `refs/holds` directory, a broken loose ref) is not detected and fails open.
+
+The record is in
 `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`.
 
 ## The empty intersection, which no sequence fixes

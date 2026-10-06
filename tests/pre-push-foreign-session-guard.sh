@@ -99,6 +99,11 @@ run() {
     local -a env=()
     [ "$pusher" != "-" ] && env+=("CLAUDE_CODE_SESSION_ID=$pusher")
     [ "$ack" != "-" ] && env+=("CODESCOUT_PUSH_ACK=$ack")
+    # Optional, set only by the publish-hold section: a throwaway HOME so resolve_sids never
+    # reads this machine's session registry, and a directory prepended to PATH so a `git`
+    # shim can fail one specific lookup. Both are unset everywhere else.
+    [ -n "${RUN_HOME:-}" ] && env+=("HOME=$RUN_HOME")
+    [ -n "${RUN_PATH_PREFIX:-}" ] && env+=("PATH=$RUN_PATH_PREFIX:$PATH")
     # `timeout` is load-bearing, not defensive tidiness. The guard's refusal banner is an
     # UNQUOTED heredoc, so a stray backtick in its prose becomes a command substitution that
     # bash runs while expanding it -- and if that command blocks, `cat` never completes and
@@ -106,7 +111,7 @@ run() {
     # redding it, which is strictly worse than a failure: no assertion reports, no exit code
     # is produced, and CI shows a job that never finished instead of a test that failed.
     # Measured 2026-09-07, docs/issues/archive/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md.
-    OUT="$(printf '%s\n' "$line" | (cd "$REPO" && timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" origin git@example.invalid:x) 2>&1)"
+    OUT="$(printf '%s\n' "$line" | (cd "$REPO" && timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" "${RUN_REMOTE:-origin}" git@example.invalid:x) 2>&1)"
     EC=$?
 }
 
@@ -133,6 +138,37 @@ hasnt "your own commits are not in the report" "$(report_rows "$OUT")" "$ALICE"
 hasnt "nor is your own subject"       "$(report_rows "$OUT")" "alice on top"
 has "offers the ack, prefilled"      "$OUT" "CODESCOUT_PUSH_ACK=\"$BOB\""
 has "points at the class"            "$OUT" "OB-20"
+
+# resolve_sids lives in scripts/resolve-sids.sh and the guard sources it. A guard copied
+# ALONE (no sibling file) must still refuse and print the bare sid: the fallback degrades to
+# `?`, never to a wrong "LIVE"/"gone". The positive assertions prove the copy ran at all, so
+# the absence assertion cannot pass on a dead script.
+echo
+echo "== a guard without resolve-sids.sh beside it still refuses and prints the bare sid =="
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's withheld work"
+commit "$ALICE" "alice on top"; TIP=$(sha)
+GUARD_REAL="$GUARD"
+LONE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-lone-XXXXXX")"
+cp "$GUARD_REAL" "$LONE_DIR/pre-push-foreign-session-guard.sh"
+GUARD="$LONE_DIR/pre-push-foreign-session-guard.sh"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+LONE_OUT="$OUT"; LONE_EC="$EC"
+GUARD="$GUARD_REAL"
+eq    "lone copy: refused"                   "$LONE_EC" 1
+has   "lone copy: prints the bare sid"       "$LONE_OUT" "$BOB"
+has   "lone copy: ran far enough to name the class" "$LONE_OUT" "OB-20"
+hasnt "lone copy: never claims LIVE"         "$LONE_OUT" "LIVE"
+# Only the fallback produces these two: its `?` state reaches the banner, and the function
+# exists at all. With resolve_sids undefined the table is empty, the state prints as `[]`, and
+# bash reports `command not found` -- yet the three assertions above would still pass.
+has   "lone copy: fallback state reaches the banner as [?]" "$LONE_OUT" "[?]"
+hasnt "lone copy: resolve_sids is defined"   "$LONE_OUT" "command not found"
+rm -r "$LONE_DIR"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "original guard with its sibling: refused" "$EC" 1
+has   "original guard: prints the bare sid"  "$OUT" "$BOB"
 
 # THE REMEDY TEXT, ASSERTED AS SHAPE RATHER THAN AS PROSE.
 #
@@ -1227,6 +1263,504 @@ ledger_append A
 NONMERGE_TIP="$(sha)"
 run "$ALICE" - "refs/heads/main $NONMERGE_TIP refs/heads/main $NONMERGE_BASE"
 eq  "non-merge push: allowed"                     "$EC" 0
+
+echo
+echo "== a publish hold =="
+# A hold is refs/holds/<sid> -> a blob (reason / set-at / head). The guard refuses any commit
+# whose Session-Id trailer is a held sid, and an ack does NOT clear it: the ack is the
+# PUSHER's authority over someone else's work, the hold is the AUTHOR saying "not yet".
+#
+# Holds are built by hand rather than by scripts/hold-publish.sh so this section tests the
+# guard alone. Every run uses a throwaway HOME, so resolve_sids never reads the real session
+# registry of whoever runs the suite.
+HOLD_HOME="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-home-XXXXXX")"
+RUN_HOME="$HOLD_HOME"
+mkhold() {  # <sid> <reason> [set-at]
+    local blob
+    blob="$(printf 'reason: %s\nset-at: %s\nhead: x\n' "$2" "${3:-2026-10-06T00:00:00Z}" \
+        | git -C "$REPO" hash-object -w --stdin)"
+    git -C "$REPO" update-ref "refs/holds/$1" "$blob"
+}
+
+# --- the core: a held commit is refused even where an ack would let it through
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's held work"
+commit "$ALICE" "alice on top"; TIP=$(sha)
+LINE="refs/heads/main $TIP refs/heads/main $BASE"
+run "$ALICE" all "$LINE"
+eq    "no hold, ack=all: the push passes (positive control)" "$EC" 0
+mkhold "$BOB" "waiting"
+run "$ALICE" all "$LINE"
+eq    "a held session's commit is refused under ack=all" "$EC" 1
+has   "ack=all refusal carries the PUBLISH HOLD marker" "$OUT" "PUBLISH HOLD"
+has   "ack=all refusal names the held sid" "$OUT" "$BOB"
+has   "ack=all refusal quotes the reason" "$OUT" "waiting"
+has   "the refusal names the release command" "$OUT" "hold-publish.sh release $BOB"
+has   "the refusal says an ack does not clear a hold" "$OUT" "does not clear a hold"
+has   "the held commit's subject is listed" "$OUT" "bob's held work"
+hasnt "your own commit is not listed as held" "$(report_rows "$OUT")" "alice on top"
+run "$ALICE" - "$LINE"
+eq    "a held session's commit is refused with no ack at all" "$EC" 1
+has   "no-ack refusal carries PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+hasnt "no ack was given, so no ack sentence" "$OUT" "does not clear a hold"
+run "$ALICE" "$BOB" "$LINE"
+eq    "an ack naming the held sid is refused too" "$EC" 1
+has   "ack naming a held sid: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "ack naming a held sid: says a hold is not cleared" "$OUT" "does not clear a hold"
+run "$ALICE" "  $(printf '%s' "$BOB" | tr '[:lower:]' '[:upper:]') " "$LINE"
+has   "the ack comparison is case- and space-insensitive" "$OUT" "does not clear a hold"
+git -C "$REPO" update-ref -d "refs/holds/$BOB"
+run "$ALICE" all "$LINE"
+eq    "releasing the hold lets the same push through again" "$EC" 0
+
+# --- age, and the three-valued state
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's held work"; TIP=$(sha)
+LINE="refs/heads/main $TIP refs/heads/main $BASE"
+mkhold "$BOB" "mid-flight" "$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+run "$ALICE" - "$LINE"
+eq    "age case: refused" "$EC" 1
+has   "a hold set 3 hours ago shows its age in hours" "$OUT" "held for 3h"
+has   "an unresolvable session prints state [?], never LIVE" "$OUT" "[?]"
+has   "(the [?] sits in a hold refusal, not the ordinary banner)" "$OUT" "PUBLISH HOLD"
+hasnt "an unresolvable session is not called LIVE" "$OUT" "LIVE"
+mkhold "$BOB" "old" "2026-09-01T00:00:00Z"
+run "$ALICE" - "$LINE"
+OLD_DAYS="$(( ( $(date +%s) - $(date -u -d 2026-09-01T00:00:00Z +%s) ) / 86400 ))"
+has   "an old hold shows its age in days" "$OUT" "held for ${OLD_DAYS}d"
+has   "an old hold still names its reason" "$OUT" "reason: old"
+if command -v python3 >/dev/null 2>&1; then
+    mkdir -p "$HOLD_HOME/.claude/sessions"
+    printf '{"sessionId": "%s", "pid": 999999999, "messagingSocketPath": "/nonexistent/sock", "procStart": "1"}\n' \
+        "$BOB" > "$HOLD_HOME/.claude/sessions/bob.json"
+    run "$ALICE" - "$LINE"
+    has   "a registry row whose process is dead prints [gone]" "$OUT" "[gone]"
+    has   "(the [gone] sits in a hold refusal, not the ordinary banner)" "$OUT" "PUBLISH HOLD"
+    rm -r "$HOLD_HOME/.claude"
+fi
+
+# --- other sessions are unaffected by someone else's hold
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's ordinary work"
+commit "$ALICE" "alice on top"; TIP=$(sha)
+mkhold "$CAROL" "carol is holding"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a hold on another session: BOB's commit follows the ordinary path" "$EC" 1
+has   "that ordinary refusal still ran (names the foreign sid)" "$OUT" "$BOB"
+has   "that ordinary refusal still ran (names the class)" "$OUT" "OB-20"
+hasnt "and it is not a hold refusal" "$OUT" "PUBLISH HOLD"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "the ordinary ack=all path still works beside an unrelated hold" "$EC" 0
+# A hold with no commit of that session in the range stays silent.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice two"; TIP=$(sha)
+mkhold "$BOB" "bob holds, but has nothing here"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a hold with no commit of that session in range: allowed" "$EC" 0
+eq    "and says nothing at all" "$(printf '%s' "$OUT" | wc -c)" 0
+
+# --- the pusher's own held commit
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice's own held work"; TIP=$(sha)
+mkhold "$ALICE" "i said not yet"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "the pusher's own held commit is refused, even under ack=all" "$EC" 1
+has   "own-hold refusal carries PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "own-hold refusal tells the pusher to release first" "$OUT" "release your own hold first"
+has   "own-hold refusal names the command" "$OUT" "hold-publish.sh release $ALICE"
+hasnt "own-hold, no prefix: does not advise a prefix that does not exist" "$OUT" "or push only the prefix"
+has   "(and that case really is the no-prefix one)" "$OUT" "nothing below the held commit is unpublished"
+# own held commit WITH a pushable prefix below it: the advice is offered
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$CAROL" "carol pushable"; LOW=$(sha)
+commit "$ALICE" "alice own held, with a prefix"; TIP=$(sha)
+mkhold "$ALICE" "i said not yet"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "own held commit with a prefix: refused" "$EC" 1
+has   "own-hold, with a prefix: the prefix advice is offered" "$OUT" "or push only the prefix named above"
+has   "own-hold, with a prefix: the prefix push line is there" "$OUT" "git push origin $LOW:main"
+
+# --- a commit carrying two Session-Id values: the SECOND one is held
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+echo "$RANDOM" >> "$REPO/f.txt"; git -C "$REPO" add f.txt
+git -C "$REPO" commit -q -m "two owners" -m "Session-Id: $ALICE
+Session-Id: $BOB"
+TIP=$(sha)
+CSV="$(git -C "$REPO" log -1 --format='%(trailers:key=Session-Id,valueonly,separator=%x2C)')"
+has   "fixture: the trailer list holds both sids" "$CSV" "$ALICE,$BOB"
+mkhold "$BOB" "second token held"
+run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a commit whose SECOND Session-Id is held is refused" "$EC" 1
+has   "two-value refusal carries PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "two-value refusal names the held (second) sid" "$OUT" "hold-publish.sh release $BOB"
+git -C "$REPO" update-ref -d "refs/holds/$BOB"
+mkhold "$ALICE" "first token held"
+run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "and when the FIRST Session-Id is the held one" "$EC" 1
+has   "first-token refusal names the first sid" "$OUT" "hold-publish.sh release $ALICE"
+
+# --- the not-held CACHE must never hide a held token of a later multi-sid commit (fail-open
+# if a cache hit on a not-held token ends the whole scan of that commit). The multi-sid commit
+# is OLDER than a commit of its own first-token sid, so that sid is already cached not-held
+# when the multi-sid commit is read (the loop is newest-first).
+commit2() {  # <sid1> <sid2> <subject>: one commit carrying two Session-Id values
+    echo "$RANDOM$RANDOM" >> "$REPO/f.txt"; git -C "$REPO" add f.txt
+    git -C "$REPO" commit -q -m "$3" -m "Session-Id: $1
+Session-Id: $2"
+}
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit2 "$ALICE" "$BOB" "two owners, second held"
+commit "$ALICE" "alice newer, same first sid"; TIP=$(sha)
+mkhold "$BOB" "second token held, first cached not-held"
+run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a multi-sid commit whose first token is cached not-held still has its second checked" "$EC" 1
+has   "cache case: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "cache case: the multi-sid commit is listed as held" "$OUT" "two owners, second held"
+hasnt "cache case: the unheld newer commit is not listed" "$(report_rows "$OUT")" "alice newer"
+# the mirror: held token FIRST, with a held-sid cache hit on the way (two held commits of one sid)
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB" "bob older, not held"
+commit2 "$ALICE" "$BOB" "two owners, first held"
+commit "$ALICE" "alice newest, held"; TIP=$(sha)
+mkhold "$ALICE" "first token held"
+run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "mirror: refused" "$EC" 1
+has   "mirror: the newest held commit is listed" "$(report_rows "$OUT")" "alice newest, held"
+has   "mirror: the multi-sid commit (a cache hit on a HELD sid) is listed" "$(report_rows "$OUT")" "two owners, first held"
+hasnt "mirror: the not-held older commit is not listed" "$(report_rows "$OUT")" "bob older"
+
+# --- the unpublished prefix below the oldest held commit
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice first"; A1=$(sha)
+commit "$BOB"   "bob held";    B1=$(sha)
+commit "$ALICE" "alice second"; A2=$(sha)
+mkhold "$BOB" "mid-stack"
+run "$ALICE" all "refs/heads/main $A2 refs/heads/main $BASE"
+eq    "stack with a held middle commit: refused" "$EC" 1
+has   "the prefix below the oldest held commit is named as a push" "$OUT" "git push origin $A1:main"
+hasnt "the sentence for an empty prefix is absent when there is a prefix" "$OUT" "nothing below the held commit"
+has   "the prefix advice says the ordinary foreign-session check still applies" "$OUT" "still subject to the ordinary foreign-session check"
+run "$ALICE" all "refs/heads/main $A1 refs/heads/main $BASE"
+eq    "pushing exactly that prefix is allowed" "$EC" 0
+run "$ALICE" - "$A1 $A1 refs/heads/main $BASE"
+eq    "and so is the bare-sha refspec form of it" "$EC" 0
+# a brand-new remote branch: the zero sha, so the prefix is everything below the held commit
+run "$ALICE" all "refs/heads/main $A2 refs/heads/feature $ZERO"
+eq    "a new remote branch carrying a held commit is refused" "$EC" 1
+has   "its prefix push targets the branch being created" "$OUT" ":feature"
+# held commit directly on top of the remote tip: nothing below it
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held"; B1=$(sha)
+mkhold "$BOB" "right on top"
+run "$ALICE" all "refs/heads/main $B1 refs/heads/main $BASE"
+eq    "held commit right above the remote tip: refused" "$EC" 1
+has   "says nothing below the held commit is unpublished" "$OUT" "nothing below the held commit is unpublished"
+hasnt "and prints no prefix push line" "$OUT" "git push origin"
+
+# --- SEVERAL held commits: the prefix is below the OLDEST, and every held commit is listed.
+# (Also the spec row: a session that holds, then commits more, has all of them held.)
+# Newest-first scan, so "oldest" is the LAST held commit met; taking the first (the newest)
+# would advise a prefix that contains a held commit.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob one"
+commit "$ALICE" "alice between"; MID=$(sha)
+commit "$BOB"   "bob two"; TIP=$(sha)
+mkhold "$BOB" "holds then commits more"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "two held commits around an unheld one: refused" "$EC" 1
+has   "the newer held commit is listed" "$(report_rows "$OUT")" "bob two"
+has   "the older held commit is listed too" "$(report_rows "$OUT")" "bob one"
+hasnt "the unheld commit between them is not listed as held" "$(report_rows "$OUT")" "alice between"
+has   "nothing is below the OLDEST held commit" "$OUT" "nothing below the held commit is unpublished"
+hasnt "no push line points above the oldest held commit" "$OUT" "git push origin"
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice low"; LOW=$(sha)
+commit "$BOB"   "bob one"
+commit "$ALICE" "alice between"; MID=$(sha)
+commit "$BOB"   "bob two"; TIP=$(sha)
+mkhold "$BOB" "holds then commits more"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "with a pushable commit below the oldest held one: refused" "$EC" 1
+has   "both held commits are listed" "$(report_rows "$OUT")" "bob one"
+has   "(second)" "$(report_rows "$OUT")" "bob two"
+has   "the prefix line is exactly the commit below the OLDEST held one" "$OUT" "git push origin $LOW:main"
+hasnt "and nothing above the oldest held commit is advised" "$OUT" "git push origin $MID"
+
+# --- a hold blob with no set-at line: age is unknown, not today's midnight
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held"; TIP=$(sha)
+git -C "$REPO" update-ref "refs/holds/$BOB" "$(printf 'reason: no clock\nhead: x\n' | git -C "$REPO" hash-object -w --stdin)"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a hold blob without set-at is still refused" "$EC" 1
+has   "a missing set-at prints an unknown age, not a made-up one" "$OUT" "held for unknown time"
+has   "(and the reason is still read)" "$OUT" "reason: no clock"
+
+# --- a PACKED ref is still a hold
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held"; TIP=$(sha)
+mkhold "$BOB" "packed"
+git -C "$REPO" pack-refs --all
+eq    "fixture: the loose hold ref is gone after pack-refs" \
+      "$(test -e "$REPO/.git/refs/holds/$BOB" && echo loose || echo packed)" packed
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a packed hold still refuses" "$EC" 1
+has   "packed hold: PUBLISH HOLD and the reason" "$OUT" "reason: packed"
+
+# --- the hold is a ref in the COMMON dir: a linked worktree sees it
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held"; TIP=$(sha)
+mkhold "$BOB" "seen from a worktree"
+WT="$REPO-wt"
+git -C "$REPO" worktree add -q "$WT" -b wt-branch
+REPO_MAIN="$REPO"; REPO="$WT"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+REPO="$REPO_MAIN"
+eq    "run from a linked worktree: still refused" "$EC" 1
+has   "worktree refusal carries PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+git -C "$REPO" worktree remove --force "$WT"
+
+# --- the trailer, and so the hold, survives amend and rebase
+PREPARE="$(cd "$(dirname "$0")/../scripts" && pwd)/prepare-commit-msg-session-id.sh"
+HOOKS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-hooks-XXXXXX")"
+printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$PREPARE" > "$HOOKS_DIR/prepare-commit-msg"
+chmod +x "$HOOKS_DIR/prepare-commit-msg"
+hcommit() {  # <sid> <subject>: a real commit through the stamping hook, in its own file
+    echo "$RANDOM$RANDOM" > "$REPO/$RANDOM$RANDOM.txt"
+    git -C "$REPO" add -A
+    CLAUDE_CODE_SESSION_ID="$1" git -C "$REPO" commit -q -m "$2"
+}
+trailer_of() { git -C "$REPO" log -1 --format='%(trailers:key=Session-Id,valueonly)' "${1:-HEAD}" | tr -d '\n'; }
+
+new_repo
+git -C "$REPO" config core.hooksPath "$HOOKS_DIR"
+hcommit "$ALICE" "alice base"; BASE=$(sha)
+hcommit "$ALICE" "alice held via the hook"
+eq    "fixture: the stamping hook wrote the trailer" "$(trailer_of)" "$ALICE"
+mkhold "$ALICE" "survives amend"
+CLAUDE_CODE_SESSION_ID="$BOB" git -C "$REPO" commit -q --amend --no-edit
+TIP=$(sha)
+eq    "git commit --amend by another session keeps the trailer" "$(trailer_of)" "$ALICE"
+run "$BOB" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "the hold survives git commit --amend" "$EC" 1
+has   "amend case: refusal is a hold refusal" "$OUT" "PUBLISH HOLD"
+
+new_repo
+git -C "$REPO" config core.hooksPath "$HOOKS_DIR"
+hcommit "$ALICE" "alice base"
+git -C "$REPO" checkout -q -b topic
+hcommit "$ALICE" "alice held, to be rebased"
+mkhold "$ALICE" "survives rebase"
+git -C "$REPO" checkout -q main
+hcommit "$ALICE" "main moves on"; MAIN_TIP=$(sha)
+git -C "$REPO" checkout -q topic
+CLAUDE_CODE_SESSION_ID="$BOB" GIT_EDITOR=true git -C "$REPO" rebase -q main
+NEWH=$(sha)
+eq    "the rebase really rewrote the commit onto the new base" \
+      "$(git -C "$REPO" rev-parse "$NEWH^")" "$MAIN_TIP"
+eq    "git rebase by another session keeps the trailer" "$(trailer_of)" "$ALICE"
+run "$BOB" all "refs/heads/topic $NEWH refs/heads/topic $MAIN_TIP"
+eq    "the hold survives a git rebase of the held commit" "$EC" 1
+has   "rebase case: refusal is a hold refusal" "$OUT" "PUBLISH HOLD"
+rm -r "$HOOKS_DIR"
+
+# --- refs/holds is not sent by an ordinary push
+new_repo
+commit "$ALICE" "alice base"
+commit "$BOB"   "bob held"
+mkhold "$BOB" "stays local"
+REMOTE="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-remote-XXXXXX")"
+git init -q --bare "$REMOTE"
+git -C "$REPO" remote add rem "$REMOTE"
+git -C "$REPO" push -q rem main 2>/dev/null
+git -C "$REPO" push -q rem --all 2>/dev/null
+eq    "fixture: the pushes really happened" \
+      "$(git -C "$REMOTE" rev-parse refs/heads/main)" "$(sha)"
+eq    "a plain push and push --all do not send refs/holds" \
+      "$(git -C "$REMOTE" for-each-ref refs/holds | wc -c)" 0
+eq    "(and the hold is still there locally)" \
+      "$(git -C "$REPO" for-each-ref refs/holds | grep -c "refs/holds/$BOB")" 1
+rm -r "$REMOTE"
+
+# --- an unreadable hold store degrades, loudly once, and never claims a hold
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's work"
+commit "$CAROL" "carol's work"; TIP=$(sha)
+LINE="refs/heads/main $TIP refs/heads/main $BASE"
+mkhold "$BOB" "held but unreadable"
+mkhold "$CAROL" "also held but unreadable"
+run "$ALICE" all "$LINE"
+eq    "fixture: with a readable store both holds refuse" "$EC" 1
+REAL_GIT="$(command -v git)"
+SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-shim-XXXXXX")"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = rev-parse ] && [ "${2:-}" = -q ] && [ "${3:-}" = --verify ] && [[ "${4:-}" == refs/holds/* ]]; then exit 128; fi\nexec "%s" "$@"\n' "$REAL_GIT" > "$SHIM_DIR/git"
+chmod +x "$SHIM_DIR/git"
+RUN_PATH_PREFIX="$SHIM_DIR"
+run "$ALICE" all "$LINE"
+SHIM_ALL_OUT="$OUT"; SHIM_ALL_EC="$EC"
+run "$ALICE" - "$LINE"
+SHIM_NOACK_OUT="$OUT"; SHIM_NOACK_EC="$EC"
+RUN_PATH_PREFIX=""
+eq    "unreadable store, ack=all: the push passes, as with no hold" "$SHIM_ALL_EC" 0
+hasnt "unreadable store, ack=all: no hold is claimed" "$SHIM_ALL_OUT" "PUBLISH HOLD"
+eq    "unreadable store: exactly one warning line (two sids, two failed lookups)" \
+      "$(printf '%s\n' "$SHIM_ALL_OUT" | grep -cF 'could not read refs/holds')" 1
+eq    "unreadable store, no ack: the ordinary refusal, as with no hold" "$SHIM_NOACK_EC" 1
+has   "unreadable store, no ack: the ordinary refusal ran" "$SHIM_NOACK_OUT" "OB-20"
+hasnt "unreadable store, no ack: no hold is claimed" "$SHIM_NOACK_OUT" "PUBLISH HOLD"
+eq    "unreadable store, no ack: still exactly one warning line" \
+      "$(printf '%s\n' "$SHIM_NOACK_OUT" | grep -cF 'could not read refs/holds')" 1
+rm -r "$SHIM_DIR"
+
+# --- a push to a NON-BRANCH ref publishes a commit exactly as a branch push does
+# The foreign check skips tags and refs/wip/*; the hold scan must not. Reachable from the
+# documented release flow: `git push` and then, separately, `git push --tags`.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held, tagged"; TIP=$(sha)
+mkhold "$BOB" "tag case"
+git -C "$REPO" tag v0 "$BASE"
+git -C "$REPO" tag v1 "$TIP"
+git -C "$REPO" tag -a -m annotated v2 "$TIP"; TAGOBJ=$(git -C "$REPO" rev-parse v2)
+eq    "fixture: the annotated tag is a tag object, not the commit" \
+      "$(git -C "$REPO" cat-file -t "$TAGOBJ")" tag
+run "$ALICE" all "refs/tags/v1 $TIP refs/tags/v1 $ZERO"
+eq    "a lightweight tag on a held commit is refused under ack=all" "$EC" 1
+has   "lightweight tag: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "lightweight tag: the held commit is listed" "$(report_rows "$OUT")" "bob held, tagged"
+hasnt "lightweight tag: no branch prefix advice (it is a tag)" "$OUT" "git push origin"
+run "$ALICE" all "refs/tags/v2 $TAGOBJ refs/tags/v2 $ZERO"
+eq    "an annotated tag on a held commit is refused (the tag object is peeled)" "$EC" 1
+has   "annotated tag: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+run "$ALICE" all "HEAD $TIP refs/tags/x $ZERO"
+eq    "HEAD:refs/tags/x carrying a held commit is refused" "$EC" 1
+has   "HEAD:refs/tags/x: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+run "$ALICE" all "HEAD $TIP refs/wip/x $ZERO"
+eq    "HEAD:refs/wip/x carrying a held commit is refused" "$EC" 1
+has   "HEAD:refs/wip/x: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+# controls, each with the hold STILL in place unless stated
+run "$ALICE" - "refs/tags/v0 $BASE refs/tags/v0 $ZERO"
+eq    "a tag on an unheld commit passes while the hold exists" "$EC" 0
+eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+TREE=$(git -C "$REPO" rev-parse "$TIP^{tree}")
+git -C "$REPO" tag tt "$TREE"
+run "$ALICE" - "refs/tags/tt $TREE refs/tags/tt $ZERO"
+eq    "a tag of a tree cannot carry a held commit: skipped" "$EC" 0
+eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+run "$ALICE" all "(delete) $ZERO refs/tags/v1 $TIP"
+eq    "deleting a tag is not a publish: skipped" "$EC" 0
+git -C "$REPO" update-ref -d "refs/holds/$BOB"
+run "$ALICE" all "refs/tags/v1 $TIP refs/tags/v1 $ZERO"
+eq    "with the hold released the same tag push passes (positive control)" "$EC" 0
+run "$ALICE" all "HEAD $TIP refs/wip/x $ZERO"
+eq    "and so does the refs/wip push" "$EC" 0
+
+# --- a range that cannot be listed must not publish a held commit
+# (the pre-existing foreign check still fails open on this input; that is a separate bug)
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held, remote tip unknown"; TIP=$(sha)
+mkhold "$BOB" "unknown tip"
+UNKNOWN="$(printf 'a sha this store has never seen' | git -C "$REPO" hash-object --stdin)"
+eq    "fixture: the remote tip is not in the local object store" \
+      "$(git -C "$REPO" cat-file -e "$UNKNOWN" 2>/dev/null && echo present || echo absent)" absent
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $UNKNOWN"
+eq    "a force push over an unfetched remote tip is refused while a hold exists" "$EC" 1
+has   "unknown tip: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "unknown tip: the held commit is listed" "$(report_rows "$OUT")" "bob held, remote tip unknown"
+git -C "$REPO" update-ref -d "refs/holds/$BOB"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $UNKNOWN"
+eq    "the same push with no hold passes as before (positive control)" "$EC" 0
+eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+# a failing `git log` -- with a hold anywhere, refuse; with none, behave as before
+REAL_GIT="$(command -v git)"
+SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-shim-XXXXXX")"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = log ]; then exit 128; fi\nexec "%s" "$@"\n' "$REAL_GIT" > "$SHIM_DIR/git"
+chmod +x "$SHIM_DIR/git"
+LINE="refs/heads/main $TIP refs/heads/main $BASE"
+RUN_PATH_PREFIX="$SHIM_DIR"
+run "$ALICE" all "$LINE"
+NOHOLD_EC="$EC"; NOHOLD_OUT="$OUT"
+mkhold "$BOB" "unlistable"
+run "$ALICE" all "$LINE"
+HOLD_EC="$EC"; HOLD_OUT="$OUT"
+RUN_PATH_PREFIX=""
+eq    "a range that cannot be listed, no hold anywhere: behaves as before (passes)" "$NOHOLD_EC" 0
+hasnt "unlistable, no hold: no hold is claimed" "$NOHOLD_OUT" "PUBLISH HOLD"
+eq    "a range that cannot be listed, a hold present: refused" "$HOLD_EC" 1
+has   "unlistable with a hold: PUBLISH HOLD" "$HOLD_OUT" "PUBLISH HOLD"
+has   "unlistable with a hold: says the range could not be listed" "$HOLD_OUT" "could not be listed while holds exist"
+rm -r "$SHIM_DIR"
+
+# --- the prefix advice names the remote the hook was given, not a hard-coded origin
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice first"; A1=$(sha)
+commit "$BOB"   "bob held"
+commit "$ALICE" "alice second"; A2=$(sha)
+mkhold "$BOB" "remote name"
+RUN_REMOTE=upstream
+run "$ALICE" all "refs/heads/main $A2 refs/heads/main $BASE"
+RUN_REMOTE=
+eq    "remote-name case: refused" "$EC" 1
+has   "the prefix advice uses the remote the hook was given" "$OUT" "git push upstream $A1:main"
+hasnt "and does not hard-code origin" "$OUT" "git push origin"
+
+# --- NEGATIVE CONTROL: the hold logic deleted from a copy lets the held push through.
+# The marker count is asserted first: without it a sed that matched nothing would copy the
+# guard unchanged and the "control" would be a second run of the real thing.
+NC_COUNT_OK=1
+for m in "# BEGIN PUBLISH HOLD" "# END PUBLISH HOLD" \
+         "# BEGIN PUBLISH HOLD (helper)" "# END PUBLISH HOLD (helper)" \
+         "# BEGIN PUBLISH HOLD (refusal)" "# END PUBLISH HOLD (refusal)"; do
+    [ "$(grep -cxF -- "$m" "$GUARD")" -eq 1 ] || { NC_COUNT_OK=0; no "marker appears exactly once: $m"; }
+done
+[ "$NC_COUNT_OK" -eq 1 ] && ok "every PUBLISH HOLD marker appears exactly once, on its own line"
+NC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-nc-XXXXXX")"
+sed '/^# BEGIN PUBLISH HOLD/,/^# END PUBLISH HOLD/d' "$GUARD" > "$NC_DIR/pre-push-foreign-session-guard.sh"
+chmod +x "$NC_DIR/pre-push-foreign-session-guard.sh"
+eq    "the stripped copy is a different file" \
+      "$(cmp -s "$GUARD" "$NC_DIR/pre-push-foreign-session-guard.sh" && echo same || echo different)" different
+eq    "the stripped copy is still valid bash" \
+      "$(bash -n "$NC_DIR/pre-push-foreign-session-guard.sh" 2>/dev/null && echo valid || echo broken)" valid
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's held work"
+commit "$ALICE" "alice on top"; TIP=$(sha)
+mkhold "$BOB" "waiting"
+LINE="refs/heads/main $TIP refs/heads/main $BASE"
+GUARD_REAL="$GUARD"
+GUARD="$NC_DIR/pre-push-foreign-session-guard.sh"
+run "$ALICE" all "$LINE"
+NC_EC="$EC"; NC_OUT="$OUT"
+run "$ALICE" - "$LINE"
+NC_PLAIN_EC="$EC"; NC_PLAIN_OUT="$OUT"
+GUARD="$GUARD_REAL"
+eq    "negative control: with the block deleted, the held push passes under ack=all" "$NC_EC" 0
+hasnt "negative control: and no hold is claimed" "$NC_OUT" "PUBLISH HOLD"
+eq    "negative control: the stripped guard still runs (ordinary refusal without an ack)" "$NC_PLAIN_EC" 1
+has   "negative control: ...and it names the class, so it is not a dead script" "$NC_PLAIN_OUT" "OB-20"
+run "$ALICE" all "$LINE"
+eq    "the real guard refuses the same push (the control differs only by the block)" "$EC" 1
+rm -r "$NC_DIR"
+RUN_HOME=""
+rm -r "$HOLD_HOME"
 
 echo
 echo "-------------------------------------------"

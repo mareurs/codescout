@@ -79,7 +79,9 @@ The refusal for a held commit prints:
 
 - the holder's sid, reason, age and liveness;
 - the release command;
-- the refspec prefix that is still pushable, taken from the guard's existing ladder.
+- the refspec prefix that is still pushable. The guard computes it directly from the parent of the oldest
+  held commit, as `git push <remote> <parent>:<branch>`. It does not take it from the ladder. When nothing
+  below the oldest held commit is unpublished, it says so instead.
 
 `CODESCOUT_PUSH_ACK` never clears a held commit. When the ack names a held sid, the guard says so, because
 an ack that is silently inert is a failure mode the guard's header already records.
@@ -93,7 +95,9 @@ release flow is not blocked.
 |---|---|
 | Hold for a dead session | Still refuses. Fails closed. The refusal names the release command. |
 | Hold forgotten | The refusal shows its age. The author or the operator releases it. |
-| `refs/holds` unreadable | The guard degrades to its current behaviour and prints one warning line. It never produces a wrong "held" claim. |
+| `refs/holds` unreadable | A hard git failure (an exit other than 0 or 1) prints one warning line, and the commits are treated as not held. It never produces a wrong "held" claim. A store that git reports as "no such ref" (a permission-denied directory, a broken ref) is not detected and fails open. That is a limit. |
+| A tag, annotated tag or `refs/wip/*` push | Checked like a branch push: the pushed sha is peeled to a commit, and one that is not a commit is skipped. Deletions are skipped. |
+| The push range cannot be listed | With the remote tip absent from the local store the range is everything not on a remote-tracking ref. If listing still fails while any hold exists, the push is refused. With no hold it behaves as before. |
 | Session sets a hold, then commits more | All its unpushed commits are held, because the key is the session. |
 | Prefix push below the first held commit | Still allowed. The ladder already supports it. |
 
@@ -139,6 +143,10 @@ requires. Each case asserts both the refusal and the silence it must keep.
 ## Files touched
 
 - New: `scripts/hold-publish.sh`.
+- New: `scripts/resolve-sids.sh`. The guard's session lookup (`resolve_sids`) moves into this sourced file so
+  that `hold-publish.sh list` and the guard share it.
+- Edited: `scripts/pre-push-foreign-session-guard.sh` also sources `scripts/resolve-sids.sh`, and
+  `tests/pre-push-foreign-session-guard.sh` gains a case for the lone-guard fallback of that lookup.
 - Edited: `scripts/pre-push-foreign-session-guard.sh` (the check, and its header, which says the author half
   is open).
 - Edited: `tests/pre-push-foreign-session-guard.sh` (cases above).

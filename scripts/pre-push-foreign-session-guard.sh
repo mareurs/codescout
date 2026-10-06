@@ -23,9 +23,16 @@
 # does is make the QUESTION unskippable at the only moment it is answerable, which is the
 # most a mechanism can do for a fact that lives outside the repository.
 #
-# It covers the pusher only. Nothing stops a session committing a change its operator said
-# to hold, and no rule asks it not to: that half is open
-# (docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md).
+# It covers the pusher, and the author half is a HOLD. An author who is told to withhold a
+# commit records that with `scripts/hold-publish.sh set <reason>`, which writes a ref
+# refs/holds/<session-id> in the shared repo. This guard refuses any commit carrying a held
+# Session-Id, and CODESCOUT_PUSH_ACK does not override it: the ack is the pusher's authority
+# over someone else's work, the hold is the author saying not yet. The author, or the operator,
+# lifts it with `scripts/hold-publish.sh release <sid>`. The hold logic sits between the
+# PUBLISH HOLD marker comments (helper, call site, refusal) so a test can delete it from a
+# copy and prove the hold cases go red without it. The marker lines are at column 0 on purpose.
+# A hold is only as good as the author's habit of setting it: nothing forces a session to.
+# (docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md)
 #
 # WHY THE `Session-Id` TRAILER IS THE DISCRIMINATOR
 # -------------------------------------------------
@@ -63,7 +70,9 @@
 #     "mine" to compare against, so the guard has no predicate — a human running the
 #     release flow is exactly this case, and must not be blocked by a guard that cannot
 #     even form its question.
-#   - Non-branch refs (tags, notes). Nothing here is about them.
+#   - Non-branch refs (tags, notes), for the FOREIGN-SESSION check. Nothing here is about them.
+#     The HOLD check is the exception: it scans every pushed ref that is not a deletion, because a
+#     tag or refs/wip/x push publishes a commit exactly as a branch push does.
 
 set -uo pipefail
 
@@ -135,6 +144,19 @@ foreign_sids=""
 foreign_report=""
 untrailered_report=""
 untrailered_n=0
+# PUBLISH HOLD state (refs/holds/<sid>, written by scripts/hold-publish.sh). All initialised
+# here because `set -u` is on and an unset read aborts the script mid-run.
+held_sids=""          # comma list of held sids found in the push
+held_report=""         # `    <sha8>  <sid>  <subject>` rows, newest first
+held_oldest_sha=""     # the oldest held commit seen (the loop is newest-first, so the last one)
+held_branch=""         # the branch that ref updates, without refs/heads/
+held_remote_sha=""     # that ref's current remote sha
+hold_yes=","           # lookup cache: sids known held
+hold_no=","            # lookup cache: sids known not held (or unreadable)
+hold_warned=0          # the unreadable-store warning prints once per run
+hold_unlistable=0      # a push range could not be listed while holds exist
+push_remote="${1:-origin}"   # the remote NAME git hands a pre-push hook; names the prefix push
+_held=""               # held_sid_of's result
 # Every commit in the push, oldest first, for the computed stack table in the refusal.
 # 0x1F for the same reason the git log format uses it below: an untrailered commit emits an
 # EMPTY sid field, and tab is IFS whitespace, so a tab-delimited row would collapse and put
@@ -158,9 +180,117 @@ total_n=0
 # the guard said there was no foreign population. Filed a60bdb57.
 foreign_pre_ack_n=0
 
+# BEGIN PUBLISH HOLD (helper)
+# held_sid_of <comma-separated sids> -> sets `_held` to the first sid that has refs/holds/<sid>,
+# or to empty. A GLOBAL RESULT, NOT A PRINTED ONE, on purpose: a `$(...)` call would run in a
+# subshell and lose `hold_warned` and the lookup caches, so the unreadable-store warning would
+# print once per commit instead of once per run.
+#
+# The argument is the Session-Id column of the per-commit loop below, which is EMPTY for an
+# untrailered commit and a COMMA-SEPARATED LIST for a commit carrying two Session-Id values, so
+# every token is tested, not just the first.
+#
+# `git rev-parse -q --verify` exits 1 for "no such ref" and anything else (128) for a real
+# failure. Those are different facts: a failed lookup must NEVER be read as a hold, and must
+# not be read as the absence of one without saying so.
+held_sid_of() {
+    _held=""
+    local _toks=() _t _rc
+    IFS=, read -ra _toks <<< "${1:-}"
+    for _t in ${_toks[@]+"${_toks[@]}"}; do
+        _t="${_t//[[:space:]]/}"
+        [ -n "$_t" ] || continue
+        case "$hold_yes" in *",$_t,"*) _held="$_t"; return 0 ;; esac
+        case "$hold_no" in *",$_t,"*) continue ;; esac
+        git rev-parse -q --verify "refs/holds/$_t" >/dev/null 2>&1 </dev/null
+        _rc=$?
+        case "$_rc" in
+            0) hold_yes="${hold_yes}${_t},"; _held="$_t"; return 0 ;;
+            1) hold_no="${hold_no}${_t}," ;;
+            *)
+                hold_no="${hold_no}${_t},"
+                if [ "$hold_warned" -eq 0 ]; then
+                    hold_warned=1
+                    printf '  note: could not read refs/holds/%s (git exited %s); commits are treated as not held.\n' "$_t" "$_rc" >&2
+                fi
+                ;;
+        esac
+    done
+    return 0
+}
+
+# hold_scan_ref <local sha> <remote ref> <remote sha>: records every held commit a push of THIS
+# ref would publish, into held_sids / held_report / held_oldest_sha. Called for EVERY pushed ref
+# that is not a deletion, before the branch filter below, because a tag or refs/wip/x push
+# publishes a commit exactly as a branch push does and the foreign check skips them.
+#
+# This is a scan of its own, not a clause of the foreign scan's per-commit loop: the foreign
+# scan never sees non-branch refs, and its `git log ... 2>/dev/null` fails OPEN (an unlistable
+# range lists zero commits). A hold must fail closed, so this scan has its own range and its
+# own failure branch, and the foreign check is left exactly as it was.
+#
+# RANGE: the remote tip is trusted only if it is a commit in the local object store. Otherwise
+# (a new ref, or a force push over a tip never fetched here, or a remote tag that points at a
+# non-commit) the range is everything not on any remote-tracking ref: it can over-refuse and
+# cannot under-refuse.
+#
+# THE PUSHED SHA IS PEELED to a commit (an annotated tag points at a tag object). One that does
+# not peel (a tag of a tree or blob) cannot carry a held commit: skipped silently.
+#
+# The commits are checked BEFORE the ack test and the mine/foreign branches, and that ordering
+# is the feature: an ack is the PUSHER's authority over another session's work, a hold is the
+# AUTHOR saying "not yet", and CODESCOUT_PUSH_ACK=all must not outrank it. `acked` is never
+# called for a held commit: it accumulates `ack_matched`, which would make the ack notes
+# report an authorisation that applied to nothing.
+hold_scan_ref() {
+    local _ls="$1" _rr="$2" _rs="$3" _tip _out _rc _l _sha _sid _subj
+    local _range=()
+    _tip="$(git rev-parse -q --verify "${_ls}^{commit}" 2>/dev/null </dev/null)" || return 0
+    if [ "$_rs" != "$ZERO" ] && git cat-file -e "${_rs}^{commit}" 2>/dev/null </dev/null; then
+        _range=("$_rs..$_tip")
+    else
+        _range=("$_tip" --not --remotes)
+    fi
+    _out="$(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${_range[@]}" 2>/dev/null </dev/null)"
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        # Could not list the range. With no hold anywhere that changes nothing (behave as the
+        # guard always did); with any hold present, say so and refuse rather than publish blind.
+        if [ -n "$(git for-each-ref --count=1 refs/holds/ 2>/dev/null </dev/null)" ]; then
+            hold_unlistable=1
+        fi
+        return 0
+    fi
+    while IFS=$'\x1f' read -r _sha _sid _subj; do
+        [ -n "${_sha:-}" ] || continue
+        held_sid_of "${_sid:-}"
+        [ -n "$_held" ] || continue
+        case ",$held_sids," in
+            *",$_held,"*) ;;
+            *) held_sids="${held_sids:+$held_sids,}$_held" ;;
+        esac
+        held_report="${held_report}    ${_sha:0:8}  ${_held}  ${_subj}"$'\n'
+        # The prefix advice is about a BRANCH; a tag or refs/wip/x push gets none.
+        case "$_rr" in
+            refs/heads/*)
+                held_oldest_sha="$_sha"
+                held_branch="${_rr#refs/heads/}"
+                held_remote_sha="$_rs"
+                ;;
+        esac
+    done <<< "$_out"
+    return 0
+}
+# END PUBLISH HOLD (helper)
+
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     [ "$local_sha" = "$ZERO" ] && continue          # branch deletion
+# BEGIN PUBLISH HOLD
+    # EVERY non-deletion ref, tags and refs/wip/* included: this runs BEFORE the branch filter
+    # below, which skips them for the foreign check.
+    hold_scan_ref "$local_sha" "$remote_ref" "$remote_sha"
+# END PUBLISH HOLD
     # WHICH FIELD NAMES THE BRANCH DEPENDS ON THE PUSH FORM, and field 1 does not
     # always. `git push <remote> <branch>` sends `refs/heads/<branch>` in field 1;
     # a refspec push from a raw sha (`git push origin <sha>:experiments`) has no
@@ -320,6 +450,108 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     done < <(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${range[@]}" 2>/dev/null)
 done
 
+# BEGIN PUBLISH HOLD (refusal)
+# Refuses, and exits 1 itself, BEFORE the untrailered note and the ack notes: a held commit is
+# never part of the ordinary refuse-or-ack path. Text is printf lines, never an unquoted
+# heredoc (see the heredoc-backtick case in the test suite).
+if [ -z "$held_sids" ] && [ "$hold_unlistable" -eq 1 ]; then
+    printf '\n  REFUSING THE PUSH: PUBLISH HOLD. The push range could not be listed while holds exist,\n' >&2
+    printf '  so this guard cannot tell whether the push carries a held commit.\n\n' >&2
+    printf '  Run git fetch, check scripts/hold-publish.sh list, and push again once the range lists.\n\n' >&2
+    exit 1
+fi
+if [ -n "$held_sids" ]; then
+    _resolve_lib_h="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
+    if [ -r "$_resolve_lib_h" ]; then
+        # shellcheck source=scripts/resolve-sids.sh
+        . "$_resolve_lib_h"
+    else
+        resolve_sids() { printf '%s\t?\t\n' "$@"; }
+    fi
+    _hs=()
+    IFS=, read -ra _hs <<< "$held_sids"
+    held_table="$(resolve_sids "${_hs[@]}")"
+
+    hold_age() {  # <set-at ISO-8601> -> 3h / 12d, or a plain "unknown time"
+        local _then _d
+        [ -n "${1:-}" ] || { printf 'unknown time'; return; }
+        _then="$(date -u -d "$1" +%s 2>/dev/null)" || _then=""
+        [ -n "$_then" ] || { printf 'unknown time'; return; }
+        _d=$(( $(date -u +%s) - _then ))
+        [ "$_d" -ge 0 ] || _d=0
+        if [ "$_d" -lt 172800 ]; then printf '%dh' $((_d / 3600)); else printf '%dd' $((_d / 86400)); fi
+    }
+
+    printf '\n  REFUSING THE PUSH: PUBLISH HOLD. It carries commit(s) whose author has withheld them:\n\n' >&2
+    printf '%s\n' "$held_report" >&2
+    for _s in "${_hs[@]}"; do
+        _blob="$(git cat-file -p "refs/holds/$_s" 2>/dev/null </dev/null)"
+        _reason="$(printf '%s\n' "$_blob" | awk 'sub(/^reason: ?/, "") { print; exit }')"
+        _setat="$(printf '%s\n' "$_blob" | awk '/^set-at: / { print $2; exit }')"
+        _state="$(printf '%s\n' "$held_table" | awk -F'\t' -v s="$_s" '$1 == s { print $2; exit }')"
+        printf '  Held session %s  [%s]  held for %s\n' "$_s" "${_state:-?}" "$(hold_age "$_setat")" >&2
+        printf '    reason: %s\n' "$_reason" >&2
+        printf '    release (the author or the operator decides): scripts/hold-publish.sh release %s\n\n' "$_s" >&2
+    done
+    printf '  A hold is its author saying these commits are not ready. Do not publish them.\n' >&2
+    printf '  Only the author, or the operator, can release it.\n\n' >&2
+    if [ "$hold_unlistable" -eq 1 ]; then
+        printf '  Another pushed ref could not be listed while holds exist; that one is refused too until it lists.\n\n' >&2
+    fi
+
+    # The commits BELOW the oldest held one are not held, and pushing exactly that prefix is
+    # allowed. Printed only when there is something in it to push.
+    _below=0
+    if [ -n "$held_oldest_sha" ]; then
+        _parent="$(git rev-parse -q --verify "${held_oldest_sha}^" 2>/dev/null </dev/null)" || _parent=""
+        if [ -n "$_parent" ]; then
+            if [ "$held_remote_sha" = "$ZERO" ]; then
+                _below=1
+            else
+                _n="$(git rev-list --count "$held_remote_sha..$_parent" 2>/dev/null </dev/null)" || _n=0
+                [ "${_n:-0}" -gt 0 ] 2>/dev/null && _below=1
+            fi
+        fi
+        if [ "$_below" -eq 1 ]; then
+            printf '  The commits below the oldest held one are not held. To publish exactly those:\n\n' >&2
+            printf '    git push %s %s:%s\n\n' "$push_remote" "$_parent" "$held_branch" >&2
+            printf '  That prefix is still subject to the ordinary foreign-session check.\n\n' >&2
+        else
+            printf '  There is no prefix to push: nothing below the held commit is unpublished.\n\n' >&2
+        fi
+    fi
+
+    case ",$held_sids," in
+        *",$me,"*)
+            if [ "$_below" -eq 1 ]; then
+                printf '  Your own commit is held: release your own hold first (scripts/hold-publish.sh release %s), or push only the prefix named above.\n\n' "$me" >&2
+            else
+                printf '  Your own commit is held: release your own hold first (scripts/hold-publish.sh release %s).\n\n' "$me" >&2
+            fi
+            ;;
+    esac
+
+    # The ack is compared the way `acked` does -- whitespace stripped, lowercased -- but WITHOUT
+    # calling it, because `acked` accumulates `ack_matched` as a side effect.
+    _ack_h="$(printf '%s' "$ack" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    _ack_hit=0
+    if [ -n "$_ack_h" ]; then
+        if [ "$_ack_h" = "all" ]; then
+            _ack_hit=1
+        else
+            for _s in "${_hs[@]}"; do
+                _sl="$(printf '%s' "$_s" | tr '[:upper:]' '[:lower:]')"
+                case ",$_ack_h," in *",$_sl,"*) _ack_hit=1 ;; esac
+            done
+        fi
+    fi
+    if [ "$_ack_hit" -eq 1 ]; then
+        printf '  An ack does not clear a hold: CODESCOUT_PUSH_ACK covers other sessions'"'"' unheld commits only.\n\n' >&2
+    fi
+    exit 1
+fi
+# END PUBLISH HOLD (refusal)
+
 if [ "$untrailered_n" -gt 0 ]; then
     printf '\n  note: %d commit(s) in this push carry no Session-Id trailer, so this guard\n' "$untrailered_n" >&2
     printf '  cannot tell whose they are. Allowed, not vouched for:\n\n%s\n' "$untrailered_report" >&2
@@ -448,55 +680,16 @@ fi
 
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '<branch>')"
 
-# RESOLVE EACH FOREIGN SID TO A LIVE ADDRESS HERE, rather than telling the reader to go and
-# run peer-sessions.sh. The dead-author case then answers itself at the point of refusal
-# instead of costing a round trip, and the live case arrives with somewhere to send it.
-#
-# Liveness is the three-part conjunction src/librarian/session_registry.rs:292-323 settled on:
-# the messaging socket exists, /proc/<pid> exists, and /proc/<pid>/stat field 22 STRING-equals
-# the row's procStart. The third part is what closes pid reuse, and it is a string compare on
-# purpose.
-#
-# Parsed with python3 rather than sed. A registry row carries `formerNames`, a LIST OF OBJECTS
-# with their own keys, so a greedy sed binds to the LAST match and can silently read a nested
-# value -- the defect already recorded against the peer-enumeration regex. python3 is already
-# on the hook path (scripts/pre-commit-ledger-counts.py runs from pre-commit), and this is ONE
-# process for all sids rather than one per sid.
-#
-# DEGRADES TO THE OLD BEHAVIOUR, never to a wrong answer: no python3, no registry, or an
-# unreadable row yields `?` and the banner prints the bare sid as it always did. Three-valued
-# on purpose -- LIVE / gone / ? -- because collapsing "cannot tell" into "gone" would print
-# "unowned, push it" about a session that is running.
-resolve_sids() {
-    command -v python3 >/dev/null 2>&1 || { printf '%s\t?\t\n' "$@"; return; }
-    printf '%s\n' "$@" | python3 -c '
-import glob, json, os, sys
-want = [l.strip() for l in sys.stdin if l.strip()]
-rows = {}
-for f in glob.glob(os.path.expanduser("~/.claude*/sessions/*.json")):
-    try:
-        d = json.load(open(f))
-    except Exception:
-        continue
-    sid = d.get("sessionId")
-    if sid not in want:
-        continue
-    pid, sock, ps = d.get("pid"), d.get("messagingSocketPath"), d.get("procStart")
-    state, addr = "gone", ""
-    if pid and sock and ps and os.path.exists(sock):
-        try:
-            with open("/proc/%d/stat" % int(pid)) as fh:
-                if fh.read().rsplit(")", 1)[1].split()[19] == str(ps):
-                    state, addr = "LIVE", "uds:" + sock
-        except Exception:
-            state = "?"
-    if rows.get(sid, ("gone",))[0] != "LIVE":
-        rows[sid] = (state, addr)
-for sid in want:
-    st, ad = rows.get(sid, ("?", ""))
-    print("%s\t%s\t%s" % (sid, st, ad))
-' 2>/dev/null || printf '%s\t?\t\n' "$@"
-}
+# resolve_sids lives in a sourced file so scripts/hold-publish.sh shares it. If that file is
+# missing or unreadable the guard DEGRADES TO THE OLD BEHAVIOUR, never to a wrong answer: every
+# sid resolves to `?` and the banner prints the bare sid as it always did.
+_resolve_lib="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
+if [ -r "$_resolve_lib" ]; then
+    # shellcheck source=scripts/resolve-sids.sh
+    . "$_resolve_lib"
+else
+    resolve_sids() { printf '%s\t?\t\n' "$@"; }
+fi
 
 _ifs="$IFS"; IFS=,
 # shellcheck disable=SC2086
