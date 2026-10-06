@@ -415,6 +415,7 @@ if [ -n "$held_sids" ]; then
 
     hold_age() {  # <set-at ISO-8601> -> 3h / 12d, or a plain "unknown time"
         local _then _d
+        [ -n "${1:-}" ] || { printf 'unknown time'; return; }
         _then="$(date -u -d "$1" +%s 2>/dev/null)" || _then=""
         [ -n "$_then" ] || { printf 'unknown time'; return; }
         _d=$(( $(date -u +%s) - _then ))
@@ -436,17 +437,11 @@ if [ -n "$held_sids" ]; then
     printf '  A hold is its author saying these commits are not ready. Do not publish them.\n' >&2
     printf '  Only the author, or the operator, can release it.\n\n' >&2
 
-    case ",$held_sids," in
-        *",$me,"*)
-            printf '  Your own commit is held: release your own hold first (scripts/hold-publish.sh release %s), or push only the prefix below.\n\n' "$me" >&2
-            ;;
-    esac
-
     # The commits BELOW the oldest held one are not held, and pushing exactly that prefix is
     # allowed. Printed only when there is something in it to push.
+    _below=0
     if [ -n "$held_oldest_sha" ]; then
         _parent="$(git rev-parse -q --verify "${held_oldest_sha}^" 2>/dev/null </dev/null)" || _parent=""
-        _below=0
         if [ -n "$_parent" ]; then
             if [ "$held_remote_sha" = "$ZERO" ]; then
                 _below=1
@@ -458,10 +453,21 @@ if [ -n "$held_sids" ]; then
         if [ "$_below" -eq 1 ]; then
             printf '  The commits below the oldest held one are not held. To publish exactly those:\n\n' >&2
             printf '    git push origin %s:%s\n\n' "$_parent" "$held_branch" >&2
+            printf '  That prefix is still subject to the ordinary foreign-session check.\n\n' >&2
         else
             printf '  There is no prefix to push: nothing below the held commit is unpublished.\n\n' >&2
         fi
     fi
+
+    case ",$held_sids," in
+        *",$me,"*)
+            if [ "$_below" -eq 1 ]; then
+                printf '  Your own commit is held: release your own hold first (scripts/hold-publish.sh release %s), or push only the prefix named above.\n\n' "$me" >&2
+            else
+                printf '  Your own commit is held: release your own hold first (scripts/hold-publish.sh release %s).\n\n' "$me" >&2
+            fi
+            ;;
+    esac
 
     # The ack is compared the way `acked` does -- whitespace stripped, lowercased -- but WITHOUT
     # calling it, because `acked` accumulates `ack_matched` as a side effect.

@@ -1373,6 +1373,18 @@ eq    "the pusher's own held commit is refused, even under ack=all" "$EC" 1
 has   "own-hold refusal carries PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
 has   "own-hold refusal tells the pusher to release first" "$OUT" "release your own hold first"
 has   "own-hold refusal names the command" "$OUT" "hold-publish.sh release $ALICE"
+hasnt "own-hold, no prefix: does not advise a prefix that does not exist" "$OUT" "or push only the prefix"
+has   "(and that case really is the no-prefix one)" "$OUT" "nothing below the held commit is unpublished"
+# own held commit WITH a pushable prefix below it: the advice is offered
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$CAROL" "carol pushable"; LOW=$(sha)
+commit "$ALICE" "alice own held, with a prefix"; TIP=$(sha)
+mkhold "$ALICE" "i said not yet"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "own held commit with a prefix: refused" "$EC" 1
+has   "own-hold, with a prefix: the prefix advice is offered" "$OUT" "or push only the prefix named above"
+has   "own-hold, with a prefix: the prefix push line is there" "$OUT" "git push origin $LOW:main"
 
 # --- a commit carrying two Session-Id values: the SECOND one is held
 new_repo
@@ -1394,6 +1406,38 @@ run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
 eq    "and when the FIRST Session-Id is the held one" "$EC" 1
 has   "first-token refusal names the first sid" "$OUT" "hold-publish.sh release $ALICE"
 
+# --- the not-held CACHE must never hide a held token of a later multi-sid commit (fail-open
+# if a cache hit on a not-held token ends the whole scan of that commit). The multi-sid commit
+# is OLDER than a commit of its own first-token sid, so that sid is already cached not-held
+# when the multi-sid commit is read (the loop is newest-first).
+commit2() {  # <sid1> <sid2> <subject>: one commit carrying two Session-Id values
+    echo "$RANDOM$RANDOM" >> "$REPO/f.txt"; git -C "$REPO" add f.txt
+    git -C "$REPO" commit -q -m "$3" -m "Session-Id: $1
+Session-Id: $2"
+}
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit2 "$ALICE" "$BOB" "two owners, second held"
+commit "$ALICE" "alice newer, same first sid"; TIP=$(sha)
+mkhold "$BOB" "second token held, first cached not-held"
+run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a multi-sid commit whose first token is cached not-held still has its second checked" "$EC" 1
+has   "cache case: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "cache case: the multi-sid commit is listed as held" "$OUT" "two owners, second held"
+hasnt "cache case: the unheld newer commit is not listed" "$(report_rows "$OUT")" "alice newer"
+# the mirror: held token FIRST, with a held-sid cache hit on the way (two held commits of one sid)
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB" "bob older, not held"
+commit2 "$ALICE" "$BOB" "two owners, first held"
+commit "$ALICE" "alice newest, held"; TIP=$(sha)
+mkhold "$ALICE" "first token held"
+run "$CAROL" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "mirror: refused" "$EC" 1
+has   "mirror: the newest held commit is listed" "$(report_rows "$OUT")" "alice newest, held"
+has   "mirror: the multi-sid commit (a cache hit on a HELD sid) is listed" "$(report_rows "$OUT")" "two owners, first held"
+hasnt "mirror: the not-held older commit is not listed" "$(report_rows "$OUT")" "bob older"
+
 # --- the unpublished prefix below the oldest held commit
 new_repo
 commit "$ALICE" "alice base"; BASE=$(sha)
@@ -1405,6 +1449,7 @@ run "$ALICE" all "refs/heads/main $A2 refs/heads/main $BASE"
 eq    "stack with a held middle commit: refused" "$EC" 1
 has   "the prefix below the oldest held commit is named as a push" "$OUT" "git push origin $A1:main"
 hasnt "the sentence for an empty prefix is absent when there is a prefix" "$OUT" "nothing below the held commit"
+has   "the prefix advice says the ordinary foreign-session check still applies" "$OUT" "still subject to the ordinary foreign-session check"
 run "$ALICE" all "refs/heads/main $A1 refs/heads/main $BASE"
 eq    "pushing exactly that prefix is allowed" "$EC" 0
 run "$ALICE" - "$A1 refs/heads/main $BASE"
@@ -1422,6 +1467,59 @@ run "$ALICE" all "refs/heads/main $B1 refs/heads/main $BASE"
 eq    "held commit right above the remote tip: refused" "$EC" 1
 has   "says nothing below the held commit is unpublished" "$OUT" "nothing below the held commit is unpublished"
 hasnt "and prints no prefix push line" "$OUT" "git push origin"
+
+# --- SEVERAL held commits: the prefix is below the OLDEST, and every held commit is listed.
+# (Also the spec row: a session that holds, then commits more, has all of them held.)
+# Newest-first scan, so "oldest" is the LAST held commit met; taking the first (the newest)
+# would advise a prefix that contains a held commit.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob one"
+commit "$ALICE" "alice between"; MID=$(sha)
+commit "$BOB"   "bob two"; TIP=$(sha)
+mkhold "$BOB" "holds then commits more"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "two held commits around an unheld one: refused" "$EC" 1
+has   "the newer held commit is listed" "$(report_rows "$OUT")" "bob two"
+has   "the older held commit is listed too" "$(report_rows "$OUT")" "bob one"
+hasnt "the unheld commit between them is not listed as held" "$(report_rows "$OUT")" "alice between"
+has   "nothing is below the OLDEST held commit" "$OUT" "nothing below the held commit is unpublished"
+hasnt "no push line points above the oldest held commit" "$OUT" "git push origin"
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice low"; LOW=$(sha)
+commit "$BOB"   "bob one"
+commit "$ALICE" "alice between"; MID=$(sha)
+commit "$BOB"   "bob two"; TIP=$(sha)
+mkhold "$BOB" "holds then commits more"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "with a pushable commit below the oldest held one: refused" "$EC" 1
+has   "both held commits are listed" "$(report_rows "$OUT")" "bob one"
+has   "(second)" "$(report_rows "$OUT")" "bob two"
+has   "the prefix line is exactly the commit below the OLDEST held one" "$OUT" "git push origin $LOW:main"
+hasnt "and nothing above the oldest held commit is advised" "$OUT" "git push origin $MID"
+
+# --- a hold blob with no set-at line: age is unknown, not today's midnight
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held"; TIP=$(sha)
+git -C "$REPO" update-ref "refs/holds/$BOB" "$(printf 'reason: no clock\nhead: x\n' | git -C "$REPO" hash-object -w --stdin)"
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a hold blob without set-at is still refused" "$EC" 1
+has   "a missing set-at prints an unknown age, not a made-up one" "$OUT" "held for unknown time"
+has   "(and the reason is still read)" "$OUT" "reason: no clock"
+
+# --- a PACKED ref is still a hold
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held"; TIP=$(sha)
+mkhold "$BOB" "packed"
+git -C "$REPO" pack-refs --all
+eq    "fixture: the loose hold ref is gone after pack-refs" \
+      "$(test -e "$REPO/.git/refs/holds/$BOB" && echo loose || echo packed)" packed
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "a packed hold still refuses" "$EC" 1
+has   "packed hold: PUBLISH HOLD and the reason" "$OUT" "reason: packed"
 
 # --- the hold is a ref in the COMMON dir: a linked worktree sees it
 new_repo
