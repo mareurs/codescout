@@ -674,6 +674,18 @@ async fn a_forced_markdown_range_whose_coverage_alone_overflows_keeps_one_handle
             let input = json!({ "path": path, "start_line": 2, "end_line": n + 1, "force": true });
             let label = format!("forced md range {class}/{shape}");
             let (v, _) = page(&ctx, &input, &path, &label).await;
+            // Unread headings remain on every page, so each carries `coverage` or the marker
+            // that it was dropped, never neither; and a short range stays inline.
+            assert!(
+                v.get("coverage").is_some() != (v["coverage_omitted"] == json!(true)),
+                "{label}: coverage and its marker disagree: {v:.300}"
+            );
+            if shape == "short" {
+                assert!(
+                    v.get("file_id").is_none(),
+                    "{label}: a short range was buffered"
+                );
+            }
             omitted += usize::from(v["coverage_omitted"] == json!(true));
             largest = largest.max(read_through(&ctx, input, &path, &label).await);
         }
