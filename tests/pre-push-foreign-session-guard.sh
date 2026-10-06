@@ -134,6 +134,31 @@ hasnt "nor is your own subject"       "$(report_rows "$OUT")" "alice on top"
 has "offers the ack, prefilled"      "$OUT" "CODESCOUT_PUSH_ACK=\"$BOB\""
 has "points at the class"            "$OUT" "OB-20"
 
+# resolve_sids lives in scripts/resolve-sids.sh and the guard sources it. A guard copied
+# ALONE (no sibling file) must still refuse and print the bare sid: the fallback degrades to
+# `?`, never to a wrong "LIVE"/"gone". The positive assertions prove the copy ran at all, so
+# the absence assertion cannot pass on a dead script.
+echo
+echo "== a guard without resolve-sids.sh beside it still refuses and prints the bare sid =="
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob's withheld work"
+commit "$ALICE" "alice on top"; TIP=$(sha)
+GUARD_REAL="$GUARD"
+LONE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-lone-XXXXXX")"
+cp "$GUARD_REAL" "$LONE_DIR/pre-push-foreign-session-guard.sh"
+GUARD="$LONE_DIR/pre-push-foreign-session-guard.sh"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+LONE_OUT="$OUT"; LONE_EC="$EC"
+GUARD="$GUARD_REAL"
+eq    "lone copy: refused"                   "$LONE_EC" 1
+has   "lone copy: prints the bare sid"       "$LONE_OUT" "$BOB"
+has   "lone copy: ran far enough to name the class" "$LONE_OUT" "OB-20"
+hasnt "lone copy: never claims LIVE"         "$LONE_OUT" "LIVE"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "original guard with its sibling: refused" "$EC" 1
+has   "original guard: prints the bare sid"  "$OUT" "$BOB"
+
 # THE REMEDY TEXT, ASSERTED AS SHAPE RATHER THAN AS PROSE.
 #
 # Every other assertion in this file is about the guard's PREDICATE -- who gets refused.
