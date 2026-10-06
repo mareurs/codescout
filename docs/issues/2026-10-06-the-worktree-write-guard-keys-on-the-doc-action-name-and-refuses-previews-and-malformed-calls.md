@@ -14,6 +14,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-03-the-worktree-write-guard-covers-file-writes-and-no-doc-action.md
 severity: low
+unverified: 'PARTIAL FIX (40349c9d): dry-run delete and graft previews now reach the tool. NOT fixed: a malformed call still meets the guard before its own validation error; rekey_prefix previews stay refused on purpose, because they can fork a shadow row. See ## Partial fix.'
 ---
 
 # BUG: the worktree write guard keys on the doc action name, so it refuses dry-run previews and malformed calls that could never write
@@ -85,7 +86,7 @@ The three calls in "Symptom" ran in this session after the reconnect to the buil
 
 ## Fix
 
-Not started. Two options, not exclusive:
+Partly done: the first option below is implemented for `delete` and `graft` (see `## Partial fix`). The options were:
 
 - For the three dry-run actions, run the guard only when the call will apply (`force=true`). The set would need a per-action predicate, not a name list.
 - Run the guard after the argument check, so a malformed call returns its own error. This needs the guard inside each tool, or a parse step in the adapter. Today only the adapter sees both `ctx` and `action`.
@@ -94,15 +95,29 @@ Whichever is chosen, the guard must still run before the first write.
 
 ## Tests added
 
-N/A — not fixed. A fix needs two tests that assert on the error TEXT, not only `is_err()`: a malformed `move` and a `delete` preview, each unpinned in a worktree repo (see `docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md` on why `is_err()` alone proved nothing about the hint).
+Partial. Four tests in `src/librarian/adapter.rs` cover the dry-run half and assert on the error TEXT (named in `## Partial fix`). The malformed-call half still needs two tests that assert on the error TEXT, not only `is_err()`: a malformed `move` and a `delete` preview, each unpinned in a worktree repo (see `docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md` on why `is_err()` alone proved nothing about the hint).
 
 ## Workarounds
 
 Pass `workspace="<abs path of the main repo>"` on the call, or call `workspace(action="activate", path=...)` once. Both are what the error already prescribes. They cost one failed call per session.
 
+## Partial fix (2026-10-06)
+
+- **SHA:** `40349c9d` (`experiments`)
+- **patch-id:** `8fc7d2a542817cb52644ffd413ae941cc8b59180`
+
+What is covered. `LibrarianAdapter::call` no longer keys the guard on the action name alone. A new predicate, `doc_call_can_write` (`src/librarian/adapter.rs`), narrows `is_mutating_doc_action` by the one argument that decides whether a call applies. A `delete` or `graft` call skips the guard only when `force` is absent, null or boolean `false`. Any other value of `force` (the string `"true"`, a number, an object) keeps the guard, so the guard is never skipped for a call that can write. Both tools build their preview from catalog reads alone (read in `delete.rs` and `graft.rs` before the change).
+
+What is NOT covered:
+
+- **`rekey_prefix` previews stay refused, on purpose.** The bug's first draft listed `rekey_prefix` with `delete` and `graft`. That was wrong. `rekey_prefix.rs:46` calls `worktree::resolve_write_target` before its preview runs. In a worktree session that function forks a main-checkout artifact into a shadow row, a `worktree_fork` event and a lineage link, which are catalog writes (`worktree.rs:75-158`, read 2026-10-06). So a `rekey_prefix` preview can write, and narrowing it would let it write past the guard.
+- **Malformed calls.** A malformed call still reaches the guard before the tool's own validation error. Fixing it needs the guard moved into each tool, or a second parse of each tool's private `Args` struct across about eleven tools. Neither was judged small or safe.
+
+Tests added, all in `src/librarian/adapter.rs`, each asserting on the error text and not only on `is_err()`: `doc_dry_run_previews_reach_the_tool_in_an_unactivated_worktree_repo`, `doc_calls_that_can_write_are_still_refused_in_an_unactivated_worktree_repo`, `doc_calls_pinned_to_a_workspace_reach_the_tool_in_an_unactivated_worktree_repo` and `doc_call_can_write_is_keyed_on_the_effect_not_the_action_name`. Two mutations were checked by the fork that wrote the fix: reverting the call site to the name-only check fails the preview test with the `Write blocked` text, and adding `rekey_prefix` to the narrow list fails two tests, one of which guards the dangerous direction. The full gate ran green on the integrated tree (4146 and 6403 passed, 0 failed, 2026-10-06).
+
 ## Resume
 
-Decide between the two fix options. Then add the two tests above. The adapter change is small. The open question is whether a preview should ever be refused.
+The dry-run half is fixed (see `## Partial fix`). What remains is the malformed-call ordering, which needs the guard moved into each tool or a second parse of each tool's private `Args`. Decide whether that is worth the change. `rekey_prefix` previews staying refused is deliberate, not a gap.
 
 ## References
 
