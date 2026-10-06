@@ -472,6 +472,12 @@ const BUFFER_STDERR_BYTE_BUDGET: usize = 2000;
 /// `@file_*` handles count too; an `.err` suffix is dropped, so the result is always the bare
 /// handle and a caller can append `.err` or not.
 fn queried_ref(command: &str) -> Option<&str> {
+    let (start, end) = queried_span(command)?;
+    Some(&command[start..end])
+}
+
+/// Byte span of the bare handle in `command`, `.err` not included.
+fn queried_span(command: &str) -> Option<(usize, usize)> {
     let start = command
         .find("@cmd_")
         .or_else(|| command.find("@file_"))
@@ -482,7 +488,20 @@ fn queried_ref(command: &str) -> Option<&str> {
         .skip(1)
         .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
         .map_or(rest.len(), |(i, _)| i);
-    Some(&rest[..end])
+    Some((start, start + end))
+}
+
+/// The stream the caller's query reads: the handle WITH its `.err` suffix when the query had one.
+/// A paging or grep hint must name this, not the bare handle: `sed -n '81,180p' @cmd_X` after a
+/// query of `@cmd_X.err` pages STDOUT, which may be one short line, and returns nothing.
+fn queried_stream(command: &str) -> Option<&str> {
+    let (start, end) = queried_span(command)?;
+    let end = if command[end..].starts_with(".err") {
+        end + ".err".len()
+    } else {
+        end
+    };
+    Some(&command[start..end])
 }
 
 /// The stderr a buffer query carries: at most `max_lines` lines AND at most
@@ -543,7 +562,7 @@ fn query_first_line(command: &str) -> usize {
 /// queried. These are the routes that work on a wide line: `sed -n` and a bare `grep` return the
 /// whole line or nothing, `jq` needs JSON.
 fn wide_line_remedy(command: &str) -> String {
-    let r = queried_ref(command).unwrap_or("@ref");
+    let r = queried_stream(command).unwrap_or("@ref");
     format!(
         "this line is wider than the response budget; read a window of it with \
          `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`"
@@ -561,7 +580,7 @@ fn capped_hint(
     by_bytes: bool,
 ) -> String {
     use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
-    let r = queried_ref(query).unwrap_or("@ref");
+    let r = queried_stream(query).unwrap_or("@ref");
     let first = query_first_line(query);
     let next_start = first + shown;
     let next_end = first - 1 + shown + BUFFER_QUERY_INLINE_CAP;

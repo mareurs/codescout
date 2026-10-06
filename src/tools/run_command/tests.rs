@@ -4779,6 +4779,45 @@ async fn buffer_query_truncation_hint_shows_next_page() {
         "hint must not restart from line 1, got: {hint}"
     );
 }
+// A query of `<handle>.err` pages the STDERR stream. Its hint must name that same stream: with the
+// bare handle the next page is a page of stdout, which here is one short line, so a reader who
+// follows the hint gets nothing back and may take that for the end of the output.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_next_page_hint_on_an_err_query_names_the_err_stream_and_that_route_works() {
+    let (_dir, ctx) = project_ctx().await;
+    let stderr: String = (1..=300).map(|i| format!("{i:>40}\n")).collect();
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), "x\n".into(), stderr, 0);
+
+    let first = RunCommand
+        .call(
+            json!({ "command": format!("cat {id}.err"), "timeout_secs": 5 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let hint = first["hint"].as_str().unwrap_or("").to_string();
+    assert!(
+        hint.contains(&format!("p' {id}.err")),
+        "the next-page route must name the queried stream `{id}.err`, got: {hint}"
+    );
+
+    // Follow it: pull the `sed -n '<a>,<b>p' <ref>` command out of the hint and run it.
+    let from = hint.find("sed -n '").expect("a next-page sed route");
+    let rest = &hint[from..];
+    let route = rest[..rest.find(". ").unwrap_or(rest.len())].to_string();
+    let page = RunCommand
+        .call(json!({ "command": route, "timeout_secs": 5 }), &ctx)
+        .await
+        .unwrap();
+    let body = page["stdout"].as_str().unwrap_or("");
+    assert!(
+        body.contains("101"),
+        "following the hint must return the next page of stderr, got: {body:.200} (route {route})"
+    );
+}
 
 // Fix C: when the first run_command looks like a plain file read (cat file),
 // the buffer creation hint should suggest read_file as an alternative.
