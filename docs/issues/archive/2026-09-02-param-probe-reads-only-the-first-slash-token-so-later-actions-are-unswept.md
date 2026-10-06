@@ -6,7 +6,6 @@ title: 'BUG: param_probe reads only the first slash token of a shared label, so 
 tags:
 - cluster/guard-narrower-than-its-name
 closed: 2026-09-09
-unverified: 'TRACKED 7c8a5ba864bc8398 — The prescribed second half (emit `checked N of M labelled pairs`) was judged obviated by the parser fix rather than implemented — reasoning in the Fix section. Residue: keys skipped for `accepts_any_json` or for carrying no `<action>:` label remain uncounted anywhere.'
 ---
 
 ## Summary
@@ -179,3 +178,7 @@ across all four probe sites and add the `N of M` denominator; the delta between 
   (`9b9c2a4c2c725e36`).
 - `CLAUDE.md` § *Testing Discipline* — "A count of a defect population must arrive with its unit or
   not at all", and "Loudness is a property of a PATH, not of a failure".
+
+## Resolution note (2026-10-06)
+
+The caveat this record carried (`TRACKED 7c8a5ba864bc8398`: keys skipped for `accepts_any_json`, or for carrying no `<action>:` label, remained uncounted anywhere) is resolved by `40add6c4` on `experiments` (patch-id `a2e96f72254883d1d273383f5bd83742b71fbe3a`), archived as `7b40e1fe5ddced5b`. `Sweep` now records both kinds, and `assert_all_honored` pins them per call site by exact set equality. The librarian site pins 13 unlabelled keys, including the unswept `audit_log` action; that debt is recorded in the fixing record, not hidden. The caveat was removed from this file's frontmatter on that basis.

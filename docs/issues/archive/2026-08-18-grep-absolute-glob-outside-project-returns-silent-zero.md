@@ -10,7 +10,6 @@ opened: 2026-08-18
 owner: marius
 related: []
 severity: medium
-unverified: 'TRACKED 9278fa8a4e651b43 — the second defect named in the title is NOT fixed in general: the hidden-paths completeness warning still asserts its remedy without checking that hidden pruning could explain the zero. The reported misattribution can no longer occur, because the glob case now errors before any walk runs, but the narrowing candidate in Fix remains unimplemented.'
 ---
 
 # BUG: `grep(glob=<absolute path outside the project>)` returns a silent zero, and the warning names the wrong cause
@@ -223,3 +222,7 @@ grep 913ba9c70e0b /tmp/patch-ids.txt
 
 Each hit is `<patch-id> <commit>`. Several hits mean the change exists on several branches
 (cherry-pick) and any of them is the fix.
+
+## Resolution note (2026-10-06)
+
+The caveat this record carried (`TRACKED 9278fa8a4e651b43`: the hidden-paths warning still asserted its remedy without checking that hidden pruning could explain the zero) is resolved by `3548d3fd` on `experiments` (patch-id `46fe142bfb3a832c33a0819148599654e7bd2c6b`), archived as `7b46ead954f2884f`. `WalkAudit::completeness_warning` now emits the hidden clause only when `globs_can_reach_a_root_dot_entry` is true. Floating, dot-anchored, wildcard-led and absolute globs are still over-approximated; that residue is recorded in the fixing record. The caveat was removed from this file's frontmatter on that basis.

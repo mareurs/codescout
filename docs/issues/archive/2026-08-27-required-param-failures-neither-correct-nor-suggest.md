@@ -15,7 +15,6 @@ owner: marius
 related:
 - docs/adrs/2026-08-27-negative-results-name-their-scope.md
 severity: medium
-unverified: 'TRACKED 36a0d5c7cb3fd4db — Out of scope and deliberately not done: the 8 already-adequate sites name their action but carry no `with_hint` corrected call, so they satisfy clause 2 only partly. The 9 repaired sites are live-verified (2026-08-28) — see § Tests.'
 ---
 
 ## Summary
@@ -440,3 +439,7 @@ err_family='missing_required_param' GROUP BY 1,2 ORDER BY 3 DESC;"`
 - `docs/adrs/2026-08-27-negative-results-name-their-scope.md` — the same principle applied
   to results rather than errors
 - `docs/PROGRESSIVE_DISCOVERABILITY.md` — output sizing and agent-guidance patterns
+
+## Resolution note (2026-10-06)
+
+The caveat this record carried (`TRACKED 36a0d5c7cb3fd4db`: the 8 already-adequate sites named their action but carried no corrected-call hint) is resolved by `f909e132` on `experiments` (patch-id `f447c6d9967ed567f7c9ed38492cff1dbbcc51a2`), archived as `4e554afd1a80957e`. Reading the code at the fix: `state_at` and `augment` already carried a corrected call, `workspace_state_at` has no required field, and update (a missing `id`), move, delete, graft and merge_worktree were the sites that lacked one; those now carry an `e.g.` hint, and the table test `every_required_param_failure_names_its_action_and_routes` covers them. Follow-ups recorded in the fixing record: two plain `anyhow!` refusals in `workspace_state_at.rs` and `state_at.rs`, and `augment` is not in the table test. The caveat was removed from this file's frontmatter on that basis.

@@ -13,7 +13,6 @@ closed: 2026-09-01
 opened: 2026-09-01
 owner: marius
 severity: low
-unverified: 'TRACKED 60ac58939c731ae3 — No regression test for the vacuity itself. `tests/tool_reachability.rs` closes the enabling condition (an unregistered `impl Tool`) but not the shape — an assertion naming a string no tool produces is vacuous by the same mechanism with no unregistered type involved. The positive form (each listed name IS produced by a registered tool, then is absent from `pinnable`) is not built. The fix was also incidental: the subject was deleted, nothing diagnosed the vacuity.'
 ---
 
 ## Summary
@@ -96,3 +95,7 @@ without any unregistered type. A guard for that would have to assert the **posit
 in the list is produced by some registered tool, *then* that it is absent from `pinnable`. Not
 built.
 
+
+## Resolution note (2026-10-06)
+
+The caveat this record carried (`TRACKED 60ac58939c731ae3`: the positive form of the assertion, each listed name IS produced by a registered tool, was not built) is resolved by `4c37ba0d` on `experiments` (patch-id `a7a897d2e347c3ef2b8561a025aaf5e2a2bf2d1c`), archived as `c72461fd60b38b34`. `pinnable_tools_advertise_workspace_param` now asserts each guarded name is a registered tool, and a second test checks that every name in the `Tool::pinnable` exclusion arm is a registered tool or a named exemption. The original vacuity was still fixed incidentally and diagnosed by nothing at the time; that history stands. The caveat was removed from this file's frontmatter on that basis.

@@ -1,19 +1,19 @@
 ---
+kind: bug
 status: fixed
-opened: 2026-08-29
+owners:
+- marius
+tags:
+- librarian
+- catalog
+- tooling
+- silent-divergence
 closed: 2026-08-30
-severity: medium
+opened: 2026-08-29
 owner: marius
 related:
-  - docs/issues/archive/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md
-tags:
-  - librarian
-  - catalog
-  - tooling
-  - silent-divergence
-kind: bug
-unverified: "TRACKED d1e3857d61e301cd — Liveness caveat CLEARED 2026-08-30 13:2x: re-verified after the rebuild this field asked for, on a fresh server (PID 1899149, /proc/<pid>/exe live, binary inode 6442149 built 13:25:19). This very frontmatter write is the probe — it sets a CATALOG COLUMN (owners), and the catalog reflected it with no reindex. Remaining and unchanged: the server-side install at src/server.rs:374 is covered by no test; deleting that line leaves all 8 green."
-owners: ["marius"]
+- docs/issues/archive/2026-08-28-root-is-https-or-loopback-has-no-test-coverage.md
+severity: medium
 ---
 
 # BUG: `edit_markdown`'s frontmatter write never touches the catalog, so `find(kind="bug", status=…)` reports the pre-edit status indefinitely
@@ -284,3 +284,7 @@ it."
 - `src/librarian/tools/get.rs:335` and `:525-533` — why the desync is
   field-selective rather than total
 - `open-issue-work-queue:BL-48`
+
+## Resolution note (2026-10-06)
+
+The caveat this record carried (`TRACKED d1e3857d61e301cd`: the server-side install of the catalog write-through, `install_catalog_frontmatter_sync` in `src/server.rs`, was covered by no test) is resolved by `cbe8f6c6` on `experiments` (patch-id `d61fb4777eb9a18aabaaa7cd6e69dd05a066df35`), archived as `8d578fe8206a10be`. `tests/server_installs_librarian_hooks.rs` spawns the real binary against a scratch catalog and checks a frontmatter write reaches the catalog row; deleting the install lines turns both of its tests red. The earlier liveness caveat had already been cleared on 2026-08-30. The caveat was removed from this file's frontmatter on that basis.
