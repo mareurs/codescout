@@ -328,3 +328,40 @@ fn clamp_keeps_a_character_of_the_line_in_a_room_too_small_for_one() {
         }
     }
 }
+
+/// `count` is part of the json_path response, so the inline decision must measure it. The
+/// coarse sweep can step over the 10-byte window `,"count":1` opens at the edge; this walks it
+/// one byte at a time.
+#[tokio::test]
+async fn json_path_inline_decision_counts_the_count_key() {
+    let ctx = ctx().await;
+    let mut spilled = 0;
+    for len in 9_900..=10_000 {
+        let r = ctx
+            .output_buffer
+            .store_tool("probe", json!({ "v": ["a".repeat(len)] }).to_string());
+        let input = json!({ "path": r, "json_path": "$.v" });
+        let (v, _) = page(&ctx, &input, &r, &format!("count/{len}")).await;
+        spilled += usize::from(v.get("file_id").is_some());
+    }
+    assert!(spilled > 0, "the walk never crossed the edge");
+}
+
+/// A page's `next` can resume at a many-digit line, and the room must count those digits. A
+/// clamped line deep in a buffer with a line after it puts `line_truncated`, `hint` and a
+/// three-digit `next` in one response that the clamp fills to the byte.
+#[tokio::test]
+async fn a_clamped_line_deep_in_a_buffer_counts_the_digits_of_next() {
+    let ctx = ctx().await;
+    for kind in REFS {
+        for (class, unit) in CLASSES {
+            let mut lines = vec!["short".to_string(); 99];
+            lines.push(one_line(unit, 30_000));
+            lines.push("tail".into());
+            let r = park(&ctx, kind, lines.join("\n"));
+            let input = json!({ "path": r, "start_line": 100, "end_line": 900 });
+            let label = format!("deep {kind:?}/{class}");
+            read_through(&ctx, input, &r, &label).await;
+        }
+    }
+}
