@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/addressing-without-an-escape-hatch
 - librarian
@@ -8,7 +8,7 @@ tags:
 - citations
 - graph-hygiene
 - no-escape-syntax
-closed: null
+closed: 2026-10-06
 opened: 2026-08-31
 owner: marius
 related: []
@@ -113,11 +113,29 @@ stands on its merits; the surviving demonstration is the three instances in
 (`:29`, `:31`, `:89`), which genuinely cannot be reworded away — that file's subject *is*
 the colliding id.
 
+## Fix
+
+Option 1 above, as the bug recommended: no code change. `src/prompts/guides/tracker-conventions.md` § *Citing an entry — bare, or qualified* gained a paragraph, **Mentioning an id without citing it** (`c2e08af8`, 7 insertions), saying that `link_scan` derives an edge from any entry token in prose, that inline backticks do not escape it (inline code is scanned), that a fenced code block is the only place a token is a literal, and that a token left in prose becomes a `cites` edge which a `write=true` run materializes.
+
+The first commit wrote the call as `link_scan(write=true)`; `tests/doc_tool_refs.rs` `a_documented_call_names_a_live_tool` flagged that on the integrated gate (the author had not run that file). `4a2e5681` (1 insertion, 1 deletion, same file) corrects it to `librarian(action="link_scan", write=true)`.
+
+Not built: option 2 (a literal marker) and option 3 (confidence-ranking). `extract` still scans inline code, and the contract test `fenced_blocks_are_skipped_inline_code_is_scanned` is unchanged; the guide now says so instead of leaving authors to discover it.
+
+## Tests added
+
+none: documentation fix. The existing `fenced_blocks_are_skipped_inline_code_is_scanned` (`src/librarian/tools/link_scan/extract.rs`) already pins the behaviour the paragraph describes, and `a_documented_call_names_a_live_tool` (`tests/doc_tool_refs.rs`) is the gate that caught the wrong call form in the first commit.
+
+## Fix provenance
+
+- **SHA:** `c2e08af8` (`experiments`)
+- **patch-id:** `d6a7cebaea01e5e1d88440d2d9384e3a0abb1968`
+- **SHA:** `4a2e5681` (`experiments`)
+- **patch-id:** `074fee2be750c126d5a8837684b1554f3ed7c9e3`
+
 ## Resume
 
-Start at `src/librarian/tools/link_scan/extract.rs` — `extract` (`:324-447`) and
-`scan_tokens` (`:454-505`); the fence-skipping is what a literal marker would extend.
-The contract test to amend is `fenced_blocks_are_skipped_inline_code_is_scanned`
-(`:644-652`). If taking option (1) instead, the text belongs in
-`get_guide("tracker-conventions")` § *Citing an entry — bare, or qualified*, next to the
-existing note that a qualifier naming no file is reported and never turned into an edge.
+Closed on 2026-10-06 by option 1 (`c2e08af8`, corrected by `4a2e5681`). Residual follow-ups (listed, not filed):
+
+- There is still no inline literal: a sentence that must name a colliding id in running prose cannot, only a fenced block can. The three instances in `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md` (`:29`, `:31`, `:89`) are unchanged. Revisit options 2 or 3 only if the population grows beyond documents about id allocation.
+- `link_scan` still reports such an edge as `edges_missing` (work to do) rather than as a suspect resolution.
+- The first commit's wrong call form was caught only by the integrated gate; a guide edit that contains a call form should run `tests/doc_tool_refs.rs` before commit.

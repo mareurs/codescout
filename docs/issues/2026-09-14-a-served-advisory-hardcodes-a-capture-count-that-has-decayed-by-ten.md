@@ -9,6 +9,7 @@ tags:
 - hooks
 - shared-checkout
 - stale-count
+unverified: 'PARTIAL FIX (ce9aa15f): the codescout half no longer carries a count. The plugin half is NOT fixed: claude-plugins codescout-companion hooks/pre-edit-dirty-check.mjs lines ~8 and ~118 still say ''Four such captures''. See ## Partial fix.'
 ---
 
 # BUG: a served advisory hardcodes "Four such captures are recorded" against a corpus now at fourteen
@@ -140,6 +141,17 @@ live session. What this closes is the in-repo half. What it adds is the finding 
 guarded SITE, not once per feature" paying out in the direction that costs: a remedy applied at the
 two known sites would have left this advisory serving the stale number indefinitely, with the bug
 file reporting the class closed.
+
+## Partial fix (2026-10-06)
+
+**The codescout half is fixed; the plugin half is NOT. Status stays `open`.** Verified at the bytes on 2026-10-06.
+
+- **SHA:** `ce9aa15f` (`experiments`) — "repair the red at HEAD, and correct two claims that decay" (2026-09-22). Its diff to `scripts/pre-commit-unreviewed-content.sh` is 2 lines (`git log -S` finds both replacement strings introduced only by this commit): the header at line 12 now reads "It has happened repeatedly in this repo, documented in", and the served text at line 156 reads "same file since you last looked. Such captures are recorded in" followed by the citation. Neither carries a count. The same commit also edited this bug file (the 2026-09-22 update above), and other files unrelated to this bug (`docs/PROBES.md`, `src/prompts/guides/librarian.md`, `tests/doc_tool_refs.rs`, and three other bug files).
+- **patch-id:** `092bb2c868fdef0957be6cb7af958082fb6a8998`
+
+**Still live in the plugin repo** (`/home/marius/work/claude/claude-plugins`, working tree clean at HEAD; last commit touching the file `9169527`): `codescout-companion/hooks/pre-edit-dirty-check.mjs` line 8 (header comment: "... land together, under your message. Four such") and line 118 (the served advisory string: "... it lands under your message. Four such\n"). The advisory still tells a reader "Four such captures are recorded in codescout's docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md" against a corpus this file measured at 17 `## Instance` headings (highest `Instance 18`) on 2026-09-22. I read the file; I did not edit the plugin repo, which this record says a live session owns.
+
+**Remaining work (plugin repo, minutes):** delete the word "Four" at both sites, leaving "Such captures are recorded in codescout's `docs/issues/2026-08-31-...`", exactly as codescout's own script now reads. No test is wanted: as this record's `## Tests added` argues, an assertion on the absence of a digit is monotone under the rewording that would reintroduce one. Not filed as a separate item.
 
 ## Tests added
 

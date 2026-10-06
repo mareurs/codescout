@@ -142,6 +142,47 @@ present. `librarian(action="doctor", scope="repo")` the same day reports `missin
 the complementary direction. Stays `zombie`. Checked by sessionId
 `c3e7701b-142f-44d5-a762-8bfb419ee1ce`.
 
+
+### 2026-10-06 — re-open trigger checked again, NOT met
+
+`audit_log(tbl="artifact", op="delete", since=2026-09-26T00:00Z (epoch-ms 1790380800000), limit=500)` →
+**109** deletes (`count=109`, `filtered_total=109`, `truncated=false`, 2 shard files read, 0 malformed,
+`table_total=158491`; first row 2026-09-26T08:37Z, last 2026-10-05T14:23Z). By recorded verb:
+
+| verb | n | disposition |
+|---|---|---|
+| `doc.move` | 96 | moves, excluded by the trigger's own definition (72 relative paths, i.e. this repo; 23 under `mirela/backend-kotlin/docs`; 1 under `stefanini/invest-europe/lang-pal-engine`) |
+| `librarian.reindex` | 6 | all under `stefanini/southpole/MRV-poc` worktrees and `mirela/backend-kotlin`, none in this repo |
+| `librarian.merge_worktree` | 6 | all under `MRV-poc/.worktrees/ma82-corpus` and `ma83-facts` shadow rows, none in this repo |
+| `doc.delete` | 1 | `MRV-poc/docs/reports/2026-10-05-sprint7-jira-tickets.md` |
+
+Every `payload.abs_path` was resolved (relative paths against this repo root) and tested with `-e`: **108
+are gone from disk, 1 exists.** For the 13 non-`doc.move` deletes (the ones the trigger counts), the deleted
+row's path does not exist on disk, and none of them is in this repo, so **0** rows were lost for a file still
+present in this repo.
+
+**The one that exists, examined rather than waved through:** a `doc.move` (seq 146771, 2026-10-05T05:59Z,
+row `a999e963840d488e`) of `/home/marius/work/stefanini/invest-europe/lang-pal-engine/docs/roadmap.md`, another
+repo. The deleted row's `file_mtime` is 2026-03-18, while the file now at that path was last written
+2026-10-05 14:40 (local) and has three `docs(roadmap)` commits that day (`f94aa687`, `c971eaa3`, `8b9ceb10`); the
+same directory has `archive/roadmap-2026-03-initial-hardening.md`. That fits "the March roadmap was archived and a
+new `roadmap.md` was written at the old path afterwards", so the path exists but not as the file the row
+described. This is an inference from mtimes and the directory listing; I did not read that repo's git history for
+the move itself. It is a move, so excluded by definition either way, and it is not in this repo.
+
+**Disagreement with the 2026-10-05 triage, reported rather than reconciled.** The triage found the same total
+(109, `truncated=false`), the same 1 `doc.delete`, the same 6 `merge_worktree`, and the same 108-gone / 1-exists
+split with the same exceptional path. Its per-verb split was 103 `doc.move` and 5 `librarian.reindex`, which
+sums to 115, not 109; the split above (96 / 6 / 6 / 1) sums to its own total and was counted directly from the
+109 rows. The table is mine.
+
+**Limits, unchanged from the earlier blocks:** `verb` is the last dispatched verb on the writing connection, not
+per statement, and `actor` records contact, not authorship, so a `doc.move` label does not prove each of its rows
+was a move; this check does not lean on the label for the 72 relative-path rows in this repo, since all are gone
+from disk regardless. A loss repaired by an intervening reindex still shows its delete row, which is what makes
+this a window check rather than a point reading. Stays `zombie`. Checked 2026-10-06 by a bookkeeping subagent
+dispatched from session `7d58cbaf-191b-4b73-b5b6-f6731a1f07a5`.
+
 ## Environment
 
 - codescout `experiments`, main checkout `/home/marius/work/claude/codescout`

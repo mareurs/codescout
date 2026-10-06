@@ -1,7 +1,7 @@
 ---
 id: '24ea8fd4e40fb821'
 kind: bug
-status: open
+status: fixed
 title: Three hooks-discrimination cases failed once inside a mutation run and did not reproduce in 12 runs
 tags:
 - cluster/gate-keyed-on-unobservable-event
@@ -9,6 +9,7 @@ tags:
 - shared-checkout
 - flaky
 topic: test suite reliability
+closed: 2026-10-06
 opened: 2026-09-16
 owner: marius
 related: []
@@ -116,18 +117,15 @@ hypothesis — the load that mattered may not have been this suite.
 
 ## Root cause
 
-**Unknown, and deliberately not guessed.** The cluster tag is `cluster/unclassified` for that
-reason: assigning a claim-shaped class here would be a hypothesis wearing a taxonomy.
+**Confirmed 2026-10-01, by the archived record [`2026-10-01-the-stage-log-suites-cold-log-precondition-depends-on-git-status-rewriting-the-index.md`](archive/2026-10-01-the-stage-log-suites-cold-log-precondition-depends-on-git-status-rewriting-the-index.md)** (status `fixed`): the cold-log precondition depended on `git status` rewriting the index, and git does not always do that. `post-index-change` fires on index writes; `git status` writes the index only when an entry needs refreshing, and a staged file whose stat data still matches its entry (the add and the status inside one timestamp tick) gives it nothing to refresh, so the hook never fires and the log stays absent. Reproduced on demand outside the suite: the log was not recreated 8 times in 150 (5.3%). Moving the staged file's mtime back first (`touch -d '2 hours ago'`) took that to 0 of 550. The same-tick reading fits the numbers and the fix; the index mtime was not captured against the add.
 
-What is known: the three cases share a subject (`.git/session-stage-log` ownership
-resolution) and each depends on a `post-index-change` hook firing as a side effect of a git
-command. A hook that does not fire, or fires late, would produce exactly this shape — a row
-missing from the log, read as *unknown*, resolving differently. That is a direction to
-probe, not a finding.
+The section 2b hypothesis (a hook that did not fire) above was this cause. The three original failures are one absent file observed at three points, as the Reproduction section says.
 
 ## Fix
 
-**Not designed.** Directions:
+**Fixed 2026-10-01: Direction 1 (diagnostic) shipped 2026-09-18, and the cause was removed 2026-10-01.** The cause fix is `65d4e5dd`: in `tests/hooks-discrimination.sh` § "stager wins", `touch -d '2 hours ago' s1.txt` before the cold-log `git status` (lines 259-268), so the index entry is stale and `status` has something to refresh and write; the `log_recreated` assertion that follows stays as the guard that says the setup worked. Direction 1 itself is `aa831668`: `owner_of()` and `route_of()` return `NO-LOG` for an absent log (`tests/hooks-discrimination.sh:128`, `:137`) and `log_recreated()` (`:62`) asserts the precondition. **Direction 2 (self re-run on failure) was never built.** The "flake rate is unchanged" paragraph under Direction 1 describes the state before `65d4e5dd`, not after.
+
+Directions as originally written:
 
 1. **Make the three cases assert their own precondition**, per § 7's rule that a case which
    does not establish the log state first can pass — or fail — for entirely the wrong reason.
@@ -184,6 +182,17 @@ probe, not a finding.
    have reported *"the hook did not recreate the log"* on the very first failure instead of
    `want '-' got ''`.
 
+## Tests added
+
+No new assertion for the cause fix (see the archived record's Tests added): the evidence is the standalone loop (8 of 150 before, 0 of 550 after) and three consecutive green runs of the suite (284 passed). `aa831668` added `log_recreated` (`tests/hooks-discrimination.sh:62`), the assertion that names the unmet precondition, and the `NO-LOG` sentinel in `owner_of`/`route_of`; the 2026-09-24 CI run recorded below is the first time that message fired in CI. A suite-level red cannot be observed on demand, which is why the probe ran outside it.
+
+## Fix provenance
+
+- **SHA:** `65d4e5dd` (`experiments`)
+- **patch-id:** `892b172ceb8ec395699d8d5ca798a00751c01716`
+- **SHA:** `aa831668` (`experiments`)
+- **patch-id:** `b81e03c0902d42f99a7b0801d441489adf5eb99c`
+
 ## Workarounds
 
 **Re-run before believing a mutation's extra kills.** A mutation that reports failures
@@ -192,14 +201,12 @@ Cheap, and it is what separated the two readings here.
 
 ## Resume
 
-`zombie`, which is this repo's status for *recurring-but-unconfirmed* — a "has this come
-back?" check rather than a task to pick up. **Do not open it on this evidence.** Do add an
-instance here if another run produces failures in cases the change under test cannot reach,
-and note the count: at two independent observations this stops being noise and the fix
-directions above become worth costing.
+Closed on 2026-10-06 (status was `open`; the old text here that called it `zombie` was stale: it reproduced at about 9% and the cause is named). The cold-log precondition is fixed by `65d4e5dd`; the diagnostics by `aa831668`; both are on `experiments`. Residual follow-ups (listed, not filed):
 
-Observed while mutation-testing `scripts/pre-commit-orphaned-citations.sh`; the mutation
-itself behaved correctly and its verdict was confirmed by the re-runs above.
+- `tests/hooks-discrimination.sh` lines 344-346 have the same shape with no `touch` and no `log_recreated` precondition: `rm -f .git/session-stage-log`, `git -C "$PWD" status --short`, then `eq "-C <path> status is NOT a staging op" "$(owner_of formC.txt)" "-"`. Whether it flakes the same way is unmeasured; a miss would read as `want '-' got 'NO-LOG'`.
+- Direction 2 (a suite that re-runs a failing case once and reports "failed 1 of 2 attempts") was never built.
+- No post-fix measurement of the CI Shell suites lane exists in this file; the 8 failures in 177 jobs it records are all pre-fix.
+- Cluster bookkeeping: this bug is a member of IC-2 (`cluster/gate-keyed-on-unobservable-event`); the integrator must update that class's `**Members:**` line when archiving.
 
 ## Absorbed duplicate — 2026-09-24
 

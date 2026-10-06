@@ -12,7 +12,7 @@ opened: 2026-08-20
 owner: marius
 related: []
 severity: medium
-unverified: TRACKED 14fb3387e1c6d0c6 — Historical rows keep their NULL friction_target — no backfill was run, so every figure computed over rows written before db76f69a still understates attribution. The `command`-addressed population (438 rows) remains target-less BY DECISION, not by defect.
+unverified: "No backfill was run and none is owed (wontfix 2026-10-06, docs/issues/2026-09-24-residual-backfill-friction-target-history.md, formerly tracked as residual 14fb3387e1c6d0c6): the 30-day retention sweep aged every pre-db76f69a row out of this project's usage.db (min called_at 2026-09-07, 0 rows before 2026-08-21). Frozen usage.db files of unused projects still hold NULL-friction_target rows and any figure over them still understates attribution. The `command`-addressed population (438 rows when measured) remains target-less BY DECISION, not by defect."
 ---
 
 # BUG: friction_target's key list omits `command` and `file_path`, so 38% of errors — including both largest families — are unattributable

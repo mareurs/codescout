@@ -1,11 +1,11 @@
 ---
 id: '85ea79df030f3512'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: src/prompts/README.md says the tool-name gate reads three prompt surfaces; it reads four, and the docs disagree on which surface is "the fourth"'
 tags:
 - cluster/doc-contradicted-by-code
-closed: null
+closed: 2026-10-06
 opened: 2026-10-03
 owner: marius
 related: []
@@ -71,18 +71,17 @@ N/A — the defect is in the texts, read directly.
 
 ## Fix
 
-Not done. Proposed: make the README's § *Surfaces* the single enumeration. Add
-`.codescout/system-prompt.md` with the two gates that read it
-(`prompt_surfaces_reference_only_real_tools`, `reader_docs_contain_no_retired_call_forms`), say the
-tool-name gate reads four surfaces and, per its doc comment, not `tools/list`, and replace "the
-fourth" with the surface's name in the README, `scripts/probe_tool_surface.py:4` and the test's
-messages. An ordinal is a position in a list each document draws for itself, which is how two of
-them can each be right about "the fourth" and still disagree.
+Done in `527fafa1` (2 files, 4 insertions, 3 deletions), on `experiments`:
+
+- `src/prompts/README.md` line 5 now says `prompt_surfaces_reference_only_real_tools` catches stale tool-name mentions "across the four surfaces it reads" (the `server_instructions` and `onboarding_prompt` slices, the `build_system_prompt_draft()` output and `.codescout/system-prompt.md`) and says it does **not** read `tools/list`.
+- § Surfaces gains a bullet for `.codescout/system-prompt.md` naming the two gates that read it (`prompt_surfaces_reference_only_real_tools`, `reader_docs_contain_no_retired_call_forms`).
+- The "fourth" ordinal for `tools/list` is dropped from the README (two places) and from the `scripts/probe_tool_surface.py` docstring.
+
+Not done: `src/server.rs` still says "The fourth surface is read from DISK" (line 5438), "the fourth surface's ..." (5480, 5486) and a panic message "cannot read the fourth prompt surface" (5509), because another agent owned that file during the sweep. Those ordinals now agree with `CLAUDE.md` § *Prompt Surface Consistency* (where `.codescout/system-prompt.md` is the fourth), so no document calls two different surfaces "the fourth" any more; they are still ordinals rather than the surface's name, which the bug's proposal wanted replaced.
 
 ## Tests added
 
-N/A — open. Pinning README prose would be the sentence-pinning `CLAUDE.md` § *Testing Discipline*
-advises against; removing the ordinals is the durable fix.
+none: documentation fix. Pinning README prose would be the sentence-pinning `CLAUDE.md` § *Testing Discipline* advises against, as this bug said when opened; removing the ordinals is the durable fix.
 
 ## Workarounds
 
@@ -91,10 +90,15 @@ For which files the tool-name gate reads, trust the doc comment on
 
 ## Resume
 
-Edit `src/prompts/README.md` line 5 and § *Surfaces* as in Fix; replace the ordinal at
-`scripts/probe_tool_surface.py:4`. Then
-`git grep -n 'fourth' -- src/prompts/README.md scripts/probe_tool_surface.py src/server.rs CLAUDE.md`
-should return no ordinal standing in for a surface's name.
+Closed on 2026-10-06 by `527fafa1`. Residual follow-ups (listed, not filed):
+
+- `src/server.rs:5438`, `5480`, `5486` and the panic message at `5509` still use "fourth surface" / "fourth prompt surface" for `.codescout/system-prompt.md`; replace with the file's name when `src/server.rs` is next touched.
+- Check: `git grep -n 'fourth' -- src/prompts/README.md scripts/probe_tool_surface.py CLAUDE.md` returns no ordinal standing in for a surface's name (verified at HEAD `fda10a31`: the only `fourth` hits among the four files named in the original Resume are in `src/server.rs`).
+
+## Fix provenance
+
+- **SHA:** `527fafa1` (`experiments`)
+- **patch-id:** `24c9a1df5dc9125334cd6cc65dcd5e8ee8cc31d6`
 
 ## References
 

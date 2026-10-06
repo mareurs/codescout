@@ -1,12 +1,13 @@
 ---
 id: '4cc587904a3dd44e'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the source-file gate reads tail inside a quoted, hyphenated filename as the tail command'
 owners:
 - marius
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-10-06
 opened: 2026-09-24
 related: []
 severity: low
@@ -68,14 +69,28 @@ Refusal outputs above (session 3b4fae98-500a-4fa9-8127-b16642a8c23d, 2026-09-24)
 
 ## Fix
 
-Not attempted. Likely shape: blank quoted spans before scanning for reader commands, the way the
-heredoc scanners mask heredoc bodies (`mask_heredoc_bodies` in `src/util/path_security.rs`). Or
-match a reader only in command position (start of a clause, or after `|`, `;`, `&&`, `$(`).
+Fixed as a side effect of #29, not by a change aimed at this bug, and pinned afterwards by a test.
+
+- `ce41048f` (PR #29, `fix(tools): Python constant ranges, IL-3 plumbing, gate reruns, and the source gate's prefix bypass`; 10 files, `src/util/path_security.rs` +454/-57 among them) introduced `executed_command` (`src/util/path_security.rs:839`) and made the source gate classify a segment by it instead of by its raw first token. `executed_command` slices the token list at `producer_index`, which skips leading `NAME=value` assignments (`is_assignment`, from `1fb66cf6`, an ancestor, `2026-09-24`). The quoted value is therefore consumed as the assignment, and a standalone assignment leaves no command at all (so nothing reads `tail`), while an assignment prefix leaves `echo` as the head.
+- Of the two shapes the bug proposed, the second (match a reader only in command position) is in effect what shipped.
+
+Not established: that `ce41048f` alone is what flipped this repro from refused to allowed. It was identified from the commit that introduced `executed_command`, the test below and the 2026-10-05 live run, not by bisecting the repro across `ce41048f`^ and `ce41048f`.
 
 ## Tests added
 
-None yet. Owed: the refused case above must be allowed, and `tail src/tools/mod.rs` must stay
-refused (the control that keeps the gate honest).
+`5d2dc462` (`test(path_security): a reader name inside a quoted assignment value is data, not a command`, test-only, 26 insertions), `source_gate_ignores_a_reader_name_inside_a_quoted_assignment_value` (`src/util/path_security.rs:4328`). It pins:
+
+- both assignment shapes, `P="docs/issues/x-tail-y.md src/tools/mod.rs"; echo assigned` (standalone assignment, no command left) and `P="..." echo assigned` (assignment prefix, `echo` is the head): each must be allowed;
+- the control that keeps the allows a verdict rather than a blind spot: the same value followed by a real `tail src/tools/mod.rs` stays refused.
+
+The fixtures put the reader name and the source path into ONE token, so the old raw-first-token rule would also have passed them; the test's comment says so. Whether it was RED on `ce41048f`^ was not checked here.
+
+## Fix provenance
+
+- **SHA:** `ce41048f` (`experiments`)
+- **patch-id:** `066083d1ea88e38ed7083576925b833c14bf39d5`
+- **SHA:** `5d2dc462` (`experiments`)
+- **patch-id:** `56c52827e56039977fc469fe9eac26923c05d278`
 
 ## Workarounds
 
@@ -83,8 +98,13 @@ Write the paths inline rather than through a variable, or pass `acknowledge_risk
 
 ## Resume
 
-Read the reader-detection in `check_source_file_access` (`src/util/path_security.rs`), then write
-the test pair first.
+Closed on 2026-10-06. Both SHAs are on `experiments` (`git branch --contains`). Live-binary evidence: a triage agent ran this bug's exact repro on the live binary on 2026-10-05 (`P="docs/issues/x-tail-y.md src/tools/mod.rs"; echo assigned`): exit 0 with `assigned`, not a refusal. Re-run on 2026-10-06 by this pass on the binary then serving it (`target/release/codescout`, dated 2026-10-06 06:03): same result, exit 0, `assigned`.
+
+Residual follow-ups (listed, not filed):
+
+- Bisect the repro across `ce41048f`^ and `ce41048f` to confirm which commit flipped it (the Fix section says this was not done).
+- Confirm the new test is RED on `ce41048f`^.
+- The `producer_index` docstring (`src/util/path_security.rs:1548`) still says a wrapper "not named here (`ionice`, a shell function)" reads as its own name, but `ionice` is handled by `98c6d798`; fix the sentence when the file is next touched.
 
 ## References
 

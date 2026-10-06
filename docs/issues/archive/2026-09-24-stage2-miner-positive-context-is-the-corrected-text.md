@@ -7,7 +7,7 @@ tags:
 opened: 2026-09-24
 owner: marius
 severity: high
-unverified: TRACKED eb9014f896a48715 — 10 mined rows already carry the twin inside context_before and nothing flags or excludes them; none reached a frozen set (measured 2026-10-01, with a control).
+unverified: "RESOLVED 2026-10-06 by b45bcce4 (experiments): the freeze now skips mined rows whose twin is already in context_before; the frozen sets are byte-identical. Residual guard gaps (T-set loop, no mining-time flag) are carried in eb9014f896a48715's own caveat. Was: TRACKED eb9014f896a48715 — 10 mined rows already carry the twin inside context_before and nothing flags or excludes them; none reached a frozen set (measured 2026-10-01, with a control)."
 ---
 
 # Stage 2 miner stored the corrected text as the positive sentence's context

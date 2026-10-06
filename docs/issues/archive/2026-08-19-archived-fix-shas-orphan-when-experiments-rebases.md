@@ -15,7 +15,7 @@ opened: 2026-08-19
 owner: marius
 related: []
 severity: high
-unverified: 'TRACKED fb147f71da8e15ab — 10 of the 63 archived records were ALREADY unrecoverable when this was mitigated — their objects are gone from the object DB — and no patch-id can restore them. The 53 recoverable ones were back-filled, but nothing gates a FUTURE archive that omits the pair at write time; detection rests on `doctor`''s `terminal_status_without_fix_anchor`, which is run manually. `patch-id` also dies under squash, since a union diff hashes differently.'
+unverified: '10 of the 63 archived records were ALREADY unrecoverable when this was mitigated — their objects are gone from the object DB — and no patch-id can restore them. The 53 recoverable ones were back-filled. The write-time gate this caveat once said was missing now exists for the archive transition (04973710 refuses archiving a fixed/mitigated bug with no fix anchor; 00fe85d6 tightened it to require the SHA + patch-id pair); closure recorded 2026-10-06 in docs/issues/2026-09-24-residual-gate-terminal-bug-missing-fix-anchor.md (formerly tracked as residual fb147f71da8e15ab). A live fixed/mitigated bug with no pair is still caught only by doctor''s manual checks. `patch-id` also dies under squash, since a union diff hashes differently.'
 ---
 
 # BUG: an archived fix SHA orphans on rebase, and nothing re-reads archive/ to notice

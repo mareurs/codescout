@@ -1,11 +1,11 @@
 ---
 id: '1e153b9a3d5bb333'
 kind: bug
-status: open
+status: fixed
 title: 'RESIDUAL: Build a detector (doctor/probe) for .worktrees/ entries that are not registered worktrees, since both git worktree list and git status are blind to them'
 tags:
 - cluster/record-asserts-an-unchecked-completion
-closed: null
+closed: 2026-10-06
 opened: 2026-09-24
 owner: marius
 related:
@@ -27,7 +27,27 @@ Remaining work split out of `docs/issues/archive/2026-08-30-bench-worktree-delet
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Implemented in `src/librarian/tools/doctor.rs` as a new doctor check `unregistered_worktree_dir` (`scan_unregistered_worktree_dirs`, `doctor.rs:3015`). It lists the entries of the MAIN checkout's `.worktrees/` (resolved through `main_root` when a session runs inside a linked worktree) and flags each one that is absent from `.git/worktrees/*/gitdir`. Each finding names the likely author session when the residue carries one (`.buddy/<id>/`, `.codescout/cc_session_id`) and says so when it does not, rather than inferring one from a directory mtime. A missing `.worktrees/`, a missing `.git` or an unreadable directory is reported in `catalog_health.unregistered_worktree_dirs` as "not checked", never as a pass. The check is project grain (`id: None`, no foreign rows to scope-gate) and report-only: there is no `fix=` mode, because deleting a directory that may hold someone's unsaved work is not a repair a report should perform. It is a defect, not informational: `codescout doctor --fail-on-violations` exits 1 on a machine that carries residue. The main checkout carries such residue today: `.worktrees/doctor-per-project-isolation`, which the check flags and whose only content is `.buddy/b80a27d4-9729-40ef-8c28-ad8982df6d13/`. Nobody has removed it; removing it is a separate act.
+
+## Tests added
+
+In `src/librarian/tools/doctor.rs`:
+
+- `an_unregistered_worktree_dir_is_flagged_and_a_registered_one_is_not` (:18393) pins that the unregistered directory fires and the registered one does not, and that the health block counts them.
+- `a_dot_worktrees_holding_only_registered_worktrees_is_silent` (:18461) pins the silent case.
+- `the_scan_resolves_the_main_checkouts_worktrees_from_inside_a_linked_worktree` (:18479) pins that a session in a linked worktree scans the main checkout's `.worktrees/`.
+- `a_project_with_no_dot_worktrees_states_that_nothing_was_checked` (:18511) pins the "nothing to check" note.
+
+The two registry meta-tests were extended to name the new check: `every_declared_check_is_scope_gated_or_a_named_exemption` (:15015) lists it as project grain, and `admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all` (:15140) pins it as excluded from the relevance exemption.
+
+## Fix provenance
+
+- **SHA:** `777dc501` (`experiments`)
+- **patch-id:** `52c9d37437bf9e73c6f8ff108d37159d3346c68e`
+
+## Resume
+
+Closed on 2026-10-06 by `777dc501` (local on `experiments`, not pushed at the time of writing). Residual follow-ups, listed and not filed: (1) the live residue `.worktrees/doctor-per-project-isolation` (author session `b80a27d4-9729-40ef-8c28-ad8982df6d13`) is flagged and still present, so `--fail-on-violations` exits 1 on this checkout until someone checks that session is gone and removes it or re-registers it. (2) The parent `docs/issues/archive/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md` still carries its `unverified: TRACKED 1e153b9a3d5bb333` caveat; its residual work is now delivered by this file, and the integrator decides how to retire that caveat.
 
 ## References
 

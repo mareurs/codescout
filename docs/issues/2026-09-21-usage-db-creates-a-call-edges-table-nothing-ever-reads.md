@@ -1,11 +1,11 @@
 ---
 id: c4e0c5cc182997ba
 kind: bug
-status: open
+status: fixed
 title: usage.db creates a call_edges table on every open that no code path has ever read or written
 tags:
 - cluster/declared-not-wired
-closed: null
+closed: 2026-10-06
 opened: 2026-09-21
 owner: marius
 related: []
@@ -184,38 +184,33 @@ inert in one direction and silently incomplete in the other.
 
 ## Fix
 
-**Not attempted — filing only.**
-
-The smallest coherent change is two edits that must land together:
-
-- delete `src/usage/db.rs:34-47`;
-- delete the `DELETE FROM call_edges;` clause at `.claude/skills/analyze-usage/SKILL.md:358` and the
-  Common-Mistakes bullet at `:385`.
-
-They are coupled in one direction only, and it is the direction that bites: dropping the DDL while
-the skill still runs `DELETE FROM call_edges` turns a silent no-op into `Error: no such table` on
-every clear. A `DROP TABLE` migration for existing `usage.db` files is optional and probably not
-worth it — it is a write to every project's database to reclaim an empty table.
-
-**The argument for leaving it:** the table is empty, `IF NOT EXISTS` makes the DDL a no-op after the
-first open, and no query plan touches it. Doing nothing costs nothing measurable. **The argument for
-removing it:** the declaration has already been read as a shipped feature once, by a documentation
-surface that then told its readers that forgetting it was a mistake. That is the class this file
-records, and the cost is one reader's confidence, not any runtime cycle.
-
-Either outcome is acceptable. `wontfix` with this file as the record would be a defensible close.
+The table was removed rather than left: the `CREATE TABLE IF NOT EXISTS call_edges` statement and its three `CREATE INDEX` statements are gone from `open_db` in `src/usage/db.rs`, which now creates exactly two tables (`tool_calls`, `lsp_events`) and says so in a comment. In the same commit the analyze-usage skill's clear step in `.claude/skills/analyze-usage/SKILL.md` dropped `DELETE FROM call_edges` (it now runs `DELETE FROM tool_calls; DELETE FROM lsp_events; VACUUM;`) and the "Forgetting `call_edges`" Common-Mistakes bullet was removed, because leaving the clause would have turned a silent no-op into `no such table` on every fresh db. A stale `three CREATE TABLEs` comment in `open_db` now reads two. Existing `usage.db` files keep their empty `call_edges` table; no migration was written, and nothing reads it.
 
 ## Tests added
 
-N/A — no code change in this commit. If the DDL is removed, the regression guard worth having is not
-a test of `usage.db` (asserting the *absence* of a table is monotone under removal of the whole
-`open_db`, per `CLAUDE.md` § *Testing Discipline*) but an assertion that the analyze-usage clear step
-names exactly the tables `src/usage/db.rs` creates — a per-member check over a set that can grow,
-rather than an `is_empty()` over it.
+Both in the test module of `src/usage/db.rs`:
+
+- `analyze_usage_clear_step_names_exactly_the_tables_open_db_creates` reads only the `### 3. Clear each DB` section of `.claude/skills/analyze-usage/SKILL.md`, collects every `DELETE FROM <table>` name, and compares that set to the user tables in a freshly opened db (SQLite's own `sqlite_*` tables excluded). It compares per member in both directions, so a table dropped from `open_db` and left in the skill, and a table added to `open_db` and forgotten in the skill, are each red. It refuses a vacuous pass when either set is empty.
+- `clear_step_check_sees_a_stale_table_a_missing_table_and_ignores_other_sections` is its negative control on synthetic skill text: the pre-fix clear step (naming `call_edges`) shows `call_edges` as stale against a fixed `{lsp_events, tool_calls}` stand-in, a clear step that omits a table shows it as missing, and a `DELETE FROM` quoted in a later section is ignored.
+
+No test asserts the absence of the table in `usage.db`, on purpose (an absence assertion is monotone under removal of the whole `open_db`). No mutation run of the production change is recorded in the commit message; the negative control stands in for it.
 
 ## Workarounds
 
-None needed. The `DELETE FROM call_edges` step is harmless; it is merely inert.
+None needed. The step no longer touches `call_edges`.
+
+## Fix provenance
+
+- **SHA:** `6db72808` (`experiments`)
+- **patch-id:** `c6a2e653de55e202cba21dd9d91405de5643a1e5`
+
+## Resume
+
+Closed on 2026-10-06. Residual follow-ups, listed and not filed:
+
+- The skill's clear step never clears `.codescout/call_edges.db`, the real edge cache (9,794 rows at filing). Whether a usage reset should clear it is a human call, not made here.
+- Historical docs still mention `DELETE FROM call_edges` (`docs/superpowers/plans/2026-05-01-call-graph.md`, `docs/superpowers/specs/2026-05-01-call-graph-design.md`, `docs/trackers/2026-09-21-kat-telemetry-findings-for-codex-sync.md`, `docs/trackers/issue-clusters/IC-3-declared-not-wired.md`); they are records and were left.
+- Existing `usage.db` files keep an empty `call_edges` table (no migration).
 
 ## References
 

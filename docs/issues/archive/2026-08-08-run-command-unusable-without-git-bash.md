@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/archive/2026-08-07-msys-pathconv-optout-breaks-native-exe-paths.md]
 tags: [windows, process-spawn, ci, wine]
 kind: bug
-unverified: TRACKED c269b760403ff5c9 — Windows-only fix, never exercised on this host — its tests are cfg(windows), and the wine CI image still ships without Git for Windows, so the 22-test skip block stands. Root cause (install Git in the image, drop the skip block) is unaddressed, which is why this is mitigated rather than fixed.
+unverified: Windows-only fix; its tests are cfg(windows) and were never exercised on this (Linux) host, only on CI lanes, which this record's reviewer did not open. The wine-lane half this caveat once named as owed (no Git for Windows in the image, so the 22-test skip block stands) was DONE 2026-08-26 by ba046b9c (PortableGit via 7z x + CODESCOUT_BASH), 70f1a32d (22 skips dropped) and d0aabbe3 (WINEPATH); at 2026-10-06 the wine cargo test line carries 5 --skip entries, each classified. Closure recorded in docs/issues/2026-09-24-residual-wine-image-installs-git-for-windows.md (formerly tracked as residual c269b760403ff5c9). The status stays mitigated pending the integrator's decision.
 ---
 
 # BUG: `run_command` is dead on a Windows host with no Git Bash, and says only "program not found"
