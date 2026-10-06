@@ -38,7 +38,7 @@ calls emitted `@tool_*`, 69 of them naming a `@cmd_` handle.
 A result that already carries a string `output_id` keeps exactly that handle.
 `clip_prebuffered_envelope` clips the envelope's oversized top-level string fields, largest
 first and only as much as needed, until it fits `INLINE_BYTE_BUDGET`. Each clipped field gets
-a marker (`<shown> of <total> bytes shown; cut to fit the response budget; the whole stream is <handle>` for a `@cmd_` handle's stdout, `the whole stream is <handle>.err` for its stderr, and `this field is built by the tool and stored nowhere, <handle> holds the output it was built from` for every other field and handle kind). The fit is measured on the serialized envelope.
+a marker (`<shown> of <total> bytes shown; cut to fit the response budget; the whole stream is <handle>` for a `@cmd_` handle's stdout, `the whole stream is <handle>.err` for its stderr, and `this field is built by the tool and stored nowhere, <handle> holds the output it was built from` for every other field and handle kind). The fit is measured on the serialized envelope. A field a summarizer already cut is spared by PROVENANCE, not by its text: the summarizer records the field's name under the reserved envelope key `_cut_fields`, and the backstop reads that record, spares only the fields it names, and strips it on every path, so a program that prints marker-looking text cannot make the backstop skip its field (`docs/conventions/parsers-over-a-namespace.md`). The key is reserved in every tool's top-level result.
 
 An envelope that cannot fit with every field at `PREBUFFERED_FIELD_FLOOR` (1,000 B) is
 returned unchanged, and `call_content` buffers the ORIGINAL under `@tool_*` as before. A
