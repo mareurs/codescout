@@ -619,11 +619,16 @@ fn read_markdown_line_range(
         let mut keep_cov = md_cov.is_some();
         if keep_cov && (crate::tools::exceeds_inline_limit(&with_cov.to_string()) || page.3) {
             let without = finalize_dropped(skeleton, &["coverage"]);
-            page = crate::tools::read_file::buffer_page(
+            let alt = crate::tools::read_file::buffer_page(
                 &content,
                 crate::tools::read_file::buffer_page_room(&without),
             );
-            keep_cov = false;
+            // A line cut either way keeps `coverage`: dropping it would buy bytes of a line
+            // the caller must `grep -o` for anyway.
+            if crate::tools::exceeds_inline_limit(&with_cov.to_string()) || !alt.3 {
+                page = alt;
+                keep_cov = false;
+            }
         }
         let (chunk, lines_shown, complete, line_truncated) = page;
         let orig_end = orig_start + lines_shown.saturating_sub(1);

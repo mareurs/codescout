@@ -538,8 +538,16 @@ async fn a_markdown_range_over_a_wide_line_keeps_one_handle() {
             let p = dir.path().join(format!("cov-{class}-{s}.md"));
             let body = one_line(unit, s);
             std::fs::write(&p, format!("# Top\n{body}\nz\n## Later\n")).unwrap();
+            // Coverage is reported only for a file with a heading already read.
+            let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+            ReadFile.call(prime, &ctx).await.unwrap();
             let input = json!({ "path": p.to_str().unwrap(), "start_line": 2, "end_line": 3 });
             let label = format!("md coverage {class}/{s}");
+            let first = ReadFile.call(input.clone(), &ctx).await.unwrap();
+            assert!(
+                first.get("coverage").is_some() || first.get("coverage_omitted").is_some(),
+                "{label}: no coverage to count: {first:.300}"
+            );
             largest = largest.max(md_read_through(&ctx, input, &label).await.0);
             // The `@file_` a whole read of a markdown file mints is markdown-sourced, so its
             // ranges take this arm too.
@@ -608,4 +616,57 @@ async fn an_oversized_section_route_reaches_the_end_of_the_section() {
             );
         }
     }
+}
+
+/// The buffered range arm keeps `coverage` unless it costs the page: dropped (marked
+/// `coverage_omitted`) when a line that does not fit beside it fits whole without it, kept when
+/// the line is cut either way, and always dropped when `coverage` alone is over the limit (a
+/// range starting on an empty line has a first line that fits any room, so only that check
+/// stops a 20 KB `coverage` riding along).
+#[tokio::test]
+async fn a_markdown_range_drops_coverage_only_to_show_a_line_whole() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut dropped = 0;
+    let mut cut = 0;
+    for w in (9_900..=10_010).chain([12_000]) {
+        let p = dir.path().join(format!("cw-{w}.md"));
+        std::fs::write(&p, format!("# Top\n{}\nz\n## Later\n", "a".repeat(w))).unwrap();
+        let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+        ReadFile.call(prime, &ctx).await.unwrap();
+        let input = json!({ "path": p.to_str().unwrap(), "start_line": 2, "end_line": 3 });
+        let label = format!("coverage width {w}");
+        let (v, _) = md_page(&ctx, &input, &label).await;
+        if v["coverage_omitted"] == json!(true) {
+            dropped += 1;
+            assert_ne!(
+                v["line_truncated"],
+                json!(true),
+                "{label}: coverage was dropped and the line is still cut: {v:.300}"
+            );
+        }
+        if v.get("file_id").is_some() && v["line_truncated"] == json!(true) {
+            cut += 1;
+            assert!(
+                v.get("coverage").is_some(),
+                "{label}: a line cut either way lost coverage too: {v:.300}"
+            );
+        }
+        md_read_through(&ctx, input, &label).await;
+    }
+    assert!(
+        dropped > 0,
+        "coverage was never dropped to show a line whole"
+    );
+    assert!(cut > 0, "no line was cut beside coverage");
+
+    let p = dir.path().join("many.md");
+    std::fs::write(&p, many_sections(600)).unwrap();
+    let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+    ReadFile.call(prime, &ctx).await.unwrap();
+    // Line 3 is the blank line after the first section's body.
+    let input = json!({ "path": p.to_str().unwrap(), "start_line": 3, "end_line": 900 });
+    let (v, _) = md_page(&ctx, &input, "empty first line").await;
+    assert_eq!(v["coverage_omitted"], json!(true), "{v:.300}");
+    md_read_through(&ctx, input, "empty first line").await;
 }
