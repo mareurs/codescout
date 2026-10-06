@@ -339,13 +339,14 @@ impl crate::tools::Tool for LibrarianAdapter {
         // sees BOTH the core ToolContext (`.agent`, which the guard reads) and
         // the tool's `action` argument. See
         // docs/issues/archive/2026-09-03-the-worktree-write-guard-covers-file-writes-and-no-doc-action.md.
-        if self.inner.name() == "doc" {
-            let action = input.get("action").and_then(Value::as_str).unwrap_or("");
-            if is_mutating_doc_action(action) {
-                crate::tools::guard_worktree_write(ctx)
-                    .await
-                    .map_err(bridge_recoverable_error)?;
-            }
+        //
+        // Keyed on whether THIS call can write, not on the action name: a dry-run
+        // `delete`/`graft` preview writes nothing and must reach the tool. See
+        // `doc_call_can_write`.
+        if self.inner.name() == "doc" && doc_call_can_write(&input) {
+            crate::tools::guard_worktree_write(ctx)
+                .await
+                .map_err(bridge_recoverable_error)?;
         }
 
         // Honor the per-request `workspace=` pin the dispatcher stashed in
@@ -1051,6 +1052,38 @@ fn is_mutating_doc_action(action: &str) -> bool {
             | "event_create"
             | "augment"
     )
+}
+/// Whether THIS `doc()` call can write, which is what the worktree guard must be keyed on —
+/// not the action name alone. [`is_mutating_doc_action`] is the superset of names;
+/// this narrows it by the one argument that decides whether a call applies.
+///
+/// `delete` and `graft` are dry runs unless `force=true` (`tools/delete.rs`, `tools/graft.rs`:
+/// `if !a.force.unwrap_or(false)` returns a preview built from catalog reads alone). A preview
+/// writes nothing, so refusing it only hides the answer to "what would this do?" from the
+/// caller who asked it before choosing a workspace.
+///
+/// Anything other than an absent, null or boolean-`false` `force` counts as applying: a
+/// string `"true"`, a number, an object. The guard may refuse a call the tool would then have
+/// rejected as malformed, and that is the safe direction — the guard must never be skipped for
+/// a call that can write bytes.
+///
+/// **`rekey_prefix` is deliberately NOT narrowed**, although it is also a dry run by default.
+/// Its preview calls `worktree::resolve_write_target` first, which forks a main-checkout
+/// artifact into a shadow row, a `worktree_fork` event and a lineage link when the session is
+/// a worktree — catalog writes — before `RekeyMode::Preview` runs.
+/// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+fn doc_call_can_write(input: &Value) -> bool {
+    let action = input.get("action").and_then(Value::as_str).unwrap_or("");
+    if !is_mutating_doc_action(action) {
+        return false;
+    }
+    if matches!(action, "delete" | "graft") {
+        return !matches!(
+            input.get("force"),
+            None | Some(Value::Null) | Some(Value::Bool(false))
+        );
+    }
+    true
 }
 
 /// Bridge a librarian-side `RecoverableError` into the host `RecoverableError`
@@ -2462,6 +2495,175 @@ mod tests {
             assert!(
                 !e.to_string().contains("Write blocked"),
                 "a read action must never be refused by the worktree-write guard: {e}"
+            );
+        }
+    }
+    /// The text of a call's outcome, whichever way the adapter reports a refusal. The worktree
+    /// guard and an inner tool's own refusal both surface as an error here, so a test that only
+    /// checks `is_err()` cannot tell which one fired — which is the whole point of these tests.
+    fn outcome_text(result: anyhow::Result<Value>) -> String {
+        match result {
+            Ok(v) => v.to_string(),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+    /// A dry-run `delete`/`graft` writes nothing, so the guard must let it reach the tool.
+    /// The id does not exist, so the tool's own `unknown id` refusal is what proves it ran.
+    #[tokio::test]
+    async fn doc_dry_run_previews_reach_the_tool_in_an_unactivated_worktree_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let ctx = core_ctx_for_guard(&root).await;
+        let adapter = adapter_for_test();
+
+        for (input, tool_text) in [
+            (
+                json!({"action": "delete", "id": "0000000000000000"}),
+                "unknown id",
+            ),
+            (
+                json!({"action": "delete", "id": "0000000000000000", "force": false}),
+                "unknown id",
+            ),
+            (
+                json!({"action": "delete", "id": "0000000000000000", "force": null}),
+                "unknown id",
+            ),
+            (
+                json!({"action": "graft", "from_id": "0000000000000000", "into_id": "1111111111111111"}),
+                "unknown from_id",
+            ),
+            (
+                json!({"action": "graft", "from_id": "0000000000000000", "into_id": "1111111111111111", "force": false}),
+                "unknown from_id",
+            ),
+        ] {
+            let text = outcome_text(adapter.call(input.clone(), &ctx).await);
+            assert!(
+                !text.contains("Write blocked"),
+                "a dry-run preview writes nothing and must not be refused by the worktree guard: {input} -> {text}"
+            );
+            assert!(
+                text.contains(tool_text),
+                "the call must have reached the tool, which refuses an unknown id with `{tool_text}`: {input} -> {text}"
+            );
+        }
+    }
+
+    /// The other half, and the one that matters: a call that CAN write is still refused with the
+    /// worktree-activation text. `rekey_prefix` is in this table although it is a dry run by
+    /// default, because its preview forks a worktree shadow row first (`resolve_write_target`).
+    /// A string `"true"` counts as applying: the guard must never be skipped for a call that
+    /// might write.
+    #[tokio::test]
+    async fn doc_calls_that_can_write_are_still_refused_in_an_unactivated_worktree_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let ctx = core_ctx_for_guard(&root).await;
+        let adapter = adapter_for_test();
+
+        for input in [
+            json!({"action": "delete", "id": "0000000000000000", "force": true}),
+            json!({"action": "delete", "id": "0000000000000000", "force": "true"}),
+            json!({"action": "graft", "from_id": "0000000000000000", "into_id": "1111111111111111", "force": true}),
+            json!({"action": "rekey_prefix", "id": "0000000000000000", "from": "T", "to": "SRI"}),
+            json!({"action": "rekey_prefix", "id": "0000000000000000", "from": "T", "to": "SRI", "force": true}),
+            json!({"action": "move", "id": "0000000000000000", "new_rel_path": "docs/x.md"}),
+            json!({"action": "update", "id": "0000000000000000", "patch": {"status": "done"}}),
+        ] {
+            let text = outcome_text(adapter.call(input.clone(), &ctx).await);
+            assert!(
+                text.contains("Write blocked"),
+                "a call that can write must still hit the worktree guard: {input} -> {text}"
+            );
+        }
+    }
+
+    /// A `workspace=` pin answers the guard's question outright, so a pinned call reaches the
+    /// tool whether it previews or applies. Unchanged by this fix; pinned here so the fix cannot
+    /// quietly make a pinned write need `activate` again.
+    #[tokio::test]
+    async fn doc_calls_pinned_to_a_workspace_reach_the_tool_in_an_unactivated_worktree_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let mut ctx = core_ctx_for_guard(&root).await;
+        ctx.workspace_override = Some(root.clone());
+        let adapter = adapter_for_test();
+
+        for input in [
+            json!({"action": "delete", "id": "0000000000000000"}),
+            json!({"action": "delete", "id": "0000000000000000", "force": true}),
+        ] {
+            let text = outcome_text(adapter.call(input.clone(), &ctx).await);
+            assert!(
+                !text.contains("Write blocked"),
+                "a pinned call must never be refused by the worktree guard: {input} -> {text}"
+            );
+            assert!(
+                text.contains("unknown id"),
+                "a pinned call must reach the tool: {input} -> {text}"
+            );
+        }
+    }
+
+    /// The predicate itself, over the shapes the table above cannot reach without a catalog.
+    #[test]
+    fn doc_call_can_write_is_keyed_on_the_effect_not_the_action_name() {
+        // Reads never write.
+        for action in ["find", "get", "graph", "state_at", "event_list", "gather"] {
+            assert!(!doc_call_can_write(&json!({"action": action})), "{action}");
+        }
+        // `delete`/`graft` write only when `force` is exactly `true` or something unrecognised.
+        for action in ["delete", "graft"] {
+            assert!(
+                !doc_call_can_write(&json!({"action": action})),
+                "{action} bare"
+            );
+            assert!(
+                !doc_call_can_write(&json!({"action": action, "force": false})),
+                "{action} force=false"
+            );
+            assert!(
+                !doc_call_can_write(&json!({"action": action, "force": null})),
+                "{action} force=null"
+            );
+            for force in [
+                json!(true),
+                json!("true"),
+                json!("false"),
+                json!(1),
+                json!({}),
+            ] {
+                assert!(
+                    doc_call_can_write(&json!({"action": action, "force": force})),
+                    "{action} force={force} must keep the guard"
+                );
+            }
+        }
+        // Every other mutating action always keeps the guard, `force` or not.
+        for action in [
+            "create",
+            "update",
+            "move",
+            "link",
+            "append_entry",
+            "update_entry",
+            "rekey_prefix",
+            "event_create",
+            "augment",
+        ] {
+            assert!(doc_call_can_write(&json!({"action": action})), "{action}");
+            assert!(
+                doc_call_can_write(&json!({"action": action, "force": false})),
+                "{action} force=false must not narrow it"
             );
         }
     }
