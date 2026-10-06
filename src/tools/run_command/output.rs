@@ -973,7 +973,15 @@ pub(crate) async fn handle_successful_output_with(
     const STDERR_BUDGET: usize = 20;
     // Where the stderr a buffer query carries comes from decides what its marker may promise: the
     // entry's STORED stderr is behind `<handle>.err`, the query's OWN stderr is stored nowhere.
-    let stderr_is_stored = buffer_only && raw_stderr.is_empty();
+    //
+    // A query of `<handle>.err` takes NO stored stderr: it reads that stream, so the stream is its
+    // payload, its stdout, and the side channel would carry it a second time. Measured before this
+    // rule: `cat @cmd_X.err` over 300 stored stderr lines answered `stdout 80/300, stderr 20/300`,
+    // the twenty lines spent on a repeat of lines the reader was already paging. The query's OWN
+    // stderr (a failing `awk`) is still carried: it is in neither stream.
+    let queries_stored_stderr =
+        queried_stream(original_command).is_some_and(|s| s.ends_with(".err"));
+    let stderr_is_stored = buffer_only && raw_stderr.is_empty() && !queries_stored_stderr;
     let buffer_stderr: String = if stderr_is_stored {
         original_command
             .find("@cmd_")

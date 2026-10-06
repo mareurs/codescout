@@ -4850,6 +4850,185 @@ async fn a_wide_line_remedy_on_an_err_query_names_the_err_stream() {
         "the hint must name `{id}.err`: {hint}"
     );
 }
+/// Every distinct buffer handle (`@cmd_`, `@tool_`, `@file_` and eight hex digits) `text` names.
+fn handles_named(text: &str) -> std::collections::BTreeSet<String> {
+    regex::Regex::new(r"@(?:cmd|tool|file)_[0-9a-f]{8}")
+        .expect("static pattern")
+        .find_iter(text)
+        .map(|m| m.as_str().to_string())
+        .collect()
+}
+
+/// Each escape class the response limit counts differently: 1, 2, 2, 6 serialized bytes per char,
+/// and two multibyte chars serde_json writes raw.
+// cap-class: NOT_A_CAP — a test fixture listing escape classes, not a bound on any result
+const ESCAPE_UNITS: [&str; 6] = ["a", "\"", "\\", "\u{1}", "é", "日"];
+
+/// Serialized bytes of one `unit`, quotes excluded.
+fn escaped_unit_len(unit: &str) -> usize {
+    serde_json::to_string(unit).unwrap().len() - 2
+}
+
+// A query of `<handle>.err` READS the stored stderr: that stream is its payload, its stdout. The
+// bounded `stderr` field exists so a query of the BARE handle still shows the command's stderr; on
+// a `.err` query it repeated the payload, took lines and bytes from it, and reported `stderr N/M`
+// for the stream the reader was already paging. Measured before the fix: `stdout 80/300, stderr
+// 20/300`.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_err_query_carries_the_stored_stderr_once_and_its_routes_work() {
+    let (_dir, ctx) = project_ctx().await;
+    let stderr: String = (1..=300).map(|i| format!("{i:>40}\n")).collect();
+    let (id, text, parsed) =
+        query_stored(&ctx, "x\n".into(), stderr, |id| format!("cat {id}.err")).await;
+
+    assert_eq!(
+        handles_named(&text).into_iter().collect::<Vec<_>>(),
+        vec![id.clone()],
+        "{text:.300}"
+    );
+    assert!(text.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN);
+    for key in ["stderr", "stderr_shown", "stderr_total"] {
+        assert!(
+            parsed.get(key).is_none(),
+            "the payload must not come back again as `{key}`: {text:.400}"
+        );
+    }
+    let hint = parsed["hint"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a capped query owes a hint: {text:.300}"));
+    assert!(!hint.contains("stderr"), "no side-channel note: {hint}");
+    assert_eq!(
+        parsed["stdout_shown"],
+        json!(crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP),
+        "the whole line budget goes to the payload: {hint}"
+    );
+    assert_eq!(parsed["stdout_total"], json!(300), "{hint}");
+
+    // Follow every route the hint names, on the stream it names.
+    let page = regex::Regex::new(r"sed -n '\d+,\d+p' @[A-Za-z0-9_]+(?:\.err)?")
+        .unwrap()
+        .find(hint)
+        .unwrap_or_else(|| panic!("no next-page route: {hint}"))
+        .as_str()
+        .to_string();
+    assert!(page.ends_with(&format!("{id}.err")), "{page}");
+    let (page_text, next) = buffer_query_free(&ctx, &page).await;
+    let body = next["stdout"].as_str().unwrap_or_default();
+    assert!(
+        body.starts_with(&format!("{:>40}\n", 101)),
+        "the next page is lines 101.. of stderr: {page_text:.300}"
+    );
+    let grep_on = regex::Regex::new(r"grep 'keyword' (@[A-Za-z0-9_]+(?:\.err)?)")
+        .unwrap()
+        .captures(hint)
+        .unwrap_or_else(|| panic!("no grep route: {hint}"))[1]
+        .to_string();
+    assert_eq!(grep_on, format!("{id}.err"), "{hint}");
+    let (found_text, found) = buffer_query_free(&ctx, &format!("grep -c ' 250$' {grep_on}")).await;
+    assert_eq!(
+        found["stdout"].as_str().map(str::trim),
+        Some("1"),
+        "the grep route searches stderr: {found_text:.300}"
+    );
+}
+
+// The same rule across the byte edge of the response, in every escape class: a `.err` query whose
+// payload serializes to 9,300..10,500 B carries it once, mints no handle of its own, and fits.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_err_query_across_the_byte_edge_keeps_one_handle_and_one_copy() {
+    let (_dir, ctx) = project_ctx().await;
+    for unit in ESCAPE_UNITS {
+        let line = format!("{}\n", unit.repeat(40));
+        let line_cost = 40 * escaped_unit_len(unit) + 2;
+        // Both arms must be reached, or the sweep is not across the edge: whole, and cut.
+        let (mut whole, mut cut) = (0, 0);
+        for target in (9_300..=10_500).step_by(150) {
+            let stderr = line.repeat(target / line_cost + 1);
+            let (id, text, parsed) =
+                query_stored(&ctx, "x\n".into(), stderr, |id| format!("cat {id}.err")).await;
+            let named = handles_named(&text);
+            assert!(
+                named.iter().all(|h| *h == id),
+                "{unit:?} {target}: a second handle {named:?}"
+            );
+            assert!(
+                parsed.get("output_id").is_none(),
+                "{unit:?} {target}: {text:.200}"
+            );
+            assert!(
+                text.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+                "{unit:?} {target}: {} B",
+                text.len()
+            );
+            assert!(
+                parsed.get("stderr").is_none(),
+                "{unit:?} {target}: the payload came back twice: {text:.200}"
+            );
+            if parsed.get("truncated").is_some() {
+                cut += 1;
+            } else {
+                whole += 1;
+            }
+        }
+        assert!(whole > 0 && cut > 0, "{unit:?}: whole {whole}, cut {cut}");
+    }
+}
+// A summarized test run whose stderr ends in ONE line wider than the stderr field: the end of that
+// line is usually the verdict, and the field kept only its head. Elided in the middle, in escaped
+// bytes like every other field, both ends survive, across the response's byte edge and every
+// escape class; the header's `read_file("<handle>.err")` route resolves to the whole line.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wide_last_stderr_line_keeps_its_end_across_the_byte_edge() {
+    let (dir, ctx) = project_ctx().await;
+    for unit in ESCAPE_UNITS {
+        let mut summarized = 0;
+        for target in (9_300..=10_500).step_by(300) {
+            let body = unit.repeat(target / escaped_unit_len(unit));
+            std::fs::write(
+                dir.path().join("wide.log"),
+                format!("START{body}THE_VERDICT\n"),
+            )
+            .unwrap();
+            let (text, parsed) = buffer_query_free(&ctx, "cat wide.log >&2; echo cargo test").await;
+            assert!(!has_tool_handle(&text), "{unit:?} {target}: {text:.200}");
+            assert!(
+                handles_named(&text).len() <= 1,
+                "{unit:?} {target}: {text:.300}"
+            );
+            if parsed.get("output_id").is_none() {
+                assert!(
+                    text.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+                    "{unit:?} {target}: {} B",
+                    text.len()
+                );
+            }
+            let stderr = parsed["stderr"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{unit:?} {target}: no stderr: {text:.300}"));
+            assert!(
+                stderr.contains("START") && stderr.contains("THE_VERDICT"),
+                "{unit:?} {target}: both ends of the line must survive: {stderr:.300}"
+            );
+            if let Some(id) = parsed["output_id"].as_str() {
+                let route = format!("read_file(\"{id}.err\")");
+                assert!(stderr.contains(&route), "{unit:?} {target}: {stderr:.300}");
+                let whole = ctx
+                    .output_buffer
+                    .get_stream(&format!("{id}.err"))
+                    .unwrap_or_else(|| panic!("{unit:?} {target}: {route} resolves nothing"));
+                assert!(whole.ends_with("THE_VERDICT\n"), "{unit:?} {target}");
+                summarized += 1;
+            }
+        }
+        assert!(
+            summarized > 0,
+            "{unit:?}: no case reached the summarized stderr"
+        );
+    }
+}
 
 // Fix C: when the first run_command looks like a plain file read (cat file),
 // the buffer creation hint should suggest read_file as an alternative.

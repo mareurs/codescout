@@ -1806,6 +1806,140 @@ fn a_marked_field_is_spared_while_an_unmarked_one_is_clipped() {
         "the envelope must fit"
     );
 }
+/// Every marker a summarizer writes, as the summarizer writes it, padded so the marked field is the
+/// LARGEST and the envelope cannot fit without cutting it.
+fn summarizer_marked_fields() -> Vec<(&'static str, String)> {
+    let warnings: String = (0..200).map(|i| format!("warning line {i}\n")).collect();
+    let tail =
+        crate::tools::command_summary::summarize_test_output("running 0 tests\n", &warnings, 0)
+            ["stderr"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    assert!(tail.starts_with("--- stderr TAIL:"), "{tail:.200}");
+    let lines: String = (0..300).map(|i| format!("{i}\n")).collect();
+    let omitted = crate::tools::command_summary::summarize_generic(&lines, "", 0)["stdout"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(omitted.contains(" lines omitted ---\n"), "{omitted:.200}");
+    assert!(
+        !omitted.contains("bytes shown"),
+        "the fixture must carry ONLY the line marker: {omitted:.0}"
+    );
+    let bytes = crate::util::text::elide_middle_escaped(
+        &"b".repeat(50_000),
+        50_000,
+        9_000,
+        "stdout",
+        "all of it: @cmd_own9",
+    );
+    vec![
+        ("bytes shown", bytes),
+        ("stderr TAIL", format!("{tail}\n{}", "x".repeat(9_000))),
+        ("lines omitted", format!("{}\n{omitted}", "h".repeat(9_000))),
+    ]
+}
+
+/// A field a summarizer already cut carries a marker whose numbers describe the SOURCE; cutting it
+/// again drops or doubles that marker. Every marker the summarizers write must spare its field,
+/// not only the `bytes shown` one: a `--- stderr TAIL:` header or a `--- N lines omitted ---` line
+/// was re-cut, and the clip's own marker then reported the cut text's length as the total.
+#[test]
+fn every_summarizer_marker_spares_its_field_from_a_second_cut() {
+    for (name, marked) in summarizer_marked_fields() {
+        let val = serde_json::json!({
+            "output_id": "@cmd_own9",
+            "stdout": marked,
+            "other": "e".repeat(3_000),
+        });
+        assert!(
+            exceeds_inline_limit(&val.to_string()),
+            "{name}: fixture must overflow"
+        );
+        assert_eq!(
+            clip_prebuffered_envelope(val.clone(), false),
+            val,
+            "{name}: a marked field was cut a second time"
+        );
+    }
+}
+
+/// The backstop's marker must be TRUE of the field it cuts. A `@cmd_` handle holds stdout behind
+/// the bare handle and stderr behind `<handle>.err`; any other field (a hint, a diagnostic, an
+/// excerpt) is built by the tool and is in no buffer, so "the tool's own buffer is <handle>" sent a
+/// reader to look for text that is not there. Each route the markers name is followed.
+#[tokio::test]
+async fn the_backstop_marker_names_where_each_cut_field_really_is() {
+    let ctx = bare_ctx().await;
+    let (out, err) = (wide("SO", 's', 20_000, "EO"), wide("SE", 'e', 20_000, "EE"));
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), out.clone(), err.clone(), 1);
+    let tool = EchoTool {
+        result: serde_json::json!({
+            "output_id": id,
+            "stdout": out,
+            "stderr": err,
+            "hint": wide("HH", 'h', 20_000, "TT"),
+        }),
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("primary block is not JSON ({e}): {text:.200}"));
+    assert_eq!(parsed["output_id"], serde_json::json!(id), "{text:.200}");
+    assert!(!text.contains("@tool_"), "{text:.200}");
+
+    let field = |k: &str| parsed[k].as_str().unwrap_or_default().to_string();
+    let stdout_route = format!("the whole stream is {id} ---");
+    let stderr_route = format!("the whole stream is {id}.err ---");
+    assert!(
+        field("stdout").contains(&stdout_route),
+        "{:.0}",
+        field("stdout")
+    );
+    assert!(
+        field("stderr").contains(&stderr_route),
+        "{:.0}",
+        field("stderr")
+    );
+    let hint = field("hint");
+    assert!(
+        hint.contains("this field is built by the tool and stored nowhere")
+            && !hint.contains("whole stream"),
+        "an envelope-only field must not be promised a stored copy: {hint:.0}"
+    );
+    // Follow them.
+    assert_eq!(
+        ctx.output_buffer.get_stream(&id).as_deref(),
+        Some(out.as_str())
+    );
+    assert_eq!(
+        ctx.output_buffer
+            .get_stream(&format!("{id}.err"))
+            .as_deref(),
+        Some(err.as_str())
+    );
+
+    // A handle kind with no `.err` stream is never sent there.
+    let other = clip_prebuffered_envelope(
+        serde_json::json!({ "output_id": "@bg_0000aaaa", "stderr": "e".repeat(20_000) }),
+        false,
+    );
+    let cut = other["stderr"].as_str().unwrap();
+    assert!(
+        cut.contains("bytes shown") && !cut.contains(".err"),
+        "{cut:.0}"
+    );
+}
 
 #[tokio::test]
 async fn an_envelope_between_the_clip_target_and_the_inline_limit_is_untouched() {
