@@ -673,6 +673,9 @@ pub(crate) struct LateKeys {
     /// The keys `run_command` puts on every response shape (`super::envelope_keys`):
     /// `buffer_truncated`, `jobs`, `timeout_hint`.
     pub envelope: serde_json::Map<String, Value>,
+    /// Prepended to `stdout` where the response has one (`CallNotes::stdout_prefix`). Priced by
+    /// the gate in the escaped bytes of the stdout it joins.
+    pub stdout_prefix: String,
 }
 
 /// What `"stdout":""` adds to a response that had no `stdout` key. The tee block inserts it when a
@@ -1030,6 +1033,13 @@ pub(crate) async fn handle_successful_output_with(
 
     // --- Step 6: Decide whether to buffer + summarize ---
     //
+    // The refresh lines (`LateKeys::stdout_prefix`) go INTO `stdout` where the response has one,
+    // so each arm prices them there. Escaping is per character, so the escaped prefix plus the
+    // escaped stdout is exactly the escaped joined string.
+    let prefix = late_keys.stdout_prefix.as_str();
+    let prefix_cost = json!(prefix).to_string().len() - 2;
+    let with_prefix = |text: &str| format!("{prefix}{text}");
+    //
     // Decided on the SERIALIZED response, not the raw streams: see `inline_response_exceeds_limit`.
     // The extras are the exact serialized cost of the keys attached after the streams: the
     // diagnostics, the tee keys, the redaction note, and, for a buffer query, the stderr counters.
@@ -1047,13 +1057,19 @@ pub(crate) async fn handle_successful_output_with(
     let extras = extras_len(
         &gate_keys,
         unfiltered_ref.is_some() && raw_stdout.is_empty(),
-    );
+    ) + if raw_stdout.is_empty() {
+        0
+    } else {
+        prefix_cost
+    };
     // A libtest run is compacted BEFORE the gate judges it, and the gate is asked about the
     // COMPACTED response when there is one: see `compacted_fits`. Only for runs whose raw bytes fit
     // the limit, the population that was returned inline (and compacted) before the gate counted
     // serialized bytes: a run over it was summarized then and is now, unchanged. Compaction that
     // does not fit either falls through to the raw gate, as it always did.
     let compacted = (!buffer_only
+        // A refresh prefix is not priced by `compacted_fits`: such a run takes the raw gate.
+        && prefix.is_empty()
         && raw_stdout.len() + raw_stderr.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN
         && detect_command_type(original_command) == CommandType::Test)
         .then(|| crate::tools::libtest_compact::compact_libtest_output(&raw_stdout, &raw_stderr))
@@ -1103,7 +1119,7 @@ pub(crate) async fn handle_successful_output_with(
                 for (key, value) in &late {
                     skeleton[key.as_str()] = value.clone();
                 }
-                inline_stdout_room(&skeleton)
+                inline_stdout_room(&skeleton).saturating_sub(prefix_cost)
             };
             let mut cut =
                 truncate_lines_and_bytes(&raw_stdout, line_budget, room_for(false), &wide_remedy);
@@ -1125,7 +1141,7 @@ pub(crate) async fn handle_successful_output_with(
 
             let mut result = json!({"exit_code": exit_code});
             if !stdout_out.is_empty() {
-                result["stdout"] = json!(stdout_out);
+                result["stdout"] = json!(with_prefix(&stdout_out));
             }
             if !stderr_out.is_empty() {
                 result["stderr"] = json!(stderr_out);
@@ -1178,6 +1194,9 @@ pub(crate) async fn handle_successful_output_with(
                 // Rebuild with correct field order so output_id appears before content fields.
                 let mut response = rebuild_buffered_summary(cmd_summary, &output_id);
                 attach(&mut response, late.clone(), tee_present);
+                if let Some(text) = response.get("stdout").and_then(Value::as_str) {
+                    response["stdout"] = json!(with_prefix(text));
+                }
                 response
             })
         }
@@ -1201,7 +1220,7 @@ pub(crate) async fn handle_successful_output_with(
         // nothing, while the gate measured the real size).
         let mut r = json!({"exit_code": exit_code});
         if !raw_stdout.is_empty() {
-            r["stdout"] = json!(raw_stdout);
+            r["stdout"] = json!(with_prefix(&raw_stdout));
         }
         if let Some((stderr_out, stderr_shown, stderr_total)) = &stderr_cut {
             // THE REPRODUCED PATH. `grep -c MARKER @cmd_abc` returns two bytes, so

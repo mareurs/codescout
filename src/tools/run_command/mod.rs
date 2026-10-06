@@ -306,7 +306,7 @@ impl Tool for RunCommand {
                 &root,
                 &security,
                 ctx,
-                None, // timeout_hint: an ack replays a stored command, not this input
+                &Default::default(), // an ack replays a stored command, not this input
             )
             .await;
         }
@@ -322,6 +322,15 @@ impl Tool for RunCommand {
             ctx.output_buffer.resolve_refs(command)?;
 
         // Helper: run inner logic then always clean up temp files.
+        let notes = inner::CallNotes {
+            timeout_hint: timeout_hint.clone(),
+            // Said when any @file_* handle was auto-refreshed. Passed IN, not prepended
+            // afterwards: it goes into `stdout`, and the inline-or-summary gate has to price it.
+            stdout_prefix: refreshed_handles
+                .iter()
+                .map(|id| format!("↻ {id} refreshed from disk (file changed since last read)\n"))
+                .collect(),
+        };
         let mut result = run_command_inner(
             command,
             &resolved_command,
@@ -333,32 +342,11 @@ impl Tool for RunCommand {
             &root,
             &security,
             ctx,
-            timeout_hint.as_deref(),
+            &notes,
         )
         .await;
 
         OutputBuffer::cleanup_temp_files(&temp_files);
-
-        // Inject refresh indicator into stdout when any @file_* handle was auto-refreshed.
-        if !refreshed_handles.is_empty() {
-            if let Ok(ref mut val) = result {
-                let prefix: String = refreshed_handles
-                    .iter()
-                    .map(|id| {
-                        format!(
-                            "↻ {} refreshed from disk (file changed since last read)\n",
-                            id
-                        )
-                    })
-                    .collect();
-                // Note: silently skips injection if "stdout" is absent (e.g. pending_ack
-                // shape or buffered-output summary). These cases are extremely unlikely
-                // to co-occur with a @file_* refresh, but worth noting.
-                if let Some(stdout) = val["stdout"].as_str() {
-                    val["stdout"] = serde_json::json!(format!("{}{}", prefix, stdout));
-                }
-            }
-        }
 
         // The envelope keys (`envelope_keys`) on every response shape. A response built by
         // `handle_successful_output_with` already carries them, because its inline-or-summary gate

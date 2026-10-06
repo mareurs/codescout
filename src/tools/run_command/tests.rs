@@ -1716,7 +1716,7 @@ async fn dangerous_command_returns_ack_handle() {
         &root,
         &security,
         &ctx,
-        None, // timeout_hint
+        &Default::default(), // notes
     )
     .await
     .expect("should return Ok with pending_ack, not Err");
@@ -1751,7 +1751,7 @@ async fn run_in_background_returns_bg_handle() {
         &root,
         &security,
         &ctx,
-        None, // timeout_hint
+        &Default::default(), // notes
     )
     .await
     .expect("should succeed");
@@ -1866,11 +1866,17 @@ async fn run_in_background_rejects_buffer_only() {
     let root = dir.path().to_path_buf();
     let security = crate::util::path_security::PathSecurityConfig::default();
     let result = run_command_inner(
-        "echo x", "echo x", 30, false, // acknowledge_risk
+        "echo x",
+        "echo x",
+        30,
+        false, // acknowledge_risk
         None,  // cwd_param
         true,  // buffer_only
         true,  // run_in_background
-        &root, &security, &ctx, None,
+        &root,
+        &security,
+        &ctx,
+        &Default::default(),
     )
     .await;
     let err = result.unwrap_err();
@@ -1905,11 +1911,17 @@ async fn shell_command_mode_disabled_blocks_run_command() {
         ..Default::default()
     };
     let result = run_command_inner(
-        "echo x", "echo x", 30, false, // acknowledge_risk
+        "echo x",
+        "echo x",
+        30,
+        false, // acknowledge_risk
         None,  // cwd_param
         false, // buffer_only
         false, // run_in_background
-        &root, &security, &ctx, None,
+        &root,
+        &security,
+        &ctx,
+        &Default::default(),
     )
     .await;
     let err = result.unwrap_err();
@@ -8363,4 +8375,83 @@ async fn a_truncated_buffer_counts_its_notice_in_every_query() {
     // Both arms reached, or the sweep is not across the edge.
     assert!(whole > 0 && cut > 0, "whole {whole}, cut {cut}");
     eprintln!("notice sweep: whole {whole}, cut {cut}, largest response {largest} B");
+}
+
+// ---- a refreshed `@file_*` handle's `↻` line is priced by the gate ----
+//
+// `RunCommand::call` prepended `↻ <handle> refreshed from disk …` to `stdout` AFTER the gate had
+// sized the response, the same defect as the notice above in a different channel: a query of a
+// stale `@file_*` handle that exactly fit went over the limit by that line (about 70 B).
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_refreshed_file_handle_prices_its_refresh_line_in_every_query() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("stale.txt");
+    let (mut whole, mut cut, mut summarized, mut largest) = (0, 0, 0, 0);
+    let mut failures = Vec::new();
+    for unit in NOTICE_UNITS {
+        for target in (9_300..=10_500usize).step_by(50) {
+            let line =
+                unit.repeat(((target / 30).saturating_sub(2) / escaped_unit_len(unit)).max(1));
+            let body = format!("{}\n", vec![line; 30].join("\n"));
+            for shape in ["cat", "sed", "grep", "mixed"] {
+                // A fresh stale handle per query: a refresh re-reads the file and is then current.
+                std::fs::write(&path, &body).unwrap();
+                let id = ctx
+                    .output_buffer
+                    .store_file(path.to_string_lossy().to_string(), "original".into());
+                let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+                filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future))
+                    .unwrap();
+                let command = match shape {
+                    "cat" => format!("cat {id}"),
+                    "sed" => format!("sed -n '1,30p' {id}"),
+                    "grep" => format!("grep -v NO_SUCH_LINE {id}"),
+                    // Not a buffer query (a path-like word revokes buffer-only status): summarized
+                    // under its own `@cmd_*`, `stdout` and all.
+                    _ => format!("cat {id}; seq 1 4000; true ./not-a-buffer"),
+                };
+                let label = format!("{unit:?} {target} `{command}`");
+                let (text, parsed) = buffer_query(&ctx, command).await;
+                let own_id = parsed["output_id"].as_str().unwrap_or_default();
+                let refreshed = parsed["stdout"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with(&format!("↻ {id} refreshed from disk")));
+                if has_tool_handle(&text)
+                    || !(own_id.is_empty() || (shape == "mixed" && own_id.starts_with("@cmd_")))
+                    || text.len() > crate::tools::INLINE_MAX_RESPONSE_LEN
+                    || !refreshed
+                {
+                    failures.push(format!(
+                        "{label}: {} B, buffered_bytes {}: {text:.200}",
+                        text.len(),
+                        parsed["buffered_bytes"]
+                    ));
+                    continue;
+                }
+                largest = largest.max(text.len());
+                if !own_id.is_empty() {
+                    summarized += 1;
+                } else if parsed.get("truncated").is_some() {
+                    cut += 1;
+                } else {
+                    whole += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} queries broke the one-handle limit; first: {:#?}",
+        failures.len(),
+        &failures[..failures.len().min(3)]
+    );
+    assert!(
+        whole > 0 && cut > 0 && summarized > 0,
+        "whole {whole}, cut {cut}, summarized {summarized}"
+    );
+    eprintln!(
+        "refresh sweep: whole {whole}, cut {cut}, summarized {summarized}, largest {largest} B"
+    );
 }
