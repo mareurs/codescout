@@ -4155,7 +4155,12 @@ mod tests {
     ///   `read_full_file`'s own, separate, inner `exceeds_inline_limit` check — so
     ///   `read_file`'s own file-summarization buffering never fires and `call_content`'s
     ///   outer one does, which is the only way this tool's JSON corrections address is
-    ///   ever reachable.
+    ///   ever reachable. **That premise is retired**: a read whose ESCAPED response crossed the
+    ///   limit while its raw text did not was the byte-unit defect, and `read_file` now decides on
+    ///   the serialized response, so no `read_file` fixture can reach the outer envelope. The
+    ///   `read_file` case below pins the compact-text hint and the one-handle result instead; the
+    ///   JSON address on the outer buffered path is pinned in `src/tools/core/tests.rs` by
+    ///   `correction_reaches_the_caller_on_the_buffered_path`, with a fixture that really overflows.
     /// - `create_file(file_path=…, content=…)` and `edit_file(file_path=…, old_string=…,
     ///   new_string=…)` — `OutputForm::Json` (the default), small output: pin the JSON
     ///   `corrections.param_aliases.hint` address directly, no buffering trick needed.
@@ -4261,27 +4266,29 @@ mod tests {
              back to pretty-JSON and this pin is no longer testing what it claims: {text}"
         );
 
-        // --- read_file: force the OUTER buffered-envelope path — see the doc comment
-        // above for the byte-budget derivation.
+        // --- read_file: OutputForm::Text -> the SAME compact-text ⚠ hint as grep. A 6000-`"`
+        // one-line file is 6,000 raw bytes and ~12 KB escaped: this fixture used to push the
+        // ESCAPED response over the limit while the raw text stayed under `read_file`'s own
+        // gate, so `call_content`'s outer envelope fired. That was the defect (a size measured
+        // raw, returned escaped, the whole response re-buffered under a second handle). The read
+        // now decides on the serialized response and comes back as ONE summary under its own
+        // handle, so the advisory takes the compact-text form and no `@tool_*` is minted.
         let big = "\"".repeat(6000);
         std::fs::write(dir.path().join("big.txt"), &big).unwrap();
         let text = call!("read_file", { "output_id": "big.txt" });
-        let val: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("read_file: buffered envelope was not JSON: {e}\n{text}"));
         assert!(
-            val.get("buffered_bytes")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0)
-                > 10_000,
-            "read_file: expected the OUTER buffered envelope (buffered_bytes > 10000), \
-             meaning the fixture no longer crosses the threshold this pin depends on: {val}"
+            text.contains("\"\"\"\"\"\"\"\""),
+            "read_file: the output_id alias's value did not reach the real read: {text:.300}"
         );
-        let hint = val["corrections"]["param_aliases"]["hint"]
-            .as_str()
-            .unwrap_or_else(|| panic!("read_file: corrections.param_aliases.hint missing: {val}"));
         assert!(
-            hint.contains("output_id") && hint.contains("read_file") && hint.contains("'path'"),
-            "read_file: {hint}"
+            text.contains("⚠ 'output_id' is not a parameter of read_file")
+                && text.contains("corrected to 'path'"),
+            "read_file: compact-text alias advisory missing or malformed: {text:.600}"
+        );
+        assert!(
+            !text.contains("@tool_"),
+            "read_file: a read whose escaped response is over the limit must keep its ONE \
+             handle, not be re-buffered under @tool_*: {text:.600}"
         );
 
         // --- create_file: OutputForm::Json, small output -> JSON corrections.param_aliases ---
