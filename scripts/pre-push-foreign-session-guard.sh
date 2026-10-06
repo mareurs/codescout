@@ -23,9 +23,16 @@
 # does is make the QUESTION unskippable at the only moment it is answerable, which is the
 # most a mechanism can do for a fact that lives outside the repository.
 #
-# It covers the pusher only. Nothing stops a session committing a change its operator said
-# to hold, and no rule asks it not to: that half is open
-# (docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md).
+# It covers the pusher, and the author half is a HOLD. An author who is told to withhold a
+# commit records that with `scripts/hold-publish.sh set <reason>`, which writes a ref
+# refs/holds/<session-id> in the shared repo. This guard refuses any commit carrying a held
+# Session-Id, and CODESCOUT_PUSH_ACK does not override it: the ack is the pusher's authority
+# over someone else's work, the hold is the author saying not yet. The author, or the operator,
+# lifts it with `scripts/hold-publish.sh release <sid>`. The hold logic sits between the
+# PUBLISH HOLD marker comments (helper, per-commit, refusal) so a test can delete it from a
+# copy and prove the hold cases go red without it. The marker lines are at column 0 on purpose.
+# A hold is only as good as the author's habit of setting it: nothing forces a session to.
+# (docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md)
 #
 # WHY THE `Session-Id` TRAILER IS THE DISCRIMINATOR
 # -------------------------------------------------
@@ -135,6 +142,17 @@ foreign_sids=""
 foreign_report=""
 untrailered_report=""
 untrailered_n=0
+# PUBLISH HOLD state (refs/holds/<sid>, written by scripts/hold-publish.sh). All initialised
+# here because `set -u` is on and an unset read aborts the script mid-run.
+held_sids=""          # comma list of held sids found in the push
+held_report=""         # `    <sha8>  <sid>  <subject>` rows, newest first
+held_oldest_sha=""     # the oldest held commit seen (the loop is newest-first, so the last one)
+held_branch=""         # the branch that ref updates, without refs/heads/
+held_remote_sha=""     # that ref's current remote sha
+hold_yes=","           # lookup cache: sids known held
+hold_no=","            # lookup cache: sids known not held (or unreadable)
+hold_warned=0          # the unreadable-store warning prints once per run
+_held=""               # held_sid_of's result
 # Every commit in the push, oldest first, for the computed stack table in the refusal.
 # 0x1F for the same reason the git log format uses it below: an untrailered commit emits an
 # EMPTY sid field, and tab is IFS whitespace, so a tab-delimited row would collapse and put
@@ -157,6 +175,46 @@ total_n=0
 # Measured in production by sessionId c86ebb51: 52 commits, 6 foreign sids, all acked, and
 # the guard said there was no foreign population. Filed a60bdb57.
 foreign_pre_ack_n=0
+
+# BEGIN PUBLISH HOLD (helper)
+# held_sid_of <comma-separated sids> -> sets `_held` to the first sid that has refs/holds/<sid>,
+# or to empty. A GLOBAL RESULT, NOT A PRINTED ONE, on purpose: a `$(...)` call would run in a
+# subshell and lose `hold_warned` and the lookup caches, so the unreadable-store warning would
+# print once per commit instead of once per run.
+#
+# The argument is the Session-Id column of the per-commit loop below, which is EMPTY for an
+# untrailered commit and a COMMA-SEPARATED LIST for a commit carrying two Session-Id values, so
+# every token is tested, not just the first.
+#
+# `git rev-parse -q --verify` exits 1 for "no such ref" and anything else (128) for a real
+# failure. Those are different facts: a failed lookup must NEVER be read as a hold, and must
+# not be read as the absence of one without saying so.
+held_sid_of() {
+    _held=""
+    local _toks=() _t _rc
+    IFS=, read -ra _toks <<< "${1:-}"
+    for _t in ${_toks[@]+"${_toks[@]}"}; do
+        _t="${_t//[[:space:]]/}"
+        [ -n "$_t" ] || continue
+        case "$hold_yes" in *",$_t,"*) _held="$_t"; return 0 ;; esac
+        case "$hold_no" in *",$_t,"*) continue ;; esac
+        git rev-parse -q --verify "refs/holds/$_t" >/dev/null 2>&1 </dev/null
+        _rc=$?
+        case "$_rc" in
+            0) hold_yes="${hold_yes}${_t},"; _held="$_t"; return 0 ;;
+            1) hold_no="${hold_no}${_t}," ;;
+            *)
+                hold_no="${hold_no}${_t},"
+                if [ "$hold_warned" -eq 0 ]; then
+                    hold_warned=1
+                    printf '  note: could not read refs/holds/%s (git exited %s); commits are treated as not held.\n' "$_t" "$_rc" >&2
+                fi
+                ;;
+        esac
+    done
+    return 0
+}
+# END PUBLISH HOLD (helper)
 
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
@@ -302,6 +360,25 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         [ -n "${sha:-}" ] || continue
         commit_rows="${sha:0:8}"$'\x1f'"${sid:-}"$'\x1f'"${subject}"$'\n'"${commit_rows}"
         total_n=$((total_n + 1))
+# BEGIN PUBLISH HOLD
+        # BEFORE the ack test, the mine/foreign branches and the untrailered branch, and that
+        # ordering is the feature: an ack is the PUSHER's authority over another session's work,
+        # a hold is the AUTHOR saying "not yet", and CODESCOUT_PUSH_ACK=all must not outrank it.
+        # `acked` is NOT called for held commits: it accumulates `ack_matched`, which would make
+        # the ack notes report an authorisation that applied to nothing.
+        held_sid_of "${sid:-}"
+        if [ -n "$_held" ]; then
+            case ",$held_sids," in
+                *",$_held,"*) ;;
+                *) held_sids="${held_sids:+$held_sids,}$_held" ;;
+            esac
+            held_report="${held_report}    ${sha:0:8}  ${_held}  ${subject}"$'\n'
+            held_oldest_sha="$sha"
+            held_branch="${remote_ref#refs/heads/}"
+            held_remote_sha="$remote_sha"
+            continue
+        fi
+# END PUBLISH HOLD
         if [ -z "${sid:-}" ]; then
             untrailered_n=$((untrailered_n + 1))
             untrailered_report="${untrailered_report}    ${sha:0:8}  ${subject}"$'\n'
@@ -319,6 +396,93 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         fi
     done < <(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${range[@]}" 2>/dev/null)
 done
+
+# BEGIN PUBLISH HOLD (refusal)
+# Refuses, and exits 1 itself, BEFORE the untrailered note and the ack notes: a held commit is
+# never part of the ordinary refuse-or-ack path. Text is printf lines, never an unquoted
+# heredoc (see the heredoc-backtick case in the test suite).
+if [ -n "$held_sids" ]; then
+    _resolve_lib_h="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
+    if [ -r "$_resolve_lib_h" ]; then
+        # shellcheck source=scripts/resolve-sids.sh
+        . "$_resolve_lib_h"
+    else
+        resolve_sids() { printf '%s\t?\t\n' "$@"; }
+    fi
+    _hs=()
+    IFS=, read -ra _hs <<< "$held_sids"
+    held_table="$(resolve_sids "${_hs[@]}")"
+
+    hold_age() {  # <set-at ISO-8601> -> 3h / 12d, or a plain "unknown time"
+        local _then _d
+        _then="$(date -u -d "$1" +%s 2>/dev/null)" || _then=""
+        [ -n "$_then" ] || { printf 'unknown time'; return; }
+        _d=$(( $(date -u +%s) - _then ))
+        [ "$_d" -ge 0 ] || _d=0
+        if [ "$_d" -lt 172800 ]; then printf '%dh' $((_d / 3600)); else printf '%dd' $((_d / 86400)); fi
+    }
+
+    printf '\n  REFUSING THE PUSH: PUBLISH HOLD. It carries commit(s) whose author has withheld them:\n\n' >&2
+    printf '%s\n' "$held_report" >&2
+    for _s in "${_hs[@]}"; do
+        _blob="$(git cat-file -p "refs/holds/$_s" 2>/dev/null </dev/null)"
+        _reason="$(printf '%s\n' "$_blob" | awk 'sub(/^reason: ?/, "") { print; exit }')"
+        _setat="$(printf '%s\n' "$_blob" | awk '/^set-at: / { print $2; exit }')"
+        _state="$(printf '%s\n' "$held_table" | awk -F'\t' -v s="$_s" '$1 == s { print $2; exit }')"
+        printf '  Held session %s  [%s]  held for %s\n' "$_s" "${_state:-?}" "$(hold_age "$_setat")" >&2
+        printf '    reason: %s\n' "$_reason" >&2
+        printf '    release (the author or the operator decides): scripts/hold-publish.sh release %s\n\n' "$_s" >&2
+    done
+    printf '  A hold is its author saying these commits are not ready. Do not publish them.\n' >&2
+    printf '  Only the author, or the operator, can release it.\n\n' >&2
+
+    case ",$held_sids," in
+        *",$me,"*)
+            printf '  Your own commit is held: release your own hold first (scripts/hold-publish.sh release %s), or push only the prefix below.\n\n' "$me" >&2
+            ;;
+    esac
+
+    # The commits BELOW the oldest held one are not held, and pushing exactly that prefix is
+    # allowed. Printed only when there is something in it to push.
+    if [ -n "$held_oldest_sha" ]; then
+        _parent="$(git rev-parse -q --verify "${held_oldest_sha}^" 2>/dev/null </dev/null)" || _parent=""
+        _below=0
+        if [ -n "$_parent" ]; then
+            if [ "$held_remote_sha" = "$ZERO" ]; then
+                _below=1
+            else
+                _n="$(git rev-list --count "$held_remote_sha..$_parent" 2>/dev/null </dev/null)" || _n=0
+                [ "${_n:-0}" -gt 0 ] 2>/dev/null && _below=1
+            fi
+        fi
+        if [ "$_below" -eq 1 ]; then
+            printf '  The commits below the oldest held one are not held. To publish exactly those:\n\n' >&2
+            printf '    git push origin %s:%s\n\n' "$_parent" "$held_branch" >&2
+        else
+            printf '  There is no prefix to push: nothing below the held commit is unpublished.\n\n' >&2
+        fi
+    fi
+
+    # The ack is compared the way `acked` does -- whitespace stripped, lowercased -- but WITHOUT
+    # calling it, because `acked` accumulates `ack_matched` as a side effect.
+    _ack_h="$(printf '%s' "$ack" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    _ack_hit=0
+    if [ -n "$_ack_h" ]; then
+        if [ "$_ack_h" = "all" ]; then
+            _ack_hit=1
+        else
+            for _s in "${_hs[@]}"; do
+                _sl="$(printf '%s' "$_s" | tr '[:upper:]' '[:lower:]')"
+                case ",$_ack_h," in *",$_sl,"*) _ack_hit=1 ;; esac
+            done
+        fi
+    fi
+    if [ "$_ack_hit" -eq 1 ]; then
+        printf '  An ack does not clear a hold: CODESCOUT_PUSH_ACK covers other sessions'"'"' unheld commits only.\n\n' >&2
+    fi
+    exit 1
+fi
+# END PUBLISH HOLD (refusal)
 
 if [ "$untrailered_n" -gt 0 ]; then
     printf '\n  note: %d commit(s) in this push carry no Session-Id trailer, so this guard\n' "$untrailered_n" >&2
