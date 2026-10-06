@@ -1104,6 +1104,9 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // each echo in `section_map` and `breadcrumb` serializes to at most 200 B plus its quotes,
         // with its true raw length beside it as `h_bytes`. The unit is SERIALIZED bytes: a raw-byte
         // clip of `\x01` echoed 1,200 B, of `"` 398 B (measured 2026-10-06, before the re-unit).
+        // An echo quoted inside another string (`next_actions`, the message) is clipped against
+        // its doubly-escaped length (`clip_heading_embedded`), and the cited test asserts it
+        // costs at most 200 B there too: before, `"` cost 396 B in `next_actions`.
         // Marker written by production in `read_markdown_single_heading`, from `clip_heading`.
         id: "read_markdown.heading_echo_bytes",
         coverage: Coverage::Probed {

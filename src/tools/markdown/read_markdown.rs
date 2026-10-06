@@ -135,21 +135,40 @@ fn read_markdown_multi_heading(
             "use {:?} — request one heading at a time, or slice with start_line/end_line",
             file_id
         );
+        // Each heading is echoed clipped, as every heading echo is, and quoted as JSON in a route
+        // (an unquoted `heading=## A` is not a call a caller can paste back). The list has as many
+        // entries as the caller asked for, so it is dropped (marked `requested_headings_omitted`)
+        // when the body would not fit: an `Err` body is put inline by the server, and 3 headings
+        // of 12 KB made it 72,413 B. `next_actions` is at most three clipped routes.
+        let requested: Vec<String> = seen_headings.iter().map(|h| clip_heading(h).0).collect();
         let next_actions: Vec<String> = seen_headings
             .iter()
             .take(3)
-            .map(|h| format!("read_file({:?}, heading={})", file_id, h))
+            .map(|h| {
+                let quoted = serde_json::to_string(clip_heading_embedded(h)).unwrap_or_default();
+                format!("read_file({:?}, heading={quoted})", file_id)
+            })
             .collect();
-        let err = crate::tools::RecoverableError::with_hint(
-            format!(
-                "combined headings span {} lines — exceeds inline threshold",
-                lines
-            ),
-            hint,
-        )
-        .with_extra("file_id", serde_json::json!(file_id))
-        .with_extra("requested_headings", serde_json::json!(seen_headings))
-        .with_extra("next_actions", serde_json::json!(next_actions));
+        let message = format!(
+            "combined headings span {} lines — exceeds inline threshold",
+            lines
+        );
+        let body = json!({
+            "error": message,
+            "hint": hint,
+            "file_id": file_id,
+            "requested_headings": requested,
+            "next_actions": next_actions,
+        });
+        let fits = !crate::tools::exceeds_inline_limit(&body.to_string());
+        let mut err = crate::tools::RecoverableError::with_hint(message, hint)
+            .with_extra("file_id", serde_json::json!(file_id));
+        err = if fits {
+            err.with_extra("requested_headings", serde_json::json!(requested))
+        } else {
+            err.with_extra("requested_headings_omitted", serde_json::json!(true))
+        };
+        let err = err.with_extra("next_actions", serde_json::json!(next_actions));
         return Err(err.into());
     }
 
@@ -268,7 +287,9 @@ fn drop_to_fit(
 /// `read_file(heading=<prefix>)` matches by prefix. A clipped entry carries the true length as
 /// `h_bytes`, so the clip is a statement and not a silent edit. The cap counts SERIALIZED bytes
 /// (`json_escaped_len`), the unit the response is measured in: in raw bytes, 200 `\x01` escaped
-/// to 1,200 B per echo.
+/// to 1,200 B per echo. An echo quoted inside another string (`next_actions`, the message) is
+/// escaped twice there, and is clipped against that doubled length ([`clip_heading_embedded`]),
+/// so 200 bounds what is DELIVERED at every echo site.
 // cap-class: RESULT_CAP read_markdown.heading_echo_bytes — probed
 const HEADING_ECHO_CLIP: usize = 200;
 
@@ -284,6 +305,23 @@ fn clip_heading(text: &str) -> (String, Option<usize>) {
         crate::util::text::clip_head_escaped(text, HEADING_ECHO_CLIP).to_string(),
         Some(text.len()),
     )
+}
+/// The longest prefix of `text` that costs at most [`HEADING_ECHO_CLIP`] bytes where it is
+/// DELIVERED quoted inside another JSON string (`next_actions`, the message): there it is
+/// escaped twice, so `"` costs 4 bytes (`\\\"`) and `\x01` 7 (`\\u0001`). [`clip_heading`]
+/// alone bounds one escaping, and a clipped echo quoted this way reached 396 B for `"`. A prefix
+/// still routes: `read_file(heading=<prefix>)` matches by prefix.
+fn clip_heading_embedded(text: &str) -> &str {
+    let mut used = 0usize;
+    for (i, c) in text.char_indices() {
+        let once = serde_json::to_string(c.encode_utf8(&mut [0u8; 4])).unwrap_or_default();
+        let cost = crate::util::text::json_escaped_len(&once[1..once.len().saturating_sub(1)]);
+        if used + cost > HEADING_ECHO_CLIP {
+            return &text[..i];
+        }
+        used += cost;
+    }
+    text
 }
 
 /// Single-heading navigation: extract one section. Returns a `headings` list on
@@ -426,7 +464,8 @@ fn read_markdown_single_heading(
                     // The heading is quoted as a JSON string, the form a caller passes it in:
                     // `{:?}` wrote a control character as `\u{1}`, which no JSON parser reads,
                     // and an unquoted `heading=### Sub A` is not a call the caller can paste back.
-                    let quoted = serde_json::to_string(h).unwrap_or_else(|_| format!("{h:?}"));
+                    let quoted = serde_json::to_string(clip_heading_embedded(h))
+                        .unwrap_or_else(|_| format!("{h:?}"));
                     actions.push(format!("read_file({:?}, heading={quoted})", file_id));
                 }
             }
@@ -444,9 +483,12 @@ fn read_markdown_single_heading(
             actions
         };
 
+        // Quoted as JSON, like the heading in `next_actions`, and clipped for that context:
+        // Rust's `{:?}` wrote `\u{1}` and doubled `"` before the response escaped it again.
         let message = format!(
-            "section {:?} spans {} lines — exceeds inline threshold",
-            heading_label, section_lines
+            "section {} spans {} lines — exceeds inline threshold",
+            serde_json::to_string(clip_heading_embedded(&heading_label)).unwrap_or_default(),
+            section_lines
         );
         // An `Err` never reaches `call_content`'s buffering: `server.rs` puts `extra` inline in
         // the error body, so a 300-sub-heading section returned a 26,629 B body in context. The

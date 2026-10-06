@@ -264,7 +264,7 @@ async fn a_heading_not_found_list_at_the_byte_edge_keeps_one_handle() {
 #[tokio::test]
 async fn a_control_char_heading_echo_is_clipped_in_escaped_bytes() {
     let dir = tempfile::tempdir().unwrap();
-    for (class, unit) in CLASSES {
+    for (class, unit) in CLASSES.into_iter().chain([("esc", "\u{1b}")]) {
         let path = dir.path().join(format!("echo-{class}.md"));
         // 1,000 units: over the clip in every class, yet one line still fits a range read once
         // escaped. A wider line is clamped by whichever arm serves the range: a `.md` path, and
@@ -299,19 +299,31 @@ async fn a_control_char_heading_echo_is_clipped_in_escaped_bytes() {
             let n = serde_json::to_string(crumb).unwrap().len();
             assert!(n <= 200 + 2, "{class}: a breadcrumb echoes {n} B");
         }
-        let action = serde_json::to_string(&rec.extra["next_actions"][0]).unwrap();
-        // An echo quoted inside another string is escaped twice (`"` -> `\"` -> `\\\"`), so the
-        // bound on an embedded echo is twice the cap plus the call around it. A raw-byte clip of
-        // `\x01` was 1,200 B per echo before that doubling.
+        // An echo quoted inside another string is escaped twice (`"` -> `\"` -> `\\\"`). The cap
+        // bounds what is DELIVERED, so the quoted heading costs at most 200 B in the response
+        // beside the call around it: measured before, `"` cost 398 B there and `\` 398 B.
+        let action = rec.extra["next_actions"][0].as_str().unwrap();
+        let fid = rec.extra["file_id"].as_str().unwrap();
+        let around = json_escaped_len(&format!("read_file(\"{fid}\", heading=\"\")"));
+        let echo = json_escaped_len(action) - around;
         assert!(
-            action.len() <= 2 * 200 + 100,
-            "{class}: next_actions[0] is {} B",
-            action.len()
+            echo <= 200,
+            "{class}: next_actions[0] echoes {echo} B: {action:.120}"
         );
+        let routed: String =
+            serde_json::from_str(&action[action.find("heading=").unwrap() + 8..action.len() - 1])
+                .unwrap();
         assert!(
-            serde_json::to_string(&rec.message).unwrap().len() <= 2 * 200 + 100,
-            "{class}: the message is {} B",
-            rec.message.len()
+            format!("### {sub}").starts_with(&routed),
+            "{class}: the route names no prefix of the heading"
+        );
+        let lines = rec.message.split(" spans ").nth(1).unwrap();
+        let around = json_escaped_len(&format!("section \"\" spans {lines}"));
+        let echo = json_escaped_len(&rec.message) - around;
+        assert!(
+            echo <= 200,
+            "{class}: the message echoes {echo} B: {:.120}",
+            rec.message
         );
         assert_one_handle_and_fits(input, class).await;
     }
@@ -684,4 +696,50 @@ async fn a_markdown_range_drops_coverage_only_to_show_a_line_whole() {
     let (v, _) = md_page(&ctx, &input, "wide line beside 20 KB coverage").await;
     assert_eq!(v["coverage_omitted"], json!(true), "{v:.300}");
     assert_eq!(v["line_truncated"], json!(true), "{v:.300}");
+}
+
+/// The multi-heading arm's oversized error (`combined headings span N lines`) echoes each
+/// requested section's heading in `requested_headings` and `next_actions`. Measured here with
+/// headings of 12 KB in seven classes: an `Err` body is put inline by the server, so it must fit.
+#[tokio::test]
+async fn a_multi_heading_overflow_error_echoes_bounded_headings() {
+    let dir = tempfile::tempdir().unwrap();
+    for (class, unit) in CLASSES.into_iter().chain([("esc", "\u{1b}")]) {
+        let path = dir.path().join(format!("multi-{class}.md"));
+        let long = unit.repeat(12_000 / json_escaped_len(unit));
+        let mut body = String::new();
+        let mut asked = Vec::new();
+        for i in 0..3 {
+            body.push_str(&format!("## H{i} {long}\n{}\n\n", "b\n".repeat(2_500)));
+            asked.push(format!("## H{i}"));
+        }
+        std::fs::write(&path, &body).unwrap();
+        let input = json!({ "path": path.to_str().unwrap(), "headings": asked });
+        let ctx = ctx().await;
+        let (text, compact) = deliver(&ctx, &input).await;
+        eprintln!("multi {class}: {compact} B");
+        assert!(
+            text.contains("exceeds inline threshold"),
+            "{class}: {text:.300}"
+        );
+        assert_one_handle_and_fits(input, &format!("multi {class}")).await;
+    }
+    // Eighty requested sections: each echo is clipped, but the list is long, so it is dropped.
+    let path = dir.path().join("multi-many.md");
+    let body: String = (0..80)
+        .map(|i| format!("## H{i:02} {}\n{}\n", "w".repeat(300), "b\n".repeat(100)))
+        .collect();
+    std::fs::write(&path, &body).unwrap();
+    let asked: Vec<String> = (0..80).map(|i| format!("## H{i:02}")).collect();
+    let input = json!({ "path": path.to_str().unwrap(), "headings": asked });
+    let ctx = ctx().await;
+    let err = ReadFile.call(input.clone(), &ctx).await.unwrap_err();
+    let rec = err.downcast_ref::<RecoverableError>().unwrap();
+    assert_eq!(
+        rec.extra["requested_headings_omitted"],
+        json!(true),
+        "{:?}",
+        rec.extra
+    );
+    assert_one_handle_and_fits(input, "multi 80").await;
 }
