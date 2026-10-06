@@ -1716,6 +1716,7 @@ async fn dangerous_command_returns_ack_handle() {
         &root,
         &security,
         &ctx,
+        None, // timeout_hint
     )
     .await
     .expect("should return Ok with pending_ack, not Err");
@@ -1750,6 +1751,7 @@ async fn run_in_background_returns_bg_handle() {
         &root,
         &security,
         &ctx,
+        None, // timeout_hint
     )
     .await
     .expect("should succeed");
@@ -1868,7 +1870,7 @@ async fn run_in_background_rejects_buffer_only() {
         None,  // cwd_param
         true,  // buffer_only
         true,  // run_in_background
-        &root, &security, &ctx,
+        &root, &security, &ctx, None,
     )
     .await;
     let err = result.unwrap_err();
@@ -1907,7 +1909,7 @@ async fn shell_command_mode_disabled_blocks_run_command() {
         None,  // cwd_param
         false, // buffer_only
         false, // run_in_background
-        &root, &security, &ctx,
+        &root, &security, &ctx, None,
     )
     .await;
     let err = result.unwrap_err();
@@ -2790,10 +2792,12 @@ fn wide_stderr() -> String {
 
 /// Run `command` through `RunCommand::call_content`; return the primary block's text and parse.
 async fn buffer_query(ctx: &ToolContext, command: String) -> (String, Value) {
-    let content = RunCommand
-        .call_content(json!({ "command": command, "timeout_secs": 10 }), ctx)
-        .await
-        .unwrap();
+    run_query(ctx, json!({ "command": command, "timeout_secs": 10 })).await
+}
+
+/// [`buffer_query`] with the whole `input`, for a test that sets more than the command.
+async fn run_query(ctx: &ToolContext, input: Value) -> (String, Value) {
+    let content = RunCommand.call_content(input, ctx).await.unwrap();
     let text = content[0]
         .as_text()
         .map(|t| t.text.clone())
@@ -3691,6 +3695,7 @@ async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
             Box::new(|| LateKeys {
                 redacted: 1,
                 tee_skipped: None,
+                ..Default::default()
             }) as Box<dyn Fn() -> LateKeys>,
             json!({"exit_code": 0, "stdout": "", "redacted_credentials": 1})
                 .to_string()
@@ -3701,6 +3706,7 @@ async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
             Box::new(|| LateKeys {
                 redacted: 0,
                 tee_skipped: Some("full".into()),
+                ..Default::default()
             }),
             json!({"exit_code": 0, "stdout": "", "unfiltered_output_skipped": "full"})
                 .to_string()
@@ -3761,6 +3767,7 @@ async fn a_tee_capture_behind_an_empty_stdout_is_inside_the_gate_at_the_exact_ed
                 LateKeys {
                     redacted: 0,
                     tee_skipped: Some("n".repeat(note)),
+                    ..Default::default()
                 },
             )
             .await
@@ -3841,6 +3848,7 @@ async fn a_truncated_page_counts_the_late_keys_it_carries() {
         LateKeys {
             redacted: 0,
             tee_skipped: Some("n".repeat(400)),
+            ..Default::default()
         },
     )
     .await
@@ -8178,6 +8186,7 @@ async fn a_compacted_response_is_judged_with_its_late_keys_and_its_real_handle_a
                 LateKeys {
                     redacted: 0,
                     tee_skipped: Some("n".repeat(note)),
+                    ..Default::default()
                 },
             )
             .await
@@ -8233,6 +8242,7 @@ async fn a_summary_budgets_around_the_late_keys_it_carries() {
         LateKeys {
             redacted: 0,
             tee_skipped: Some("n".repeat(7_000)),
+            ..Default::default()
         },
     )
     .await
@@ -8263,4 +8273,94 @@ async fn a_summary_budgets_around_the_late_keys_it_carries() {
             "{key}"
         );
     }
+}
+
+// ---- a truncated buffer's notice is counted by the gate that sizes the query ----
+//
+// `buffer_truncated` (about 280 B) was attached by `RunCommand::call` AFTER
+// `handle_successful_output_with` had sized the response, so a query of a truncated `@cmd_*`
+// buffer whose answer the gate judged to fit went over the inline limit by the notice, and
+// `call_content` re-buffered it under a second handle. `timeout_hint` was attached the same way.
+
+/// The seven escape classes the inline limit counts differently: 1, 2, 2, 6 and 6 serialized
+/// bytes per char (ESC also meets the ANSI strip a buffer query applies), and two multibyte chars
+/// serde_json writes raw.
+// cap-class: NOT_A_CAP — a test fixture listing escape classes, not a bound on any result
+const NOTICE_UNITS: [&str; 7] = ["a", "\"", "\\", "\u{1}", "\u{1b}", "\u{20ac}", "\u{1F600}"];
+
+/// A 30-line `@cmd_*` buffer whose payload serializes to about `target` bytes, stored as a PREFIX
+/// of a ten-times-longer capture so that every read of it carries `buffer_truncated`.
+fn truncated_cmd_buffer(ctx: &ToolContext, unit: &str, target: usize) -> String {
+    let per_line = target / 30;
+    let line = unit.repeat((per_line.saturating_sub(2) / escaped_unit_len(unit)).max(1));
+    let body = format!("{}\n", vec![line; 30].join("\n"));
+    ctx.output_buffer.store_truncated(
+        "probe".into(),
+        body,
+        String::new(),
+        0,
+        Some(crate::tools::output_buffer::Truncation {
+            kept_lines: 30,
+            total_lines: 300,
+        }),
+    )
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_truncated_buffer_counts_its_notice_in_every_query() {
+    let (_dir, ctx) = project_ctx().await;
+    let (mut whole, mut cut, mut largest) = (0, 0, 0);
+    let mut failures = Vec::new();
+    for unit in NOTICE_UNITS {
+        for target in (9_300..=10_500).step_by(50) {
+            let id = truncated_cmd_buffer(&ctx, unit, target);
+            for (command, timeout) in [
+                (format!("cat {id}"), 10),
+                (format!("sed -n '1,30p' {id}"), 10),
+                (format!("grep -v NO_SUCH_LINE {id}"), 10),
+                // `timeout_secs: 0` is corrected to 30 and says so in `timeout_hint`, another key
+                // `call` attaches to every response shape.
+                (format!("cat {id}"), 0),
+            ] {
+                let label = format!("{unit:?} {target} `{command}` timeout={timeout}");
+                let (text, parsed) =
+                    run_query(&ctx, json!({ "command": command, "timeout_secs": timeout })).await;
+                let named = handles_named(&text);
+                let notice = parsed["buffer_truncated"][0]
+                    .as_str()
+                    .is_some_and(|n| n.contains(&id));
+                let hint_ok = timeout != 0 || parsed.get("timeout_hint").is_some();
+                if has_tool_handle(&text)
+                    || named.iter().any(|h| *h != id)
+                    || parsed.get("output_id").is_some()
+                    || text.len() > crate::tools::INLINE_MAX_RESPONSE_LEN
+                    || !notice
+                    || !hint_ok
+                {
+                    failures.push(format!(
+                        "{label}: {} B, buffered_bytes {}: {text:.200}",
+                        text.len(),
+                        parsed["buffered_bytes"]
+                    ));
+                    continue;
+                }
+                largest = largest.max(text.len());
+                if parsed.get("truncated").is_some() {
+                    cut += 1;
+                } else {
+                    whole += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} queries broke the one-handle limit; first: {:#?}",
+        failures.len(),
+        &failures[..failures.len().min(3)]
+    );
+    // Both arms reached, or the sweep is not across the edge.
+    assert!(whole > 0 && cut > 0, "whole {whole}, cut {cut}");
+    eprintln!("notice sweep: whole {whole}, cut {cut}, largest response {largest} B");
 }

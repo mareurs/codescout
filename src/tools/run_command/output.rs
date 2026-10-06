@@ -670,6 +670,9 @@ pub(crate) struct LateKeys {
     pub redacted: usize,
     /// Why a wanted tee capture was not made: `unfiltered_output_skipped`.
     pub tee_skipped: Option<String>,
+    /// The keys `run_command` puts on every response shape (`super::envelope_keys`):
+    /// `buffer_truncated`, `jobs`, `timeout_hint`.
+    pub envelope: serde_json::Map<String, Value>,
 }
 
 /// What `"stdout":""` adds to a response that had no `stdout` key. The tee block inserts it when a
@@ -677,9 +680,9 @@ pub(crate) struct LateKeys {
 const EMPTY_STDOUT_KEY: &str = r#","stdout":"""#;
 
 /// Every key attached to the response AFTER the streams, as one map: the four diagnostics, the tee
-/// keys, the redaction note and the tee-skipped note. Built once, MEASURED by the summary-or-inline
-/// gate and then APPLIED by `attach`, so the gate cannot judge keys the response does not carry or
-/// miss keys it does.
+/// keys, the redaction note, the tee-skipped note and the envelope keys (`LateKeys::envelope`).
+/// Built once, MEASURED by the summary-or-inline gate and then APPLIED by `attach`, so the gate
+/// cannot judge keys the response does not carry or miss keys it does.
 fn attachments(
     diagnostics: &[(&str, &Option<String>)],
     unfiltered: &Option<(
@@ -689,6 +692,7 @@ fn attachments(
     )>,
     redacted: usize,
     tee_skipped: &Option<String>,
+    envelope: &serde_json::Map<String, Value>,
 ) -> serde_json::Map<String, Value> {
     let mut keys = serde_json::Map::new();
     if let Some((ref_id, truncation, line_count)) = unfiltered {
@@ -715,6 +719,7 @@ fn attachments(
     if let Some(why) = tee_skipped {
         keys.insert("unfiltered_output_skipped".into(), json!(why));
     }
+    keys.extend(envelope.clone());
     keys
 }
 
@@ -1020,6 +1025,7 @@ pub(crate) async fn handle_successful_output_with(
         &unfiltered_ref,
         tee_redacted + late_keys.redacted,
         &late_keys.tee_skipped,
+        &late_keys.envelope,
     );
 
     // --- Step 6: Decide whether to buffer + summarize ---
@@ -1507,6 +1513,16 @@ mod tests {
             )),
             3,
             &Some("no space left".to_string()),
+            &serde_json::Map::from_iter([
+                (
+                    "buffer_truncated".to_string(),
+                    json!(["@cmd_0bf0a222 holds a \"prefix\""]),
+                ),
+                (
+                    "timeout_hint".to_string(),
+                    json!("timeout_secs: 0 is invalid"),
+                ),
+            ]),
         )
     }
 
@@ -1552,7 +1568,7 @@ mod tests {
 
     #[test]
     fn a_redaction_count_of_zero_adds_no_key() {
-        let keys = attachments(&[], &None, 0, &None);
+        let keys = attachments(&[], &None, 0, &None, &serde_json::Map::new());
         assert!(keys.is_empty(), "{keys:?}");
     }
 

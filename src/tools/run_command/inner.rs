@@ -344,6 +344,9 @@ pub(crate) async fn run_command_inner(
     root: &Path,
     security: &crate::util::path_security::PathSecurityConfig,
     ctx: &ToolContext,
+    // Said on the response when `call` corrected the timeout parameter: an envelope key, so it is
+    // measured by the inline-or-summary gate below (`LateKeys::envelope`).
+    timeout_hint: Option<&str>,
 ) -> anyhow::Result<Value> {
     use crate::util::path_security::is_dangerous_command;
 
@@ -643,6 +646,8 @@ pub(crate) async fn run_command_inner(
                 LateKeys {
                     redacted,
                     tee_skipped,
+                    // Built here, after the child exited, so `jobs` reports what the read saw.
+                    envelope: super::envelope_keys(ctx, original_command, timeout_hint),
                 },
             )
             .await?;
