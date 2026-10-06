@@ -582,3 +582,26 @@ async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
     }
     assert!(buffered > 0, "no read took the file_id arm");
 }
+
+/// `siblings` of a `toml_key` read is capped in count upstream but not in width. A read whose
+/// handle arm would be over the limit with about 12 KB of sibling names beside it drops them,
+/// marked `siblings_omitted`, so that arm is not buffered again under `@tool_*`.
+#[tokio::test]
+async fn a_toml_key_read_with_many_siblings_drops_them_from_the_handle_arm() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    // Siblings are capped in count upstream (about 30), not in width: 40 tables with 400-byte
+    // names put about 12 KB of them beside the value.
+    let siblings: String = (0..40)
+        .map(|i| format!("[key_{i:04}{}]\nx = 1\n", "n".repeat(400)))
+        .collect();
+    for (shape, value) in [("wide", "a".repeat(12_000)), ("short", "a".into())] {
+        let p = dir.path().join(format!("sib-{shape}.toml"));
+        std::fs::write(&p, format!("[k]\nv = \"{value}\"\n{siblings}")).unwrap();
+        let input = json!({ "path": p.to_str().unwrap(), "toml_key": "k" });
+        let label = format!("siblings {shape}");
+        let (v, _) = page(&ctx, &input, "", &label).await;
+        assert_eq!(v["siblings_omitted"], json!(true), "{label}: {v:.300}");
+        assert!(v.get("file_id").is_some(), "{label}: {v:.300}");
+    }
+}

@@ -669,4 +669,19 @@ async fn a_markdown_range_drops_coverage_only_to_show_a_line_whole() {
     let (v, _) = md_page(&ctx, &input, "empty first line").await;
     assert_eq!(v["coverage_omitted"], json!(true), "{v:.300}");
     md_read_through(&ctx, input, "empty first line").await;
+
+    // `coverage` over the limit AND a first line too wide even without it: the line is cut
+    // either way, yet `coverage` must still go.
+    let p = dir.path().join("many-wide.md");
+    std::fs::write(
+        &p,
+        format!("{}{}\nz\n", many_sections(600), "a".repeat(12_000)),
+    )
+    .unwrap();
+    let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+    ReadFile.call(prime, &ctx).await.unwrap();
+    let input = json!({ "path": p.to_str().unwrap(), "start_line": 1_801, "end_line": 1_802 });
+    let (v, _) = md_page(&ctx, &input, "wide line beside 20 KB coverage").await;
+    assert_eq!(v["coverage_omitted"], json!(true), "{v:.300}");
+    assert_eq!(v["line_truncated"], json!(true), "{v:.300}");
 }
