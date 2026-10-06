@@ -111,7 +111,7 @@ run() {
     # redding it, which is strictly worse than a failure: no assertion reports, no exit code
     # is produced, and CI shows a job that never finished instead of a test that failed.
     # Measured 2026-09-07, docs/issues/archive/2026-09-07-the-pre-push-guards-refusal-text-executes-its-own-example-commands.md.
-    OUT="$(printf '%s\n' "$line" | (cd "$REPO" && timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" origin git@example.invalid:x) 2>&1)"
+    OUT="$(printf '%s\n' "$line" | (cd "$REPO" && timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODESCOUT_PUSH_ACK "${env[@]}" "$GUARD" "${RUN_REMOTE:-origin}" git@example.invalid:x) 2>&1)"
     EC=$?
 }
 
@@ -1452,7 +1452,7 @@ hasnt "the sentence for an empty prefix is absent when there is a prefix" "$OUT"
 has   "the prefix advice says the ordinary foreign-session check still applies" "$OUT" "still subject to the ordinary foreign-session check"
 run "$ALICE" all "refs/heads/main $A1 refs/heads/main $BASE"
 eq    "pushing exactly that prefix is allowed" "$EC" 0
-run "$ALICE" - "$A1 refs/heads/main $BASE"
+run "$ALICE" - "$A1 $A1 refs/heads/main $BASE"
 eq    "and so is the bare-sha refspec form of it" "$EC" 0
 # a brand-new remote branch: the zero sha, so the prefix is everything below the held commit
 run "$ALICE" all "refs/heads/main $A2 refs/heads/feature $ZERO"
@@ -1627,6 +1627,100 @@ hasnt "unreadable store, no ack: no hold is claimed" "$SHIM_NOACK_OUT" "PUBLISH 
 eq    "unreadable store, no ack: still exactly one warning line" \
       "$(printf '%s\n' "$SHIM_NOACK_OUT" | grep -cF 'could not read refs/holds')" 1
 rm -r "$SHIM_DIR"
+
+# --- a push to a NON-BRANCH ref publishes a commit exactly as a branch push does
+# The foreign check skips tags and refs/wip/*; the hold scan must not. Reachable from the
+# documented release flow: `git push` and then, separately, `git push --tags`.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held, tagged"; TIP=$(sha)
+mkhold "$BOB" "tag case"
+git -C "$REPO" tag v0 "$BASE"
+git -C "$REPO" tag v1 "$TIP"
+git -C "$REPO" tag -a -m annotated v2 "$TIP"; TAGOBJ=$(git -C "$REPO" rev-parse v2)
+eq    "fixture: the annotated tag is a tag object, not the commit" \
+      "$(git -C "$REPO" cat-file -t "$TAGOBJ")" tag
+run "$ALICE" all "refs/tags/v1 $TIP refs/tags/v1 $ZERO"
+eq    "a lightweight tag on a held commit is refused under ack=all" "$EC" 1
+has   "lightweight tag: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "lightweight tag: the held commit is listed" "$(report_rows "$OUT")" "bob held, tagged"
+hasnt "lightweight tag: no branch prefix advice (it is a tag)" "$OUT" "git push origin"
+run "$ALICE" all "refs/tags/v2 $TAGOBJ refs/tags/v2 $ZERO"
+eq    "an annotated tag on a held commit is refused (the tag object is peeled)" "$EC" 1
+has   "annotated tag: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+run "$ALICE" all "HEAD $TIP refs/tags/x $ZERO"
+eq    "HEAD:refs/tags/x carrying a held commit is refused" "$EC" 1
+has   "HEAD:refs/tags/x: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+run "$ALICE" all "HEAD $TIP refs/wip/x $ZERO"
+eq    "HEAD:refs/wip/x carrying a held commit is refused" "$EC" 1
+has   "HEAD:refs/wip/x: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+# controls, each with the hold STILL in place unless stated
+run "$ALICE" - "refs/tags/v0 $BASE refs/tags/v0 $ZERO"
+eq    "a tag on an unheld commit passes while the hold exists" "$EC" 0
+eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+TREE=$(git -C "$REPO" rev-parse "$TIP^{tree}")
+git -C "$REPO" tag tt "$TREE"
+run "$ALICE" - "refs/tags/tt $TREE refs/tags/tt $ZERO"
+eq    "a tag of a tree cannot carry a held commit: skipped" "$EC" 0
+eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+run "$ALICE" all "(delete) $ZERO refs/tags/v1 $TIP"
+eq    "deleting a tag is not a publish: skipped" "$EC" 0
+git -C "$REPO" update-ref -d "refs/holds/$BOB"
+run "$ALICE" all "refs/tags/v1 $TIP refs/tags/v1 $ZERO"
+eq    "with the hold released the same tag push passes (positive control)" "$EC" 0
+run "$ALICE" all "HEAD $TIP refs/wip/x $ZERO"
+eq    "and so does the refs/wip push" "$EC" 0
+
+# --- a range that cannot be listed must not publish a held commit
+# (the pre-existing foreign check still fails open on this input; that is a separate bug)
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held, remote tip unknown"; TIP=$(sha)
+mkhold "$BOB" "unknown tip"
+UNKNOWN="$(printf 'a sha this store has never seen' | git -C "$REPO" hash-object --stdin)"
+eq    "fixture: the remote tip is not in the local object store" \
+      "$(git -C "$REPO" cat-file -e "$UNKNOWN" 2>/dev/null && echo present || echo absent)" absent
+run "$ALICE" all "refs/heads/main $TIP refs/heads/main $UNKNOWN"
+eq    "a force push over an unfetched remote tip is refused while a hold exists" "$EC" 1
+has   "unknown tip: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
+has   "unknown tip: the held commit is listed" "$(report_rows "$OUT")" "bob held, remote tip unknown"
+git -C "$REPO" update-ref -d "refs/holds/$BOB"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $UNKNOWN"
+eq    "the same push with no hold passes as before (positive control)" "$EC" 0
+eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+# a failing `git log` -- with a hold anywhere, refuse; with none, behave as before
+REAL_GIT="$(command -v git)"
+SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/prepush-guard-shim-XXXXXX")"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = log ]; then exit 128; fi\nexec "%s" "$@"\n' "$REAL_GIT" > "$SHIM_DIR/git"
+chmod +x "$SHIM_DIR/git"
+LINE="refs/heads/main $TIP refs/heads/main $BASE"
+RUN_PATH_PREFIX="$SHIM_DIR"
+run "$ALICE" all "$LINE"
+NOHOLD_EC="$EC"; NOHOLD_OUT="$OUT"
+mkhold "$BOB" "unlistable"
+run "$ALICE" all "$LINE"
+HOLD_EC="$EC"; HOLD_OUT="$OUT"
+RUN_PATH_PREFIX=""
+eq    "a range that cannot be listed, no hold anywhere: behaves as before (passes)" "$NOHOLD_EC" 0
+hasnt "unlistable, no hold: no hold is claimed" "$NOHOLD_OUT" "PUBLISH HOLD"
+eq    "a range that cannot be listed, a hold present: refused" "$HOLD_EC" 1
+has   "unlistable with a hold: PUBLISH HOLD" "$HOLD_OUT" "PUBLISH HOLD"
+has   "unlistable with a hold: says the range could not be listed" "$HOLD_OUT" "could not be listed while holds exist"
+rm -r "$SHIM_DIR"
+
+# --- the prefix advice names the remote the hook was given, not a hard-coded origin
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice first"; A1=$(sha)
+commit "$BOB"   "bob held"
+commit "$ALICE" "alice second"; A2=$(sha)
+mkhold "$BOB" "remote name"
+RUN_REMOTE=upstream
+run "$ALICE" all "refs/heads/main $A2 refs/heads/main $BASE"
+RUN_REMOTE=
+eq    "remote-name case: refused" "$EC" 1
+has   "the prefix advice uses the remote the hook was given" "$OUT" "git push upstream $A1:main"
+hasnt "and does not hard-code origin" "$OUT" "git push origin"
 
 # --- NEGATIVE CONTROL: the hold logic deleted from a copy lets the held push through.
 # The marker count is asserted first: without it a sed that matched nothing would copy the

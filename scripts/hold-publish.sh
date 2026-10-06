@@ -60,7 +60,10 @@ case "$cmd" in
             printf 'no hold for session %s\n' "$target"
             exit 0
         fi
-        git update-ref -d "$ref"
+        if ! git update-ref -d "$ref"; then
+            printf 'hold-publish: could not release the hold of %s (git update-ref -d failed)\n' "$target" >&2
+            exit 1
+        fi
         if [ "$target" = "$sid" ]; then
             printf 'released your hold (%s)\n' "$target"
         else

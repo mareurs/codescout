@@ -175,6 +175,23 @@ for bad in '../x' 'a/b'; do
     eq "release '$bad' leaves other holds intact" "$(holds)" "refs/holds/$SID"
 done
 
+echo "== release: a failed delete is not reported as released"
+new_repo
+run "$SID" set "stuck"
+REAL_GIT="$(command -v git)"
+SHIM="$(mktemp -d "$SCRATCH/shim-XXXXXX")"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = update-ref ] && [ "${2:-}" = -d ]; then exit 1; fi\nexec "%s" "$@"\n' "$REAL_GIT" > "$SHIM/git"
+chmod +x "$SHIM/git"
+OUT="$(cd "$REPO" && PATH="$SHIM:$PATH" HOME="$FAKEHOME" CLAUDE_CODE_SESSION_ID="$SID" bash "$SCRIPT" release 2>&1)"
+EC=$?
+eq    "release whose delete fails exits non-zero" "$((EC != 0))" 1
+hasnt "release whose delete fails never says released" "$OUT" "released"
+has   "release whose delete fails says so" "$OUT" "could not release"
+eq    "the hold is still there after the failed release" "$(holds)" "refs/holds/$SID"
+run "$SID" release
+has   "without the shim the same release succeeds (positive control)" "$OUT" "released your hold"
+eq    "and the hold is gone" "$(holds)" ""
+
 echo "== list"
 new_repo
 run "$SID" list

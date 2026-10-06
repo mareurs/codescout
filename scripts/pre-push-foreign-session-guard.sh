@@ -29,7 +29,7 @@
 # Session-Id, and CODESCOUT_PUSH_ACK does not override it: the ack is the pusher's authority
 # over someone else's work, the hold is the author saying not yet. The author, or the operator,
 # lifts it with `scripts/hold-publish.sh release <sid>`. The hold logic sits between the
-# PUBLISH HOLD marker comments (helper, per-commit, refusal) so a test can delete it from a
+# PUBLISH HOLD marker comments (helper, call site, refusal) so a test can delete it from a
 # copy and prove the hold cases go red without it. The marker lines are at column 0 on purpose.
 # A hold is only as good as the author's habit of setting it: nothing forces a session to.
 # (docs/issues/2026-09-06-a-withheld-commit-is-indistinguishable-from-an-unpushed-one.md)
@@ -152,6 +152,8 @@ held_remote_sha=""     # that ref's current remote sha
 hold_yes=","           # lookup cache: sids known held
 hold_no=","            # lookup cache: sids known not held (or unreadable)
 hold_warned=0          # the unreadable-store warning prints once per run
+hold_unlistable=0      # a push range could not be listed while holds exist
+push_remote="${1:-origin}"   # the remote NAME git hands a pre-push hook; names the prefix push
 _held=""               # held_sid_of's result
 # Every commit in the push, oldest first, for the computed stack table in the refusal.
 # 0x1F for the same reason the git log format uses it below: an untrailered commit emits an
@@ -214,11 +216,79 @@ held_sid_of() {
     done
     return 0
 }
+
+# hold_scan_ref <local sha> <remote ref> <remote sha>: records every held commit a push of THIS
+# ref would publish, into held_sids / held_report / held_oldest_sha. Called for EVERY pushed ref
+# that is not a deletion, before the branch filter below, because a tag or refs/wip/x push
+# publishes a commit exactly as a branch push does and the foreign check skips them.
+#
+# This is a scan of its own, not a clause of the foreign scan's per-commit loop: the foreign
+# scan never sees non-branch refs, and its `git log ... 2>/dev/null` fails OPEN (an unlistable
+# range lists zero commits). A hold must fail closed, so this scan has its own range and its
+# own failure branch, and the foreign check is left exactly as it was.
+#
+# RANGE: the remote tip is trusted only if it is a commit in the local object store. Otherwise
+# (a new ref, or a force push over a tip never fetched here, or a remote tag that points at a
+# non-commit) the range is everything not on any remote-tracking ref: it can over-refuse and
+# cannot under-refuse.
+#
+# THE PUSHED SHA IS PEELED to a commit (an annotated tag points at a tag object). One that does
+# not peel (a tag of a tree or blob) cannot carry a held commit: skipped silently.
+#
+# The commits are checked BEFORE the ack test and the mine/foreign branches, and that ordering
+# is the feature: an ack is the PUSHER's authority over another session's work, a hold is the
+# AUTHOR saying "not yet", and CODESCOUT_PUSH_ACK=all must not outrank it. `acked` is never
+# called for a held commit: it accumulates `ack_matched`, which would make the ack notes
+# report an authorisation that applied to nothing.
+hold_scan_ref() {
+    local _ls="$1" _rr="$2" _rs="$3" _tip _out _rc _l _sha _sid _subj
+    local _range=()
+    _tip="$(git rev-parse -q --verify "${_ls}^{commit}" 2>/dev/null </dev/null)" || return 0
+    if [ "$_rs" != "$ZERO" ] && git cat-file -e "${_rs}^{commit}" 2>/dev/null </dev/null; then
+        _range=("$_rs..$_tip")
+    else
+        _range=("$_tip" --not --remotes)
+    fi
+    _out="$(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${_range[@]}" 2>/dev/null </dev/null)"
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        # Could not list the range. With no hold anywhere that changes nothing (behave as the
+        # guard always did); with any hold present, say so and refuse rather than publish blind.
+        if [ -n "$(git for-each-ref --count=1 refs/holds/ 2>/dev/null </dev/null)" ]; then
+            hold_unlistable=1
+        fi
+        return 0
+    fi
+    while IFS=$'\x1f' read -r _sha _sid _subj; do
+        [ -n "${_sha:-}" ] || continue
+        held_sid_of "${_sid:-}"
+        [ -n "$_held" ] || continue
+        case ",$held_sids," in
+            *",$_held,"*) ;;
+            *) held_sids="${held_sids:+$held_sids,}$_held" ;;
+        esac
+        held_report="${held_report}    ${_sha:0:8}  ${_held}  ${_subj}"$'\n'
+        # The prefix advice is about a BRANCH; a tag or refs/wip/x push gets none.
+        case "$_rr" in
+            refs/heads/*)
+                held_oldest_sha="$_sha"
+                held_branch="${_rr#refs/heads/}"
+                held_remote_sha="$_rs"
+                ;;
+        esac
+    done <<< "$_out"
+    return 0
+}
 # END PUBLISH HOLD (helper)
 
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     [ "$local_sha" = "$ZERO" ] && continue          # branch deletion
+# BEGIN PUBLISH HOLD
+    # EVERY non-deletion ref, tags and refs/wip/* included: this runs BEFORE the branch filter
+    # below, which skips them for the foreign check.
+    hold_scan_ref "$local_sha" "$remote_ref" "$remote_sha"
+# END PUBLISH HOLD
     # WHICH FIELD NAMES THE BRANCH DEPENDS ON THE PUSH FORM, and field 1 does not
     # always. `git push <remote> <branch>` sends `refs/heads/<branch>` in field 1;
     # a refspec push from a raw sha (`git push origin <sha>:experiments`) has no
@@ -360,25 +430,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         [ -n "${sha:-}" ] || continue
         commit_rows="${sha:0:8}"$'\x1f'"${sid:-}"$'\x1f'"${subject}"$'\n'"${commit_rows}"
         total_n=$((total_n + 1))
-# BEGIN PUBLISH HOLD
-        # BEFORE the ack test, the mine/foreign branches and the untrailered branch, and that
-        # ordering is the feature: an ack is the PUSHER's authority over another session's work,
-        # a hold is the AUTHOR saying "not yet", and CODESCOUT_PUSH_ACK=all must not outrank it.
-        # `acked` is NOT called for held commits: it accumulates `ack_matched`, which would make
-        # the ack notes report an authorisation that applied to nothing.
-        held_sid_of "${sid:-}"
-        if [ -n "$_held" ]; then
-            case ",$held_sids," in
-                *",$_held,"*) ;;
-                *) held_sids="${held_sids:+$held_sids,}$_held" ;;
-            esac
-            held_report="${held_report}    ${sha:0:8}  ${_held}  ${subject}"$'\n'
-            held_oldest_sha="$sha"
-            held_branch="${remote_ref#refs/heads/}"
-            held_remote_sha="$remote_sha"
-            continue
-        fi
-# END PUBLISH HOLD
         if [ -z "${sid:-}" ]; then
             untrailered_n=$((untrailered_n + 1))
             untrailered_report="${untrailered_report}    ${sha:0:8}  ${subject}"$'\n'
@@ -401,6 +452,12 @@ done
 # Refuses, and exits 1 itself, BEFORE the untrailered note and the ack notes: a held commit is
 # never part of the ordinary refuse-or-ack path. Text is printf lines, never an unquoted
 # heredoc (see the heredoc-backtick case in the test suite).
+if [ -z "$held_sids" ] && [ "$hold_unlistable" -eq 1 ]; then
+    printf '\n  REFUSING THE PUSH: PUBLISH HOLD. The push range could not be listed while holds exist,\n' >&2
+    printf '  so this guard cannot tell whether the push carries a held commit.\n\n' >&2
+    printf '  Run git fetch, check scripts/hold-publish.sh list, and push again once the range lists.\n\n' >&2
+    exit 1
+fi
 if [ -n "$held_sids" ]; then
     _resolve_lib_h="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
     if [ -r "$_resolve_lib_h" ]; then
@@ -436,6 +493,9 @@ if [ -n "$held_sids" ]; then
     done
     printf '  A hold is its author saying these commits are not ready. Do not publish them.\n' >&2
     printf '  Only the author, or the operator, can release it.\n\n' >&2
+    if [ "$hold_unlistable" -eq 1 ]; then
+        printf '  Another pushed ref could not be listed while holds exist; that one is refused too until it lists.\n\n' >&2
+    fi
 
     # The commits BELOW the oldest held one are not held, and pushing exactly that prefix is
     # allowed. Printed only when there is something in it to push.
@@ -452,7 +512,7 @@ if [ -n "$held_sids" ]; then
         fi
         if [ "$_below" -eq 1 ]; then
             printf '  The commits below the oldest held one are not held. To publish exactly those:\n\n' >&2
-            printf '    git push origin %s:%s\n\n' "$_parent" "$held_branch" >&2
+            printf '    git push %s %s:%s\n\n' "$push_remote" "$_parent" "$held_branch" >&2
             printf '  That prefix is still subject to the ordinary foreign-session check.\n\n' >&2
         else
             printf '  There is no prefix to push: nothing below the held commit is unpublished.\n\n' >&2
