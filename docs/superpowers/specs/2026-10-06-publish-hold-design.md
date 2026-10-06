@@ -95,7 +95,9 @@ release flow is not blocked.
 |---|---|
 | Hold for a dead session | Still refuses. Fails closed. The refusal names the release command. |
 | Hold forgotten | The refusal shows its age. The author or the operator releases it. |
-| `refs/holds` unreadable | The guard degrades to its current behaviour and prints one warning line. It never produces a wrong "held" claim. |
+| `refs/holds` unreadable | A hard git failure (an exit other than 0 or 1) prints one warning line, and the commits are treated as not held. It never produces a wrong "held" claim. A store that git reports as "no such ref" (a permission-denied directory, a broken ref) is not detected and fails open. That is a limit. |
+| A tag, annotated tag or `refs/wip/*` push | Checked like a branch push: the pushed sha is peeled to a commit, and one that is not a commit is skipped. Deletions are skipped. |
+| The push range cannot be listed | With the remote tip absent from the local store the range is everything not on a remote-tracking ref. If listing still fails while any hold exists, the push is refused. With no hold it behaves as before. |
 | Session sets a hold, then commits more | All its unpushed commits are held, because the key is the session. |
 | Prefix push below the first held commit | Still allowed. The ladder already supports it. |
 

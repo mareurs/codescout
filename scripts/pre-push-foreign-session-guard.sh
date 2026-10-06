@@ -70,7 +70,9 @@
 #     "mine" to compare against, so the guard has no predicate — a human running the
 #     release flow is exactly this case, and must not be blocked by a guard that cannot
 #     even form its question.
-#   - Non-branch refs (tags, notes). Nothing here is about them.
+#   - Non-branch refs (tags, notes), for the FOREIGN-SESSION check. Nothing here is about them.
+#     The HOLD check is the exception: it scans every pushed ref that is not a deletion, because a
+#     tag or refs/wip/x push publishes a commit exactly as a branch push does.
 
 set -uo pipefail
 

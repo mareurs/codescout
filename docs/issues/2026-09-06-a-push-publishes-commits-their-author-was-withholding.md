@@ -928,8 +928,14 @@ An author who must withhold its work runs `scripts/hold-publish.sh set <reason>`
 it and `list` shows every hold. `scripts/pre-push-foreign-session-guard.sh` refuses a push that carries any
 commit whose `Session-Id` trailer has a hold. It checks before the ack test, so neither `CODESCOUT_PUSH_ACK=all`
 nor an ack naming the sid clears it. It also refuses the pusher's own held commits. The refusal prints the sid,
-reason, age, state, the release command and the prefix below the oldest held commit that can still be pushed.
-An unreadable hold store prints one warning line and is treated as not held. The guard is still silent when
+reason, age, state and the release command. When something unpublished sits below the oldest held commit it also
+prints the prefix push that is still allowed (`git push <remote> <parent>:<branch>`, with the remote name the hook
+was given); otherwise it prints "There is no prefix to push". The hold check runs for every pushed ref except a
+deletion, so a tag, an annotated tag and a `refs/wip/*` push are covered, and the pushed sha is peeled to a commit
+(a tag of a tree or blob cannot carry one and is skipped). When the remote tip is not in the local object store the
+hold range is everything not on a remote-tracking ref, and when a range cannot be listed while any hold exists the
+push is refused. The one-line warning for an unreadable hold store covers hard git failures only, meaning an exit
+other than 0 or 1; a store failure that git itself reports as "no such ref" (a permission-denied `refs/holds` directory, a broken loose ref) is not detected and fails open. The guard is still silent when
 `CLAUDE_CODE_SESSION_ID` is empty. The rule and its limits are in
 `docs/conventions/shared-checkout-commit-sequence.md` § *A session that cannot publish must not commit*, with a
 bullet in `docs/RELEASE.md` § *Concurrent-Work Rules*.
@@ -945,11 +951,15 @@ the SHA does not survive a rebase (`docs/RELEASE.md` § *Citing a fix*):
 | `5b66ad64ea84fc8b955aead42427597ff7c65dab` | `ff2b406ee3fc8f7da518601f2ce5e0acb5154166` | the reason is flattened |
 | `57b00dc36213b3ebfbd7af28f5ca32b46029bc68` | `4362cb3f499b95feca4ef2e0b0c8a1a1038db68d` | the guard refuses held commits |
 | `e79f6a25e7212a21af6a55dacc07a9eb7b96fcba` | `81ee117d3fd9dd5f7556c984bc2b746a0dd240fe` | the guard's test pins |
+| `f7c928aab7d8eab03a4330d56edb3440a5fc7d3c` | `79c4a4fec36d1ecd8f960754ea23f84725327f07` | tag and other-ref pushes covered, an unlistable range fails closed, the prefix names the hook's remote, `release` checks its delete |
 
 **What the mechanism does not do.** A commit with no `Session-Id` trailer is not matched. A hold covers the
 whole session, not one commit. Nothing forces a session to set one. `release` is a convention: nothing proves
 the caller is the operator. And nothing stops a session from committing a change its operator said to hold,
-which is why the status stays `open`.
+which is why the status stays `open`. Further limits, all in
+`docs/conventions/shared-checkout-commit-sequence.md` § *Limits of the mechanism*: a push with no session id is
+not checked, a squash merge by another session launders the trailer, a checkout whose guard predates the hold
+check does not enforce it, and a store failure that git reports as "no such ref" is not detected.
 
 **Live check, 2026-10-06.** A bare remote and a clone with `core.hooksPath` set to a directory whose `pre-push`
 execs the worktree's guard with git's own stdin. Session `AAAA-1111` commits and holds. Session `BBBB-2222`
