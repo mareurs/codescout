@@ -807,7 +807,7 @@ token in prose, and **inline backticks do not escape it** — inline code is sca
 because that is how most real citations are written. A fenced code block is the only
 place a token is a literal: use one when the sentence is about the identifier itself
 (an id-allocation collision, say) rather than the entry it names. Left in prose, the
-token becomes a `cites` edge, and `link_scan(write=true)` materializes it.
+token becomes a `cites` edge, and `librarian(action="link_scan", write=true)` materializes it.
 
 Why this matters: measured 2026-08-17, ~400 ambiguous citations were ~12% of the
 project's total, 49 of 50 sampled were F/W, and the citers were the **durable**
