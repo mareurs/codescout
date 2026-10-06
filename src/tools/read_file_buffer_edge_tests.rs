@@ -469,3 +469,45 @@ async fn a_real_file_whole_read_of_escape_heavy_text_keeps_one_handle() {
         }
     }
 }
+
+/// A real-file range response also carries `coverage` (a markdown file read with
+/// `force=true` while sections stay unread), and `next` can resume at a many-digit line. Both
+/// are counted: the inline decision walks the edge in 5-byte steps with `coverage` present,
+/// and a clamped line at line 100 fills its page to the byte beside `coverage` and a
+/// three-digit `next`.
+#[tokio::test]
+async fn a_real_file_range_counts_coverage_and_the_digits_of_next() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let prime = |p: &str| json!({ "path": p, "start_line": 1, "end_line": 1, "force": true });
+    let mut covered = 0;
+    for size in (9_900..=10_000).step_by(5) {
+        let p = dir.path().join(format!("cov-{size}.md"));
+        let body = payload("a", size);
+        let n = body.lines().count();
+        std::fs::write(&p, format!("# Top\n{body}\n## Later\n")).unwrap();
+        let path = p.to_str().unwrap().to_string();
+        ReadFile.call(prime(&path), &ctx).await.unwrap();
+        let input = json!({ "path": path, "start_line": 2, "end_line": n + 1, "force": true });
+        let (v, _) = page(&ctx, &input, &path, &format!("coverage/{size}")).await;
+        covered += usize::from(v.get("coverage").is_some());
+    }
+    assert!(covered > 0, "no response carried coverage");
+    for (class, unit) in CLASSES {
+        let p = dir.path().join(format!("deep-{class}.md"));
+        let mut lines = vec!["# Top".to_string()];
+        lines.extend(vec!["short".to_string(); 98]);
+        lines.push(one_line(unit, 30_000));
+        lines.push("tail".into());
+        lines.push("## Later".into());
+        std::fs::write(&p, lines.join("\n")).unwrap();
+        let path = p.to_str().unwrap().to_string();
+        ReadFile.call(prime(&path), &ctx).await.unwrap();
+        let input = json!({ "path": path, "start_line": 100, "end_line": 101, "force": true });
+        let (v, _) = page(&ctx, &input, &path, &format!("deep md {class}")).await;
+        assert!(
+            v.get("coverage").is_some() && v.get("next").is_some(),
+            "deep md {class}: the page lacks coverage or next: {v:.300}"
+        );
+    }
+}
