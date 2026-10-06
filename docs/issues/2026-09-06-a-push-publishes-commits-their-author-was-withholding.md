@@ -918,8 +918,12 @@ SHA alone would not, observed rather than argued.
 
 ## Fix
 
-Not applied — the useful remedy is a convention, and it should be agreed rather
-than declared unilaterally by one session.
+**Convention written 2026-10-04, awaiting the operator's agreement; the mechanism question is still open.**
+The rule is in `docs/conventions/shared-checkout-commit-sequence.md` § *A session that cannot publish must
+not commit*, with a pointer bullet in `docs/RELEASE.md` § *Concurrent-Work Rules*. It is a policy: no hook
+reminds a session at the moment of the commit, so the bug stays `open`. It was not committed in this session.
+
+The original proposal follows, unchanged.
 
 **Proposed, in preference order:**
 
