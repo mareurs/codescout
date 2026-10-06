@@ -83,6 +83,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let new_rows = reconcile(&prior, &grouped, &files, &today);
     let n_open = new_rows.iter().filter(|r| r.status == "open").count() as u32;
     let n_closed = new_rows.iter().filter(|r| r.status == "closed").count();
+    let n_retired = new_rows.iter().filter(|r| r.status == "retired").count();
     let backlog = BacklogParams {
         candidates: new_rows,
         scan_meta: ScanMeta {
@@ -101,6 +102,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "tracker_error": format!("{e:#}"),
             "open": n_open,
             "closed": n_closed,
+            "retired": n_retired,
         }));
     }
 
@@ -110,6 +112,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "tracker_path": rel,
         "open": n_open,
         "closed": n_closed,
+        "retired": n_retired,
     }))
 }
 
@@ -199,6 +202,9 @@ pub struct CandidateRow {
     pub name_path: String,
     pub defects: Vec<String>,
     pub tier: u8,
+    /// `open`, `closed` (the defect was repaired, or the target is gone — see
+    /// `closed_reason`) or `retired` (the detector that produced the row no longer
+    /// exists, so nothing was repaired).
     pub status: String,
     pub measure: Measure,
     pub cost: Cost,
@@ -207,6 +213,11 @@ pub struct CandidateRow {
     pub before: Measure,
     pub after: Option<Measure>,
     pub closed_at: Option<String>,
+    /// Why a non-open row left `open`: `refactored`, `symbol_gone` or
+    /// `detector_removed`. Absent on rows closed before the field existed, and a
+    /// reader must treat absence as "unknown", never as "refactored".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_reason: Option<String>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -231,14 +242,30 @@ fn defect_str(d: Defect) -> &'static str {
         Defect::UnMappableFile => "un_mappable_file",
     }
 }
+/// Every defect kind the current scan can emit. Keep in step with `Defect` and
+/// `defect_str` (a new variant fails to compile in `defect_str`; list it here too).
+const LIVE_DEFECTS: [Defect; 2] = [Defect::OverBudgetBody, Defect::UnMappableFile];
+
+/// Is `s` a defect kind a scan can still produce? A persisted row may carry a kind whose
+/// detector has since been deleted (`name_collision`, retired 2026-06-13).
+fn is_live_defect(s: &str) -> bool {
+    LIVE_DEFECTS.iter().any(|d| defect_str(*d) == s)
+}
 
 /// Reconcile the prior backlog with the current scan. Two passes:
 /// 1. upsert every current candidate (update in place / insert new, preserving
-///    `first_seen` and `before`; re-open a regressed closed row);
-/// 2. auto-close every prior `open` row whose key is absent from the current scan —
-///    its defect is gone — recording `after` (re-measured) and `closed_at`.
+///    `first_seen` and `before`; re-open a regressed closed or retired row);
+/// 2. settle every prior `open` row whose key is absent from the current scan.
+///    Absence alone proves nothing: a deleted detector empties `current` exactly as a
+///    repair does. So the row's own `defects` decide what the absence means —
+///    - any defect kind no scan can emit any more -> `retired`, no `after` delta (the
+///      detector is gone; nothing was repaired);
+///    - every kind still live and the target re-measures -> `closed` / `refactored`,
+///      recording `after` and `closed_at`;
+///    - every kind still live but the target no longer resolves (renamed, deleted)
+///      -> `closed` / `symbol_gone`, no `after`.
 ///
-/// Closed rows are retained for history.
+/// Settled rows are retained for history.
 pub fn reconcile(
     prior: &BacklogParams,
     current: &[GroupedCandidate],
@@ -271,10 +298,11 @@ pub fn reconcile(
             row.measure = measure;
             row.cost = cost;
             row.score = c.score;
-            if row.status == "closed" {
+            if row.status == "closed" || row.status == "retired" {
                 row.status = "open".to_string(); // regression: defect returned
                 row.after = None;
                 row.closed_at = None;
+                row.closed_reason = None;
             }
         } else {
             rows.push(CandidateRow {
@@ -291,22 +319,39 @@ pub fn reconcile(
                 before: measure,
                 after: None,
                 closed_at: None,
+                closed_reason: None,
                 extra: serde_json::Map::new(),
             });
         }
     }
 
     for row in rows.iter_mut() {
-        if row.status == "open" && !current_keys.contains(row.key.as_str()) {
-            row.status = "closed".to_string();
-            row.closed_at = Some(today.to_string());
-            row.after = crate::legibility::measure_target(files, &row.rel_file, &row.name_path)
-                .map(|(tokens, lines)| Measure {
-                    tokens,
-                    budget: crate::tools::MAX_INLINE_TOKENS,
-                    lines,
-                });
+        if row.status != "open" || current_keys.contains(row.key.as_str()) {
+            continue;
         }
+        row.closed_at = Some(today.to_string());
+        if !row.defects.iter().all(|d| is_live_defect(d)) {
+            row.status = "retired".to_string();
+            row.closed_reason = Some("detector_removed".to_string());
+            row.after = None;
+            continue;
+        }
+        row.status = "closed".to_string();
+        row.after = crate::legibility::measure_target(files, &row.rel_file, &row.name_path).map(
+            |(tokens, lines)| Measure {
+                tokens,
+                budget: crate::tools::MAX_INLINE_TOKENS,
+                lines,
+            },
+        );
+        row.closed_reason = Some(
+            if row.after.is_some() {
+                "refactored"
+            } else {
+                "symbol_gone"
+            }
+            .to_string(),
+        );
     }
     rows
 }
@@ -588,10 +633,231 @@ mod tests {
         let rows2 = reconcile(&prior, &[], &[small_file()], "2026-06-14");
         assert_eq!(rows2.len(), 1, "closed rows stay for history");
         assert_eq!(rows2[0].status, "closed");
+        assert_eq!(rows2[0].closed_reason.as_deref(), Some("refactored"));
         assert_eq!(rows2[0].closed_at.as_deref(), Some("2026-06-14"));
         assert_eq!(rows2[0].before.tokens, 4180, "before preserved");
         let after = rows2[0].after.as_ref().expect("after delta recorded");
         assert!(after.tokens < 2500, "after is the now-sub-budget measure");
+    }
+    /// One open row for `Foo/big`, built through `reconcile` (so every field is a real
+    /// one), then stamped with the given defect strings — the way a row written by an
+    /// older detector roster looks in a persisted backlog.
+    fn prior_with_defects(defects: &[&str]) -> BacklogParams {
+        let g = grouped("src/foo.rs::Foo/big", "Foo/big", 4180, Friction::default());
+        let mut rows = reconcile(&BacklogParams::default(), &[g], &[], "2026-06-13");
+        rows[0].defects = defects.iter().map(|s| s.to_string()).collect();
+        BacklogParams {
+            candidates: rows,
+            scan_meta: Default::default(),
+        }
+    }
+
+    /// The claim of the fix: a removed detector and a repaired defect hand `reconcile`
+    /// the byte-identical input (`current` empty, same re-measurable file), and the two
+    /// must come out as different terminal states. Asserting a label alone would pass
+    /// on a rule that stamped everything with it, so the two outcomes are compared.
+    #[test]
+    fn reconcile_tells_a_retired_detector_from_a_repaired_defect() {
+        let files = [small_file()];
+
+        // Detector gone: the row's only defect is a kind no scan can emit any more.
+        let retired = reconcile(
+            &prior_with_defects(&["name_collision"]),
+            &[],
+            &files,
+            "2026-06-14",
+        );
+        assert_eq!(retired[0].status, "retired");
+        assert_eq!(
+            retired[0].closed_reason.as_deref(),
+            Some("detector_removed")
+        );
+        assert!(
+            retired[0].after.is_none(),
+            "no before->after delta for a repair that never happened: {:?}",
+            retired[0].after
+        );
+
+        // Positive twin: same absence, but the defect kind is live and the body re-measures
+        // small -> a genuine repair, with its delta.
+        let repaired = reconcile(
+            &prior_with_defects(&["over_budget_body"]),
+            &[],
+            &files,
+            "2026-06-14",
+        );
+        assert_eq!(repaired[0].status, "closed");
+        assert_eq!(repaired[0].closed_reason.as_deref(), Some("refactored"));
+        assert!(repaired[0].after.is_some(), "refactor records its delta");
+
+        assert_ne!(
+            retired[0].status, repaired[0].status,
+            "the two causes must be distinguishable"
+        );
+    }
+
+    /// A row with one retired kind among live ones is not a repair either: "every defect
+    /// is still producible" is the precondition for reading absence as a repair.
+    #[test]
+    fn reconcile_retires_a_row_carrying_any_retired_defect_kind() {
+        let rows = reconcile(
+            &prior_with_defects(&["over_budget_body", "name_collision"]),
+            &[],
+            &[small_file()],
+            "2026-06-14",
+        );
+        assert_eq!(rows[0].status, "retired");
+        assert!(rows[0].after.is_none());
+    }
+
+    /// The other roster-independent cause: a live-detector row whose target no longer
+    /// exists (renamed / deleted) cannot be re-measured, so it is not a "refactored" row
+    /// either — and it keeps `status == "closed"` because the detector is not at fault.
+    #[test]
+    fn reconcile_closes_a_vanished_target_as_symbol_gone() {
+        let rows = reconcile(
+            &prior_with_defects(&["over_budget_body"]),
+            &[],
+            &[], // no parsed files: measure_target returns None
+            "2026-06-14",
+        );
+        assert_eq!(rows[0].status, "closed");
+        assert_eq!(rows[0].closed_reason.as_deref(), Some("symbol_gone"));
+        assert!(rows[0].after.is_none());
+        assert_eq!(rows[0].closed_at.as_deref(), Some("2026-06-14"));
+    }
+
+    /// Both live kinds count as producible (positive control for the roster: a roster
+    /// that rejected `un_mappable_file` would retire every file-level row).
+    #[test]
+    fn every_producible_defect_kind_is_live_and_a_removed_one_is_not() {
+        for d in [Defect::OverBudgetBody, Defect::UnMappableFile] {
+            assert!(is_live_defect(defect_str(d)), "{d:?} must be live");
+        }
+        assert!(!is_live_defect("name_collision"));
+        assert!(!is_live_defect(""));
+    }
+
+    /// A closed or retired row whose candidate shows up in a later scan is open again
+    /// and sheds its terminal reason.
+    #[test]
+    fn reconcile_reopens_a_regressed_row_and_clears_its_reason() {
+        let key = "src/foo.rs::Foo/big";
+        for (defects, want) in [
+            (&["over_budget_body"][..], "closed"),
+            (&["name_collision"][..], "retired"),
+        ] {
+            let ended = BacklogParams {
+                candidates: reconcile(&prior_with_defects(defects), &[], &[small_file()], "d2"),
+                scan_meta: Default::default(),
+            };
+            assert_eq!(ended.candidates[0].status, want);
+            assert!(ended.candidates[0].closed_reason.is_some());
+
+            let back = reconcile(
+                &ended,
+                &[grouped(key, "Foo/big", 4000, Friction::default())],
+                &[],
+                "d3",
+            );
+            assert_eq!(back[0].status, "open", "{want} row re-opens");
+            assert!(back[0].closed_reason.is_none());
+            assert!(back[0].closed_at.is_none());
+            assert!(back[0].after.is_none());
+            assert_eq!(back[0].defects, vec!["over_budget_body".to_string()]);
+        }
+    }
+
+    /// Params written before `closed_reason` existed must still load, and must not grow
+    /// a `closed_reason` key when written back (absence = "unknown", never "refactored").
+    #[test]
+    fn legacy_rows_without_closed_reason_load_and_round_trip_unchanged() {
+        let legacy = json!({
+            "key": "k", "rel_file": "f.rs", "name_path": "a/b",
+            "defects": ["name_collision"], "tier": 2, "status": "closed",
+            "measure": {"tokens": 0, "budget": 0, "lines": 0},
+            "cost": {"truncations": 0, "edit_fails": 0, "sessions": 0},
+            "score": 1, "first_seen": "2026-06-01",
+            "before": {"tokens": 0, "budget": 0, "lines": 0},
+            "after": null, "closed_at": "2026-06-13"
+        });
+        let row: CandidateRow = serde_json::from_value(legacy).unwrap();
+        assert!(row.closed_reason.is_none());
+        assert!(
+            row.extra.is_empty(),
+            "closed_reason must not leak into extra"
+        );
+        let back = serde_json::to_value(&row).unwrap();
+        assert!(back.get("closed_reason").is_none());
+
+        let with_reason = CandidateRow {
+            closed_reason: Some("refactored".into()),
+            ..row
+        };
+        let back = serde_json::to_value(&with_reason).unwrap();
+        assert_eq!(back["closed_reason"], "refactored");
+        let again: CandidateRow = serde_json::from_value(back).unwrap();
+        assert_eq!(again.closed_reason.as_deref(), Some("refactored"));
+    }
+
+    /// The tracker body must not call a retired row "refactored". Sections are cut at
+    /// their headings so a key appearing under the wrong one fails, not just a key
+    /// appearing somewhere.
+    #[test]
+    fn render_files_retired_rows_outside_the_refactored_table() {
+        let files = [small_file()];
+        let mut cands = Vec::new();
+        for (defects, key_tag) in [
+            (&["over_budget_body"][..], "refactored"),
+            (&["name_collision"][..], "retired"),
+        ] {
+            let mut p = prior_with_defects(defects);
+            p.candidates[0].key = format!("k::{key_tag}");
+            cands.extend(reconcile(&p, &[], &files, "2026-06-14"));
+        }
+        let mut gone = prior_with_defects(&["over_budget_body"]);
+        gone.candidates[0].key = "k::symbol_gone".into();
+        cands.extend(reconcile(&gone, &[], &[], "2026-06-14"));
+        let mut legacy = prior_with_defects(&["name_collision"]);
+        legacy.candidates[0].key = "k::legacy".into();
+        legacy.candidates[0].status = "closed".into(); // pre-closed_reason row
+        legacy.candidates[0].closed_at = Some("2026-06-13".into());
+        cands.extend(legacy.candidates);
+
+        let params = BacklogParams {
+            candidates: cands,
+            scan_meta: Default::default(),
+        };
+        let md = crate::librarian::tools::render::render_params(
+            include_str!("./render_template.j2"),
+            &serde_json::to_value(&params).unwrap(),
+        )
+        .unwrap();
+
+        let section = |start: &str| -> String {
+            let from = md
+                .find(start)
+                .unwrap_or_else(|| panic!("no `{start}` in:\n{md}"));
+            let rest = &md[from + start.len()..];
+            let to = rest.find("\n### ").unwrap_or(rest.len());
+            rest[..to].to_string()
+        };
+        let refactored = section("### Closed (refactored");
+        let gone_s = section("### Closed (target gone");
+        let unknown = section("### Closed (reason not recorded");
+        let retired = section("### Retired");
+
+        assert!(refactored.contains("k::refactored"));
+        assert!(!refactored.contains("k::retired"), "{refactored}");
+        assert!(!refactored.contains("k::symbol_gone"), "{refactored}");
+        assert!(!refactored.contains("k::legacy"), "{refactored}");
+        assert!(gone_s.contains("k::symbol_gone"));
+        assert!(unknown.contains("k::legacy"));
+        assert!(!unknown.contains("k::retired"));
+        assert!(retired.contains("k::retired"));
+        assert!(!retired.contains("k::refactored"));
+        // the "cleared" claim lives only in the refactored section
+        assert!(!md.contains("defects cleared") || refactored.contains("defects cleared"));
     }
 
     use crate::librarian::catalog::Catalog;

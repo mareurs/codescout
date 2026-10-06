@@ -144,6 +144,17 @@ fi
 # CLOSED — nothing was written — which is exactly why it survived a passing test of
 # the outcome. Caught by asserting on the MESSAGE, not on the exit code.
 MINE=$(printf '%s\n' "$PROV" | awk '$1=="MINE"{ $1=""; sub(/^ +/,""); print }')
+# `CLEAN` is the provenance scan's verdict for a path a peer wrote but git reports with NO
+# uncommitted bytes: nothing of anyone's is at risk, so formatting it overwrites no one's work.
+# It was SHARED/PEER before, and a hard stop with no --force over a file nobody holds bytes in.
+# A token this partition does not name is silently in NEITHER list, which would leave the file
+# unformatted and unexplained, so it is named here and formatted with this session's own.
+CLEAN=$(printf '%s\n' "$PROV" | awk '$1=="CLEAN"{ $1=""; sub(/^ +/,""); print }')
+if [ -n "$CLEAN" ]; then
+    echo "fmt-mine: git reports these CLEAN (no uncommitted bytes from anyone), so they are formatted with this session's own:" >&2
+    printf '  %s\n' $CLEAN >&2
+    MINE=$(printf '%s\n%s\n' "$MINE" "$CLEAN" | sed '/^$/d')
+fi
 NOT_MINE=$(printf '%s\n' "$PROV" \
     | awk '$1=="SHARED"||$1=="PEER"||$1=="UNKNOWN"{ $1=""; sub(/^ +/,""); print }')
 
@@ -151,7 +162,7 @@ NOT_MINE=$(printf '%s\n' "$PROV" \
 # $NOT_MINE above, which is a bare path list for feeding a command. A continuation line
 # never matches a verdict in $1, so it inherits the disposition of the row above it.
 NOT_MINE_ROWS=$(printf '%s\n' "$PROV" | awk '
-    $1=="MINE" { drop=1; next }
+    $1=="MINE"||$1=="CLEAN" { drop=1; next }
     $1=="SHARED"||$1=="PEER"||$1=="UNKNOWN" { drop=0 }
     !drop')
 

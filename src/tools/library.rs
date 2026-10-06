@@ -668,6 +668,10 @@ mod tests {
             // has been undone; if it reads 3 the two accessors have been given real types and
             // should leave `accepts_any_json`.
             1,
+            // Pinned from `sweep`'s own `unlabelled`, read 2026-10-05: nothing is skipped for want
+            // of a label here (`name` and `language` are skipped as `accepts_any_json`, which
+            // `assert_all_honored` reconciles against the spec on its own).
+            &[],
             |args| async move { Library.call(args, &project_ctx().await).await },
         )
         .await;

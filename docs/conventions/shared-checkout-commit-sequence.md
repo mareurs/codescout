@@ -277,6 +277,34 @@ back to an unattributed row, so check the log row rather than trusting that the 
 precondition of the section above still holds: you must be able to reconstruct the file with only
 your hunks, which is impossible where your lines and theirs overlap. That is a merge, not a split.
 
+## A session that cannot publish must not commit
+
+The rule: a session that cannot publish leaves the change in the working tree and does not commit it.
+
+**Why.** `git push` sends every commit on the branch, not only the pusher's own. A commit that its author is
+withholding pending an operator's say-so is byte-identical to a commit that is merely not pushed yet. Nothing
+in git records the difference, so any peer's push publishes it. A held commit also blocks every authorised
+commit stacked above it, because a push is all-or-nothing over the branch. Nothing announces the block until
+somebody tries to push. An uncommitted change cannot be carried out by anybody.
+
+**This rule needs no coordination.** It holds for a peer that never read it. That is its advantage over every
+freeze protocol.
+
+**What you do instead of committing:**
+
+- Leave the change dirty in the working tree.
+- Or save it to a patch file or a stash.
+
+**What you must not reach for.** A scratch branch is not available on a shared checkout. `git checkout -b` moves
+the working tree for every session in it.
+
+**Scope.** This rule covers the author side. The pusher side is separate: re-derive the range and send the
+decided set by SHA. That rule is in `docs/RELEASE.md` § *Concurrent-Work Rules*.
+
+**Status.** This is a policy, not a mechanism. No hook reminds a session at the moment of the commit. The
+open question of a mechanism is recorded in
+`docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`.
+
 ## The empty intersection, which no sequence fixes
 
 `foreign-index` accepts **only** a pathspec commit when the index holds a peer's paths.

@@ -244,6 +244,29 @@ mod tests {
             // `crate::tools::param_probe::assert_all_honored` for why the margin between
             // floor and count is the number of labels that can go missing in silence.
             28,
+            // Pinned from `sweep`'s own `unlabelled`, read 2026-10-05: THIRTEEN keys are not
+            // probed at all, and this list is that debt made visible rather than a pass.
+            // Ten are labelled `audit_log:` but `audit_log` is not in `spec.actions` above, so
+            // the whole action is unswept; `write` opens `legibility_scan (default true): …`,
+            // `root`/`confirm` open `doctor fix=…`, and `old_root`/`new_root` open
+            // `For fix=rehome:` — each reads as a label naming no action. Clearing an entry
+            // means relabelling the key to a bare `<action>:` (or adding the action to
+            // `spec.actions` with a `required` arm), which then moves `floor` too.
+            &[
+                "actor",
+                "confirm",
+                "export",
+                "new_root",
+                "old_root",
+                "op",
+                "prune_before_ms",
+                "root",
+                "row_id",
+                "since",
+                "tbl",
+                "until",
+                "write",
+            ],
             |args| async move { Librarian.call(&mk_ctx(), args).await },
         )
         .await;

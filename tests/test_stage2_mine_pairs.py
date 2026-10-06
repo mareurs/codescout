@@ -217,6 +217,50 @@ class MineKeepsEachSidesContext(unittest.TestCase):
     def test_no_row_carries_the_old_single_sided_paragraph_field(self):
         (row,) = self.mine_one()
         self.assertNotIn("paragraph", row)
+class TwinInContextBefore(unittest.TestCase):
+    """`twin_in_context_before`: the correction already sits in the positive's own context window.
+
+    docs/issues/2026-10-01-residual-mined-rows-with-the-twin-already-in-context-before.md: the
+    freeze builds a mined positive from `context_before` and its negative from `context_after`
+    (the twin), so a row whose `context_before` already contains the twin hands the model the
+    correction beside the sentence it corrects -- the label leak the miner's context re-centring
+    was meant to remove.
+    """
+
+    @staticmethod
+    def _row(twin, before):
+        return {"positive": "the old sentence.", "twin": twin, "context_before": before}
+
+    def test_a_twin_inside_context_before_is_flagged(self):
+        row = self._row("The fix is here.", "Intro. The fix is here. the old sentence. Outro.")
+        self.assertTrue(mp.twin_in_context_before(row))
+
+    def test_the_comparison_ignores_whitespace_differences(self):
+        # Whitespace-normalised, as the issue's measurement was: a twin split across a line break
+        # in the window is still the same text.
+        row = self._row("The fix  is\nhere.", "Intro. The fix is here. the old sentence.")
+        self.assertTrue(mp.twin_in_context_before(row))
+
+    def test_a_twin_absent_from_context_before_is_not_flagged(self):
+        # Twin of the first case: without it a function returning True for every row passes.
+        row = self._row("The fix is here.", "Intro. the old sentence. Outro.")
+        self.assertFalse(mp.twin_in_context_before(row))
+
+    def test_a_row_with_no_twin_is_not_flagged(self):
+        # `"" in text` is True in Python, so an unguarded containment check would flag every row
+        # that has no twin -- 9 of the 944 committed rows -- as leaking.
+        self.assertFalse(mp.twin_in_context_before(self._row(None, "anything")))
+        self.assertFalse(mp.twin_in_context_before(self._row("", "anything")))
+
+    def test_the_committed_candidates_flag_exactly_the_ten_rows_the_issue_measured(self):
+        # Tie the predicate to the measurement it came from (0-based line order), so a
+        # predicate that is too loose or too strict on real text fails here.
+        rows = [json.loads(l) for l in (STAGE2 / "mined-candidates.jsonl").read_text().splitlines()]
+        flagged = [i for i, r in enumerate(rows) if mp.twin_in_context_before(r)]
+        self.assertEqual(flagged, [267, 327, 439, 534, 592, 593, 677, 810, 929, 941])
+
+
+
 class MineKeepsNoteContext(unittest.TestCase):
     """The same separation for the OTHER row kind: a kept sentence with a correction note appended.
 

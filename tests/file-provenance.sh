@@ -659,6 +659,188 @@ tool_use "$B" mcp__codescout__edit_file '{"path":"src/never_committed.rs","old_s
 has "an uncommitted path keeps its full history" "$(run src/never_committed.rs)" "$PEER"
 
 echo
+echo "== a REFUSED write is not a write -- and a CLEAN path has nothing at risk =="
+# docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md
+#
+# Two false-POSITIVE causes, one consequence at the point of use (fmt-mine refuses on SHARED):
+#   1. A tool_use block is a REQUEST. A refused edit is the same token as a landed one, and
+#      only the paired tool_result tells them apart. A codescout refusal does NOT set
+#      `is_error` -- RecoverableError maps to isError:false -- so it arrives as text,
+#      `{"ok": false, ...}`; only the harness's own refusals set the flag.
+#   2. SHARED / PEER assert that another party's UNCOMMITTED bytes are in the path. On a path
+#      git reports clean, a session's earlier write is history already in HEAD.
+#
+# Every negative below is paired with a positive twin that MUST still name the writer. The
+# negatives are absence assertions, monotone under "report nothing, ever"; the twins are what
+# make them evidence. The direction this tool refuses to err in -- UNKNOWN rendered as absence
+# -- is guarded by the Bash case and by every no-result fixture in the suite above.
+FUT="2099-01-01T00:00:00.000Z"      # after any floor a just-made commit can derive
+NSEQ=0
+
+# emit_use <file> <id> <tool> <input-json> [ts]   -- a tool_use block that carries an id
+emit_use() {
+    python3 - "$1" "$2" "$3" "$4" "${5:-}" <<'PY'
+import json, sys
+f, tid, name, inp, ts = sys.argv[1:6]
+rec = {"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "id": tid, "name": name, "input": json.loads(inp)}]}}
+if ts:
+    rec["timestamp"] = ts
+open(f, "a").write(json.dumps(rec) + "\n")
+PY
+}
+
+# emit_result <file> <id> <result-text> <is_error:0|1>  -- the user record that answers it,
+# shaped like a real one: a list of text parts, `is_error` ABSENT unless the harness set it.
+emit_result() {
+    python3 - "$1" "$2" "$3" "$4" <<'PY'
+import json, sys
+f, tid, text, err = sys.argv[1:5]
+blk = {"type": "tool_result", "tool_use_id": tid, "content": [{"type": "text", "text": text}]}
+if err == "1":
+    blk["is_error"] = True
+rec = {"type": "user", "message": {"content": [blk]}}
+open(f, "a").write(json.dumps(rec) + "\n")
+PY
+}
+
+# call_result <file> <tool> <input-json> <result-text> <is_error>  -> a call and its answer
+call_result() {
+    NSEQ=$((NSEQ + 1))
+    emit_use "$1" "toolu_fx$NSEQ" "$2" "$3" "$FUT"
+    emit_result "$1" "toolu_fx$NSEQ" "$4" "$5"
+}
+
+# seed <path>    -- tracked, committed, CLEAN        dirty <path>  -- then give it uncommitted bytes
+seed() {
+    mkdir -p "$T/repo/$(dirname "$1")"
+    echo "v1" > "$T/repo/$1"
+    git -C "$T/repo" add "$1"
+    git -C "$T/repo" commit -q -m "seed $1"
+}
+dirty() { echo "uncommitted" >> "$T/repo/$1"; }
+verdict_of() { printf '%s' "$1" | head -1 | awk '{print $1}'; }
+
+OK_CS='{"status": "ok", "rel_path": "x"}'
+REFUSED_CS='{"ok": false, "error": "old_string not found in src/x.rs", "hint": "Copy the actual bytes"}'
+edit_in() { printf '{"path":"%s","old_string":"a","new_string":"b"}' "$1"; }
+
+# --- 1. a codescout refusal (is_error ABSENT) --------------------------------------------
+seed src/rf_cs.rs; dirty src/rf_cs.rs
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/rf_cs.rs)" "$OK_CS" 0
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/rf_cs.rs)" "$REFUSED_CS" 0
+out="$(run src/rf_cs.rs)"
+eq    "a refused codescout edit does not make the path SHARED -- the peer alone is PEER" "$(verdict_of "$out")" "PEER"
+hasnt "and the refused session is not named as a writer" "$out" "THIS session"
+has   "while the peer's landed write is still named" "$out" "$PEER"
+
+seed src/rf_cs_twin.rs; dirty src/rf_cs_twin.rs
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/rf_cs_twin.rs)" "$OK_CS" 0
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/rf_cs_twin.rs)" "$OK_CS" 0
+out="$(run src/rf_cs_twin.rs)"
+eq  "TWIN: the same call LANDED -> SHARED" "$(verdict_of "$out")" "SHARED"
+has "TWIN: and this session is named" "$out" "THIS session"
+has "TWIN: and so is the peer" "$out" "$PEER"
+
+# --- 2. a harness refusal (is_error TRUE) on a native tool ---------------------------------
+seed src/rf_native.rs; dirty src/rf_native.rs
+call_result "$B" Edit '{"file_path":"src/rf_native.rs","old_string":"a","new_string":"b"}' \
+    "The file src/rf_native.rs has been updated successfully." 0
+call_result "$A" Edit '{"file_path":"src/rf_native.rs","old_string":"a","new_string":"b"}' \
+    "<tool_use_error>File has not been read yet.</tool_use_error>" 1
+out="$(run src/rf_native.rs)"
+eq    "a native Edit refused with is_error is not a write" "$(verdict_of "$out")" "PEER"
+hasnt "and the refused session is not named" "$out" "THIS session"
+
+seed src/rf_native_twin.rs; dirty src/rf_native_twin.rs
+call_result "$B" Edit '{"file_path":"src/rf_native_twin.rs","old_string":"a","new_string":"b"}' "updated successfully" 0
+call_result "$A" Edit '{"file_path":"src/rf_native_twin.rs","old_string":"a","new_string":"b"}' "updated successfully" 0
+eq "TWIN: the native Edit landed -> SHARED" "$(verdict_of "$(run src/rf_native_twin.rs)")" "SHARED"
+
+# --- 3. the out-of-project write that was never acknowledged -------------------------------
+seed src/rf_ack.rs; dirty src/rf_ack.rs
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/rf_ack.rs)" "$OK_CS" 0
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/rf_ack.rs)" \
+    '{"pending_ack": "@ack_deadbeef", "reason": "outside the project root"}' 0
+out="$(run src/rf_ack.rs)"
+eq "an edit parked on pending_ack wrote nothing" "$(verdict_of "$out")" "PEER"
+
+seed src/rf_ack_twin.rs; dirty src/rf_ack_twin.rs
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/rf_ack_twin.rs)" "$OK_CS" 0
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/rf_ack_twin.rs)" '"ok"' 0
+eq "TWIN: the bare \"ok\" result of a landed write -> SHARED" \
+    "$(verdict_of "$(run src/rf_ack_twin.rs)")" "SHARED"
+
+# --- 4. the peer's refusal, and MY landed write --------------------------------------------
+seed src/rf_peer.rs; dirty src/rf_peer.rs
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/rf_peer.rs)" "$OK_CS" 0
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/rf_peer.rs)" "$REFUSED_CS" 0
+out="$(run src/rf_peer.rs)"
+eq    "a PEER's refused edit does not make my path SHARED" "$(verdict_of "$out")" "MINE"
+hasnt "and the refusing peer is not named" "$out" "$PEER"
+
+# --- 5. pairing is by id, not position ----------------------------------------------------
+# Two parallel calls whose results come back swapped. A pairing that applied "the next result"
+# to "the last call" would credit P1 and discard P2, or the reverse.
+seed src/rf_p1.rs; dirty src/rf_p1.rs
+seed src/rf_p2.rs; dirty src/rf_p2.rs
+emit_use "$A" toolu_par1 mcp__codescout__edit_file "$(edit_in src/rf_p1.rs)" "$FUT"
+emit_use "$A" toolu_par2 mcp__codescout__edit_file "$(edit_in src/rf_p2.rs)" "$FUT"
+emit_result "$A" toolu_par2 "$OK_CS" 0
+emit_result "$A" toolu_par1 "$REFUSED_CS" 0
+eq "the refused call (issued first, answered last) is not a write" \
+    "$(verdict_of "$(run src/rf_p1.rs)")" "UNKNOWN"
+eq "the landed call (issued second, answered first) is" \
+    "$(verdict_of "$(run src/rf_p2.rs)")" "MINE"
+
+# --- 6. the direction this tool refuses to err in -----------------------------------------
+# A shell command that exits non-zero may still have written. Dropping it on is_error would turn
+# "the command failed" into "the command wrote nothing" -- a false NEGATIVE.
+seed src/rf_bash.rs; dirty src/rf_bash.rs
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/rf_bash.rs)" "$OK_CS" 0
+call_result "$A" Bash '{"command":"sed -i s/a/b/ src/rf_bash.rs && false","description":"edit"}' \
+    "Exit code 1" 1
+out="$(run src/rf_bash.rs)"
+eq  "a Bash write that exited non-zero STILL counts" "$(verdict_of "$out")" "SHARED"
+has "and is attributed to this session" "$out" "THIS session"
+
+# --- 7. a CLEAN path has nothing at risk -------------------------------------------------
+seed src/cl_peer.rs
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/cl_peer.rs)" "$OK_CS" 0
+out="$(run src/cl_peer.rs)"
+eq  "a peer's write to a path git reports CLEAN is not PEER" "$(verdict_of "$out")" "CLEAN"
+has "and the output says nothing is at risk" "$out" "nothing is at risk"
+dirty src/cl_peer.rs
+eq  "TWIN: the same record on the same path once DIRTY -> PEER" \
+    "$(verdict_of "$(run src/cl_peer.rs)")" "PEER"
+has "TWIN: and names the peer" "$(run src/cl_peer.rs)" "$PEER"
+
+seed src/cl_shared.rs
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/cl_shared.rs)" "$OK_CS" 0
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/cl_shared.rs)" "$OK_CS" 0
+eq "a committed shared write on a CLEAN path is not SHARED" \
+    "$(verdict_of "$(run src/cl_shared.rs)")" "CLEAN"
+dirty src/cl_shared.rs
+eq "TWIN: the same record once DIRTY -> SHARED" \
+    "$(verdict_of "$(run src/cl_shared.rs)")" "SHARED"
+
+# MINE on a clean path is untouched: only the two verdicts that name ANOTHER party's bytes moved.
+seed src/cl_mine.rs
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/cl_mine.rs)" "$OK_CS" 0
+eq "MINE on a CLEAN path stays MINE" "$(verdict_of "$(run src/cl_mine.rs)")" "MINE"
+
+# git cannot vouch for a path it does not track, so no clearance is licensed there.
+call_result "$B" mcp__codescout__edit_file "$(edit_in src/cl_untracked.rs)" "$OK_CS" 0
+eq "an UNTRACKED path with a peer write is still PEER" \
+    "$(verdict_of "$(run src/cl_untracked.rs)")" "PEER"
+
+# The two fixes compose: a refused write on a CLEAN path leaves nothing to name at all.
+seed src/cl_refused.rs
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/cl_refused.rs)" "$REFUSED_CS" 0
+eq "a refused write on a CLEAN path is UNKNOWN, not CLEAN" \
+    "$(verdict_of "$(run src/cl_refused.rs)")" "UNKNOWN"
+
+echo
 echo "== a sessionId is an ADDRESS, not just evidence -- the registry join =="
 #
 # The bug: the tool named a session and stopped, so every answer cost a round trip

@@ -9,6 +9,11 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     }
     let conn = Connection::open(&path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    // Exactly two tables are created here, and the analyze-usage skill's clear step is
+    // pinned to that set (`analyze_usage_clear_step_names_exactly_the_tables_open_db_creates`).
+    // `call_edges` is deliberately not one of them: its live store is
+    // `.codescout/call_edges.db` (`tools/symbol/call_edges/cache.rs`). A `usage.db`
+    // created before this was removed keeps its empty `call_edges`; nothing reads it.
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
 
@@ -29,22 +34,7 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
             reason            TEXT NOT NULL,
             handshake_ms      INTEGER NOT NULL,
             first_response_ms INTEGER
-        );
-
-        CREATE TABLE IF NOT EXISTS call_edges (
-            project_id   TEXT NOT NULL,
-            caller_sym   TEXT NOT NULL,
-            callee_sym   TEXT NOT NULL,
-            file         TEXT NOT NULL,
-            line         INTEGER NOT NULL,
-            col          INTEGER NOT NULL,
-            source       TEXT NOT NULL,
-            computed_at  INTEGER NOT NULL,
-            PRIMARY KEY (project_id, caller_sym, callee_sym, file, line, col)
-        );
-        CREATE INDEX IF NOT EXISTS call_edges_caller ON call_edges(project_id, caller_sym);
-        CREATE INDEX IF NOT EXISTS call_edges_callee ON call_edges(project_id, callee_sym);
-        CREATE INDEX IF NOT EXISTS call_edges_file   ON call_edges(project_id, file);",
+        );",
     )?;
 
     // Migration: add traceability columns (v0.9)
@@ -127,7 +117,7 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     // body returned, so it is a completion instant under a name that states the start.
     // It is NOT derivable as `called_at - latency_ms`: `latency_ms` times only
     // `f().await`, while the INSERT additionally follows `with_project_at`, a
-    // `worktree_main_root` probe and a full `open_db` (three CREATE TABLEs, five
+    // `worktree_main_root` probe and a full `open_db` (two CREATE TABLEs, five
     // migration probes, `backfill_legacy_rows`, and a 5s `busy_timeout` on contention).
     // That overhead is unbounded and unmeasured, so the start is captured where it is
     // actually known — in `UsageRecorder::record_content`, beside `Instant::now()` —
@@ -1300,6 +1290,112 @@ mod tests {
         // table exists if this doesn't error
         conn.execute("SELECT 1 FROM tool_calls LIMIT 0", [])
             .unwrap();
+    }
+    /// The tables the analyze-usage skill's "Clear each DB" step deletes from.
+    ///
+    /// Reads only that section, so a `DELETE FROM` quoted elsewhere in the skill
+    /// (an example, a warning) is not mistaken for the clear step.
+    fn clear_step_tables(skill_md: &str) -> std::collections::BTreeSet<String> {
+        const HEADING: &str = "### 3. Clear each DB";
+        let start = skill_md
+            .find(HEADING)
+            .unwrap_or_else(|| panic!("SKILL.md has no `{HEADING}` section"));
+        let body = &skill_md[start + HEADING.len()..];
+        let end = ["\n## ", "\n### "]
+            .iter()
+            .filter_map(|h| body.find(h))
+            .min()
+            .unwrap_or(body.len());
+        let re = regex::Regex::new(r"(?i)DELETE\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
+        re.captures_iter(&body[..end])
+            .map(|c| c[1].to_string())
+            .collect()
+    }
+
+    /// Every user table a fresh `open_db` leaves behind (SQLite's own
+    /// `sqlite_sequence` bookkeeping table excluded).
+    fn created_tables(conn: &Connection) -> std::collections::BTreeSet<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+            )
+            .unwrap();
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+        rows.map(|r| r.unwrap()).collect()
+    }
+
+    /// The skill's clear step ran `DELETE FROM call_edges` against `usage.db` for
+    /// months after the table had stopped being a real store, and would have turned
+    /// into `no such table` the moment its DDL was dropped. Pin the two together:
+    /// the step must name exactly the tables `open_db` creates — per member, in both
+    /// directions, so a table added to `open_db` and forgotten here is as loud as a
+    /// table dropped from `open_db` and left here.
+    /// docs/issues/2026-09-21-usage-db-creates-a-call-edges-table-nothing-ever-reads.md
+    #[test]
+    fn analyze_usage_clear_step_names_exactly_the_tables_open_db_creates() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".claude/skills/analyze-usage/SKILL.md");
+        let skill = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let (_dir, conn) = tmp();
+
+        let named = clear_step_tables(&skill);
+        let created = created_tables(&conn);
+
+        // A parser that matched nothing, or a db that created nothing, would make
+        // the two empty sets "equal" — refuse that vacuous pass.
+        assert!(!created.is_empty(), "open_db created no tables");
+        assert!(
+            !named.is_empty(),
+            "no `DELETE FROM` found in the clear step"
+        );
+
+        let stale: Vec<_> = named.difference(&created).collect();
+        let missing: Vec<_> = created.difference(&named).collect();
+        assert!(
+            stale.is_empty(),
+            "the clear step in SKILL.md deletes from table(s) open_db does not create \
+             (`no such table` on a fresh db): {stale:?}"
+        );
+        assert!(
+            missing.is_empty(),
+            "open_db creates table(s) the clear step in SKILL.md never clears: {missing:?}"
+        );
+    }
+
+    /// Negative control for the test above: the comparison must actually see both
+    /// kinds of drift, and the parser must read only its own section. Without this
+    /// an always-equal implementation would satisfy the real test.
+    #[test]
+    fn clear_step_check_sees_a_stale_table_a_missing_table_and_ignores_other_sections() {
+        let set = |names: &[&str]| -> std::collections::BTreeSet<String> {
+            names.iter().map(|s| s.to_string()).collect()
+        };
+        // A fixed stand-in for what `open_db` creates, so this control does not move
+        // when a table is legitimately added (the real test above is what tracks that).
+        let created = set(&["lsp_events", "tool_calls"]);
+        // The pre-fix skill text: names a table open_db no longer creates.
+        let stale = "### 3. Clear each DB\n```bash\n\
+             sqlite3 <db> \"DELETE FROM tool_calls; DELETE FROM lsp_events; DELETE FROM call_edges; VACUUM;\"\n```\n";
+        let named = clear_step_tables(stale);
+        assert_eq!(named, set(&["call_edges", "lsp_events", "tool_calls"]));
+        assert_eq!(
+            named.difference(&created).collect::<Vec<_>>(),
+            vec![&"call_edges".to_string()]
+        );
+
+        // A clear step that forgets a created table.
+        let partial = "### 3. Clear each DB\n```bash\nsqlite3 <db> \"DELETE FROM tool_calls; VACUUM;\"\n```\n";
+        let named = clear_step_tables(partial);
+        assert_eq!(
+            created.difference(&named).collect::<Vec<_>>(),
+            vec![&"lsp_events".to_string()]
+        );
+
+        // A DELETE quoted in a later section is not part of the clear step.
+        let other = "### 3. Clear each DB\nDELETE FROM tool_calls; DELETE FROM lsp_events;\n\
+             ## Common Mistakes\n- never run DELETE FROM sqlite_master\n";
+        assert_eq!(clear_step_tables(other), created);
     }
 
     #[test]

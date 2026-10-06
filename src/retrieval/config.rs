@@ -205,10 +205,14 @@ impl RetrievalConfig {
     /// Note the override is kept on top by the 2026-09-17 ruling: every stack
     /// deployment in existence sets it while leaving `[embeddings].model` at the
     /// built-in default, so letting `model` win would silently repoint them at
-    /// the wrong model. The shadow WARNING that makes this visible needs
-    /// provenance `RetrievalConfig` does not yet carry — it cannot distinguish a
-    /// chosen `model` from a defaulted one — and lands with Task 5 of
-    /// `docs/plans/2026-09-17-embedding-config-consolidation.md`.
+    /// the wrong model. The shadow WARNING that would make this visible does not
+    /// exist: it was deferred to Task 5 of
+    /// `docs/plans/2026-09-17-embedding-config-consolidation.md`, and Task 5 landed
+    /// (5a `dotenv_shadowed_fields`, 5b the `CODESCOUT_EMBEDDING_*` family) without
+    /// it. The provenance that landed is `DotenvProvenance` on `EmbedEnv`, which
+    /// covers dotenv-versus-config for `url`/`model`/`api_key` only; this override
+    /// is read outside that path, and `RetrievalConfig` still cannot distinguish a
+    /// chosen `model` from a defaulted one. Re-verified 2026-10-05.
     // Its only caller, `build_http_embedder`, is `remote-embed`-gated; the lean
     // lane compiles this and reaches it from nowhere.
     #[cfg_attr(not(feature = "remote-embed"), allow(dead_code))]

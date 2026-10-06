@@ -39,7 +39,28 @@ pub(crate) enum GuideDeliveryShape {
     /// topic's preamble shipped, with an explicit pointer to call
     /// `get_guide(topic)` for the full body.
     Preamble,
+    /// Non-declaring topic whose body is over
+    /// [`MAX_AUTO_INJECT_GUIDE_BYTES`]: NO body shipped, only a one-line
+    /// pointer to `get_guide(topic)`. The topic is not stamped delivered.
+    Pointer,
 }
+
+/// Largest guide block (wrapper included) the server will auto-inject whole.
+///
+/// A guide is a later content block, and the harness may save an oversized
+/// tool result to disk and show the model only a ~2 KB preview of block 0 — so
+/// anything auto-injected into such a result is stamped delivered and never
+/// read (`docs/issues/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
+/// The cut-off is not known: the smallest harness-saved result measured was
+/// 29.4 KB (64 saved results across one profile's transcripts, 2026-09-24).
+/// The bound is chosen so that guide + a primary block at its own inline cap
+/// (`TOOL_OUTPUT_BUFFER_THRESHOLD`, ~10 KB) still sits below that floor:
+/// 16 KiB + 10 KB = ~26 KB < 29.4 KB. A guide over this is not delivered; a
+/// pointer to `get_guide(topic)` ships instead and the topic stays unstamped.
+/// Of the corpus today only `tracker-conventions` (~59 KB) exceeds it; the next
+/// largest non-declaring guide (`iron-laws-detail`) is ~14.7 KB.
+// cap-class: RESULT_CAP guide_emit.auto_inject_bound — probed
+pub(crate) const MAX_AUTO_INJECT_GUIDE_BYTES: usize = 16 * 1024;
 
 pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShape) {
     let text = match shape {
@@ -57,6 +78,10 @@ pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShap
             "No section of '{topic}' declares this call shape; its \
              preamble is below. Call `get_guide(\"{topic}\")` for the \
              full topic."
+        ),
+        GuideDeliveryShape::Pointer => format!(
+            "Guide '{topic}' is too large to auto-inject and was NOT \
+             delivered. Call `get_guide(\"{topic}\")` to read it."
         ),
     };
     if let Some(obj) = val.as_object_mut() {
@@ -95,12 +120,68 @@ pub(crate) fn guide_block(topic: &str) -> Option<Content> {
     Some(Content::text(wrapped))
 }
 
+/// The non-declaring (whole-topic) branch of [`guide_blocks_for`], with the
+/// size bound passed in so a test can drive the oversize path without a guide
+/// that happens to be large.
+///
+/// A body within `max_bytes` ships whole and stamps the bare topic. A body over
+/// it ships a one-line pointer instead and does NOT stamp the bare topic: the
+/// stamp means "the model has this", and an oversized block is the one most
+/// likely to be saved to disk by the harness and never read. An explicit
+/// `get_guide(topic)` always returns the full body and stamps the bare topic
+/// itself, so the pointer leads somewhere and a deliberate read retires it.
+///
+/// The pointer is sent once per session, under its own `<topic>#<pointer>` key
+/// (swept by `GuideLedger::re_arm` with the topic, owned by `owns_guide_key`).
+/// Unkeyed it would claim every call that names the topic, and
+/// `emit_guide_sections` stops at the first candidate that ships — a declared
+/// section for the same call would then never be reached. A spent pointer
+/// returns empty, the same as a spent whole guide, so that fallthrough survives.
+fn whole_topic_blocks(
+    topic: &str,
+    emitted: &mut crate::tools::guide_ledger::GuideLedger,
+    max_bytes: usize,
+) -> (Vec<Content>, Option<GuideDeliveryShape>) {
+    if emitted.contains(topic) {
+        return (Vec::new(), None);
+    }
+    // Only burn a ledger key once the block actually builds —
+    // `guide_block` returning `None` (topic not registered) must
+    // not consume the slot on silence (fix for the fail-safe
+    // inversion flagged in Task 8 review: an unregistered topic
+    // used to burn its key with nothing shipped at all, which is
+    // ambiguity resolving toward suppression).
+    let Some(block) = guide_block(topic) else {
+        return (Vec::new(), None);
+    };
+    let size = block.as_text().map_or(0, |t| t.text.len());
+    if size <= max_bytes {
+        emitted.insert(topic.to_string());
+        return (vec![block], Some(GuideDeliveryShape::Whole));
+    }
+    let pointer_key = format!("{topic}#<pointer>");
+    if emitted.contains(&pointer_key) {
+        return (Vec::new(), None);
+    }
+    emitted.insert(pointer_key);
+    (
+        vec![Content::text(format!(
+            "<!-- get_guide('{topic}') NOT auto-injected: {size} bytes is over the \
+             {max_bytes}-byte auto-inject bound. -->\n\
+             Call `get_guide(\"{topic}\")` to read it."
+        ))],
+        Some(GuideDeliveryShape::Pointer),
+    )
+}
+
 /// Blocks to emit for a resolved topic, and the ledger bookkeeping for
 /// them. A topic that does not declare any `serves:` sections
 /// (`GUIDE_INDEX.declares`) keeps the exact pre-Task-8 whole-topic
 /// behaviour: one block, bare-topic ledger key, byte-identical output
 /// — this is the Phase 1 containment property, and every topic but
-/// `librarian` takes this branch today.
+/// `librarian` takes this branch today. Except that a body over
+/// [`MAX_AUTO_INJECT_GUIDE_BYTES`] ships a pointer, not the body, and does not
+/// stamp the bare topic — see `whole_topic_blocks`.
 ///
 /// A declaring topic instead resolves the call's shape
 /// (`selector` + the typed result) against the topic's declared
@@ -133,22 +214,7 @@ pub(crate) fn guide_blocks_for(
     use crate::prompts::guide_index::GUIDE_INDEX;
 
     if !GUIDE_INDEX.declares(topic) {
-        if emitted.contains(topic) {
-            return (Vec::new(), None);
-        }
-        // Only burn the ledger key once the block actually builds —
-        // `guide_block` returning `None` (topic not registered) must
-        // not consume the slot on silence (fix for the fail-safe
-        // inversion flagged in Task 8 review: an unregistered topic
-        // used to burn its key with nothing shipped at all, which is
-        // ambiguity resolving toward suppression).
-        return match guide_block(topic) {
-            Some(block) => {
-                emitted.insert(topic.to_string());
-                (vec![block], Some(GuideDeliveryShape::Whole))
-            }
-            None => (Vec::new(), None),
-        };
+        return whole_topic_blocks(topic, emitted, MAX_AUTO_INJECT_GUIDE_BYTES);
     }
 
     let matched = GUIDE_INDEX.match_sections(topic, selector, result);
@@ -294,6 +360,108 @@ mod tests {
         assert!(blocks.is_empty());
         assert!(shape.is_none());
     }
+    /// Byte length of a topic's whole-topic block — the quantity the bound reads.
+    fn whole_block_len(topic: &str) -> usize {
+        text(&guide_block(topic).expect("registered topic")).len()
+    }
+
+    #[test]
+    fn an_oversize_whole_topic_guide_ships_a_pointer_and_does_not_stamp_the_topic() {
+        let topic = a_non_declaring_topic();
+        let mut led = ledger();
+        // A bound of 100 B makes any real guide "oversize" without depending on
+        // which topic is large today.
+        let (blocks, shape) = whole_topic_blocks(topic, &mut led, 100);
+
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Pointer)));
+        let pointer = text(&blocks[0]);
+        assert!(pointer.contains(&format!("get_guide(\"{topic}\")")));
+        assert!(
+            pointer.len() < 400 && pointer.len() < whole_block_len(topic),
+            "a pointer is a line, not the body — got {} B",
+            pointer.len()
+        );
+        assert!(
+            !pointer.contains("<!-- end auto-injected"),
+            "the body's wrapper must not ship"
+        );
+        // The load-bearing half: the stamp is what suppresses the guide for the
+        // rest of the session, so an undelivered body must not leave one.
+        assert!(
+            !led.contains(topic),
+            "an oversize guide must not be marked delivered"
+        );
+    }
+
+    /// Positive twin of the oversize test: the same function, a bound the guide
+    /// fits, and the opposite outcome — so a `max_bytes` that never compares, or
+    /// a pointer that always ships, reds one of the two.
+    #[test]
+    fn a_whole_topic_guide_within_the_bound_ships_whole_and_stamps() {
+        let topic = a_non_declaring_topic();
+        let size = whole_block_len(topic);
+
+        // Exactly at the bound is within it; one byte under is not.
+        let mut at = ledger();
+        let (blocks, shape) = whole_topic_blocks(topic, &mut at, size);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Whole)));
+        assert_eq!(text(&blocks[0]).len(), size);
+        assert!(at.contains(topic));
+        assert!(!at.contains(&format!("{topic}#<pointer>")));
+
+        let mut under = ledger();
+        let (_, shape) = whole_topic_blocks(topic, &mut under, size - 1);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Pointer)));
+        assert!(!under.contains(topic));
+    }
+
+    /// The pointer is once per session, and a spent one ships NOTHING — not
+    /// another pointer. `emit_guide_sections` stops at the first candidate that
+    /// ships, so a pointer on every call would starve any declared section for
+    /// the same call (`a_declared_section_still_arrives_once_the_content_topic_is_spent`).
+    #[test]
+    fn a_spent_pointer_ships_nothing_and_still_leaves_the_topic_unstamped() {
+        let topic = a_non_declaring_topic();
+        let mut led = ledger();
+        whole_topic_blocks(topic, &mut led, 100);
+        let (blocks, shape) = whole_topic_blocks(topic, &mut led, 100);
+
+        assert!(blocks.is_empty());
+        assert!(shape.is_none());
+        assert!(
+            !led.contains(topic),
+            "repeating the pointer must not stamp the topic either"
+        );
+    }
+
+    /// The pointer cannot loop: once the model follows it, `get_guide` stamps the
+    /// bare topic (`tools/guide.rs`), and an oversize guide is then silent rather
+    /// than pointing again at something already read.
+    #[test]
+    fn an_explicitly_fetched_oversize_guide_is_not_pointed_at_again() {
+        let topic = a_non_declaring_topic();
+        let mut led = ledger();
+        led.insert(topic.to_string()); // what an explicit get_guide does
+        let (blocks, shape) = whole_topic_blocks(topic, &mut led, 100);
+
+        assert!(blocks.is_empty());
+        assert!(shape.is_none());
+        assert!(!led.contains(&format!("{topic}#<pointer>")));
+    }
+
+    /// Pins the bound to the measurement it was derived from, so raising it is a
+    /// decision rather than a drift: guide + a primary block at its own inline
+    /// cap must stay under the smallest harness-saved result observed (29.4 KB).
+    /// A `const` assertion, not a `#[test]`: both sides are constants, so a bad
+    /// bound is a compile error in the test build.
+    const _: () = {
+        const SMALLEST_SAVED_RESULT_BYTES: usize = 29_400;
+        assert!(
+            MAX_AUTO_INJECT_GUIDE_BYTES + crate::tools::core::types::TOOL_OUTPUT_BUFFER_THRESHOLD
+                < SMALLEST_SAVED_RESULT_BYTES
+        );
+    };
 
     #[test]
     fn an_unregistered_topic_ships_nothing_and_stamps_nothing() {
@@ -414,5 +582,17 @@ mod tests {
             "the preamble fallback is a no-op if it tells the reader not to fetch: {preamble}"
         );
         assert_ne!(whole, preamble);
+
+        // `Pointer` shipped no body: it must say so, and must not borrow the
+        // `Whole` promise that the guide is already in context.
+        let mut v = json!({});
+        inject_hint(&mut v, "t", GuideDeliveryShape::Pointer);
+        let pointer = v["_guide_hint"].as_str().unwrap().to_string();
+        assert!(
+            pointer.contains("Call `get_guide(\"t\")`"),
+            "got: {pointer}"
+        );
+        assert!(pointer.contains("NOT delivered"), "got: {pointer}");
+        assert!(!pointer.contains("do not re-call"), "got: {pointer}");
     }
 }

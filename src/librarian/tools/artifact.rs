@@ -587,6 +587,9 @@ mod tests {
             &Artifact.input_schema(),
             &probe_spec(),
             99,
+            // Pinned from `sweep`'s own `unlabelled`, read 2026-10-05: nothing is skipped for want
+            // of a label here, so a key that loses its `<action>:` prefix reds this call.
+            &[],
             |args| async move { Artifact.call(&mk_ctx(), args).await },
         )
         .await;

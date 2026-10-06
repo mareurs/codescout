@@ -345,6 +345,23 @@ has "11 says it is not a fixed point" "$OUT" "NOT a fixed point"
 has "11 names the file that will not settle" "$OUT" "src/lib.rs"
 hasnt "11 never claims 'formatted N file(s)'" "$OUT" "file(s) written by this session"
 
+echo "== 12. CLEAN: git holds no uncommitted bytes, so nothing is at risk and it is formatted =="
+# `CLEAN` is the provenance scan's verdict for a path a peer wrote but git reports clean
+# (docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md). It was
+# SHARED/PEER, a hard stop over a file nobody holds bytes in. A token the partition does not
+# name lands in NEITHER list, so the file would stay unformatted with no word said -- which is
+# what the first assertion pair pins. Its twins are cases 4 and 6: a PEER or SHARED row must
+# STILL refuse, so "format everything" cannot pass this case.
+CLEAN_STUB=$(mkstub clean CLEAN "          the worktree is CLEAN for this path")
+P=$(newproj); deformed "$P"
+run "$P" "$CLEAN_STUB"
+eq   "12 CLEAN exits 0" "$RC" "0"
+eq   "12 CLEAN rewrote the file" "$(grep -c 'pub fn f() -> u32 {' "$P/src/lib.rs")" "1"
+has  "12 CLEAN says it formatted" "$OUT" "formatted"
+has  "12 CLEAN names why it was allowed" "$OUT" "CLEAN"
+hasnt "12 CLEAN is not reported as a refusal" "$OUT" "REFUSED"
+hasnt "12 CLEAN is not misreported as nothing-to-do" "$OUT" "nothing attributable"
+
 echo
 echo "fmt-mine: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

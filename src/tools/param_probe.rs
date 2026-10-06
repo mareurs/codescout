@@ -110,6 +110,20 @@ pub(crate) struct Sweep {
     pub checked: usize,
     pub unhonored: Vec<String>,
     pub unprobeable: Vec<String>,
+    /// Keys the sweep passed over because the call site declared them in `accepts_any_json`
+    /// (a top-level name or a nested dotted path). An admission made on purpose, so it is
+    /// recorded to be compared against the call site's own list rather than to be acted on:
+    /// a name here that the schema no longer carries is a stale admission, and one the
+    /// schema carries that this list lacks is not reachable by any other route.
+    pub skipped_any_json: Vec<String>,
+    /// Top-level keys that received **no probe** because no `<action>:` label token names a
+    /// dispatched action — either the description is missing, or its label (the text before
+    /// the first `:`) matches nothing in `Spec::actions`. This is the half `floor` cannot see
+    /// per key: a key that loses its label drops out of `checked` and `unhonored` together,
+    /// so the sweep reads as clean over a population it quietly shrank
+    /// (`docs/issues/archive/2026-09-02-param-probe-reads-only-the-first-slash-token-so-later-actions-are-unswept.md`,
+    /// whose residue this field closes).
+    pub unlabelled: Vec<String>,
 }
 
 /// Sweep every action-labelled key, one level of nesting included.
@@ -141,13 +155,21 @@ where
         checked: 0,
         unhonored: Vec::new(),
         unprobeable: Vec::new(),
+        skipped_any_json: Vec::new(),
+        unlabelled: Vec::new(),
     };
 
     for (name, spec_v) in &props {
-        if name == "action" || spec.accepts_any_json.contains(&name.as_str()) {
+        // `action` is the dispatch key, not a param any action reads; it is not a skip.
+        if name == "action" {
+            continue;
+        }
+        if spec.accepts_any_json.contains(&name.as_str()) {
+            out.skipped_any_json.push(name.clone());
             continue;
         }
         let Some(desc) = spec_v["description"].as_str() else {
+            out.unlabelled.push(name.clone());
             continue;
         };
         // Label convention: `<action>: …`, or `<a>/<b>/<c>: …` for a key shared by several
@@ -168,10 +190,12 @@ where
 
         let declared = spec_v["type"].as_str().unwrap_or("string");
 
+        let mut matched = false;
         for action in label.split('/') {
             if !spec.actions.contains(&action) {
                 continue;
             }
+            matched = true;
 
             let mut base_args = (spec.required)(action);
             base_args.insert("action".into(), json!(action));
@@ -215,6 +239,10 @@ where
                 // simply cannot speak for.
                 let path = format!("{name}.{child}");
                 if spec.accepts_any_json.contains(&path.as_str()) {
+                    // A key labelled for several actions reaches here once per action.
+                    if !out.skipped_any_json.contains(&path) {
+                        out.skipped_any_json.push(path);
+                    }
                     continue;
                 }
                 // One level, declared rather than assumed: a child that declares its own
@@ -254,6 +282,9 @@ where
                 out.checked += 1;
             }
         }
+        if !matched {
+            out.unlabelled.push(name.clone());
+        }
     }
 
     out
@@ -282,11 +313,22 @@ where
 /// A floor cannot see that, because a sweep that skips a nested object silently never had
 /// those pairs in its count to begin with, which is how nine keys left guard reach without
 /// moving a single number.
+///
+/// **`unlabelled_pin` is the third assertion, and it is a ledger rather than a floor.** A key
+/// whose label matches no dispatched action is probed by nothing, and drops out of `checked`
+/// and `unhonored` together — so neither assertion above can see it go, and `floor` can only
+/// notice once enough of them have. The pin lists those keys by name and is compared for
+/// exact set equality: a key that newly loses its label reds, and so does a pinned key that
+/// has since been labelled, so the list can neither grow nor rot in silence. A non-empty pin
+/// is an honest record of unguarded keys, not an approval of them — clearing it is the
+/// work. `accepts_any_json` is reconciled the same way, against the keys the sweep actually
+/// skipped for it, so an admission naming a key the schema no longer carries is caught.
 pub(crate) async fn assert_all_honored<F, Fut>(
     tool: &str,
     schema: &Value,
     spec: &Spec<'_>,
     floor: usize,
+    unlabelled_pin: &[&str],
     call: F,
 ) where
     F: Fn(Value) -> Fut,
@@ -296,12 +338,20 @@ pub(crate) async fn assert_all_honored<F, Fut>(
         checked,
         unhonored,
         unprobeable,
+        skipped_any_json,
+        unlabelled,
     } = sweep(schema, spec, call).await;
+    let coverage = format!(
+        "coverage: {checked} pair(s) probed, {} key(s) skipped as accepts_any_json, {} key(s) \
+         skipped as unlabelled",
+        skipped_any_json.len(),
+        unlabelled.len()
+    );
     assert!(
         unhonored.is_empty(),
         "{tool}: these schema keys are labelled for an action whose Args has no such \
          field, so serde discards them silently — the shape of IC-15. Either add the \
-         field or move the guidance off the key: {unhonored:?}"
+         field or move the guidance off the key: {unhonored:?} ({coverage})"
     );
     assert!(
         unprobeable.is_empty(),
@@ -311,11 +361,44 @@ pub(crate) async fn assert_all_honored<F, Fut>(
          of the nested object. Leaving them here is the IC-14 shape — a guard narrower \
          than its name: {unprobeable:?}"
     );
+    let sorted = |mut v: Vec<String>| {
+        v.sort();
+        v
+    };
+    let (got, want) = (
+        sorted(unlabelled),
+        sorted(unlabelled_pin.iter().map(|s| s.to_string()).collect()),
+    );
+    assert!(
+        got == want,
+        "{tool}: the keys the sweep left UNPROBED for want of an `<action>:` label changed. \
+         Newly unlabelled (lost or never had a label — relabel, or pin them here if the \
+         key is genuinely not per-action): {:?}. Pinned but now labelled (drop from the \
+         pin): {:?}. A key with no matching label is dropped from `checked` and \
+         `unhonored` alike, so this pin is the only place its absence is visible ({coverage})",
+        got.iter().filter(|k| !want.contains(k)).collect::<Vec<_>>(),
+        want.iter().filter(|k| !got.contains(k)).collect::<Vec<_>>(),
+    );
+    let (got_any, want_any) = (
+        sorted(skipped_any_json),
+        sorted(
+            spec.accepts_any_json
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ),
+    );
+    assert!(
+        got_any == want_any,
+        "{tool}: `accepts_any_json` and the keys the sweep actually skipped for it disagree — \
+         an admission that names no key the sweep reached is stale. Declared: {want_any:?}; \
+         skipped: {got_any:?} ({coverage})"
+    );
     assert!(
         checked >= floor,
         "{tool}: expected the sweep to cover at least {floor} labelled keys, covered \
          {checked} — the `<action>:` label convention may have changed, which would make \
-         this test silently stop checking"
+         this test silently stop checking ({coverage})"
     );
 }
 
@@ -497,6 +580,185 @@ mod tests {
             "one key labelled for three actions is three action/key pairs, not one"
         );
     }
+    /// A schema with one skipped key of every kind the sweep has a way to skip, plus one
+    /// probed key and the `action` dispatch key (which is neither probed nor a skip).
+    fn schema_with_one_skip_of_each_kind() -> Value {
+        json!({
+            "properties": {
+                "action": {"type": "string", "enum": ["alpha"]},
+                "id": {"type": "string", "description": "alpha/zeta: one token matches"},
+                "blob": {"type": "string", "description": "alpha: an opaque value"},
+                "nodesc": {"type": "string"},
+                "prose": {"type": "string", "description": "For action='alpha': prose label"},
+                "ghost": {"type": "string", "description": "zeta: names no dispatched action"}
+            }
+        })
+    }
+
+    fn spec_admitting_blob() -> Spec<'static> {
+        Spec {
+            actions: &["alpha"],
+            accepts_any_json: &["blob"],
+            required: |_| Map::new(),
+        }
+    }
+
+    /// The residue `IC-15`'s parent bug named: a key skipped for `accepts_any_json` or for
+    /// carrying no `<action>:` label dropped out of `checked` and `unhonored` alike, so the
+    /// sweep read as clean over a population it had quietly shrunk. Each kind is reported
+    /// under its own name, and `action` plus a key with ONE matching label token are not
+    /// skips at all.
+    #[tokio::test]
+    async fn skipped_keys_are_reported_by_kind() {
+        let Sweep {
+            checked,
+            unhonored,
+            mut unlabelled,
+            skipped_any_json,
+            ..
+        } = sweep(
+            &schema_with_one_skip_of_each_kind(),
+            &spec_admitting_blob(),
+            honours_id_except_beta,
+        )
+        .await;
+
+        unlabelled.sort();
+        assert_eq!(
+            unlabelled,
+            ["ghost", "nodesc", "prose"],
+            "a key with no description, a prose label and a label naming no dispatched action \
+             are each probed by nothing and must each be reported"
+        );
+        assert_eq!(skipped_any_json, ["blob"]);
+        assert!(unhonored.is_empty(), "{unhonored:?}");
+        assert_eq!(
+            checked, 1,
+            "`id` is the only probed pair: its `alpha` token matches although `zeta` does not"
+        );
+    }
+
+    /// Positive twin of `skipped_keys_are_reported_by_kind`: a fully labelled schema with no
+    /// admissions reports no skips, so the fields are not simply always non-empty.
+    #[tokio::test]
+    async fn a_fully_labelled_schema_reports_no_skipped_keys() {
+        let schema = json!({
+            "properties": {
+                "action": {"type": "string"},
+                "id": {"type": "string", "description": "alpha/zeta: one token matches"}
+            }
+        });
+
+        let Sweep {
+            checked,
+            unlabelled,
+            skipped_any_json,
+            ..
+        } = sweep(&schema, &spec(&["alpha"]), honours_id_except_beta).await;
+
+        assert!(unlabelled.is_empty(), "{unlabelled:?}");
+        assert!(skipped_any_json.is_empty(), "{skipped_any_json:?}");
+        assert_eq!(checked, 1);
+    }
+
+    /// A nested `accepts_any_json` path is a skip too, and is reported once even though the
+    /// key is labelled for two actions and so reaches the check twice.
+    #[tokio::test]
+    async fn a_nested_any_json_skip_is_reported_once() {
+        let schema = json!({
+            "properties": {
+                "event": {
+                    "type": "object",
+                    "description": "alpha/beta: the event",
+                    "properties": {
+                        "kind": {"type": "string", "description": "event kind"},
+                        "payload": {"type": "object", "description": "opaque payload"}
+                    }
+                }
+            }
+        });
+        let spec = Spec {
+            actions: &["alpha", "beta"],
+            accepts_any_json: &["event.payload"],
+            required: |_| {
+                let mut m = Map::new();
+                m.insert("event".into(), json!({"kind": "note"}));
+                m
+            },
+        };
+
+        let Sweep {
+            skipped_any_json, ..
+        } = sweep(&schema, &spec, honours_event_kind_only).await;
+
+        assert_eq!(skipped_any_json, ["event.payload"]);
+    }
+
+    /// The entry point every call site uses, with a pin that matches the sweep: passes.
+    #[tokio::test]
+    async fn assert_all_honored_accepts_a_matching_pin() {
+        assert_all_honored(
+            "fixture",
+            &schema_with_one_skip_of_each_kind(),
+            &spec_admitting_blob(),
+            1,
+            &["nodesc", "prose", "ghost"],
+            honours_id_except_beta,
+        )
+        .await;
+    }
+
+    /// Negative control: a key that loses its label while the pin still says it had one must
+    /// red. Without this, `unlabelled` is a number that is printed and never compared.
+    #[tokio::test]
+    #[should_panic(expected = "per-action): [\"ghost\"]. Pinned")]
+    async fn assert_all_honored_rejects_a_newly_unlabelled_key() {
+        assert_all_honored(
+            "fixture",
+            &schema_with_one_skip_of_each_kind(),
+            &spec_admitting_blob(),
+            1,
+            &["nodesc", "prose"], // `ghost` is skipped but not pinned
+            honours_id_except_beta,
+        )
+        .await;
+    }
+
+    /// The other direction: a pin naming a key the sweep now probes is a stale pin, and a
+    /// stale pin is how a ledger stops being one.
+    #[tokio::test]
+    #[should_panic(expected = "the pin): [\"id\"]. A key")]
+    async fn assert_all_honored_rejects_a_stale_pin() {
+        assert_all_honored(
+            "fixture",
+            &schema_with_one_skip_of_each_kind(),
+            &spec_admitting_blob(),
+            1,
+            &["nodesc", "prose", "ghost", "id"], // `id` is labelled and probed
+            honours_id_except_beta,
+        )
+        .await;
+    }
+
+    /// An `accepts_any_json` entry naming a key the sweep never skipped is a stale admission.
+    #[tokio::test]
+    #[should_panic(expected = "`accepts_any_json` and the keys the sweep actually skipped")]
+    async fn assert_all_honored_rejects_a_stale_admission() {
+        let spec = Spec {
+            actions: &["alpha"],
+            accepts_any_json: &["blob", "removed_long_ago"],
+            required: |_| Map::new(),
+        };
+        assert_all_honored(
+            "fixture",
+            &schema_with_one_skip_of_each_kind(),
+            &spec,
+            1,
+            &["nodesc", "prose", "ghost"],
+            honours_id_except_beta,
+        )
+        .await;
+    }
 
     /// The reproduction from
     /// `docs/issues/archive/2026-09-02-param-probe-does-not-recurse-so-nesting-a-key-removes-it-from-guard-reach.md`,
@@ -519,6 +781,7 @@ mod tests {
             checked,
             unhonored,
             unprobeable,
+            ..
         } = sweep(&schema, &spec_with_event_parent(), honours_event_kind_only).await;
 
         assert_eq!(

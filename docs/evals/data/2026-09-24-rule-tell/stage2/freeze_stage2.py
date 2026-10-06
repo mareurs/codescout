@@ -120,6 +120,7 @@ def main() -> int:
 
     n = collections.Counter()
     items = []                       # (fold, [rows], shingles, kind, rule)
+    twin_leak_skipped = 0            # stdout only: kept out of `n` so the manifest bytes cannot move
     for rnd, f in ((1, "train/pairs.jsonl"), (2, "topup/pairs.jsonl")):
         for p in load(SYN / f):
             if not p["ok"] or not cell_kept(p, rnd, "training") or p["pair_id"] in quarantine:
@@ -131,6 +132,9 @@ def main() -> int:
             items.append((p["fold"], p, sh, "synthetic", p["rule"]))
     for i, r in enumerate(rows):
         if split[i] != "rest" or lab[i] in DROPPED or lab[i] not in mp.sel.RULES:
+            continue
+        if mp.twin_in_context_before(r):         # the correction is already in the positive's own window
+            twin_leak_skipped += 1
             continue
         sh = set().union(*(mp.shingles(r.get(f) or "") for f in ("positive", "twin", "context_before", "context_after")))
         if sh & H:
@@ -198,6 +202,7 @@ def main() -> int:
     for name, v in files.items():
         print(f"{name:11} rows {v['rows']:5}  positives {v['positives']:5}  sha256 {v['sha256'][:16]}")
     print("dropped:", dict(n))
+    print("mined rows skipped, twin already in context_before:", twin_leak_skipped)
     print(f"menu {len(menu)} rules; Haiku-only {len(frozen['haiku_only'])}")
     return 0
 

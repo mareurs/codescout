@@ -33,8 +33,14 @@ struct Args {
 /// foreign keys and kept every point. The claim was correct about the backend
 /// the tests exercise, which is why it read as complete.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args)
-        .map_err(|e| super::LibrarianRecoverableError::new(format!("delete requires 'id': {e}")))?;
+    let a: Args = serde_json::from_value(args).map_err(|e| {
+        super::deser_error(
+            e,
+            "delete",
+            "doc(action=\"delete\") requires 'id'",
+            "e.g. doc(action=\"delete\", id=\"<16-hex>\") previews; add force=true to apply. Get an id from doc(action=\"find\", ...).",
+        )
+    })?;
 
     // The catalog guard lives in an EXPLICIT BLOCK, and the block is the fix rather
     // than a tidy-up. The vector delete below is `async`, and this guard is a

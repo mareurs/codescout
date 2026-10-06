@@ -193,7 +193,8 @@
             document.getElementById('usage-summary').innerHTML =
                 '<strong>' + totalCalls + '</strong> total calls &nbsp;|&nbsp; ' +
                 '<strong>' + errorPct + '%</strong> error rate &nbsp;|&nbsp; ' +
-                '<strong>' + overflowPct + '%</strong> overflow rate';
+                '<strong>' + overflowPct + '%</strong> overflow rate' +
+                (usage.scope ? '<br><span class="muted">' + esc(usage.scope) + '</span>' : '');
 
             // Chart — built once on first load, never updated by polling
             if (!callsChart) {

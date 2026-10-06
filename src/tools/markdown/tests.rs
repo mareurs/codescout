@@ -1110,6 +1110,222 @@ fn insert_before() {
         "# Title\n## Prerequisites\ninstall stuff\n## Setup\ncontent\n"
     );
 }
+/// The repro from `docs/issues/2026-10-02-edit-file-insert-before-with-a-headingless-body-lands-in-the-previous-section.md`.
+const HEADINGLESS_INSERT_FIXTURE: &str =
+    "# Title\n\nIntro paragraph.\n\n## First\n\nFirst body.\n\n## Second\n\nSecond body.\n";
+
+/// `insert_before` adds a SIBLING section. A body with no heading line adds no section: the
+/// splice lands at the target heading's line start, i.e. at the END OF THE PRECEDING
+/// section, and the call used to report ok. It is refused instead, and the file is untouched.
+#[tokio::test]
+async fn a_headingless_insert_before_is_refused_and_writes_nothing() {
+    use crate::tools::core::types::RecoverableError;
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, HEADINGLESS_INSERT_FIXTURE).unwrap();
+
+    let err = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "heading": "## Second",
+            "action": "insert_before",
+            "body": "A new section body with no heading line.\n",
+        }),
+        &ctx,
+    )
+    .await
+    .expect_err("a headingless insert_before cannot be a sibling section");
+
+    let rec = err
+        .downcast_ref::<RecoverableError>()
+        .unwrap_or_else(|| panic!("must be a RecoverableError, not a fatal one: {err:#}"));
+    let text = rec.to_string();
+    assert!(
+        text.contains("insert_before") && text.contains("heading"),
+        "the refusal must name the action and the missing heading: {text}"
+    );
+    assert!(
+        rec.hint().is_some_and(|h| h.contains("heading")),
+        "the refusal must carry a corrective hint: {rec:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        HEADINGLESS_INSERT_FIXTURE,
+        "a refused edit must not touch the file"
+    );
+}
+
+/// Same refusal through the `edits[]` batch path, which reaches `plan_section_edit` by its
+/// own route. An earlier edit in the batch must not be applied either: the batch is atomic.
+#[tokio::test]
+async fn a_headingless_insert_before_in_a_batch_is_refused_and_writes_nothing() {
+    use crate::tools::core::types::RecoverableError;
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, HEADINGLESS_INSERT_FIXTURE).unwrap();
+
+    let err = super::edit_markdown::edit(
+        json!({
+            "path": file.to_str().unwrap(),
+            "edits": [
+                { "heading": "## First", "action": "replace", "content": "swapped\n" },
+                { "heading": "## Second", "action": "insert_before", "content": "no heading here\n" },
+            ],
+        }),
+        &ctx,
+    )
+    .await
+    .expect_err("a headingless insert_before in a batch cannot be a sibling section");
+
+    let rec = err
+        .downcast_ref::<RecoverableError>()
+        .unwrap_or_else(|| panic!("must be a RecoverableError, not a fatal one: {err:#}"));
+    assert!(
+        rec.to_string().contains("edits[1]"),
+        "the refusal must locate the offending batch entry: {rec}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        HEADINGLESS_INSERT_FIXTURE,
+        "an atomic batch with a refused entry must write nothing"
+    );
+}
+
+/// Positive twin of the two refusals above: an `insert_before` whose body OPENS with a
+/// heading is a real sibling section, and lands as one, through both entry points. Without
+/// this an implementation that refuses every `insert_before` would satisfy the tests above.
+#[tokio::test]
+async fn an_insert_before_with_a_leading_heading_still_adds_the_section() {
+    let (dir, ctx) = project_ctx().await;
+    let want = "# Title\n\nIntro paragraph.\n\n## First\n\nFirst body.\n\n## Middle\n\nmiddle text\n\n## Second\n\nSecond body.\n";
+
+    let single = dir.path().join("single.md");
+    std::fs::write(&single, HEADINGLESS_INSERT_FIXTURE).unwrap();
+    super::edit_markdown::edit(
+        json!({
+            "path": single.to_str().unwrap(),
+            "heading": "## Second",
+            "action": "insert_before",
+            "body": "## Middle\n\nmiddle text\n",
+        }),
+        &ctx,
+    )
+    .await
+    .expect("a heading-leading insert_before must apply");
+    assert_eq!(std::fs::read_to_string(&single).unwrap(), want);
+
+    let batch = dir.path().join("batch.md");
+    std::fs::write(&batch, HEADINGLESS_INSERT_FIXTURE).unwrap();
+    super::edit_markdown::edit(
+        json!({
+            "path": batch.to_str().unwrap(),
+            "edits": [
+                { "heading": "## Second", "action": "insert_before", "content": "## Middle\n\nmiddle text\n" },
+            ],
+        }),
+        &ctx,
+    )
+    .await
+    .expect("a heading-leading insert_before must apply in a batch");
+    assert_eq!(std::fs::read_to_string(&batch).unwrap(), want);
+}
+
+/// What counts as "opens with a heading" is decided on the FIRST NON-BLANK line, and it
+/// must be a real ATX heading. Each case here is refused for a different reason a lazier
+/// predicate (`contains('#')`, `starts_with('#')`, "any heading anywhere") would miss; the
+/// last one is the accepted counterpart, so the predicate cannot be "always refuse".
+#[test]
+fn insert_before_heading_detection_uses_the_first_non_blank_line() {
+    let content = HEADINGLESS_INSERT_FIXTURE;
+    let plan = |body: &str| {
+        let off = super::edit_markdown::LineOffsets::new(content);
+        super::edit_markdown::plan_section_edit(
+            content,
+            &off,
+            "## Second",
+            "insert_before",
+            Some(body),
+            None,
+            false,
+            0,
+        )
+    };
+
+    for (why, body) in [
+        ("empty body", ""),
+        ("blank-only body", "\n\n"),
+        ("hashtag, no space after the #", "#hashtag line\n"),
+        ("seven hashes is not a heading", "####### too deep\n"),
+        (
+            "prose BEFORE the heading still lands in the preceding section",
+            "lead-in prose\n\n## Middle\n\nbody\n",
+        ),
+        (
+            "a heading only inside a code fence is not a heading",
+            "```\n## not a heading\n```\n",
+        ),
+    ] {
+        assert!(plan(body).is_err(), "{why}: must be refused, body {body:?}");
+    }
+
+    for (why, body) in [
+        ("leading blank lines are skipped", "\n\n## Middle\n\nbody\n"),
+        (
+            "any level opens a sibling-or-nested section",
+            "### Deeper\n\nbody\n",
+        ),
+        ("a heading with no trailing newline", "## Middle"),
+    ] {
+        assert!(plan(body).is_ok(), "{why}: must be accepted, body {body:?}");
+    }
+}
+
+/// `insert_after` is NOT given the same rule: a headingless body is the documented way to
+/// append prose to a section (`at` default `end-of-section`) or to its opening
+/// (`at="after-heading-line"`). Pinned through the real entry point so a blanket
+/// "both inserts need a heading" change cannot slip in as a drive-by.
+#[tokio::test]
+async fn a_headingless_insert_after_still_appends_to_the_section() {
+    let (dir, ctx) = project_ctx().await;
+
+    let end = dir.path().join("end.md");
+    std::fs::write(&end, HEADINGLESS_INSERT_FIXTURE).unwrap();
+    super::edit_markdown::edit(
+        json!({
+            "path": end.to_str().unwrap(),
+            "heading": "## First",
+            "action": "insert_after",
+            "body": "appended prose\n",
+        }),
+        &ctx,
+    )
+    .await
+    .expect("a headingless insert_after must still apply");
+    assert_eq!(
+        std::fs::read_to_string(&end).unwrap(),
+        "# Title\n\nIntro paragraph.\n\n## First\n\nFirst body.\n\nappended prose\n\n## Second\n\nSecond body.\n"
+    );
+
+    let batch = dir.path().join("batch.md");
+    std::fs::write(&batch, HEADINGLESS_INSERT_FIXTURE).unwrap();
+    super::edit_markdown::edit(
+        json!({
+            "path": batch.to_str().unwrap(),
+            "edits": [
+                { "heading": "## First", "action": "insert_after", "at": "after-heading-line", "content": "opening prose\n" },
+            ],
+        }),
+        &ctx,
+    )
+    .await
+    .expect("a headingless insert_after must still apply in a batch");
+    assert!(
+        std::fs::read_to_string(&batch)
+            .unwrap()
+            .contains("## First\nopening prose\n"),
+        "after-heading-line insert must land directly under the heading"
+    );
+}
 
 #[test]
 fn insert_after() {
@@ -3388,7 +3604,7 @@ fn batch_coincident_insert_and_span_is_order_independent() {
     // non-zero span starting at the SAME byte. detect_overlaps allows this pair.
     // Both array orders must produce identical, uncorrupted output.
     let doc = "## A\naaa\n## B\nbbb\n";
-    let ins = json!({"heading":"B","action":"insert_before","content":"INSERTED"});
+    let ins = json!({"heading":"B","action":"insert_before","content":"## INSERTED"});
     let rem = json!({"heading":"B","action":"remove"});
 
     let out1 = super::edit_markdown::apply_planned_edits(
@@ -3417,7 +3633,7 @@ fn batch_coincident_insert_and_span_is_order_independent() {
         "A section intact and uncorrupted: {out1:?}"
     );
     assert_eq!(
-        out1, "## A\naaa\nINSERTED\n",
+        out1, "## A\naaa\n## INSERTED\n",
         "expected exact output: {out1:?}"
     );
 }
@@ -3457,7 +3673,7 @@ fn plan_section_edit_insert_after_and_remove_match_legacy() {
     let content = "## A\nbody\n## B\nmore\n";
     for (action, arg, at) in [
         ("insert_after", Some("added"), None),
-        ("insert_before", Some("added"), None),
+        ("insert_before", Some("## added"), None),
         ("remove", None, None),
     ] {
         let legacy =
@@ -4003,7 +4219,7 @@ fn every_advertised_batch_action_actually_dispatches() {
     let snapshot = "# Doc\n\n## A\nalpha body\n";
     for (action, extra) in [
         ("replace", json!({"content": "new"})),
-        ("insert_before", json!({"content": "new"})),
+        ("insert_before", json!({"content": "## New\n\nnew"})),
         ("insert_after", json!({"content": "new"})),
         ("remove", json!({})),
         ("edit", json!({"old_string": "alpha", "new_string": "beta"})),

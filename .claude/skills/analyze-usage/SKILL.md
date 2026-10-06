@@ -355,7 +355,7 @@ This cannot be undone. Confirm? (yes/no)
 For each confirmed DB, run:
 
 ```bash
-sqlite3 <db> "DELETE FROM tool_calls; DELETE FROM lsp_events; DELETE FROM call_edges; VACUUM;"
+sqlite3 <db> "DELETE FROM tool_calls; DELETE FROM lsp_events; VACUUM;"
 ```
 
 `VACUUM` reclaims disk space after the deletions. The schema is preserved — codescout does not need to recreate the file.
@@ -382,6 +382,5 @@ Total removed: X calls
 - **Printing empty sections** — if D/F/H/I return no rows, omit those sections entirely.
 - **Clearing without confirmation** — always show what will be removed and wait for explicit "yes" before running DELETE.
 - **Deleting the .db file** — use `DELETE + VACUUM`, not `rm`. Deleting the file works but forces codescout to recreate it on next activation; DELETE preserves the schema cleanly.
-- **Forgetting `call_edges`** — three tables need clearing: `tool_calls`, `lsp_events`, `call_edges`.
 - **Trusting `--all` project paths** — cc.py decodes project paths by replacing `-` with `/`, but directory names containing `-` (e.g. `backend-kotlin`) become `backend/kotlin`. Always verify the reconstructed path exists before using it in `--project` flags: `ls <path> 2>/dev/null || echo "path invalid"`. If invalid, use `find ~/.claude/projects -name "<session_prefix>*"` to find the real encoded path.
 - **Stopping at usage.db for session analysis** — usage.db tracks codescout tool calls only. For the full picture (token cost, stop reasons, actual tool sequence including native CC tools), see Step 7.

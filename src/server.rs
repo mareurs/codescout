@@ -6633,9 +6633,165 @@ mod tests {
         for n in ["doc", "librarian"] {
             assert!(pinnable.contains(n), "{n} must be pinnable");
         }
+        // Positive form first. `!pinnable.contains(n)` is also true for a name no tool
+        // produces — rename `Workspace` and the loop below keeps passing while guarding
+        // nothing. So each listed name must be a REGISTERED tool before its absence from
+        // `pinnable` means anything.
+        let registered: std::collections::HashSet<&str> =
+            server.tools.iter().map(|t| t.name()).collect();
         for n in ["workspace", "get_guide"] {
+            assert!(
+                registered.contains(n),
+                "'{n}' is not a registered tool, so asserting it is not pinnable is vacuous — \
+                 update this list to the tool's current name"
+            );
             assert!(!pinnable.contains(n), "{n} must NOT be pinnable");
         }
+    }
+    /// Names in `Tool::pinnable`'s exclusion arm that no registered tool produces and are
+    /// not on `exempt`. Pure over its inputs so the red case can be driven from a fixture.
+    fn unaccounted_pinnable_arm_names<'a>(
+        arm: &'a [String],
+        registered: &std::collections::HashSet<&str>,
+        exempt: &[&str],
+    ) -> Vec<&'a str> {
+        arm.iter()
+            .map(String::as_str)
+            .filter(|n| !registered.contains(n) && !exempt.contains(n))
+            .collect()
+    }
+
+    /// The string literals inside `Tool::pinnable`'s `matches!( self.name(), … )` arm,
+    /// read from the source so a name added to the arm is checked without being restated
+    /// here. Balanced-paren scan: a bare `find(')')` lands on `self.name()`'s own paren,
+    /// which precedes every literal (the same trap `tests/doc_tool_refs.rs` documents).
+    fn pinnable_arm_names(src: &str) -> Vec<String> {
+        let Some(at) = src.find("fn pinnable(&self) -> bool {") else {
+            return Vec::new();
+        };
+        let Some(m) = src[at..].find("matches!").map(|i| at + i) else {
+            return Vec::new();
+        };
+        let Some(open) = src[m..].find('(').map(|i| m + i) else {
+            return Vec::new();
+        };
+        let mut depth = 0usize;
+        let mut close = open;
+        for (i, b) in src.as_bytes()[open..].iter().enumerate() {
+            match b {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        let mut rest = &src[open..close];
+        while let Some(s) = rest.find('"') {
+            let after = &rest[s + 1..];
+            let Some(e) = after.find('"') else { break };
+            out.push(after[..e].to_string());
+            rest = &after[e + 1..];
+        }
+        out
+    }
+
+    /// Every name in `Tool::pinnable`'s exclusion arm is produced by a registered tool, or is
+    /// on a NAMED exemption. The arm is the other half of the pair
+    /// `pinnable_tools_advertise_workspace_param` asserts: a name here that no tool
+    /// produces is a dead arm, and a renamed tool silently drops out of the exclusion.
+    #[tokio::test]
+    async fn every_pinnable_exclusion_names_a_registered_tool_or_a_named_exemption() {
+        let (_dir, server) = make_server().await;
+        let registered: std::collections::HashSet<&str> =
+            server.tools.iter().map(|t| t.name()).collect();
+
+        // Each exemption is tied to the TYPE that owns the name, so renaming the type's
+        // name without updating the arm reds here rather than leaving a free-floating string.
+        //  * `activate_project`: `ActivateProject` is dispatched to by `Workspace`
+        //    (`action="activate"`), never registered on its own. The arm is dead for the
+        //    wire surface — filed as a follow-up, not deleted here.
+        //  * `__probe_description_cap__`: registered only under `CODESCOUT_PROBE=1`.
+        let exempt = [
+            crate::tools::config::ActivateProject.name(),
+            crate::tools::probe::ProbeTool.name(),
+        ];
+        assert_eq!(
+            exempt,
+            ["activate_project", "__probe_description_cap__"],
+            "an exemption's owning type no longer carries the name the arm lists"
+        );
+
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tools/core/types.rs"
+        ))
+        .unwrap();
+        let arm = pinnable_arm_names(&src);
+        assert!(
+            arm.len() >= 5,
+            "control: parsed only {} names from `Tool::pinnable`'s arm ({arm:?}); an empty \
+         parse would make this test pass over nothing",
+            arm.len()
+        );
+        // Control that the production names the other test relies on were actually parsed.
+        for n in ["workspace", "get_guide", "onboarding"] {
+            assert!(
+                arm.iter().any(|a| a == n),
+                "control: `{n}` missing from {arm:?}"
+            );
+        }
+
+        let bad = unaccounted_pinnable_arm_names(&arm, &registered, &exempt);
+        assert!(
+            bad.is_empty(),
+            "`Tool::pinnable` lists {bad:?}, which no registered tool produces and no named \
+         exemption covers — a renamed tool has dropped out of the exclusion, or the arm \
+         names a tool that does not exist"
+        );
+    }
+
+    /// Positive twin and negative control for `unaccounted_pinnable_arm_names`: a name no tool
+    /// produces is reported; a registered one and an exempt one are not.
+    #[test]
+    fn unaccounted_pinnable_arm_names_reports_only_the_unproduced() {
+        let registered: std::collections::HashSet<&str> =
+            ["workspace", "onboarding"].into_iter().collect();
+        let arm: Vec<String> = ["workspace", "onboarding", "gone_tool", "probe_only"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            unaccounted_pinnable_arm_names(&arm, &registered, &["probe_only"]),
+            vec!["gone_tool"]
+        );
+        assert!(
+            unaccounted_pinnable_arm_names(&arm[..2], &registered, &[]).is_empty(),
+            "all-registered arm must report nothing"
+        );
+    }
+
+    /// `pinnable_arm_names` against a fixture shaped like the production arm, including the
+    /// `self.name()` paren that precedes every literal.
+    #[test]
+    fn pinnable_arm_names_reads_every_literal_in_the_matches_arm() {
+        let src = r#"
+        fn pinnable(&self) -> bool {
+            !matches!(
+                self.name(),
+                "workspace"
+                    | "a_b"
+            )
+        }
+        fn other() { let _ = "not_in_arm"; }
+    "#;
+        assert_eq!(pinnable_arm_names(src), vec!["workspace", "a_b"]);
+        assert!(pinnable_arm_names("fn nothing() {}").is_empty());
     }
 
     /// The injected `workspace` param is optional (never added to `required`),
@@ -7350,6 +7506,161 @@ mod tests {
         );
     }
 
+    /// Why a `path~` selector served by `tool` could never match, or `None` if it can.
+    ///
+    /// The router matches `path~` against the path `call_content` annotates onto a WRITE
+    /// response, and that annotation (`write_path`) is read from the literal input key `path`
+    /// and skipped for `WRITE_ROOT_ANNOTATION_EXEMPT` tools. So three shapes are dead on
+    /// arrival, none of which `parse_shape` or the tool-existence check can see: the tool
+    /// is not a write call under this selector's action, it is exempt from the annotation,
+    /// or it names its target under another key. A selector with no `path~` predicate asks
+    /// nothing of the tool and is never a defect here.
+    ///
+    /// Reads the tool's own `is_write` and schema rather than a restated list, so a new
+    /// write tool is judged by what it declares. Pure over `(tool, selector)` so the red
+    /// case can be driven from a fixture.
+    fn path_predicate_defect(
+        tool: &dyn Tool,
+        sel: &crate::operator_rules::rule::Selector,
+    ) -> Option<String> {
+        sel.path_contains.as_ref()?;
+        let probe = match &sel.action {
+            Some(a) => serde_json::json!({ "action": a }),
+            None => serde_json::json!({}),
+        };
+        if !tool.is_write(&probe) {
+            return Some(format!(
+                "serves `{}` with a `path~` predicate, but that is not a write call under this \
+             selector — the path is annotated only onto write responses, so it can never match",
+                tool.name()
+            ));
+        }
+        if crate::tools::WRITE_ROOT_ANNOTATION_EXEMPT.contains(&tool.name()) {
+            return Some(format!(
+                "serves `{}` with a `path~` predicate, but `{}` is exempt from the write-path \
+             annotation, so it can never match",
+                tool.name(),
+                tool.name()
+            ));
+        }
+        let has_path = tool
+            .input_schema()
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .is_some_and(|p| p.contains_key("path"));
+        if !has_path {
+            return Some(format!(
+                "serves `{}` with a `path~` predicate, but `{}` has no `path` parameter and \
+             `call_content` captures the write path only from `input[\"path\"]` — the rule \
+             would be dead. Either name the target `path`, or teach `write_path` this tool's key",
+                tool.name(),
+                tool.name()
+            ));
+        }
+        None
+    }
+
+    /// `path_predicate_defect`, driven from fixtures: the live `path~` targets are clean, and
+    /// each dead shape is named. The controls pin WHY each fixture is dead, so a tool gaining
+    /// or losing a `path` parameter reds here rather than turning a case vacuous.
+    #[tokio::test]
+    async fn a_path_predicate_on_a_tool_that_cannot_deliver_it_is_a_defect() {
+        use crate::operator_rules::rule::Selector;
+        let (_dir, server) = make_server().await;
+        let tool = |n: &str| {
+            server
+                .tools
+                .iter()
+                .find(|t| t.name() == n)
+                .unwrap_or_else(|| panic!("control: fixture tool `{n}` is not registered"))
+                .clone()
+        };
+        let sel = |tool: &str, action: Option<&str>, path: Option<&str>| Selector {
+            tool: tool.to_string(),
+            action: action.map(str::to_string),
+            path_contains: path.map(str::to_string),
+        };
+        let has_path = |t: &dyn Tool| {
+            t.input_schema()
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .is_some_and(|p| p.contains_key("path"))
+        };
+
+        // Positive twin: the shapes the live ledger actually serves.
+        for n in ["edit_file", "create_file"] {
+            let t = tool(n);
+            assert!(has_path(t.as_ref()), "control: `{n}` must carry `path`");
+            assert_eq!(
+                path_predicate_defect(t.as_ref(), &sel(n, None, Some("/.claude"))),
+                None,
+                "`{n}(path~…)` is deliverable and must not be a defect"
+            );
+        }
+
+        // A write tool keyed differently: `memory.write` writes but has no `path` parameter.
+        let memory = tool("memory");
+        assert!(
+            memory.is_write(&serde_json::json!({"action": "write"})),
+            "control: memory.write must be a write call"
+        );
+        assert!(
+            !has_path(memory.as_ref()),
+            "control: memory must have no `path`"
+        );
+        let d = path_predicate_defect(
+            memory.as_ref(),
+            &sel("memory", Some("write"), Some("/.claude")),
+        )
+        .expect("a write tool without a `path` parameter must be a defect");
+        assert!(d.contains("no `path` parameter"), "wrong defect: {d}");
+
+        // A tool that carries `path` but does not write: nothing is annotated onto its result.
+        let read = tool("read_file");
+        assert!(
+            has_path(read.as_ref()),
+            "control: read_file must carry `path`"
+        );
+        assert!(
+            !read.is_write(&serde_json::json!({})),
+            "control: read_file reads"
+        );
+        let d = path_predicate_defect(read.as_ref(), &sel("read_file", None, Some("/.claude")))
+            .expect("a read tool with `path~` must be a defect");
+        assert!(d.contains("not a write call"), "wrong defect: {d}");
+
+        // The same tool under a non-write action of an action-dispatched tool.
+        let d = path_predicate_defect(
+            memory.as_ref(),
+            &sel("memory", Some("read"), Some("/.claude")),
+        )
+        .expect("a non-write action with `path~` must be a defect");
+        assert!(d.contains("not a write call"), "wrong defect: {d}");
+
+        // Exempt from the annotation although it writes and has `path`.
+        let approve = tool("approve_write");
+        assert!(
+            approve.is_write(&serde_json::json!({})) && has_path(approve.as_ref()),
+            "control: approve_write must write and carry `path` so only the exemption makes it dead"
+        );
+        let d = path_predicate_defect(
+            approve.as_ref(),
+            &sel("approve_write", None, Some("/.claude")),
+        )
+        .expect("an annotation-exempt tool with `path~` must be a defect");
+        assert!(d.contains("exempt"), "wrong defect: {d}");
+
+        // No `path~` predicate asks nothing of the tool: never a defect, whatever the tool is.
+        assert_eq!(
+            path_predicate_defect(memory.as_ref(), &sel("memory", Some("write"), None)),
+            None
+        );
+        assert_eq!(
+            path_predicate_defect(read.as_ref(), &sel("read_file", None, None)),
+            None
+        );
+    }
+
     /// Every `triggered` rule must name a tool that can actually deliver it — or declare, by
     /// id, that it cannot.
     ///
@@ -7388,6 +7699,7 @@ mod tests {
     /// | stale exemption | add `OP-9` to `HARNESS_BLOCKED` | fires, naming `OP-9` |
     /// | selector precondition | — | **not exercised here.** A tool returning `None` reds `every_registered_tool_supplies_a_selector_key` too, so this arm is a second, better-located signal rather than the only one |
     /// | action enum | — | **NOT exercised, and left unclaimed.** Reaching it means mutating `Serves:` in the live ledger, a guarded artifact and a real corpus. The arm is written and untested; do not read this gate's green as covering it |
+    /// | `path~` predicate | `path_predicate_defect` returns `None` unconditionally | the fixture test `a_path_predicate_on_a_tool_that_cannot_deliver_it_is_a_defect` fires. **The arm's call site here is only exercised by the live corpus (`edit_file` / `create_file`, both clean)** — a dead live rule is not authored to prove it, so the helper's red lives in the fixture test |
     #[tokio::test]
     async fn every_triggered_rule_names_a_tool_that_can_deliver_it() {
         use crate::operator_rules::rule::{Binding, Status};
@@ -7470,6 +7782,13 @@ mod tests {
                             allowed.join(", ")
                         }
                     );
+                }
+                // A `path~` predicate matches against the path the router captured from a
+                // WRITE call's `path` key (`call_content`'s `write_path`). A rule serving a
+                // tool that does not write, or writes under another key, gets no path to
+                // match — dead exactly as the unregistered-tool case, and just as silent.
+                if let Some(defect) = path_predicate_defect(tool.as_ref(), sel) {
+                    panic!("{} {defect}", rule.id);
                 }
                 checked += 1;
             }
@@ -13754,8 +14073,13 @@ mod guide_hint_tests {
     async fn a_declared_section_still_arrives_once_the_content_topic_is_spent() {
         let (_dir, server) = make_server().await;
 
-        // 1 — a create under docs/trackers/ must still deliver the tracker guide
-        //     whole. This is the behaviour `32736ca0` bought and
+        // 1 — a create under docs/trackers/ must still route to the tracker guide
+        //     first. `tracker-conventions` is over the auto-inject bound, so what
+        //     arrives is its POINTER (the body would be 59 KB the harness may
+        //     save to disk unread — see
+        //     `an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped`),
+        //     but the result-based topic still goes first and still claims the
+        //     call. This is the behaviour `32736ca0` bought and
         //     `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`
         //     protects; the fallthrough must not cost it.
         let created = call_tool(
@@ -13771,8 +14095,10 @@ mod guide_hint_tests {
         )
         .await;
         assert!(
-            content_carries_guide_body(&created, "tracker-conventions"),
-            "the result-based topic must still go first and still ship whole, got: {}",
+            guide_blocks(&created)
+                .join("")
+                .contains("get_guide(\"tracker-conventions\")"),
+            "the result-based topic must still go first and still claim the call, got: {}",
             guide_blocks(&created)
                 .join("")
                 .chars()
@@ -13799,9 +14125,89 @@ mod guide_hint_tests {
             guide.chars().take(300).collect::<String>()
         );
         assert!(
-            !content_carries_guide_body(&out, "tracker-conventions"),
-            "one topic per call — the spent whole guide must not ride along again"
+            !content_carries_guide_body(&out, "tracker-conventions")
+                && !guide.contains("get_guide(\"tracker-conventions\")"),
+            "one topic per call — the spent pointer must not ride along again"
         );
+    }
+    /// A guide too large to auto-inject is pointed at, not delivered and not
+    /// stamped as delivered.
+    ///
+    /// The harness may save an oversized tool result to disk and show the model
+    /// only a ~2 KB preview of block 0; the guide is always a later block, so a
+    /// 59 KB `tracker-conventions` shipped whole could be marked delivered while
+    /// the model never saw a byte of it
+    /// (`docs/issues/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
+    ///
+    /// Asserted on the LEDGER as well as the blocks: a response-shape check alone
+    /// is satisfied by a block that is stamped and then dropped by the client.
+    /// The explicit fetch is asserted too, so the pointer is shown to lead
+    /// somewhere: `get_guide` must still return the full body, and stamping on
+    /// that deliberate read is what retires the topic.
+    ///
+    /// Positive twin (a small whole-topic guide still ships whole and stamps):
+    /// `guide_emit::tests::a_non_declaring_topic_ships_whole_and_stamps_the_bare_topic`.
+    #[tokio::test]
+    async fn an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped() {
+        let (_dir, server) = make_server().await;
+        let ledger = server.live_ledger();
+
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/trackers/oversize-pointer-probe.md",
+                "kind": "tracker",
+                "title": "oversize pointer probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+
+        assert!(
+            !content_carries_guide_body(&created, "tracker-conventions"),
+            "a guide over the auto-inject bound must not ship its body inline"
+        );
+        let guide = guide_blocks(&created).join("");
+        assert!(
+            guide.contains("get_guide(\"tracker-conventions\")"),
+            "the pointer must name the explicit fetch, got: {guide}"
+        );
+        assert!(
+            guide.len() < 1_024,
+            "a pointer is a line, not a body — got {} B",
+            guide.len()
+        );
+        let hint = extract_hint(&created).unwrap_or_default();
+        assert!(
+            hint.contains("get_guide(\"tracker-conventions\")") && !hint.contains("do not re-call"),
+            "the _guide_hint must not promise a body that did not ship, got: {hint}"
+        );
+        assert!(
+            !ledger.lock().contains("tracker-conventions"),
+            "an undelivered guide must not be marked delivered — it is what \
+             suppresses the guide for the rest of the session"
+        );
+
+        // The pointer leads somewhere: an explicit fetch returns the whole body,
+        // and that deliberate read is what stamps the topic.
+        let fetched = call_tool(
+            &server,
+            "get_guide",
+            json!({"topic": "tracker-conventions"}),
+        )
+        .await;
+        let fetched_len: usize = fetched
+            .iter()
+            .filter_map(|c| c.as_text())
+            .map(|t| t.text.len())
+            .sum();
+        assert!(
+            fetched_len > crate::tools::guide_emit::MAX_AUTO_INJECT_GUIDE_BYTES,
+            "an explicit get_guide must still return the full body, got {fetched_len} B"
+        );
+        assert!(ledger.lock().contains("tracker-conventions"));
     }
 
     /// A call that delivers nothing must not refresh the stamps it did not use.

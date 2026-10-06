@@ -287,3 +287,11 @@ required-features = ["librarian"]
 name = "librarian"
 path = "tests/librarian/main.rs"
 required-features = ["librarian"]
+
+# Spawns the real binary against a scratch librarian runtime and observes the two hooks the
+# server installs. Needs the librarian feature on BOTH sides: the binary must register the
+# `doc` tool, and the test reads the catalog schema.
+[[test]]
+name = "server_installs_librarian_hooks"
+path = "tests/server_installs_librarian_hooks.rs"
+required-features = ["librarian"]

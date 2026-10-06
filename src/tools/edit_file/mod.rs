@@ -433,9 +433,9 @@ impl Tool for EditFile {
                 "action": {
                     "type": "string",
                     "enum": ["replace", "insert_before", "insert_after", "remove", "edit"],
-                    "description": "Markdown only: operation to perform on the heading-addressed section. 'replace' OVERWRITES the entire body (heading preserved) — choose 'insert_after' to add an adjacent section, or 'edit' with old_string/new_string for in-section surgical replacement. 'insert_before'/'insert_after' add a sibling section (target body preserved). 'remove' deletes the target section. 'edit' performs scoped text replacement within the target section."
+                    "description": "Markdown only: operation to perform on the heading-addressed section. 'replace' OVERWRITES the entire body (heading preserved) — choose 'insert_after' to add an adjacent section, or 'edit' with old_string/new_string for in-section surgical replacement. 'insert_before'/'insert_after' add a sibling section (target body preserved). 'remove' deletes the target section."
                 },
-                "body": { "type": "string", "description": "Markdown only: the section's new body text for replace/insert actions (heading preserved on replace). `body` not `content`: a text parameter is `body` when the tool also takes a contrasting sibling — here `frontmatter`. `content` is accepted as an alias." },
+                "body": { "type": "string", "description": "Markdown only: the section's new body text for replace/insert actions (heading preserved on replace; insert_before's body must start with its own heading line). `body` not `content`: a text parameter is `body` when the tool also takes a contrasting sibling — here `frontmatter`. `content` is accepted as an alias." },
                 "at": {
                     "type": "string",
                     "enum": ["end-of-section", "after-heading-line"],

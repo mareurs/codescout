@@ -1,6 +1,3 @@
-// Traversal engine is not yet wired into the tool (Task 10); suppress dead_code until then.
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use async_trait::async_trait;

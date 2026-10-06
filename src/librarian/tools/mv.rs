@@ -134,7 +134,12 @@ const CITATION_SAMPLE: usize = 20;
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        super::LibrarianRecoverableError::new(format!("move requires 'id' and 'new_rel_path': {e}"))
+        super::deser_error(
+            e,
+            "move",
+            "doc(action=\"move\") requires 'id' and 'new_rel_path'",
+            "e.g. doc(action=\"move\", id=\"<16-hex>\", new_rel_path=\"docs/archive/foo.md\"). new_rel_path is relative to the repo root; get an id from doc(action=\"find\", ...).",
+        )
     })?;
 
     // Defense-in-depth: new_rel_path must stay within the resolved root. Reject
@@ -2799,6 +2804,40 @@ mod tests {
             .path()
             .join("docs/issues/archive/2026-09-28-example.md")
             .exists());
+    }
+
+    /// Regression for
+    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`, at the
+    /// move surface: the SHA half alone dies at rebase, so the move guard demands the pair too.
+    /// The anchored move above is the positive twin (both bullets pass).
+    #[tokio::test]
+    async fn moving_a_bug_with_a_sha_and_no_patch_id_into_archive_is_refused_and_moves_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rel = "docs/issues/2026-09-28-example.md";
+        let dest = "docs/issues/archive/2026-09-28-example.md";
+        let ctx = mk_bug_ctx(
+            tmp.path(),
+            rel,
+            "fixed",
+            "## Fix provenance\n\n- **SHA:** `5a72304c` (`experiments`)\n",
+        );
+
+        let err = mv::call(
+            &ctx,
+            serde_json::json!({"id": "bbccddee11223344", "new_rel_path": dest}),
+        )
+        .await
+        .expect_err("a SHA with no patch-id must not discharge the move guard");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("no patch-id") && msg.contains("orphans"),
+            "the refusal must say what is missing and why it matters: {msg}"
+        );
+        assert!(tmp.path().join(rel).exists(), "the file must stay put");
+        assert!(
+            !tmp.path().join(dest).exists(),
+            "nothing may land in archive/"
+        );
     }
 
     /// The controls. Each input is admitted by every move-guard condition EXCEPT the one it

@@ -43,7 +43,12 @@ struct Args {
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        LibrarianRecoverableError::new(format!("merge_worktree requires 'root': {e}"))
+        super::deser_error(
+            e,
+            "merge_worktree",
+            "librarian(action=\"merge_worktree\") requires 'root'",
+            "e.g. librarian(action=\"merge_worktree\", root=\"/abs/path/of/the/worktree\", dry_run=true) previews; omit dry_run to merge, or pass abandon=true to drop the shadow rows.",
+        )
     })?;
     let root = RepoPath::from(Path::new(&a.root)).into_string();
 

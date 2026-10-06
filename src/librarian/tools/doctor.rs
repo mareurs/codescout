@@ -362,6 +362,7 @@ impl Check {
                 | Check::EntryDefinedTwice
                 | Check::EntryPrefixDeclaredTwice
                 | Check::EntryWithoutDefinition
+                | Check::FixAnchorMissingPatchId
                 | Check::FrontmatterIdIsNotACatalogId
                 | Check::FrontmatterIdMismatch
                 | Check::FrontmatterStatusMismatch
@@ -407,6 +408,7 @@ declare_checks! {
     EntryDefinedTwice => "entry_defined_twice",
     EntryPrefixDeclaredTwice => "entry_prefix_declared_twice",
     EntryWithoutDefinition => "entry_without_definition",
+    FixAnchorMissingPatchId => "fix_anchor_missing_patch_id",
     FrontmatterIdIsNotACatalogId => "frontmatter_id_is_not_a_catalog_id",
     FrontmatterIdMismatch => "frontmatter_id_mismatch",
     FrontmatterStatusMismatch => "frontmatter_status_mismatch",
@@ -425,6 +427,7 @@ declare_checks! {
     SnapshotDrift => "snapshot_drift",
     TerminalStatusWithCaveat => "terminal_status_with_caveat",
     TerminalStatusWithoutFixAnchor => "terminal_status_without_fix_anchor",
+    UnregisteredWorktreeDir => "unregistered_worktree_dir",
     UnterminatedFence => "unterminated_fence",
     ValidityUnparseable => "validity_unparseable",
     WorktreeScopedRow => "worktree_scoped_row",
@@ -575,6 +578,9 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::AugmentationDeclarationUnparseable,
     Check::ArchivedFixShaUnresolvable,
     Check::TerminalStatusWithoutFixAnchor,
+    // Added with the check itself, as a sibling of the line above: same scan, same population,
+    // same `(id, abs_path)` admitted — it only names the SHA-without-patch-id state apart.
+    Check::FixAnchorMissingPatchId,
     Check::NonTerminalStatusWithFixAnchor,
     Check::OpenBugCitedFromSource,
     // Added 2026-09-16 with the check itself. It shares `scan_open_bug_cited_from_source`'s
@@ -772,6 +778,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // disk and touches no connection, so it runs outside the lock alongside
     // `managed_roots` rather than widening the critical section.
     let (declared_root_violations, declared_roots_health) = scan_declared_project_roots(ctx);
+    // Filesystem state too, and for the same reason: it reads the active project's
+    // `.worktrees/` against `.git/worktrees/`, touches no connection, and so runs outside the
+    // lock. See `scan_unregistered_worktree_dirs`.
+    let (unregistered_worktree_violations, unregistered_worktree_health) =
+        scan_unregistered_worktree_dirs(ctx);
 
     // Task 7 (review round 1, Commit B): `DoctorScope::new` no longer locks
     // `ctx.catalog` internally — its cross-root-cites query takes a `&Connection`
@@ -786,6 +797,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut all_violations: Vec<Violation> = Vec::new();
 
     all_violations.extend(declared_root_violations);
+    all_violations.extend(unregistered_worktree_violations);
     // Roots that belong to a workspace this machine knows about but is not
     // managing this session — the discriminator that lets the outside-roots check
     // separate "another workspace's row" from "orphan". Needs the connection, so
@@ -1447,6 +1459,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              Cross-repo grouping belongs in an [[umbrella]], not a [[project]]."
         ));
     }
+    if let Some(n) = unregistered_worktree_health
+        .get("unregistered")
+        .and_then(Value::as_u64)
+        .filter(|n| *n > 0)
+    {
+        hint_parts.push(format!(
+            "unregistered_worktree_dir fired {n} time(s): .worktrees/ holds director(ies) git \
+             does not know as worktrees. `git worktree list` and `git status` are both blind to \
+             them (the latter because .worktrees/ is gitignored), so this is the only place they \
+             surface. Each finding names the session recorded in its own residue; check it is \
+             not still running, then remove the directory or re-register it."
+        ));
+    }
     let health_hint = hint_parts.join(" ");
 
     let mut catalog_health = serde_json::Map::new();
@@ -1574,6 +1599,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Always present, even when nothing fired: its `note` is how a SKIP (linked worktree,
     // absent/unreadable/unparseable config) stays distinguishable from a pass.
     catalog_health.insert("declared_roots".to_string(), declared_roots_health);
+    // Always present, for the same reason: its `note` is how "no .worktrees/" or an unreadable
+    // one stays distinguishable from a directory that was examined and found clean.
+    catalog_health.insert(
+        "unregistered_worktree_dirs".to_string(),
+        unregistered_worktree_health,
+    );
     catalog_health.insert("archived_fix_shas".to_string(), archived_fix_shas);
     catalog_health.insert(
         "open_bug_source_citations".to_string(),
@@ -2910,6 +2941,197 @@ fn scan_declared_project_roots(ctx: &ToolContext) -> (Vec<Violation>, Value) {
         "config": config_display,
         "declared": cfg.projects.len(),
         "missing": out.len(),
+    });
+    (out, health)
+}
+
+/// A Claude session id as it appears on disk: 8-4-4-4-12 hex, which is what `.buddy/<id>/`
+/// directories and `.codescout/cc_session_id` carry. Narrow on purpose — `.buddy/` also holds
+/// non-session entries (`memory/`, index files), and reading one of those as an author would
+/// name a person who was never there.
+fn is_session_id(s: &str) -> bool {
+    s.len() == 36
+        && s.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        })
+}
+
+/// Session ids a directory's own residue names: `.buddy/<id>/` entries and the contents of
+/// `.codescout/cc_session_id`. Sorted and de-duplicated. These are gitignored per-session
+/// files that a session writes into whatever directory it was running in, so the author of an
+/// otherwise anonymous directory is GIVEN, not inferred from an mtime.
+fn worktree_residue_sessions(dir: &Path) -> Vec<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir(dir.join(".buddy")) {
+        for e in entries.flatten() {
+            if let Some(name) = e.file_name().to_str() {
+                if is_session_id(name) {
+                    ids.insert(name.to_string());
+                }
+            }
+        }
+    }
+    if let Ok(text) = std::fs::read_to_string(dir.join(".codescout").join("cc_session_id")) {
+        let id = text.trim();
+        if is_session_id(id) {
+            ids.insert(id.to_string());
+        }
+    }
+    ids.into_iter().collect()
+}
+
+/// `unregistered_worktree_dir`: an entry under `<main repo>/.worktrees/` that git does not know
+/// as a worktree — absent from `.git/worktrees/*/gitdir`, and so from `git worktree list`.
+///
+/// **Why it needs its own instrument.** The two tools a person would ask both report the
+/// absence of the problem. `git worktree list` reports REGISTRATIONS and cannot see a directory
+/// that was never registered or whose registration was pruned; `git status` honours
+/// `.gitignore`'s `.worktrees/` and cannot see it either. Two correct instruments whose blind
+/// spots coincide, so their agreement is one blind spot counted twice.
+/// docs/issues/archive/2026-08-30-bench-worktree-deletion-recorded-as-done-never-happened.md
+/// docs/issues/2026-09-24-residual-detect-unregistered-worktree-dirs.md
+///
+/// **It regenerates, which is why a one-time cleanup was not a fix.** Measured 2026-09-02 and
+/// again 2026-10-05: a different member each time (`audit-shards-t7`, then
+/// `doctor-per-project-isolation`), each holding only a dead session's gitignored `.buddy/<id>/`
+/// and no `.git`. Removing one closed a member, not the population.
+///
+/// **Resolves the MAIN checkout's `.worktrees/`, not the active root's.** A session running in a
+/// linked worktree (`cp.main_root` is `Some`) must scan the directory that holds its siblings;
+/// scanning its own root would find nothing and report a clean bill of health from the one place
+/// that cannot see the problem. A registered worktree is read from `<main>/.git/worktrees/*/gitdir`
+/// — the filesystem-only source [`crate::util::path_security::list_git_worktrees`] uses, but NOT
+/// that function, which deliberately skips mutation-probe slots: a slot registered under
+/// `.worktrees/` would be reported unregistered here.
+///
+/// Names the likely author when the residue carries one ([`worktree_residue_sessions`]); says so
+/// when it does not, rather than guessing from a directory mtime.
+///
+/// Project grain, like [`scan_declared_project_roots`]: it reads only the active project's own
+/// tree and emits `id: None`, so there is no foreign row for a scope gate to refuse. Reports
+/// only; there is no `fix=`, because deleting a directory that may hold someone's unsaved work
+/// is not a repair a report should perform.
+fn scan_unregistered_worktree_dirs(ctx: &ToolContext) -> (Vec<Violation>, Value) {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return (
+            Vec::new(),
+            json!({
+                "dir": Value::Null,
+                "note": "no active project resolved, so no .worktrees/ was located — \
+                         unregistered worktree dirs were NOT checked",
+            }),
+        );
+    };
+    let main = cp.main_root.as_deref().unwrap_or(cp.git_root.as_path());
+    let wt_dir = main.join(".worktrees");
+    let wt_display = crate::util::fs::RepoPath::from_path(&wt_dir).into_string();
+    if !wt_dir.is_dir() {
+        return (
+            Vec::new(),
+            json!({
+                "dir": wt_display,
+                "scanned": 0,
+                "note": "no .worktrees/ directory under the main checkout — nothing to check",
+            }),
+        );
+    }
+    let git_dir = main.join(".git");
+    if !git_dir.is_dir() {
+        return (
+            Vec::new(),
+            json!({
+                "dir": wt_display,
+                "note": "the main checkout has no .git directory to read registrations from — \
+                         unregistered worktree dirs were NOT checked. This is not a pass.",
+            }),
+        );
+    }
+
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut registered = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir(git_dir.join("worktrees")) {
+        for e in entries.flatten() {
+            let Ok(text) = std::fs::read_to_string(e.path().join("gitdir")) else {
+                continue;
+            };
+            // `gitdir` holds `<worktree root>/.git`.
+            if let Some(root) = Path::new(text.trim()).parent() {
+                registered.insert(canon(root));
+            }
+        }
+    }
+
+    let Ok(entries) = std::fs::read_dir(&wt_dir) else {
+        return (
+            Vec::new(),
+            json!({
+                "dir": wt_display,
+                "note": "the .worktrees/ directory is unreadable — unregistered worktree dirs \
+                         were NOT checked. This is not a pass.",
+            }),
+        );
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+
+    let mut out = Vec::new();
+    for dir in &dirs {
+        if registered.contains(&canon(dir)) {
+            continue;
+        }
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let sessions = worktree_residue_sessions(dir);
+        let author = if sessions.is_empty() {
+            "No session id is recorded in it (`.buddy/<id>/`, `.codescout/cc_session_id`), so its \
+             author is not establishable — do not infer one from the directory's mtime, which \
+             records its last entry change and not who made it."
+                .to_string()
+        } else {
+            format!(
+                "Likely author: session {} — read from its own `.buddy/<id>/` / \
+                 `.codescout/cc_session_id` residue, so given rather than inferred. Check whether \
+                 that session is still running before removing anything.",
+                sessions
+                    .iter()
+                    .map(|s| format!("`{s}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let has_git = if dir.join(".git").exists() {
+            " It carries a `.git` entry, so it was once a worktree whose registration is gone \
+             (pruned, or removed from `.git/worktrees/`)."
+        } else {
+            " It carries no `.git`, so it never was, or no longer is, a working tree."
+        };
+        out.push(Violation::new(
+            "unregistered_worktree_dir",
+            None,
+            crate::util::fs::RepoPath::from_path(dir).into_string(),
+            format!(
+                "`.worktrees/{name}` is not a registered git worktree: it is absent from \
+                 `.git/worktrees/*/gitdir`, so `git worktree list` does not show it, and \
+                 `git status` does not either because `.worktrees/` is gitignored — two \
+                 instruments whose blind spots coincide, which is why nothing else reports it.\
+                 {has_git} {author} Inspect it, then remove it (`rm -r`) or re-register it \
+                 (`git worktree add`); this check reports only and repairs nothing."
+            ),
+        ));
+    }
+
+    let health = json!({
+        "dir": wt_display,
+        "scanned": dirs.len(),
+        "registered": dirs.len() - out.len(),
+        "unregistered": out.len(),
     });
     (out, health)
 }
@@ -6599,14 +6821,20 @@ fn declares_fix_provenance_heading(content: &str) -> bool {
 /// committed. An empty `no_fix_commit` counts as absent, like `unverified:`: presence is what a
 /// reader queries.
 ///
-/// **The one predicate behind `terminal_status_without_fix_anchor` and the archive guards in
-/// `update` and `move` ([`refuse_unanchored_archive`]).** The guards exist because the check
-/// stops looking at exactly the transition its rule is for, so the two must agree on what
-/// "anchored" means: a second copy of this logic would let a record pass one and fail the other.
+/// **The predicate that separates "owes an anchor" from "owes the rest of one".**
+/// `terminal_status_without_fix_anchor` fires when this is false; when it is true but
+/// [`declares_fix_pair`] is false the record is reported as `fix_anchor_missing_patch_id`
+/// instead. The archive guards in `update` and `move` ([`refuse_unanchored_archive`]) share both
+/// predicates, because the guards exist as the check stops looking at exactly the transition its
+/// rule is for, so the two must agree on what "anchored" means: a second copy of this logic
+/// would let a record pass one and fail the other.
 pub(crate) fn declares_fix_anchor(content: &str) -> bool {
-    if !structured_fix_pointers(content).is_empty() {
-        return true;
-    }
+    !structured_fix_pointers(content).is_empty() || declares_no_fix_commit(content)
+}
+
+/// Whether the frontmatter carries a non-empty `no_fix_commit:` — the author's statement that
+/// nothing was committed, so no anchor can exist. Empty counts as absent, like `unverified:`.
+fn declares_no_fix_commit(content: &str) -> bool {
     let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(content) else {
         return false;
     };
@@ -6617,6 +6845,30 @@ pub(crate) fn declares_fix_anchor(content: &str) -> bool {
     }
 }
 
+/// Whether a bug record's fix anchor is **recoverable after a rebase**: at least one
+/// `## Fix provenance` pointer carries a non-empty patch-id ([`structured_fix_pointers`]), or a
+/// non-empty `no_fix_commit:` says nothing was committed.
+///
+/// **The question [`declares_fix_anchor`] does not ask.** That predicate answers *"did the author
+/// write anything shaped like a pointer?"*; a lone `- **SHA:**` bullet satisfies it, though the
+/// SHA is the half that dies when `experiments` is rebased and the patch-id — a content hash of
+/// the diff — is the half that survives. A record with only the SHA reads as anchored until the
+/// next rebase, at which point `archived_fix_sha_unresolvable` finds the SHA dead and the
+/// patch-id that would have recovered it was never required.
+/// docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
+///
+/// **Both parser and `declares_fix_anchor` stay as they were**: [`structured_fix_pointers`]
+/// returns the patch-id as an `Option` deliberately, and it has two other consumers whose
+/// inverse property depends on that. The strictness lives here, in the one caller that owes the
+/// recoverability question. An EMPTY backticked patch-id (`` ` ` ``) counts as absent: presence
+/// of a value is what recovers anything.
+pub(crate) fn declares_fix_pair(content: &str) -> bool {
+    structured_fix_pointers(content)
+        .iter()
+        .any(|(_, patch_id)| patch_id.as_deref().is_some_and(|p| !p.trim().is_empty()))
+        || declares_no_fix_commit(content)
+}
+
 /// Whether any component of `path` is `archive`. A component, not a substring, so a directory
 /// such as `archived-notes/` does not count.
 pub(crate) fn in_archive_dir(path: &Path) -> bool {
@@ -6624,8 +6876,10 @@ pub(crate) fn in_archive_dir(path: &Path) -> bool {
         .any(|c| c.as_os_str() == std::ffi::OsStr::new("archive"))
 }
 
-/// Refuse to take a `fixed`/`mitigated` bug out of `terminal_status_without_fix_anchor`'s
-/// population unless it declares its fix anchor ([`declares_fix_anchor`]).
+/// Refuse to take a `fixed`/`mitigated` bug out of `terminal_status_without_fix_anchor`'s and
+/// `fix_anchor_missing_patch_id`'s population unless it declares the recoverable pair
+/// ([`declares_fix_pair`]): a patch-id next to the SHA, or `no_fix_commit:`. A SHA alone is
+/// refused with its own hint, because the SHA is the half that orphans at rebase.
 ///
 /// **Why at the transition, not in the check.** The check selects live `fixed`/`mitigated`
 /// records and skips archive paths, deliberately: of 355 archived files, 297 predated the rule
@@ -6645,8 +6899,29 @@ pub(crate) fn refuse_unanchored_archive(
     content: &str,
     surface: &str,
 ) -> Result<()> {
-    if kind != "bug" || !matches!(status, "fixed" | "mitigated") || declares_fix_anchor(content) {
+    if kind != "bug" || !matches!(status, "fixed" | "mitigated") || declares_fix_pair(content) {
         return Ok(());
+    }
+    // Two states reach here and they owe different edits, so they get different text: a record
+    // that declared NOTHING owes both bullets; one that declared a SHA owes the half that
+    // survives a rebase. Telling the second "declares no fix anchor" contradicts the file its
+    // author is looking at.
+    if declares_fix_anchor(content) {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!(
+                "doc(action=\"{surface}\") refused: this `{status}` bug declares a fix SHA but no \
+                 patch-id, and a SHA alone orphans on the next rebase (`experiments` is rebased \
+                 after every ship); archiving it would take it out of \
+                 `fix_anchor_missing_patch_id`, the only check that asks for the patch-id"
+            ),
+            "Add the patch-id as its own bullet under the SHA, `- **patch-id:** `<id>``, with the \
+             id from `git show <sha> | git patch-id --stable` (docs/RELEASE.md § Citing a fix), \
+             via doc(action=\"update\", patch={body_edits: [...]}); one update may add it and \
+             archive in the same call. Both labels must be line-start bullets outside any fence: \
+             a patch-id written on the SAME line as the SHA is not parsed. If nothing was \
+             committed, declare `no_fix_commit: \"<reason>\"` via patch.extra instead. Then \
+             archive.",
+        ));
     }
     Err(LibrarianRecoverableError::with_hint(
         format!(
@@ -6894,6 +7169,14 @@ fn commit_like_hashes(content: &str) -> Vec<String> {
 ///
 /// Reports only; there is no `fix=`. Recovering a fix SHA is research, and a wrong anchor is
 /// worse than an absent one.
+///
+/// **Emits two check names from one loop, because there are two states and the existing check's
+/// population must not move.** `terminal_status_without_fix_anchor` is the record that declares
+/// nothing. `fix_anchor_missing_patch_id` is the record that declares a SHA and no patch-id —
+/// previously discharged outright, though the SHA is the half that orphans at rebase
+/// ([`declares_fix_pair`]). Each is admitted under its OWN name, so each is counted under its own
+/// name when scoped out, and both are in `ROW_GRAIN_SCOPED_CHECKS`.
+/// docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
 fn scan_terminal_status_without_fix_anchor(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
@@ -6925,7 +7208,37 @@ fn scan_terminal_status_without_fix_anchor(
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
+        if declares_fix_pair(&content) {
+            continue;
+        }
+        // A SHA is declared and no patch-id parses next to it. Its own check name, so the
+        // absent-anchor population above does not move and the state is queryable by name.
+        // docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md
         if declares_fix_anchor(&content) {
+            if !scope.admit("fix_anchor_missing_patch_id", id, abs_path) {
+                continue;
+            }
+            let shas: Vec<String> = structured_fix_pointers(&content)
+                .into_iter()
+                .map(|(sha, _)| format!("`{sha}`"))
+                .collect();
+            out.push(Violation::new(
+                "fix_anchor_missing_patch_id",
+                Some(id.clone()),
+                abs_path.clone(),
+                format!(
+                    "status is `{status}` and a fix SHA is declared ({}) but no patch-id parses \
+                     next to it. The SHA is positional and orphans when `experiments` is rebased, \
+                     which happens after every ship; the patch-id is a content hash of the diff \
+                     and is the half that survives. Give the patch-id its own bullet under the \
+                     SHA — `- **patch-id:** ` followed by a backticked id from \
+                     `git show <sha> | git patch-id --stable` (docs/RELEASE.md § Citing a fix). \
+                     The label must START its line, outside any fence: a patch-id written on \
+                     the SAME line as the SHA, or in prose, is not parsed. If the fix had no \
+                     commit, say so in `no_fix_commit:` instead.",
+                    shas.join(", ")
+                ),
+            ));
             continue;
         }
 
@@ -10702,6 +11015,229 @@ mod tests {
         );
     }
 
+    // ---- fix_anchor_missing_patch_id (and the fence escape of its sibling) -------------
+
+    /// `(check, artifact_id)` for every finding `scan_terminal_status_without_fix_anchor`
+    /// emits over `ctx`, sorted. Pairs rather than ids alone, because the property under test
+    /// is WHICH check names a record: a SHA-only record must be reported under its own name,
+    /// and must not be folded into the absent-anchor check or silently discharged.
+    fn terminal_anchor_findings(ctx: &ToolContext) -> Vec<(String, String)> {
+        let cat = ctx.catalog.lock();
+        let mut scope =
+            scope::DoctorScope::new(super::super::scope::Scope::All, ctx, &cat.conn).unwrap();
+        let mut found: Vec<(String, String)> =
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn)
+                .unwrap()
+                .into_iter()
+                .map(|v| (v.check, v.artifact_id.unwrap()))
+                .collect();
+        found.sort();
+        found
+    }
+
+    /// Regression for
+    /// `docs/issues/2026-09-20-the-fix-anchor-check-accepts-a-sha-with-no-patch-id.md`.
+    ///
+    /// A record declaring `- **SHA:**` and no patch-id was discharged by `is_empty()` on the
+    /// pointer list, though the SHA is the half that dies at rebase. It must now be reported —
+    /// under ITS OWN check name, so the absent-anchor check's population does not move.
+    ///
+    /// Every other seed is a control that a single-sided implementation fails: `pair` (both
+    /// bullets) must stay silent, or an always-fire check passes; `bare` (no pointer) must
+    /// keep the OLD name, or folding both states under the new name passes; `declared-none`
+    /// (SHA only, plus a non-empty `no_fix_commit`) must stay silent, or a check that ignored
+    /// the escape passes; `same-line` is the exact shape the bug was measured on — both labels
+    /// on one bullet, which the line-start parser reads as a SHA with no patch-id.
+    #[tokio::test]
+    async fn a_sha_with_no_patch_id_is_reported_under_its_own_check_name() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "sha-only",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234` (`experiments`)\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "same-line",
+            "mitigated",
+            "",
+            "## Fix provenance\n\n- **SHA:** `737a29fe` — what it did. **patch-id:** \
+             `79c64ff0427f983feb6898e438a23910adc5768f`\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "empty-patch-id",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** ``\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "pair",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "bare",
+            "fixed",
+            "",
+            "Nothing here names a commit.",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "declared-none",
+            "fixed",
+            "no_fix_commit: \"doc note; nothing was committed\"\n",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let found = terminal_anchor_findings(&ctx);
+        let want = |check: &str, id: &str| (check.to_string(), id.to_string());
+        assert_eq!(
+            found,
+            vec![
+                want("fix_anchor_missing_patch_id", "empty-patch-id"),
+                want("fix_anchor_missing_patch_id", "same-line"),
+                want("fix_anchor_missing_patch_id", "sha-only"),
+                want("terminal_status_without_fix_anchor", "bare"),
+            ],
+            "a SHA with no (non-empty) patch-id owes the pair under its own name; the pair, \
+             and a stated `no_fix_commit`, owe nothing; a record with no pointer keeps the \
+             old name"
+        );
+    }
+
+    /// The detail text is the only place the author learns what shape is owed, and the
+    /// same-line shape is the one the bug was measured on. Pin that the text names the
+    /// consequence and the two-bullet remedy, and says the SHA half is the one that orphans.
+    #[tokio::test]
+    async fn the_missing_patch_id_finding_names_the_consequence_and_the_remedy() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "sha-only",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+        let v = {
+            let cat = ctx.catalog.lock();
+            let mut scope =
+                scope::DoctorScope::new(super::super::scope::Scope::All, &ctx, &cat.conn).unwrap();
+            scan_terminal_status_without_fix_anchor(&mut scope, &cat.conn).unwrap()
+        };
+        assert_eq!(v.len(), 1, "{v:#?}");
+        assert_eq!(v[0].check, "fix_anchor_missing_patch_id");
+        for needle in ["orphans", "patch-id", "git patch-id --stable", "own bullet"] {
+            assert!(
+                v[0].detail.contains(needle),
+                "detail must contain `{needle}`: {}",
+                v[0].detail
+            );
+        }
+    }
+
+    /// The new name is scope-gated like its sibling, so a row under a sibling root is COUNTED
+    /// as scoped out under the NEW name rather than reported or silently dropped.
+    #[tokio::test]
+    async fn fix_anchor_missing_patch_id_does_not_report_a_row_under_a_sibling_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling_root = tmp.path().join("sibling-project");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling_root).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &sibling_root,
+            "sha-only",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &active_root);
+
+        let mut ds = {
+            let cat = ctx.catalog.lock();
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap()
+        };
+        let v = {
+            let cat = ctx.catalog.lock();
+            scan_terminal_status_without_fix_anchor(&mut ds, &cat.conn).unwrap()
+        };
+        assert!(
+            v.is_empty(),
+            "the sibling-root row must not be reported: {v:#?}"
+        );
+        let scoped_out = ds
+            .scoped_out()
+            .get("fix_anchor_missing_patch_id")
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            scoped_out.values().sum::<usize>(),
+            1,
+            "the refusal must be counted under the new check's own name: {scoped_out:?}"
+        );
+    }
+
+    /// The fence escape of `terminal_status_without_fix_anchor`, which
+    /// `docs/issues/archive/2026-09-13-fix-anchor-check-reads-a-cited-patch-id-as-a-claim.md`
+    /// records as untested: a regression in the fence skip would break the check silently.
+    ///
+    /// A worked example of the provenance block inside a fence is a quotation, not a claim, so
+    /// a record whose ONLY pair is fenced still owes an anchor. The `unfenced` seed carries the
+    /// identical block outside a fence and must stay silent — without it, a check that fired on
+    /// every record mentioning a pair in any form would pass.
+    #[tokio::test]
+    async fn terminal_status_without_fix_anchor_does_not_read_a_fenced_pair_as_a_declaration() {
+        let (_tmp, root, _live) = git_fixture_with_commit();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "fenced",
+            "fixed",
+            "",
+            "## Fix provenance\n\n```\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n```\n",
+        );
+        seed_live_bug(
+            &cat,
+            &root,
+            "unfenced",
+            "fixed",
+            "",
+            "## Fix provenance\n\n- **SHA:** `abc1234`\n- **patch-id:** `deadbeefcafe`\n",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+
+        let found = terminal_anchor_findings(&ctx);
+        assert_eq!(
+            found,
+            vec![(
+                "terminal_status_without_fix_anchor".to_string(),
+                "fenced".to_string()
+            )],
+            "a fenced pair is a quotation: the record owes an anchor, and owes the whole one \
+             (no pointer at all), not just a patch-id"
+        );
+    }
+
     // ---- non_terminal_status_with_fix_anchor ------------------------------------------
 
     /// The patch-id used across these fixtures. Real shape: 40 hex digits, as
@@ -14453,9 +14989,9 @@ mod tests {
     /// (its own dedicated `outside_scope_refused_by_project` fold); the four entry-validity
     /// checks (`entry_validity_scoped_by_project`); `CitedPrefixWithNoDefiner` (its own
     /// dedicated `cited_prefix_scoped` fold, admitted only via `.as_str()`, never a
-    /// literal); or a named, commented `EXEMPT` entry. `EXEMPT` holds exactly three
+    /// literal); or a named, commented `EXEMPT` entry. `EXEMPT` holds exactly four
     /// variants today, each with a structural reason it needs no per-row scope gate of its
-    /// own:
+    /// own (the fourth, `UnregisteredWorktreeDir`, is commented where it is listed):
     /// - `SidecarUnparseable` shares its sibling `SidecarShapeDrift`'s check name at BOTH of
     ///   `scan_sidecar_shape_drift`'s two `admit()` call sites — one guarding the
     ///   unparseable-sidecar push, one guarding the shape-drift push, each on the same
@@ -14526,6 +15062,12 @@ mod tests {
             // Stronger than "no id": the subject is the catalog this run is already
             // reading, so it can never be another repo's.
             Check::RetiredObjectStillPresent.as_str(),
+            // scan_unregistered_worktree_dirs reads only the ACTIVE project's own
+            // `<main>/.worktrees/` against `<main>/.git/worktrees/` and emits id: None with the
+            // directory it just listed — never a catalogued artifact's abs_path, so there is no
+            // foreign-repo row for a scope gate to refuse. Same structural reason as
+            // DeclaredRootMissing: there is no other project's tree for it to have read.
+            Check::UnregisteredWorktreeDir.as_str(),
         ]
         .into_iter()
         .collect();
@@ -14590,6 +15132,10 @@ mod tests {
     /// because it was weighed and declined: the check emits `id: None` against a
     /// machine-local database, so there is no artifact for relevance to be a property of.
     /// A third kind of exclusion, worth distinguishing from the other two.
+    ///
+    /// 2026-10-05: 3 to 4 with `Check::UnregisteredWorktreeDir`, excluded for the same reason as
+    /// `RetiredObjectStillPresent` — it emits `id: None` for a directory it listed itself, so
+    /// there is no artifact for relevance to be a property of.
     #[test]
     fn admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all() {
         let allow_listed = Check::ALL
@@ -14613,9 +15159,14 @@ mod tests {
              OF. Excluded because the question does not apply, not because it was judged \
              and declined"
         );
+        assert!(
+            !Check::UnregisteredWorktreeDir.admits_relevance_exemption(),
+            "UnregisteredWorktreeDir must stay excluded — it emits id: None for a directory it \
+             listed itself, so there is no artifact for relevance to be a property OF"
+        );
         assert_eq!(
             Check::ALL.len() - allow_listed,
-            3,
+            4,
             "Check::ALL grew or shrank without a matching, deliberate update to \
              admits_relevance_exemption's matches! arms — a new check defaults to \
              EXCLUDED (the safe polarity), but that exclusion must be a choice this \
@@ -17795,6 +18346,176 @@ root = "work/elsewhere/ghost"
                 .contains("sub/project"),
             "reports the config it actually read, so the base is auditable"
         );
+    }
+
+    // ---- unregistered_worktree_dir ----------------------------------------------------
+
+    /// A real repo (one commit, so a worktree can be added) whose `.worktrees/` holds one
+    /// REGISTERED linked worktree, `registered`, made by git itself rather than faked, so the
+    /// registration the check reads is the one `git worktree add` writes.
+    fn repo_with_registered_worktree() -> (tempfile::TempDir, std::path::PathBuf) {
+        let (tmp, root, _sha) = git_fixture_with_commit();
+        let wt_parent = root.join(".worktrees");
+        std::fs::create_dir_all(&wt_parent).unwrap();
+        let repo = git2::Repository::open(&root).unwrap();
+        repo.worktree("registered", &wt_parent.join("registered"), None)
+            .unwrap();
+        (tmp, root)
+    }
+
+    const GHOST_SESSION: &str = "b80a27d4-9729-40ef-8c28-ad8982df6d13";
+    const GHOST_SESSION_2: &str = "bf44ba81-4cb3-4fdc-a92b-0780646ca7b9";
+
+    /// The shape measured 2026-10-05: a directory under `.worktrees/` with no `.git`, holding only
+    /// a dead session's gitignored `.buddy/<id>/` residue.
+    fn plant_unregistered_dir(root: &std::path::Path, name: &str, with_residue: bool) {
+        let dir = root.join(".worktrees").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        if with_residue {
+            std::fs::create_dir_all(dir.join(".buddy").join(GHOST_SESSION)).unwrap();
+            std::fs::create_dir_all(dir.join(".codescout")).unwrap();
+            std::fs::write(
+                dir.join(".codescout").join("cc_session_id"),
+                format!("{GHOST_SESSION_2}\n"),
+            )
+            .unwrap();
+        }
+    }
+
+    /// Exactly the unregistered directories are flagged, and the registered one is not.
+    ///
+    /// The registered worktree is the control a fire-on-everything check fails; the plain FILE
+    /// under `.worktrees/` is the control for a check that flags every entry rather than every
+    /// directory; `empty` (no residue) is the control for a check that only fires when it can
+    /// name an author, and must say so rather than invent one. Driven through `call`, the real
+    /// entry, so the wiring (violations list, `catalog_health`, hint) is under test too.
+    #[tokio::test]
+    async fn an_unregistered_worktree_dir_is_flagged_and_a_registered_one_is_not() {
+        let (_tmp, root) = repo_with_registered_worktree();
+        plant_unregistered_dir(&root, "ghost", true);
+        plant_unregistered_dir(&root, "empty", false);
+        std::fs::write(root.join(".worktrees").join("README"), "not a worktree").unwrap();
+
+        let out = doctor_at(root.clone()).await;
+        let fired = violations_named(&out, "unregistered_worktree_dir");
+        let mut names: Vec<String> = fired
+            .iter()
+            .map(|v| {
+                std::path::Path::new(v["path"].as_str().unwrap())
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["empty", "ghost"],
+            "exactly the unregistered directories fire — not the registered worktree, not a \
+             plain file: {fired:#?}"
+        );
+
+        let ghost = fired
+            .iter()
+            .find(|v| v["path"].as_str().unwrap().ends_with("/ghost"))
+            .unwrap();
+        let detail = ghost["detail"].as_str().unwrap();
+        assert!(
+            detail.contains(GHOST_SESSION) && detail.contains(GHOST_SESSION_2),
+            "names the session(s) the residue records, from BOTH sources: {detail}"
+        );
+        assert!(
+            detail.contains("git worktree list") && detail.contains("git status"),
+            "says why no other instrument reports it: {detail}"
+        );
+        let empty = fired
+            .iter()
+            .find(|v| v["path"].as_str().unwrap().ends_with("/empty"))
+            .unwrap();
+        assert!(
+            empty["detail"]
+                .as_str()
+                .unwrap()
+                .contains("not establishable"),
+            "a dir with no residue must say its author is unknown, not invent one: {}",
+            empty["detail"]
+        );
+
+        let health = &out["catalog_health"]["unregistered_worktree_dirs"];
+        assert_eq!(health["scanned"], 3, "{health}");
+        assert_eq!(health["registered"], 1, "{health}");
+        assert_eq!(health["unregistered"], 2, "{health}");
+        assert!(
+            out["catalog_health"]["hint"]
+                .as_str()
+                .unwrap()
+                .contains("unregistered_worktree_dir"),
+            "the hint must surface it — a finding nobody is pointed at is not a report"
+        );
+    }
+
+    /// The positive twin: a `.worktrees/` holding ONLY registered worktrees is silent. Without
+    /// it, a check that fired on every directory would pass the test above.
+    #[tokio::test]
+    async fn a_dot_worktrees_holding_only_registered_worktrees_is_silent() {
+        let (_tmp, root) = repo_with_registered_worktree();
+
+        let out = doctor_at(root).await;
+        assert!(
+            violations_named(&out, "unregistered_worktree_dir").is_empty(),
+            "a registered worktree must not be flagged: {out:#}"
+        );
+        let health = &out["catalog_health"]["unregistered_worktree_dirs"];
+        assert_eq!(health["scanned"], 1, "the directory WAS examined: {health}");
+        assert_eq!(health["unregistered"], 0, "{health}");
+    }
+
+    /// A session running IN a linked worktree must scan the MAIN checkout's `.worktrees/`, which
+    /// is where its siblings live. Scanning its own root finds nothing and reports clean from the
+    /// one place that cannot see the problem — so this runs from inside `registered` and demands
+    /// both that `ghost` is found and that the worktree the session stands in is NOT flagged.
+    #[tokio::test]
+    async fn the_scan_resolves_the_main_checkouts_worktrees_from_inside_a_linked_worktree() {
+        let (_tmp, root) = repo_with_registered_worktree();
+        plant_unregistered_dir(&root, "ghost", true);
+        let own = root.join(".worktrees").join("registered");
+        assert!(
+            crate::librarian::current_project::is_linked_worktree(&own),
+            "the fixture must really be a linked worktree"
+        );
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: own.clone(),
+            git_root: own.clone(),
+            main_root: crate::librarian::current_project::worktree_main_root(&own),
+            umbrella: None,
+        });
+        assert!(cp.main_root.is_some(), "main root must resolve from `.git`");
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(cp)
+            .build();
+
+        let out = call(&ctx, json!({})).await.unwrap();
+        let fired = violations_named(&out, "unregistered_worktree_dir");
+        assert_eq!(
+            fired.len(),
+            1,
+            "only `ghost` — not the worktree this session is standing in: {fired:#?}"
+        );
+        assert!(fired[0]["path"].as_str().unwrap().ends_with("/ghost"));
+    }
+
+    /// A skip must not read as a pass: a project with no `.worktrees/` reports why it checked
+    /// nothing, and fires nothing.
+    #[tokio::test]
+    async fn a_project_with_no_dot_worktrees_states_that_nothing_was_checked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = doctor_at(tmp.path().to_path_buf()).await;
+        assert!(violations_named(&out, "unregistered_worktree_dir").is_empty());
+        let note = out["catalog_health"]["unregistered_worktree_dirs"]["note"]
+            .as_str()
+            .unwrap();
+        assert!(note.contains(".worktrees"), "{note}");
     }
 
     // ---- entry_indegree / scan_conditional_past_due ------------------------------------

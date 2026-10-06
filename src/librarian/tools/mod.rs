@@ -651,6 +651,18 @@ mod required_param_routing_tests {
             ("refresh", refresh::call(&c, json!({})).await.unwrap_err()),
             ("get", get::call(&c, json!({})).await.unwrap_err()),
             ("timeline", timeline::call(&c, json!({})).await.unwrap_err()),
+            // Residual 8 of the 2026-08-27 parent: they named an action but offered no
+            // corrected call, and four of them built the LIBRARIAN's error type.
+            // docs/issues/2026-09-24-residual-required-param-corrected-call-hints.md
+            ("update", update::call(&c, json!({})).await.unwrap_err()),
+            ("move", mv::call(&c, json!({})).await.unwrap_err()),
+            ("delete", delete::call(&c, json!({})).await.unwrap_err()),
+            ("graft", graft::call(&c, json!({})).await.unwrap_err()),
+            (
+                "merge_worktree",
+                merge_worktree::call(&c, json!({})).await.unwrap_err(),
+            ),
+            ("state_at", state_at::call(&c, json!({})).await.unwrap_err()),
         ];
 
         for (name, e) in cases {
@@ -673,10 +685,29 @@ mod required_param_routing_tests {
                 "{name}: the refusal must name what wanted the field; got: {msg}"
             );
             assert!(
-                msg.contains("doc("),
+                msg.contains("doc(") || msg.contains("librarian("),
                 "{name}: the refusal must name the TOOL and action, since `missing field \
                  \\`x\\`` names neither; got: {msg}"
             );
+            // The table's first column is the MODULE name, which is the action name for the
+            // sites below but not for all of the older ones (`refresh` is `gather`). For these,
+            // a tool prefix alone is satisfied by ANY action's text, so require THEIR OWN.
+            // `merge_worktree` is a `librarian` action, the rest are `doc` actions.
+            if [
+                "update",
+                "move",
+                "delete",
+                "graft",
+                "merge_worktree",
+                "state_at",
+            ]
+            .contains(&name)
+            {
+                assert!(
+                    msg.contains(&format!("(action=\"{name}\")")),
+                    "{name}: the refusal must name THIS action; got: {msg}"
+                );
+            }
             let hint = r.hint().unwrap_or_default();
             assert!(
                 hint.contains("e.g.") || hint.contains("doc("),
