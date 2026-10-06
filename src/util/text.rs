@@ -1063,6 +1063,16 @@ mod tests {
             lines_omitted_marker(120)
         )));
         assert!(!carries_elision_marker("a\n--- many lines omitted ---\nb"));
+        // Its line must START with it and END with it: a line a program printed that merely contains
+        // the words, at either end, is not the marker.
+        assert!(!carries_elision_marker(&format!(
+            "printed: {}\nmore",
+            lines_omitted_marker(120)
+        )));
+        assert!(!carries_elision_marker(&format!(
+            "head\n{} and more\ntail",
+            lines_omitted_marker(120)
+        )));
     }
 
     #[test]
