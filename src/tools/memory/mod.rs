@@ -674,7 +674,16 @@ fn apply_sections_filter(
         (result.content, result.missing)
     };
 
-    let value = if crate::tools::exceeds_inline_limit(&content) {
+    // Decide on the response that would be RETURNED, not on the raw text: the content travels
+    // JSON-escaped inside `{"content": ...}`, so 5,000 `"` is 5,000 raw bytes and 10,014
+    // serialized. A raw gate sent that inline and `call_content` then buffered the whole response a
+    // second time under `@tool_*`.
+    let inline = if missing.is_empty() {
+        json!({ "content": &content })
+    } else {
+        json!({ "content": &content, "missing": &missing })
+    };
+    let value = if crate::tools::exceeds_inline_limit(&inline.to_string()) {
         let total_lines = content.lines().count();
         // Use a `@`-prefixed synthetic path: store_file sets source_path=None for
         // paths starting with '@', preventing get_with_refresh_flag from stat-ing
@@ -692,10 +701,8 @@ fn apply_sections_filter(
         } else {
             json!({ "file_id": file_id, "total_lines": total_lines, "missing": missing, "hint": hint })
         }
-    } else if missing.is_empty() {
-        json!({ "content": content })
     } else {
-        json!({ "content": content, "missing": missing })
+        inline
     };
 
     Ok(value)

@@ -1819,6 +1819,116 @@ async fn memory_large_read_buffers_as_file_ref() {
 
     drop(dir);
 }
+// The inline-or-buffer decision for a memory read must be made on the response that would be
+// RETURNED (`{"content": ...}`, compact JSON), not on the raw text: a topic of 5,000 `"` is 5,000
+// raw bytes and 10,014 serialized, so the raw gate returned it inline and `call_content` then
+// re-buffered the whole response under `@tool_*`. Drives the real tool across the edge for each
+// escaping class and asserts the one-handle contract: a `file_id` arm exactly when the inline
+// response would be over the limit, and an inline arm that fits.
+#[tokio::test]
+async fn a_memory_read_decides_inline_or_buffered_on_the_serialized_response() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let tool = Memory;
+    let classes: [(&str, &str); 5] = [
+        ("ascii", "a"),
+        ("quote", "\""),
+        ("backslash", "\\"),
+        ("control", "\u{1}"),
+        ("euro", "\u{20ac}"),
+    ];
+    for (name, ch) in classes {
+        let per = serde_json::to_string(&json!({ "content": ch.repeat(1000) }))
+            .unwrap()
+            .len()
+            .saturating_sub(14)
+            / 1000;
+        let edge = (crate::tools::INLINE_MAX_RESPONSE_LEN - 14) / per;
+        for n in edge - 3..=edge + 3 {
+            let content = ch.repeat(n);
+            let topic = format!("edge-{name}-{n}");
+            tool.call(
+                json!({ "action": "write", "topic": topic, "content": content }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+            let result = tool
+                .call(json!({ "action": "read", "topic": topic }), &ctx)
+                .await
+                .unwrap();
+            let serialized = serde_json::to_string(&json!({ "content": content }))
+                .unwrap()
+                .len();
+            let over = crate::tools::exceeds_inline_limit_len(serialized);
+            let text = result.to_string();
+            if over {
+                assert!(
+                    result.get("file_id").is_some() && result.get("content").is_none(),
+                    "{name} n={n}: the inline response would be {serialized} B, over the limit, \
+                     so the read must come back as one file_id, got {text:.200}"
+                );
+            } else {
+                assert!(
+                    result.get("content").is_some(),
+                    "{name} n={n}: {serialized} B fits, so the read must stay inline, got {text:.200}"
+                );
+            }
+            assert!(
+                !crate::tools::exceeds_inline_limit(&text),
+                "{name} n={n}: the returned response is {} B and would be re-buffered",
+                text.len()
+            );
+        }
+    }
+    drop(dir);
+}
+// The `missing` key rides in the inline response too, so it must be inside the measure: a read whose
+// filtered content alone fits but whose content PLUS the `missing` list does not must be buffered.
+#[tokio::test]
+async fn a_memory_read_counts_the_missing_list_in_the_response_it_measures() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let tool = Memory;
+    let mut buffered = 0;
+    let mut inline = 0;
+    for n in 9_930..=9_995 {
+        let topic = format!("missing-edge-{n}");
+        let body = format!("## A\n{}\n", "a".repeat(n));
+        tool.call(
+            json!({ "action": "write", "topic": topic, "content": body }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let result = tool
+            .call(
+                json!({ "action": "read", "topic": topic, "sections": ["A", "Nope"] }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            result["missing"],
+            json!(["Nope"]),
+            "n={n}: the unmatched section is reported: {result:.200}"
+        );
+        let text = result.to_string();
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "n={n}: the returned response is {} B and would be re-buffered",
+            text.len()
+        );
+        if result.get("file_id").is_some() {
+            buffered += 1;
+        } else {
+            inline += 1;
+        }
+    }
+    assert!(
+        buffered > 0 && inline > 0,
+        "the sweep must cross the edge: {inline} inline, {buffered} buffered"
+    );
+    drop(dir);
+}
 
 #[tokio::test]
 async fn memory_list_via_dispatch() {
