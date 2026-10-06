@@ -8555,3 +8555,62 @@ async fn a_test_run_naming_a_stale_handle_keeps_one_handle_across_the_byte_edge(
         "stale test run sweep: inline {inline}, summarized {summarized}, largest {largest} B"
     );
 }
+
+// ---- a program that prints the summarizers' own markers keeps one handle ----
+//
+// `carries_elision_marker` decides that a field was already cut by matching text: a whole line
+// `--- N lines omitted ---`, or a stderr that OPENS with a full `--- stderr TAIL: … ---` header.
+// A program can print either. The detector's one consumer is the backstop in `call_content`
+// (`clip_prebuffered_envelope`), which spares a marked field and, when the rest cannot make the
+// envelope fit, buffers the whole envelope under `@tool_*`. This pins that a program printing the
+// markers, at and far past the byte edge, never reaches that fallback through `run_command`.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_program_printing_the_summarizer_markers_keeps_one_handle() {
+    let (dir, ctx) = project_ctx().await;
+    let header = format!(
+        "{} 3 earlier line(s) dropped; 2 of 5 line(s) shown. Full stderr: \
+         read_file(\"@cmd_0000aaaa.err\") ---\n",
+        crate::util::text::STDERR_TAIL_MARKER
+    );
+    let mut checked = 0;
+    for unit in NOTICE_UNITS {
+        let line = unit.repeat(40);
+        for total in (9_300..=10_500usize).step_by(100).chain([60_000]) {
+            let n = total / (40 * escaped_unit_len(unit) + 2) + 1;
+            let mut lines = Vec::new();
+            for i in 0..n {
+                lines.push(if i % 10 == 5 {
+                    "--- 5 lines omitted ---".to_string()
+                } else {
+                    line.clone()
+                });
+            }
+            let body = format!("{}\n", lines.join("\n"));
+            std::fs::write(dir.path().join("marked.txt"), &body).unwrap();
+            std::fs::write(dir.path().join("marked_err.txt"), format!("{header}{body}")).unwrap();
+            for command in [
+                "cat ./marked.txt",
+                "cat ./marked_err.txt >&2",
+                "cat ./marked.txt; cat ./marked_err.txt >&2",
+            ] {
+                let (text, parsed) = buffer_query_free(&ctx, command).await;
+                let label = format!("{unit:?} {total} `{command}`");
+                assert!(!has_tool_handle(&text), "{label}: {text:.300}");
+                assert!(
+                    parsed["output_id"]
+                        .as_str()
+                        .is_none_or(|id| id.starts_with("@cmd_")),
+                    "{label}: {text:.300}"
+                );
+                assert!(
+                    text.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+                    "{label}: {} B",
+                    text.len()
+                );
+                checked += 1;
+            }
+        }
+    }
+    eprintln!("marker sweep: {checked} runs kept one handle");
+}
