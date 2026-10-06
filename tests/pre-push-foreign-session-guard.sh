@@ -155,6 +155,12 @@ eq    "lone copy: refused"                   "$LONE_EC" 1
 has   "lone copy: prints the bare sid"       "$LONE_OUT" "$BOB"
 has   "lone copy: ran far enough to name the class" "$LONE_OUT" "OB-20"
 hasnt "lone copy: never claims LIVE"         "$LONE_OUT" "LIVE"
+# Only the fallback produces these two: its `?` state reaches the banner, and the function
+# exists at all. With resolve_sids undefined the table is empty, the state prints as `[]`, and
+# bash reports `command not found` -- yet the three assertions above would still pass.
+has   "lone copy: fallback state reaches the banner as [?]" "$LONE_OUT" "[?]"
+hasnt "lone copy: resolve_sids is defined"   "$LONE_OUT" "command not found"
+rm -r "$LONE_DIR"
 run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
 eq    "original guard with its sibling: refused" "$EC" 1
 has   "original guard: prints the bare sid"  "$OUT" "$BOB"
