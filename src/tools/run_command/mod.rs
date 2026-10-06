@@ -16,6 +16,64 @@ use serde_json::{json, Value};
 
 pub struct RunCommand;
 
+/// Keys `run_command` attaches to EVERY response shape, as one map: `buffer_truncated`, `jobs` and
+/// `timeout_hint`. Built for the inline-or-summary gate (`LateKeys::envelope`), which measures them
+/// with the response they join, and again by `RunCommand::call` for the shapes that gate never
+/// sees. They used to be attached only by `call`, after the gate had sized the response, so a
+/// query of a truncated buffer that exactly fit went over the inline limit by its notice (about
+/// 280 B) and `call_content` re-buffered it under a second handle.
+pub(super) fn envelope_keys(
+    ctx: &ToolContext,
+    command: &str,
+    timeout_hint: Option<&str>,
+) -> serde_json::Map<String, Value> {
+    let mut keys = serde_json::Map::new();
+    // A truncation notice when the command read a buffer that holds only a PREFIX of what was
+    // captured. This is the half that closes the observable: the in-buffer sentinel is visible to
+    // `tail`/`wc`/a slice, but a `grep -c` over the missing tail returns `0` and shows the caller
+    // nothing at all, and `0` is byte-identical to genuinely absent. Reported as a field rather
+    // than injected into stdout, because a count or a hash is a value the caller will parse, and
+    // prepending prose to it corrupts the thing they asked for.
+    //
+    // BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
+    let truncation_notices = ctx.output_buffer.truncation_notices_in(command);
+    if !truncation_notices.is_empty() {
+        keys.insert("buffer_truncated".into(), json!(truncation_notices));
+    }
+    // Background job state travels in the ENVELOPE, and it has to.
+    //
+    // A `@bg_*` handle is resolved by textual substitution into the shell command, so it can only
+    // ever expand to a FILENAME: the channel cannot carry a status, and the exit code the shell
+    // hands back belongs to the reader (`tail`, `cat`) rather than to the job. That is the whole
+    // reason a backgrounded failure read as success: the caller asked `tail` how it went.
+    // Attaching state here is what makes the supervisor's observation reachable; without it the
+    // job record would be written and never read. Built AFTER the command ran (the gate's copy is
+    // built in `run_command_inner` once the child exited), so it reports the state the read saw.
+    //
+    // docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md
+    let job_states = ctx.output_buffer.job_states_in(command);
+    if !job_states.is_empty() {
+        keys.insert(
+            "jobs".into(),
+            json!(job_states
+                .iter()
+                .map(|(id, state, cmd)| {
+                    json!({
+                        "handle": id,
+                        "state": state.summary(),
+                        "command": cmd,
+                    })
+                })
+                .collect::<Vec<_>>()),
+        );
+    }
+    // Said when the timeout parameter was auto-corrected.
+    if let Some(hint) = timeout_hint {
+        keys.insert("timeout_hint".into(), json!(hint));
+    }
+    keys
+}
+
 /// Extract a u64 from a JSON value that may be a Number or a numeric String.
 fn get_timeout_u64(v: &Value) -> Option<u64> {
     match v {
@@ -248,6 +306,7 @@ impl Tool for RunCommand {
                 &root,
                 &security,
                 ctx,
+                &Default::default(), // an ack replays a stored command, not this input
             )
             .await;
         }
@@ -263,6 +322,15 @@ impl Tool for RunCommand {
             ctx.output_buffer.resolve_refs(command)?;
 
         // Helper: run inner logic then always clean up temp files.
+        let notes = inner::CallNotes {
+            timeout_hint: timeout_hint.clone(),
+            // Said when any @file_* handle was auto-refreshed. Passed IN, not prepended
+            // afterwards: it goes into `stdout`, and the inline-or-summary gate has to price it.
+            stdout_prefix: refreshed_handles
+                .iter()
+                .map(|id| format!("↻ {id} refreshed from disk (file changed since last read)\n"))
+                .collect(),
+        };
         let mut result = run_command_inner(
             command,
             &resolved_command,
@@ -274,79 +342,21 @@ impl Tool for RunCommand {
             &root,
             &security,
             ctx,
+            &notes,
         )
         .await;
 
         OutputBuffer::cleanup_temp_files(&temp_files);
 
-        // Inject refresh indicator into stdout when any @file_* handle was auto-refreshed.
-        if !refreshed_handles.is_empty() {
-            if let Ok(ref mut val) = result {
-                let prefix: String = refreshed_handles
-                    .iter()
-                    .map(|id| {
-                        format!(
-                            "↻ {} refreshed from disk (file changed since last read)\n",
-                            id
-                        )
-                    })
-                    .collect();
-                // Note: silently skips injection if "stdout" is absent (e.g. pending_ack
-                // shape or buffered-output summary). These cases are extremely unlikely
-                // to co-occur with a @file_* refresh, but worth noting.
-                if let Some(stdout) = val["stdout"].as_str() {
-                    val["stdout"] = serde_json::json!(format!("{}{}", prefix, stdout));
-                }
-            }
-        }
-
-        // Attach a truncation notice when the command read a buffer that holds only a
-        // PREFIX of what was captured. This is the half that closes the observable:
-        // the in-buffer sentinel is visible to `tail`/`wc`/a slice, but a `grep -c`
-        // over the missing tail returns `0` and shows the caller nothing at all — and
-        // `0` is byte-identical to genuinely absent. Reported as a field rather than
-        // injected into stdout, because a count or a hash is a value the caller will
-        // parse, and prepending prose to it corrupts the thing they asked for.
-        //
-        // BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
-        let truncation_notices = ctx.output_buffer.truncation_notices_in(command);
-        if !truncation_notices.is_empty() {
-            if let Ok(ref mut val) = result {
-                val["buffer_truncated"] = serde_json::json!(truncation_notices);
-            }
-        }
-
-        // Background job state travels in the ENVELOPE, and it has to.
-        //
-        // A `@bg_*` handle is resolved by textual substitution into the shell
-        // command, so it can only ever expand to a FILENAME — the channel cannot
-        // carry a status, and the exit code the shell hands back belongs to the
-        // reader (`tail`, `cat`) rather than to the job. That is the whole reason
-        // a backgrounded failure read as success: the caller asked `tail` how it
-        // went. Attaching state here is what makes the supervisor's observation
-        // reachable; without it the job record would be written and never read.
-        //
-        // docs/issues/archive/2026-09-13-background-command-loses-terminal-status.md
-        let job_states = ctx.output_buffer.job_states_in(command);
-        if !job_states.is_empty() {
-            if let Ok(ref mut val) = result {
-                val["jobs"] = serde_json::json!(job_states
-                    .iter()
-                    .map(|(id, state, cmd)| {
-                        serde_json::json!({
-                            "handle": id,
-                            "state": state.summary(),
-                            "command": cmd,
-                        })
-                    })
-                    .collect::<Vec<_>>());
-            }
-        }
-
-        // Attach timeout hint when the timeout parameter was auto-corrected.
-        if let Some(ref hint) = timeout_hint {
-            if let Ok(ref mut val) = result {
-                val["timeout_hint"] = json!(hint);
+        // The envelope keys (`envelope_keys`) on every response shape. A response built by
+        // `handle_successful_output_with` already carries them, because its inline-or-summary gate
+        // MEASURED them: a key that is present is left exactly as measured, so a value computed
+        // again here (a job that finished meanwhile) cannot change the size of a response that was
+        // judged to fit. The other shapes (background, pending ack, timeout) get them here.
+        let envelope = envelope_keys(ctx, command, timeout_hint.as_deref());
+        if let Ok(Value::Object(obj)) = &mut result {
+            for (key, value) in envelope {
+                obj.entry(key).or_insert(value);
             }
         }
 

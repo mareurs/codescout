@@ -332,6 +332,17 @@ pub(crate) fn classify_slow_command(cmd: &str) -> Option<&'static str> {
     None
 }
 
+/// What `RunCommand::call` knows about one call that the response must carry. Handed to
+/// `run_command_inner` so the inline-or-summary gate measures it with the response it joins.
+#[derive(Default)]
+pub(crate) struct CallNotes {
+    /// Said when `call` corrected the timeout parameter (`timeout_hint`).
+    pub timeout_hint: Option<String>,
+    /// `↻ <handle> refreshed from disk` lines for the `@file_*` handles `resolve_refs` re-read,
+    /// prepended to `stdout` where the response has one.
+    pub stdout_prefix: String,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_command_inner(
     original_command: &str,
@@ -344,6 +355,9 @@ pub(crate) async fn run_command_inner(
     root: &Path,
     security: &crate::util::path_security::PathSecurityConfig,
     ctx: &ToolContext,
+    // What `call` knows about this call that the response must carry. Measured by the
+    // inline-or-summary gate below (`LateKeys`), not added after it.
+    notes: &CallNotes,
 ) -> anyhow::Result<Value> {
     use crate::util::path_security::is_dangerous_command;
 
@@ -643,6 +657,13 @@ pub(crate) async fn run_command_inner(
                 LateKeys {
                     redacted,
                     tee_skipped,
+                    // Built here, after the child exited, so `jobs` reports what the read saw.
+                    envelope: super::envelope_keys(
+                        ctx,
+                        original_command,
+                        notes.timeout_hint.as_deref(),
+                    ),
+                    stdout_prefix: notes.stdout_prefix.clone(),
                 },
             )
             .await?;

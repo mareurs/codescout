@@ -1716,6 +1716,7 @@ async fn dangerous_command_returns_ack_handle() {
         &root,
         &security,
         &ctx,
+        &Default::default(), // notes
     )
     .await
     .expect("should return Ok with pending_ack, not Err");
@@ -1750,6 +1751,7 @@ async fn run_in_background_returns_bg_handle() {
         &root,
         &security,
         &ctx,
+        &Default::default(), // notes
     )
     .await
     .expect("should succeed");
@@ -1864,11 +1866,17 @@ async fn run_in_background_rejects_buffer_only() {
     let root = dir.path().to_path_buf();
     let security = crate::util::path_security::PathSecurityConfig::default();
     let result = run_command_inner(
-        "echo x", "echo x", 30, false, // acknowledge_risk
+        "echo x",
+        "echo x",
+        30,
+        false, // acknowledge_risk
         None,  // cwd_param
         true,  // buffer_only
         true,  // run_in_background
-        &root, &security, &ctx,
+        &root,
+        &security,
+        &ctx,
+        &Default::default(),
     )
     .await;
     let err = result.unwrap_err();
@@ -1903,11 +1911,17 @@ async fn shell_command_mode_disabled_blocks_run_command() {
         ..Default::default()
     };
     let result = run_command_inner(
-        "echo x", "echo x", 30, false, // acknowledge_risk
+        "echo x",
+        "echo x",
+        30,
+        false, // acknowledge_risk
         None,  // cwd_param
         false, // buffer_only
         false, // run_in_background
-        &root, &security, &ctx,
+        &root,
+        &security,
+        &ctx,
+        &Default::default(),
     )
     .await;
     let err = result.unwrap_err();
@@ -2790,10 +2804,12 @@ fn wide_stderr() -> String {
 
 /// Run `command` through `RunCommand::call_content`; return the primary block's text and parse.
 async fn buffer_query(ctx: &ToolContext, command: String) -> (String, Value) {
-    let content = RunCommand
-        .call_content(json!({ "command": command, "timeout_secs": 10 }), ctx)
-        .await
-        .unwrap();
+    run_query(ctx, json!({ "command": command, "timeout_secs": 10 })).await
+}
+
+/// [`buffer_query`] with the whole `input`, for a test that sets more than the command.
+async fn run_query(ctx: &ToolContext, input: Value) -> (String, Value) {
+    let content = RunCommand.call_content(input, ctx).await.unwrap();
     let text = content[0]
         .as_text()
         .map(|t| t.text.clone())
@@ -3691,6 +3707,7 @@ async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
             Box::new(|| LateKeys {
                 redacted: 1,
                 tee_skipped: None,
+                ..Default::default()
             }) as Box<dyn Fn() -> LateKeys>,
             json!({"exit_code": 0, "stdout": "", "redacted_credentials": 1})
                 .to_string()
@@ -3701,6 +3718,7 @@ async fn late_keys_are_inside_the_gate_at_the_exact_edge() {
             Box::new(|| LateKeys {
                 redacted: 0,
                 tee_skipped: Some("full".into()),
+                ..Default::default()
             }),
             json!({"exit_code": 0, "stdout": "", "unfiltered_output_skipped": "full"})
                 .to_string()
@@ -3761,6 +3779,7 @@ async fn a_tee_capture_behind_an_empty_stdout_is_inside_the_gate_at_the_exact_ed
                 LateKeys {
                     redacted: 0,
                     tee_skipped: Some("n".repeat(note)),
+                    ..Default::default()
                 },
             )
             .await
@@ -3841,6 +3860,7 @@ async fn a_truncated_page_counts_the_late_keys_it_carries() {
         LateKeys {
             redacted: 0,
             tee_skipped: Some("n".repeat(400)),
+            ..Default::default()
         },
     )
     .await
@@ -8178,6 +8198,7 @@ async fn a_compacted_response_is_judged_with_its_late_keys_and_its_real_handle_a
                 LateKeys {
                     redacted: 0,
                     tee_skipped: Some("n".repeat(note)),
+                    ..Default::default()
                 },
             )
             .await
@@ -8233,6 +8254,7 @@ async fn a_summary_budgets_around_the_late_keys_it_carries() {
         LateKeys {
             redacted: 0,
             tee_skipped: Some("n".repeat(7_000)),
+            ..Default::default()
         },
     )
     .await
@@ -8263,4 +8285,332 @@ async fn a_summary_budgets_around_the_late_keys_it_carries() {
             "{key}"
         );
     }
+}
+
+// ---- a truncated buffer's notice is counted by the gate that sizes the query ----
+//
+// `buffer_truncated` (about 280 B) was attached by `RunCommand::call` AFTER
+// `handle_successful_output_with` had sized the response, so a query of a truncated `@cmd_*`
+// buffer whose answer the gate judged to fit went over the inline limit by the notice, and
+// `call_content` re-buffered it under a second handle. `timeout_hint` was attached the same way.
+
+/// The seven escape classes the inline limit counts differently: 1, 2, 2, 6 and 6 serialized
+/// bytes per char (ESC also meets the ANSI strip a buffer query applies), and two multibyte chars
+/// serde_json writes raw.
+// cap-class: NOT_A_CAP — a test fixture listing escape classes, not a bound on any result
+const NOTICE_UNITS: [&str; 7] = ["a", "\"", "\\", "\u{1}", "\u{1b}", "\u{20ac}", "\u{1F600}"];
+
+/// A 30-line `@cmd_*` buffer whose payload serializes to about `target` bytes, stored as a PREFIX
+/// of a ten-times-longer capture so that every read of it carries `buffer_truncated`.
+fn truncated_cmd_buffer(ctx: &ToolContext, unit: &str, target: usize) -> String {
+    let per_line = target / 30;
+    let line = unit.repeat((per_line.saturating_sub(2) / escaped_unit_len(unit)).max(1));
+    let body = format!("{}\n", vec![line; 30].join("\n"));
+    ctx.output_buffer.store_truncated(
+        "probe".into(),
+        body,
+        String::new(),
+        0,
+        Some(crate::tools::output_buffer::Truncation {
+            kept_lines: 30,
+            total_lines: 300,
+        }),
+    )
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_truncated_buffer_counts_its_notice_in_every_query() {
+    let (_dir, ctx) = project_ctx().await;
+    let (mut whole, mut cut, mut largest) = (0, 0, 0);
+    let mut failures = Vec::new();
+    for unit in NOTICE_UNITS {
+        for target in (9_300..=10_500).step_by(50) {
+            let id = truncated_cmd_buffer(&ctx, unit, target);
+            for (command, timeout) in [
+                (format!("cat {id}"), 10),
+                (format!("sed -n '1,30p' {id}"), 10),
+                (format!("grep -v NO_SUCH_LINE {id}"), 10),
+                // `timeout_secs: 0` is corrected to 30 and says so in `timeout_hint`, another key
+                // `call` attaches to every response shape.
+                (format!("cat {id}"), 0),
+            ] {
+                let label = format!("{unit:?} {target} `{command}` timeout={timeout}");
+                let (text, parsed) =
+                    run_query(&ctx, json!({ "command": command, "timeout_secs": timeout })).await;
+                let named = handles_named(&text);
+                let notice = parsed["buffer_truncated"][0]
+                    .as_str()
+                    .is_some_and(|n| n.contains(&id));
+                let hint_ok = timeout != 0 || parsed.get("timeout_hint").is_some();
+                if has_tool_handle(&text)
+                    || named.iter().any(|h| *h != id)
+                    || parsed.get("output_id").is_some()
+                    || text.len() > crate::tools::INLINE_MAX_RESPONSE_LEN
+                    || !notice
+                    || !hint_ok
+                {
+                    failures.push(format!(
+                        "{label}: {} B, buffered_bytes {}: {text:.200}",
+                        text.len(),
+                        parsed["buffered_bytes"]
+                    ));
+                    continue;
+                }
+                largest = largest.max(text.len());
+                if parsed.get("truncated").is_some() {
+                    cut += 1;
+                } else {
+                    whole += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} queries broke the one-handle limit; first: {:#?}",
+        failures.len(),
+        &failures[..failures.len().min(3)]
+    );
+    // Both arms reached, or the sweep is not across the edge.
+    assert!(whole > 0 && cut > 0, "whole {whole}, cut {cut}");
+    eprintln!("notice sweep: whole {whole}, cut {cut}, largest response {largest} B");
+}
+
+// ---- a refreshed `@file_*` handle's `↻` line is priced by the gate ----
+//
+// `RunCommand::call` prepended `↻ <handle> refreshed from disk …` to `stdout` AFTER the gate had
+// sized the response, the same defect as the notice above in a different channel: a query of a
+// stale `@file_*` handle that exactly fit went over the limit by that line (about 70 B).
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_refreshed_file_handle_prices_its_refresh_line_in_every_query() {
+    let (dir, ctx) = project_ctx().await;
+    let path = dir.path().join("stale.txt");
+    let (mut whole, mut cut, mut summarized, mut largest) = (0, 0, 0, 0);
+    let mut failures = Vec::new();
+    for unit in NOTICE_UNITS {
+        for target in (9_300..=10_500usize).step_by(50) {
+            let line =
+                unit.repeat(((target / 30).saturating_sub(2) / escaped_unit_len(unit)).max(1));
+            let body = format!("{}\n", vec![line; 30].join("\n"));
+            for shape in ["cat", "sed", "grep", "mixed"] {
+                // A fresh stale handle per query: a refresh re-reads the file and is then current.
+                std::fs::write(&path, &body).unwrap();
+                let id = ctx
+                    .output_buffer
+                    .store_file(path.to_string_lossy().to_string(), "original".into());
+                let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+                filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future))
+                    .unwrap();
+                let command = match shape {
+                    "cat" => format!("cat {id}"),
+                    "sed" => format!("sed -n '1,30p' {id}"),
+                    "grep" => format!("grep -v NO_SUCH_LINE {id}"),
+                    // Not a buffer query (a path-like word revokes buffer-only status): summarized
+                    // under its own `@cmd_*`, `stdout` and all.
+                    _ => format!("cat {id}; seq 1 4000; true ./not-a-buffer"),
+                };
+                let label = format!("{unit:?} {target} `{command}`");
+                let (text, parsed) = buffer_query(&ctx, command).await;
+                let own_id = parsed["output_id"].as_str().unwrap_or_default();
+                let refreshed = parsed["stdout"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with(&format!("↻ {id} refreshed from disk")));
+                if has_tool_handle(&text)
+                    || !(own_id.is_empty() || (shape == "mixed" && own_id.starts_with("@cmd_")))
+                    || text.len() > crate::tools::INLINE_MAX_RESPONSE_LEN
+                    || !refreshed
+                {
+                    failures.push(format!(
+                        "{label}: {} B, buffered_bytes {}: {text:.200}",
+                        text.len(),
+                        parsed["buffered_bytes"]
+                    ));
+                    continue;
+                }
+                largest = largest.max(text.len());
+                if !own_id.is_empty() {
+                    summarized += 1;
+                } else if parsed.get("truncated").is_some() {
+                    cut += 1;
+                } else {
+                    whole += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} queries broke the one-handle limit; first: {:#?}",
+        failures.len(),
+        &failures[..failures.len().min(3)]
+    );
+    assert!(
+        whole > 0 && cut > 0 && summarized > 0,
+        "whole {whole}, cut {cut}, summarized {summarized}"
+    );
+    eprintln!(
+        "refresh sweep: whole {whole}, cut {cut}, summarized {summarized}, largest {largest} B"
+    );
+}
+
+// ---- a libtest run naming a stale `@file_*` handle is not compacted out of its refresh line ----
+//
+// `compacted_fits` does not price `LateKeys::stdout_prefix`, and the compacted arm does not
+// prepend it, so such a run must take the raw gate. Without that guard the refresh line was simply
+// absent from a compacted response.
+
+/// `blocks` empty libtest targets (each dropped by compaction) and one passing test: the shape a
+/// filtered `cargo test` prints, as a file so its path makes the command not a buffer query.
+fn libtest_noise(blocks: usize) -> String {
+    let empty = "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; \
+                 3 filtered out; finished in 0.00s\n\n";
+    format!(
+        "{}running 1 test\ntest a ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; \
+         0 measured; 0 filtered out; finished in 0.00s\n\n",
+        empty.repeat(blocks)
+    )
+}
+
+/// Store `body` behind a `@file_*` handle that is stale (the file is newer than the entry), so the
+/// next command naming it re-reads it and says so.
+fn stale_file_handle(ctx: &ToolContext, path: &std::path::Path, body: &str) -> String {
+    std::fs::write(path, body).unwrap();
+    let id = ctx
+        .output_buffer
+        .store_file(path.to_string_lossy().to_string(), "original".into());
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+    filetime::set_file_mtime(path, filetime::FileTime::from_system_time(future)).unwrap();
+    id
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_compactable_test_run_keeps_the_refresh_line_of_a_stale_handle() {
+    let (dir, ctx) = project_ctx().await;
+    std::fs::write(dir.path().join("noise.txt"), libtest_noise(60)).unwrap();
+    let id = stale_file_handle(&ctx, &dir.path().join("stale.txt"), "PAYLOAD\n");
+    let (text, parsed) = buffer_query(&ctx, format!("cat {id} ./noise.txt; echo cargo test")).await;
+    let stdout = parsed["stdout"].as_str().unwrap_or_default();
+    assert!(
+        stdout.starts_with(&format!("↻ {id} refreshed from disk")),
+        "the refresh line is missing: {text:.400}"
+    );
+    assert!(stdout.contains("PAYLOAD"), "{text:.400}");
+    assert!(!has_tool_handle(&text), "{text:.300}");
+}
+
+// The same command across the response's byte edge, in the escape classes, with the payload behind
+// the stale handle growing: one handle at most, no response over the limit, the line always shown.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_test_run_naming_a_stale_handle_keeps_one_handle_across_the_byte_edge() {
+    let (dir, ctx) = project_ctx().await;
+    let noise = libtest_noise(20);
+    let noise_cost = serde_json::to_string(&noise).unwrap().len() - 2;
+    std::fs::write(dir.path().join("noise.txt"), &noise).unwrap();
+    let path = dir.path().join("stale.txt");
+    let (mut inline, mut summarized, mut largest) = (0, 0, 0);
+    let mut failures = Vec::new();
+    for unit in ["a", "\"", "\u{1}"] {
+        for total in (9_300..=10_500usize).step_by(50) {
+            let width = (total.saturating_sub(noise_cost) / 30).saturating_sub(2);
+            let line = unit.repeat((width / escaped_unit_len(unit)).max(1));
+            let id = stale_file_handle(&ctx, &path, &format!("{}\n", vec![line; 30].join("\n")));
+            let command = format!("cat {id} ./noise.txt; echo cargo test");
+            let (text, parsed) = buffer_query(&ctx, command).await;
+            let own_id = parsed["output_id"].as_str().unwrap_or_default();
+            let refreshed = parsed["stdout"]
+                .as_str()
+                .is_some_and(|s| s.starts_with(&format!("↻ {id} refreshed from disk")));
+            if has_tool_handle(&text)
+                || !(own_id.is_empty() || own_id.starts_with("@cmd_"))
+                || text.len() > crate::tools::INLINE_MAX_RESPONSE_LEN
+                || !refreshed
+            {
+                failures.push(format!("{unit:?} {total}: {} B: {text:.300}", text.len()));
+                continue;
+            }
+            largest = largest.max(text.len());
+            if own_id.is_empty() {
+                inline += 1;
+            } else {
+                summarized += 1;
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} runs broke the one-handle limit; first: {:#?}",
+        failures.len(),
+        &failures[..failures.len().min(3)]
+    );
+    assert!(
+        inline > 0 && summarized > 0,
+        "inline {inline}, summarized {summarized}"
+    );
+    eprintln!(
+        "stale test run sweep: inline {inline}, summarized {summarized}, largest {largest} B"
+    );
+}
+
+// ---- a program that prints the summarizers' own markers keeps one handle ----
+//
+// `carries_elision_marker` decides that a field was already cut by matching text: a whole line
+// `--- N lines omitted ---`, or a stderr that OPENS with a full `--- stderr TAIL: … ---` header.
+// A program can print either. The detector's one consumer is the backstop in `call_content`
+// (`clip_prebuffered_envelope`), which spares a marked field and, when the rest cannot make the
+// envelope fit, buffers the whole envelope under `@tool_*`. This pins that a program printing the
+// markers, at and far past the byte edge, never reaches that fallback through `run_command`.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_program_printing_the_summarizer_markers_keeps_one_handle() {
+    let (dir, ctx) = project_ctx().await;
+    let header = format!(
+        "{} 3 earlier line(s) dropped; 2 of 5 line(s) shown. Full stderr: \
+         read_file(\"@cmd_0000aaaa.err\") ---\n",
+        crate::util::text::STDERR_TAIL_MARKER
+    );
+    let mut checked = 0;
+    for unit in NOTICE_UNITS {
+        let line = unit.repeat(40);
+        for total in (9_300..=10_500usize).step_by(100).chain([60_000]) {
+            let n = total / (40 * escaped_unit_len(unit) + 2) + 1;
+            let mut lines = Vec::new();
+            for i in 0..n {
+                lines.push(if i % 10 == 5 {
+                    "--- 5 lines omitted ---".to_string()
+                } else {
+                    line.clone()
+                });
+            }
+            let body = format!("{}\n", lines.join("\n"));
+            std::fs::write(dir.path().join("marked.txt"), &body).unwrap();
+            std::fs::write(dir.path().join("marked_err.txt"), format!("{header}{body}")).unwrap();
+            for command in [
+                "cat ./marked.txt",
+                "cat ./marked_err.txt >&2",
+                "cat ./marked.txt; cat ./marked_err.txt >&2",
+            ] {
+                let (text, parsed) = buffer_query_free(&ctx, command).await;
+                let label = format!("{unit:?} {total} `{command}`");
+                assert!(!has_tool_handle(&text), "{label}: {text:.300}");
+                assert!(
+                    parsed["output_id"]
+                        .as_str()
+                        .is_none_or(|id| id.starts_with("@cmd_")),
+                    "{label}: {text:.300}"
+                );
+                assert!(
+                    text.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+                    "{label}: {} B",
+                    text.len()
+                );
+                checked += 1;
+            }
+        }
+    }
+    eprintln!("marker sweep: {checked} runs kept one handle");
 }
