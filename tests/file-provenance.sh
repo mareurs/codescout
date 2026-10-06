@@ -841,6 +841,120 @@ eq "a refused write on a CLEAN path is UNKNOWN, not CLEAN" \
     "$(verdict_of "$(run src/cl_refused.rs)")" "UNKNOWN"
 
 echo
+echo "== a DIRTY path: a peer whose write the last commit already took is not a co-writer =="
+# docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md, instance 2.
+# The window floor is the path's last commit time, which git gives to the SECOND. A write that
+# commit took can be inside the window only when it was made in the commit's own second, and the
+# path being DIRTY (someone else's bytes) means the CLEAN verdict cannot discount it. The text
+# can: a peer whose text is already in HEAD, with no further copy in the worktree, holds
+# nothing uncommitted. Every negative below has twins that MUST still name the writer -- they are
+# what make the negatives evidence, because "name nobody, ever" passes every absence assertion.
+BASE_S="2026-03-02T10:00:05"
+COMMIT_ISO="${BASE_S}+00:00"          # the commit, to the second
+BOUNDARY="${BASE_S}.400Z"             # 0.4 s into that same second
+LATER="2026-03-02T10:00:10.000Z"      # five seconds after it
+LONG="pub fn resolve_identity() -> Option<String> { std::env::var(\"ID\").ok() }"
+LONG2="pub fn another_long_line_of_code() -> usize { 4242424242 }"
+
+# seed_at <path> <text> -- tracked, committed AT $COMMIT_ISO, CLEAN
+seed_at() {
+    mkdir -p "$T/repo/$(dirname "$1")"
+    printf '%s\n' "$2" > "$T/repo/$1"
+    git -C "$T/repo" add "$1"
+    GIT_COMMITTER_DATE="$COMMIT_ISO" GIT_AUTHOR_DATE="$COMMIT_ISO" \
+        git -C "$T/repo" commit -q -m "seed $1"
+}
+# call_at <file> <tool> <input-json> <iso> -- a landed call (its result is the bare "ok")
+call_at() {
+    NSEQ=$((NSEQ + 1))
+    emit_use "$1" "toolu_ab$NSEQ" "$2" "$3" "$4"
+    emit_result "$1" "toolu_ab$NSEQ" '"ok"' 0
+}
+create_in() { python3 -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "content": sys.argv[2]}))' "$1" "$2"; }
+edit_text_in() { python3 -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "old_string": "a", "new_string": sys.argv[2]}))' "$1" "$2"; }
+
+# --- 1. the filed shape: the peer's create is the commit's content, the asker added lines ----
+seed_at src/ab_filed.rs "$LONG"
+call_at "$B" mcp__codescout__create_file "$(create_in src/ab_filed.rs "$LONG")" "$BOUNDARY"
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_filed.rs)" "$OK_CS" 0
+dirty src/ab_filed.rs
+out="$(run src/ab_filed.rs)"
+eq    "a dirty path whose peer bytes are already committed is MINE, not SHARED" "$(verdict_of "$out")" "MINE"
+hasnt "and the committed peer is not named as a writer" "$out" "written by $PEER"
+has   "and the output says why it was set aside" "$out" "already in HEAD"
+has   "while this session is still named" "$out" "THIS session"
+
+seed_at src/ab_only.rs "$LONG"
+call_at "$B" mcp__codescout__create_file "$(create_in src/ab_only.rs "$LONG")" "$BOUNDARY"
+dirty src/ab_only.rs
+out="$(run src/ab_only.rs)"
+eq    "with only the committed peer on record, a dirty path is UNKNOWN, not PEER" "$(verdict_of "$out")" "UNKNOWN"
+hasnt "and the committed peer is not named" "$out" "written by $PEER"
+has   "and the output says why it was set aside" "$out" "already in HEAD"
+has   "and does not read as 'nobody owns it'" "$out" "WHO holds the uncommitted bytes is not recorded"
+
+# --- 2. TWIN: the peer's text is NOT in HEAD, so it is the uncommitted bytes ---------------
+seed_at src/ab_live.rs "$LONG"
+call_at "$B" mcp__codescout__edit_file "$(edit_text_in src/ab_live.rs "$LONG2")" "$BOUNDARY"
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_live.rs)" "$OK_CS" 0
+printf '%s\n' "$LONG2" >> "$T/repo/src/ab_live.rs"
+out="$(run src/ab_live.rs)"
+eq  "TWIN: a boundary write whose text is NOT in HEAD is still SHARED" "$(verdict_of "$out")" "SHARED"
+has "TWIN: and the peer is named" "$out" "written by $PEER"
+
+# --- 3. TWIN: a shell write carries no text, so it cannot be shown to be committed ---------
+seed_at src/ab_bash.rs "$LONG"
+tool_use "$B" Bash '{"command":"sed -i s/a/b/ src/ab_bash.rs","description":"edit"}' "$BOUNDARY"
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_bash.rs)" "$OK_CS" 0
+dirty src/ab_bash.rs
+out="$(run src/ab_bash.rs)"
+eq  "TWIN: a boundary Bash write is still SHARED" "$(verdict_of "$out")" "SHARED"
+has "TWIN: and the peer is named" "$out" "written by $PEER"
+
+# --- 4. TWIN: a short string proves nothing by occurring in a file --------------------------
+seed_at src/ab_short.rs "let value = compute();"
+call_at "$B" mcp__codescout__edit_file "$(edit_text_in src/ab_short.rs "compute()")" "$BOUNDARY"
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_short.rs)" "$OK_CS" 0
+dirty src/ab_short.rs
+eq "TWIN: a short text that occurs in HEAD is still SHARED" \
+    "$(verdict_of "$(run src/ab_short.rs)")" "SHARED"
+
+# --- 5. TWIN: outside the commit's own second the write cannot have been in that commit -----
+seed_at src/ab_later.rs "$LONG"
+call_at "$B" mcp__codescout__create_file "$(create_in src/ab_later.rs "$LONG")" "$LATER"
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_later.rs)" "$OK_CS" 0
+dirty src/ab_later.rs
+eq "TWIN: the same text five seconds AFTER the commit is still SHARED" \
+    "$(verdict_of "$(run src/ab_later.rs)")" "SHARED"
+
+# --- 6. TWIN: an uncommitted second copy of the text is the peer's live bytes ---------------
+seed_at src/ab_dup.rs "$LONG"
+call_at "$B" mcp__codescout__create_file "$(create_in src/ab_dup.rs "$LONG")" "$BOUNDARY"
+call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_dup.rs)" "$OK_CS" 0
+printf '%s\n' "$LONG" >> "$T/repo/src/ab_dup.rs"
+eq "TWIN: HEAD holds one copy and the worktree two -> the extra is uncommitted -> SHARED" \
+    "$(verdict_of "$(run src/ab_dup.rs)")" "SHARED"
+
+# --- 7. TWIN: the asker's OWN boundary write is never set aside ----------------------------
+seed_at src/ab_own.rs "$LONG"
+call_at "$A" mcp__codescout__create_file "$(create_in src/ab_own.rs "$LONG")" "$BOUNDARY"
+dirty src/ab_own.rs
+out="$(run src/ab_own.rs)"
+eq  "TWIN: this session's own boundary write is still MINE" "$(verdict_of "$out")" "MINE"
+has "TWIN: and still named" "$out" "THIS session"
+
+# --- 8. TWIN: --all names its own floor, so there is no boundary to resolve -----------------
+out="$(run --all src/ab_only.rs)"
+eq  "TWIN: --all on the committed-peer path names the peer again (PEER)" "$(verdict_of "$out")" "PEER"
+has "TWIN: and names it" "$out" "written by $PEER"
+
+# --- 9. TWIN: --since is the caller's own floor, not git's second-resolution one -------------
+out="$(run --since "$COMMIT_ISO" src/ab_only.rs)"
+eq  "TWIN: --since at the commit's second names the peer (PEER); it is not git's floor" \
+    "$(verdict_of "$out")" "PEER"
+has "TWIN: and names it" "$out" "written by $PEER"
+
+echo
 echo "== a sessionId is an ADDRESS, not just evidence -- the registry join =="
 #
 # The bug: the tool named a session and stopped, so every answer cost a round trip

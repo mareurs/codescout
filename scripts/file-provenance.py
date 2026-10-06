@@ -55,13 +55,19 @@ emitting none. **Bash remains the one real blind spot.**
 
 THE OTHER DIRECTION: what SHARED / PEER may claim
 -------------------------------------------------
-Both assert that another party's UNCOMMITTED bytes are in the path right now, so two things
+Both assert that another party's UNCOMMITTED bytes are in the path right now, so three things
 that look like writes in a transcript but put nothing at risk are NOT counted as that:
 a call whose own tool_result says it was REFUSED (a request and a landed edit are the same
 token in a tool_use block; a codescout refusal arrives as `{"ok": false}` with `is_error`
 absent, a harness refusal sets `is_error`), and a write to a path git reports CLEAN, which is
 history already in HEAD and is reported as the verdict `CLEAN` rather than SHARED or PEER.
-Both narrow the false-POSITIVE side only. A call with no result on record, and every shell
+A third case needs the text, because per-path git state cannot see it: on a DIRTY path, a write
+that the path's last commit already took still falls in the window when it was made in that
+commit's own second (git dates a commit to the second). Such a peer is dropped, with a note,
+only when its text is known, long enough, present in HEAD and not copied again in the
+worktree (`absorbed_writes`); a shell write, a short string, a write outside that second and
+the asker's own writes always stay counted.
+All three narrow the false-POSITIVE side only. A call with no result on record, and every shell
 call whatever its exit status, still counts; UNKNOWN is still never "not mine"; and a path git
 cannot vouch for (untracked) keeps its transcript verdict. Verdict tokens, first column:
 MINE SHARED PEER UNKNOWN CLEAN. scripts/fmt-mine.sh partitions on that column.
@@ -78,7 +84,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Tool calls whose input names a write TARGET. Read tools are deliberately absent:
@@ -836,8 +842,56 @@ def session_activations(files: list[Path]) -> dict[str, dict]:
     return facts
 
 
-def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
-    """path (repo-relative) -> [(session id, ISO timestamp or None), ...].
+
+# The shortest text a write may carry and still be tested for "already committed" (see
+# `absorbed_writes`). Below this a string is as likely to occur in a file by coincidence as by
+# the write, and "it occurs in HEAD" would then prove nothing about THIS write.
+MIN_ABSORB_CHARS = 24
+
+
+def write_texts(name: str, inp: dict) -> list[str] | None:
+    """The text this ONE all-or-nothing write put on disk, or None when that is not knowable.
+
+    None is the safe answer and the common one: a shell command, a `doc()` call (addressed by
+    id, patching a rendered body), a deletion (empty replacement) and a rename carry no text
+    that can be looked up in a file. A write whose text is unknown is never treated as already
+    committed (see `absorbed_writes`), so every None keeps the write counted.
+
+    Also None when ANY piece is shorter than MIN_ABSORB_CHARS: one piece that proves nothing
+    must not be outvoted by the others.
+    """
+    if not isinstance(inp, dict):
+        return None
+    if name in CS_WRITE_TOOLS:
+        keys = ("new_string", "content", "body", "new_body")
+    elif name in NATIVE_WRITE_TOOLS:
+        keys = ("new_string", "content", "new_source")
+    else:
+        return None
+    found: list[str] = []
+    pieces = [inp]
+    edits = inp.get("edits")
+    if isinstance(edits, list):
+        pieces.extend(e for e in edits if isinstance(e, dict))
+    for piece in pieces:
+        for key in keys:
+            if key in piece:
+                if not isinstance(piece[key], str):
+                    return None
+                found.append(piece[key])
+    if not found or any(len(t.strip()) < MIN_ABSORB_CHARS for t in found):
+        return None
+    return found
+
+def scan_with_evidence(root: Path) -> tuple[
+        dict[str, list[tuple[str, str | None]]],
+        dict[tuple[str, str, str | None], list[str] | None]]:
+    """(owners, evidence). `owners`: path (repo-relative) -> [(session id, ISO timestamp or None), ...].
+
+    `evidence` maps (path, session id, timestamp) -> the text those writes put on disk, or None
+    when ANY write behind that key has no knowable text (`write_texts`), or reaches several
+    paths at once. None is sticky: one opaque write poisons the key, so it can only ever be
+    counted, never discounted. Consumed by `absorbed_writes`.
 
     Timestamps are kept rather than filtered here: a record with no timestamp
     cannot be placed in or out of any window, and dropping it would convert a
@@ -851,6 +905,7 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
     fmt-mine acts on this answer. Absolute paths and native tools are unaffected.
     """
     owners: dict[str, list[tuple[str, str | None]]] = {}
+    evidence: dict[tuple[str, str, str | None], list[str] | None] = {}
     files = transcript_files(root)
     facts = session_activations(files)
     no_facts = {"parent_activated": False, "sub_activated_at": None}
@@ -890,16 +945,28 @@ def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
                 tree_unknown = base is UNKNOWN_TREE
                 # A refused all-or-nothing call wrote nothing. Activation tracking below is
                 # deliberately unchanged: this narrows WRITES only.
-                targets = () if (b.get("id") in refused and name not in _NON_ATOMIC_NAMES) \
-                    else write_targets(name, inp, root)
+                targets = [] if (b.get("id") in refused and name not in _NON_ATOMIC_NAMES) \
+                    else list(write_targets(name, inp, root))
+                # The text is only attributable to a path when the call reached exactly one.
+                texts = write_texts(name, inp) if len(targets) == 1 else None
                 for raw in targets:
                     if (unknowable or tree_unknown) and relative_cs and not Path(raw).is_absolute():
                         continue
                     rel = normalize(raw, root, base)
                     if rel:
                         owners.setdefault(rel, []).append((who, when))
+                        key = (rel, who, when)
+                        if texts is None or evidence.get(key, []) is None:
+                            evidence[key] = None
+                        else:
+                            evidence.setdefault(key, []).extend(texts)
                 active = activated_tree(name, inp, active)
-    return owners
+    return owners, evidence
+
+
+def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
+    """path (repo-relative) -> [(session id, ISO timestamp or None), ...]. See `scan_with_evidence`."""
+    return scan_with_evidence(root)[0]
 
 
 def last_commit_time(path: str, root: Path) -> str | None:
@@ -957,6 +1024,77 @@ def _key(iso: str) -> str:
     return d.astimezone(timezone.utc).isoformat()
 
 
+def _when_dt(iso: str | None) -> datetime | None:
+    """A transcript or git timestamp as an aware UTC datetime; None when it will not parse."""
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(_key(iso))
+    except ValueError:
+        return None
+
+
+def absorbed_writes(rel: str, root: Path, floor: str | None,
+                    records: list[tuple[str, str | None]],
+                    evidence: dict[tuple[str, str, str | None], list[str] | None],
+                    me: str) -> set[tuple[str, str | None]]:
+    """Writes to a DIRTY path that the path's last commit already took, so nothing is at risk.
+
+    The window's floor is the path's last commit time, and git gives that to the SECOND. A write
+    committed by that very commit can therefore only fall inside the window when it was made in
+    the commit's own second: an edit and the commit that took it, one second apart or less.
+    That write is history, not co-ownership, but the path is dirty (someone else's bytes are
+    in it), so the CLEAN verdict cannot discount it and per-path git state cannot tell the two
+    apart (docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md,
+    instance 2: a session whose create was committed at bc933c01 was named as a live co-writer
+    of a file the asker had since added 99 lines to).
+
+    What can tell them apart is the text. A write is ABSORBED only when ALL of these hold:
+      - it is dated, and falls in [floor, floor + 1 s), the one second the floor cannot resolve;
+      - its text is known and long enough to mean something (`write_texts`);
+      - every piece of that text occurs in HEAD's copy of the path;
+      - the worktree holds no MORE copies of it than HEAD does, so no uncommitted copy of the
+        text exists for it to be the author of.
+    Anything else stays counted. That includes a shell write, a `doc()` write, a short string, a
+    write outside the boundary second, and the asker's own writes (`me`): this narrows the
+    FALSE-POSITIVE direction only, so the cost of being wrong is a name that should have been
+    dropped and was not, never a live co-writer that was.
+
+    Known residue, accepted: an UNCOMMITTED edit that merely MOVES a block already in HEAD
+    leaves the copy count unchanged, so its author reads as absorbed. It needs the move to
+    land in the commit's own second as well.
+    """
+    floor_dt = _when_dt(floor)
+    if floor_dt is None:
+        return set()
+    end = floor_dt + timedelta(seconds=1)
+    candidates = []
+    for who, when in set(records):
+        dt = _when_dt(when)
+        if who != me and dt is not None and floor_dt <= dt < end:
+            candidates.append((who, when))
+    if not candidates:
+        return set()
+    shown = subprocess.run(["git", "-C", str(root), "show", f"HEAD:{rel}"],
+                           capture_output=True, text=True, errors="replace")
+    if shown.returncode != 0:
+        return set()
+    head = shown.stdout
+    try:
+        work = (root / rel).read_text(errors="replace")
+    except OSError:
+        return set()
+    out: set[tuple[str, str | None]] = set()
+    for who, when in candidates:
+        texts = evidence.get((rel, who, when))
+        if not texts:
+            continue
+        if all(head.count(t) > 0 and work.count(t) <= head.count(t) for t in texts):
+            out.add((who, when))
+    return out
+
+
+
 def main(argv: list[str]) -> int:
     since = None
     unbounded = False
@@ -978,7 +1116,7 @@ def main(argv: list[str]) -> int:
 
     root = repo_root()
     me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    owners = scan(root)
+    owners, evidence = scan_with_evidence(root)
     # Resolved ONCE per invocation, deliberately: a snapshot the whole run shares is
     # honest about being an instant, where a per-path re-read would silently mix two.
     live, unreadable = live_sessions()
@@ -1006,12 +1144,33 @@ def main(argv: list[str]) -> int:
                 undated.append(who)
             elif floor is None or _key(when) >= floor:
                 in_window.append(who)
-        who_set = set(in_window) | set(undated)
         # Records the window excluded -- present regardless of verdict, because a hidden
         # write is exactly as real on a MINE path as on an UNKNOWN one. Equals len(records)
         # whenever who_set is empty, which is what makes this a drop-in for the count the
-        # UNKNOWN branch used to compute only for itself.
+        # UNKNOWN branch used to compute only for itself. Counted BEFORE the absorbed writes
+        # below are discounted: those are in the window, just already in HEAD.
         hidden = len(records) - len(in_window) - len(undated)
+        # Instance 2 of docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-
+        # at-risk.md: on a DIRTY path, a write committed by the path's last commit still lands
+        # in the window when it was made in that commit's own second (git's resolution). Only the
+        # DEFAULT window has such a floor; --since and --all name their own.
+        absorbed_sids: set[str] = set()
+        if in_window and not unbounded and not since and floor is not None \
+                and worktree_is_dirty(rel, root):
+            absorbed = absorbed_writes(rel, root, floor, records, evidence, me)
+            for who in set(in_window):
+                its = [(w, t) for w, t in records
+                       if w == who and t is not None and _key(t) >= floor]
+                if who not in undated and its and all(r in absorbed for r in its):
+                    absorbed_sids.add(who)
+            in_window = [w for w in in_window if w not in absorbed_sids]
+        who_set = set(in_window) | set(undated)
+        absorbed_note = (
+            f"          ({len(absorbed_sids)} session(s) "
+            f"[{', '.join(sorted(s[:8] for s in absorbed_sids))}] wrote this path in the last "
+            f"commit's own second, and the text they wrote is already in HEAD with no further "
+            f"copy in the worktree: they hold no uncommitted bytes here, so they are not named)"
+        ) if absorbed_sids else None
 
         if not who_set:
             unknown += 1
@@ -1022,6 +1181,8 @@ def main(argv: list[str]) -> int:
             # an untracked path has no floor, and its silence is already right.
             if floor:
                 print(f"          window: writes at or after {floor}")
+            if absorbed_note:
+                print(absorbed_note)
             # Name the cause the reader is most likely looking at BEFORE the caveats.
             # Inside this branch `hidden == len(records)` is a TAUTOLOGY -- an empty
             # who_set means in_window and undated are both empty -- so `records` is the
@@ -1034,6 +1195,12 @@ def main(argv: list[str]) -> int:
                           "so no session holds uncommitted bytes in it. That is a "
                           "dispositive clearance rather than a coverage gap — git "
                           "cleanliness shares no blind spot with the heuristics below.")
+                elif dirty is True and absorbed_sids:
+                    print("          LIKELY CAUSE: the worktree is DIRTY for this path and the "
+                          "only writes on record in the window are already in the last "
+                          "commit, so WHO holds the uncommitted bytes is not recorded — NOT "
+                          "evidence that nobody does. A write this tool cannot read made "
+                          "them.")
                 elif dirty is True:
                     print("          LIKELY CAUSE: the worktree is DIRTY for this path "
                           "and every write on record predates the window, so the window "
@@ -1091,6 +1258,8 @@ def main(argv: list[str]) -> int:
         print(f"{verdict:9} {rel}")
         if floor:
             print(f"          window: writes at or after {floor}")
+        if absorbed_note:
+            print(absorbed_note)
         if hidden:
             # MINE is the verdict a reader acts on to license a commit, so this caveat
             # matters most exactly here -- a peer write the window hid is still a peer
