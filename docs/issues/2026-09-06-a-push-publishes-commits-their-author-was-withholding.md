@@ -929,8 +929,11 @@ it and `list` shows every hold. `scripts/pre-push-foreign-session-guard.sh` refu
 commit whose `Session-Id` trailer has a hold. It checks before the ack test, so neither `CODESCOUT_PUSH_ACK=all`
 nor an ack naming the sid clears it. It also refuses the pusher's own held commits. The refusal prints the sid,
 reason, age, state and the release command. When something unpublished sits below the oldest held commit it also
-prints the prefix push that is still allowed (`git push <remote> <parent>:<branch>`, with the remote name the hook
-was given); otherwise it prints "There is no prefix to push". The hold check runs for every pushed ref except a
+prints, for each pushed branch ref that carries a held commit and labelled with that branch, the prefix push that is
+still allowed (`git push <remote> <parent>:<branch>`, with the remote name the hook was given). For such a ref with
+nothing unpublished below its oldest held commit it prints "There is no prefix to push", and when that ref's remote
+tip is not in the local object store it says no prefix can be computed and to run `git fetch`. A refusal triggered
+only by a tag or a `refs/wip/*` push prints none of these lines. The hold check runs for every pushed ref except a
 deletion, so a tag, an annotated tag and a `refs/wip/*` push are covered, and the pushed sha is peeled to a commit
 (a tag of a tree or blob cannot carry one and is skipped). When the remote tip is not in the local object store the
 hold range is everything not on a remote-tracking ref, and when a range cannot be listed while any hold exists the
@@ -990,6 +993,10 @@ $ CLAUDE_CODE_SESSION_ID=BBBB-2222 CODESCOUT_PUSH_ACK=all git push origin main
    b555abb..283cb87  main -> main
 push exit=0
 ```
+
+This transcript predates two wording changes. The age now reads `held for 0s` (the refusal and `hold-publish.sh list`
+share one formatter that prints seconds, minutes, hours or days), and the no-prefix line is labelled with its branch,
+`[main] There is no prefix to push: ...`.
 
 The `[?]` is the session state: the two ids were made up, so the session registry has no row for them and the
 lookup answers `?`. The refusal was real (`git push` exit 1, the remote still at `base`), and the same push

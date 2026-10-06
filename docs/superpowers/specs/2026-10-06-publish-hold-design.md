@@ -58,7 +58,7 @@ rebase, because the commit message is replayed and `scripts/prepare-commit-msg-s
 
 | Command | Effect |
 |---|---|
-| `set [reason]` | Writes the blob and creates `refs/holds/$CLAUDE_CODE_SESSION_ID`. Exits non-zero with a message when the variable is empty. Replaces an existing hold of the same session and keeps the original time. |
+| `set [reason]` | Writes the blob and creates `refs/holds/$CLAUDE_CODE_SESSION_ID`. Exits non-zero with a message when the variable is empty. Replaces an existing hold of the same session and keeps the original time. With no reason it keeps the existing hold's reason and refreshes only `head:`; a first `set` with no reason records an empty one. |
 | `release [sid]` | Deletes the ref. With no argument it releases the caller's own hold. A `sid` argument releases that session's hold. |
 | `list` | Prints each hold: sid, age, reason, and whether the session is live (reuses the guard's session lookup). |
 
@@ -80,8 +80,9 @@ The refusal for a held commit prints:
 - the holder's sid, reason, age and liveness;
 - the release command;
 - the refspec prefix that is still pushable. The guard computes it directly from the parent of the oldest
-  held commit, as `git push <remote> <parent>:<branch>`. It does not take it from the ladder. When nothing
-  below the oldest held commit is unpublished, it says so instead.
+  held commit, as `git push <remote> <parent>:<branch>`, once per pushed branch ref and labelled with the branch. It does not
+  take it from the ladder. When nothing below that ref's oldest held commit is unpublished, it says so instead. When
+  the remote tip is not in the local object store the prefix cannot be counted, and it says to run `git fetch`.
 
 `CODESCOUT_PUSH_ACK` never clears a held commit. When the ack names a held sid, the guard says so, because
 an ack that is silently inert is a failure mode the guard's header already records.
