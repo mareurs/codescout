@@ -18,7 +18,7 @@ A `Session-Id:` commit trailer names the session that **ran `git commit`**. It s
 about the session that **produced the lines the commit changes**. For a commit that corrects an
 earlier claim, those are different sessions often enough to matter, and nothing marks which
 case you are in. The bug file that measured it is
-[`2026-09-22-a-session-id-trailer-names-who-committed-not-who-wrote-the-line.md`](../issues/2026-09-22-a-session-id-trailer-names-who-committed-not-who-wrote-the-line.md).
+[`2026-09-22-a-session-id-trailer-names-who-committed-not-who-wrote-the-line.md`](../issues/archive/2026-09-22-a-session-id-trailer-names-who-committed-not-who-wrote-the-line.md).
 
 ## The rule
 
