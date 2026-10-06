@@ -918,10 +918,72 @@ SHA alone would not, observed rather than argued.
 
 ## Fix
 
-**Convention written 2026-10-04, awaiting the operator's agreement; the mechanism question is still open.**
-The rule is in `docs/conventions/shared-checkout-commit-sequence.md` § *A session that cannot publish must
-not commit*, with a pointer bullet in `docs/RELEASE.md` § *Concurrent-Work Rules*. It is a policy: no hook
-reminds a session at the moment of the commit, so the bug stays `open`. It was not committed in this session.
+**Publish hold, written 2026-10-06 (OB-20): the push side now has a mechanism. The commit side does not, so
+this bug stays `open`.** The work is on branch `feat/publish-hold`, not yet merged to `experiments` and not
+pushed. Spec: `docs/superpowers/specs/2026-10-06-publish-hold-design.md`. Plan:
+`docs/superpowers/plans/2026-10-06-publish-hold.md`.
+
+An author who must withhold its work runs `scripts/hold-publish.sh set <reason>`. That records a blob at
+`refs/holds/<session-id>` in the shared `.git`, holding `reason:`, `set-at:` and `head:`. `release [sid]` drops
+it and `list` shows every hold. `scripts/pre-push-foreign-session-guard.sh` refuses a push that carries any
+commit whose `Session-Id` trailer has a hold. It checks before the ack test, so neither `CODESCOUT_PUSH_ACK=all`
+nor an ack naming the sid clears it. It also refuses the pusher's own held commits. The refusal prints the sid,
+reason, age, state, the release command and the prefix below the oldest held commit that can still be pushed.
+An unreadable hold store prints one warning line and is treated as not held. The guard is still silent when
+`CLAUDE_CODE_SESSION_ID` is empty. The rule and its limits are in
+`docs/conventions/shared-checkout-commit-sequence.md` § *A session that cannot publish must not commit*, with a
+bullet in `docs/RELEASE.md` § *Concurrent-Work Rules*.
+
+Fix commits on `feat/publish-hold`, cited by patch-id first (`git patch-id --stable`) and SHA second, because
+the SHA does not survive a rebase (`docs/RELEASE.md` § *Citing a fix*):
+
+| patch-id | SHA | What |
+|---|---|---|
+| `5c8f3fb12ca033c537f2f959b727427986fe06a3` | `c5c9892d3454134cf8761730d91ff26894b180b6` | `resolve_sids` moves to `scripts/resolve-sids.sh` |
+| `ee81a061f775f9a4a457f6ff82a7f3daef900267` | `ce87d44a07cc980f7dc5330ad76966e6ce3d646b` | its test strengthened |
+| `ec0a017dd099d5a61805d287f9c2ccd0ba9cb2e6` | `46f345b40951862b0409a0d5ecbd5b0cf0c669dc` | `scripts/hold-publish.sh` |
+| `5b66ad64ea84fc8b955aead42427597ff7c65dab` | `ff2b406ee3fc8f7da518601f2ce5e0acb5154166` | the reason is flattened |
+| `57b00dc36213b3ebfbd7af28f5ca32b46029bc68` | `4362cb3f499b95feca4ef2e0b0c8a1a1038db68d` | the guard refuses held commits |
+| `e79f6a25e7212a21af6a55dacc07a9eb7b96fcba` | `81ee117d3fd9dd5f7556c984bc2b746a0dd240fe` | the guard's test pins |
+
+**What the mechanism does not do.** A commit with no `Session-Id` trailer is not matched. A hold covers the
+whole session, not one commit. Nothing forces a session to set one. `release` is a convention: nothing proves
+the caller is the operator. And nothing stops a session from committing a change its operator said to hold,
+which is why the status stays `open`.
+
+**Live check, 2026-10-06.** A bare remote and a clone with `core.hooksPath` set to a directory whose `pre-push`
+execs the worktree's guard with git's own stdin. Session `AAAA-1111` commits and holds. Session `BBBB-2222`
+commits on top and pushes with `CODESCOUT_PUSH_ACK=all`. Raw, trimmed to the essential lines:
+
+```
+$ CLAUDE_CODE_SESSION_ID=AAAA-1111 hold-publish.sh set "waiting for operator"
+hold set for session AAAA-1111
+$ git log --format='%h %s | %(trailers:key=Session-Id,valueonly)'
+283cb87 B work | BBBB-2222
+7d96619 A work | AAAA-1111
+b555abb base |
+$ CLAUDE_CODE_SESSION_ID=BBBB-2222 CODESCOUT_PUSH_ACK=all git push origin main
+  REFUSING THE PUSH: PUBLISH HOLD. It carries commit(s) whose author has withheld them:
+    7d96619e  AAAA-1111  A work
+  Held session AAAA-1111  [?]  held for 0h
+    reason: waiting for operator
+    release (the author or the operator decides): scripts/hold-publish.sh release AAAA-1111
+  There is no prefix to push: nothing below the held commit is unpublished.
+  An ack does not clear a hold: CODESCOUT_PUSH_ACK covers other sessions' unheld commits only.
+error: failed to push some refs to '/tmp/tmp.nOVyRVDwzK/remote.git'
+push exit=1
+$ git -C remote.git log --format=%s main
+base
+$ CLAUDE_CODE_SESSION_ID=AAAA-1111 hold-publish.sh release
+released your hold (AAAA-1111)
+$ CLAUDE_CODE_SESSION_ID=BBBB-2222 CODESCOUT_PUSH_ACK=all git push origin main
+   b555abb..283cb87  main -> main
+push exit=0
+```
+
+The `[?]` is the session state: the two ids were made up, so the session registry has no row for them and the
+lookup answers `?`. The refusal was real (`git push` exit 1, the remote still at `base`), and the same push
+passed after the release.
 
 The original proposal follows, unchanged.
 
@@ -1014,14 +1076,9 @@ turns on.
 
 ## Resume
 
-Decide whether the "cannot publish → do not commit" convention is adopted, and
-where it lives — `docs/RELEASE.md` and `docs/conventions/shared-checkout-commit-sequence.md`
-are the two candidate surfaces, and the latter already carries the numbered
-sequence this would extend.
-
-Then decide whether it earns a mechanism or stays a policy. A convention nobody can
-be reminded of at the moment it matters is a policy, and this ledger's own standing
-position is that a trigger the model must notice is a policy rather than a mechanism.
+The convention and its push-side mechanism are written (see `## Fix`, 2026-10-06). What is left is
+the operator's agreement, the branch `feat/publish-hold` landing on `experiments`, and the commit-side gap:
+nothing stops a session committing a change its operator said to hold.
 
 **Third, added 2026-09-11: the PUSHER-side half is a SEPARATE question, and it is already
 answered.** Everything above concerns the author's state. The guard names a second failure mode
@@ -1031,6 +1088,6 @@ operator's decision is itself unrecorded prose, and `git push origin <branch>` h
 letter while sending whatever landed since. **This needs no decision here**: `docs/RELEASE.md`
 § *Concurrent-Work Rules* already prescribes the remedy — re-derive the range, compare it to what
 was decided, send the decided set by sha — and the guard cites that section. It is recorded in
-this file only so the author-side convention under decision above is not mistaken for covering
+this file only so the author-side convention above is not mistaken for covering
 it. (An earlier version of this paragraph claimed the by-sha rule was undocumented; that was
 wrong and is corrected in § *Evidence*, instance 2026-09-11.)

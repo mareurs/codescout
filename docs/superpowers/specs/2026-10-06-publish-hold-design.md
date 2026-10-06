@@ -79,7 +79,9 @@ The refusal for a held commit prints:
 
 - the holder's sid, reason, age and liveness;
 - the release command;
-- the refspec prefix that is still pushable, taken from the guard's existing ladder.
+- the refspec prefix that is still pushable. The guard computes it directly from the parent of the oldest
+  held commit, as `git push <remote> <parent>:<branch>`. It does not take it from the ladder. When nothing
+  below the oldest held commit is unpublished, it says so instead.
 
 `CODESCOUT_PUSH_ACK` never clears a held commit. When the ack names a held sid, the guard says so, because
 an ack that is silently inert is a failure mode the guard's header already records.
@@ -139,6 +141,10 @@ requires. Each case asserts both the refusal and the silence it must keep.
 ## Files touched
 
 - New: `scripts/hold-publish.sh`.
+- New: `scripts/resolve-sids.sh`. The guard's session lookup (`resolve_sids`) moves into this sourced file so
+  that `hold-publish.sh list` and the guard share it.
+- Edited: `scripts/pre-push-foreign-session-guard.sh` also sources `scripts/resolve-sids.sh`, and
+  `tests/pre-push-foreign-session-guard.sh` gains a case for the lone-guard fallback of that lookup.
 - Edited: `scripts/pre-push-foreign-session-guard.sh` (the check, and its header, which says the author half
   is open).
 - Edited: `tests/pre-push-foreign-session-guard.sh` (cases above).
