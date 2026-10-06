@@ -2159,6 +2159,21 @@ fn the_cut_record_key_is_reserved_and_never_delivered() {
             .contains("the whole stream is @cmd_0000beef ---"));
     }
 }
+/// The record is a set of names: recording a field twice names it once, and a non-object is left alone.
+#[test]
+fn record_cut_names_each_field_once() {
+    let mut v = serde_json::json!({"stdout": "x"});
+    crate::tools::record_cut(&mut v, "stdout");
+    crate::tools::record_cut(&mut v, "stderr");
+    crate::tools::record_cut(&mut v, "stdout");
+    assert_eq!(
+        v[crate::tools::CUT_FIELDS_KEY],
+        serde_json::json!(["stdout", "stderr"])
+    );
+    let mut s = serde_json::json!("not an object");
+    crate::tools::record_cut(&mut s, "stdout");
+    assert_eq!(s, serde_json::json!("not an object"));
+}
 
 // ---- truncate_compact tests ----
 

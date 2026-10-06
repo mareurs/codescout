@@ -1705,12 +1705,16 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         assert_eq!(fitted, summary);
     }
     /// The cut record is stripped by the backstop before delivery, so `fit_summary` measures without it: a
-    /// summary that fits AS DELIVERED is returned as built, even when the record would push the measured
-    /// bytes over the limit. Counting it cut text to make room for bytes the caller never receives.
+    /// summary that fits AS DELIVERED is returned as built, from the ONE render with the natural ceilings,
+    /// even when the record would push the measured bytes over the limit. Counting it sent a fitting
+    /// summary through a second render it did not need (and, with the room measured the same way, cut
+    /// text to make room for bytes the caller never receives).
     #[test]
     fn fit_summary_does_not_count_the_cut_record_it_never_delivers() {
         use crate::tools::{delivered_len, record_cut, CUT_FIELDS_KEY, INLINE_MAX_RESPONSE_LEN};
+        let renders = std::cell::Cell::new(0);
         let render = |b: &SummaryBudget| {
+            renders.set(renders.get() + 1);
             let mut v = json!({"type": "generic", "exit_code": 0, "stdout": ""});
             let room = INLINE_MAX_RESPONSE_LEN - v.to_string().len();
             v["stdout"] = json!(if b.stdout.is_none() {
@@ -1734,6 +1738,36 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         assert_ne!(
             fitted["stdout"], "refit",
             "a response that fits as delivered was cut"
+        );
+        assert_eq!(
+            renders.get(),
+            1,
+            "a summary that fits as delivered is the answer from its first render"
+        );
+    }
+
+    /// When a summary must be cut, the room handed to its fields is measured on the skeleton AS DELIVERED,
+    /// without the cut record: a lone field gets all of it and the response lands ON the limit, to the
+    /// byte. Measuring the record too left the field that many bytes short of what fits.
+    #[test]
+    fn fit_summary_shares_out_the_room_the_cut_record_does_not_take() {
+        use crate::tools::{delivered_len, record_cut, CUT_FIELDS_KEY, INLINE_MAX_RESPONSE_LEN};
+        let render = |b: &SummaryBudget| {
+            let mut v = json!({"type": "generic", "exit_code": 0, "stdout": ""});
+            let text = match b.stdout {
+                None => "s".repeat(INLINE_MAX_RESPONSE_LEN + 500),
+                Some(share) => "s".repeat(share),
+            };
+            v["stdout"] = json!(text);
+            record_cut(&mut v, "stdout");
+            v
+        };
+        let fitted = fit_summary(render);
+        assert!(fitted.get(CUT_FIELDS_KEY).is_some());
+        assert_eq!(
+            delivered_len(&fitted),
+            INLINE_MAX_RESPONSE_LEN,
+            "the lone field must fill the room exactly"
         );
     }
 
