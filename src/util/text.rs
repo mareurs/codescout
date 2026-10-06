@@ -868,19 +868,49 @@ pub(crate) fn elide_middle_escaped(
     let shown = head.len() + tail.len();
     format!("{head}\n--- {label}: {shown} of {original_len} bytes shown; {remedy} ---\n{tail}")
 }
-/// Does `s` already carry one of this module's elision markers, `--- <label>: N of M bytes shown;
-/// <remedy> ---` on a line of its own?
+/// Does `s` already carry one of the markers a summarizer writes when it cuts a field?
 ///
-/// Such text was cut from a source of `M` bytes, and `M` is in the marker. Cutting it AGAIN
-/// loses the marker (it sits in the middle) and writes a new one whose total is the length of
-/// the already-cut text: a 50,000 B stream read "1000 of 2065 bytes shown". A second cutter asks
-/// this first and leaves marked text alone.
+/// The ONE definition of "already cut", covering every marker the summarizers emit:
+///
+/// - this module's elision marker, `--- <label>: N of M bytes shown; <remedy> ---`, on a line of
+///   its own (written by [`elide_middle_bytes`] and [`elide_middle_escaped`]);
+/// - the header that OPENS a summarized stderr tail, [`STDERR_TAIL_MARKER`] `... N of M line(s)
+///   shown. Full stderr: ... ---` (written by `command_summary::summarize_stderr`);
+/// - the line-elision marker, [`lines_omitted_marker`], on a line of its own (written by
+///   `command_summary::summarize_generic_within`).
+///
+/// Such text was cut from a larger source, and the marker's numbers describe that source. Cutting
+/// it AGAIN loses the marker (it sits in the middle, or the cut drops the head it opens) and
+/// writes a new one whose total is the length of the already-cut text: a 50,000 B stream read
+/// "1000 of 2065 bytes shown". A second cutter asks this first and leaves marked text alone.
+///
+/// Each shape is matched whole and where its writer puts it, so prose that merely mentions a
+/// marker (`see --- x: 1 of 2 bytes shown; y`) is not taken for one.
 pub(crate) fn carries_elision_marker(s: &str) -> bool {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        regex::Regex::new(r"(?:^|\n)--- [^\n:]+: \d+ of \d+ bytes shown; ").expect("static pattern")
+        regex::Regex::new(&format!(
+            r"(?:^|\n)--- [^\n:]+: \d+ of \d+ bytes shown; |\A{tail}[^\n]* \d+ of \d+ line\(s\) shown\. Full stderr: [^\n]* ---\n|(?:^|\n)--- \d+ lines omitted ---(?:\n|$)",
+            tail = regex::escape(STDERR_TAIL_MARKER),
+        ))
+        .expect("static pattern")
     })
     .is_match(s)
+}
+
+/// Leading token of the header that opens a summarized, tail-kept `stderr` field.
+///
+/// Distinct from [`lines_omitted_marker`], and the distinction is the point: that marker elides a
+/// MIDDLE, this one drops a HEAD. A reader who mistakes which end was cut goes looking for the
+/// missing lines in the wrong place, and both markers sit in the same envelope. Defined here, beside
+/// [`carries_elision_marker`], so the writer and the detector read one literal.
+pub(crate) const STDERR_TAIL_MARKER: &str = "--- stderr TAIL:";
+
+/// The line a line-eliding summary puts where it dropped `omitted` lines from the middle, newline
+/// not included. Defined here, beside [`carries_elision_marker`], so the writer and the detector
+/// read one shape.
+pub(crate) fn lines_omitted_marker(omitted: usize) -> String {
+    format!("--- {omitted} lines omitted ---")
 }
 
 // `extract_lines_to_budget` is deprecated but deliberately still exercised here:
@@ -1006,6 +1036,33 @@ mod tests {
         assert!(carries_elision_marker(
             "--- x: 1 of 2 bytes shown; R ---\nrest"
         ));
+    }
+    #[test]
+    fn carries_elision_marker_recognises_every_summarizer_marker_where_it_is_written() {
+        let tail_header = format!(
+            "{STDERR_TAIL_MARKER} 3 earlier line(s) dropped; 2 of 5 line(s) shown. \
+         Full stderr: read_file(\"@cmd_0000aaaa.err\") ---\nlast\nlines"
+        );
+        assert!(carries_elision_marker(&tail_header));
+        // The header OPENS its field; the same words further down are a line of the stream.
+        assert!(!carries_elision_marker(&format!("output\n{tail_header}")));
+        // The token alone, without the header's counts and route, is not the header.
+        assert!(!carries_elision_marker(
+            "--- stderr TAIL: a line a program printed\n"
+        ));
+
+        let omitted = format!("head\n{}\ntail", lines_omitted_marker(120));
+        assert!(carries_elision_marker(&omitted));
+        assert!(carries_elision_marker(&format!(
+            "head\n{}",
+            lines_omitted_marker(7)
+        )));
+        // On a line of its own, whole: prose that mentions it is not it.
+        assert!(!carries_elision_marker(&format!(
+            "see {} above",
+            lines_omitted_marker(120)
+        )));
+        assert!(!carries_elision_marker("a\n--- many lines omitted ---\nb"));
     }
 
     #[test]

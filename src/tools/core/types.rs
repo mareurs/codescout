@@ -128,9 +128,28 @@ pub(crate) fn clip_prebuffered_envelope(val: Value, force_inline: bool) -> Value
         })
         .collect();
     fields.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
-    let remedy = format!("cut to fit the response budget; the tool's own buffer is {handle}");
+    // The marker must be TRUE of the field it sits in. A `@cmd_` handle holds the command's stdout
+    // behind the bare handle and its stderr behind `<handle>.err`, so a cut `stdout` or `stderr` is
+    // sent to its own stream. Any other field (a hint, a diagnostic, an excerpt) is built by the
+    // tool and is in no buffer: "the tool's own buffer is <handle>" sent a reader there for text it
+    // does not hold. Other handle kinds carry no `.err` stream, so they get that wording too.
+    let remedy_for = |key: &str| -> String {
+        match key {
+            "stdout" if handle.starts_with("@cmd_") => {
+                format!("cut to fit the response budget; the whole stream is {handle}")
+            }
+            "stderr" if handle.starts_with("@cmd_") => {
+                format!("cut to fit the response budget; the whole stream is {handle}.err")
+            }
+            _ => format!(
+                "cut to fit the response budget; this field is built by the tool and stored \
+                 nowhere, {handle} holds the output it was built from"
+            ),
+        }
+    };
 
     for (key, original) in fields {
+        let remedy = remedy_for(&key);
         let mut target = original.len();
         loop {
             let size = work.to_string().len();

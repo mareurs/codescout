@@ -7,7 +7,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 
-use crate::util::text::{clip_head_escaped, elide_middle_escaped, json_escaped_len};
+use crate::util::text::{elide_middle_escaped, json_escaped_len};
 
 // ---------------------------------------------------------------------------
 // Thresholds
@@ -103,13 +103,9 @@ const GENERIC_FIELD_BYTE_BUDGET: usize = 2000;
 // cap-class: RESULT_CAP command_summary.failure_field_bytes — probed
 const FAILURE_FIELD_BYTE_BUDGET: usize = 5000;
 
-/// Leading token of the marker prefixed to a `stderr` field that was cut.
-///
-/// Distinct from `summarize_generic`'s `--- N lines omitted ---`, and the
-/// distinction is the point: that marker elides a MIDDLE, this one drops a
-/// HEAD. A reader who mistakes which end was cut goes looking for the missing
-/// lines in the wrong place — and both markers sit in the same envelope.
-pub(crate) const STDERR_TAIL_MARKER: &str = "--- stderr TAIL:";
+/// Leading token of the marker prefixed to a `stderr` field that was cut; defined in `util::text`
+/// beside the one detector of every summarizer marker, `carries_elision_marker`.
+pub(crate) use crate::util::text::STDERR_TAIL_MARKER;
 
 /// Stands for the envelope's own `output_id` inside a summarized `stderr` field's remedy.
 /// `summarize_stderr` cannot know the handle; `rebuild_buffered_summary` — which every
@@ -455,7 +451,7 @@ fn summarize_stderr(stderr: &str, share: Option<usize>) -> Option<String> {
     // Walk backwards, so when the byte ceiling binds it drops the OLDEST line
     // kept rather than the newest. Forwards, a long compile log would spend the
     // whole budget on its first lines and cut off exactly the verdict.
-    let mut kept: Vec<&str> = Vec::new();
+    let mut kept: Vec<std::borrow::Cow<str>> = Vec::new();
     let mut bytes = 0usize;
     let mut clipped = false;
     for line in lines.iter().rev().take(STDERR_SUMMARY_LINE_BUDGET) {
@@ -466,14 +462,25 @@ fn summarize_stderr(stderr: &str, share: Option<usize>) -> Option<String> {
             // reach an empty-ish field on non-empty input, and it is why `clipped` is
             // tracked separately from the dropped-line count — with `total == 1` the
             // count is zero and the marker would otherwise claim nothing was lost.
+            //
+            // Elided in the MIDDLE, in escaped bytes, like every other field: the END of the
+            // last line is where a verdict sits (`... error: aborting`), and a head-only clip
+            // dropped exactly that. The inline marker sends nowhere new: the header above
+            // names the whole stream.
             if kept.is_empty() {
-                kept.push(clip_head_escaped(line, body_budget));
+                kept.push(std::borrow::Cow::Owned(elide_middle_escaped(
+                    line,
+                    line.len(),
+                    body_budget,
+                    "stderr line",
+                    "middle elided, the whole line is in the full stderr named above",
+                )));
                 clipped = true;
             }
             break;
         }
         bytes += needed;
-        kept.push(line);
+        kept.push(std::borrow::Cow::Borrowed(line));
     }
     kept.reverse();
 
@@ -504,7 +511,7 @@ fn stderr_notes(progress: usize, dropped: usize, clipped: bool, normalized: bool
         notes.push(format!("{dropped} earlier line(s) dropped"));
     }
     if clipped {
-        notes.push("last line clipped to the byte ceiling".to_string());
+        notes.push("last line clipped to the byte ceiling, its middle elided".to_string());
     }
     if normalized {
         notes.push("line terminators normalized to fit".to_string());
@@ -693,9 +700,9 @@ pub(crate) fn summarize_generic_within(
         let tail: Vec<&str> = stdout_lines[total_stdout_lines - TAIL_LINES..].to_vec();
         let omitted = total_stdout_lines - HEAD_LINES - TAIL_LINES;
         format!(
-            "{}\n--- {} lines omitted ---\n{}",
+            "{}\n{}\n{}",
             head.join("\n"),
-            omitted,
+            crate::util::text::lines_omitted_marker(omitted),
             tail.join("\n")
         )
     } else {
