@@ -8,7 +8,8 @@
 #   head: <sha at hold time>
 # The pre-push guard reads these refs (OB-20).
 #
-#   hold-publish.sh set [reason...]   hold the current session (CLAUDE_CODE_SESSION_ID)
+#   hold-publish.sh set [reason...]   hold the current session (CLAUDE_CODE_SESSION_ID); with no
+#                                     reason, an existing hold keeps its reason
 #   hold-publish.sh release [sid]     drop a hold (default: the caller's own)
 #   hold-publish.sh list              one row per hold: sid, LIVE|gone|?, age, reason
 
@@ -23,6 +24,15 @@ valid_sid() {
         '' | *[!A-Za-z0-9-]*) return 1 ;;
         *) return 0 ;;
     esac
+}
+
+# `list` and `release` read refs/holds of the repo of the current directory; outside one, git's own
+# fatal message is not an answer and an exit 0 would read as "no holds". Same exit code as
+# `set`'s usage failures.
+in_repo() {
+    git rev-parse --git-dir >/dev/null 2>&1 && return 0
+    printf 'hold-publish: not a git repository\n' >&2
+    return 1
 }
 
 cmd="${1:-}"
@@ -42,6 +52,11 @@ case "$cmd" in
         set_at=""
         if old="$(git cat-file -p "$ref" 2>/dev/null)"; then
             set_at="$(printf '%s\n' "$old" | sed -n 's/^set-at: //p' | sed -n 1p)"
+            # A `set` with NO reason is a refresh of head, not a request to blank the reason: it
+            # keeps the one already recorded. (A first reasonless set still writes `reason: `.)
+            if [ "$#" -eq 0 ]; then
+                reason="$(printf '%s\n' "$old" | sed -n 's/^reason: //p' | sed -n 1p)"
+            fi
         fi
         [ -n "$set_at" ] || set_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         blob="$(printf 'reason: %s\nset-at: %s\nhead: %s\n' "$reason" "$set_at" "$head" | git hash-object -w --stdin)" || exit 1
@@ -50,6 +65,7 @@ case "$cmd" in
         exit 0
         ;;
     release)
+        in_repo || exit 2
         target="${1:-$sid}"
         if ! valid_sid "$target"; then
             printf 'hold-publish: no session id to release (pass one, or set CLAUDE_CODE_SESSION_ID)\n' >&2
@@ -72,27 +88,22 @@ case "$cmd" in
         exit 0
         ;;
     list)
-        _rs="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
-        if [ -r "$_rs" ]; then . "$_rs"; else resolve_sids() { printf '%s\t?\t\n' "$@"; }; fi
+        in_repo || exit 2
+        _dir="$(dirname "${BASH_SOURCE[0]}")"
+        if [ -r "$_dir/resolve-sids.sh" ]; then . "$_dir/resolve-sids.sh"; else resolve_sids() { printf '%s\t?\t\n' "$@"; }; fi
+        # hold_age is the ONE definition of the age units, shared with the pre-push guard's refusal.
+        # Missing file: every age is `?`, never a wrong number.
+        if [ -r "$_dir/hold-age.sh" ]; then . "$_dir/hold-age.sh"; else hold_age() { return 1; }; fi
         sids=()
         while IFS= read -r r; do
             [ -n "$r" ] && sids+=("${r#refs/holds/}")
         done < <(git for-each-ref --format='%(refname)' refs/holds/)
         [ "${#sids[@]}" -gt 0 ] || exit 0
-        now="$(date +%s)"
         while IFS="$(printf '\t')" read -r s state _sock; do
             body="$(git cat-file -p "refs/holds/$s" 2>/dev/null || true)"
             reason="$(printf '%s\n' "$body" | sed -n 's/^reason: //p' | sed -n 1p)"
             set_at="$(printf '%s\n' "$body" | sed -n 's/^set-at: //p' | sed -n 1p)"
-            age="?"
-            # GNU date only (-d); on other dates it fails and the age stays "?".
-            if t="$(date -d "$set_at" +%s 2>/dev/null)"; then
-                d=$((now - t))
-                if [ "$d" -lt 60 ]; then age="${d}s"
-                elif [ "$d" -lt 3600 ]; then age="$((d / 60))m"
-                elif [ "$d" -lt 86400 ]; then age="$((d / 3600))h"
-                else age="$((d / 86400))d"; fi
-            fi
+            age="$(hold_age "$set_at")" || age="?"
             printf '%s\t%s\t%s\t%s\n' "$s" "$state" "$age" "$reason"
         done < <(resolve_sids "${sids[@]}")
         exit 0
