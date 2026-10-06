@@ -10,7 +10,7 @@ opened: 2026-09-21
 owner: marius
 related: []
 severity: medium
-unverified: 'PARTIAL FIX (820a5d8c): a removed detector now retires a row instead of reporting a repair. NOT fixed: cause 3 (a threshold widening closes a marginal row as refactored) and the per-row retag of the live legibility-backlog tracker (cd886c414f6751b4). See ## Partial fix.'
+unverified: 'PARTIAL FIX (820a5d8c): a removed detector now retires a row instead of reporting a repair. NOT fixed: cause 3 (a threshold widening closes a marginal row as refactored). The live-tracker retag and the render_template re-attach were DONE 2026-10-06 (ddc595ca); see ## Partial fix.'
 ---
 
 # BUG: legibility_scan's auto-close reports a repair for a removed detector — the close predicate is monotone under detector removal
@@ -316,9 +316,15 @@ Tests added (all in `src/librarian/tools/legibility_scan/mod.rs`): `reconcile_te
 What is NOT covered:
 
 - **Cause 3 (threshold widening).** Raising `MAX_INLINE_TOKENS` still drops a marginal candidate out of `current` and closes it as `refactored`, because the row stores no threshold or detector version to compare against.
-- **The live tracker (artifact `cd886c414f6751b4`) was not touched.** Its closed rows have no `closed_reason` and will render under "reason not recorded" until retagged per row with `doc(action="update_entry", id="cd886c414f6751b4", entry_collection="candidates", entry_id=<key>, fields={...})`, never a params rewrite. The seven detector-removed rows named under `## Symptom (Effect)` should become `retired`; the twelve genuine closes (ten `src/lsp/client.rs::LspClient/*` rows, `LspManager/notify_file_changed`, `LspManager/shutdown_all`) should get `closed_reason: refactored`; the remaining closed rows need per-row judgement. The counts differ between sources in this file (19 versus 42 entries, 25 closed), so verify them at retag time.
-- **The live augmentation row's `render_template`** in the catalog is still the old text and must be re-attached with `doc(action="augment", merge=true, render_template=<new .j2>)`.
+- **The live tracker (artifact `cd886c414f6751b4`) was not touched when this was written; DONE 2026-10-06, see the Update below.** Its closed rows have no `closed_reason` and will render under "reason not recorded" until retagged per row with `doc(action="update_entry", id="cd886c414f6751b4", entry_collection="candidates", entry_id=<key>, fields={...})`, never a params rewrite. The seven detector-removed rows named under `## Symptom (Effect)` should become `retired`; the twelve genuine closes (ten `src/lsp/client.rs::LspClient/*` rows, `LspManager/notify_file_changed`, `LspManager/shutdown_all`) should get `closed_reason: refactored`; the remaining closed rows need per-row judgement. The counts differ between sources in this file (19 versus 42 entries, 25 closed), so verify them at retag time.
+- **The live augmentation row's `render_template`** was the old text when this was written (DONE 2026-10-06, see the Update below); it had to be re-attached with `doc(action="augment", merge=true, render_template=<new .j2>)`.
 - **A new `retired` status** was added to `BacklogParams`; consumers outside the files read for the commit were not checked.
+
+**Update 2026-10-06 (live tracker and template).** Artifact `cd886c414f6751b4` was retagged and its `render_template` re-attached. Commit `ddc595ca` carries the re-rendered body. The retag was NOT done with `update_entry`, because that action cannot address these rows: they carry `key` and no `id`, and it answers `no entry '<key>' in 'candidates'` (measured 2026-10-06). It was one `doc(action="augment", merge=true)` with `params_path` holding the full array. The array was built with `jq` from the live params, so no row was lost: 42 rows before and after, and the counts after were 18 closed/refactored, 17 open and 7 retired. This is the whole-array rewrite that the text above advised against, done because the advised route does not exist for these rows.
+
+The tags come from the 2026-06-13 verdict in the tracker's own Verdicts section. Seven `name_collision` rows (the verdict says the detector was removed and nothing was refactored) became `retired` with `detector_removed`. Ten `LspClient` rows plus `LspManager/notify_file_changed` and `LspManager/shutdown_all` (the verdict calls them genuine trait-impl relocations) became `closed` with `refactored`. So did the six body extractions that the Verdicts record: `get_or_start`, `extract_rust_symbols`, `Symbols/call`, `ReadMarkdown/call`, `perform_full_onboarding` and `ArtifactAugment/call`.
+
+`legibility_scan` then ran with `write=true` against the current code, and open rows went from 17 in the catalog (47 in the committed body of 2026-08-28) to 81. That is four months of new code, not a regression of this fix. Still NOT fixed: cause 3, above.
 
 ## Resume
 
