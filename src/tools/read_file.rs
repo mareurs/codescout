@@ -321,6 +321,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 .unwrap_or_else(|| raw.clone());
             let (content, type_name, count) =
                 crate::tools::file_summary::extract_json_path(&text, jp)?;
+            let echo = clip_input_echo(jp, "json_path");
             // Decided on the response it would return, `count` included. The value's raw bytes
             // understate that response by its escaping and its other keys, and a response over
             // the limit is buffered again by `call_content` under a second handle. The raw
@@ -329,7 +330,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             if !crate::tools::exceeds_inline_limit(&content) {
                 let mut inline = json!({
                     "content": &content,
-                    "path": jp,
+                    "path": echo,
                     "value_type": type_name,
                     "format": "json",
                 });
@@ -347,12 +348,12 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 .store_file(format!("{path}:{jp}"), content);
             let mut result = json!({
                 "file_id": file_id,
-                "path": jp,
+                "path": echo,
                 "value_type": type_name,
                 "format": "json",
                 "total_lines": line_count,
                 "hint": format!(
-                    "Extracted value at {jp} ({line_count} lines). \
+                    "Extracted value at {echo} ({line_count} lines). \
                      read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
                      or run_command(\"grep pattern {file_id}\") to search."
                 ),
@@ -732,6 +733,27 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
     })
 }
 
+/// How much of the caller's own `json_path` or `toml_key` a response echoes back, in each place
+/// it is echoed (`path`, a `breadcrumb` entry, the `hint`), in SERIALIZED bytes. The value is
+/// the caller's input and has no length of its own: a 6 KB `toml_key` echoed in `breadcrumb` and
+/// in the hint of the `file_id` arm made a 12,287 B response, which `call_content` buffered again
+/// under `@tool_*` beside that `file_id`. No route quotes the echo (each names the handle), so a
+/// clipped echo loses nothing a caller needs, and the marker says the rest is what they passed.
+// cap-class: RESULT_CAP read_file.input_echo_bytes — probed
+const INPUT_ECHO_CLIP: usize = 300;
+
+/// `value` (the caller's `json_path` or `toml_key`, named by `what`) bounded to
+/// [`INPUT_ECHO_CLIP`] escaped bytes by eliding its middle, with a visible marker.
+fn clip_input_echo(value: &str, what: &str) -> String {
+    crate::util::text::elide_middle_escaped(
+        value,
+        value.len(),
+        INPUT_ECHO_CLIP,
+        what,
+        "the rest is the value you passed",
+    )
+}
+
 /// Handle `json_path` navigation for JSON files.
 fn read_json_path_nav(
     text: &str,
@@ -748,8 +770,9 @@ fn read_json_path_nav(
         .into());
     }
     let (content, type_name, count) = crate::tools::file_summary::extract_json_path(text, jp)?;
+    let echo = clip_input_echo(jp, "json_path");
     let mut keys = json!({
-        "path": jp,
+        "path": echo,
         "value_type": type_name,
         "format": "json",
     });
@@ -761,7 +784,7 @@ fn read_json_path_nav(
         keys,
         &[],
         &resolved.to_string_lossy(),
-        &format!("Extracted value at {jp}"),
+        &format!("Extracted value at {echo}"),
         ctx,
     ))
 }
@@ -849,18 +872,26 @@ fn read_toml_yaml_key(
             .into())
         }
     };
+    // Each `breadcrumb` entry is clipped like every echo of the key; a key of very many
+    // segments makes the list itself long, so it is dropped after `siblings` when the handle arm
+    // is still over the limit.
+    let breadcrumb: Vec<String> = result
+        .breadcrumb
+        .iter()
+        .map(|b| clip_input_echo(b, "toml_key"))
+        .collect();
     let keys = json!({
         "line_range": [result.line_range.0, result.line_range.1],
-        "breadcrumb": result.breadcrumb,
+        "breadcrumb": breadcrumb,
         "siblings": result.siblings,
         "format": format,
     });
     Ok(inline_or_file_id(
         result.content,
         keys,
-        &["siblings"],
+        &["siblings", "breadcrumb"],
         &resolved.to_string_lossy(),
-        &format!("Extracted value at {tk}"),
+        &format!("Extracted value at {}", clip_input_echo(tk, "toml_key")),
         ctx,
     ))
 }

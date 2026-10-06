@@ -681,6 +681,121 @@ async fn a_forced_markdown_range_whose_coverage_alone_overflows_keeps_one_handle
     assert!(omitted > 0, "no response marked coverage_omitted");
     eprintln!("forced md range with oversized coverage: largest response = {largest} B");
 }
+/// A `json_path` (or `toml_key`) is the caller's own input and has no length of its own. It was
+/// echoed whole as `path` (or `breadcrumb`) and inside the `hint` of the `file_id` arm, so a
+/// path of several KB pushed a response that already carried a `file_id` over the limit, and
+/// `call_content` buffered it again under `@tool_*`: measured before, a 6 KB YAML key made a
+/// 12,287 B response with two handles. Each echo is clipped in ESCAPED bytes with a visible
+/// marker; the routes name the handle, never the echo. A key of 40 segments of 290 B each makes
+/// `breadcrumb` long though every entry fits: it is dropped, marked `breadcrumb_omitted`.
+#[tokio::test]
+async fn an_overlong_json_path_or_key_echo_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let hint_route =
+        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=N, end_line=M\)"#).unwrap();
+    let mut resolved = BTreeSet::new();
+    let mut clipped = 0;
+    let segments: Vec<String> = (0..40)
+        .map(|i| format!("s{i:02}{}", "q".repeat(287)))
+        .collect();
+    let deep = dir.path().join("deep.toml");
+    std::fs::write(
+        &deep,
+        format!("{} = \"{}\"\n", segments.join("."), "a".repeat(12_000)),
+    )
+    .unwrap();
+    let deep_case = json!({ "path": deep.to_str().unwrap(), "toml_key": segments.join(".") });
+    let (v, _) = page(&ctx, &deep_case, "", "echo deep toml").await;
+    assert_eq!(v["breadcrumb_omitted"], json!(true), "deep toml: {v:.300}");
+    for (class, unit) in CLASSES7 {
+        for key_bytes in [3_000usize, 6_000, 9_000, 12_000] {
+            let key = one_line(unit, key_bytes);
+            for (vshape, value) in [("tiny", "x".to_string()), ("wide", "a".repeat(12_000))] {
+                let doc = json!({ key.clone(): value });
+                let stem = format!("k-{class}-{key_bytes}-{vshape}");
+                let json_file = dir.path().join(format!("{stem}.json"));
+                std::fs::write(&json_file, doc.to_string()).unwrap();
+                let yaml_file = dir.path().join(format!("{stem}.yaml"));
+                std::fs::write(&yaml_file, format!("{key}: {value}\n")).unwrap();
+                let toml_file = dir.path().join(format!("{stem}.toml"));
+                std::fs::write(&toml_file, format!("{key} = \"{value}\"\n")).unwrap();
+                let tool_ref = ctx.output_buffer.store_tool("probe", doc.to_string());
+                let bracket = format!("$[{}]", serde_json::to_string(&key).unwrap());
+                let cases = [
+                    (
+                        "json-dot",
+                        json!({ "path": json_file.to_str().unwrap(), "json_path": format!("$.{key}") }),
+                    ),
+                    (
+                        "json-bracket",
+                        json!({ "path": json_file.to_str().unwrap(), "json_path": bracket }),
+                    ),
+                    (
+                        "tool-dot",
+                        json!({ "path": tool_ref, "json_path": format!("$.{key}") }),
+                    ),
+                    (
+                        "tool-bracket",
+                        json!({ "path": tool_ref, "json_path": bracket }),
+                    ),
+                    (
+                        "yaml",
+                        json!({ "path": yaml_file.to_str().unwrap(), "toml_key": key }),
+                    ),
+                    (
+                        "toml",
+                        json!({ "path": toml_file.to_str().unwrap(), "toml_key": key }),
+                    ),
+                ];
+                for (fmt, input) in cases {
+                    let label = format!("echo {fmt} {class}/{key_bytes}/{vshape}");
+                    if ReadFile.call(input.clone(), &ctx).await.is_err() {
+                        continue;
+                    }
+                    resolved.insert(format!("{fmt}/{class}"));
+                    let input_ref = if fmt.starts_with("tool") {
+                        tool_ref.as_str()
+                    } else {
+                        ""
+                    };
+                    let (v, _) = page(&ctx, &input, input_ref, &label).await;
+                    let text = v.to_string();
+                    // Every key here is over the clip, and every response echoes it at least once.
+                    assert!(
+                        text.contains("bytes shown; the rest is the value you passed"),
+                        "{label}: the echo carries no marker: {text:.300}"
+                    );
+                    clipped += 1;
+                    let Some(fid) = v["file_id"].as_str() else {
+                        continue;
+                    };
+                    let hint = v["hint"].as_str().unwrap_or_default();
+                    let c = hint_route.captures(hint).unwrap_or_else(|| {
+                        panic!("{label}: the hint names no line route: {hint:.300}")
+                    });
+                    assert_eq!(&c[1], fid, "{label}: the hint names another handle");
+                    let total = v["total_lines"].as_u64().unwrap();
+                    let route = json!({ "path": fid, "start_line": 1, "end_line": total });
+                    read_through(&ctx, route, fid, &label).await;
+                }
+            }
+        }
+    }
+    eprintln!("overlong echo: resolved {resolved:?}");
+    for must in [
+        "json-dot/ascii",
+        "json-bracket/ascii",
+        "tool-dot/ascii",
+        "yaml/ascii",
+    ] {
+        assert!(
+            resolved.contains(must),
+            "{must} never resolved: {resolved:?}"
+        );
+    }
+    assert!(clipped > 0, "no echo was clipped");
+}
 
 /// `heading=` on a NON-markdown real file. Measured: what arm serves it, and how large its
 /// response is when the heading is the caller's 12 KB of each class.

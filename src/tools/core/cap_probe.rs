@@ -1113,6 +1113,22 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // passes a `json_path` (dot and bracket form, on a real JSON file and on a `@tool_*`
+        // ref) and a `toml_key` (YAML and TOML) of 3, 6, 9 and 12 KB in seven content classes
+        // (ASCII, `"`, `\`, `\x01`, `\x1b`, `€`, a 4-byte emoji) against `INPUT_ECHO_CLIP` 300,
+        // through the real tool, and asserts one handle at most, no `@tool_*`, a response within
+        // the limit and a hint route that reads the value to the end. Measured before the clip:
+        // a 6 KB YAML key made a 12,287 B response with a `@file_*` and a `@tool_*` handle.
+        // Marker written by production in `read_file::clip_input_echo` (`elide_middle_escaped`).
+        id: "read_file.input_echo_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("the rest is the value you passed"),
+            mutation: Mutation::NotYet("mutation run pending in this branch"),
+            cited_test: "an_overlong_json_path_or_key_echo_keeps_one_handle",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked
