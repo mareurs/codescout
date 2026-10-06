@@ -193,10 +193,10 @@ impl Tool for ReadFile {
         )?;
 
         if let Some(jp) = input["json_path"].as_str() {
-            return read_json_path_nav(&text, &resolved, jp);
+            return read_json_path_nav(&text, &resolved, jp, ctx);
         }
         if let Some(tk) = input["toml_key"].as_str() {
-            return read_toml_yaml_key(&text, &resolved, tk);
+            return read_toml_yaml_key(&text, &resolved, tk, ctx);
         }
 
         let force = input["force"].as_bool().unwrap_or(false);
@@ -564,13 +564,13 @@ const OVER_BUDGET_MARKER: &str = "\n…[truncated: this line is wider than the i
 /// and this one is exact. `call_content` measures the value this function's caller returns;
 /// what it adds afterwards (`_guide_hint`, parameter corrections) is added after the
 /// buffering decision.
-fn buffer_page_room(widest: &Value) -> usize {
+pub(super) fn buffer_page_room(widest: &Value) -> usize {
     crate::tools::INLINE_MAX_RESPONSE_LEN.saturating_sub(widest.to_string().len())
 }
 
 /// One page of `body`, from its first line, whose content fits `room` serialized bytes.
 /// Returns `(chunk, lines_shown, complete, line_truncated)`.
-fn buffer_page(body: &str, room: usize) -> (String, usize, bool, bool) {
+pub(super) fn buffer_page(body: &str, room: usize) -> (String, usize, bool, bool) {
     let (chunk, lines_shown, complete) =
         crate::util::text::extract_lines_to_json_budget(body, 1, usize::MAX, room);
     // The valve yields one line even when that line alone busts the room.
@@ -585,7 +585,7 @@ fn buffer_page(body: &str, room: usize) -> (String, usize, bool, bool) {
 /// `json_path` because on a `@tool_*` ref an over-budget line is almost always a
 /// JSON-escaped payload, and field addressing reaches it in one call where line
 /// addressing cannot reach it at all.
-fn over_budget_line_hint(path: &str) -> String {
+pub(super) fn over_budget_line_hint(path: &str) -> String {
     // `grep -o` prints only the part of the line that matched. Plain `grep` returns the whole
     // line, which is the thing that was too wide; `[^,]*` ends the match at the next comma,
     // which bounds a hit inside JSON or CSV. The `PATTERN` placeholder is the caller's to fill.
@@ -599,9 +599,11 @@ fn over_budget_line_hint(path: &str) -> String {
              {grep} prints just the matching part of the line."
         )
     } else {
-        // Every caller is `read_from_buffer`, so this is a `@cmd_*` / `@file_*` ref, and
-        // `json_path` is refused on those ("only supported on @tool_* refs"). The branch used
-        // to advise it anyway.
+        // Every caller passes a buffer ref: `read_from_buffer` the ref it was asked to read,
+        // and `read_with_line_range` and the markdown range arm (`read_markdown_line_range`)
+        // the `@file_*` handle they just stored the slice under. So this is a `@cmd_*` /
+        // `@file_*` ref, and `json_path` is refused on those ("only supported on @tool_*
+        // refs"). The branch used to advise it anyway.
         format!(
             "A single line here is wider than the inline budget, so it is shown truncated. \
              Fields cannot be addressed on this kind of ref. Print just the part you need: \
@@ -690,7 +692,12 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
 }
 
 /// Handle `json_path` navigation for JSON files.
-fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Result<Value> {
+fn read_json_path_nav(
+    text: &str,
+    resolved: &std::path::Path,
+    jp: &str,
+    ctx: &ToolContext,
+) -> Result<Value> {
     let file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
     if !matches!(file_type, crate::tools::file_summary::FileSummaryType::Json) {
         return Err(RecoverableError::with_hint(
@@ -700,20 +707,83 @@ fn read_json_path_nav(text: &str, resolved: &std::path::Path, jp: &str) -> Resul
         .into());
     }
     let (content, type_name, count) = crate::tools::file_summary::extract_json_path(text, jp)?;
-    let mut result = json!({
-        "content": content,
+    let mut keys = json!({
         "path": jp,
         "value_type": type_name,
         "format": "json",
     });
     if let Some(c) = count {
-        result["count"] = json!(c);
+        keys["count"] = json!(c);
     }
-    Ok(result)
+    Ok(inline_or_file_id(
+        content,
+        keys,
+        &[],
+        &resolved.to_string_lossy(),
+        &format!("Extracted value at {jp}"),
+        ctx,
+    ))
+}
+
+/// The response of a format-navigation read (`json_path`, `toml_key`) of a REAL file: the
+/// extracted `content` beside `keys` when that whole response fits the inline limit, else the
+/// content stored under one `@file_*` handle that is browsed by line range.
+///
+/// Decided on the response it would return, as the `@tool_*` `json_path` arm of
+/// [`read_from_buffer`] decides: these reads had no gate at all, so a value over the limit went
+/// out whole and `call_content` buffered it under `@tool_*`. The raw pre-check only skips a
+/// candidate that cannot fit (escaping never shrinks a string). `droppable` keys have no length
+/// of their own (`siblings`): the handle arm carries one only when it still fits, and marks it
+/// `<key>_omitted` otherwise, so that arm stays small enough for `call_content` to leave alone.
+fn inline_or_file_id(
+    content: String,
+    keys: Value,
+    droppable: &[&str],
+    source: &str,
+    what: &str,
+    ctx: &ToolContext,
+) -> Value {
+    if !crate::tools::exceeds_inline_limit(&content) {
+        let mut inline = keys.clone();
+        inline["content"] = json!(&content);
+        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+            return inline;
+        }
+    }
+    let line_count = content.lines().count().max(1);
+    // An excerpt: a snapshot of the extracted value. `store_file` would treat the source as
+    // the WHOLE file, refresh the handle to it on the next mtime change, and, given a name
+    // that is not a real path, evict it on the first read.
+    let file_id = ctx
+        .output_buffer
+        .store_file_excerpt(source.to_string(), content);
+    let mut result = keys;
+    result["file_id"] = json!(file_id);
+    result["total_lines"] = json!(line_count);
+    result["hint"] = json!(format!(
+        "{what} ({line_count} lines). \
+         read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
+         or run_command(\"grep pattern {file_id}\") to search."
+    ));
+    for key in droppable {
+        if crate::tools::exceeds_inline_limit(&result.to_string()) {
+            if let Some(obj) = result.as_object_mut() {
+                if obj.remove(*key).is_some() {
+                    obj.insert(format!("{key}_omitted"), json!(true));
+                }
+            }
+        }
+    }
+    result
 }
 
 /// Handle `toml_key` navigation for TOML and YAML files.
-fn read_toml_yaml_key(text: &str, resolved: &std::path::Path, tk: &str) -> Result<Value> {
+fn read_toml_yaml_key(
+    text: &str,
+    resolved: &std::path::Path,
+    tk: &str,
+    ctx: &ToolContext,
+) -> Result<Value> {
     let mut file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
     // Cargo.lock (and most `.lock` files) are TOML, but detect_file_type
     // classifies `.lock` as Config. Coerce to TOML so toml_key works; a
@@ -721,33 +791,37 @@ fn read_toml_yaml_key(text: &str, resolved: &std::path::Path, tk: &str) -> Resul
     if resolved.to_string_lossy().to_lowercase().ends_with(".lock") {
         file_type = crate::tools::file_summary::FileSummaryType::Toml;
     }
-    match file_type {
-        crate::tools::file_summary::FileSummaryType::Toml => {
-            let result = crate::tools::file_summary::extract_toml_key(text, tk)?;
-            Ok(json!({
-                "content": result.content,
-                "line_range": [result.line_range.0, result.line_range.1],
-                "breadcrumb": result.breadcrumb,
-                "siblings": result.siblings,
-                "format": "toml",
-            }))
+    let (result, format) = match file_type {
+        crate::tools::file_summary::FileSummaryType::Toml => (
+            crate::tools::file_summary::extract_toml_key(text, tk)?,
+            "toml",
+        ),
+        crate::tools::file_summary::FileSummaryType::Yaml => (
+            crate::tools::file_summary::extract_yaml_key(text, tk)?,
+            "yaml",
+        ),
+        _ => {
+            return Err(RecoverableError::with_hint(
+                "toml_key parameter is only supported for TOML and YAML files",
+                "For Markdown files pass heading= or headings=, for JSON use json_path",
+            )
+            .into())
         }
-        crate::tools::file_summary::FileSummaryType::Yaml => {
-            let result = crate::tools::file_summary::extract_yaml_key(text, tk)?;
-            Ok(json!({
-                "content": result.content,
-                "line_range": [result.line_range.0, result.line_range.1],
-                "breadcrumb": result.breadcrumb,
-                "siblings": result.siblings,
-                "format": "yaml",
-            }))
-        }
-        _ => Err(RecoverableError::with_hint(
-            "toml_key parameter is only supported for TOML and YAML files",
-            "For Markdown files pass heading= or headings=, for JSON use json_path",
-        )
-        .into()),
-    }
+    };
+    let keys = json!({
+        "line_range": [result.line_range.0, result.line_range.1],
+        "breadcrumb": result.breadcrumb,
+        "siblings": result.siblings,
+        "format": format,
+    });
+    Ok(inline_or_file_id(
+        result.content,
+        keys,
+        &["siblings"],
+        &resolved.to_string_lossy(),
+        &format!("Extracted value at {tk}"),
+        ctx,
+    ))
 }
 
 /// Handle an explicit `start_line`+`end_line` range read from a real file.
@@ -916,8 +990,13 @@ fn read_with_line_range(
     // newly trip that gate — with one exception: the head-read exemption turns on
     // `start == 1`, which a follow-up no longer satisfies. Carry `force=true` on source files
     // so the call we hand back is one the caller can actually make.
-    let force_arg = if crate::tools::file_summary::detect_file_type(path)
-        == crate::tools::file_summary::FileSummaryType::Source
+    //
+    // And carry it whenever the caller passed it: on a markdown target `force=true` is what
+    // routed the read HERE instead of to `markdown::read`, so a `next` without it resumes in
+    // a different arm, with a different response shape, from the one serving this read.
+    let force_arg = if force
+        || crate::tools::file_summary::detect_file_type(path)
+            == crate::tools::file_summary::FileSummaryType::Source
     {
         ", force=true"
     } else {

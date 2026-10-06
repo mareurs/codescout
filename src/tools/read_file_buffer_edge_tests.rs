@@ -511,3 +511,74 @@ async fn a_real_file_range_counts_coverage_and_the_digits_of_next() {
         );
     }
 }
+
+/// Units of a value such that `cost(units)`, the serialized bytes of the content a read returns
+/// for it, is about `size`. `cost` is linear in the units, so two samples fix it.
+fn units_for(size: usize, cost: impl Fn(usize) -> usize) -> usize {
+    let base = cost(0);
+    let per_1000 = cost(1_000) - base;
+    (size.saturating_sub(base) * 1_000 / per_1000).max(1)
+}
+
+/// A `json_path` or `toml_key` read of a REAL file had no inline gate: the value went out
+/// whole and `call_content` buffered it as `@tool_*`. Measured before the fix: a json_path read
+/// minted `@tool_` at 10,004 B. A response over the limit must come back as one `file_id`
+/// whose `hint` names a line route that reads it to the end.
+#[tokio::test]
+async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let hint_route =
+        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=N, end_line=M\)"#).unwrap();
+    let json_text = |v: &Value| v.to_string();
+    // A JSON string or array literal is a valid TOML basic string or inline array (`\uXXXX`,
+    // `\"`, `\\`). The `toml` serializer overflows on these values in a debug build.
+    let toml_text = |v: &Value| format!("k = {}\n", v["k"]);
+    let mut buffered = 0;
+    for (class, unit) in CLASSES.into_iter().chain([("esc", "\u{1b}")]) {
+        // One string value, and a value of many 40-unit lines.
+        let one = |n: usize| json!({ "k": unit.repeat(n) });
+        let many = |n: usize| json!({ "k": vec![unit.repeat(40); n] });
+        let sizes: Vec<usize> = sweep()
+            .chain((9_950..=10_010).step_by(3))
+            .chain([12_000, 60_000])
+            .collect();
+        for size in sizes {
+            for (fmt, ext, nav, text_of) in [
+                (
+                    "json",
+                    "json",
+                    json!({ "json_path": "$.k" }),
+                    &json_text as &dyn Fn(&Value) -> String,
+                ),
+                ("toml", "toml", json!({ "toml_key": "k" }), &toml_text),
+            ] {
+                for (shape, make) in [("one", &one as &dyn Fn(usize) -> Value), ("many", &many)] {
+                    let n = units_for(size, |u| json_escaped_len(&text_of(&make(u))));
+                    let p = dir
+                        .path()
+                        .join(format!("{fmt}-{class}-{shape}-{size}.{ext}"));
+                    std::fs::write(&p, text_of(&make(n))).unwrap();
+                    let mut input = nav.clone();
+                    input["path"] = json!(p.to_str().unwrap());
+                    let label = format!("{fmt} {class}/{shape}/{size}");
+                    let (v, _) = page(&ctx, &input, "", &label).await;
+                    let Some(fid) = v["file_id"].as_str() else {
+                        assert!(v.get("content").is_some(), "{label}: no content: {v:.300}");
+                        continue;
+                    };
+                    buffered += 1;
+                    let hint = v["hint"].as_str().unwrap_or_default();
+                    let c = hint_route
+                        .captures(hint)
+                        .unwrap_or_else(|| panic!("{label}: the hint names no line route: {hint}"));
+                    assert_eq!(&c[1], fid, "{label}: the hint names another handle");
+                    let total = v["total_lines"].as_u64().unwrap();
+                    let route = json!({ "path": fid, "start_line": 1, "end_line": total });
+                    read_through(&ctx, route, fid, &label).await;
+                }
+            }
+        }
+    }
+    assert!(buffered > 0, "no read took the file_id arm");
+}
