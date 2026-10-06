@@ -655,6 +655,7 @@ fn apply_sections_filter(
     topic: &str,
     sections: &[String],
     output_buffer: &std::sync::Arc<crate::tools::output_buffer::OutputBuffer>,
+    extra: &[(&str, serde_json::Value)],
 ) -> anyhow::Result<serde_json::Value> {
     let (content, missing) = if sections.is_empty() {
         (content, vec![])
@@ -678,12 +679,18 @@ fn apply_sections_filter(
     // JSON-escaped inside `{"content": ...}`, so 5,000 `"` is 5,000 raw bytes and 10,014
     // serialized. A raw gate sent that inline and `call_content` then buffered the whole response a
     // second time under `@tool_*`.
-    let inline = if missing.is_empty() {
+    let mut inline = if missing.is_empty() {
         json!({ "content": &content })
     } else {
         json!({ "content": &content, "missing": &missing })
     };
-    let value = if crate::tools::exceeds_inline_limit(&inline.to_string()) {
+    // `extra` (`resolved_from`, `write_target`) is part of the response too: measure it, or a
+    // read from the other layout is decided on a response that is ~125 B smaller than the one
+    // returned and `call_content` re-buffers it under `@tool_*`.
+    for (key, value) in extra {
+        inline[*key] = value.clone();
+    }
+    let mut value = if crate::tools::exceeds_inline_limit(&inline.to_string()) {
         let total_lines = content.lines().count();
         // Use a `@`-prefixed synthetic path: store_file sets source_path=None for
         // paths starting with '@', preventing get_with_refresh_flag from stat-ing
@@ -704,6 +711,11 @@ fn apply_sections_filter(
     } else {
         inline
     };
+    if value.get("file_id").is_some() {
+        for (key, extra_value) in extra {
+            value[*key] = extra_value.clone();
+        }
+    }
 
     Ok(value)
 }
@@ -961,7 +973,7 @@ impl Tool for Memory {
                         .with_project_at(ctx.workspace_override.as_deref(), |p| {
                             match p.private_memory.read(topic)? {
                                 Some(content) => {
-                                    apply_sections_filter(content, topic, &sections, &buf)
+                                    apply_sections_filter(content, topic, &sections, &buf, &[])
                                 }
                                 None => Err(topic_not_found_error(
                                     topic,
@@ -975,8 +987,6 @@ impl Tool for Memory {
                     let dirs = resolve_memory_dirs(&input, ctx).await?;
                     match dirs.read_first(topic)? {
                         Some((content, from)) => {
-                            let mut value =
-                                apply_sections_filter(content, topic, &sections, &ctx.output_buffer)?;
                             // Resolved from the OTHER layout, not the write target.
                             // Say so: a later `memory(write)` on this topic goes to
                             // `primary`, leaving the file just read untouched and
@@ -984,20 +994,29 @@ impl Tool for Memory {
                             // the read-union introduces, so it is reported every
                             // time it is live — and rendered by `format_read_memory`,
                             // which returns `$.content` alone and would otherwise
-                            // drop these fields silently.
-                            if from != dirs.primary {
-                                if let Some(obj) = value.as_object_mut() {
-                                    obj.insert(
-                                        "resolved_from".to_string(),
+                            // drop these fields silently. They go INTO the gate that
+                            // decides inline-or-buffered, not on after it.
+                            let extra: Vec<(&str, serde_json::Value)> = if from != dirs.primary {
+                                vec![
+                                    (
+                                        "resolved_from",
                                         json!(crate::util::fs::to_forward_slash(&from)),
-                                    );
-                                    obj.insert(
-                                        "write_target".to_string(),
+                                    ),
+                                    (
+                                        "write_target",
                                         json!(crate::util::fs::to_forward_slash(&dirs.primary)),
-                                    );
-                                }
-                            }
-                            Ok(value)
+                                    ),
+                                ]
+                            } else {
+                                Vec::new()
+                            };
+                            apply_sections_filter(
+                                content,
+                                topic,
+                                &sections,
+                                &ctx.output_buffer,
+                                &extra,
+                            )
                         }
                         None => Err(topic_not_found_error(
                             topic,
