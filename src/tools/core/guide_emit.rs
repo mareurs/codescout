@@ -59,6 +59,7 @@ pub(crate) enum GuideDeliveryShape {
 /// pointer to `get_guide(topic)` ships instead and the topic stays unstamped.
 /// Of the corpus today only `tracker-conventions` (~59 KB) exceeds it; the next
 /// largest non-declaring guide (`iron-laws-detail`) is ~14.7 KB.
+// cap-class: RESULT_CAP guide_emit.auto_inject_bound — probed
 pub(crate) const MAX_AUTO_INJECT_GUIDE_BYTES: usize = 16 * 1024;
 
 pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShape) {

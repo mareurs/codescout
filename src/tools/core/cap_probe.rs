@@ -198,6 +198,16 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 /// about (`IC-18`). `tests/result_caps.rs`'s correspondence check keeps the
 /// two lists from drifting apart in either direction.
 pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
+    // -- src/tools/core/guide_emit.rs --
+    ProbeRow {
+        id: "guide_emit.auto_inject_bound",
+        coverage: Coverage::Deferred(
+            "behavioural tests drive an oversize guide past the bound and assert a pointer \
+             ships and the topic stays unstamped (guide_emit.rs and server.rs guide_hint_tests), \
+             but no row has been certified against this table's marker grammar and the bound \
+             constant itself has not been mutation-checked",
+        ),
+    },
     // -- src/tools/core/types.rs --
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
