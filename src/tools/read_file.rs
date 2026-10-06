@@ -317,31 +317,41 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 .unwrap_or_else(|| raw.clone());
             let (content, type_name, count) =
                 crate::tools::file_summary::extract_json_path(&text, jp)?;
-            let mut result = if crate::tools::exceeds_inline_limit(&content) {
-                let line_count = content.lines().count().max(1);
-                let file_id = ctx
-                    .output_buffer
-                    .store_file(format!("{path}:{jp}"), content);
-                json!({
-                    "file_id": file_id,
+            // Decided on the response it would return, `count` included. The value's raw bytes
+            // understate that response by its escaping and its other keys, and a response over
+            // the limit is buffered again by `call_content` under a second handle. The raw
+            // pre-check only skips building a candidate that cannot fit: escaping never
+            // shrinks a string, so raw bytes over the limit mean the response is too.
+            if !crate::tools::exceeds_inline_limit(&content) {
+                let mut inline = json!({
+                    "content": &content,
                     "path": jp,
                     "value_type": type_name,
                     "format": "json",
-                    "total_lines": line_count,
-                    "hint": format!(
-                        "Extracted value at {jp} ({line_count} lines). \
-                         read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
-                         or run_command(\"grep pattern {file_id}\") to search."
-                    ),
-                })
-            } else {
-                json!({
-                    "content": content,
-                    "path": jp,
-                    "value_type": type_name,
-                    "format": "json",
-                })
-            };
+                });
+                if let Some(c) = count {
+                    inline["count"] = json!(c);
+                }
+                if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+                    return Ok(inline);
+                }
+            }
+            let line_count = content.lines().count().max(1);
+            let file_id = ctx
+                .output_buffer
+                .store_file(format!("{path}:{jp}"), content);
+            let mut result = json!({
+                "file_id": file_id,
+                "path": jp,
+                "value_type": type_name,
+                "format": "json",
+                "total_lines": line_count,
+                "hint": format!(
+                    "Extracted value at {jp} ({line_count} lines). \
+                     read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
+                     or run_command(\"grep pattern {file_id}\") to search."
+                ),
+            });
             if let Some(c) = count {
                 result["count"] = json!(c);
             }
@@ -374,7 +384,17 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             .into());
         }
         let content = extract_lines(&text, s as usize, e as usize);
-        if crate::tools::exceeds_inline_limit(&content) {
+        // The inline arm is chosen on the response it returns, not on the slice's raw bytes:
+        // one line of 2,000 `\x01` is 2,000 raw bytes and 12,039 serialized, and was returned
+        // here for `call_content` to buffer under `@tool_*`. The raw pre-check only skips a
+        // candidate that cannot fit (escaping never shrinks a string).
+        if !crate::tools::exceeds_inline_limit(&content) {
+            let inline = json!({ "content": &content, "total_lines": total_lines });
+            if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+                return Ok(inline);
+            }
+        }
+        {
             // The slice is still stored under its own handle: that keeps it
             // greppable, and it keeps THIS response small enough that
             // `call_content()` will not re-wrap it in a `@tool_*` envelope
@@ -388,18 +408,25 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             let file_id = ctx
                 .output_buffer
                 .store_file(format!("{}[{}-{}]", path, s, e), content.clone());
-            let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
-                &content,
-                1,
-                usize::MAX,
-                crate::tools::INLINE_BYTE_BUDGET,
-            );
-            // The valve above yields one line even when that line alone busts the
-            // budget; without this the response exceeds the threshold it is
-            // measured against and gets re-wrapped.
-            let (chunk, line_truncated) =
-                clamp_over_budget_line(chunk, crate::tools::INLINE_BYTE_BUDGET);
             let orig_start = s as usize;
+            // The page sized with every other key it can carry counted. `shown_lines` ends
+            // at most at `e` and `next` resumes at most at `e + 1`, so these are the widest
+            // values those keys can take.
+            let widest = json!({
+                "content": "",
+                "file_id": file_id,
+                "total_lines": total_lines,
+                "shown_lines": [orig_start, e],
+                "complete": false,
+                "line_truncated": true,
+                "hint": over_budget_line_hint(path),
+                "next": format!(
+                    "read_file(\"{path}\", start_line={}, end_line={e})",
+                    e.saturating_add(1)
+                ),
+            });
+            let (chunk, lines_shown, complete, line_truncated) =
+                buffer_page(&content, buffer_page_room(&widest));
             let orig_end = orig_start + lines_shown.saturating_sub(1);
             let mut result = json!({
                 "content": chunk,
@@ -427,20 +454,31 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             }
             return Ok(result);
         }
-        return Ok(json!({ "content": content, "total_lines": total_lines }));
     }
 
-    // Full buffer: paginate if over the inline limit. Never re-buffer.
-    if crate::tools::exceeds_inline_limit(&text) {
-        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
-            &text,
-            1,
-            usize::MAX,
-            crate::tools::INLINE_BYTE_BUDGET,
-        );
-        // Same valve, same consequence — see the range branch above.
-        let (chunk, line_truncated) =
-            clamp_over_budget_line(chunk, crate::tools::INLINE_BYTE_BUDGET);
+    // Full buffer: paginate if the RESPONSE is over the inline limit. Never re-buffer.
+    if !crate::tools::exceeds_inline_limit(&text) {
+        let inline = json!({ "content": &text, "total_lines": total_lines });
+        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+            return Ok(inline);
+        }
+    }
+    {
+        // A page that stops short has `lines_shown < total_lines`, so `next` resumes at
+        // most at `total_lines`: these are the widest values every key can take.
+        let widest = json!({
+            "content": "",
+            "total_lines": total_lines,
+            "shown_lines": [1, total_lines],
+            "complete": false,
+            "line_truncated": true,
+            "hint": over_budget_line_hint(path),
+            "next": format!(
+                "read_file(\"{path}\", start_line={total_lines}, end_line={total_lines})"
+            ),
+        });
+        let (chunk, lines_shown, complete, line_truncated) =
+            buffer_page(&text, buffer_page_room(&widest));
         let mut result = json!({
             "content": chunk,
             "total_lines": total_lines,
@@ -458,12 +496,11 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 "read_file(\"{path}\", start_line={next_start}, end_line={next_end})"
             ));
         }
-        return Ok(result);
+        Ok(result)
     }
-    Ok(json!({ "content": text, "total_lines": total_lines }))
 }
 
-/// Cut a chunk down when a SINGLE line is wider than the whole inline budget.
+/// Cut a chunk down when a SINGLE line is wider than the room its page has for it.
 ///
 /// The safety valve in `extract_lines_with_cost` deliberately emits at least one
 /// line even when that line exceeds the budget — without it, a caller re-requests
@@ -476,22 +513,61 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
 /// The valve exists to guarantee *progress*, not completeness — so keep the
 /// progress and drop the excess bytes. Returns `(chunk, true)` when it cut.
 ///
+/// `room` is in SERIALIZED bytes, the unit the response is judged in, and so is the
+/// cut. This used to test the line's raw bytes and keep half the budget raw: a line of
+/// 2,000 `\x01` (12,000 B escaped) was never cut, and a cut line of them kept 4,500 raw
+/// bytes, 27,000 escaped. The kept prefix is never empty for a non-empty line: at least
+/// its first character survives, even in a room too small for it.
+///
 /// Measured 2026-08-29: a `run_command` envelope pretty-prints to four lines, of
 /// which the third is the entire stdout as one JSON-escaped string 9998 bytes
 /// wide. Line-slicing could never address it. See
 /// `docs/issues/archive/2026-08-28-tool-buffer-grep-returns-envelope-not-stdout.md`.
-fn clamp_over_budget_line(chunk: String, budget: usize) -> (String, bool) {
-    if !crate::tools::exceeds_inline_limit(&chunk) {
+fn clamp_over_budget_line(chunk: String, room: usize) -> (String, bool) {
+    use crate::util::text::{clip_head_escaped, json_escaped_len};
+    if json_escaped_len(&chunk) <= room {
         return (chunk, false);
     }
-    // Half the budget, not all of it. The kept bytes are re-measured AFTER JSON
-    // escaping and alongside the response's other keys, and an escape-heavy line
-    // can nearly double in width. Undershooting costs a few hundred bytes of
-    // preview; overshooting reinstates the wrap this function exists to prevent.
-    let keep = crate::tools::floor_char_boundary(&chunk, budget / 2);
-    let mut out = chunk[..keep].to_string();
-    out.push_str("\n…[truncated: this line is wider than the inline budget]");
+    let kept = clip_head_escaped(
+        &chunk,
+        room.saturating_sub(json_escaped_len(OVER_BUDGET_MARKER)),
+    );
+    let keep = match kept.len() {
+        0 => chunk.chars().next().map_or(0, char::len_utf8),
+        n => n,
+    };
+    let mut out = chunk;
+    out.truncate(keep);
+    out.push_str(OVER_BUDGET_MARKER);
     (out, true)
+}
+
+/// Appended to a line [`clamp_over_budget_line`] cut.
+// cap-class: NOT_A_CAP — the text a cut line ends with; the cut's bound is the page's room.
+const OVER_BUDGET_MARKER: &str = "\n…[truncated: this line is wider than the inline budget]";
+
+/// What a page of [`read_from_buffer`] has left for `content`, in serialized bytes: the
+/// response limit less every other key the page can carry, capped at `INLINE_BYTE_BUDGET`.
+///
+/// `widest` is the page's response with `content` set to `""` and every optional key present
+/// at the widest value it can take. The real page carries a subset of those keys with values
+/// no wider, so a `content` whose ESCAPED length fits this room keeps the compact response
+/// within the limit `call_content` judges it by. A room counted in raw bytes, or with the
+/// other keys left out, let that response be buffered again under a second handle.
+fn buffer_page_room(widest: &Value) -> usize {
+    crate::tools::INLINE_MAX_RESPONSE_LEN
+        .saturating_sub(widest.to_string().len())
+        .min(crate::tools::INLINE_BYTE_BUDGET)
+}
+
+/// One page of `body`, from its first line, whose content fits `room` serialized bytes.
+/// Returns `(chunk, lines_shown, complete, line_truncated)`.
+fn buffer_page(body: &str, room: usize) -> (String, usize, bool, bool) {
+    let (chunk, lines_shown, complete) =
+        crate::util::text::extract_lines_to_json_budget(body, 1, usize::MAX, room);
+    // The valve yields one line even when that line alone busts the room.
+    let (chunk, line_truncated) = clamp_over_budget_line(chunk, room);
+    (chunk, lines_shown, complete, line_truncated)
 }
 
 /// The advisory attached whenever [`clamp_over_budget_line`] cuts.
@@ -4803,3 +4879,7 @@ line b10
         );
     }
 }
+
+#[cfg(test)]
+#[path = "read_file_buffer_edge_tests.rs"]
+mod buffer_edge_tests;
