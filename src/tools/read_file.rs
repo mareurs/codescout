@@ -135,18 +135,10 @@ impl Tool for ReadFile {
 
         // Buffer refs bypass the filesystem entirely.
         if path.starts_with("@file_") || path.starts_with("@cmd_") || path.starts_with("@tool_") {
-            let mut res = read_from_buffer(path, &input, ctx)?;
-            // Same contract as run_command's `buffer_truncated`: a handle whose buffer
-            // holds only a prefix says so at EVERY read, not just on the response that
-            // minted it. Attached here rather than inside `read_from_buffer` because
-            // that function has several return shapes (json_path extraction, a line
-            // slice, a re-parked @file_* handle) and the notice belongs on all of them.
-            if let Some(notice) = ctx.output_buffer.truncation_notice(path) {
-                if let Some(obj) = res.as_object_mut() {
-                    obj.insert("buffer_truncated".into(), json!([notice]));
-                }
-            }
-            return Ok(res);
+            // `read_from_buffer` attaches `buffer_truncated` itself, to every return shape,
+            // before it measures the response: attached here, after sizing, it pushed a
+            // response at the limit over it.
+            return read_from_buffer(path, &input, ctx);
         }
 
         let project_root = ctx
@@ -287,6 +279,18 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         )
     })?;
 
+    // A handle whose buffer holds only a prefix says so at EVERY read (the same contract as
+    // run_command's `buffer_truncated`). It is part of every response below, so it is attached
+    // BEFORE each one is measured: added afterwards, it pushed a response sized to the limit
+    // over it, and `call_content` buffered that under a second handle.
+    let notice = ctx.output_buffer.truncation_notice(path);
+    let noted = |mut v: Value| -> Value {
+        if let Some(n) = &notice {
+            v["buffer_truncated"] = json!([n]);
+        }
+        v
+    };
+
     // Navigation params this buffer ref cannot honor must fail loudly, not be
     // silently ignored (which masks caller misuse). `toml_key` is never valid
     // on a buffer (buffers are not TOML files); `json_path` is only meaningful
@@ -332,6 +336,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 if let Some(c) = count {
                     inline["count"] = json!(c);
                 }
+                let inline = noted(inline);
                 if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
                     return Ok(inline);
                 }
@@ -355,7 +360,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             if let Some(c) = count {
                 result["count"] = json!(c);
             }
-            return Ok(result);
+            return Ok(noted(result));
         }
     }
 
@@ -389,7 +394,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         // here for `call_content` to buffer under `@tool_*`. The raw pre-check only skips a
         // candidate that cannot fit (escaping never shrinks a string).
         if !crate::tools::exceeds_inline_limit(&content) {
-            let inline = json!({ "content": &content, "total_lines": total_lines });
+            let inline = noted(json!({ "content": &content, "total_lines": total_lines }));
             if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
                 return Ok(inline);
             }
@@ -412,7 +417,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             // The page sized with every other key it can carry counted. `shown_lines` ends
             // at most at `e` and `next` resumes at most at `e + 1`, so these are the widest
             // values those keys can take.
-            let widest = json!({
+            let widest = noted(json!({
                 "content": "",
                 "file_id": file_id,
                 "total_lines": total_lines,
@@ -424,7 +429,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                     "read_file(\"{path}\", start_line={}, end_line={e})",
                     e.saturating_add(1)
                 ),
-            });
+            }));
             let (chunk, lines_shown, complete, line_truncated) =
                 buffer_page(&content, buffer_page_room(&widest));
             let orig_end = orig_start + lines_shown.saturating_sub(1);
@@ -452,13 +457,13 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                     orig_end + 1
                 ));
             }
-            return Ok(result);
+            return Ok(noted(result));
         }
     }
 
     // Full buffer: paginate if the RESPONSE is over the inline limit. Never re-buffer.
     if !crate::tools::exceeds_inline_limit(&text) {
-        let inline = json!({ "content": &text, "total_lines": total_lines });
+        let inline = noted(json!({ "content": &text, "total_lines": total_lines }));
         if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
             return Ok(inline);
         }
@@ -466,7 +471,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     {
         // A page that stops short has `lines_shown < total_lines`, so `next` resumes at
         // most at `total_lines`: these are the widest values every key can take.
-        let widest = json!({
+        let widest = noted(json!({
             "content": "",
             "total_lines": total_lines,
             "shown_lines": [1, total_lines],
@@ -476,7 +481,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             "next": format!(
                 "read_file(\"{path}\", start_line={total_lines}, end_line={total_lines})"
             ),
-        });
+        }));
         let (chunk, lines_shown, complete, line_truncated) =
             buffer_page(&text, buffer_page_room(&widest));
         let mut result = json!({
@@ -496,7 +501,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 "read_file(\"{path}\", start_line={next_start}, end_line={next_end})"
             ));
         }
-        Ok(result)
+        Ok(noted(result))
     }
 }
 
@@ -875,66 +880,89 @@ fn read_with_line_range(
         None
     };
 
-    // Proactive buffering: oversized extracted ranges are stored as @file_* refs
-    // so callers can navigate by line number (BUG-025 class).
-    if crate::tools::exceeds_inline_limit(&content) {
-        let file_id = ctx
-            .output_buffer
-            .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
-        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
-            &content,
-            1,
-            usize::MAX,
-            crate::tools::INLINE_BYTE_BUDGET,
-        );
-        let orig_start = start as usize;
-        let orig_end = orig_start + lines_shown.saturating_sub(1);
-        let mut result = json!({
-            "content": chunk,
-            "file_id": file_id,
-            "total_lines": file_total_lines,
-            "shown_lines": [orig_start, orig_end],
-            "complete": complete,
-        });
-        if !complete {
-            // Continue against the file itself, in the same line numbers
-            // `shown_lines` just reported — a `next` phrased in the slice buffer's
-            // own 1-based frame is off by `start - 1` and re-serves seen lines.
-            //
-            // A continuation is a SUBrange of a range the overlap gate already
-            // allowed, so it cannot newly trip that gate — with one exception: the
-            // head-read exemption turns on `start == 1`, which a follow-up no
-            // longer satisfies. Carry `force=true` on source files so the call we
-            // hand back is one the caller can actually make.
-            let force_arg = if crate::tools::file_summary::detect_file_type(path)
-                == crate::tools::file_summary::FileSummaryType::Source
-            {
-                ", force=true"
-            } else {
-                ""
-            };
-            result["next"] = json!(format!(
-                "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
-                orig_end + 1
-            ));
-        }
+    // Every response below carries `source` and `coverage` beside the content, so both arms
+    // are decided and sized with them in.
+    let extras = |mut v: Value| -> Value {
         if source_tag != "project" {
-            result["source"] = json!(source_tag);
+            v["source"] = json!(source_tag);
         }
-        if let Some(c) = md_cov {
-            result["coverage"] = c;
+        if let Some(c) = &md_cov {
+            v["coverage"] = c.clone();
         }
-        return Ok(result);
+        v
+    };
+
+    // Inline when the RESPONSE fits, not when the slice's raw bytes do: a 12 KB line of
+    // ASCII, or 9,990 B of escaped text, went inline here and was buffered by `call_content`
+    // under `@tool_*`. The raw pre-check only skips a candidate that cannot fit (escaping
+    // never shrinks a string).
+    if !crate::tools::exceeds_inline_limit(&content) {
+        let inline = extras(json!({ "content": &content }));
+        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+            return Ok(inline);
+        }
     }
 
-    let mut result = json!({ "content": content });
-    if source_tag != "project" {
-        result["source"] = json!(source_tag);
+    // Proactive buffering: oversized extracted ranges are stored as @file_* refs
+    // so callers can navigate by line number (BUG-025 class).
+    let file_id = ctx
+        .output_buffer
+        .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
+    // Continue against the file itself, in the same line numbers `shown_lines` reports — a
+    // `next` phrased in the slice buffer's own 1-based frame is off by `start - 1` and
+    // re-serves seen lines.
+    //
+    // A continuation is a SUBrange of a range the overlap gate already allowed, so it cannot
+    // newly trip that gate — with one exception: the head-read exemption turns on
+    // `start == 1`, which a follow-up no longer satisfies. Carry `force=true` on source files
+    // so the call we hand back is one the caller can actually make.
+    let force_arg = if crate::tools::file_summary::detect_file_type(path)
+        == crate::tools::file_summary::FileSummaryType::Source
+    {
+        ", force=true"
+    } else {
+        ""
+    };
+    let orig_start = start as usize;
+    // The page sized with every other key counted at its widest: `shown_lines` ends at most
+    // at `end` and `next` resumes at most at `end + 1`. The over-wide-line hint names the
+    // slice's own handle, where `grep -o` reaches the line.
+    let widest = extras(json!({
+        "content": "",
+        "file_id": file_id,
+        "total_lines": file_total_lines,
+        "shown_lines": [orig_start, end],
+        "complete": false,
+        "line_truncated": true,
+        "hint": over_budget_line_hint(&file_id),
+        "next": format!(
+            "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
+            end.saturating_add(1)
+        ),
+    }));
+    let (chunk, lines_shown, complete, line_truncated) =
+        buffer_page(&content, buffer_page_room(&widest));
+    let orig_end = orig_start + lines_shown.saturating_sub(1);
+    let mut result = json!({
+        "content": chunk,
+        "file_id": file_id,
+        "total_lines": file_total_lines,
+        "shown_lines": [orig_start, orig_end],
+        "complete": complete,
+    });
+    if line_truncated {
+        // No `next` for the line itself: the range that would re-read it is the one that
+        // produced it. `next` below resumes AFTER it.
+        result["line_truncated"] = json!(true);
+        result["hint"] = json!(over_budget_line_hint(&file_id));
     }
-    if let Some(c) = md_cov {
-        result["coverage"] = c;
+    if !complete {
+        result["next"] = json!(format!(
+            "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
+            orig_end + 1
+        ));
     }
-    Ok(result)
+    Ok(extras(result))
 }
 
 /// The overflow hint for a whole-file read that was summarised instead of returned.
@@ -992,9 +1020,27 @@ fn read_full_file(
     source_tag: &str,
     ctx: &ToolContext,
 ) -> Result<Value> {
-    use super::output::{OutputGuard, OutputMode, OverflowInfo};
+    use super::output::{OutputGuard, OverflowInfo};
 
-    if crate::tools::exceeds_inline_limit(text) {
+    // `markdown_coverage` MARKS headings as seen, so it runs once, here, for whichever arm
+    // returns.
+    let md_cov = if path.ends_with(".md") || path.ends_with(".markdown") {
+        markdown_coverage(text, resolved, ctx, None, None, None)
+    } else {
+        None
+    };
+
+    // Inline when the RESPONSE fits. This decided on the file's raw bytes, so a one-line file
+    // of 10,000 ASCII bytes (10,030 B as a response) went inline and `call_content` buffered
+    // it under `@tool_*`. The raw pre-check only skips a candidate that cannot fit (escaping
+    // never shrinks a string).
+    if !crate::tools::exceeds_inline_limit(text) {
+        let inline = full_file_inline(path, text, resolved, input, source_tag, md_cov.clone());
+        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+            return Ok(inline);
+        }
+    }
+    {
         let file_id = ctx
             .output_buffer
             .store_file(resolved.to_string_lossy().to_string(), text.to_string());
@@ -1022,13 +1068,9 @@ fn read_full_file(
                     crate::tools::file_summary::summarize_generic_file(text)
                 }
             };
-        // `markdown_coverage` MARKS headings as seen, so it runs once, here, and its value is
-        // handed to `finish` (which `fit_envelope` may call several times).
-        let coverage = if path.ends_with(".md") || path.ends_with(".markdown") {
-            markdown_coverage(text, resolved, ctx, None, None, None)
-        } else {
-            None
-        };
+        // Computed once above and handed to `finish`, which `fit_envelope` may call several
+        // times.
+        let coverage = md_cov;
         let is_source = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy())
             == crate::tools::file_summary::FileSummaryType::Source;
         let force = input["force"].as_bool().unwrap_or(false);
@@ -1069,17 +1111,23 @@ fn read_full_file(
             }
             result
         };
-        return Ok(crate::tools::file_summary::fit_envelope(
+        Ok(crate::tools::file_summary::fit_envelope(
             summary, &file_id, finish,
-        ));
+        ))
     }
+}
 
-    let is_md = path.ends_with(".md") || path.ends_with(".markdown");
-    let md_cov = if is_md {
-        markdown_coverage(text, resolved, ctx, None, None, None)
-    } else {
-        None
-    };
+/// The inline response of a whole-file read: the first page in exploring mode, else the whole
+/// text. [`read_full_file`] returns it only when its serialized form fits the inline limit.
+fn full_file_inline(
+    path: &str,
+    text: &str,
+    resolved: &std::path::Path,
+    input: &Value,
+    source_tag: &str,
+    md_cov: Option<Value>,
+) -> Value {
+    use super::output::{OutputGuard, OutputMode, OverflowInfo};
 
     let guard = OutputGuard::from_input(input);
     let total_lines = text.lines().count();
@@ -1117,7 +1165,7 @@ fn read_full_file(
         if let Some(c) = md_cov {
             result["coverage"] = c;
         }
-        return Ok(result);
+        return result;
     }
 
     let mut result = json!({ "content": text, "total_lines": total_lines });
@@ -1135,7 +1183,7 @@ fn read_full_file(
     if let Some(c) = md_cov {
         result["coverage"] = c;
     }
-    Ok(result)
+    result
 }
 
 /// Record which markdown headings were covered by a read operation and return

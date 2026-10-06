@@ -365,3 +365,95 @@ async fn a_clamped_line_deep_in_a_buffer_counts_the_digits_of_next() {
         }
     }
 }
+
+/// A buffer that holds only a prefix says so on every read (`buffer_truncated`, about 280 B).
+/// The notice was attached by `call` AFTER `read_from_buffer` had sized its response, so a page
+/// or an inline read at the edge went over by the notice and was buffered under `@tool_*`.
+#[tokio::test]
+async fn a_truncated_buffer_counts_its_notice_in_every_read() {
+    let ctx = ctx().await;
+    for (class, unit) in CLASSES {
+        for size in sweep().chain([12_000]) {
+            for body in [payload(unit, size), one_line(unit, size)] {
+                let kept = body.lines().count();
+                let r = ctx.output_buffer.store_truncated(
+                    "probe".into(),
+                    body,
+                    String::new(),
+                    0,
+                    Some(crate::tools::output_buffer::Truncation {
+                        kept_lines: kept,
+                        total_lines: kept * 10,
+                    }),
+                );
+                for input in [
+                    json!({ "path": r }),
+                    json!({ "path": r, "start_line": 1, "end_line": 100_000 }),
+                ] {
+                    let label = format!("truncated {class}/{size}/{kept} {input}");
+                    read_through(&ctx, input, &r, &label).await;
+                }
+            }
+        }
+    }
+}
+
+/// A line range read from a REAL file (`read_with_line_range`). It chose its inline arm on the
+/// slice's raw bytes, sized its page without the other keys, and had no clamp for one line
+/// wider than the page: measured before the fix, a ~9,990 B multi-line range came back at
+/// 10,005-10,007 B and a 12 KB line at 12,017-12,177 B, both as `@tool_*` (with a `file_id` as
+/// well for ascii, euro and emoji).
+#[tokio::test]
+async fn a_real_file_range_at_the_byte_edge_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut largest = 0;
+    for (class, unit) in CLASSES {
+        let bodies = sweep()
+            .map(|s| (format!("lines{s}"), payload(unit, s)))
+            .chain([
+                ("lines9990".into(), payload(unit, 9_990)),
+                ("one12k".into(), one_line(unit, 12_000)),
+                ("one60k".into(), one_line(unit, 60_000)),
+            ]);
+        for (shape, body) in bodies {
+            for tail in ["", "\nz\n"] {
+                let p = dir
+                    .path()
+                    .join(format!("{class}-{shape}-{}.txt", tail.len()));
+                std::fs::write(&p, format!("{body}{tail}")).unwrap();
+                let path = p.to_str().unwrap().to_string();
+                let input = json!({ "path": path, "start_line": 1, "end_line": 100_000 });
+                let label = format!("real range {class}/{shape}/{}", tail.len());
+                largest = largest.max(read_through(&ctx, input, &path, &label).await);
+            }
+        }
+    }
+    eprintln!("real range: largest response judged = {largest} B");
+}
+
+/// A whole read of a REAL file whose raw bytes are under the limit but whose escaped bytes
+/// are not (`read_full_file` decided on raw bytes).
+#[tokio::test]
+async fn a_real_file_whole_read_of_escape_heavy_text_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    for (class, unit) in CLASSES {
+        for raw in (1_000..=10_000).step_by(500) {
+            let n = raw / unit.len();
+            for (shape, body) in [
+                ("one", unit.repeat(n)),
+                ("lines", {
+                    let line = unit.repeat(40);
+                    vec![line; (n / 40).max(1)].join("\n")
+                }),
+            ] {
+                let p = dir.path().join(format!("w-{class}-{raw}-{shape}.txt"));
+                std::fs::write(&p, &body).unwrap();
+                let path = p.to_str().unwrap().to_string();
+                let label = format!("real whole {class}/{raw}/{shape}");
+                read_through(&ctx, json!({ "path": path }), &path, &label).await;
+            }
+        }
+    }
+}
