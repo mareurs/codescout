@@ -267,7 +267,11 @@ async fn a_control_char_heading_echo_is_clipped_in_escaped_bytes() {
     for (class, unit) in CLASSES {
         let path = dir.path().join(format!("echo-{class}.md"));
         // 1,000 units: over the clip in every class, yet one line still fits a range read once
-        // escaped (a line wider than that is the buffer reader's case, outside this test).
+        // escaped. A wider line is clamped by whichever arm serves the range: a `.md` path, and
+        // the `@file_` a WHOLE markdown file is stored under, go to `read_markdown_line_range`
+        // (`a_markdown_range_over_a_wide_line_keeps_one_handle`); a section's `@file_` is an
+        // excerpt with no source path, so its ranges go to `read_from_buffer`
+        // (`an_oversized_section_route_reaches_the_end_of_the_section`).
         let sub = unit.repeat(1_000);
         let mut body = format!("## Big {sub}\n### {sub}\nfirst body\n\n");
         for i in 2..=40 {
@@ -367,4 +371,317 @@ async fn a_line_range_of_a_many_heading_file_drops_coverage_to_fit() {
     assert!(result.get("file_id").is_some(), "{result:.300}");
     assert_eq!(result["coverage_omitted"], json!(true), "{result:.300}");
     assert_one_handle_and_fits(long, "long range").await;
+}
+
+/// The six classes above and ESC (`\x1b`, six bytes escaped like `\x01`).
+fn classes7() -> impl Iterator<Item = (&'static str, &'static str)> {
+    CLASSES.into_iter().chain([("esc", "\u{1b}")])
+}
+
+/// One line of `unit` whose JSON-escaped length is about `escaped` bytes.
+fn one_line(unit: &str, escaped: usize) -> String {
+    unit.repeat((escaped / json_escaped_len(unit)).max(1))
+}
+
+/// The per-page contract of a line-range read through the REAL `call_content`: no `@tool_*`,
+/// at most one handle minted counting `file_id` (the handle the input itself names is not
+/// minted by this page), the compact response fits, and a truncated line names a route off it.
+async fn md_page(ctx: &crate::tools::ToolContext, input: &Value, label: &str) -> (Value, usize) {
+    let v = ReadFile
+        .call(input.clone(), ctx)
+        .await
+        .unwrap_or_else(|e| panic!("{label}: {input} failed: {e}"));
+    let compact = v.to_string().len();
+    let blocks = ReadFile.call_content(input.clone(), ctx).await.unwrap();
+    let text = crate::tools::hint_probe::primary_text(&blocks);
+    let mut minted = handles_in(&text);
+    if let Some(p) = input["path"].as_str() {
+        minted.remove(p);
+    }
+    // A prose mention ("a @tool_* ref") is not a handle.
+    minted.retain(|h| !["@file_", "@tool_", "@cmd_", "@bg_"].contains(&h.as_str()));
+    assert!(
+        !minted.iter().any(|h| h.starts_with("@tool_")),
+        "{label}: a second handle was minted for a {compact} B response ({minted:?}): {:.300}",
+        text
+    );
+    assert!(minted.len() <= 1, "{label}: handles minted {minted:?}");
+    assert!(
+        !crate::tools::exceeds_inline_limit_len(compact),
+        "{label}: {compact} B is over the inline limit"
+    );
+    if v["line_truncated"] == json!(true) {
+        assert!(
+            v["hint"].as_str().is_some_and(|h| h.contains("grep -o")),
+            "{label}: a truncated line names no route off it: {:?}",
+            v["hint"]
+        );
+    }
+    (v, compact)
+}
+
+/// Follow `next` from `input` until the read completes. Returns the largest compact response
+/// and the last line the chain delivered. A `force=true` read must stay in the raw range arm
+/// (no `format` key) on every page, so each `next` it names must carry `force=true` too.
+async fn md_read_through(
+    ctx: &crate::tools::ToolContext,
+    mut input: Value,
+    label: &str,
+) -> (usize, u64) {
+    let route = regex::Regex::new(
+        r#"^read_file\("([^"]+)", start_line=(\d+), end_line=(\d+)(, force=true)?\)$"#,
+    )
+    .unwrap();
+    let forced = input["force"] == json!(true);
+    let path = input["path"].as_str().unwrap().to_string();
+    let mut largest = 0;
+    let mut prev_start = 0u64;
+    for _ in 0..400 {
+        let (v, compact) = md_page(ctx, &input, label).await;
+        largest = largest.max(compact);
+        if forced {
+            assert!(
+                v.get("format").is_none(),
+                "{label}: a force=true read left the raw range arm: {v:.300}"
+            );
+        }
+        let Some(next) = v["next"].as_str() else {
+            let last = v["shown_lines"][1]
+                .as_u64()
+                .unwrap_or_else(|| input["end_line"].as_u64().unwrap());
+            return (largest, last);
+        };
+        let c = route
+            .captures(next)
+            .unwrap_or_else(|| panic!("{label}: next {next:?} is not a line route"));
+        assert_eq!(&c[1], path, "{label}: next leaves the path");
+        if forced {
+            assert!(
+                c.get(4).is_some(),
+                "{label}: next {next:?} drops force=true"
+            );
+        }
+        let start: u64 = c[2].parse().unwrap();
+        let shown_end = v["shown_lines"][1].as_u64().unwrap();
+        assert_eq!(
+            start,
+            shown_end + 1,
+            "{label}: next does not resume after the page"
+        );
+        assert!(start > prev_start, "{label}: next does not advance");
+        prev_start = start;
+        input =
+            json!({ "path": path, "start_line": start, "end_line": c[3].parse::<u64>().unwrap() });
+        if c.get(4).is_some() {
+            input["force"] = json!(true);
+        }
+    }
+    panic!("{label}: next chain did not terminate");
+}
+
+/// The buffered arm of `read_markdown_line_range` sized its page with a raw budget and a fixed
+/// reserve for its other keys, and never clamped. One line wider than the page came back whole:
+/// measured before the fix, a `.md` file of ONE 9,990 B line read 1..100000 was 10,103 B, a
+/// 60,000 B line 60,113 B, both buffered by `call_content` as `@tool_*` beside the `file_id`.
+/// The `force=true` twin (`read_with_line_range`) dropped `force` from its `next`, so following
+/// it left the raw arm for this one. A long path widens `next`, and `coverage` rides along when
+/// headings stay unread.
+#[tokio::test]
+async fn a_markdown_range_over_a_wide_line_keeps_one_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    // About 1,210 B of path, so `next` is far wider than a fixed reserve allowed for.
+    let mut deep = dir.path().to_path_buf();
+    for i in 0..6 {
+        deep.push(format!("{i}{}", "d".repeat(199)));
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    let mut largest = 0;
+    for (class, unit) in classes7() {
+        let bodies = sweep()
+            .chain((9_950..=10_010).step_by(3))
+            .map(|s| (format!("lines{s}"), payload(unit, s)))
+            .chain(
+                [9_969, 9_972, 9_990, 12_000, 60_000]
+                    .map(|s| (format!("one{s}"), one_line(unit, s))),
+            );
+        for (shape, body) in bodies {
+            for tail in ["", "\nz\n"] {
+                let p = dir
+                    .path()
+                    .join(format!("{class}-{shape}-{}.md", tail.len()));
+                std::fs::write(&p, format!("{body}{tail}")).unwrap();
+                let path = p.to_str().unwrap();
+                for force in [false, true] {
+                    let mut input = json!({ "path": path, "start_line": 1, "end_line": 100_000 });
+                    if force {
+                        input["force"] = json!(true);
+                    }
+                    let label = format!("md range {class}/{shape}/{}/force={force}", tail.len());
+                    largest = largest.max(md_read_through(&ctx, input, &label).await.0);
+                }
+            }
+        }
+        for (shape, body) in [
+            ("one12k", one_line(unit, 12_000)),
+            ("lines9990", payload(unit, 9_990)),
+        ] {
+            let p = deep.join(format!("{class}-{shape}.md"));
+            std::fs::write(&p, format!("{body}\nz\n")).unwrap();
+            let input =
+                json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 100_000 });
+            let label = format!("md long path {class}/{shape}");
+            largest = largest.max(md_read_through(&ctx, input, &label).await.0);
+        }
+        // `coverage` present: the range leaves both headings unread.
+        for s in [9_990, 12_000] {
+            let p = dir.path().join(format!("cov-{class}-{s}.md"));
+            let body = one_line(unit, s);
+            std::fs::write(&p, format!("# Top\n{body}\nz\n## Later\n")).unwrap();
+            // Coverage is reported only for a file with a heading already read.
+            let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+            ReadFile.call(prime, &ctx).await.unwrap();
+            let input = json!({ "path": p.to_str().unwrap(), "start_line": 2, "end_line": 3 });
+            let label = format!("md coverage {class}/{s}");
+            let first = ReadFile.call(input.clone(), &ctx).await.unwrap();
+            assert!(
+                first.get("coverage").is_some() || first.get("coverage_omitted").is_some(),
+                "{label}: no coverage to count: {first:.300}"
+            );
+            largest = largest.max(md_read_through(&ctx, input, &label).await.0);
+            // The `@file_` a whole read of a markdown file mints is markdown-sourced, so its
+            // ranges take this arm too.
+            let whole = ReadFile
+                .call(json!({ "path": p.to_str().unwrap() }), &ctx)
+                .await
+                .unwrap();
+            let fid = whole["file_id"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{label}: a whole read minted no file_id: {whole:.300}"));
+            assert!(
+                crate::tools::markdown::is_markdown_target(fid, &ctx),
+                "{label}: {fid}"
+            );
+            let input = json!({ "path": fid, "start_line": 1, "end_line": 100_000 });
+            let label = format!("md whole-file handle {class}/{s}");
+            largest = largest.max(md_read_through(&ctx, input, &label).await.0);
+        }
+    }
+    eprintln!("md range: largest response judged = {largest} B");
+}
+
+/// An oversized single-heading section names a range route in `next_actions`. It was sized to
+/// the lines that fit inline, so when the section's SECOND line was wide the route was
+/// `end_line=1`: it returned the `## S` line alone, with no `next`, and led nowhere. Followed
+/// with its `next` chain, the route must reach the section's last line.
+#[tokio::test]
+async fn an_oversized_section_route_reaches_the_end_of_the_section() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let range =
+        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=1, end_line=(\d+)\)"#)
+            .unwrap();
+    let spans = regex::Regex::new(r"spans (\d+) lines").unwrap();
+    for (class, unit) in classes7() {
+        for wide in [12_000, 60_000] {
+            let p = dir.path().join(format!("sec-{class}-{wide}.md"));
+            let body = format!("## S\n{}\n{}\n", one_line(unit, wide), payload("b", 3_000));
+            std::fs::write(&p, body).unwrap();
+            let label = format!("section route {class}/{wide}");
+            let input = json!({ "path": p.to_str().unwrap(), "heading": "## S" });
+            let err = ReadFile.call(input, &ctx).await.unwrap_err();
+            let rec = err
+                .downcast_ref::<RecoverableError>()
+                .expect("an oversized section is a RecoverableError");
+            let lines: u64 = spans.captures(&rec.message).unwrap()[1].parse().unwrap();
+            let actions: Vec<String> = rec.extra["next_actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a.as_str().unwrap().to_string())
+                .collect();
+            let c = actions
+                .iter()
+                .find_map(|a| range.captures(a))
+                .unwrap_or_else(|| panic!("{label}: no range route in {actions:?}"));
+            let route = json!({
+                "path": &c[1],
+                "start_line": 1,
+                "end_line": c[2].parse::<u64>().unwrap(),
+            });
+            let (_, last) = md_read_through(&ctx, route, &label).await;
+            assert!(
+                last >= lines,
+                "{label}: the route stops at line {last} of {lines}: {actions:?}"
+            );
+        }
+    }
+}
+
+/// The buffered range arm keeps `coverage` unless it costs the page: dropped (marked
+/// `coverage_omitted`) when a line that does not fit beside it fits whole without it, kept when
+/// the line is cut either way, and always dropped when `coverage` alone is over the limit (a
+/// range starting on an empty line has a first line that fits any room, so only that check
+/// stops a 20 KB `coverage` riding along).
+#[tokio::test]
+async fn a_markdown_range_drops_coverage_only_to_show_a_line_whole() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut dropped = 0;
+    let mut cut = 0;
+    for w in (9_900..=10_010).chain([12_000]) {
+        let p = dir.path().join(format!("cw-{w}.md"));
+        std::fs::write(&p, format!("# Top\n{}\nz\n## Later\n", "a".repeat(w))).unwrap();
+        let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+        ReadFile.call(prime, &ctx).await.unwrap();
+        let input = json!({ "path": p.to_str().unwrap(), "start_line": 2, "end_line": 3 });
+        let label = format!("coverage width {w}");
+        let (v, _) = md_page(&ctx, &input, &label).await;
+        if v["coverage_omitted"] == json!(true) {
+            dropped += 1;
+            assert_ne!(
+                v["line_truncated"],
+                json!(true),
+                "{label}: coverage was dropped and the line is still cut: {v:.300}"
+            );
+        }
+        if v.get("file_id").is_some() && v["line_truncated"] == json!(true) {
+            cut += 1;
+            assert!(
+                v.get("coverage").is_some(),
+                "{label}: a line cut either way lost coverage too: {v:.300}"
+            );
+        }
+        md_read_through(&ctx, input, &label).await;
+    }
+    assert!(
+        dropped > 0,
+        "coverage was never dropped to show a line whole"
+    );
+    assert!(cut > 0, "no line was cut beside coverage");
+
+    let p = dir.path().join("many.md");
+    std::fs::write(&p, many_sections(600)).unwrap();
+    let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+    ReadFile.call(prime, &ctx).await.unwrap();
+    // Line 3 is the blank line after the first section's body.
+    let input = json!({ "path": p.to_str().unwrap(), "start_line": 3, "end_line": 900 });
+    let (v, _) = md_page(&ctx, &input, "empty first line").await;
+    assert_eq!(v["coverage_omitted"], json!(true), "{v:.300}");
+    md_read_through(&ctx, input, "empty first line").await;
+
+    // `coverage` over the limit AND a first line too wide even without it: the line is cut
+    // either way, yet `coverage` must still go.
+    let p = dir.path().join("many-wide.md");
+    std::fs::write(
+        &p,
+        format!("{}{}\nz\n", many_sections(600), "a".repeat(12_000)),
+    )
+    .unwrap();
+    let prime = json!({ "path": p.to_str().unwrap(), "start_line": 1, "end_line": 1 });
+    ReadFile.call(prime, &ctx).await.unwrap();
+    let input = json!({ "path": p.to_str().unwrap(), "start_line": 1_801, "end_line": 1_802 });
+    let (v, _) = md_page(&ctx, &input, "wide line beside 20 KB coverage").await;
+    assert_eq!(v["coverage_omitted"], json!(true), "{v:.300}");
+    assert_eq!(v["line_truncated"], json!(true), "{v:.300}");
 }

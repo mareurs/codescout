@@ -430,19 +430,16 @@ fn read_markdown_single_heading(
                     actions.push(format!("read_file({:?}, heading={quoted})", file_id));
                 }
             }
-            // The range is sized in SERIALIZED bytes, the unit the read it names is judged
-            // in: `end_line=100` of a control-heavy section is 24 KB once escaped, and that
-            // read came back under a second `@tool_*` handle. At most 100 lines, at least one.
-            let (_, fit_lines, _) = crate::util::text::extract_lines_to_json_budget(
-                &section_result.content,
-                1,
-                100,
-                crate::tools::INLINE_BYTE_BUDGET,
-            );
+            // The range spans the WHOLE section and lets the read page itself. It used to be
+            // sized to the lines that fit inline (at most 100), which read back with no `next`:
+            // when the section's second line was wide that was `end_line=1`, the `## S` line
+            // alone, and the route led nowhere. The range arm pages in serialized bytes, clamps
+            // a line wider than its page, and names `next` until the section is read, so this
+            // route reaches the section's last line under one handle per page.
             actions.push(format!(
                 "read_file({:?}, start_line=1, end_line={})",
                 file_id,
-                fit_lines.max(1)
+                section_lines.max(1)
             ));
             actions
         };
@@ -569,39 +566,87 @@ fn read_markdown_line_range(
         let file_id = ctx
             .output_buffer
             .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
-        // Budget on the ESCAPED size: this chunk is returned inline as JSON and
-        // measured against TOOL_OUTPUT_BUFFER_THRESHOLD after serialization, so a
-        // raw-byte budget lets a line-dense extract overshoot and get re-wrapped
-        // as a `@tool_*` envelope.
-        let (chunk, lines_shown, complete) = crate::util::text::extract_lines_to_json_budget(
-            &content,
-            1,
-            usize::MAX,
-            crate::tools::INLINE_BYTE_BUDGET,
-        );
+        // The page is sized like `read_from_buffer`'s and `read_with_line_range`'s: against the
+        // response with `content` empty and every other key at its widest, in SERIALIZED bytes,
+        // and a single line wider than that room is clamped. A raw budget with a fixed reserve
+        // for the other keys returned one wide line whole (a 60,000 B line came back at
+        // 60,113 B) and missed a long path in `next`; `call_content` then buffered the response
+        // under `@tool_*` beside this `file_id`. `shown_lines` ends at most at `end` and `next`
+        // resumes at most at `end + 1`.
         let orig_start = start as usize;
+        let next_at = |line: u64| -> String {
+            format!("read_file(\"{path}\", start_line={line}, end_line={end})")
+        };
+        let hint = crate::tools::read_file::over_budget_line_hint(&file_id);
+        let base = |shown_end: u64, next: Option<String>, truncated: bool, chunk: String| {
+            let mut v = json!({
+                "content": chunk,
+                "file_id": file_id,
+                "total_lines": file_total_lines,
+                "shown_lines": [orig_start, shown_end],
+                "complete": next.is_none(),
+            });
+            if truncated {
+                v["line_truncated"] = json!(true);
+                v["hint"] = json!(hint);
+            }
+            if let Some(n) = next {
+                v["next"] = json!(n);
+            }
+            v
+        };
+        // `coverage` has no length of its own. It rides in the skeleton, and is dropped
+        // (marked `coverage_omitted`) only when it would cost the page its first line whole:
+        // content first, as `drop_to_fit` orders it for the inline arm.
+        let skeleton = base(
+            end,
+            Some(next_at(end.saturating_add(1))),
+            true,
+            String::new(),
+        );
+        let with_cov = match &md_cov {
+            Some(c) => {
+                let mut v = skeleton.clone();
+                v["coverage"] = c.clone();
+                with_format(v)
+            }
+            None => with_format(skeleton.clone()),
+        };
+        let mut page = crate::tools::read_file::buffer_page(
+            &content,
+            crate::tools::read_file::buffer_page_room(&with_cov),
+        );
+        let mut keep_cov = md_cov.is_some();
+        if keep_cov && (crate::tools::exceeds_inline_limit(&with_cov.to_string()) || page.3) {
+            let without = finalize_dropped(skeleton, &["coverage"]);
+            let alt = crate::tools::read_file::buffer_page(
+                &content,
+                crate::tools::read_file::buffer_page_room(&without),
+            );
+            // A line cut either way keeps `coverage`: dropping it would buy bytes of a line
+            // the caller must `grep -o` for anyway.
+            if crate::tools::exceeds_inline_limit(&with_cov.to_string()) || !alt.3 {
+                page = alt;
+                keep_cov = false;
+            }
+        }
+        let (chunk, lines_shown, complete, line_truncated) = page;
         let orig_end = orig_start + lines_shown.saturating_sub(1);
-        let mut result = json!({
-            "content": chunk,
-            "file_id": file_id,
-            "total_lines": file_total_lines,
-            "shown_lines": [orig_start, orig_end],
-            "complete": complete,
+        // `complete == false` means the room stopped the page short of `end`, and the valve
+        // yields at least one line, so `next` strictly advances. A clamped line gets no `next`
+        // of its own (the range that re-reads it is the one that produced it); `next` resumes
+        // after it, and the hint names `grep -o` on `file_id` for the line itself.
+        let next = (!complete).then(|| next_at(orig_end as u64 + 1));
+        let result = base(orig_end as u64, next, line_truncated, chunk);
+        return Ok(match md_cov {
+            Some(c) if keep_cov => {
+                let mut v = result;
+                v["coverage"] = c;
+                with_format(v)
+            }
+            Some(_) => finalize_dropped(result, &["coverage"]),
+            None => with_format(result),
         });
-        if !complete {
-            // Continue against the file, in the line numbers `shown_lines` just
-            // reported. Phrasing `next` in the slice buffer's own 1-based frame
-            // is off by `start - 1` and re-serves lines the caller has seen.
-            result["next"] = json!(format!(
-                "read_file(\"{path}\", start_line={}, end_line={end})",
-                orig_end + 1
-            ));
-        }
-        if let Some(c) = md_cov {
-            result["coverage"] = c;
-        }
-        // The chunk is bounded; `coverage` is not, so it is dropped when it is what overflows.
-        return Ok(drop_to_fit(&result, &["coverage"], finalize_dropped));
     }
 
     Ok(inline)
