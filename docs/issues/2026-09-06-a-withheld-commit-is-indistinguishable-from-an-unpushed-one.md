@@ -1,15 +1,17 @@
 ---
 kind: bug
-status: open
+status: mitigated
 tags:
 - cluster/shared-resource-carries-no-owner
 - shared-checkout
 - git-workflow
 - multi-session
+closed: 2026-10-06
 opened: 2026-09-06
 owner: marius
 related: []
 severity: medium
+unverified: 'The mitigation is a hold the author must remember to set: nothing reminds an author at commit time, and a hook could only remind because the authorisation lives in an operator conversation. A push with no session id, a squash merge of a held branch, and a checkout whose guard predates the merge still publish held commits.'
 ---
 
 # BUG: a commit an author is deliberately withholding is byte-identical to one merely not pushed yet, so any peer's push publishes it
@@ -263,18 +265,14 @@ Directions if a mechanism is wanted, none free and none yet chosen:
 
 ## Fix provenance
 
-- **SHA:** `a3dcff7213b60a3141261c54f58785763c62a36e` (`experiments`)
-- **patch-id:** `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`
-- **Mitigated by** that commit
-  — the two-states rule, placed in `CLAUDE.md` § *Git Workflow* as § *Resume* asked, with the
-  operator's agreement (2026-09-24). It carries this file's Resolution forward: publication
-  *without a decision* is the failure, so unpushed work stays committable and only a HELD change
-  must stay uncommitted.
-- **The marker direction is declined, not deferred**, for the reason § *Resume* gave — a
-  fail-open hook nobody has installed reproduces the defect while reading as a fix. The
-  isolation direction is the rule itself.
-- **Withdrawn 2026-10-04:** the operator removed the rule from `CLAUDE.md` when § *Git Workflow*
-  became a pointer, so nothing mitigates this and it is `open` again.
+- **Mitigated 2026-10-06 by the publish hold**, merged as `4766c07f` on `experiments` (not pushed). The fix commits, patch-id first and SHA second (the SHA alone does not survive a rebase):
+  - `ec0a017dd099d5a61805d287f9c2ccd0ba9cb2e6` (`46f345b4`): `scripts/hold-publish.sh` records a per-session hold in `refs/holds/<session-id>`.
+  - `57b00dc36213b3ebfbd7af28f5ca32b46029bc68` (`4362cb3f`): the pre-push guard refuses a held session's commits, even under `CODESCOUT_PUSH_ACK=all`.
+  - `f7c928aab7d8eab03a4330d56edb3440a5fc7d3c` (`79c4a4fe`): the hold check also covers tag and other-ref pushes and fails closed on an unlistable range.
+  - Spec: `docs/superpowers/specs/2026-10-06-publish-hold-design.md`. The sibling bug `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md` carries the full account, the live check and the limits.
+- **Where the rule lives now:** `docs/conventions/shared-checkout-commit-sequence.md` § *A session that cannot publish must not commit*, and a bullet in `docs/RELEASE.md` § *Concurrent-Work Rules*. It is not in `CLAUDE.md`, by the operator's choice.
+- **Still not covered** (the `unverified:` caveat): nothing reminds an author to run `hold-publish.sh set` when they commit, so an author who forgets leaves the original situation unchanged. A push with no session id, a squash merge of a held branch (it launders the trailer), and a checkout whose guard predates the merge also still publish held commits. Trailerless commits are not matched.
+- **History.** On 2026-09-24 a `CLAUDE.md` rule mitigated this (SHA `a3dcff7213b60a3141261c54f58785763c62a36e`, patch-id `10592b9ddcc2570fab6ddf99aa389f8dfc029d36`). The operator removed it on 2026-10-04 when § *Git Workflow* became a pointer, so the bug reopened. That 2026-09-24 entry also said the marker direction was declined, because a fail-open hook nobody has installed reproduces the defect while reading as a fix. That reason no longer applies: the pre-push guard is installed through `scripts/install-hooks.sh`, and every session on this checkout runs it. The marker direction was therefore built on 2026-10-06, on top of that guard.
 
 ## Tests added
 
@@ -304,15 +302,11 @@ Do not close this on a green suite; close it on an observed refusal of a real wi
 
 ## Resume
 
-Put the two-states rule where a session reads it before committing — `CLAUDE.md` § *Git Workflow*
-is the surface, alongside the existing "Visibility is not authority" note in § *Reaching a Peer
-Session*, since this is that rule's other direction. That is a text change and needs the
-operator's agreement, not a code change. Only then decide between the marker and the isolation
-direction in § *Fix*; do not build the marker first, because a fail-open hook nobody has
-installed reproduces the defect while reading as a fix.
+The surface question this section used to ask is answered: the rule is in the convention doc and in `docs/RELEASE.md`, and a marker with an enforcing guard now exists (see § *Fix provenance*).
 
-**2026-10-04: not `CLAUDE.md`.** The operator removed the rule from there; pick another surface
-or a mechanism.
+Nothing is left to decide here except whether a commit-time reminder is worth building. A hook at commit time cannot know the authorisation, because that fact lives in an operator conversation. It could only remind, and this ledger's standing position is that a reminder the model must notice is a policy and not a mechanism. So the bug stays `mitigated`, not `fixed`.
+
+Reopen it when a held commit is published although its author had set a hold. That would be a defect in the guard, so also file it against the sibling bug above.
 
 ## Resolution, and the two things this file said too strongly
 
