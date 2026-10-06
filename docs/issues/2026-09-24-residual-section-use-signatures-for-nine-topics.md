@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
 severity: low
-unverified: 'PARTIAL FIX (34d39567): a missing guide file is now refused apart from ''no rules matched''. NOT done: signature authoring for the nine other topics. See ## Partial fix.'
+unverified: 'PARTIAL FIX (34d39567): a missing guide file is now refused apart from ''no rules matched''. NOT done: signature authoring for the nine other topics. It is blocked on three design decisions and, for four topics, on evidence that does not exist; see ## Partial fix, Update 2026-10-06.'
 ---
 
 ## Summary
@@ -42,6 +42,15 @@ Tests added: class `MissingGuideIsNotNoRules` in `tests/test_probe_mechanism_too
 What is NOT covered: authoring `SECTION_SIGNATURES` for the other nine topics, so nine of ten topics are still unmeasurable (the guard still refuses them). That is a separate measurement project.
 
 **Correction to the triage and an important follow-up.** The triage claim that this registry test is the only Python unittest was WRONG. Counted 2026-10-06: `git ls-files 'tests/test_*.py'` lists 27 files (the sweep brief said 29; the 27 is what this pass measured, so reconcile before quoting a number). None is run by `scripts/gate.sh` (no `pytest`, `unittest` or `tests/test_` reference in it or in any `scripts/*.sh` other than comments in `scripts/mutation-probe.sh`) or by `.github/workflows/ci.yml` (its only Python step is `python3 scripts/probe_tool_surface.py`). `tests/python_test_entry_guard.rs` states the same: "No CI job, gate lane or hook runs `tests/test_*.py`; they are run by hand." So the tests added here, like the rest of that population, guard nothing unless someone runs them by hand (`python3 tests/test_probe_mechanism_tools_registry.py` or `unittest discover`).
+
+**Update 2026-10-06 (authoring attempted and stopped; no signature written).** A fork tried the authoring and stopped, because it needs design decisions and four topics have no evidence. The figures below were measured by the fork and were not re-run by the author of this note.
+
+- `scan_transcript` (`scripts/probe_guide_section_use.py:541-616`) counts only `doc`, `librarian` and `artifact` calls. Its docstring marks that limit as load-bearing, because a self-trigger once scored all six sections at 100%. Seven topics cannot be expressed in that scope: `error-handling`, `iron-laws-detail`, `progressive-disclosure`, `project-activation-bootstrap`, `symbol-navigation`, `untrusted-content` and `workspace-state`.
+- `SECTION_SIGNATURES` is keyed by heading alone. Headings collide across the ten guides: `Related` appears in four, and `(preamble)` in all ten. Per-topic rules need a `(topic, heading)` key.
+- Four topics were never injected in 3,487 transcripts: `error-handling`, `iron-laws-detail`, `librarian-runtime` and `untrusted-content`. No positive control can exist for them.
+- The probe cannot see section-grain injections of `librarian`. That is filed as `9cf119d200328dfb`.
+
+Decisions needed before anyone authors: widen the tool scope per topic, or declare those seven topics out of scope; key by `(topic, heading)`; and match the `§ <heading>` marker form. After those, `librarian` is the only topic with a feasible population.
 
 ## Resume
 
