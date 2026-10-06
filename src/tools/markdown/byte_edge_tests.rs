@@ -722,6 +722,14 @@ async fn a_multi_heading_overflow_error_echoes_bounded_headings() {
             text.contains("exceeds inline threshold"),
             "{class}: {text:.300}"
         );
+        // Each echo is clipped, so three of them fit and the list is kept, not dropped.
+        let err = ReadFile.call(input.clone(), &ctx).await.unwrap_err();
+        let rec = err.downcast_ref::<RecoverableError>().unwrap();
+        assert_eq!(
+            rec.extra["requested_headings"].as_array().map(Vec::len),
+            Some(3),
+            "{class}"
+        );
         assert_one_handle_and_fits(input, &format!("multi {class}")).await;
     }
     // Eighty requested sections: each echo is clipped, but the list is long, so it is dropped.
