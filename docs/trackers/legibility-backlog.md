@@ -12,63 +12,140 @@ expects_augmentation: docs/augmentations/docs-trackers-legibility-backlog.yaml
 
 ## Backlog (auto-managed)
 
-Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-08-28 · **47 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta. (`—` in tokens/lines = a non-body defect, e.g. a name collision.) The Dzo's verdicts are below.
+Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-10-06 · **81 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta; a row whose detector no longer exists is **retired**, not closed. (`—` in tokens/lines = a non-body defect, e.g. an un-mappable file.) The Dzo's verdicts are below.
 
 | key | tier | defects | score | tok/budget | lines | tr/ed/se |
 |---|:--:|---|--:|--:|--:|:--:|
-| `src/librarian/tools/doctor.rs::call` | 1 | over_budget_body | 6 | 6284/2500 | 465 | 2/0/2 |
-| `src/librarian/tools/doctor.rs::(file)` | 1 | un_mappable_file | 6 | 4855/2500 | 10426 | 2/0/2 |
-| `src/prompts/builders.rs::build_system_prompt_draft` | 1 | over_budget_body | 6 | 3148/2500 | 270 | 2/0/1 |
-| `src/librarian/tools/doctor.rs::run_fix` | 1 | over_budget_body | 6 | 3022/2500 | 232 | 2/0/2 |
-| `src/tools/core/types.rs::Tool/call_content` | 1 | over_budget_body | 3 | 5825/2500 | 438 | 1/0/1 |
-| `src/librarian/tools/artifact.rs::Artifact/input_schema` | 1 | over_budget_body | 3 | 3897/2500 | 178 | 1/0/1 |
-| `src/librarian/catalog/augmentation.rs::allocate_entry_id` | 1 | over_budget_body | 3 | 3090/2500 | 249 | 1/0/1 |
-| `src/retrieval/sync.rs::sync_worktree` | 1 | over_budget_body | 2 | 2874/2500 | 241 | 0/0/1 |
-| `src/tools/config/mod.rs::ProjectStatus/call` | 1 | over_budget_body | 1 | 3370/2500 | 278 | 0/0/1 |
-| `src/tools/config/mod.rs::build_activation_response` | 1 | over_budget_body | 1 | 2939/2500 | 266 | 0/0/1 |
-| `src/librarian/tools/link_scan/mod.rs::call` | 2 | over_budget_body | 0 | 6476/2500 | 499 | 0/0/0 |
-| `src/tools/grep.rs::Grep/call` | 2 | over_budget_body | 0 | 6042/2500 | 503 | 0/0/0 |
-| `src/librarian/tools/find.rs::call` | 2 | over_budget_body | 0 | 5505/2500 | 478 | 0/0/0 |
-| `src/tools/symbol/list_overview.rs::list_overview` | 2 | over_budget_body | 0 | 5480/2500 | 519 | 0/0/0 |
-| `src/tools/semantic/index.rs::IndexProject/call` | 2 | over_budget_body | 0 | 5459/2500 | 441 | 0/0/0 |
-| `src/librarian/tools/get.rs::call` | 2 | over_budget_body | 0 | 5031/2500 | 503 | 0/0/0 |
-| `src/tools/symbol/tests.rs::(file)` | 2 | un_mappable_file | 0 | 4997/2500 | 8920 | 0/0/0 |
-| `src/tools/memory/mod.rs::Memory/call` | 2 | over_budget_body | 0 | 4841/2500 | 398 | 0/0/0 |
-| `src/util/path_security.rs::(file)` | 2 | un_mappable_file | 0 | 4544/2500 | 4634 | 0/0/0 |
-| `src/tools/semantic/index.rs::IndexStatus/call` | 2 | over_budget_body | 0 | 4499/2500 | 301 | 0/0/0 |
-| `tests/librarian/timemachine_smoke.rs::timemachine_full_chain` | 2 | over_budget_body | 0 | 4438/2500 | 499 | 0/0/0 |
-| `src/librarian/tools/context.rs::call` | 2 | over_budget_body | 0 | 4243/2500 | 435 | 0/0/0 |
-| `src/librarian/tools/update.rs::call` | 2 | over_budget_body | 0 | 4080/2500 | 336 | 0/0/0 |
-| `src/tools/run_command/inner.rs::run_command_inner` | 2 | over_budget_body | 0 | 4028/2500 | 327 | 0/0/0 |
-| `src/tools/symbol/edit_code.rs::EditCode/do_rename` | 2 | over_budget_body | 0 | 3908/2500 | 351 | 0/0/0 |
-| `src/server.rs::(file)` | 2 | un_mappable_file | 0 | 3797/2500 | 7496 | 0/0/0 |
-| `src/tools/symbol/edit_code.rs::EditCode/do_replace` | 2 | over_budget_body | 0 | 3775/2500 | 291 | 0/0/0 |
-| `src/tools/edit_file/tests.rs::(file)` | 2 | un_mappable_file | 0 | 3772/2500 | 5835 | 0/0/0 |
-| `src/usage/db.rs::normalize_err_family` | 2 | over_budget_body | 0 | 3623/2500 | 294 | 0/0/0 |
+| `src/lsp/manager.rs::LspManager/get_or_start` | 1 | over_budget_body | 6 | 2840/2500 | 222 | 2/0/1 |
+| `tests/librarian/timemachine_smoke.rs::timemachine_full_chain` | 1 | over_budget_body | 4 | 4723/2500 | 521 | 1/0/2 |
+| `src/tools/symbol/tests.rs::(file)` | 2 | un_mappable_file | 0 | 5824/2500 | 10582 | 0/0/0 |
+| `src/tools/memory/mod.rs::Memory/call` | 1 | over_budget_body | 4 | 5444/2500 | 446 | 1/0/1 |
+| `src/tools/symbol/list_overview.rs::list_overview` | 1 | over_budget_body | 9 | 5917/2500 | 554 | 3/0/2 |
+| `src/tools/semantic/index.rs::IndexProject/call` | 1 | over_budget_body | 14 | 5979/2500 | 480 | 4/1/1 |
 | `tests/e2e/edit_eval/cases.rs::all` | 2 | over_budget_body | 0 | 3506/2500 | 320 | 0/0/0 |
-| `src/librarian/tools/append_entry.rs::call` | 2 | over_budget_body | 0 | 3442/2500 | 244 | 0/0/0 |
-| `src/librarian/tools/tracker_design.rs::archetype_goal` | 2 | over_budget_body | 0 | 3440/2500 | 92 | 0/0/0 |
-| `src/librarian/tools/context.rs::pack_entry_anchor` | 2 | over_budget_body | 0 | 3439/2500 | 292 | 0/0/0 |
-| `src/tools/edit_file/mod.rs::perform_edit` | 2 | over_budget_body | 0 | 3246/2500 | 263 | 0/0/0 |
-| `src/tools/run_command/output.rs::handle_successful_output` | 2 | over_budget_body | 0 | 3215/2500 | 279 | 0/0/0 |
-| `src/librarian/tools/reindex.rs::call` | 2 | over_budget_body | 0 | 3159/2500 | 274 | 0/0/0 |
-| `src/main.rs::main` | 2 | over_budget_body | 0 | 3091/2500 | 294 | 0/0/0 |
-| `src/tools/run_command/tests.rs::(file)` | 2 | un_mappable_file | 0 | 3027/2500 | 4456 | 0/0/0 |
-| `src/tools/edit_file/mod.rs::EditFile/call` | 2 | over_budget_body | 0 | 2943/2500 | 241 | 0/0/0 |
-| `src/tools/semantic/semantic_search.rs::SemanticSearch/call` | 2 | over_budget_body | 0 | 2864/2500 | 235 | 0/0/0 |
-| `src/lsp/manager.rs::LspManager/get_or_start` | 2 | over_budget_body | 0 | 2840/2500 | 222 | 0/0/0 |
-| `src/tools/symbol/edit_code.rs::EditCode/do_insert` | 2 | over_budget_body | 0 | 2798/2500 | 208 | 0/0/0 |
-| `src/librarian/indexer.rs::index_repo_sync` | 2 | over_budget_body | 0 | 2794/2500 | 278 | 0/0/0 |
-| `src/librarian/tools/find.rs::build_hints` | 2 | over_budget_body | 0 | 2776/2500 | 265 | 0/0/0 |
-| `src/server.rs::CodeScoutServer/call_tool_inner` | 2 | over_budget_body | 0 | 2673/2500 | 217 | 0/0/0 |
-| `src/tools/markdown/tests.rs::(file)` | 2 | un_mappable_file | 0 | 2644/2500 | 3348 | 0/0/0 |
-| `src/server.rs::run` | 2 | over_budget_body | 0 | 2637/2500 | 248 | 0/0/0 |
+| `src/librarian/tools/tracker_design.rs::archetype_goal` | 1 | over_budget_body | 3 | 3437/2500 | 92 | 1/0/1 |
+| `src/tools/edit_file/mod.rs::EditFile/call` | 1 | over_budget_body | 3 | 2928/2500 | 245 | 1/0/1 |
+| `src/tools/edit_file/tests.rs::(file)` | 1 | un_mappable_file | 1 | 4069/2500 | 6427 | 0/0/1 |
+| `src/prompts/builders.rs::build_system_prompt_draft` | 2 | over_budget_body | 0 | 3159/2500 | 270 | 0/0/0 |
+| `src/librarian/tools/get.rs::call` | 1 | over_budget_body | 36 | 6274/2500 | 579 | 12/0/9 |
+| `src/tools/grep.rs::Grep/call` | 1 | over_budget_body | 15 | 6327/2500 | 516 | 5/0/4 |
+| `src/tools/symbol/edit_code.rs::EditCode/do_rename` | 1 | over_budget_body | 3 | 3908/2500 | 351 | 0/0/2 |
+| `src/tools/symbol/edit_code.rs::EditCode/do_replace` | 1 | over_budget_body | 3 | 4382/2500 | 335 | 0/0/2 |
+| `src/tools/run_command/inner.rs::run_command_inner` | 1 | over_budget_body | 9 | 4513/2500 | 365 | 3/0/3 |
+| `src/tools/run_command/tests.rs::(file)` | 1 | un_mappable_file | 7 | 5374/2500 | 8616 | 2/0/3 |
+| `src/librarian/tools/doctor.rs::(file)` | 1 | un_mappable_file | 86 | 8711/2500 | 22255 | 20/0/23 |
+| `src/librarian/tools/doctor.rs::run_fix` | 1 | over_budget_body | 86 | 4030/2500 | 303 | 20/0/23 |
+| `src/librarian/tools/doctor.rs::tests/row_checks_scoped_by_project_table_driven` | 1 | over_budget_body | 86 | 3625/2500 | 280 | 20/0/23 |
+| `src/server.rs::(file)` | 1 | un_mappable_file | 80 | 5751/2500 | 14837 | 17/0/23 |
+| `tests/test_measure_join.py::(file)` | 1 | un_mappable_file | 52 | 3018/2500 | 2526 | 14/0/8 |
+| `tests/test_measure_lessons.py::(file)` | 1 | un_mappable_file | 41 | 3496/2500 | 1992 | 12/0/2 |
+| `src/librarian/tools/append_entry.rs::(file)` | 1 | un_mappable_file | 38 | 3563/2500 | 4756 | 9/0/10 |
+| `src/librarian/tools/doctor.rs::call` | 1 | over_budget_body | 36 | 13478/2500 | 909 | 12/0/9 |
+| `src/librarian/tools/link_scan/mod.rs::call` | 1 | over_budget_body | 36 | 9718/2500 | 706 | 12/0/9 |
+| `src/librarian/tools/find.rs::call` | 1 | over_budget_body | 36 | 8164/2500 | 647 | 12/0/9 |
+| `src/librarian/tools/mv.rs::call` | 1 | over_budget_body | 36 | 6625/2500 | 434 | 12/0/9 |
+| `src/librarian/tools/reindex.rs::call` | 1 | over_budget_body | 36 | 6592/2500 | 511 | 12/0/9 |
+| `src/librarian/tools/append_entry.rs::call` | 1 | over_budget_body | 36 | 5819/2500 | 392 | 12/0/9 |
+| `src/librarian/tools/update.rs::call` | 1 | over_budget_body | 36 | 5613/2500 | 439 | 12/0/9 |
+| `src/librarian/tools/context.rs::call` | 1 | over_budget_body | 36 | 4373/2500 | 443 | 12/0/9 |
+| `src/librarian/tools/audit_log.rs::call` | 1 | over_budget_body | 36 | 3073/2500 | 234 | 12/0/9 |
+| `src/tools/core/types.rs::Tool/call_content` | 1 | over_budget_body | 34 | 6040/2500 | 411 | 11/0/6 |
+| `src/librarian/catalog/augmentation.rs::(file)` | 1 | un_mappable_file | 33 | 3106/2500 | 5688 | 8/0/9 |
+| `src/usage/db.rs::normalize_err_family` | 1 | over_budget_body | 28 | 3848/2500 | 306 | 7/0/9 |
+| `scripts/pre-commit-ledger-counts.py::main` | 1 | over_budget_body | 27 | 6415/2500 | 441 | 8/1/6 |
+| `src/server.rs::CodeScoutServer/call_tool_inner` | 1 | over_budget_body | 27 | 3868/2500 | 288 | 9/0/5 |
+| `scripts/run-artifact-bench.py::main` | 1 | over_budget_body | 27 | 3097/2500 | 210 | 8/1/6 |
+| `src/main.rs::main` | 1 | over_budget_body | 27 | 3007/2500 | 286 | 8/1/6 |
+| `scripts/file-provenance.py::main` | 1 | over_budget_body | 27 | 2656/2500 | 183 | 8/1/6 |
+| `src/tools/read_file.rs::read_from_buffer` | 1 | over_budget_body | 25 | 2766/2500 | 233 | 7/0/6 |
+| `src/tools/read_file.rs::(file)` | 1 | un_mappable_file | 25 | 2755/2500 | 5016 | 7/0/6 |
+| `scripts/measure/observability.py::coverage` | 1 | over_budget_body | 24 | 3211/2500 | 231 | 8/0/2 |
+| `src/util/path_security.rs::(file)` | 1 | un_mappable_file | 18 | 5807/2500 | 6292 | 4/0/4 |
+| `src/librarian/catalog/augmentation.rs::append_entry` | 1 | over_budget_body | 15 | 3046/2500 | 260 | 5/0/4 |
+| `src/usage/db.rs::open_db` | 1 | over_budget_body | 15 | 2687/2500 | 208 | 5/0/4 |
+| `src/server.rs::run` | 1 | over_budget_body | 13 | 2637/2500 | 248 | 4/0/2 |
+| `src/tools/config/mod.rs::ProjectStatus/call` | 1 | over_budget_body | 12 | 4300/2500 | 341 | 4/0/3 |
+| `src/tools/core/tests.rs::(file)` | 1 | un_mappable_file | 11 | 3253/2500 | 3939 | 1/0/5 |
+| `tests/test_measure_packet.py::(file)` | 1 | un_mappable_file | 10 | 3081/2500 | 1491 | 2/0/3 |
+| `src/tools/output_buffer.rs::OutputBuffer/resolve_refs` | 1 | over_budget_body | 9 | 3136/2500 | 246 | 3/0/3 |
+| `src/librarian/catalog/rekey.rs::rekey_prefix_rows` | 1 | over_budget_body | 7 | 2934/2500 | 256 | 1/0/2 |
+| `tests/test_measure_run_sample.py::(file)` | 1 | un_mappable_file | 7 | 2768/2500 | 2378 | 2/0/3 |
+| `src/librarian/tools/artifact.rs::Artifact/input_schema` | 1 | over_budget_body | 6 | 5922/2500 | 275 | 0/0/4 |
+| `src/librarian/indexer.rs::index_repo_sync` | 1 | over_budget_body | 6 | 5320/2500 | 435 | 2/0/2 |
+| `src/tools/semantic/semantic_search.rs::SemanticSearch/call` | 1 | over_budget_body | 6 | 3063/2500 | 244 | 2/0/1 |
+| `src/server.rs::CodeScoutServer/from_parts_with_env` | 1 | over_budget_body | 6 | 2833/2500 | 219 | 2/0/1 |
+| `src/librarian/tools/find.rs::build_hints` | 1 | over_budget_body | 6 | 2776/2500 | 265 | 2/0/2 |
+| `src/server.rs::guide_hint_tests/a_p50_session_stays_under_the_committed_emission_byte_ceiling` | 1 | over_budget_body | 3 | 5475/2500 | 352 | 1/0/1 |
+| `src/tools/semantic/index.rs::IndexStatus/call` | 1 | over_budget_body | 3 | 4507/2500 | 300 | 0/0/1 |
+| `src/librarian/tools/context.rs::pack_entry_anchor` | 1 | over_budget_body | 3 | 3439/2500 | 292 | 1/0/1 |
+| `src/librarian/tools/doctor.rs::scan_open_bug_cited_from_source` | 1 | over_budget_body | 3 | 3417/2500 | 289 | 1/0/1 |
+| `src/tools/markdown/edit_markdown.rs::plan_section_edit` | 1 | over_budget_body | 3 | 3177/2500 | 257 | 1/0/1 |
+| `src/tools/symbol/edit_code.rs::EditCode/do_insert` | 1 | over_budget_body | 3 | 3115/2500 | 229 | 0/0/2 |
+| `src/librarian/tools/doctor.rs::scan_cited_prefix_with_no_definer` | 1 | over_budget_body | 3 | 3073/2500 | 241 | 1/0/1 |
+| `src/server.rs::tests/provenance_probes_reference_only_real_tool_names` | 1 | over_budget_body | 3 | 2951/2500 | 229 | 1/0/1 |
+| `src/librarian/catalog/mod.rs::apply_migrations_in_txn` | 1 | over_budget_body | 3 | 2771/2500 | 247 | 0/0/3 |
+| `scripts/measure/observability.py::render_map` | 1 | over_budget_body | 3 | 2745/2500 | 271 | 1/0/1 |
+| `src/librarian/filter.rs::compile_leaf` | 1 | over_budget_body | 3 | 2713/2500 | 242 | 1/0/1 |
+| `src/tools/symbol/edit_code.rs::EditCode/do_remove` | 1 | over_budget_body | 3 | 2572/2500 | 209 | 0/0/2 |
+| `src/tools/run_command/output.rs::handle_successful_output_with` | 1 | over_budget_body | 2 | 5681/2500 | 450 | 0/0/2 |
+| `src/tools/config/mod.rs::build_activation_response` | 1 | over_budget_body | 2 | 3361/2500 | 293 | 0/0/2 |
+| `src/tools/symbol/references.rs::References/call` | 1 | over_budget_body | 2 | 2740/2500 | 222 | 0/0/1 |
+| `src/tools/edit_file/mod.rs::perform_edit` | 1 | over_budget_body | 1 | 3494/2500 | 274 | 0/0/1 |
+| `src/tools/markdown/tests.rs::(file)` | 1 | un_mappable_file | 1 | 3141/2500 | 4239 | 0/0/1 |
+| `src/librarian/catalog/audit/shard.rs::export` | 2 | over_budget_body | 0 | 3719/2500 | 272 | 0/0/0 |
+| `src/retrieval/sync.rs::sync_worktree` | 2 | over_budget_body | 0 | 3097/2500 | 257 | 0/0/0 |
+| `src/tools/file_summary/tests.rs::(file)` | 2 | un_mappable_file | 0 | 2808/2500 | 2602 | 0/0/0 |
+| `src/tools/markdown/read_markdown.rs::read_markdown_single_heading` | 2 | over_budget_body | 0 | 2561/2500 | 212 | 0/0/0 |
+| `src/librarian/tools/librarian.rs::Librarian/input_schema` | 2 | over_budget_body | 0 | 2512/2500 | 76 | 0/0/0 |
 
 
 ### Closed (refactored — before → after)
 
 | key | defects cleared | before → after | closed |
 |---|---|---|:--:|
+| `src/ast/parser.rs::extract_rust_symbols` | over_budget_body | 2948 → 2100 tok | 2026-06-14 |
+| `src/tools/symbol/symbols.rs::Symbols/call` | over_budget_body | 5789 → 1781 tok | 2026-06-15 |
+| `src/tools/markdown/read_markdown.rs::ReadMarkdown/call` | over_budget_body | 4798 → 629 tok | 2026-06-15 |
+| `src/tools/onboarding.rs::perform_full_onboarding` | over_budget_body | 3839 → 2147 tok | 2026-06-14 |
+| `src/librarian/tools/augment.rs::ArtifactAugment/call` | over_budget_body | 3188 → 1828 tok | 2026-06-14 |
+| `src/lsp/client.rs::LspClient/did_change` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/document_symbols` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/goto_definition` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/hover` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/incoming_calls` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/outgoing_calls` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/prepare_call_hierarchy` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/references` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/rename` | name_collision | structural | 2026-06-13 |
+| `src/lsp/client.rs::LspClient/workspace_symbols` | name_collision | structural | 2026-06-13 |
+| `src/lsp/manager.rs::LspManager/notify_file_changed` | name_collision | structural | 2026-06-13 |
+| `src/lsp/manager.rs::LspManager/shutdown_all` | name_collision | structural | 2026-06-13 |
+
+
+### Closed (target gone — renamed or deleted, no re-measure)
+
+| key | defects | closed |
+|---|---|:--:|
+| `src/tools/markdown/edit_markdown.rs::EditMarkdown/call` | over_budget_body | 2026-10-06 |
+
+
+### Closed (reason not recorded — pre-dates `closed_reason`; check the Verdicts before reading these as repairs)
+
+| key | defects | closed |
+|---|---|:--:|
+
+
+### Retired (detector removed — nothing was repaired)
+
+| key | defects | retired |
+|---|---|:--:|
+| `src/config/sensitive.rs::SensitiveString/fmt` | name_collision | 2026-06-13 |
+| `src/config/sensitive.rs::SensitiveString/from` | name_collision | 2026-06-13 |
+| `src/lsp/mux/process.rs::read_proc_memory` | name_collision | 2026-06-13 |
+| `src/util/fs.rs::RepoPath/from` | name_collision | 2026-06-13 |
+| `src/util/path_security.rs::DEFAULT_DENIED_EXACT` | name_collision | 2026-06-13 |
+| `tests/fixtures/nav-eval-rust/src/trait_dispatch.rs::Counter/next` | name_collision | 2026-06-13 |
+| `tests/fixtures/typescript-library/src/extensions/advanced.ts::BookMetadata` | name_collision | 2026-06-13 |
 
 ---
 
@@ -140,4 +217,3 @@ _Per-key triage goes here — classify code-class vs tool-class, name the move, 
 **Human-cost:** positive — `call` reads as a clean orchestrator; the four read strategies are separable and individually testable. Comments preserved verbatim.
 **Note (Principle 2):** Tier-2 latent — picked on token weight, not observed friction (tier 1 long drained).
 **Confidence:** high.
-
