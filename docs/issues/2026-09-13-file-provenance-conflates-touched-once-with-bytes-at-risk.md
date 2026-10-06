@@ -8,6 +8,7 @@ tags:
 - provenance
 - shared-checkout
 topic: shared-checkout authorship
+unverified: 'PARTIAL FIX (6f6fdc96): a refused write and a clean path no longer read as bytes at risk. Instance 2 (a dirty path whose peer bytes were already committed) still prints SHARED and is NOT fixed; see ## Partial fix.'
 ---
 
 # BUG: file-provenance conflates "touched this path once" with "has bytes at risk right now"

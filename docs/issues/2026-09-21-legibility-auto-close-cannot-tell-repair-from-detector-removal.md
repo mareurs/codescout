@@ -10,6 +10,7 @@ opened: 2026-09-21
 owner: marius
 related: []
 severity: medium
+unverified: 'PARTIAL FIX (820a5d8c): a removed detector now retires a row instead of reporting a repair. NOT fixed: cause 3 (a threshold widening closes a marginal row as refactored) and the per-row retag of the live legibility-backlog tracker (cd886c414f6751b4). See ## Partial fix.'
 ---
 
 # BUG: legibility_scan's auto-close reports a repair for a removed detector — the close predicate is monotone under detector removal

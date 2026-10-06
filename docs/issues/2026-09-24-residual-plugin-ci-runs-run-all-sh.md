@@ -11,6 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md
 severity: low
+unverified: 'PARTIAL FIX (claude-plugins:502365e, claude-plugins:8a95728): plugin CI now runs tests/run-all.sh. NOT done: the self-identification test of the reaching-peer-sessions skill. See ## Partial fix.'
 ---
 
 ## Summary

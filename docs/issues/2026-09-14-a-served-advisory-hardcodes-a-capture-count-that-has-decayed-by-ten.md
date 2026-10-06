@@ -9,6 +9,7 @@ tags:
 - hooks
 - shared-checkout
 - stale-count
+unverified: 'PARTIAL FIX (ce9aa15f): the codescout half no longer carries a count. The plugin half is NOT fixed: claude-plugins codescout-companion hooks/pre-edit-dirty-check.mjs lines ~8 and ~118 still say ''Four such captures''. See ## Partial fix.'
 ---
 
 # BUG: a served advisory hardcodes "Four such captures are recorded" against a corpus now at fourteen

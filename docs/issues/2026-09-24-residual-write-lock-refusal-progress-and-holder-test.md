@@ -11,6 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-03-a-held-write-lock-names-no-owner-progress-or-duration.md
 severity: low
+unverified: 'PARTIAL FIX (9f6cc269): the named-holder refusal is now tested across processes. NOT done: the progress/ETA half, which is a design decision. See ## Partial fix.'
 ---
 
 ## Summary

@@ -11,6 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
 severity: low
+unverified: 'PARTIAL FIX (34d39567): a missing guide file is now refused apart from ''no rules matched''. NOT done: signature authoring for the nine other topics. See ## Partial fix.'
 ---
 
 ## Summary
