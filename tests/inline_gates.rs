@@ -579,9 +579,8 @@ fn scan_file(src: &str, file: &str) -> Result<FileScan, String> {
                 scan.len_calls += 1;
                 match gate_reason(&lexed.comments, line) {
                     None => scan.findings.push(finding(Kind::Unannotated)),
-                    Some(reason) if reason.is_empty() => {
-                        scan.findings.push(finding(Kind::EmptyReason))
-                    }
+                    // `gate_reason` trims, so a whitespace-only reason is `""` here too.
+                    Some("") => scan.findings.push(finding(Kind::EmptyReason)),
                     Some(_) => {}
                 }
             }
