@@ -663,7 +663,6 @@ fn the_scanner_keeps_its_place_through_every_tracked_file() {
 }
 
 #[test]
-#[ignore = "enabled by the integration commit, after the sites migrate"]
 fn every_length_gate_outside_core_names_its_unit() {
     let (findings, layout, _, len_calls) = scan_tree();
     let mut problems: Vec<String> = findings.iter().map(ToString::to_string).collect();

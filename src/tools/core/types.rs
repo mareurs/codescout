@@ -45,7 +45,22 @@ pub(crate) const LINE_SOFT_CAP: usize = 150;
 // cap-class: RESULT_CAP markdown.headings_hard_cap — probed
 pub(crate) const HEADINGS_HARD_CAP: usize = 40;
 
-/// Check whether content should be buffered based on estimated token count.
+/// The text predicate: is this STRING over the inline limit?
+///
+/// Visible only inside `core` in production. A raw string measured here is not the response: the
+/// body travels JSON-escaped inside a larger object, so every tool that gated on its raw body
+/// returned a response `call_content` then buffered a second time. Outside `core`, decide with
+/// `response_fits`, `response_room` or `body_alone_overflows` (module `response_fit`; see
+/// `docs/adrs/2026-10-07-one-measure-of-the-delivered-response.md`). `call_content` and the
+/// backstop use it on a string they have already serialized, which is a delivered response.
+#[cfg(not(test))]
+pub(super) fn exceeds_inline_limit(text: &str) -> bool {
+    exceeds_inline_limit_len(text.len())
+}
+/// Tests measure DELIVERED text (the string a tool call returned), which is exactly what this
+/// predicate is for, so under `cfg(test)` it stays callable from anywhere in the crate. The
+/// production rule is enforced by the compiler and by `tests/inline_gates.rs`.
+#[cfg(test)]
 pub(crate) fn exceeds_inline_limit(text: &str) -> bool {
     exceeds_inline_limit_len(text.len())
 }

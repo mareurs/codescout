@@ -432,7 +432,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 ),
             }));
             let (chunk, lines_shown, complete, line_truncated) =
-                buffer_page(&content, buffer_page_room(&widest));
+                buffer_page(&content, crate::tools::response_room(&widest));
             let orig_end = orig_start + lines_shown.saturating_sub(1);
             let mut result = json!({
                 "content": chunk,
@@ -484,7 +484,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             ),
         }));
         let (chunk, lines_shown, complete, line_truncated) =
-            buffer_page(&text, buffer_page_room(&widest));
+            buffer_page(&text, crate::tools::response_room(&widest));
         let mut result = json!({
             "content": chunk,
             "total_lines": total_lines,
@@ -552,24 +552,6 @@ fn clamp_over_budget_line(chunk: String, room: usize) -> (String, bool) {
 // cap-class: NOT_A_CAP — the text a cut line ends with; the cut's bound is the page's room.
 const OVER_BUDGET_MARKER: &str = "\n…[truncated: this line is wider than the inline budget]";
 
-/// What a page has left for `content`, in serialized bytes: the response limit less every
-/// other key the page can carry. Used by every paging range arm: [`read_from_buffer`],
-/// [`read_with_line_range`] and the markdown range arm (`read_markdown_line_range`).
-///
-/// `widest` is the page's response with `content` set to `""` and every optional key present
-/// at the widest value it can take. The real page carries a subset of those keys with values
-/// no wider, so a `content` whose ESCAPED length fits this room keeps the compact response
-/// within the limit `call_content` judges it by. A room counted in raw bytes, or with the
-/// other keys left out, let that response be buffered again under a second handle.
-///
-/// No `INLINE_BYTE_BUDGET` margin on top: that 10% existed for estimates in the wrong unit,
-/// and this one is exact. `call_content` measures the value this function's caller returns;
-/// what it adds afterwards (`_guide_hint`, parameter corrections) is added after the
-/// buffering decision.
-pub(super) fn buffer_page_room(widest: &Value) -> usize {
-    crate::tools::response_room(widest)
-}
-
 /// One page of `body`, from its first line, whose content fits `room` serialized bytes.
 /// Returns `(chunk, lines_shown, complete, line_truncated)`.
 pub(super) fn buffer_page(body: &str, room: usize) -> (String, usize, bool, bool) {
@@ -603,14 +585,14 @@ pub(crate) fn page_beside_coverage(
         }
         finish(v)
     };
-    let mut page = buffer_page(content, buffer_page_room(&with_cov));
+    let mut page = buffer_page(content, crate::tools::response_room(&with_cov));
     let mut keep = coverage.is_some();
     if keep {
         let over_alone = !crate::tools::response_fits(&with_cov);
         if over_alone || page.3 {
             let mut without = skeleton.clone();
             without["coverage_omitted"] = json!(true);
-            let alt = buffer_page(content, buffer_page_room(&finish(without)));
+            let alt = buffer_page(content, crate::tools::response_room(&finish(without)));
             if over_alone || !alt.3 {
                 page = alt;
                 keep = false;
@@ -1197,8 +1179,11 @@ fn read_full_file(
 
     // Inline when the RESPONSE fits. This decided on the file's raw bytes, so a one-line file
     // of 10,000 ASCII bytes (10,030 B as a response) went inline and `call_content` buffered
-    // it under `@tool_*`. The raw pre-check only skips a candidate that cannot fit (escaping
-    // never shrinks a string).
+    // it under `@tool_*`. `body_alone_overflows` is NOT only a shortcut here: in exploring mode
+    // `full_file_inline` returns the FIRST PAGE of the text, so a file whose raw text alone is
+    // over the limit would come back inline as page 1 where the contract is a summary with a
+    // handle (`a_source_file_with_many_symbols_is_summarised_inline_with_one_handle` pins it).
+    // Elsewhere the same call only skips a candidate that cannot fit.
     if !crate::tools::body_alone_overflows(text) {
         let inline = full_file_inline(path, text, resolved, input, source_tag, md_cov.clone());
         if crate::tools::response_fits(&inline) {
