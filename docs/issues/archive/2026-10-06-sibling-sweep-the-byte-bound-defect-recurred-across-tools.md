@@ -17,7 +17,7 @@ related:
 - docs/issues/archive/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md
 - docs/adrs/2026-10-05-a-result-keeps-the-one-handle-its-tool-gave-it.md
 severity: medium
-unverified: 'Not fixed, and not reached by a probe through a real tool: the reserved _cut_fields key would strip a tool''s own field of that name (none exists today), a real file path in next longer than about 4 KB, and a jobs race in run_command::call that needs timing control to test. The per-fix mutation counts in Evidence were reported by the fixing agents. The libtest compaction boundary is a standing design limit. Gate green on 5b9e844f, lean re-run on the landed tip 4f2f2e3e; nothing is pushed.'
+unverified: 'Not fixed, and not all reached by a probe through a real tool (section Still open): the interactive run_command arm is ungated; a huge custom dangerous pattern echoed in the pending-ack reason can still reach @tool_*; buffer_truncated is shed, not bounded; JobState::Failed text is unclipped; the Text render of a memory read is never measured; the memory path-clip step is reached only by a direct test; the reserved _cut_fields key would strip a tool''s own field of that name; a real file path in next longer than about 4 KB; a jobs race in run_command::call. The per-fix mutation counts in Evidence were reported by the fixing agents; the first memory ones were also run by the owner session. The libtest compaction boundary is a standing design limit. Gate green on 5a7a54ec, lean re-run on the landed tip 2ee8514c; nothing is pushed by this session.'
 ---
 
 # BUG: the size-measured-in-one-unit, returned-in-another defect recurred across tools; every known instance is fixed, what remains is a short list of unreached edges and a standing limit
@@ -77,6 +77,11 @@ Third round, the residue this record listed as not fixed (all measured through t
 - The `path`, `json_path` and `breadcrumb` echoes are bounded in escaped bytes by a new cap, `INPUT_ECHO_CLIP` (300; probe row `read_file.input_echo_bytes`): a 6 KB YAML key had produced 12,287 bytes with two handles: `bcb02dd8`, `60e26d68`.
 - A heading echo quoted inside another string now costs at most its 200-byte clip as delivered (it cost 396 bytes for `"`). The multi-heading oversized error, found on the way, echoed every heading whole: 72,413 bytes for three 12 KB headings, now 1,568 to 1,589: `352587c0`, `25561143`, `e659e4c1`.
 
+Fourth round, from a survey of every site that adds a key after a gate decided (22 sites: 9 counted, 13 harmless overshoot, 3 dangerous; `docs/adrs/2026-10-07-one-measure-of-the-delivered-response.md`):
+
+- `memory` section reads: the `file_id` fallback arm was never measured and was about 87 bytes wider than the inline candidate it replaced, so a missing-section name of 9,950 bytes gave a 10,092-byte arm with two handles (653 breaches across seven classes and both layouts). The arm is now built with every key and measured, the `missing` echo is clipped (300 escaped bytes a name, at most 40 kept, the rest counted in `missing_names_omitted`), `missing` is dropped and counted if the arm still does not fit, and `extra` is applied once before the measure. The Text render also hid `missing` from the caller entirely; it now shows `sections not found: [...]`: `bc696175`, `cea82b1c`, `8706dabb`.
+- `run_command`: `jobs` carried every background job's full command with no bound, and the pending-ack, timeout and background shapes had no gate, so three 4 KB jobs gave 12,592 to 12,896 bytes under `@tool_*` and the `@ack_*` handle (or the `timed_out` status) was visible only inside that buffer (493,027 bytes with 20 `\x01` jobs). `jobs` lists at most 8 jobs, each command clipped to 300 escaped bytes, with a count and a route that shows an omitted job; every shape is measured in `RunCommand::call` and sheds envelope keys in a fixed order (`buffer_truncated`, `jobs`, `timeout_hint`) when still over, never its own status key. The largest delivered response in the sweeps is 3,771 bytes: `d3e293cc`, `4d8d7680`.
+
 ## Evidence
 
 Gate on the final tip `bd945569`: fmt, clippy, lean (4,146 tests) and default (6,399 tests) all exit 0; 84 `test result: ok` lines, none FAILED. The second Opus review of `a0930592` ran about 38,500 probes through the real `call_content` across every tool and arm; no fixed arm broke the one-handle rule or the 10,003-byte limit, and its 14 mutations were all killed. It also found the four gaps fixed in the second round above.
@@ -86,6 +91,8 @@ The fixing agents report per-fix mutation runs, each applied after committing, o
 Correction to this record's first version: the whole read below the summary threshold (the `read_markdown` default tiers) did NOT reproduce. At `2d1e4052` it already measured the serialized candidate, and its sweep passed before any change; it is kept as a guard. The heading-not-found list and the single-heading success were real and are fixed.
 
 Third round: gate on `5b9e844f` (the two branches merged onto `experiments`): fmt, clippy, lean (4,154 tests) and default (6,411 tests) all exit 0, 84 `ok` result lines, none FAILED. `experiments` then gained only docs; the lean step was re-run on the landed tip `4f2f2e3e` (40 `ok`, none FAILED). The fixing agents report 13 mutations killed for the `read_file` and `read_markdown` residuals and 21 of 21 killed for the provenance fix. Three of those survived at first (`fit_summary` counting the record in two places, and `record_cut` appending duplicates); each got a committed killing test and was re-run and killed. A test-first unit test of the false positive failed on the old code with the byte counts above. Measured clean without a production change: a YAML key read, a `source: "lib:<name>"` response (largest 10,003 bytes), and `heading=` on a non-markdown real file (refused with a 181-byte error). Each has a guard test that passes on the old code.
+
+Fourth round: the full gate passed on `5a7a54ec` (the two branches merged onto `experiments`): fmt, clippy, lean (4,180 tests) and default (6,438 tests) all exit 0, 86 `ok` result lines, none FAILED; `experiments` then gained only a shell test, and the lean step was re-run on the landed tip `2ee8514c` (41 `ok`, none FAILED). The `memory` agent reports 7 mutations killed (one, `extra` applied after the measure in the `file_id` arm only, survived every real-tool test until a new one was written and committed) and the `run_command` agent reports 9 killed; the per-fix counts were reported by the agents, not re-run by the owner session. The survey's figures are its own measurements through `call_content`; sites 1 to 5 and 7 rest on existing tests passing.
 
 ## Hypotheses tried
 
@@ -116,6 +123,7 @@ Other commits:
 - `84b1a028` patch-id `92ae5d0a7e256fa83a3a3082d8d67096c0e69c1b`, `ddf52cb5` patch-id `399ffc69b0b8eb67fafbc0a220a577cb3bd550c4`, `eaf787f1` patch-id `7c2916bc4801533bdee753aeb4d1218c86e12559` (`read_file`)
 - `a6953592` patch-id `311116e21e35d6eed1ccf48670cbe766c794903b` (peer dispatch test)
 - Third round: `b7422986` patch-id `c665484f254197870799e3eb83a437801a6aa651`, `e33e91ad` patch-id `9dcefd208df65d823a8857fb5332fee5773f3c02` (cut-record provenance); `442a47d4` patch-id `3a5a3bb283dddc4ddbdfba13f7213da8f01ac97e`, `bcb02dd8` patch-id `b1edf93e868dcb457ae20a89671888faddcace5b`, `352587c0` patch-id `5fef3c60ccd531c029457728a6c711f0edf24470`, `e659e4c1` patch-id `0c5ab2447191199ec24ed9c5418062e923805170`, `25561143` patch-id `27174c4adb486727da69582d6e2c1faf9035dc29`, `60e26d68` patch-id `0a4bb22db262bfd6b211631644a10b1c36fcf887` (`read_file` and `read_markdown` residuals)
+- Fourth round: `bc696175` patch-id `1d7d7346aa482d3c1b3255635bc0ef134ed614f8`, `cea82b1c` patch-id `235df86c36227d1da1f9dfba6d30948186ede5e8`, `8706dabb` patch-id `43986f51bc5c46af355753b677ea6a0c581e76da` (`memory`); `d3e293cc` patch-id `3d10fb43b1ad9e0c0f8ae2fc3ff91edadfbb42d6`, `4d8d7680` patch-id `1bc4a7b28f86b1e8b3c88f9ff264121fcfc7dca3` (`run_command`)
 
 ## Tests added
 
@@ -130,6 +138,13 @@ What remains is small, and nothing here was reached by a probe through a real to
 3. **The `@tool_` `json_path` arm stores its handle under the name `{path}:{jp}`** through `store_file`. The name is never echoed, so it costs nothing today.
 4. **`file_summary::bound_summary`** builds a `file_id` envelope and does not use the cut record; the backstop acts only on `output_id` envelopes, so it never sees one.
 5. **The `jobs` race.** `M6` (`or_insert` to `insert` in `run_command::call`) is equivalent except for a background job changing state between the two builds of the response; testing it needs timing control.
+
+6. **The interactive arm of `run_command` is not gated.** Its `stdout` is the whole accumulated output, so a large run goes to `@tool_*` (one handle). It also never gets the envelope keys, although the `envelope_keys` doc says "every response shape"; the doc and the code disagree.
+7. **A huge custom dangerous pattern** from config is echoed in the pending-ack `reason`, which is never shed, so that response can still go to `@tool_*`.
+8. **`buffer_truncated` has no count cap.** It carries one notice of about 265 bytes per truncated buffer named, up to the buffer capacity of 50. It is shed when the response is over the limit, not bounded.
+9. **`JobState::Failed` text is not clipped** (it shows an OS error string), so it is bounded only in practice.
+10. **The Text render of a `memory` read is never measured, only the JSON the gate judged.** The new `sections not found` note can make it a few bytes larger. The existing shadow warning has a bigger skew of the same kind.
+11. **The path-clip step in `memory`** is reachable only by a direct test, because no fixture can root a project at a path that wide.
 
 A behaviour change to know: a section whose own content does not fit inline once serialized now returns the oversized-section error with a `file_id`, where before it came back as a success buffered under `@tool_*`. Both cost one extra call.
 

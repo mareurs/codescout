@@ -202,3 +202,11 @@ carrier. Rule: every arm that can be returned either passes `response_fits` or h
 bounded shape, and a test per arm says which. The survey also found that a counted key is not a
 bounded one: `jobs` carries each job's full command, so the gate counted it and the response was
 still over the limit.
+
+Fixed the same day: the `memory` fallback arm is built with every key, measured, and falls back to
+dropping `missing` and clipping the layout paths, with `extra` applied once before the measure; the
+`run_command` shapes are measured in `RunCommand::call`, `jobs` is bounded (8 jobs, 300 escaped
+bytes a command, a count and a route for the rest), and envelope keys are shed in a fixed order
+when a shape is still over. Left open and recorded in the sweep record: the interactive arm, the
+pending-ack `reason` echo of a custom pattern, the unbounded `buffer_truncated` count, and the
+unmeasured Text render of a `memory` read.
