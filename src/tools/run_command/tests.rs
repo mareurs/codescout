@@ -8244,6 +8244,112 @@ async fn a_compacted_response_is_judged_with_its_late_keys_and_its_real_handle_a
         over.to_string().len()
     );
 }
+/// A libtest run whose compacted response carries 25 stderr warning lines, more than the
+/// summarizer's 20-line stderr budget, so the summarizer records `stderr` as cut. `pad` extra bytes
+/// go into the one test's name, which the compacted stdout keeps byte for byte; the quotes double
+/// when serialized, and the empty targets are what makes the compaction pay.
+fn warned_libtest_run(pad: usize) -> (String, String) {
+    let stderr = (0..25)
+        .map(|i| format!("warning: unused {i:02} {}\n", "\"".repeat(170)))
+        .collect();
+    (libtest_run(40, pad), stderr)
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_compacted_run_is_judged_without_the_cut_record_it_never_delivers() {
+    // The summarizer's record (`_cut_fields: ["stderr"]`) survived compaction, which REPLACES that
+    // `stderr`, and the gate counted it: 25 B the caller never receives. A compacted response
+    // within 25 B of the limit was therefore summarized, though delivered it fits. Swept across
+    // that whole window through the real tool, plus one byte over.
+    use super::output::{handle_successful_output_with, LateKeys};
+    const RECORD: &str = r#","_cut_fields":["stderr"]"#;
+    const CMD: &str = ": cargo test ; cat out.txt; cat err.txt >&2";
+    let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
+    let (dir, ctx) = project_ctx().await;
+    let is_compacted = |r: &Value| {
+        r["stdout"]
+            .as_str()
+            .is_some_and(|s| s.contains("codescout compacted this run"))
+    };
+    let write = |pad: usize| {
+        let (stdout, stderr) = warned_libtest_run(pad);
+        assert!(
+            stdout.len() + stderr.len() <= limit,
+            "fixture: the raw run must fit, or compaction is never considered"
+        );
+        std::fs::write(dir.path().join("out.txt"), &stdout).unwrap();
+        std::fs::write(dir.path().join("err.txt"), &stderr).unwrap();
+    };
+
+    // Control: far enough under the limit to compact on any version of the gate.
+    let (stdout, stderr) = warned_libtest_run(0);
+    let control = handle_successful_output_with(
+        CMD,
+        stdout,
+        stderr,
+        0,
+        false,
+        None,
+        dir.path(),
+        &ctx,
+        LateKeys::default(),
+    )
+    .await
+    .unwrap();
+    assert!(is_compacted(&control), "precondition: {control:.300}");
+    let d0 = crate::tools::delivered_len(&control);
+    assert!(
+        d0 + RECORD.len() <= limit,
+        "the control must compact even counting the record: {d0} B"
+    );
+    let need = limit - d0;
+
+    // Warm the guide ledger through the real tool, so no `_guide_hint` lands in a measured block.
+    write(0);
+    let (warm, _) = buffer_query_free(&ctx, CMD).await;
+    assert!(!has_tool_handle(&warm), "{warm:.300}");
+
+    for k in 0..RECORD.len() {
+        write(need - k);
+        let (text, parsed) = buffer_query_free(&ctx, CMD).await;
+        assert!(
+            is_compacted(&parsed),
+            "k={k}: delivered {} B, {} B counting the record: summarized instead of compacted: \
+             {text:.200}",
+            limit - k,
+            limit - k + RECORD.len()
+        );
+        assert_eq!(text.len(), limit - k, "k={k}");
+        assert!(
+            text.len() + RECORD.len() > limit,
+            "k={k}: inside the window"
+        );
+        assert!(!has_tool_handle(&text), "k={k}: one handle: {text:.200}");
+        assert!(
+            parsed["output_id"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("@cmd_")),
+            "k={k}: {text:.200}"
+        );
+        assert!(parsed.get(crate::tools::CUT_FIELDS_KEY).is_none(), "k={k}");
+        assert!(
+            parsed.get("_guide_hint").is_none(),
+            "k={k}: ledger not warm"
+        );
+    }
+
+    write(need + 1);
+    let (text, parsed) = buffer_query_free(&ctx, CMD).await;
+    assert!(
+        !is_compacted(&parsed),
+        "one byte over the limit must not be returned compacted: {} B",
+        text.len()
+    );
+    assert!(!has_tool_handle(&text), "{text:.200}");
+    assert!(text.len() <= limit, "{} B", text.len());
+    assert!(parsed.get(crate::tools::CUT_FIELDS_KEY).is_none());
+}
 
 #[cfg(unix)]
 #[tokio::test]

@@ -97,6 +97,19 @@ fn compacted_test_value(
     if let Some(obj) = summary.as_object_mut() {
         obj.remove("failures");
         obj.remove("stderr");
+        // The cut record names fields whose text the SUMMARIZER cut. Both are gone or about to hold
+        // compacted text it never cut, so neither name may stay: a stale `stderr` would spare the
+        // compacted stderr from the backstop, and the record is bytes the caller never receives.
+        let emptied = match obj.get_mut(crate::tools::CUT_FIELDS_KEY) {
+            Some(Value::Array(names)) => {
+                names.retain(|n| !matches!(n.as_str(), Some("failures" | "stderr")));
+                names.is_empty()
+            }
+            _ => false,
+        };
+        if emptied {
+            obj.remove(crate::tools::CUT_FIELDS_KEY);
+        }
     }
     let trailer = c.trailer(output_id);
     summary["stdout"] = json!(if c.stdout.is_empty() {
@@ -133,9 +146,7 @@ fn compacted_fits(
     // A compacted response always carries `stdout`, so the empty-`stdout` a tee capture adds to a
     // response that had none never applies here.
     attach(&mut response, late.clone(), false);
-    // inline-gate: compact serialized bytes of the whole compacted response, every late key
-    // attached; NOT yet the delivered length: it still counts the summarizer's cut record.
-    !crate::tools::exceeds_inline_limit_len(response.to_string().len())
+    crate::tools::response_fits(&response)
 }
 
 /// Name the cause when the shell performed command substitution the caller did not intend.
@@ -1706,6 +1717,40 @@ mod tests {
                 - EMPTY_STDOUT_KEY.len(),
             "the room is the pre-migration formula"
         );
+    }
+    /// A cut record names fields whose text the SUMMARIZER cut. `compacted_test_value` removes the
+    /// summarizer's `failures` and replaces its `stderr` with compacted text it never cut, so after
+    /// compaction the record names neither (and, naming nothing else, is gone): a stale `stderr`
+    /// would spare the compacted stderr from the backstop and be counted by the gate.
+    #[test]
+    fn a_compacted_value_never_keeps_a_record_naming_a_field_it_replaced() {
+        let mut stdout = String::from("\nrunning 150 tests\n");
+        for i in 0..150 {
+            stdout.push_str(&format!("test tests::passes_{i:03} ... ok\n"));
+        }
+        stdout.push_str(
+            "\ntest result: ok. 150 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; \
+             finished in 0.00s\n\n",
+        );
+        let stderr: String = (0..25)
+            .map(|i| format!("warning: unused variable `x{i}`\n"))
+            .collect();
+        let c = crate::tools::libtest_compact::compact_libtest_output(&stdout, &stderr)
+            .expect("fixture compacts");
+        let key = crate::tools::CUT_FIELDS_KEY;
+
+        // `stderr`: 25 lines, over the summarizer's 20-line budget.
+        let summary = crate::tools::command_summary::summarize_test_output(&stdout, &stderr, 0);
+        assert_eq!(summary[key], json!(["stderr"]), "fixture: {summary}");
+        let v = compacted_test_value(&c, &stdout, &stderr, 0, MEASURING_OUTPUT_ID);
+        assert!(v.get(key).is_none(), "stale stderr record: {v}");
+
+        // `failures`: a section over its 5,000 B budget, and no stderr to record.
+        let red = format!("{stdout}failures:\n{}\n", "z".repeat(6_000));
+        let summary = crate::tools::command_summary::summarize_test_output(&red, "", 101);
+        assert_eq!(summary[key], json!(["failures"]), "fixture: {summary}");
+        let v = compacted_test_value(&c, &red, "", 101, MEASURING_OUTPUT_ID);
+        assert!(v.get(key).is_none(), "stale failures record: {v}");
     }
 
     /// `INLINE_MAX_RESPONSE_LEN` is the same edge `exceeds_inline_limit_len` draws.
