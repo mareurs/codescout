@@ -2445,8 +2445,9 @@ mod tests {
     /// with `stdout`, the key of a `run_command` envelope; a literal `$.field` is not filled and
     /// would fail when followed.
     ///
-    /// The same discipline covers the page of a `json_path` value: its clamped line carries
-    /// `json_path_line_hint`, taken here from the response a real `json_path` read returns.
+    /// The same discipline covers the page of a `json_path` value: its clamped line carries its
+    /// own hint, taken here from what real `json_path` reads return, on a `run_command` envelope
+    /// and on another tool's `@tool_*` ref.
     #[tokio::test]
     async fn the_over_budget_hint_never_names_a_route_the_ref_refuses() {
         use crate::tools::hint_probe::{commands_in, json_paths_in};
@@ -2477,24 +2478,33 @@ mod tests {
             json!({ "exit_code": 0, "stdout": wide }).to_string(),
         );
 
-        // The json_path page's hint, as a real read of the wide value returns it.
-        let page = ReadFile
-            .call(json!({ "path": tool, "json_path": "$.stdout" }), &ctx)
-            .await
-            .unwrap();
-        assert_eq!(
-            page["line_truncated"],
-            json!(true),
-            "precondition: the json_path read must clamp the wide value: {page:.300}"
-        );
-        let json_path_hint = page["hint"].as_str().unwrap().to_string();
-        assert_eq!(json_path_hint, json_path_line_hint(&tool));
+        // The json_path page's hint, as a real read of the wide value returns it: from a
+        // `run_command` envelope, and from a `@tool_*` ref of another tool, which has no `stdout`
+        // key, so a hint that offers `json_path="$.<field>"` (filled with `stdout`) fails there.
+        let probe = ctx
+            .output_buffer
+            .store_tool("probe", json!({ "v": wide }).to_string());
+        let mut json_path_hints = Vec::new();
+        for (handle, jp) in [(&tool, "$.stdout"), (&probe, "$.v")] {
+            let page = ReadFile
+                .call(json!({ "path": handle, "json_path": jp }), &ctx)
+                .await
+                .unwrap();
+            assert_eq!(
+                page["line_truncated"],
+                json!(true),
+                "precondition: the json_path read must clamp the wide value: {page:.300}"
+            );
+            json_path_hints.push((handle.clone(), page["hint"].as_str().unwrap().to_string()));
+        }
+        let [(_, tool_jp_hint), (_, probe_jp_hint)] = <[_; 2]>::try_from(json_path_hints).unwrap();
 
         for (kind, handle, hint) in [
             ("@cmd_", cmd.clone(), over_budget_line_hint(&cmd)),
             ("@file_", file.clone(), over_budget_line_hint(&file)),
             ("@tool_", tool.clone(), over_budget_line_hint(&tool)),
-            ("@tool_", tool.clone(), json_path_hint),
+            ("@tool_", tool.clone(), tool_jp_hint),
+            ("@tool_", probe.clone(), probe_jp_hint),
         ] {
             assert!(
                 handle.starts_with(kind),

@@ -1340,7 +1340,7 @@ async fn a_json_path_value_paged_to_its_end_reassembles_the_value() {
             let (start, end) = if key.len() > 300 {
                 assert!(
                     !next.contains("kkkk") && !next.contains("bytes shown"),
-                    "{label}: next quotes the clipped echo: {next:.300}"
+                    "{label}: next quotes the overlong path, whole or clipped: {next:.300}"
                 );
                 let c = route
                     .captures(next)
