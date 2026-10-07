@@ -506,8 +506,10 @@ impl crate::tools::Tool for LibrarianAdapter {
         // either, only `result`, so it is recomputed here. `emit_guide_sections` gates
         // `"progressive-disclosure"` on `ctx.overflowing` regardless of what this
         // function names, so if this ever drifts from that formula the topic silently
-        // stops firing again rather than erroring -- keep the two in lockstep with the
-        // one in `src/tools/core/types.rs::exceeds_inline_limit`.
+        // stops firing again rather than erroring -- keep the two in lockstep:
+        // `response_fits` (`src/tools/core/response_fit.rs`) measures `result` compact and
+        // without a cut record, as `call_content` measures its `json`, and `result` here has
+        // already had its record stripped by `clip_prebuffered_envelope`.
         //
         // A response naming a path under `docs/issues/` or `docs/trackers/` is a
         // bug-file or tracker operation, and `tracker-conventions` (frontmatter, the
@@ -533,13 +535,12 @@ impl crate::tools::Tool for LibrarianAdapter {
         // deleted outright rather than corrected: there the number did no work.
         //
         // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
-        let overflowing = crate::tools::exceeds_inline_limit(
-            &serde_json::to_string(result).unwrap_or_else(|_| result.to_string()),
-        ) || result
-            .as_object()
-            .and_then(|o| o.get("output_id"))
-            .and_then(|v| v.as_str())
-            .is_some();
+        let overflowing = !crate::tools::response_fits(result)
+            || result
+                .as_object()
+                .and_then(|o| o.get("output_id"))
+                .and_then(|v| v.as_str())
+                .is_some();
         if overflowing {
             return Some("progressive-disclosure");
         }
