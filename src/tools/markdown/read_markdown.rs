@@ -73,6 +73,8 @@ async fn resolve_markdown_source(
         }
 
         let read_mtime = crate::tools::output_buffer::file_mtime_ms(&resolved);
+        #[cfg(test)]
+        crate::tools::read_file::read_hook::fire_before_read(&resolved);
         let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => RecoverableError::with_hint(
                 format!(

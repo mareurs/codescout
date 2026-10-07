@@ -179,6 +179,8 @@ impl Tool for ReadFile {
         // with it, so a reader that read an older version cannot overwrite a newer reader's
         // store (`OutputBuffer::store_file_read`).
         let read_mtime = crate::tools::output_buffer::file_mtime_ms(&resolved);
+        #[cfg(test)]
+        read_hook::fire_before_read(&resolved);
         let text = read_file_text(path, &resolved)?;
         #[cfg(test)]
         read_hook::fire(&resolved);
@@ -881,38 +883,63 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
     })
 }
 
-/// Test-only: run a callback after a read of a real file has read its text and before it
-/// stores the file's handle, so a test can land a write (and a second reader) inside that
-/// window. That window is where the stale-write race lives: a reader that read the old text
-/// and stores it after a newer reader stored the new text.
+/// Test-only: run a callback at one of two points in a read of a real file, so a test can land
+/// a write (and a second reader) there:
+/// - `fire` / [`after_read_of`]: after the text is read, before the handle is stored. That
+///   window is where the stale-write race lives: a reader that read the old text and stores it
+///   after a newer reader stored the new text.
+/// - `fire_before_read` / [`before_read_of`]: after the read-start mtime is taken, before the
+///   text is read. A write there must leave the entry stamped below the file's mtime, so the
+///   next read of the handle re-checks it: that is what pins the mtime as taken BEFORE the read.
 #[cfg(test)]
 pub(crate) mod read_hook {
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 
     type Hook = Box<dyn FnOnce() + Send>;
-    static HOOKS: Mutex<Vec<(PathBuf, Hook)>> = Mutex::new(Vec::new());
+    /// `(path, before_read, hook)`.
+    static HOOKS: Mutex<Vec<(PathBuf, bool, Hook)>> = Mutex::new(Vec::new());
 
-    /// Run `f` once, the next time a read of `path` (canonical) has read its text.
-    pub(crate) fn after_read_of(path: &Path, f: impl FnOnce() + Send + 'static) {
-        HOOKS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((path.to_path_buf(), Box::new(f)));
+    fn add(path: &Path, before_read: bool, f: impl FnOnce() + Send + 'static) {
+        HOOKS.lock().unwrap_or_else(|e| e.into_inner()).push((
+            path.to_path_buf(),
+            before_read,
+            Box::new(f),
+        ));
     }
 
-    /// Called by the real-file read paths between reading the text and storing the handle.
-    pub(crate) fn fire(path: &Path) {
+    fn run(path: &Path, before_read: bool) {
         let hook = {
             let mut hooks = HOOKS.lock().unwrap_or_else(|e| e.into_inner());
             hooks
                 .iter()
-                .position(|(p, _)| p == path)
-                .map(|i| hooks.remove(i).1)
+                .position(|(p, b, _)| p == path && *b == before_read)
+                .map(|i| hooks.remove(i).2)
         };
         if let Some(f) = hook {
             f();
         }
+    }
+
+    /// Run `f` once, the next time a read of `path` (canonical) has read its text.
+    pub(crate) fn after_read_of(path: &Path, f: impl FnOnce() + Send + 'static) {
+        add(path, false, f);
+    }
+
+    /// Run `f` once, the next time a read of `path` (canonical) has taken its mtime and not yet
+    /// read its text.
+    pub(crate) fn before_read_of(path: &Path, f: impl FnOnce() + Send + 'static) {
+        add(path, true, f);
+    }
+
+    /// Called by the real-file read paths between reading the text and storing the handle.
+    pub(crate) fn fire(path: &Path) {
+        run(path, false);
+    }
+
+    /// Called by the real-file read paths between taking the mtime and reading the text.
+    pub(crate) fn fire_before_read(path: &Path) {
+        run(path, true);
     }
 }
 

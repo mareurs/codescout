@@ -730,6 +730,60 @@ async fn a_write_inside_the_read_window_is_repaired_by_the_next_handle_read() {
         assert!(refreshed, "{name}: the holder was not told");
     }
 }
+/// The read-start mtime is taken BEFORE the text is read. A write landing between the two is
+/// one the reader cannot place: it may have read the text before or after it. So its entry must
+/// be stamped below the file's mtime, and the next read of the handle re-reads the file (and
+/// reports it). An mtime taken AFTER the read equals the file's and leaves nothing to re-check;
+/// when the write lands between the read and that late stat, the old text stays for good.
+/// Review M: mutants M12/M17 (stat moved after the read) survived while the only hook fired after
+/// the read, where both orders look alike; this one fires between the stat and the read.
+#[tokio::test]
+async fn a_write_between_the_stat_and_the_read_leaves_the_handle_to_re_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let ago = |secs: u64| {
+        filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+        )
+    };
+    for (name, md) in [("stat.txt", false), ("stat.md", true)] {
+        let p = root.join(name);
+        let body = |tag: &str| {
+            if md {
+                format!("# S\n\n## A\n{}\n", big_text(tag, 400))
+            } else {
+                big_text(tag, 400)
+            }
+        };
+        let (v1, v2) = (body("v1"), body("v2"));
+        std::fs::write(&p, &v1).unwrap();
+        filetime::set_file_mtime(&p, ago(100)).unwrap();
+        {
+            let (p, v2) = (p.clone(), v2.clone());
+            super::read_hook::before_read_of(&p.clone(), move || {
+                std::fs::write(&p, &v2).unwrap();
+                filetime::set_file_mtime(&p, ago(50)).unwrap();
+            });
+        }
+        let ctx = ctx().await;
+        let h = ReadFile
+            .call(json!({ "path": p.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap()["file_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (entry, refreshed) = ctx.output_buffer.get_with_refresh_flag(&h).unwrap();
+        assert_eq!(
+            entry.stdout, v2,
+            "{name}: fixture: the reader read after the write"
+        );
+        assert!(
+            refreshed,
+            "{name}: the entry was stamped with an mtime taken after the read, so nothing re-checks it"
+        );
+    }
+}
 
 /// Review B2: a HOLDER of the file's handle is told, once, when a path read changed the bytes
 /// behind it. The path re-read updates the one handle in place (R3) and stamps it with the
