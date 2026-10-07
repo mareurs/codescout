@@ -126,7 +126,7 @@ fn read_markdown_multi_heading(
     // missed those keys, and a content of 9,820-10,003 B came back 10,016-10,136 B and was
     // parked under `@tool_*`. If even that does not fit, the read takes this error path.
     let smallest = finalize_multi(json!({ "content": &content }), &["sections", "coverage"]);
-    if crate::tools::exceeds_inline_limit(&smallest.to_string()) {
+    if !crate::tools::response_fits(&smallest) {
         let file_id = ctx
             .output_buffer
             .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
@@ -160,7 +160,7 @@ fn read_markdown_multi_heading(
             "requested_headings": requested,
             "next_actions": next_actions,
         });
-        let fits = !crate::tools::exceeds_inline_limit(&body.to_string());
+        let fits = crate::tools::response_fits(&body);
         let mut err = crate::tools::RecoverableError::with_hint(message, hint)
             .with_extra("file_id", serde_json::json!(file_id));
         err = if fits {
@@ -264,7 +264,7 @@ fn drop_to_fit(
     let mut dropped: Vec<&'static str> = Vec::new();
     loop {
         let candidate = finalize(work.clone(), &dropped);
-        if !crate::tools::exceeds_inline_limit(&candidate.to_string()) {
+        if crate::tools::response_fits(&candidate) {
             return candidate;
         }
         let next = keys
@@ -409,7 +409,7 @@ fn read_markdown_single_heading(
     // Oversized match — return ok:false with hint + nested section_map
     // + next_actions. The agent must pick a sub-heading or a line range, not
     // retry against the original path.
-    if crate::tools::exceeds_inline_limit(&success.to_string()) {
+    if !crate::tools::response_fits(&success) {
         let file_id = ctx.output_buffer.store_file_excerpt(
             resolved.to_string_lossy().to_string(),
             section_result.content.clone(),
@@ -604,7 +604,7 @@ fn read_markdown_line_range(
     };
 
     // Buffer large extracts
-    if crate::tools::exceeds_inline_limit(&inline.to_string()) {
+    if !crate::tools::response_fits(&inline) {
         let file_id = ctx
             .output_buffer
             .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
@@ -694,7 +694,7 @@ fn read_markdown_default_tiers(
     ctx: &ToolContext,
 ) -> Result<Value> {
     let total_lines = text.lines().count();
-    let oversized = crate::tools::exceeds_inline_limit(text);
+    let oversized = crate::tools::body_alone_overflows(text);
     let all_headings = crate::tools::file_summary::parse_all_headings(text);
     let oversized_by_headings = all_headings.len() > crate::tools::HEADINGS_HARD_CAP;
 
@@ -712,7 +712,8 @@ fn read_markdown_default_tiers(
 
     // ── Tiers 1 and 2: the body inline, with the heading map ─────────
     // Built BEFORE deciding, because whether it FITS is a fact about the SERIALIZED response:
-    // `exceeds_inline_limit(text)` measures the raw body alone, but the response is the body
+    // `body_alone_overflows(text)` measures the raw body alone, so it can only skip building a
+    // candidate that cannot fit; it never says one fits. The response is the body
     // plus the heading map, JSON-escaped (every newline and quote doubles), and a 9,900 B file
     // serialized to 14,062 B and was buffered under `@tool_*` with no handle of its own. A
     // response that does not fit falls through to tier 3, the tier built for exactly that.
@@ -762,7 +763,7 @@ fn read_markdown_default_tiers(
         Some(with_format(result))
     };
     if let Some(result) = inline {
-        if !crate::tools::exceeds_inline_limit(&result.to_string()) {
+        if crate::tools::response_fits(&result) {
             return Ok(result);
         }
     }
