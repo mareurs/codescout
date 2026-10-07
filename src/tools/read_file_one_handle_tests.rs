@@ -971,3 +971,37 @@ async fn a_reread_at_capacity_reuses_its_handle_and_evicts_nothing() {
         }
     }
 }
+
+/// Review M: a file whose mtime was in the FUTURE at its first read (clock skew, `touch -d`, an
+/// archive from a machine ahead), then edited normally. Its handle must serve the edit. The
+/// stamp used to be that future mtime, so the edit's mtime (now) was below it and the handle
+/// kept the pre-edit text, with no notice, until someone read the path again; baseline stamped
+/// the clock and followed the edit. Through the real tools: a path read, then a read of the
+/// handle.
+#[tokio::test]
+async fn a_handle_first_read_under_a_future_mtime_still_follows_an_edit() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("future.txt");
+    std::fs::write(&p, big_text("v1", 400)).unwrap();
+    filetime::set_file_mtime(
+        &p,
+        filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() + std::time::Duration::from_secs(86_400),
+        ),
+    )
+    .unwrap();
+    let path = p.to_str().unwrap().to_string();
+    let h = delivered_handle(&ctx, &json!({ "path": path })).await;
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    std::fs::write(&p, big_text("v2", 400)).unwrap();
+    let v = ReadFile
+        .call(json!({ "path": h, "start_line": 1, "end_line": 1 }), &ctx)
+        .await
+        .unwrap();
+    assert!(
+        v["content"].as_str().unwrap().starts_with("v2"),
+        "the handle kept the pre-edit text: {:?}",
+        v["content"]
+    );
+}

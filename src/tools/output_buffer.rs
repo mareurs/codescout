@@ -64,6 +64,30 @@ fn mtime_ms_of(meta: &std::fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
+/// The stamp a whole-file `@file_*` entry gets for text read under `mtime`: that mtime, capped
+/// at the wall clock `now` (both ms since the epoch). An unknown mtime stamps 0, so the next read
+/// of the handle re-checks the file.
+///
+/// The cap is what keeps a FUTURE mtime (clock skew, `touch -d tomorrow`, an archive from a
+/// machine ahead) from hiding every later edit: stamped with it, an ordinary edit's mtime (now)
+/// is below the stamp, and `get_with_refresh_flag` refreshes only when the mtime passes it.
+/// Measured on review M (2026-10-07): the handle kept serving the pre-edit text with no notice
+/// until the path was read again, where baseline (which stamped the clock) followed the edit.
+/// For a file at a future mtime the handle re-reads it on every read until the clock passes it,
+/// as baseline did. Below the clock the cap changes nothing, so the stale-write rule
+/// ([`OutputBuffer::store_file_read`]) compares real mtimes as before.
+fn capped_stamp(mtime: Option<u64>, now: u64) -> u64 {
+    mtime.unwrap_or(0).min(now)
+}
+
+/// The wall clock in ms since the epoch, the unit every entry `timestamp` is kept in.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 /// How a `@file_*` store finds the entry it may reuse ([`OutputBuffer::store_file_inner`]).
 enum FileStore {
     /// The WHOLE text of the file at `source`, by a reader that observed the file's mtime as
@@ -85,8 +109,9 @@ pub struct BufferEntry {
     pub stderr: String,
     pub exit_code: i32,
     /// For a whole-file `@file_*` entry (`source_path` set): the file's mtime in ms, as
-    /// observed BEFORE the read that produced `stdout`; `get()` refreshes once the file's
-    /// mtime passes it. For every other entry: when it was stored, in ms since the epoch.
+    /// observed BEFORE the read that produced `stdout`, capped at the clock ([`capped_stamp`]);
+    /// `get()` refreshes once the file's mtime passes it. For every other entry: when it was
+    /// stored, in ms since the epoch.
     pub timestamp: u64,
     /// Set only for `@file_*` entries. Enables mtime-based auto-refresh in `get()`.
     pub source_path: Option<PathBuf>,
@@ -498,7 +523,8 @@ impl OutputBuffer {
     /// all others return `false`. Each change is reported once — this call consumes it — and
     /// `get` never does, so an internal lookup cannot swallow a holder's notice.
     ///
-    /// A refreshed entry is stamped with the mtime observed BEFORE its re-read, the same rule
+    /// A refreshed entry is stamped with the mtime observed BEFORE its re-read (capped at the
+    /// clock, [`capped_stamp`]), the same rule
     /// a whole-file store follows ([`OutputBuffer::store_file_read`]): a write landing during
     /// the re-read leaves the file's mtime above the stamp, so the next read refreshes again
     /// instead of keeping the text read before that write.
@@ -550,7 +576,7 @@ impl OutputBuffer {
                 Ok(content) => {
                     if let Some(entry) = inner.entries.get_mut(canonical) {
                         entry.stdout = content;
-                        entry.timestamp = observed;
+                        entry.timestamp = capped_stamp(Some(observed), now_ms());
                     }
                 }
                 Err(_) => {
@@ -622,7 +648,10 @@ impl OutputBuffer {
 
     /// Store the WHOLE text of a real file a caller has just read, under the file's one
     /// handle. `read_mtime` is the file's mtime as [`file_mtime_ms`] observed it BEFORE the
-    /// read; the entry is stamped with it, and it decides the race between two readers.
+    /// read; the entry is stamped with it (capped at the clock, [`capped_stamp`]), and it
+    /// decides the race between two readers. Two readers that both stat'ed FUTURE mtimes are
+    /// not ordered by it once capped: the later store wins, but the file's mtime is still past
+    /// the capped stamp, so every read of the handle re-reads the file before serving it.
     ///
     /// The race (review RB-A7, 2026-10-07): reader A reads v1; the file is rewritten to v2;
     /// reader B reads v2 and stores it; then A stores v1. Without the read time the late store
@@ -686,7 +715,8 @@ impl OutputBuffer {
     /// on an unchanged 456-line file returned `@file_159e1949` and `@file_159e1a97`.
     ///
     /// - A whole-file store finds the live entry with the same `source_path`, and
-    ///   brings it up to `content`, stamped with the reader's `read_mtime` — unless
+    ///   brings it up to `content`, stamped with the reader's `read_mtime` (capped at the
+    ///   clock) — unless
     ///   that reader stat'ed an OLDER mtime than the entry carries and the file is no
     ///   longer at the reader's version, in which case a newer reader already stored
     ///   newer text and the entry is kept (the stale-write race, see
@@ -748,7 +778,7 @@ impl OutputBuffer {
                             entry.stdout = content.into_owned();
                             changed = true;
                         }
-                        entry.timestamp = read_mtime.unwrap_or(0);
+                        entry.timestamp = capped_stamp(*read_mtime, now);
                     }
                 }
                 // A holder of the handle saw the old bytes; the next read that can tell them
@@ -768,7 +798,7 @@ impl OutputBuffer {
             // An unknown read time stamps 0, so the first read of the handle re-checks the file.
             FileStore::Whole {
                 source, read_mtime, ..
-            } => (Some(source), read_mtime.unwrap_or(0)),
+            } => (Some(source), capped_stamp(read_mtime, now)),
             FileStore::Snapshot => (None, now),
         };
 
@@ -3088,6 +3118,120 @@ mod tests {
             (entry.stdout.as_str(), refreshed),
             ("v3", true),
             "the refresh stamp hid a later write"
+        );
+    }
+    /// Every whole-file stamp is capped at the wall clock. A file whose mtime is in the FUTURE
+    /// (clock skew, an archive from a machine ahead, `touch -d tomorrow`) must not stamp its
+    /// handle in the future: every ordinary edit after that has an mtime below the stamp, and
+    /// the handle served the pre-edit text with no notice until someone read the path again.
+    /// Baseline stamped the clock and followed the edit (review M, 2026-10-07). An entry gets a
+    /// stamp three ways — minted, a store hit, a refresh — so three cases.
+    #[test]
+    fn a_future_mtime_never_hides_a_later_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |secs: i64| {
+            let now = std::time::SystemTime::now();
+            let d = std::time::Duration::from_secs(secs.unsigned_abs());
+            filetime::FileTime::from_system_time(if secs >= 0 { now + d } else { now - d })
+        };
+        let set = |p: &std::path::Path, body: &str, secs: i64| {
+            std::fs::write(p, body).unwrap();
+            filetime::set_file_mtime(p, at(secs)).unwrap();
+        };
+        const TOMORROW: i64 = 86_400;
+        // An edit made after the store: its mtime is past the store time and before tomorrow.
+        const EDIT: i64 = 1;
+
+        // Minted from a read under a future mtime.
+        let p = dir.path().join("mint.txt");
+        set(&p, "v1", TOMORROW);
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&p.to_string_lossy(), "v1", file_mtime_ms(&p));
+        set(&p, "v2", EDIT);
+        assert_eq!(
+            buf.get_stream(&h).as_deref(),
+            Some("v2"),
+            "minted: the edit was hidden"
+        );
+
+        // A store hit under a future mtime.
+        let p = dir.path().join("hit.txt");
+        set(&p, "v0", -100);
+        let path = p.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&path, "v0", file_mtime_ms(&p));
+        set(&p, "v1", TOMORROW);
+        assert_eq!(buf.store_file_read(&path, "v1", file_mtime_ms(&p)), h);
+        set(&p, "v2", EDIT);
+        assert_eq!(
+            buf.get_stream(&h).as_deref(),
+            Some("v2"),
+            "store hit: the edit was hidden"
+        );
+
+        // A refresh under a future mtime.
+        let p = dir.path().join("refresh.txt");
+        set(&p, "v0", -100);
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&p.to_string_lossy(), "v0", file_mtime_ms(&p));
+        set(&p, "v1", TOMORROW);
+        assert_eq!(
+            buf.get_stream(&h).as_deref(),
+            Some("v1"),
+            "fixture: the refresh"
+        );
+        set(&p, "v2", EDIT);
+        assert_eq!(
+            buf.get_stream(&h).as_deref(),
+            Some("v2"),
+            "refresh: the edit was hidden"
+        );
+
+        // The residual edge: two readers that both stat'ed FUTURE mtimes are not ordered by the
+        // capped stamp, so the late store of the older read (A, v1 at T+1d) is taken over B's
+        // newer one (v2 at T+2d). It is never SERVED: the file's mtime is past the capped stamp,
+        // so the read of the handle re-reads the file first.
+        let p = dir.path().join("two-futures.txt");
+        set(&p, "v2", 2 * TOMORROW);
+        let path = p.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&path, "v2", file_mtime_ms(&p));
+        let a_read = file_mtime_ms(&p).map(|ms| ms - TOMORROW as u64 * 1000);
+        assert_eq!(buf.store_file_read(&path, "v1", a_read), h);
+        assert_eq!(
+            buf.get_stream(&h).as_deref(),
+            Some("v2"),
+            "two future reads: the handle served the older text"
+        );
+    }
+
+    /// An EQUAL mtime overwrites, even when the file has since moved to another (older) mtime:
+    /// the second reader stat'ed the very mtime the entry carries, so its text is not older than
+    /// the entry's and nothing orders the two but the bytes. From review M (mutant M8, the race
+    /// test's `<` made `<=`, which refused it and survived the suite).
+    #[test]
+    fn an_equal_mtime_overwrites_even_after_the_file_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("eq.txt");
+        let ago = |s: u64| {
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(s),
+            )
+        };
+        std::fs::write(&p, "A").unwrap();
+        filetime::set_file_mtime(&p, ago(100)).unwrap();
+        let t = file_mtime_ms(&p).unwrap();
+        let path = p.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(50);
+        let h = buf.store_file_read(&path, "A", Some(t));
+        // The file moves to an OLDER mtime before the second reader (which stat'ed `t`) stores.
+        std::fs::write(&p, "C").unwrap();
+        filetime::set_file_mtime(&p, ago(200)).unwrap();
+        assert_eq!(buf.store_file_read(&path, "B", Some(t)), h);
+        assert_eq!(
+            buf.get_stream(&h).as_deref(),
+            Some("B"),
+            "an equal-mtime store was refused"
         );
     }
 
