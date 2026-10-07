@@ -776,16 +776,17 @@ async fn heading_on_large_section_returns_ok_false_with_hint_and_section_map() {
     );
 }
 
-/// The heading-shaped twin of the ranged-read case: a `@file_*` handle minted
-/// for an oversized SECTION is a derived subset, so a later change to the file
-/// must not widen it into the whole document. Bug
-/// `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
+/// R3, the heading-shaped twin of the ranged-read case: an oversized SECTION names the FILE's
+/// one handle, the same handle a whole read of the file names, and that handle follows the
+/// file when it is rewritten.
 ///
-/// This shape is why the fix snapshots rather than storing a line range to
-/// re-extract: a section's line range moves when text above it changes, so
-/// re-reading `start_ln..end_ln` after an edit is not "the `# Root` section".
+/// History: bug `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
+/// The section used to get a handle of its own holding only the section, made a snapshot so a
+/// refresh could not widen it into the document while its numbers described the section. Under
+/// R3 the section has no handle of its own, and every number the oversized response states is
+/// in the file's line numbers, so following the file widens nothing it described.
 #[tokio::test]
-async fn heading_excerpt_handle_stays_the_section_after_the_file_changes() {
+async fn a_section_read_names_the_files_one_handle_which_follows_the_file() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     let file = dir.path().join("big.md");
@@ -812,40 +813,46 @@ async fn heading_excerpt_handle_stays_the_section_after_the_file_changes() {
         .and_then(|v| v.as_str())
         .expect("extra must include file_id")
         .to_string();
+    assert_eq!(
+        ctx.output_buffer.get_stream(&file_id).as_deref(),
+        Some(body.as_str()),
+        "the section names the handle holding the whole file"
+    );
+    let whole = super::read(json!({ "path": file.to_str().unwrap() }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        whole["file_id"].as_str(),
+        Some(file_id.as_str()),
+        "a whole read of the same file must name the same handle"
+    );
 
     // Rewrite the document entirely and advance its mtime past the entry's.
     std::fs::write(&file, "# Different\n\nnothing to see here\n").unwrap();
     let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
     filetime::set_file_mtime(&file, filetime::FileTime::from_system_time(future)).unwrap();
 
-    let entry = ctx
-        .output_buffer
-        .get(&file_id)
-        .expect("the section handle must survive a change to its source file");
-    assert!(
-        !entry.stdout.contains("Different"),
-        "a section handle must not absorb the rewritten document; got: {:?}",
-        entry.stdout.chars().take(60).collect::<String>()
-    );
-    assert!(
-        entry.stdout.contains("## Sub 0"),
-        "the handle must still hold the section it was minted for"
+    assert_eq!(
+        ctx.output_buffer.get_stream(&file_id).as_deref(),
+        Some("# Different\n\nnothing to see here\n"),
+        "the file's handle must follow the file"
     );
 }
 
-/// Bug 2026-08-25-read-markdown-next-actions-uses-file-line-numbers.
+/// Bug 2026-08-25-read-markdown-next-actions-uses-file-line-numbers, restated under R3.
 ///
-/// The oversized-section payload steers the caller at `file_id`, which holds
-/// ONLY the section — but built its numbers from the section's position in the
-/// FILE. Every number it hands back must address the handle it names.
+/// Every number the oversized-section payload hands back must address the handle it names,
+/// proven by FOLLOWING it. The bug was a section-only handle steered with the section's file
+/// lines (start_line=304 against a 207-line buffer). Under R3 the handle IS the file, so the
+/// numbers are the file's lines and must be stated that way: the range route starts at the
+/// section's own first line (`line_range[0]`), not at 1.
 ///
-/// A fixture whose section starts at line 1 passes under both the broken and
-/// the correct arithmetic, because the two frames coincide there. That is why
-/// `heading_on_large_section_returns_ok_false_with_hint_and_section_map` does
-/// not catch this — its `# Root` is at line 1. Here the section starts at file
+/// A fixture whose section starts at line 1 passes under both frames, because they coincide
+/// there. That is why `heading_on_large_section_returns_ok_false_with_hint_and_section_map`
+/// does not catch a frame error — its `# Root` is at line 1. Here the section starts at file
 /// line 304.
 #[tokio::test]
-async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
+async fn oversized_section_steering_numbers_are_the_files_lines_on_its_one_handle() {
     let ctx = test_ctx().await;
     let dir = tempdir().unwrap();
     let file = dir.path().join("deep.md");
@@ -877,6 +884,11 @@ async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
         .as_str()
         .expect("extra must include file_id")
         .to_string();
+    let (start_ln, end_ln) = (
+        rec.extra["line_range"][0].as_u64().unwrap(),
+        rec.extra["line_range"][1].as_u64().unwrap(),
+    );
+    assert_eq!(start_ln, 304, "fixture: `## Big` is file line 304");
 
     let actions: Vec<&str> = rec.extra["next_actions"]
         .as_array()
@@ -885,17 +897,27 @@ async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
         .filter_map(|a| a.as_str())
         .collect();
 
-    // 1. The line-range action addresses the handle, so it starts at its line 1.
-    //    Before the fix this said start_line=304 against a 207-line buffer, and
-    //    following it returned "start_line 304 exceeds file length 207".
+    // 1. The line-range action names the section's lines in the file, which are the handle's.
+    //    Followed, its first line is the section's heading.
     let range_action = actions
         .iter()
         .find(|s| s.contains("start_line="))
         .unwrap_or_else(|| panic!("expected a line-range next_action, got: {actions:?}"));
-    assert!(
-        range_action.contains("start_line=1,"),
-        "the line-range action addresses {file_id}, so it must start at that \
-         buffer's line 1; got: {range_action}"
+    assert_eq!(
+        *range_action,
+        format!("read_file({file_id:?}, start_line={start_ln}, end_line={end_ln})"),
+        "the range route must span the section in the file's line numbers"
+    );
+    let head = super::read(
+        json!({ "path": &file_id, "start_line": start_ln, "end_line": start_ln }),
+        &ctx,
+    )
+    .await
+    .unwrap_or_else(|e| panic!("line {start_ln} must be readable in {file_id}: {e}"));
+    assert_eq!(
+        head["content"].as_str(),
+        Some("## Big"),
+        "the range route's first line must be the section heading; got: {head}"
     );
 
     // 2. The sub-heading action must be pasteable — the heading needs quoting.
@@ -908,13 +930,13 @@ async fn oversized_section_steering_numbers_address_the_handle_not_the_file() {
         "the heading argument must be quoted to be pasteable; got: {heading_action}"
     );
 
-    // 3. section_map's line numbers address the handle too — the server's own
-    //    heading-miss listing reports `### Sub A` at L3 of this buffer, so a
-    //    section_map saying 306 contradicts it. Proven by following the number.
+    // 3. section_map's line numbers address the handle too: the file's line of `### Sub A`
+    //    (306), proven by following the number.
     let sm = rec.extra["section_map"]
         .as_array()
         .expect("section_map array");
     let first_line = sm[0]["l"].as_u64().expect("section_map entry has l");
+    assert_eq!(first_line, 306, "`### Sub A` is file line 306: {sm:?}");
     let probe = super::read(
         json!({ "path": &file_id, "start_line": first_line, "end_line": first_line }),
         &ctx,
@@ -4236,4 +4258,80 @@ fn every_advertised_batch_action_actually_dispatches() {
             out.unwrap_err()
         );
     }
+}
+
+/// A buffered markdown RANGE page, as DELIVERED (the Text form `call_content` returns, which is
+/// all a caller reads). `format_read`'s content branch printed `content` and a truncation hint
+/// only, and dropped `file_id`, `shown_lines`, `complete` and `next`: the caller got 9 KB of a
+/// range with no handle, no sign the page was partial, and no route to the rest. Measured on
+/// review (baseline, 0499c606 and 6ebd0615 alike): 9,276 B delivered, no `@file_`, no "next".
+/// The page must name its handle, how much it shows, and a `next` route that works.
+#[tokio::test]
+async fn a_buffered_markdown_range_page_delivers_its_handle_count_and_next() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("pg.md");
+    let lines: Vec<String> = (1..=600)
+        .map(|i| format!("a line {i:04} {}", "x".repeat(48)))
+        .collect();
+    std::fs::write(&file, format!("# D\n\n## A\n{}\n", lines.join("\n"))).unwrap();
+    let path = file.to_str().unwrap().to_string();
+    let input = json!({ "path": path, "start_line": 3, "end_line": 500 });
+
+    let v = crate::tools::read_file::ReadFile
+        .call(input.clone(), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        v["format"],
+        json!("markdown"),
+        "fixture: the markdown range arm"
+    );
+    assert_eq!(v["complete"], json!(false), "fixture: a partial page");
+    let file_id = v["file_id"].as_str().unwrap().to_string();
+    let next = v["next"].as_str().unwrap().to_string();
+    let shown = v["content"].as_str().unwrap().lines().count();
+    let total = v["total_lines"].as_u64().unwrap();
+
+    let blocks = crate::tools::read_file::ReadFile
+        .call_content(input, &ctx)
+        .await
+        .unwrap();
+    let text = crate::tools::hint_probe::primary_text(&blocks);
+    assert!(
+        text.contains(&format!("Buffer: {file_id}")),
+        "the page does not name its handle: {:?}",
+        &text[text.len().saturating_sub(300)..]
+    );
+    assert!(
+        text.contains(&format!("[{shown} of {total} lines shown]")),
+        "the page does not say it is partial: {:?}",
+        &text[text.len().saturating_sub(300)..]
+    );
+    assert!(
+        text.contains(&format!("Next: {next}")),
+        "the page names no route to the rest: {:?}",
+        &text[text.len().saturating_sub(300)..]
+    );
+
+    // Following the delivered `next` continues where the page stopped.
+    let route =
+        regex::Regex::new(r#"Next: read_file\("([^"]+)", start_line=(\d+), end_line=(\d+)\)"#)
+            .unwrap();
+    let c = route.captures(&text).expect("a parseable next route");
+    let start: u64 = c[2].parse().unwrap();
+    assert_eq!(start, v["shown_lines"][1].as_u64().unwrap() + 1);
+    let cont = crate::tools::read_file::ReadFile
+        .call(
+            json!({ "path": &c[1], "start_line": start, "end_line": c[3].parse::<u64>().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let first = cont["content"].as_str().unwrap().lines().next().unwrap();
+    assert_eq!(
+        first,
+        lines[(start - 4) as usize],
+        "next resumed at the wrong line"
+    );
 }
