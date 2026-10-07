@@ -3174,3 +3174,371 @@ async fn a_pin_at_an_unparseable_config_refuses_instead_of_answering_about_the_d
         }
     }
 }
+
+// ---- a section-filtered read keeps ONE handle whatever the caller names ----
+//
+// `missing` echoes the caller's own section names, which have no length of their own. The inline
+// candidate was measured, but the `file_id` arm that replaced it (file_id, total_lines, hint and the
+// same `missing`, plus `extra` re-applied after it was built) was never measured: measured
+// 2026-10-07, a missing name of 9,947 ASCII bytes came back inline at exactly 10,003 B and one of
+// 9,948 as a 10,090 B `file_id` arm that `call_content` buffered again under `@tool_*`.
+
+/// Every distinct buffer handle named in `text`; a prose mention like `@tool_*` is not one.
+fn buffer_handles_in(text: &str) -> std::collections::BTreeSet<String> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '@' || c == '_'))
+        .filter(|t| {
+            ["@file_", "@tool_", "@cmd_", "@bg_"]
+                .iter()
+                .any(|p| t.len() > p.len() && t.starts_with(p))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// ASCII, the two-byte escapes, the six-byte escapes and two multi-byte characters.
+const ECHO_CLASSES7: [(&str, &str); 7] = [
+    ("ascii", "a"),
+    ("quote", "\""),
+    ("backslash", "\\"),
+    ("control", "\u{1}"),
+    ("esc", "\u{1b}"),
+    ("euro", "\u{20ac}"),
+    ("emoji", "\u{1F600}"),
+];
+
+/// The marker `clip_input_echo` writes into a clipped echo.
+const ECHO_CLIP_MARKER: &str = "the rest is the value you passed";
+
+/// One read through the REAL tool, checked against the one-handle contract: no `@tool_*`, at most
+/// one handle counting the `file_id`, a compact response within the limit whenever no `@tool_*` is
+/// minted, and a `file_id` whose hinted line route returns the section that matched. Returns the
+/// response, its compact size and every breach found (empty when the contract holds).
+async fn read_under_contract(
+    ctx: &ToolContext,
+    input: Value,
+    label: &str,
+) -> (Value, usize, Vec<String>) {
+    let v = Memory
+        .call(input.clone(), ctx)
+        .await
+        .unwrap_or_else(|e| panic!("{label}: {e}"));
+    let compact = v.to_string().len();
+    let blocks = Memory.call_content(input, ctx).await.unwrap();
+    let text = crate::tools::hint_probe::primary_text(&blocks);
+    let handles = buffer_handles_in(&text);
+    let minted_tool = handles.iter().any(|h| h.starts_with("@tool_"));
+    let mut breaches = vec![];
+    if minted_tool || handles.len() > 1 {
+        breaches.push(format!(
+            "{label}: a {compact} B response was delivered with handles {handles:?}"
+        ));
+    }
+    if !minted_tool && crate::tools::exceeds_inline_limit_len(compact) {
+        breaches.push(format!("{label}: {compact} B is over the inline limit"));
+    }
+    if let Some(fid) = v["file_id"].as_str() {
+        let hint = v["hint"].as_str().unwrap_or_default();
+        if !hint.contains(fid) || !hint.contains("start_line/end_line") {
+            breaches.push(format!(
+                "{label}: the hint names no line route on {fid}: {hint}"
+            ));
+        }
+        let total = v["total_lines"].as_u64().unwrap_or(0);
+        let read = crate::tools::read_file::ReadFile
+            .call(
+                json!({ "path": fid, "start_line": 1, "end_line": total }),
+                ctx,
+            )
+            .await
+            .map(|r| r.to_string());
+        if !matches!(&read, Ok(r) if r.contains("real body line")) {
+            let shown: String = format!("{read:?}").chars().take(200).collect();
+            breaches.push(format!(
+                "{label}: the hinted route through {fid} returned no data: {shown}"
+            ));
+        }
+    }
+    (v, compact, breaches)
+}
+
+/// The topic bodies the sweep reads: one whose filtered content is tiny, so the read stays inline
+/// once the echo is bounded, and one near the limit, so the same read takes the `file_id` arm.
+fn missing_echo_bodies() -> [(&'static str, String); 2] {
+    [
+        ("small", "## Real\nreal body line\n".to_string()),
+        (
+            "big",
+            format!("## Real\nreal body line\n{}\n", "a".repeat(9_800)),
+        ),
+    ]
+}
+
+/// The missing name echoed back must be bounded: one name of any length in any escaping class keeps
+/// the read to one handle within the limit, on both layouts, and the clipped echo says so.
+#[tokio::test]
+async fn an_overlong_missing_section_name_keeps_one_handle_and_fits() {
+    let mut breaches = vec![];
+    let mut unmarked = vec![];
+    let (mut inline, mut file_id) = (0, 0);
+
+    let (_dir, ctx) = test_ctx_with_project().await;
+    for (shape, body) in missing_echo_bodies() {
+        let topic = format!("missing-echo-{shape}");
+        Memory
+            .call(
+                json!({ "action": "write", "topic": topic, "content": body }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        for (class, unit) in ECHO_CLASSES7 {
+            let per = crate::util::text::json_escaped_len(unit);
+            let mut counts = std::collections::BTreeSet::new();
+            if shape == "small" {
+                counts.extend((9_900..=10_100).map(|e| e / per));
+            } else {
+                counts.insert(10_000 / per);
+            }
+            counts.extend([12_000 / per, 60_000 / per]);
+            for n in counts {
+                let name = unit.repeat(n);
+                let label = format!("{shape}/{class} x{n} ({} raw B)", name.len());
+                let input = json!({ "action": "read", "topic": topic, "sections": ["Real", name] });
+                let (v, compact, b) = read_under_contract(&ctx, input, &label).await;
+                if class == "ascii" && (9_945..=9_950).contains(&n) {
+                    eprintln!(
+                        "{label}: {compact} B, file_id arm: {}, breaches: {}",
+                        v.get("file_id").is_some(),
+                        b.len()
+                    );
+                }
+                breaches.extend(b);
+                if !v["missing"].to_string().contains(ECHO_CLIP_MARKER) {
+                    unmarked.push(format!(
+                        "{label}: missing {:.120}",
+                        v["missing"].to_string()
+                    ));
+                }
+                if v.get("file_id").is_some() {
+                    file_id += 1;
+                } else {
+                    inline += 1;
+                }
+            }
+        }
+    }
+
+    // The other layout adds `resolved_from` and `write_target` to both arms.
+    let (_dir2, root, ctx2) = workspace_ctx_with_sub_project().await;
+    for (shape, body) in missing_echo_bodies() {
+        let topic = format!("missing-echo-other-{shape}");
+        seed(&local_layout_dir(&root), &topic, &body);
+        for (class, unit) in ECHO_CLASSES7 {
+            let per = crate::util::text::json_escaped_len(unit);
+            let mut counts: std::collections::BTreeSet<usize> =
+                [10_000 / per, 12_000 / per, 60_000 / per].into();
+            if class == "ascii" && shape == "small" {
+                counts.extend(9_780..=9_960);
+            }
+            for n in counts {
+                let name = unit.repeat(n);
+                let label = format!("other/{shape}/{class} x{n} ({} raw B)", name.len());
+                let input = json!({
+                    "action": "read", "topic": topic, "project_id": "svc",
+                    "sections": ["Real", name],
+                });
+                let (v, _, b) = read_under_contract(&ctx2, input, &label).await;
+                breaches.extend(b);
+                if v.get("resolved_from").is_none() || v.get("write_target").is_none() {
+                    breaches.push(format!("{label}: the provenance keys are gone: {v:.200}"));
+                }
+                if !v["missing"].to_string().contains(ECHO_CLIP_MARKER) {
+                    unmarked.push(format!(
+                        "{label}: missing {:.120}",
+                        v["missing"].to_string()
+                    ));
+                }
+                if v.get("file_id").is_some() {
+                    file_id += 1;
+                } else {
+                    inline += 1;
+                }
+            }
+        }
+    }
+
+    assert!(
+        breaches.is_empty(),
+        "{} contract breaches, first: {:#?}",
+        breaches.len(),
+        &breaches[..breaches.len().min(12)]
+    );
+    assert!(
+        unmarked.is_empty(),
+        "{} missing echoes carry no clip marker, first: {:#?}",
+        unmarked.len(),
+        &unmarked[..unmarked.len().min(6)]
+    );
+    assert!(
+        inline > 0 && file_id > 0,
+        "both arms must be exercised: {inline} inline, {file_id} file_id"
+    );
+}
+
+/// The NUMBER of missing names is bounded too: forty are kept, the rest counted under
+/// `missing_names_omitted`. When the kept list itself is too wide for the `file_id` arm it is
+/// dropped and counted under `missing_omitted`, and the arm's hint still reads the section.
+#[tokio::test]
+async fn a_read_naming_many_missing_sections_keeps_forty_and_counts_the_rest() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "many-missing", "content": "## Real\nreal body line\n" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    let mut short = vec![json!("Real")];
+    short.extend((0..100).map(|i| json!(format!("nope-{i:03}"))));
+    let input = json!({ "action": "read", "topic": "many-missing", "sections": short });
+    let (v, _, b) = read_under_contract(&ctx, input, "100 short names").await;
+    assert!(b.is_empty(), "{b:#?}");
+    let text = v.to_string();
+    assert!(
+        text.contains("missing_names_omitted"),
+        "the names past the cap must be counted: {text:.300}"
+    );
+    assert_eq!(v["missing_names_omitted"], json!(60), "{text:.300}");
+    let kept = v["missing"].as_array().cloned().unwrap_or_default();
+    assert_eq!(kept.len(), 40, "{text:.300}");
+    assert_eq!(kept[0], json!("nope-000"));
+    assert_eq!(kept[39], json!("nope-039"));
+
+    let mut wide = vec![json!("Real")];
+    wide.extend((0..100).map(|i| json!(format!("nope-{i:03}-{}", "x".repeat(1_000)))));
+    let input = json!({ "action": "read", "topic": "many-missing", "sections": wide });
+    let (v, compact, b) = read_under_contract(&ctx, input, "100 wide names").await;
+    assert!(b.is_empty(), "{b:#?}");
+    assert!(v.get("file_id").is_some(), "{compact} B: {v:.300}");
+    assert!(v.get("missing").is_none(), "{v:.300}");
+    assert_eq!(v["missing_omitted"], json!(100), "{v:.300}");
+}
+
+/// The `file_id` arm is measured with everything it carries. `extra` holds the two layout paths:
+/// when they are so wide that dropping `missing` is not enough they are clipped, with a marker, to
+/// the room left; when dropping `missing` is enough, `missing` goes and the paths stay whole.
+/// Driven on `apply_sections_filter` directly: no fixture can root a project at a path this wide.
+#[test]
+fn a_file_id_arm_with_wide_layout_paths_is_measured_and_fits() {
+    let buf = Arc::new(crate::tools::output_buffer::OutputBuffer::new(20));
+    let content = format!("## Real\nreal body line\n{}\n", "a".repeat(11_000));
+
+    let widest = format!("/{}", "\"".repeat(3_000));
+    let extra = vec![
+        ("resolved_from", json!(widest.clone())),
+        ("write_target", json!(widest.clone())),
+    ];
+    let sections = vec!["Real".to_string(), "Nope".to_string()];
+    let v = apply_sections_filter(content.clone(), "t", &sections, &buf, &extra).unwrap();
+    let len = v.to_string().len();
+    assert!(crate::tools::response_fits(&v), "{len} B: {v:.300}");
+    assert!(v.get("file_id").is_some(), "{v:.300}");
+    assert_eq!(v["missing_omitted"], json!(1), "{v:.300}");
+    for key in ["resolved_from", "write_target"] {
+        assert!(
+            v[key].as_str().is_some_and(|p| p.contains("bytes shown")),
+            "{key} must be clipped with a marker: {:.200}",
+            v[key]
+        );
+    }
+
+    let mid = format!("/{}", "\"".repeat(1_500));
+    let extra = vec![
+        ("resolved_from", json!(mid.clone())),
+        ("write_target", json!(mid.clone())),
+    ];
+    let mut many = vec!["Real".to_string()];
+    many.extend((0..40).map(|i| format!("nope-{i:03}-{}", "x".repeat(400))));
+    let v = apply_sections_filter(content, "t", &many, &buf, &extra).unwrap();
+    let len = v.to_string().len();
+    assert!(crate::tools::response_fits(&v), "{len} B: {v:.300}");
+    assert_eq!(v["missing_omitted"], json!(40), "{v:.300}");
+    assert_eq!(v["resolved_from"], json!(mid), "the paths stay whole");
+    assert_eq!(v["write_target"], json!(mid), "the paths stay whole");
+}
+
+/// `memory` renders a read as TEXT, and `format_read_memory` rendered `content` alone, so the
+/// sections that matched nothing never reached the caller: a read naming one real and one absent
+/// section looked exactly like a read naming only the real one.
+#[tokio::test]
+async fn a_text_render_of_a_filtered_read_names_the_missing_sections() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "render-missing", "content": "## Real\nreal body line\n" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let input = json!({ "action": "read", "topic": "render-missing", "sections": ["Real", "Absent-Section"] });
+    let text =
+        crate::tools::hint_probe::primary_text(&Memory.call_content(input, &ctx).await.unwrap());
+    assert!(text.contains("real body line"), "{text}");
+    assert!(
+        text.contains("Absent-Section"),
+        "the missing section must be rendered: {text}"
+    );
+
+    let mut many = vec![json!("Real")];
+    many.extend((0..45).map(|i| json!(format!("nope-{i:03}"))));
+    let input = json!({ "action": "read", "topic": "render-missing", "sections": many });
+    let text =
+        crate::tools::hint_probe::primary_text(&Memory.call_content(input, &ctx).await.unwrap());
+    assert!(text.contains("nope-039"), "{text:.400}");
+    assert!(
+        text.contains("5 more"),
+        "the names past the cap must be counted: {text:.400}"
+    );
+}
+
+/// The `file_id` arm from the OTHER layout carries `resolved_from` and `write_target` too, so the
+/// measure that decides whether its `missing` list stays must count them. Thirty-three names
+/// (each under the 300 B echo clip) of 270 to 300 B sweep that arm across the limit in 33 B steps,
+/// through the ~125 B window the two paths open: an arm measured without them is returned with
+/// them and `call_content` re-buffers it under `@tool_*`.
+#[tokio::test]
+async fn a_file_id_arm_from_the_other_layout_counts_its_paths_in_the_measure() {
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    let topic = "other-arm-edge";
+    let body = format!("## Real\nreal body line\n{}\n", "a".repeat(11_000));
+    seed(&local_layout_dir(&root), topic, &body);
+    let (mut kept, mut dropped) = (0, 0);
+    let mut breaches = vec![];
+    for width in 270..=300 {
+        let mut sections = vec![json!("Real")];
+        sections.extend((0..33).map(|i| json!(format!("{i:02}{}", "m".repeat(width - 2)))));
+        let input = json!({
+            "action": "read", "topic": topic, "project_id": "svc", "sections": sections,
+        });
+        let label = format!("33 names of {width} B");
+        let (v, _, b) = read_under_contract(&ctx, input, &label).await;
+        breaches.extend(b);
+        assert!(v.get("file_id").is_some(), "{label}: {v:.200}");
+        assert!(
+            v.get("resolved_from").is_some() && v.get("write_target").is_some(),
+            "{label}: the provenance keys are gone: {v:.200}"
+        );
+        if v.get("missing").is_some() {
+            kept += 1;
+        } else {
+            assert_eq!(v["missing_omitted"], json!(33), "{label}: {v:.200}");
+            dropped += 1;
+        }
+    }
+    assert!(breaches.is_empty(), "{breaches:#?}");
+    assert!(
+        kept > 0 && dropped > 0,
+        "the sweep must cross the edge: {kept} kept, {dropped} dropped"
+    );
+}

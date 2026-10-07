@@ -726,7 +726,7 @@ const INPUT_ECHO_CLIP: usize = 300;
 
 /// `value` (the caller's `json_path` or `toml_key`, named by `what`) bounded to
 /// [`INPUT_ECHO_CLIP`] escaped bytes by eliding its middle, with a visible marker.
-fn clip_input_echo(value: &str, what: &str) -> String {
+pub(crate) fn clip_input_echo(value: &str, what: &str) -> String {
     crate::util::text::elide_middle_escaped(
         value,
         value.len(),

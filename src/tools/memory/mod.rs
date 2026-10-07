@@ -13,24 +13,40 @@ use serde_json::{json, Value};
 /// downstream truncation cuts, and a caller pasting the result would carry it
 /// into the memory itself.
 ///
+/// A section-filtered read that named sections the memory does not have carries
+/// them under `missing` (and the count past the cap under `missing_names_omitted`).
+/// They are noted at the head too, as a JSON array so a name holding `, ` reads
+/// back as one name: rendered as `content` alone, a read naming one real and one
+/// absent section looked exactly like a read naming only the real one.
+///
 /// These fields exist only in the split-store case, so this branch is the only
 /// thing that renders them — a field the formatter drops reaches nobody, which is
 /// how `docs/issues/archive/2026-08-26-read-file-truncation-flag-never-rendered.md`
 /// shipped inert.
 fn format_read_memory(result: &Value) -> String {
     let content = result["content"].as_str().unwrap_or("");
-    match (
+    let mut head = String::new();
+    if let (Some(from), Some(target)) = (
         result["resolved_from"].as_str(),
         result["write_target"].as_str(),
     ) {
-        (Some(from), Some(target)) => format!(
+        head.push_str(&format!(
             "⚠ read from {from} — this project's other memory store. \
              memory(action='write') on this topic targets {target} instead, which \
-             would leave the text below untouched and shadowed by a second copy.\n\n\
-             {content}"
-        ),
-        _ => content.to_string(),
+             would leave the text below untouched and shadowed by a second copy.\n\n"
+        ));
     }
+    if let Some(missing) = result["missing"].as_array() {
+        let more = match result["missing_names_omitted"].as_u64() {
+            Some(n) => format!(" and {n} more not listed"),
+            None => String::new(),
+        };
+        head.push_str(&format!(
+            "⚠ sections not found: {}{more}\n\n",
+            Value::Array(missing.clone())
+        ));
+    }
+    format!("{head}{content}")
 }
 
 fn format_list_memories(result: &Value) -> String {
@@ -643,6 +659,26 @@ pub(crate) async fn union_with_workspace_memories(
     topics
 }
 
+/// How many caller-supplied section names a read echoes back under `missing`; the rest are counted
+/// under `missing_names_omitted`. Each kept name is clipped to `INPUT_ECHO_CLIP` escaped bytes, so
+/// the list is bounded at about 40 x 303 B: wider than the inline limit on purpose, because the
+/// arm that carries it is MEASURED and drops it (counted under `missing_omitted`) when it does not
+/// fit. The count keeps a usefully long list of short names instead of an unbounded one.
+// cap-class: RESULT_CAP memory.missing_names_kept — probed
+const MISSING_NAMES_KEPT: usize = 40;
+
+/// The `missing` echo bounded: at most [`MISSING_NAMES_KEPT`] names, each clipped in escaped
+/// bytes with a visible marker, and the number of names past the cap.
+fn bounded_missing(missing: Vec<String>) -> (Vec<String>, usize) {
+    let omitted = missing.len().saturating_sub(MISSING_NAMES_KEPT);
+    let kept = missing
+        .iter()
+        .take(MISSING_NAMES_KEPT)
+        .map(|name| crate::tools::read_file::clip_input_echo(name, "section name"))
+        .collect();
+    (kept, omitted)
+}
+
 /// Apply `sections` filtering to memory content and produce the JSON response value.
 ///
 /// - If `sections` is empty, returns `content` unchanged (no filtering).
@@ -650,6 +686,8 @@ pub(crate) async fn union_with_workspace_memories(
 /// - Handles the inline-vs-buffer threshold; uses a `@`-prefixed synthetic path
 ///   when buffering filtered content so `store_file` does not stat a missing file
 ///   and evict the entry immediately.
+/// - Every arm it can return is MEASURED with every key it carries (`missing`, `extra`), so the
+///   response always fits and `call_content` never wraps a `file_id` in a second `@tool_*` handle.
 fn apply_sections_filter(
     content: String,
     topic: &str,
@@ -675,49 +713,88 @@ fn apply_sections_filter(
         (result.content, result.missing)
     };
 
+    // `missing` echoes the caller's own section names, which have no length of their own: bounded
+    // in count and, per name, in escaped bytes, before any arm is built from it.
+    let total_missing = missing.len();
+    let (missing, names_omitted) = bounded_missing(missing);
+    // The keys an arm carries beside its payload, applied ONCE, before that arm is measured:
+    // `missing` (or, once dropped, its count) and `extra` (`resolved_from`, `write_target`). A key
+    // put on after the measure is a key the measure did not see, and `call_content` re-buffers the
+    // response it makes too wide under `@tool_*`.
+    let with_keys = |mut arm: Value, keep_missing: bool, extra: &[(&str, Value)]| -> Value {
+        if keep_missing {
+            if !missing.is_empty() {
+                arm["missing"] = json!(missing);
+            }
+            if names_omitted > 0 {
+                arm["missing_names_omitted"] = json!(names_omitted);
+            }
+        } else if total_missing > 0 {
+            arm["missing_omitted"] = json!(total_missing);
+        }
+        for (key, value) in extra {
+            arm[*key] = value.clone();
+        }
+        arm
+    };
+
     // Decide on the response that would be RETURNED, not on the raw text: the content travels
     // JSON-escaped inside `{"content": ...}`, so 5,000 `"` is 5,000 raw bytes and 10,014
     // serialized. A raw gate sent that inline and `call_content` then buffered the whole response a
     // second time under `@tool_*`.
-    let mut inline = if missing.is_empty() {
-        json!({ "content": &content })
-    } else {
-        json!({ "content": &content, "missing": &missing })
-    };
-    // `extra` (`resolved_from`, `write_target`) is part of the response too: measure it, or a
-    // read from the other layout is decided on a response that is ~125 B smaller than the one
-    // returned and `call_content` re-buffers it under `@tool_*`.
-    for (key, value) in extra {
-        inline[*key] = value.clone();
-    }
-    let mut value = if !crate::tools::response_fits(&inline) {
-        let total_lines = content.lines().count();
-        // Use a `@`-prefixed synthetic path: store_file sets source_path=None for
-        // paths starting with '@', preventing get_with_refresh_flag from stat-ing
-        // a non-existent file and immediately evicting the entry.
-        let synthetic_path = format!("@memory:{topic}:filtered");
-        let file_id = output_buffer.store_file(synthetic_path, content);
-        // `source_path` is always None for a `@`-prefixed handle (see store_file),
-        // so `is_markdown_target` never recognizes this buffer as markdown even
-        // though the topic's content usually is — `heading=` addressing silently
-        // does nothing here. The hint must name only what the buffer actually
-        // supports, or it advertises a capability this handle doesn't have.
-        let hint = format!("use {file_id:?} — start_line/end_line to browse the full content");
-        if missing.is_empty() {
-            json!({ "file_id": file_id, "total_lines": total_lines, "hint": hint })
-        } else {
-            json!({ "file_id": file_id, "total_lines": total_lines, "missing": missing, "hint": hint })
-        }
-    } else {
-        inline
-    };
-    if value.get("file_id").is_some() {
-        for (key, extra_value) in extra {
-            value[*key] = extra_value.clone();
-        }
+    let inline = with_keys(json!({ "content": &content }), true, extra);
+    if crate::tools::response_fits(&inline) {
+        return Ok(inline);
     }
 
-    Ok(value)
+    let total_lines = content.lines().count();
+    // Use a `@`-prefixed synthetic path: store_file sets source_path=None for
+    // paths starting with '@', preventing get_with_refresh_flag from stat-ing
+    // a non-existent file and immediately evicting the entry.
+    let synthetic_path = format!("@memory:{topic}:filtered");
+    let file_id = output_buffer.store_file(synthetic_path, content);
+    // `source_path` is always None for a `@`-prefixed handle (see store_file),
+    // so `is_markdown_target` never recognizes this buffer as markdown even
+    // though the topic's content usually is — `heading=` addressing silently
+    // does nothing here. The hint must name only what the buffer actually
+    // supports, or it advertises a capability this handle doesn't have.
+    let hint = format!("use {file_id:?} — start_line/end_line to browse the full content");
+    let head = json!({ "file_id": file_id, "total_lines": total_lines, "hint": hint });
+
+    // The `file_id` arm is WIDER than the inline candidate it replaces (file_id, total_lines and
+    // hint), so it is measured the same way. Measured 2026-10-07 before this: a missing name of
+    // 9,950 ASCII bytes made a 10,092 B arm, delivered with a `@file_*` and a `@tool_*` handle.
+    let arm = with_keys(head.clone(), true, extra);
+    if crate::tools::response_fits(&arm) {
+        return Ok(arm);
+    }
+    // `missing` is the caller's own echo, so it goes first, counted under `missing_omitted`.
+    let arm = with_keys(head.clone(), false, extra);
+    if crate::tools::response_fits(&arm) {
+        return Ok(arm);
+    }
+    // What is left beside the handle is the two layout paths: each is clipped, with a marker, to an
+    // equal share of the room the rest of the arm leaves, so this arm fits whatever their width.
+    let blank: Vec<(&str, Value)> = extra.iter().map(|(key, _)| (*key, json!(""))).collect();
+    let share =
+        crate::tools::response_room(&with_keys(head.clone(), false, &blank)) / extra.len().max(1);
+    let clipped: Vec<(&str, Value)> = extra
+        .iter()
+        .map(|(key, value)| match value.as_str() {
+            Some(path) => (
+                *key,
+                json!(crate::util::text::elide_middle_escaped(
+                    path,
+                    path.len(),
+                    share,
+                    key,
+                    "the rest of the path is elided"
+                )),
+            ),
+            None => (*key, value.clone()),
+        })
+        .collect();
+    Ok(with_keys(head, false, &clipped))
 }
 
 #[async_trait::async_trait]
