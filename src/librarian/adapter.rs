@@ -2741,6 +2741,57 @@ mod tests {
             Some("tracker-conventions")
         );
     }
+    /// The overflow gate measures the WHOLE result as serialized, never a raw field alone: a result
+    /// can be over the limit while no field is over it by itself, because escaping widens `"`, `\`
+    /// and control characters, and because bulk spread over several fields adds up. Sized around
+    /// the 10,003 B limit in each class, plus the edge itself.
+    #[test]
+    fn overflow_is_judged_on_the_serialized_result_not_on_any_raw_field() {
+        use serde_json::Value;
+        let a = adapter_for_test();
+        let path = "docs/trackers/tool-usage-patterns.md";
+        let one = |s: String| json!({"abs_path": path, "padding": s});
+        let two = |s: String| json!({"abs_path": path, "a": s.clone(), "b": s});
+        let cases: Vec<(&str, Value)> = vec![
+            ("quote", one("\"".repeat(5_002))),
+            ("backslash", one("\\".repeat(5_002))),
+            ("x01", one("\x01".repeat(1_700))),
+            ("x1b", one("\x1b".repeat(1_700))),
+            ("ascii", two("a".repeat(5_100))),
+            ("euro", two("€".repeat(1_700))),
+            ("emoji", two("😀".repeat(1_300))),
+        ];
+        for (class, result) in cases {
+            let fields = result.as_object().unwrap();
+            assert!(
+                fields
+                    .values()
+                    .filter_map(Value::as_str)
+                    .all(|s| !crate::tools::body_alone_overflows(s)),
+                "{class}: fixture: no field may be over the limit alone"
+            );
+            assert!(
+                !crate::tools::response_fits(&result),
+                "{class}: fixture: the whole result must be over the limit"
+            );
+            assert_eq!(
+                a.relevant_guide_topic(&result),
+                Some("progressive-disclosure"),
+                "{class}"
+            );
+        }
+        // The edge: a result exactly on the limit fits, one byte more does not.
+        let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
+        let base = one(String::new()).to_string().len();
+        let on = one("a".repeat(limit - base));
+        assert_eq!(on.to_string().len(), limit);
+        assert_eq!(a.relevant_guide_topic(&on), Some("tracker-conventions"));
+        let over = one("a".repeat(limit - base + 1));
+        assert_eq!(
+            a.relevant_guide_topic(&over),
+            Some("progressive-disclosure")
+        );
+    }
 
     /// A doctor result routes AWAY from `librarian`, so the `fix=` repair modes
     /// must be documented on the schema — the surface a doctor caller receives.
