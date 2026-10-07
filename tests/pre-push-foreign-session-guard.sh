@@ -448,8 +448,12 @@ TARGET="$REPO/scripts/pre-push-foreign-session-guard.sh"
 # execs the live guard, so the assertions below silently measure the wrong repository:
 # first written that way, and it reported exit 0 with empty output for every case.
 fire() {
-    OUT="$(cd "$REPO" && printf 'refs/heads/main %s refs/heads/main %s\n' "$(sha)" "$ZERO" \
-        | CLAUDE_CODE_SESSION_ID="$ALICE" "$SHIM" origin git@example.invalid:x 2>&1)"
+    # No pipe into the shim. The line is built FIRST and handed over as a here-string, so there is
+    # no writer that can lose a race to a shim which exits without reading stdin: a pipe plus
+    # `pipefail` turned that lost race into exit 141 (SIGPIPE) in place of the shim's own status.
+    local line
+    line="$(printf 'refs/heads/main %s refs/heads/main %s' "$(sha)" "$ZERO")"
+    OUT="$(cd "$REPO" && CLAUDE_CODE_SESSION_ID="$ALICE" "$SHIM" origin git@example.invalid:x 2>&1 <<<"$line")"
     EC=$?
 }
 if [ ! -x "$SHIM" ]; then
@@ -475,6 +479,28 @@ else
     # while still somehow invoking the target. Do not credit it with catching the
     # mutation; #5 and #6 do that. Noted by sessionId ba061586-6581-4656-b0c5-acad83474de5.
     hasnt "and does not silently run nothing" "$OUT" "GUARD-RAN"
+
+    # THE FLAKE THIS PINS. fire() used to feed the shim through a pipe whose writer runs a
+    # command substitution (`git rev-parse`) BEFORE it writes. This shim exits 0 without reading
+    # stdin, so when the writer lost the race the late write hit a closed pipe (SIGPIPE) and
+    # `pipefail` reported 141 instead of the shim's 0. Measured on the real fire(): 0 of 3000
+    # fires on an idle machine, 53 of 3000 under CPU load (128 busy loops on 64 CPUs). Only an
+    # exit-0 shim shows it: under pipefail the RIGHTMOST non-zero status wins, so an exit-1 shim
+    # hides the SIGPIPE.
+    # Pinned deterministically, not statistically: a `git` wrapper sleeps in exactly the writer's
+    # `git -C <dir> rev-parse HEAD` and nowhere else (the shim's own rev-parse is untouched), so the
+    # writer is reliably slower than the shim. The old pipe form then fails every time.
+    SLOW_BIN="$(mktemp -d "$SUITE_TMP/slowgit-XXXXXX")"
+    REAL_GIT="$(command -v git)"
+    printf '%s\n' '#!/usr/bin/env bash' \
+        'if [ "${1:-}" = "-C" ] && [ "${3:-}" = "rev-parse" ] && [ "${4:-}" = "HEAD" ]; then : > "$0.hit"; sleep 0.3; fi' \
+        "exec \"$REAL_GIT\" \"\$@\"" > "$SLOW_BIN/git"
+    chmod +x "$SLOW_BIN/git"
+    PATH="$SLOW_BIN:$PATH" fire
+    eq  "target vanished, writer slower than the shim: still exits 0 (no SIGPIPE)" "$EC" 0
+    has "and it still said so"                "$OUT" "missing or not executable"
+    # Positive control: the wrapper really sat in the writer, so the case above cannot pass vacuously.
+    if [ -e "$SLOW_BIN/git.hit" ]; then ok "the slowed writer really ran"; else no "the slowed writer really ran" "wrapper never matched sha()'s git call"; fi
 
     # And it recovers rather than latching.
     mv "$TARGET.parked" "$TARGET"
