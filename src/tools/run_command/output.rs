@@ -133,6 +133,8 @@ fn compacted_fits(
     // A compacted response always carries `stdout`, so the empty-`stdout` a tee capture adds to a
     // response that had none never applies here.
     attach(&mut response, late.clone(), false);
+    // inline-gate: compact serialized bytes of the whole compacted response, every late key
+    // attached; NOT yet the delivered length: it still counts the summarizer's cut record.
     !crate::tools::exceeds_inline_limit_len(response.to_string().len())
 }
 
@@ -761,8 +763,7 @@ fn extras_len(keys: &serde_json::Map<String, Value>, empty_stdout_key: bool) -> 
 /// `stdout` key: the inline limit minus the skeleton's compact length minus what the key itself
 /// costs. A response built to this lands ON the limit, which is what the limit is for.
 fn inline_stdout_room(skeleton: &Value) -> usize {
-    crate::tools::INLINE_MAX_RESPONSE_LEN
-        .saturating_sub(skeleton.to_string().len() + EMPTY_STDOUT_KEY.len())
+    crate::tools::response_room(skeleton).saturating_sub(EMPTY_STDOUT_KEY.len())
 }
 
 /// Build the response for a command that ran to completion — at any exit code.
@@ -888,7 +889,7 @@ pub(crate) async fn handle_successful_output_with(
             // the whole point is telling the caller how much is behind the ref, not how
             // much of it happened to fit inline.
             let line_count = count_lines(&content);
-            let (stored, truncation) = if crate::tools::exceeds_inline_limit(&content) {
+            let (stored, truncation) = if crate::tools::body_alone_overflows(&content) {
                 let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
                 let capped: String = content
                     .lines()
@@ -1637,6 +1638,74 @@ mod tests {
         assert_eq!(build(room), crate::tools::INLINE_MAX_RESPONSE_LEN);
         assert!(!crate::tools::exceeds_inline_limit_len(build(room)));
         assert!(crate::tools::exceeds_inline_limit_len(build(room + 1)));
+    }
+    /// `inline_stdout_room` measures with `response_room`, which strips a cut record. That equals the
+    /// skeleton's compact length, the measure it had before, only because the skeleton never
+    /// carries one: the summary arm builds it from fixed keys plus `late`, which `attachments`
+    /// alone builds, and the one record `handle_successful_output_with` writes (`wip_authors`) goes
+    /// on the RESULT after every arm has measured. Pinned at the producer, with every key
+    /// `attachments` can emit present and a `wip_authors` diagnostic that WAS cut at its source.
+    #[test]
+    fn the_stdout_room_skeleton_never_carries_a_cut_record() {
+        let raw_wip = "w".repeat(WIP_AUTHORS_BYTE_BUDGET * 3);
+        let cut_wip = bound_wip_authors(raw_wip.clone());
+        assert_ne!(cut_wip, raw_wip, "fixture: the diagnostic must be cut");
+        let late = attachments(
+            &[
+                ("shell_cause", &Some("cause".to_string())),
+                ("wip_authors", &Some(cut_wip)),
+                ("empty_test_selection", &Some("empty".to_string())),
+                ("partial_test_selection", &Some("partial".to_string())),
+            ],
+            &Some((
+                "@cmd_0bf0a111".to_string(),
+                Some(crate::tools::output_buffer::Truncation {
+                    kept_lines: 1,
+                    total_lines: 2,
+                }),
+                2,
+            )),
+            1,
+            &Some("skipped".to_string()),
+            &serde_json::Map::from_iter([
+                ("buffer_truncated".to_string(), json!(["@cmd_0bf0a222"])),
+                (
+                    "jobs".to_string(),
+                    json!([{"handle": "@bg_1", "state": "done", "command": "x"}]),
+                ),
+                ("timeout_hint".to_string(), json!("hint")),
+            ]),
+        );
+        assert!(
+            !late.contains_key(crate::tools::CUT_FIELDS_KEY),
+            "late keys carry a cut record: {late:?}"
+        );
+        // The summary arm's skeleton, every optional key present.
+        let mut skeleton = json!({
+            "exit_code": 1,
+            "truncated": true,
+            "stdout_shown": 9,
+            "stdout_total": 9,
+            "hint": "h",
+            "stderr": "e",
+            "stderr_shown": 1,
+            "stderr_total": 2,
+        });
+        for (key, value) in &late {
+            skeleton[key.as_str()] = value.clone();
+        }
+        assert!(skeleton.get(crate::tools::CUT_FIELDS_KEY).is_none());
+        assert_eq!(
+            crate::tools::delivered_len(&skeleton),
+            skeleton.to_string().len()
+        );
+        assert_eq!(
+            inline_stdout_room(&skeleton),
+            crate::tools::INLINE_MAX_RESPONSE_LEN
+                - skeleton.to_string().len()
+                - EMPTY_STDOUT_KEY.len(),
+            "the room is the pre-migration formula"
+        );
     }
 
     /// `INLINE_MAX_RESPONSE_LEN` is the same edge `exceeds_inline_limit_len` draws.
