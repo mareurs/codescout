@@ -311,6 +311,15 @@ impl OutputBuffer {
             .content_index
             .len()
     }
+    /// How many handles the pool holds (every kind sharing `entries`).
+    #[cfg(test)]
+    pub(crate) fn entry_count(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entries
+            .len()
+    }
 
     /// Store command output and return an opaque handle (`@cmd_<8hex>`).
     pub fn store(&self, command: String, stdout: String, stderr: String, exit_code: i32) -> String {
@@ -498,10 +507,15 @@ impl OutputBuffer {
             .map(|e| (e, needs_refresh))
     }
 
-    /// Store a file's WHOLE content under a `@file_*` handle.
+    /// Store a file's WHOLE content under its ONE `@file_*` handle.
     ///
     /// Content goes in `stdout`; `stderr` is empty; `exit_code` is 0.
     /// The `command` field holds the source path for diagnostics.
+    ///
+    /// A path that already has a live handle gets that handle back, with its
+    /// content brought up to `content`; nothing is minted and nothing is evicted
+    /// (see [`OutputBuffer::store_file_inner`]). A `@`-prefixed synthetic path is a
+    /// snapshot, and is reused only for byte-identical content.
     ///
     /// The entry auto-refreshes: `get_with_refresh_flag` re-reads `source_path`
     /// in full whenever the file's mtime advances. That is correct only because
@@ -529,7 +543,8 @@ impl OutputBuffer {
     /// Store a DERIVED SUBSET of a file — a line range, one heading section, a
     /// set of sections — under a `@file_*` handle. The entry is a snapshot:
     /// `path` is recorded in `command` for diagnostics, but `source_path` is
-    /// deliberately left unset.
+    /// deliberately left unset. A live snapshot of the same `path` holding
+    /// byte-identical content is returned instead of minting a second one.
     ///
     /// [`OutputBuffer::store_file`] must not be used for this.
     /// `get_with_refresh_flag` re-reads `source_path` **whole**, which is the
@@ -549,9 +564,28 @@ impl OutputBuffer {
         self.store_file_inner(path, content, None)
     }
 
-    /// Shared mint/insert behind [`OutputBuffer::store_file`] and
+    /// Shared find-or-mint behind [`OutputBuffer::store_file`] and
     /// [`OutputBuffer::store_file_excerpt`] — they differ only in the refresh
     /// policy they select.
+    ///
+    /// **One live handle per source (R3).** Before this, every call minted, so an
+    /// unchanged file read twice came back under two handles, and since each mint
+    /// can evict the least-recently-used entry, repeated reads of one file flushed
+    /// the pool. Measured on the live binary before the fix: two `read_file` calls
+    /// on an unchanged 456-line file returned `@file_159e1949` and `@file_159e1a97`.
+    ///
+    /// - A whole-file store (`source_path` set) finds the live entry with the same
+    ///   `source_path`. Its content is replaced with `content` and its timestamp
+    ///   reset: exactly what `get_with_refresh_flag` would do to that entry on its
+    ///   next read once the file's mtime advanced, so a caller holding the handle
+    ///   sees nothing it would not have seen anyway, and the file keeps ONE handle.
+    /// - A snapshot (`source_path` unset: an excerpt, or a synthetic `@…` view) is
+    ///   reused only when an entry of the same name holds byte-identical content.
+    ///   Same name with different content is a different view (two section filters
+    ///   of one memory topic), so it mints.
+    ///
+    /// The two kinds never match each other: a whole-file entry must keep refreshing,
+    /// and a snapshot must never start.
     fn store_file_inner(
         &self,
         path: String,
@@ -563,6 +597,31 @@ impl OutputBuffer {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+
+        // A linear scan: the pool holds at most `max_entries` (50 in production), and a
+        // separate path index would be one more map to keep in step with every eviction.
+        let live = inner
+            .entries
+            .iter()
+            .find(|(id, e)| {
+                id.starts_with("@file_")
+                    && match &source_path {
+                        Some(p) => e.source_path.as_ref() == Some(p),
+                        None => e.source_path.is_none() && e.command == path && e.stdout == content,
+                    }
+            })
+            .map(|(id, _)| id.clone());
+        if let Some(id) = live {
+            if source_path.is_some() {
+                if let Some(entry) = inner.entries.get_mut(&id) {
+                    entry.stdout = content;
+                    entry.timestamp = now;
+                }
+            }
+            Self::bump_lru_locked(&mut inner, &id);
+            return id;
+        }
+
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@file_{:08x}", now.wrapping_add(inner.counter) as u32);
 
@@ -576,7 +635,7 @@ impl OutputBuffer {
             source_path,
             content_hash: None,
             // A @file_* entry holds the whole file, or an excerpt the caller
-            // explicitly asked for by line range. Neither is a silent prefix.
+            // explicitly asked for. Neither is a silent prefix.
             truncated: None,
         };
         inner.entries.insert(id.clone(), entry);
@@ -2710,18 +2769,205 @@ mod tests {
     }
 
     #[test]
-    fn dedup_is_tool_only() {
+    fn content_dedup_never_crosses_a_path() {
         let buf = OutputBuffer::new(10);
         // Shell output: identical stdout must NOT dedup.
         let c1 = buf.store("cmd".to_string(), "SAME".to_string(), String::new(), 0);
         let c2 = buf.store("cmd".to_string(), "SAME".to_string(), String::new(), 0);
         assert_ne!(c1, c2, "store (@cmd_) must not dedup");
-        // File content: identical content under different paths must NOT dedup.
+        // File content: identical content under different paths must NOT dedup. A @file_
+        // handle is keyed by its path first; content only decides reuse within one path.
         // (Do not call get() on these — the fake paths would stat-evict.)
         let f1 = buf.store_file("/tmp/codescout-a".to_string(), "SAME".to_string());
         let f2 = buf.store_file("/tmp/codescout-b".to_string(), "SAME".to_string());
-        assert_ne!(f1, f2, "store_file (@file_) must not dedup");
+        assert_ne!(f1, f2, "two files with equal content are still two files");
+        let e1 = buf.store_file_excerpt("/tmp/codescout-a".to_string(), "PART".to_string());
+        let e2 = buf.store_file_excerpt("/tmp/codescout-b".to_string(), "PART".to_string());
+        assert_ne!(e1, e2, "equal excerpts of two files are two snapshots");
     }
+    /// R3: one real file has one live handle. A second whole-file store of the same path
+    /// and the same content returns the first handle and mints nothing.
+    #[test]
+    fn store_file_returns_the_live_handle_for_the_same_path_and_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        std::fs::write(&p, "body").unwrap();
+        let path = p.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(10);
+        let first = buf.store_file(path.clone(), "body".into());
+        let again = buf.store_file(path.clone(), "body".into());
+        assert_eq!(first, again, "an unchanged file must keep its handle");
+        assert_eq!(buf.entry_count(), 1, "the second store minted an entry");
+        let (entry, refreshed) = buf.get_with_refresh_flag(&first).unwrap();
+        assert_eq!(entry.stdout, "body");
+        assert!(!refreshed);
+    }
+
+    /// The changed-file case. The handle a whole-file store returns is the file's one handle,
+    /// so a store of NEW content for the same path updates that entry in place: the same
+    /// handle, now holding the new content, which is exactly what `get_with_refresh_flag`
+    /// would have served from it after the mtime advanced. Minting instead would leave two live
+    /// handles for one file (the old one auto-refreshes to the same bytes).
+    #[test]
+    fn store_file_of_changed_content_updates_the_one_handle_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        std::fs::write(&p, "old").unwrap();
+        let path = p.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(10);
+        let first = buf.store_file(path.clone(), "old".into());
+        std::fs::write(&p, "new").unwrap();
+        let past = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        // An mtime in the past: a read of the handle will NOT refresh it, so what the handle
+        // holds below is what the store put there, not what a refresh re-read.
+        filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(past)).unwrap();
+        let again = buf.store_file(path.clone(), "new".into());
+        assert_eq!(first, again, "a changed file must keep its one handle");
+        assert_eq!(buf.entry_count(), 1);
+        let (entry, refreshed) = buf.get_with_refresh_flag(&first).unwrap();
+        assert!(
+            !refreshed,
+            "the mtime is in the past; this read cannot refresh"
+        );
+        assert_eq!(
+            entry.stdout, "new",
+            "the handle must hold the content just read"
+        );
+        assert_eq!(
+            entry.source_path.as_deref(),
+            Some(p.as_path()),
+            "the entry still refreshes from its file"
+        );
+    }
+    /// The store that finds the live entry also records WHEN it brought the entry up to the file,
+    /// so a later read does not "refresh" an entry that already holds the file's bytes. Without
+    /// the timestamp, a file written between the first store and the second (mtime in between)
+    /// makes the next `get_with_refresh_flag` re-read it and report a refresh of content the
+    /// caller was just handed, both for changed and for unchanged content.
+    #[test]
+    fn a_store_hit_leaves_nothing_for_a_later_read_to_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let ms = std::time::Duration::from_millis(20);
+        for (first_body, second_body) in [("old", "new"), ("same", "same")] {
+            let p = dir.path().join(format!("{first_body}-{second_body}.txt"));
+            std::fs::write(&p, first_body).unwrap();
+            let path = p.to_string_lossy().to_string();
+            let buf = OutputBuffer::new(10);
+            let first = buf.store_file(path.clone(), first_body.into());
+            std::thread::sleep(ms);
+            std::fs::write(&p, second_body).unwrap();
+            // An mtime after the first store and before the second.
+            filetime::set_file_mtime(&p, filetime::FileTime::now()).unwrap();
+            std::thread::sleep(ms);
+            assert_eq!(buf.store_file(path, second_body.into()), first);
+            let (entry, refreshed) = buf.get_with_refresh_flag(&first).unwrap();
+            assert!(
+                !refreshed,
+                "{first_body}->{second_body}: the store left the entry stale for a read to refresh"
+            );
+            assert_eq!(entry.stdout, second_body);
+        }
+    }
+
+    /// A snapshot (excerpt, or a synthetic `@…` view) is reused only when it is byte-identical:
+    /// the same name with other content is another view, and must not overwrite the first.
+    #[test]
+    fn a_snapshot_is_reused_only_for_identical_content() {
+        let buf = OutputBuffer::new(10);
+        let a = buf.store_file("@memory:t:filtered".into(), "## A\nx".into());
+        let a2 = buf.store_file("@memory:t:filtered".into(), "## A\nx".into());
+        assert_eq!(a, a2, "an identical view must keep its handle");
+        let b = buf.store_file("@memory:t:filtered".into(), "## B\ny".into());
+        assert_ne!(a, b, "another view under the same name is another snapshot");
+        assert_eq!(
+            buf.get(&a).unwrap().stdout,
+            "## A\nx",
+            "the first view was overwritten"
+        );
+        let e = buf.store_file_excerpt("/x/f.json".into(), "[1]".into());
+        let e2 = buf.store_file_excerpt("/x/f.json".into(), "[1]".into());
+        assert_eq!(e, e2, "an identical excerpt must keep its handle");
+        let e3 = buf.store_file_excerpt("/x/f.json".into(), "[2]".into());
+        assert_ne!(
+            e, e3,
+            "another excerpt of the same file is another snapshot"
+        );
+        assert_eq!(
+            buf.get(&e).unwrap().stdout,
+            "[1]",
+            "the first excerpt was overwritten"
+        );
+        assert_eq!(buf.entry_count(), 4);
+    }
+
+    /// A whole-file entry and a snapshot of the same path never stand in for each other: the
+    /// whole-file handle must keep refreshing and the snapshot must never start to.
+    ///
+    /// Each direction gets a buffer where the OTHER kind is the only candidate. With both
+    /// present, a scan that crossed kinds could still pick the right one by `HashMap` order
+    /// (measured: such a mutant survived one run and was killed by the next).
+    #[test]
+    fn a_whole_file_handle_and_a_snapshot_of_its_path_stay_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.txt");
+        std::fs::write(&p, "same").unwrap();
+        let path = p.to_string_lossy().to_string();
+
+        // A whole-file store when only a snapshot of the path exists.
+        let buf = OutputBuffer::new(10);
+        let snap = buf.store_file_excerpt(path.clone(), "same".into());
+        let whole = buf.store_file(path.clone(), "same".into());
+        assert_ne!(snap, whole, "a whole-file store reused a snapshot");
+        assert!(buf.get(&snap).unwrap().source_path.is_none());
+        assert!(buf.get(&whole).unwrap().source_path.is_some());
+
+        // A snapshot store when only the whole-file entry of the path exists.
+        let buf = OutputBuffer::new(10);
+        let whole = buf.store_file(path.clone(), "same".into());
+        let snap = buf.store_file_excerpt(path.clone(), "same".into());
+        assert_ne!(snap, whole, "a snapshot store reused the whole-file entry");
+        assert_eq!(buf.store_file_excerpt(path.clone(), "same".into()), snap);
+        assert_eq!(buf.store_file(path, "same".into()), whole);
+    }
+    /// A `@file_` store only ever reuses a `@file_` entry. `@cmd_` and `@tool_` entries share
+    /// the same map, with `source_path` unset and a `command` of their own, so a scan that
+    /// ignored the kind could hand a file read back a `@cmd_` handle whose command string and
+    /// stdout happened to equal the file store's path and content.
+    #[test]
+    fn a_file_store_never_reuses_another_kinds_entry() {
+        let buf = OutputBuffer::new(10);
+        let cmd = buf.store("x.json".into(), "SAME".into(), String::new(), 0);
+        let tool = buf.store_tool("@x.json", "SAME".into());
+        let excerpt = buf.store_file_excerpt("x.json".into(), "SAME".into());
+        let synthetic = buf.store_file("@x.json".into(), "SAME".into());
+        assert!(excerpt.starts_with("@file_"), "got {excerpt} beside {cmd}");
+        assert!(
+            synthetic.starts_with("@file_"),
+            "got {synthetic} beside {tool}"
+        );
+        assert_eq!(buf.entry_count(), 4);
+    }
+
+    /// A dedup hit is a use: it bumps the entry to most-recently-used, so the file a caller keeps
+    /// reading is not the one evicted.
+    #[test]
+    fn a_store_file_hit_bumps_lru() {
+        let dir = tempfile::tempdir().unwrap();
+        let pa = dir.path().join("a.txt");
+        std::fs::write(&pa, "A").unwrap();
+        let a_path = pa.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(2);
+        let a = buf.store_file(a_path.clone(), "A".into()); // [a]
+        let b = buf.store_tool("t", "B".into()); // [a, b]
+        assert_eq!(buf.store_file(a_path, "A".into()), a); // hit -> [b, a]
+        let _c = buf.store_tool("t", "C".into()); // evicts b
+        assert!(buf.get(&b).is_none(), "b was LRU and should be evicted");
+        assert!(
+            buf.get(&a).is_some(),
+            "a survived because the hit bumped it"
+        );
+    }
+
     #[test]
     fn store_pending_write_returns_ack_handle_and_round_trips() {
         let buf = OutputBuffer::new(10);

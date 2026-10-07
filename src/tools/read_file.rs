@@ -799,7 +799,12 @@ fn inline_or_file_id(
     let line_count = content.lines().count().max(1);
     // An excerpt: a snapshot of the extracted value. `store_file` would treat the source as
     // the WHOLE file, refresh the handle to it on the next mtime change, and, given a name
-    // that is not a real path, evict it on the first read.
+    // that is not a real path, evict it on the first read. The same value read again from an
+    // unchanged file gets the same handle back (identical snapshot), so nothing is minted.
+    // It is still a handle BESIDE the file's own whole-file handle: the value is not in general
+    // a run of the file's lines (a JSON value is re-serialized, a string value unescaped, and a
+    // TOML/YAML key resolved through the full parse is re-serialized), so it cannot be phrased
+    // in the file's line numbers.
     let file_id = ctx
         .output_buffer
         .store_file_excerpt(source.to_string(), content);
@@ -5084,3 +5089,7 @@ line b10
 #[cfg(test)]
 #[path = "read_file_buffer_edge_tests.rs"]
 mod buffer_edge_tests;
+
+#[cfg(test)]
+#[path = "read_file_one_handle_tests.rs"]
+mod one_handle_tests;

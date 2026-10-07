@@ -750,7 +750,9 @@ fn apply_sections_filter(
     let total_lines = content.lines().count();
     // Use a `@`-prefixed synthetic path: store_file sets source_path=None for
     // paths starting with '@', preventing get_with_refresh_flag from stat-ing
-    // a non-existent file and immediately evicting the entry.
+    // a non-existent file and immediately evicting the entry. The entry is a
+    // snapshot, so the same view read again (same topic, same filtered bytes)
+    // gets the same handle back, and another filter of the topic gets its own.
     let synthetic_path = format!("@memory:{topic}:filtered");
     let file_id = output_buffer.store_file(synthetic_path, content);
     // `source_path` is always None for a `@`-prefixed handle (see store_file),

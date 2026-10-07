@@ -1819,6 +1819,79 @@ async fn memory_large_read_buffers_as_file_ref() {
 
     drop(dir);
 }
+/// A buffered memory read is a SNAPSHOT under a synthetic `@memory:<topic>:filtered` name, so it
+/// is reused only for byte-identical content: the same view read again keeps its handle and mints
+/// nothing, while another filter of the same topic is another view with its own handle. Driven
+/// through the real `call_content` and counted on the buffer.
+#[tokio::test]
+async fn an_identical_memory_view_read_again_keeps_its_handle() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let body = |tag: &str| -> String {
+        (1..=300)
+            .map(|i| format!("{tag} line {i:04} padding_padding_padding\n"))
+            .collect()
+    };
+    let content = format!("# Topic\n\n## A\n{}\n## B\n{}", body("a"), body("b"));
+    Memory
+        .call(
+            json!({ "action": "write", "topic": "views", "content": content }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let handle_of = |input: Value| {
+        let ctx = &ctx;
+        async move {
+            let blocks = Memory.call_content(input.clone(), ctx).await.unwrap();
+            let text = crate::tools::hint_probe::primary_text(&blocks);
+            let handles: std::collections::BTreeSet<String> = text
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '@' || c == '_'))
+                .filter(|t| t.len() > "@file_".len() && t.starts_with("@file_"))
+                .map(str::to_owned)
+                .collect();
+            assert_eq!(handles.len(), 1, "{input}: {text:.300}");
+            handles.into_iter().next().unwrap()
+        }
+    };
+    let whole = json!({ "action": "read", "topic": "views" });
+    let only_a = json!({ "action": "read", "topic": "views", "sections": ["A"] });
+    let only_b = json!({ "action": "read", "topic": "views", "sections": ["B"] });
+
+    let w1 = handle_of(whole.clone()).await;
+    let a1 = handle_of(only_a.clone()).await;
+    let count = ctx.output_buffer.entry_count();
+    assert_eq!(
+        handle_of(whole).await,
+        w1,
+        "the same view got a second handle"
+    );
+    assert_eq!(
+        handle_of(only_a).await,
+        a1,
+        "the same filtered view got a second handle"
+    );
+    assert_eq!(
+        ctx.output_buffer.entry_count(),
+        count,
+        "a repeated view minted"
+    );
+    assert_ne!(w1, a1, "two different views shared one handle");
+    let b1 = handle_of(only_b).await;
+    assert_ne!(
+        a1, b1,
+        "another filter of the topic overwrote the first view"
+    );
+    assert!(
+        ctx.output_buffer
+            .get(&a1)
+            .unwrap()
+            .stdout
+            .contains("a line 0001"),
+        "the first view must keep its own content"
+    );
+    drop(dir);
+}
+
 // The inline-or-buffer decision for a memory read must be made on the response that would be
 // RETURNED (`{"content": ...}`, compact JSON), not on the raw text: a topic of 5,000 `"` is 5,000
 // raw bytes and 10,014 serialized, so the raw gate returned it inline and `call_content` then
