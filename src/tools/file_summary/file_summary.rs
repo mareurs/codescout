@@ -1231,7 +1231,7 @@ pub(crate) fn fit_envelope(
     file_id: &str,
     finish: impl Fn(Value, &[String]) -> Value,
 ) -> Value {
-    let over_limit = |v: &Value| crate::tools::exceeds_inline_limit(&v.to_string());
+    let over_limit = |v: &Value| !crate::tools::response_fits(v);
     let whole = finish(summary.clone(), &[]);
     if !over_limit(&whole) {
         return whole;

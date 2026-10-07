@@ -690,7 +690,7 @@ fn apply_sections_filter(
     for (key, value) in extra {
         inline[*key] = value.clone();
     }
-    let mut value = if crate::tools::exceeds_inline_limit(&inline.to_string()) {
+    let mut value = if !crate::tools::response_fits(&inline) {
         let total_lines = content.lines().count();
         // Use a `@`-prefixed synthetic path: store_file sets source_path=None for
         // paths starting with '@', preventing get_with_refresh_flag from stat-ing
