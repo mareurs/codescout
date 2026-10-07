@@ -1634,6 +1634,24 @@ pub(super) fn format_read_file(val: &Value) -> String {
     )
 }
 
+/// How many lines a page SHOWS: the span its `shown_lines` names, for the `[N of M lines shown]`
+/// line every page renderer prints. Counting `content.lines()` counted the marker a cut line
+/// ends with (`\n…[truncated: …]`) as a second line, so a page of one clamped line read
+/// `[2 of 2 lines shown]` beside `shown_lines: [1, 1]` and a `next` resuming at line 2.
+///
+/// ONE helper for both renderers, the raw one ([`format_read_file_body`]) and the markdown one
+/// (`markdown::format_read`): the markdown copy counted `content.lines()` after the raw one was
+/// fixed, and printed `[2 of 6 lines shown]` where the raw one said `[1 of 6` (review M).
+pub(crate) fn page_lines_shown(val: &Value) -> usize {
+    match (
+        val["shown_lines"][0].as_u64(),
+        val["shown_lines"][1].as_u64(),
+    ) {
+        (Some(first), Some(last)) if last >= first => (last - first + 1) as usize,
+        _ => val["content"].as_str().unwrap_or("").lines().count(),
+    }
+}
+
 fn format_read_file_body(val: &Value) -> String {
     // Summary modes have a "type" key
     if let Some(file_type) = val["type"].as_str() {
@@ -1648,17 +1666,7 @@ fn format_read_file_body(val: &Value) -> String {
         let total = val["total_lines"].as_u64().unwrap_or(0);
         let complete = val["complete"].as_bool().unwrap_or(true);
         let content = val["content"].as_str().unwrap_or("");
-        // The count of lines SHOWN is the span `shown_lines` names. Counting `content.lines()`
-        // counted the marker a cut line ends with (`\n…[truncated: …]`) as a second line, so a
-        // page of one clamped line read `[2 of 2 lines shown]` beside `shown_lines: [1, 1]` and
-        // a `next` resuming at line 2.
-        let lines_shown = match (
-            val["shown_lines"][0].as_u64(),
-            val["shown_lines"][1].as_u64(),
-        ) {
-            (Some(first), Some(last)) if last >= first => (last - first + 1) as usize,
-            _ => content.lines().count(),
-        };
+        let lines_shown = page_lines_shown(val);
 
         let mut out = format!("{total} lines\n\n");
         out.push_str(content);

@@ -1036,7 +1036,7 @@ pub(crate) fn format_read(result: &Value) -> Option<String> {
                 out.push_str(&format!("\n\n  Buffer: {file_id}"));
             }
             if !result["complete"].as_bool().unwrap_or(true) {
-                let shown = content.lines().count();
+                let shown = crate::tools::read_file::page_lines_shown(result);
                 out.push_str(&format!("\n  [{shown} of {total} lines shown]"));
                 if let Some(next) = result.get("next").and_then(|v| v.as_str()) {
                     out.push_str(&format!("\n  Next: {next}"));

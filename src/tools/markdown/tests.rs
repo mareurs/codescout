@@ -4335,3 +4335,45 @@ async fn a_buffered_markdown_range_page_delivers_its_handle_count_and_next() {
         "next resumed at the wrong line"
     );
 }
+
+/// The count a buffered markdown range page's TEXT prints is the span `shown_lines` names,
+/// as the raw renderer prints it. Counting `content.lines()` counted the marker a clamped line
+/// ends with (`\n…[truncated: …]`) as a second line: a page showing line 2 alone read
+/// `[2 of 6 lines shown]` beside `shown_lines: [2, 2]`, where the raw renderer said `[1 of 6`.
+/// From review M (rm_k_markdown_range_page_text_counts_the_lines_it_shows).
+#[tokio::test]
+async fn a_markdown_range_page_text_counts_the_lines_it_shows() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("wide.md");
+    std::fs::write(
+        &file,
+        format!(
+            "# T\n{}\nafter one\nafter two\n## H\nbody",
+            "M".repeat(20_000)
+        ),
+    )
+    .unwrap();
+    let input = json!({ "path": file.to_str().unwrap(), "start_line": 2, "end_line": 4 });
+    let v = crate::tools::read_file::ReadFile
+        .call(input.clone(), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        v["format"],
+        json!("markdown"),
+        "fixture: the markdown range arm"
+    );
+    assert_eq!(v["shown_lines"], json!([2, 2]), "fixture: {v:.200}");
+    assert_eq!(v["line_truncated"], json!(true), "fixture: a clamped line");
+    let blocks = crate::tools::read_file::ReadFile
+        .call_content(input, &ctx)
+        .await
+        .unwrap();
+    let text = crate::tools::hint_probe::primary_text(&blocks);
+    assert!(
+        text.contains("[1 of 6 lines shown]"),
+        "the text must count the one line shown, as shown_lines does: {}",
+        text.lines().rev().take(3).collect::<Vec<_>>().join(" | ")
+    );
+}
