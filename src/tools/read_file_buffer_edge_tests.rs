@@ -615,6 +615,46 @@ async fn a_toml_key_read_with_many_siblings_drops_them_from_the_handle_arm() {
         assert!(v.get("file_id").is_some(), "{label}: {v:.300}");
     }
 }
+/// The handle arm of a `toml_key` read drops `siblings` when the arm WITH them is over the
+/// limit, measured on that whole arm. Siblings that fit ALONE but not beside the arm's other
+/// keys (`file_id`, `hint`, `line_range`, ...) are the case a measure of `siblings` by itself
+/// misses: the arm kept them and `call_content` buffered it under a second handle. The sweep
+/// puts the sibling list just under the limit on its own; it is ASCII because bare TOML keys
+/// are, and the dimension it varies is the other keys, not escaping.
+#[tokio::test]
+async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_handle_drops_them() {
+    const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    // Over the limit alone, so the read takes the handle arm, where `siblings` is droppable.
+    let value = "a".repeat(12_000);
+    let mut in_window = 0;
+    for w in 250..=400 {
+        let siblings: String = (0..40)
+            .map(|i| format!("[s{i:02}{}]\nx = 1\n", "n".repeat(w)))
+            .collect();
+        let text = format!("[k]\nv = \"{value}\"\n{siblings}");
+        let extracted = crate::tools::file_summary::extract_toml_key(&text, "k").unwrap();
+        let alone = json!(extracted.siblings).to_string().len();
+        // Fits alone (10 B of margin), by less than the arm's other keys need beside it (they
+        // are well over 150 B: the `hint` alone names the handle twice).
+        if !(LIMIT - 150..=LIMIT - 10).contains(&alone) {
+            continue;
+        }
+        in_window += 1;
+        let p = dir.path().join(format!("sib-alone-{w}.toml"));
+        std::fs::write(&p, &text).unwrap();
+        let input = json!({ "path": p.to_str().unwrap(), "toml_key": "k" });
+        let label = format!("siblings of width {w} ({alone} B alone)");
+        let (v, _) = page(&ctx, &input, "", &label).await;
+        assert!(v.get("file_id").is_some(), "{label}: {v:.300}");
+        assert_eq!(v["siblings_omitted"], json!(true), "{label}: {v:.300}");
+    }
+    assert!(
+        in_window > 0,
+        "no width put the sibling list just under the limit alone"
+    );
+}
 
 /// The seven content classes: [`CLASSES`] and the escape character `\x1b`, which serializes to
 /// six bytes like `\x01` but is the one terminal output carries.
@@ -693,6 +733,62 @@ async fn a_forced_markdown_range_whose_coverage_alone_overflows_keeps_one_handle
     assert!(omitted > 0, "no response marked coverage_omitted");
     eprintln!("forced md range with oversized coverage: largest response = {largest} B");
 }
+/// `page_beside_coverage` drops `coverage` when the page skeleton WITH it is over the limit,
+/// measured on that whole skeleton. A `coverage` that fits ALONE but not beside the page's other
+/// keys is the case a measure of `coverage` by itself misses. With a first line too wide to show
+/// whole with or without `coverage`, only that measure can drop it: missed, the arm kept it and
+/// returned a response over the limit, which `call_content` buffered under a second handle.
+/// Swept so `coverage` serializes just under the limit in every content class.
+#[tokio::test]
+async fn a_forced_markdown_range_whose_coverage_fits_alone_but_not_beside_the_page_drops_it() {
+    const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    // Wider than any room a page has, so it is cut whether or not `coverage` rides beside it,
+    // and the "a line would show whole without it" reason never drops `coverage`.
+    let wide = "a".repeat(12_000);
+    let prime = |p: &str| json!({ "path": p, "start_line": 1, "end_line": 1, "force": true });
+    for (class, unit) in CLASSES7 {
+        // About 25 serialized bytes per unread heading, so the sweep steps finely past the edge.
+        let k = (18 / json_escaped_len(unit)).max(1);
+        let mut in_window = 0;
+        for n in 300..=500 {
+            let sections: String = (1..=n)
+                .map(|i| format!("## {i:04}{}\n", unit.repeat(k)))
+                .collect();
+            let text = format!("# Top\n{wide}\n{sections}");
+            // `coverage` as the read reports it: `Top` is read (primed below), the rest unread.
+            let unread: Vec<String> = crate::tools::file_summary::parse_all_headings(&text)
+                .into_iter()
+                .map(|h| h.text)
+                .filter(|t| t != "Top")
+                .collect();
+            let alone = json!({ "read": 1, "total": n + 1, "unread": unread })
+                .to_string()
+                .len();
+            // Fits alone (10 B of margin), by less than the page's other keys need beside it
+            // (well over 150 B: `file_id`, `hint`, a `next` naming the temp path).
+            if !(LIMIT - 150..=LIMIT - 10).contains(&alone) {
+                continue;
+            }
+            in_window += 1;
+            let p = dir.path().join(format!("cov-alone-{class}-{n}.md"));
+            std::fs::write(&p, &text).unwrap();
+            let path = p.to_str().unwrap().to_string();
+            ReadFile.call(prime(&path), &ctx).await.unwrap();
+            let input = json!({ "path": path, "start_line": 2, "end_line": 2, "force": true });
+            let label = format!("forced md range {class}/{n} (coverage {alone} B alone)");
+            let (v, _) = page(&ctx, &input, &path, &label).await;
+            assert_eq!(v["coverage_omitted"], json!(true), "{label}: {v:.300}");
+            assert!(v.get("coverage").is_none(), "{label}: {v:.300}");
+        }
+        assert!(
+            in_window > 0,
+            "{class}: no section count put coverage just under the limit alone"
+        );
+    }
+}
+
 /// A `json_path` (or `toml_key`) is the caller's own input and has no length of its own. It was
 /// echoed whole as `path` (or `breadcrumb`) and inside the `hint` of the `file_id` arm, so a
 /// path of several KB pushed a response that already carried a `file_id` over the limit, and
