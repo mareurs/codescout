@@ -2620,6 +2620,15 @@ mod tests {
             );
             json_path_hints.push((handle.clone(), page["hint"].as_str().unwrap().to_string()));
         }
+        // The route a json_path page offers searches the whole handle, so a hit can lie outside
+        // the value the page shows; the hint must name that scope, or a match elsewhere in the
+        // payload reads as a match in this value.
+        for (handle, hint) in &json_path_hints {
+            assert!(
+                hint.contains("not only this value"),
+                "the json_path page hint on {handle} does not name its search's scope: {hint}"
+            );
+        }
         let [(_, tool_jp_hint), (_, probe_jp_hint)] = <[_; 2]>::try_from(json_path_hints).unwrap();
 
         // The plain line read's hint on each `@tool_*` ref, as the read returns it. It names a
