@@ -1590,27 +1590,46 @@ mod tests {
             value["value_type"], "string",
             "{jp:?} must project the text: {value}"
         );
-        // The text is over the inline budget, so it is parked under a `@file_*` handle: its
-        // first artifact, and the packing of the others, must be findable through it.
-        let file_id = value["file_id"]
+        // The text is over the inline budget, so it comes back as the first page of the value on
+        // the SAME `@tool_*` handle: its first artifact is in that page, and the packing of the
+        // others is reached by following `next`, which repeats the `json_path`.
+        assert!(
+            value.get("file_id").is_none(),
+            "a read of a buffer mints no handle: {value}"
+        );
+        let page = value["content"].as_str().unwrap_or("");
+        assert!(
+            page.contains("an artifact body line of artifact 00"),
+            "the first page must hold the first artifact: {value}"
+        );
+        let next = value["next"]
             .as_str()
-            .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
-        let out = crate::tools::Tool::call(
-            &crate::tools::run_command::RunCommand,
-            json!({ "command": format!("grep -c 'an artifact body line' {file_id}") }),
+            .unwrap_or_else(|| panic!("an oversized extraction must page: {value}"));
+        let route = regex::Regex::new(&format!(
+            r#"^read_file\("{}", json_path="\$\.markdown", start_line=(\d+), end_line=(\d+)\)$"#,
+            regex::escape(handle)
+        ))
+        .unwrap();
+        let c = route
+            .captures(next)
+            .unwrap_or_else(|| panic!("next must page the value on {handle}: {next}"));
+        let rest = crate::tools::Tool::call(
+            &crate::tools::read_file::ReadFile,
+            json!({
+                "path": handle,
+                "json_path": "$.markdown",
+                "start_line": c[1].parse::<u64>().unwrap(),
+                "end_line": c[2].parse::<u64>().unwrap(),
+            }),
             &core,
         )
         .await
-        .unwrap_or_else(|e| panic!("searching the projected markdown failed: {e}"));
-        let matches: u64 = out["stdout"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .parse()
-            .unwrap_or(0);
+        .unwrap_or_else(|e| panic!("following {next} failed: {e}"));
+        let rest = rest["content"].as_str().unwrap_or("");
         assert!(
-            matches > 0,
-            "the route {jp:?} must return the packed artifact text; grep -c counted {matches}: {out}"
+            rest.contains("an artifact body line of artifact")
+                && !rest.contains("an artifact body line of artifact 00"),
+            "the route {next} must return the packing of the other artifacts: {rest:.300}"
         );
     }
 

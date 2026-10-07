@@ -312,6 +312,18 @@ impl OutputBuffer {
             .len()
     }
 
+    /// Every live handle in the shared `entries` map (`@cmd_*`, `@file_*`, `@tool_*`), sorted.
+    ///
+    /// For tests that must show a call minted nothing. A count alone cannot: at capacity a mint
+    /// evicts the least-recently-used entry, so the count holds while the set changes.
+    #[cfg(test)]
+    pub(crate) fn handles(&self) -> Vec<String> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ids: Vec<String> = inner.entries.keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
     /// Store command output and return an opaque handle (`@cmd_<8hex>`).
     pub fn store(&self, command: String, stdout: String, stderr: String, exit_code: i32) -> String {
         self.store_truncated(command, stdout, stderr, exit_code, None)

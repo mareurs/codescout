@@ -435,11 +435,12 @@ async fn read_file_tool_ref_invalid_line_range_errors() {
 }
 
 #[tokio::test]
-async fn read_file_buffer_ref_large_range_buffers_as_file_ref() {
+async fn read_file_buffer_ref_large_range_pages_on_the_same_ref() {
     // Regression test: when a line range read on a @file_* buffer ref extracts
-    // content > TOOL_OUTPUT_BUFFER_THRESHOLD, read_file must store it as a new
-    // @file_* ref AND return a first chunk inline (auto-chunk), rather than
-    // returning zero content or wrapping in a @tool_* envelope.
+    // content > TOOL_OUTPUT_BUFFER_THRESHOLD, read_file must return a first chunk
+    // inline (auto-chunk) on THAT ref, rather than returning zero content or
+    // wrapping in a @tool_* envelope — and without minting a second @file_* ref
+    // for the slice: every view of a buffer is the buffer's own handle plus lines.
     // Without the original fix, call_content would wrap large inline JSON in
     // a @tool_* envelope — encoding newlines as \n escapes so total_lines
     // counted JSON structure lines (4) and any sub-range with start_line > 4
@@ -470,7 +471,7 @@ async fn read_file_buffer_ref_large_range_buffers_as_file_ref() {
         .to_string();
 
     // Second read: ranged read on the @file_* ref — must auto-chunk:
-    // return first chunk inline + file_id for continuation.
+    // return first chunk inline, and continue on the same ref.
     let result = ReadFile
         .call(
             json!({ "path": file_ref, "start_line": 1, "end_line": 300 }),
@@ -480,8 +481,8 @@ async fn read_file_buffer_ref_large_range_buffers_as_file_ref() {
         .unwrap();
 
     assert!(
-        result.get("file_id").is_some(),
-        "large buffer-ref range should produce a @file_* ref; got: {}",
+        result.get("file_id").is_none(),
+        "a range of a buffer ref must not mint a second ref; got: {}",
         result
     );
     assert_eq!(
@@ -501,23 +502,22 @@ async fn read_file_buffer_ref_large_range_buffers_as_file_ref() {
         result
     );
     assert!(
-        result["next"].as_str().unwrap_or("").contains("read_file"),
-        "must include a next continuation command; got: {}",
+        result["next"].as_str().unwrap_or("").contains(&file_ref),
+        "must include a next continuation command on the same ref; got: {}",
         result
     );
 
-    // The chained @file_* ref must be navigable by sub-range.
-    let file_ref2 = result["file_id"].as_str().unwrap().to_string();
+    // The original @file_* ref is navigable by sub-range.
     let sub = ReadFile
         .call(
-            json!({ "path": file_ref2, "start_line": 50, "end_line": 50 }),
+            json!({ "path": file_ref, "start_line": 50, "end_line": 50 }),
             &ctx,
         )
         .await
         .unwrap();
     assert!(
         sub["content"].as_str().unwrap_or("").contains("line 0050"),
-        "sub-range on chained @file_* ref must return correct content; got: {}",
+        "sub-range on the @file_* ref must return correct content; got: {}",
         sub
     );
 }
@@ -578,12 +578,33 @@ async fn read_file_buffer_ref_range_auto_chunks() {
         "next should include start_line; got: {next}"
     );
 
-    // The slice is still parked under its own handle — that is what keeps this
-    // response small enough to escape a `@tool_*` re-wrap (BUG-026) and keeps the
-    // slice greppable.
+    // No handle is minted for the slice, and none is needed to escape a `@tool_*`
+    // re-wrap: the page is sized as the response it returns. That used to be pinned
+    // the other way ("the slice is still parked under its own handle — that is what
+    // keeps this response small enough", BUG-026), but the page carried the same
+    // lines beside that handle, so the store never made it smaller. Shown through
+    // the real `call_content`: the agent sees content naming only `buf_id`.
     assert!(
-        result["file_id"].as_str().is_some(),
-        "the oversized slice should still be buffered; got: {result}"
+        result.get("file_id").is_none(),
+        "a range of a buffer ref must not mint a second ref; got: {result}"
+    );
+    let before = ctx.output_buffer.handles();
+    let blocks = ReadFile
+        .call_content(
+            serde_json::json!({ "path": buf_id, "start_line": 1, "end_line": 300 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        ctx.output_buffer.handles(),
+        before,
+        "the read through call_content minted a handle"
+    );
+    let text = crate::tools::hint_probe::primary_text(&blocks);
+    assert!(
+        text.contains("line 0001") && !text.contains("@tool_") && !text.contains("Buffer:"),
+        "the agent must see the page itself, on {buf_id} alone; got: {text:.300}"
     );
 
     // But `next` continues against the ORIGINAL ref, in the line numbers
