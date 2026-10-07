@@ -3501,3 +3501,44 @@ async fn a_text_render_of_a_filtered_read_names_the_missing_sections() {
         "the names past the cap must be counted: {text:.400}"
     );
 }
+
+/// The `file_id` arm from the OTHER layout carries `resolved_from` and `write_target` too, so the
+/// measure that decides whether its `missing` list stays must count them. Thirty-three names
+/// (each under the 300 B echo clip) of 270 to 300 B sweep that arm across the limit in 33 B steps,
+/// through the ~125 B window the two paths open: an arm measured without them is returned with
+/// them and `call_content` re-buffers it under `@tool_*`.
+#[tokio::test]
+async fn a_file_id_arm_from_the_other_layout_counts_its_paths_in_the_measure() {
+    let (_dir, root, ctx) = workspace_ctx_with_sub_project().await;
+    let topic = "other-arm-edge";
+    let body = format!("## Real\nreal body line\n{}\n", "a".repeat(11_000));
+    seed(&local_layout_dir(&root), topic, &body);
+    let (mut kept, mut dropped) = (0, 0);
+    let mut breaches = vec![];
+    for width in 270..=300 {
+        let mut sections = vec![json!("Real")];
+        sections.extend((0..33).map(|i| json!(format!("{i:02}{}", "m".repeat(width - 2)))));
+        let input = json!({
+            "action": "read", "topic": topic, "project_id": "svc", "sections": sections,
+        });
+        let label = format!("33 names of {width} B");
+        let (v, _, b) = read_under_contract(&ctx, input, &label).await;
+        breaches.extend(b);
+        assert!(v.get("file_id").is_some(), "{label}: {v:.200}");
+        assert!(
+            v.get("resolved_from").is_some() && v.get("write_target").is_some(),
+            "{label}: the provenance keys are gone: {v:.200}"
+        );
+        if v.get("missing").is_some() {
+            kept += 1;
+        } else {
+            assert_eq!(v["missing_omitted"], json!(33), "{label}: {v:.200}");
+            dropped += 1;
+        }
+    }
+    assert!(breaches.is_empty(), "{breaches:#?}");
+    assert!(
+        kept > 0 && dropped > 0,
+        "the sweep must cross the edge: {kept} kept, {dropped} dropped"
+    );
+}
