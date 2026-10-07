@@ -327,7 +327,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             // the limit is buffered again by `call_content` under a second handle. The raw
             // pre-check only skips building a candidate that cannot fit: escaping never
             // shrinks a string, so raw bytes over the limit mean the response is too.
-            if !crate::tools::exceeds_inline_limit(&content) {
+            if !crate::tools::body_alone_overflows(&content) {
                 let mut inline = json!({
                     "content": &content,
                     "path": echo,
@@ -338,7 +338,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                     inline["count"] = json!(c);
                 }
                 let inline = noted(inline);
-                if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+                if crate::tools::response_fits(&inline) {
                     return Ok(inline);
                 }
             }
@@ -394,9 +394,9 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         // one line of 2,000 `\x01` is 2,000 raw bytes and 12,039 serialized, and was returned
         // here for `call_content` to buffer under `@tool_*`. The raw pre-check only skips a
         // candidate that cannot fit (escaping never shrinks a string).
-        if !crate::tools::exceeds_inline_limit(&content) {
+        if !crate::tools::body_alone_overflows(&content) {
             let inline = noted(json!({ "content": &content, "total_lines": total_lines }));
-            if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+            if crate::tools::response_fits(&inline) {
                 return Ok(inline);
             }
         }
@@ -463,9 +463,9 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     }
 
     // Full buffer: paginate if the RESPONSE is over the inline limit. Never re-buffer.
-    if !crate::tools::exceeds_inline_limit(&text) {
+    if !crate::tools::body_alone_overflows(&text) {
         let inline = noted(json!({ "content": &text, "total_lines": total_lines }));
-        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+        if crate::tools::response_fits(&inline) {
             return Ok(inline);
         }
     }
@@ -567,7 +567,7 @@ const OVER_BUDGET_MARKER: &str = "\n…[truncated: this line is wider than the i
 /// what it adds afterwards (`_guide_hint`, parameter corrections) is added after the
 /// buffering decision.
 pub(super) fn buffer_page_room(widest: &Value) -> usize {
-    crate::tools::INLINE_MAX_RESPONSE_LEN.saturating_sub(widest.to_string().len())
+    crate::tools::response_room(widest)
 }
 
 /// One page of `body`, from its first line, whose content fits `room` serialized bytes.
@@ -606,7 +606,7 @@ pub(crate) fn page_beside_coverage(
     let mut page = buffer_page(content, buffer_page_room(&with_cov));
     let mut keep = coverage.is_some();
     if keep {
-        let over_alone = crate::tools::exceeds_inline_limit(&with_cov.to_string());
+        let over_alone = !crate::tools::response_fits(&with_cov);
         if over_alone || page.3 {
             let mut without = skeleton.clone();
             without["coverage_omitted"] = json!(true);
@@ -807,10 +807,10 @@ fn inline_or_file_id(
     what: &str,
     ctx: &ToolContext,
 ) -> Value {
-    if !crate::tools::exceeds_inline_limit(&content) {
+    if !crate::tools::body_alone_overflows(&content) {
         let mut inline = keys.clone();
         inline["content"] = json!(&content);
-        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+        if crate::tools::response_fits(&inline) {
             return inline;
         }
     }
@@ -830,7 +830,7 @@ fn inline_or_file_id(
          or run_command(\"grep pattern {file_id}\") to search."
     ));
     for key in droppable {
-        if crate::tools::exceeds_inline_limit(&result.to_string()) {
+        if !crate::tools::response_fits(&result) {
             if let Some(obj) = result.as_object_mut() {
                 if obj.remove(*key).is_some() {
                     obj.insert(format!("{key}_omitted"), json!(true));
@@ -1041,17 +1041,17 @@ fn read_with_line_range(
     // never shrinks a string). `coverage` has no length of its own (600 unread headings are
     // about 33 KB), so it goes first, marked `coverage_omitted`, as the markdown range arm
     // drops it: a short range must not be buffered for it.
-    if !crate::tools::exceeds_inline_limit(&content) {
+    if !crate::tools::body_alone_overflows(&content) {
         let mut inline = with_source(json!({ "content": &content }));
         if let Some(c) = &md_cov {
             inline["coverage"] = c.clone();
         }
-        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+        if crate::tools::response_fits(&inline) {
             return Ok(inline);
         }
         if md_cov.is_some() {
             let lean = with_source(json!({ "content": &content, "coverage_omitted": true }));
-            if !crate::tools::exceeds_inline_limit(&lean.to_string()) {
+            if crate::tools::response_fits(&lean) {
                 return Ok(lean);
             }
         }
@@ -1199,9 +1199,9 @@ fn read_full_file(
     // of 10,000 ASCII bytes (10,030 B as a response) went inline and `call_content` buffered
     // it under `@tool_*`. The raw pre-check only skips a candidate that cannot fit (escaping
     // never shrinks a string).
-    if !crate::tools::exceeds_inline_limit(text) {
+    if !crate::tools::body_alone_overflows(text) {
         let inline = full_file_inline(path, text, resolved, input, source_tag, md_cov.clone());
-        if !crate::tools::exceeds_inline_limit(&inline.to_string()) {
+        if crate::tools::response_fits(&inline) {
             return Ok(inline);
         }
     }
