@@ -1108,6 +1108,99 @@ enum Arm {
     Refused,
 }
 
+/// The lines one page of a buffer read covers, in the caller's numbering, and the last line the
+/// read that produced it asked for. A page names its span in `shown_lines`; an inline answer
+/// covers its whole range (or the whole text, unranged).
+fn page_span(input: &Value, v: &Value) -> ((u64, u64), u64) {
+    let content = v["content"].as_str().unwrap_or_default();
+    let total = v["total_lines"]
+        .as_u64()
+        .unwrap_or(content.lines().count() as u64);
+    let asked_last = input["end_line"].as_u64().map_or(total, |e| e.min(total));
+    let span = match (v["shown_lines"][0].as_u64(), v["shown_lines"][1].as_u64()) {
+        (Some(a), Some(b)) => (a, b),
+        _ => (input["start_line"].as_u64().unwrap_or(1), asked_last),
+    };
+    (span, asked_last)
+}
+
+/// Follow `next` from `first` (the response to `input`) until there is none, every page through
+/// [`read_minting_nothing`]. Asserts that each page resumes on the line after the last one shown
+/// (no line skipped, none twice), that `complete` is true exactly when a page reached the last
+/// line its read asked for and that `next` is there exactly when it is not, that every `next`
+/// stays on `r` and keeps the `json_path`, and that the chain ends ON the last line `input`
+/// asked for. Unless a line was cut, the pages joined are those lines of `space`, the line space
+/// the ref is read in. Returns the pages followed after the first.
+async fn follow_to_the_end(
+    ctx: &crate::tools::ToolContext,
+    input: &Value,
+    first: Value,
+    r: &str,
+    space: &str,
+    label: &str,
+) -> usize {
+    let base = r.strip_suffix(".err").unwrap_or(r);
+    let (_, asked_last) = page_span(input, &first);
+    let asked_first = input["start_line"].as_u64().unwrap_or(1);
+    let (mut page_input, mut v) = (input.clone(), first);
+    let (mut got, mut cut, mut last, mut pages) = (Vec::new(), false, asked_first - 1, 0);
+    loop {
+        assert!(
+            v.get("file_id").is_none(),
+            "{label}: names a file_id: {v:.300}"
+        );
+        let ((a, b), page_last) = page_span(&page_input, &v);
+        assert_eq!(
+            a,
+            last + 1,
+            "{label}: page {page_input} does not resume after line {last}"
+        );
+        assert!(b >= a, "{label}: page {page_input} shows no line: {v:.300}");
+        last = b;
+        if let Some(complete) = v["complete"].as_bool() {
+            assert_eq!(
+                complete,
+                b >= page_last,
+                "{label}: complete={complete} on a page ending at {b} of {page_last}: {v:.300}"
+            );
+            assert_eq!(
+                v["next"].is_string(),
+                !complete,
+                "{label}: complete={complete} with next={}",
+                v["next"]
+            );
+        }
+        cut |= v["line_truncated"] == json!(true);
+        got.push(v["content"].as_str().unwrap_or_default().to_string());
+        let Some(next) = next_input(&v, label) else {
+            break;
+        };
+        assert_eq!(next["path"], json!(r), "{label}: next leaves the ref");
+        assert_eq!(
+            next["json_path"], input["json_path"],
+            "{label}: next drops the json_path"
+        );
+        v = read_minting_nothing(ctx, &next, base, label)
+            .await
+            .unwrap_or_else(|| panic!("{label}: following {next} failed"));
+        page_input = next;
+        pages += 1;
+        assert!(pages < 5_000, "{label}: the next chain does not end");
+    }
+    assert_eq!(
+        last, asked_last,
+        "{label}: following next stopped at line {last} of {asked_last}"
+    );
+    if !cut {
+        let want = crate::util::text::extract_lines(space, asked_first as usize, last as usize);
+        assert!(
+            got.join("\n") == want,
+            "{label}: the pages joined are not lines {asked_first}-{last} of the ref"
+        );
+    }
+    pages
+}
+
 /// R1: a read of an existing buffer refers to THAT handle and mints none. One handle holds the
 /// whole buffer; every view of it (a page, a slice, a value a `json_path` extracts) is that
 /// handle plus line numbers or a `json_path`. Measured before the fix on the live binary: a
@@ -1117,7 +1210,9 @@ enum Arm {
 /// Every source kind (`@cmd_*` stdout and `.err`, `@file_*`, `@tool_*`) is read in every arm
 /// `read_from_buffer` has, through the REAL `call_content`, in a pool at production capacity
 /// and FULL, so a mint would also evict: the guard compares the SET of handles, not a count.
-/// Every `next` is followed to the end, each page under the same guard.
+/// Every `next` is followed to the end, each page under the same guard, and the chain must end
+/// on the last line the first read asked for ([`follow_to_the_end`]): a whole read of 20,000
+/// lines whose `next` named one page-sized window stopped at line 3,046.
 #[tokio::test]
 async fn no_read_of_an_existing_buffer_mints_a_handle() {
     let mut ctx = ctx().await;
@@ -1130,18 +1225,52 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
         .join("\n");
     // One escape-heavy line far over the page (5,000 `\x01`, 30,000 B serialized), then a line.
     let wide = format!("{}\ntail line", "\u{1}".repeat(5_000));
+    // Long enough that a page-sized `next` window fits inline and so ends the chain early, which
+    // is how a whole read stopped at line 3,046 of 20,000 (short) and 178 (varied widths).
+    let long_short: String = (1..=20_000)
+        .map(|i| format!("l{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let varied = |n: usize| -> String {
+        (1..=n)
+            .map(|i| format!("{i}:{}", "x".repeat((i * 37) % 200)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let long_varied = varied(20_000);
+    // The kinds read through JSON (`@tool_*`, `json_path`) re-parse their whole payload on every
+    // page; at 20,000 varied lines (2 MB) that is about 1,400 pages of 2 MB parses, minutes in a
+    // debug build. They read 3,000 varied lines, past the page-sized window the defect needs.
+    let varied_3k = varied(3_000);
 
     let buf = &ctx.output_buffer;
-    let mut cases: Vec<(String, String, Value, Arm)> = Vec::new();
-    for (shape, body) in [("small", &small), ("big", &big), ("wide", &wide)] {
+    // (label, ref, input, arm, the line space the ref is read in)
+    let mut cases: Vec<(String, String, Value, Arm, std::rc::Rc<String>)> = Vec::new();
+    // `through_json`: also read the body through a `@tool_*` envelope and a `json_path` value.
+    for (shape, body, through_json) in [
+        ("small", &small, true),
+        ("big", &big, true),
+        ("wide", &wide, true),
+        ("long-short", &long_short, true),
+        ("long-varied", &long_varied, false),
+        ("varied-3k", &varied_3k, true),
+    ] {
+        let raw = std::rc::Rc::new(body.clone());
         let cmd = buf.store("probe".into(), body.clone(), String::new(), 0);
         let err = format!(
             "{}.err",
             buf.store("probe".into(), "x".into(), body.clone(), 1)
         );
         let file = buf.store_file_excerpt("probe.txt".into(), body.clone());
-        let tool = buf.store_tool("run_command", json!({ "stdout": body }).to_string());
+        let envelope = json!({ "stdout": body }).to_string();
+        let tool = buf.store_tool("run_command", envelope.clone());
+        let tool_lines = std::rc::Rc::new(crate::tools::output_buffer::line_addressable_text(
+            &tool, envelope,
+        ));
         for r in [&cmd, &err, &file, &tool] {
+            if r == &tool && !through_json {
+                continue;
+            }
             let ranged = |s: u64, e: u64| json!({ "path": r, "start_line": s, "end_line": e });
             let rows: Vec<(Value, Arm)> = match shape {
                 "small" => vec![
@@ -1153,7 +1282,7 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
                     (ranged(1, 100_000), Arm::Paged),
                     (ranged(3, 700), Arm::Paged),
                 ],
-                _ => {
+                "wide" => {
                     // A `@tool_*` envelope pretty-prints `{` on line 1: the wide line is line 2,
                     // so its whole read pages `{` alone first and reaches the cut on `next`.
                     let at = if r.starts_with("@tool_") { 2 } else { 1 };
@@ -1164,9 +1293,11 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
                         (json!({ "path": r }), whole),
                     ]
                 }
+                _ => vec![(json!({ "path": r }), Arm::Paged)],
             };
+            let space = if r == &tool { &tool_lines } else { &raw };
             for (input, arm) in rows {
-                cases.push((format!("{shape} {r}"), r.clone(), input, arm));
+                cases.push((format!("{shape} {r}"), r.clone(), input, arm, space.clone()));
             }
             if !r.starts_with("@tool_") {
                 cases.push((
@@ -1174,14 +1305,24 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
                     r.clone(),
                     json!({ "path": r, "json_path": "$.v" }),
                     Arm::Refused,
+                    raw.clone(),
                 ));
             }
         }
         // `json_path` into a `@tool_*` ref: a string value (its own lines) and an array (its
         // pretty-printed lines).
         let lines: Vec<&str> = body.lines().collect();
-        for value in [json!(body), json!(lines)] {
+        let values = if through_json {
+            vec![json!(body), json!(lines)]
+        } else {
+            vec![]
+        };
+        for value in values {
             let t = buf.store_tool("probe", json!({ "v": value }).to_string());
+            let space = std::rc::Rc::new(match &value {
+                Value::String(s) => s.clone(),
+                other => serde_json::to_string_pretty(other).unwrap(),
+            });
             let jp = |extra: Value| {
                 let mut v = json!({ "path": t, "json_path": "$.v" });
                 for (k, x) in extra.as_object().unwrap() {
@@ -1204,11 +1345,13 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
                     (jp(json!({ "start_line": 5, "end_line": 600 })), Arm::Paged),
                 ],
                 // The wide string value's first line is the wide one; in the array it is line 2.
-                (_, "string") => vec![
+                ("wide", "string") => vec![
                     (jp(json!({})), Arm::Clamped),
+                    (jp(json!({ "start_line": 1, "end_line": 1 })), Arm::Clamped),
                     (jp(json!({ "start_line": 1, "end_line": 2 })), Arm::Clamped),
                 ],
-                _ => vec![(jp(json!({ "start_line": 2, "end_line": 3 })), Arm::Clamped)],
+                ("wide", _) => vec![(jp(json!({ "start_line": 2, "end_line": 3 })), Arm::Clamped)],
+                _ => vec![(jp(json!({})), Arm::Paged)],
             };
             for (input, arm) in rows {
                 cases.push((
@@ -1216,6 +1359,7 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
                     t.clone(),
                     input,
                     arm,
+                    space.clone(),
                 ));
             }
         }
@@ -1234,7 +1378,7 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
     }
 
     let mut pages = 0;
-    for (label, r, input, arm) in &cases {
+    for (label, r, input, arm, space) in &cases {
         let base = r.strip_suffix(".err").unwrap_or(r);
         let label = format!("{label} {arm:?} {input}");
         let v = read_minting_nothing(&ctx, input, base, &label).await;
@@ -1266,28 +1410,13 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
                 );
             }
         }
-        let mut v = v.unwrap();
-        assert!(
-            v.get("file_id").is_none(),
-            "{label}: names a file_id: {v:.300}"
-        );
+        let v = v.unwrap();
         if input["json_path"].is_string() {
             // The same value, numbered the same way, on every read.
             let again = ReadFile.call(input.clone(), &ctx).await.unwrap();
             assert_eq!(again, v, "{label}: two reads of one value differ");
         }
-        while let Some(next) = next_input(&v, &label) {
-            assert_eq!(next["path"], json!(r), "{label}: next leaves the ref");
-            assert_eq!(
-                next["json_path"], input["json_path"],
-                "{label}: next drops the json_path"
-            );
-            v = read_minting_nothing(&ctx, &next, base, &label)
-                .await
-                .unwrap_or_else(|| panic!("{label}: following {next} failed"));
-            pages += 1;
-            assert!(pages < 2_000, "{label}: the next chain does not end");
-        }
+        pages += follow_to_the_end(&ctx, input, v, r, space, &label).await;
     }
     eprintln!(
         "no-mint guard: {} cases, {pages} pages followed",
@@ -1295,24 +1424,21 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
     );
 }
 
-/// A `json_path` the response must clip to echo (over `INPUT_ECHO_CLIP`) cannot be quoted whole in
-/// a route that fits, and quoting the clipped echo would name a route that fails. Its `next`
-/// names the path as the caller's own input instead, with the bytes it has, and the page is
-/// still followed to the end by substituting it, on the one handle. Both a short and an overlong
-/// path are followed, and the pages, joined, must be the value: nothing skipped, nothing twice.
+/// A `json_path` value paged to its end through the one handle: the pages, joined, are the
+/// value — nothing skipped, nothing twice — for a short path and for paths over `INPUT_ECHO_CLIP`
+/// (whose `path` echo is clipped but whose `next` quotes them whole) and over the route floor
+/// (whose `next` is prose). Both a whole read and a range to the end are followed with `next`
+/// alone, and both must end on the value's last line.
 #[tokio::test]
 async fn a_json_path_value_paged_to_its_end_reassembles_the_value() {
     let ctx = ctx().await;
-    let route = regex::Regex::new(
-        r#"^read_file\("([^"]+)", json_path=<your json_path: (\d+) bytes, not repeated here>, start_line=(\d+), end_line=(\d+)\)$"#,
-    )
-    .unwrap();
     let value: String = (1..=600)
         .map(|i| format!("row {i:04} \"q\" \\ {}", "v".repeat(30)))
         .collect::<Vec<_>>()
         .join("\n");
     for key in [
-        "short.key".to_string(),
+        "abcd".to_string(),
+        "k".repeat(296),
         "k".repeat(3_000),
         "k".repeat(12_000),
     ] {
@@ -1320,56 +1446,156 @@ async fn a_json_path_value_paged_to_its_end_reassembles_the_value() {
             .output_buffer
             .store_tool("probe", json!({ key.clone(): value }).to_string());
         let jp = format!("$[{}]", serde_json::to_string(&key).unwrap());
-        let label = format!("reassemble {} B key", key.len());
-        // A range to the end: a page of a range resumes up to its `end_line`, so the chain runs
-        // to the last line. (A whole read's `next` names one page-sized window, which comes back
-        // inline with no `next` of its own when it fits: following `next` alone stops there.)
-        let mut input =
-            json!({ "path": tool, "json_path": jp, "start_line": 1, "end_line": 100_000 });
-        let mut got: Vec<String> = Vec::new();
-        for _ in 0..100 {
-            let v = read_minting_nothing(&ctx, &input, &tool, &label)
-                .await
-                .unwrap();
-            assert!(v.get("file_id").is_none(), "{label}: {v:.300}");
-            let content = v["content"].as_str().unwrap();
-            got.push(content.to_string());
-            let Some(next) = v["next"].as_str() else {
-                break;
-            };
-            let (start, end) = if key.len() > 300 {
-                assert!(
-                    !next.contains("kkkk") && !next.contains("bytes shown"),
-                    "{label}: next quotes the overlong path, whole or clipped: {next:.300}"
-                );
-                let c = route
-                    .captures(next)
-                    .unwrap_or_else(|| panic!("{label}: next {next:.300} names no route"));
-                assert_eq!(&c[1], tool);
-                assert_eq!(c[2].parse::<usize>().unwrap(), jp.len());
-                (c[3].parse::<u64>().unwrap(), c[4].parse::<u64>().unwrap())
-            } else {
-                let n = next_input(&v, &label).unwrap();
-                assert_eq!(
-                    n["json_path"],
-                    json!(jp),
-                    "{label}: next drops the json_path"
-                );
-                (
-                    n["start_line"].as_u64().unwrap(),
-                    n["end_line"].as_u64().unwrap(),
-                )
-            };
-            assert_eq!(start, v["shown_lines"][1].as_u64().unwrap() + 1, "{label}");
-            input = json!({ "path": tool, "json_path": jp, "start_line": start, "end_line": end });
+        for first in [
+            json!({ "path": tool, "json_path": jp }),
+            json!({ "path": tool, "json_path": jp, "start_line": 1, "end_line": 100_000 }),
+        ] {
+            let label = format!(
+                "reassemble {} B path, ranged={}",
+                jp.len(),
+                first["start_line"]
+            );
+            let (got, nexts, last, total) = follow_json_path(&ctx, &tool, &jp, first, &label).await;
+            assert!(nexts.len() > 1, "{label}: the value was never paged");
+            assert_eq!(
+                (last, total),
+                (600, 600),
+                "{label}: did not reach the last line"
+            );
+            assert!(
+                got.join("\n") == value,
+                "{label}: the pages are not the value"
+            );
         }
-        assert!(got.len() > 1, "{label}: the value was never paged");
-        assert_eq!(
-            got.join("\n"),
-            value,
-            "{label}: the pages are not the value"
-        );
     }
+}
+
+/// Follow a `json_path` read of `tool` until there is no `next`. A route-shaped `next` is
+/// executed EXACTLY as written, its `json_path` parsed back from the literal and required to be
+/// `jp`; a prose `next` must name `tool` and both line numbers, and is followed with the caller's
+/// own `jp`. Every page goes through [`read_minting_nothing`] and must resume on the line after
+/// the last one shown. Returns the pages' contents, every `next` emitted, and the last line
+/// reached with the value's `total_lines`.
+async fn follow_json_path(
+    ctx: &crate::tools::ToolContext,
+    tool: &str,
+    jp: &str,
+    first: Value,
+    label: &str,
+) -> (Vec<String>, Vec<String>, u64, u64) {
+    let prose = regex::Regex::new(
+        r"^call read_file on (@tool_[0-9a-f]+) again with the json_path you passed and start_line=(\d+), end_line=(\d+)$",
+    )
+    .unwrap();
+    let (mut input, mut got, mut nexts) = (first, Vec::new(), Vec::new());
+    let mut last = input["start_line"].as_u64().unwrap_or(1) - 1;
+    let mut total = 0;
+    for _ in 0..1_000 {
+        let v = read_minting_nothing(ctx, &input, tool, label)
+            .await
+            .unwrap_or_else(|| panic!("{label}: {input:.300} failed"));
+        assert!(v.get("file_id").is_none(), "{label}: {v:.300}");
+        let ((a, b), _) = page_span(&input, &v);
+        assert_eq!(
+            a,
+            last + 1,
+            "{label}: a page does not resume after line {last}"
+        );
+        last = b;
+        total = v["total_lines"].as_u64().unwrap_or(total);
+        got.push(v["content"].as_str().unwrap().to_string());
+        let Some(next) = v["next"].as_str() else {
+            return (got, nexts, last, total);
+        };
+        nexts.push(next.to_string());
+        input = if next.starts_with("read_file(") {
+            let n = next_input(&v, label).unwrap();
+            assert_eq!(n["path"], json!(tool), "{label}: next leaves the ref");
+            assert_eq!(
+                n["json_path"],
+                json!(jp),
+                "{label}: the route is not the path given"
+            );
+            n
+        } else {
+            let c = prose.captures(next).unwrap_or_else(|| {
+                panic!("{label}: next is neither a route nor the prose: {next:.300}")
+            });
+            assert_eq!(&c[1], tool, "{label}: the prose names another handle");
+            json!({
+                "path": tool,
+                "json_path": jp,
+                "start_line": c[2].parse::<u64>().unwrap(),
+                "end_line": c[3].parse::<u64>().unwrap(),
+            })
+        };
+    }
+    panic!("{label}: the next chain does not end");
+}
+
+/// The `next` of a `json_path` page quotes the caller's path WHOLE, as a route that runs exactly
+/// as written, while that leaves the page `JSON_PATH_ROUTE_ROOM_FLOOR` of room; past the floor it
+/// states the continuation in prose with the line numbers. It used to name a placeholder for any
+/// path over `INPUT_ECHO_CLIP` (`json_path=<your json_path: 3005 bytes, not repeated here>`),
+/// which failed when copied: `path segment '<your json_path: …' not found`. No string a caller
+/// would copy may carry a `<…>` placeholder or a byte count now. Paths of 9, 301, 3,005 and
+/// 12,005 B, and a sweep that crosses the floor.
+#[tokio::test]
+async fn a_json_path_next_is_a_whole_route_or_plain_prose() {
+    let ctx = ctx().await;
+    let value: String = (1..=600)
+        .map(|i| format!("row {i:04} {}", "v".repeat(40)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut kinds = Vec::new();
+    let sweep = (5_000..=9_000).step_by(200);
+    for key_len in [4usize, 296, 3_000, 12_000].into_iter().chain(sweep) {
+        let key = "k".repeat(key_len);
+        let tool = ctx
+            .output_buffer
+            .store_tool("probe", json!({ key.clone(): value }).to_string());
+        let jp = format!("$[{}]", serde_json::to_string(&key).unwrap());
+        let label = format!("{} B path", jp.len());
+        let first = json!({ "path": tool, "json_path": jp });
+        let text = crate::tools::hint_probe::primary_text(
+            &ReadFile.call_content(first.clone(), &ctx).await.unwrap(),
+        );
+        let (_, nexts, last, total) = follow_json_path(&ctx, &tool, &jp, first, &label).await;
+        assert_eq!(last, total, "{label}: did not reach the last line");
+        for n in nexts.iter().chain([&text]) {
+            assert!(
+                !n.contains("<your") && !n.contains("not repeated here"),
+                "{label}: a placeholder a caller would copy: {n:.300}"
+            );
+        }
+        for n in nexts.iter().filter(|n| !n.starts_with("read_file(")) {
+            assert!(
+                n.contains("with the json_path you passed")
+                    && !n.contains('<')
+                    && !n.contains("bytes"),
+                "{label}: the prose continuation is not the plain sentence: {n:.300}"
+            );
+        }
+        // Classified by the first page's `next`: a range page prices its route a byte or two
+        // differently from the whole-read page, so a path within that of the floor may get one
+        // kind on page one and the other on page two. Both are followed above either way.
+        assert!(!nexts.is_empty(), "{label}: the value was never paged");
+        kinds.push((jp.len(), nexts[0].starts_with("read_file(")));
+    }
+    eprintln!("route (true) or prose (false) by path length: {kinds:?}");
+    for (len, route) in &kinds[..3] {
+        assert!(route, "a {len} B path must be quoted whole in a route");
+    }
+    assert!(
+        !kinds[3].1,
+        "a 12,005 B path cannot be quoted inside the limit"
+    );
+    let swept = &kinds[4..];
+    let first_prose = swept.iter().position(|(_, r)| !r);
+    assert!(
+        first_prose.is_some_and(|i| i > 0 && swept[i..].iter().all(|(_, r)| !r)),
+        "the sweep must cross the floor once, routes below it and prose above: {swept:?}"
+    );
 }
 
 /// `json_path` with a line range slices the VALUE's lines: a string's own lines, or a non-string's
@@ -1429,4 +1655,251 @@ async fn a_json_path_range_slices_the_value_and_an_unranged_inline_read_is_uncha
         .await
         .expect_err("an inverted range beside json_path must be refused, not ignored");
     assert!(err.to_string().contains("invalid line range"), "{err}");
+}
+
+/// `total_lines` of a buffer, or of a value, whose text ends in a newline counts its lines, not
+/// the empty segment after the last one (`str::lines`, not `split('\n')`). A real command's
+/// stdout almost always ends in a newline, while every other fixture here is built with
+/// `join("\n")` and does not. (From the 2026-10-07 review of this branch, mutant M5.)
+#[tokio::test]
+async fn total_lines_of_a_buffer_ending_in_a_newline_counts_its_lines() {
+    let ctx = ctx().await;
+    let body: String = (1..=800)
+        .map(|i| format!("line {i:04} {}\n", "a".repeat(40)))
+        .collect();
+    let cmd = ctx
+        .output_buffer
+        .store("p".into(), body.clone(), String::new(), 0);
+    let t = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": body }).to_string());
+    for input in [
+        json!({ "path": cmd }),
+        json!({ "path": cmd, "start_line": 3, "end_line": 700 }),
+        json!({ "path": cmd, "start_line": 3, "end_line": 5 }),
+        json!({ "path": t, "json_path": "$.v" }),
+        json!({ "path": t, "json_path": "$.v", "start_line": 1, "end_line": 5 }),
+    ] {
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        assert_eq!(v["total_lines"], json!(800), "{input}: {v:.200}");
+    }
+}
+
+/// A clamped line keeps the page's continuation honest. A one-line range whose line is cut
+/// showed every line it asked for, so it is `complete` with no `next`; a two-line range whose
+/// first line is cut stopped short, so it is not complete and its `next` resumes at line 2.
+/// `complete: false` with no `next` is a dead end, and `complete: false` on a range that was
+/// shown in full sends the caller after lines that do not exist. (Review mutants M6, M15.)
+#[tokio::test]
+async fn a_clamped_line_keeps_complete_and_next_consistent() {
+    let ctx = ctx().await;
+    let wide = format!("{}\ntail line", "\u{1}".repeat(5_000));
+    let cmd = ctx
+        .output_buffer
+        .store("p".into(), wide.clone(), String::new(), 0);
+    let t = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": wide }).to_string());
+    for (r, jp) in [(&cmd, None), (&t, Some("$.v"))] {
+        let mk = |s: u64, e: u64| {
+            let mut v = json!({ "path": r, "start_line": s, "end_line": e });
+            if let Some(jp) = jp {
+                v["json_path"] = json!(jp);
+            }
+            v
+        };
+        let one = ReadFile.call(mk(1, 1), &ctx).await.unwrap();
+        assert_eq!(one["line_truncated"], json!(true), "{one:.200}");
+        assert_eq!(one["complete"], json!(true), "{r} {jp:?}: {one:.300}");
+        assert!(one.get("next").is_none(), "{r} {jp:?}: {one:.300}");
+        let two = ReadFile.call(mk(1, 2), &ctx).await.unwrap();
+        assert_eq!(two["line_truncated"], json!(true));
+        assert_eq!(two["complete"], json!(false));
+        let next = two["next"].as_str().unwrap_or_else(|| {
+            panic!("{r} {jp:?}: a cut page that stops short has no next: {two:.300}")
+        });
+        assert!(next.contains("start_line=2, end_line=2"), "{next}");
+    }
+}
+
+/// Every return shape of a `json_path` read carries the keys that say what it answers: a ranged
+/// or paged value still echoes its `path`, `value_type` and `format`. (Review mutant M16.)
+#[tokio::test]
+async fn every_json_path_return_shape_echoes_its_path() {
+    let ctx = ctx().await;
+    let big: String = (1..=800)
+        .map(|i| format!("line {i:04} {}", "a".repeat(40)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let t = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": big }).to_string());
+    for input in [
+        json!({ "path": t, "json_path": "$.v" }),
+        json!({ "path": t, "json_path": "$.v", "start_line": 2, "end_line": 3 }),
+        json!({ "path": t, "json_path": "$.v", "start_line": 2, "end_line": 700 }),
+    ] {
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        assert_eq!(v["path"], json!("$.v"), "{input}: {v:.200}");
+        assert_eq!(v["value_type"], json!("string"), "{input}");
+        assert_eq!(v["format"], json!("json"), "{input}");
+    }
+}
+
+/// `start_line=0` on a buffer ref is refused, as on a real file: lines are 1-indexed, and a
+/// zero read as "from the top" would answer a question nobody asked. (Review mutant M19.)
+#[tokio::test]
+async fn start_line_zero_on_a_buffer_is_refused() {
+    let ctx = ctx().await;
+    let cmd = ctx
+        .output_buffer
+        .store("p".into(), "a\nb\nc".into(), String::new(), 0);
+    let t = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": "a\nb\nc" }).to_string());
+    for input in [
+        json!({ "path": cmd, "start_line": 0, "end_line": 2 }),
+        json!({ "path": t, "json_path": "$.v", "start_line": 0, "end_line": 2 }),
+    ] {
+        let err = ReadFile
+            .call(input.clone(), &ctx)
+            .await
+            .expect_err("start_line=0 must be refused");
+        assert!(
+            err.to_string().contains("invalid line range"),
+            "{input}: {err}"
+        );
+    }
+}
+
+/// A page is sized against the WIDEST `next` it can carry. A `next` resuming at `s + 1` is one
+/// digit wider than one at `s` when `s + 1` gains a digit, so a skeleton priced with the
+/// narrower route admits a cut page one byte over the limit, which `call_content` then buffers
+/// under a second handle: measured under review mutant M13, 10,004 B at `start_line=9`. The
+/// cut fills the page to the byte, at every digit boundary.
+#[tokio::test]
+async fn a_clamped_page_at_a_digit_boundary_of_next_fits() {
+    let ctx = ctx().await;
+    for s in [9usize, 99, 999, 9_999, 99_999] {
+        let mut lines: Vec<String> = (1..s).map(|_| "x".to_string()).collect();
+        lines.push("a".repeat(30_000));
+        lines.push("tail".into());
+        let body = lines.join("\n");
+        let cmd = ctx
+            .output_buffer
+            .store("p".into(), body.clone(), String::new(), 0);
+        let t = ctx
+            .output_buffer
+            .store_tool("probe", json!({ "v": body }).to_string());
+        for (input, base) in [
+            (
+                json!({ "path": cmd, "start_line": s, "end_line": s + 1 }),
+                &cmd,
+            ),
+            (
+                json!({ "path": t, "json_path": "$.v", "start_line": s, "end_line": s + 1 }),
+                &t,
+            ),
+        ] {
+            let label = format!("digit boundary {input}");
+            let v = read_minting_nothing(&ctx, &input, base, &label)
+                .await
+                .unwrap();
+            assert_eq!(v["line_truncated"], json!(true), "{label}");
+            assert!(
+                !crate::tools::exceeds_inline_limit_len(v.to_string().len()),
+                "{label}: {} B is over the inline limit",
+                v.to_string().len()
+            );
+        }
+    }
+}
+
+/// `end_line` without `start_line` on a buffer ref is refused with the real-file rule's own
+/// words (`validate_read_nav_params`), not answered with the whole buffer as if it had not been
+/// passed. A `start_line` that is not a non-negative integer reads as absent on both kinds of
+/// read, so `start_line=-1` beside an end is refused the same way, and `start_line=-1` alone
+/// reads the whole text on both: the buffer arm mirrors the real-file arm, no more.
+#[tokio::test]
+async fn end_line_without_start_line_on_a_buffer_is_refused_as_on_a_real_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(dir.path().join("f.txt"), "a\nb\nc").unwrap();
+    let mut ctx = ctx().await;
+    ctx.agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let real = dir.path().join("f.txt").to_string_lossy().into_owned();
+    let cmd = ctx
+        .output_buffer
+        .store("p".into(), "a\nb\nc".into(), String::new(), 0);
+    let t = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": "a\nb\nc" }).to_string());
+    for path in [&real, &cmd, &t] {
+        let jp = |mut v: Value| {
+            if path.starts_with("@tool_") {
+                v["json_path"] = json!("$.v");
+            }
+            v
+        };
+        for refused in [
+            jp(json!({ "path": path, "end_line": 2 })),
+            jp(json!({ "path": path, "start_line": -1, "end_line": 2 })),
+        ] {
+            if path == &real && refused.get("json_path").is_some() {
+                continue;
+            }
+            let err = ReadFile
+                .call(refused.clone(), &ctx)
+                .await
+                .expect_err("an end without a start must be refused");
+            assert!(
+                err.to_string()
+                    .contains("end_line provided without start_line"),
+                "{refused}: {err}"
+            );
+        }
+        let whole = ReadFile
+            .call(jp(json!({ "path": path, "start_line": -1 })), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(whole["content"], json!("a\nb\nc"), "{path}: {whole}");
+    }
+}
+
+/// The Text form says how many lines a page SHOWS from `shown_lines`, not by counting the
+/// content's lines: a cut line ends in a marker on its own line, and the count read
+/// `[2 of 2 lines shown]` beside `shown_lines: [1, 1]` and a `next` resuming at line 2.
+#[tokio::test]
+async fn the_text_form_counts_the_lines_a_page_shows_not_the_cut_marker() {
+    let ctx = ctx().await;
+    let wide = format!("{}\ntail line", "\u{1}".repeat(5_000));
+    let cmd = ctx
+        .output_buffer
+        .store("p".into(), wide.clone(), String::new(), 0);
+    let value: String = (1..=600)
+        .map(|i| format!("row {i:04} {}", "v".repeat(40)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let t = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": value, "w": wide }).to_string());
+    for input in [
+        json!({ "path": cmd, "start_line": 1, "end_line": 2 }),
+        json!({ "path": t, "json_path": "$.w", "start_line": 1, "end_line": 2 }),
+        json!({ "path": t, "json_path": "$.v", "start_line": 100, "end_line": 600 }),
+    ] {
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        let (a, b) = (
+            v["shown_lines"][0].as_u64().unwrap(),
+            v["shown_lines"][1].as_u64().unwrap(),
+        );
+        let text = crate::tools::hint_probe::primary_text(
+            &ReadFile.call_content(input.clone(), &ctx).await.unwrap(),
+        );
+        let want = format!("[{} of {} lines shown]", b - a + 1, v["total_lines"]);
+        assert!(
+            text.contains(&want),
+            "{input}: want {want:?} in {text:.300}"
+        );
+    }
 }

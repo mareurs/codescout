@@ -1135,6 +1135,26 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // pages a 600-line value under json_paths of 9, 301, 3,005 and 12,005 B, and sweeps
+        // paths across the floor in 200 B steps, through the real tool. Below the floor every
+        // `next` is a literal route that is executed as written to the end of the value; past
+        // it `next` is prose naming the handle and the line numbers, with no placeholder, and
+        // following it with the caller's own path reaches the end too. Every page is checked to
+        // mint no handle. Measured before the floor: the 12,005 B path either named a
+        // placeholder route that failed when copied (`path segment '<your json_path: …' not
+        // found`) or, quoted whole, made a page over the limit buffered under `@tool_*`.
+        // Marker written by production in `read_file::read_from_buffer` (the `prose` closure).
+        // MUTATION (2026-10-07): the floor at 0 (a 12 KB path quoted whole, `@tool_*` minted)
+        // and at 20,000 (a 9 B path given prose) each turn the cited test red.
+        id: "read_file.json_path_route_room",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("with the json_path you passed"),
+            mutation: Mutation::Killed,
+            cited_test: "a_json_path_next_is_a_whole_route_or_plain_prose",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked
