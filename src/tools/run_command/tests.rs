@@ -9067,13 +9067,14 @@ async fn a_job_command_is_clipped_in_escaped_bytes_with_a_marker() {
     }
 }
 
-/// The shapes `handle_successful_output_with` never measures, over the limit by a key that is not
-/// `jobs`: one `buffer_truncated` notice per truncated buffer the command names. At the server's
-/// buffer capacity (50) the notices alone are over the limit, so only a gate on the shape itself,
-/// not the bound on `jobs`, can keep the status key and the jobs in front of the caller.
+/// Every shape, over the limit by a key that is not `jobs`: one `buffer_truncated` notice per
+/// truncated buffer the command names. At the server's buffer capacity (50) the notices alone are
+/// over the limit, so the foreground gate cannot fit them by cutting stdout and the other shapes
+/// were never measured; only shedding them, not the bound on `jobs`, keeps the status key and the
+/// jobs in front of the caller.
 #[cfg(unix)]
 #[tokio::test]
-async fn an_unmeasured_shape_over_the_limit_by_buffer_notices_keeps_its_status() {
+async fn a_shape_over_the_limit_by_buffer_notices_keeps_its_status() {
     let (dir, mut ctx) = project_ctx().await;
     ctx.output_buffer = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
     let cmd_refs: Vec<String> = (0..45)
@@ -9092,6 +9093,7 @@ async fn an_unmeasured_shape_over_the_limit_by_buffer_notices_keeps_its_status()
         .collect();
     let mut failures = Vec::new();
     for shape in [
+        JobsShape::Foreground,
         JobsShape::PendingAck,
         JobsShape::Timeout,
         JobsShape::Background,

@@ -65,7 +65,7 @@ fn jobs_not_listed(
     ))
 }
 
-/// Envelope keys `fit_unmeasured_envelope` sheds, a group at a time and in this order, from a
+/// Envelope keys `shed_envelope_to_fit` sheds, a group at a time and in this order, from a
 /// response over the inline limit: the buffer notices first (one per truncated buffer named, so
 /// the widest), then the job list, then the timeout note.
 const SHED_ORDER: [&[&str]; 3] = [
@@ -74,26 +74,31 @@ const SHED_ORDER: [&[&str]; 3] = [
     &["timeout_hint"],
 ];
 
-/// Measure a response that received envelope keys AFTER it was built, and shed them until it fits.
+/// Measure a response with every envelope key on it, and shed those keys until it fits.
 ///
-/// `handle_successful_output_with` measures the envelope with the response it joins; the pending
-/// acknowledgement, the timeout and the background spawn are built without it and got their keys
-/// in `call`, unmeasured, so a response over the limit was buffered whole under `@tool_*` and the
-/// `@ack_*` handle or `timed_out` status the caller must act on was visible only inside it. Only
-/// the keys `call` added (`added`) are shed, so a response the gate already measured is never
-/// touched, and the shape's own keys stay: those are bounded by construction (the reason a
-/// command is dangerous is the matched rule's description; a timeout's text names only its
-/// seconds). A marker names what was shed and the route that shows it. A response still over the
-/// limit with everything shed is left to `call_content`.
-fn fit_unmeasured_envelope(obj: &mut serde_json::Map<String, Value>, added: &[String]) {
+/// `handle_successful_output_with` measures the envelope with the response it joins, but can only
+/// cut the streams to make room; the pending acknowledgement, the timeout and the background spawn
+/// are built without it and got their keys in `call`, unmeasured. Either way a response over the
+/// limit was buffered whole under `@tool_*`, and the `@ack_*` handle, `timed_out` status or
+/// `@cmd_*` handle the caller must act on was visible only inside it. Measured 2026-10-07 with 45
+/// truncated buffers named (one `buffer_truncated` notice each) at the server's buffer capacity:
+/// 13,450 B for a pending acknowledgement and 13,720 B for a foreground run (`buffered_bytes`).
+///
+/// A response that fits is returned untouched. Only envelope keys are shed, so the shape's own
+/// keys stay: those are bounded by construction (the reason a command is dangerous is the matched
+/// rule's description; a timeout's text names only its seconds) or by the gate that built them. A
+/// marker names what was shed and the route that shows it. A response still over the limit with
+/// every envelope key shed is left to `call_content`.
+fn shed_envelope_to_fit(obj: &mut serde_json::Map<String, Value>) {
     let mut shed: Vec<&str> = Vec::new();
     for group in SHED_ORDER {
         if crate::tools::response_fits(&Value::Object(obj.clone())) {
             return;
         }
-        for key in group.iter().filter(|k| added.iter().any(|a| a == *k)) {
-            obj.remove(*key);
-            shed.push(key);
+        for key in group.iter() {
+            if obj.remove(*key).is_some() {
+                shed.push(key);
+            }
         }
         if !shed.is_empty() {
             obj.insert(
@@ -449,17 +454,13 @@ impl Tool for RunCommand {
         // MEASURED them: a key that is present is left exactly as measured, so a value computed
         // again here (a job that finished meanwhile) cannot change the size of a response that was
         // judged to fit. The other shapes (background, pending ack, timeout) get them here, and
-        // `fit_unmeasured_envelope` measures them here, with the keys they gained.
+        // `shed_envelope_to_fit` measures every shape here, with the keys it carries.
         let envelope = envelope_keys(ctx, command, timeout_hint.as_deref());
         if let Ok(Value::Object(obj)) = &mut result {
-            let mut added = Vec::new();
             for (key, value) in envelope {
-                if !obj.contains_key(&key) {
-                    obj.insert(key.clone(), value);
-                    added.push(key);
-                }
+                obj.entry(key).or_insert(value);
             }
-            fit_unmeasured_envelope(obj, &added);
+            shed_envelope_to_fit(obj);
         }
 
         result
