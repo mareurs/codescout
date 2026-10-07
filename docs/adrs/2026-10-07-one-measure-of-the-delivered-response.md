@@ -89,9 +89,14 @@ cannot mint a second handle. Open question: clipping a page's `content` makes it
 `next` claim lines the caller did not see. It would be marked, not silent, but it is data the caller
 must notice is missing.
 
-**Phase C (not decided here): one carrier for keys the gate must count**, replacing `LateKeys`,
-`extra` and `noted`. Three concretes exist, so the abstraction is justified; it is also the cure for
-root 2, which Phase A does not touch.
+**Phase C (decided against on 2026-10-07, after measuring): one carrier for keys the gate must
+count.** The case for it was that three tools had each built the same carrier (`LateKeys`, `extra`,
+`noted`). The survey (section Survey below) found they do not share an interface: one prices a
+length delta and can prefix text into `stdout`, one inserts keys into the candidate and overwrites,
+one is a closure applied inside the widest skeleton; and they are built at different times (after
+the child exits, before the gate, per arm). Unifying them would have fixed none of the three
+dangerous sites the survey found. The cure is the rule recorded under Built (every fallback arm is
+measured or statically bounded), applied site by site.
 
 ## Alternatives considered
 
@@ -131,7 +136,8 @@ root 2, which Phase A does not touch.
 
 ## Revisit when
 
-Another late-key bug appears (then do Phase C), or a `file_id` tool ships a second handle (then do
+Another late-key bug appears in a shape the survey did not cover (then re-survey; a unified
+carrier needs a shared interface first), or a `file_id` tool ships a second handle (then do
 Phase B), or the `Tool` trait is reworked for another reason (then reconsider the `Draft` design).
 
 ## Evidence
@@ -174,3 +180,25 @@ What Phase A does NOT cover, so nobody reads the wall as wider than it is:
   five files (`librarian/frontmatter.rs`, `librarian/mod.rs`, `audit_doc_refs/parser.rs`,
   `retrieval/embedder.rs`, `symbol/call_graph/mod.rs`) carry production code after an inline test
   module. `tests/result_caps.rs` scans whole files, test modules included, so it makes no such cut.
+
+## Survey of late keys (2026-10-07)
+
+A read-mostly survey enumerated every site in the tools that return their own handle (`read_file`
+and its markdown arms, `memory`, `run_command`) and in `call_content` where a key or text is added
+after the gate decided, and drove the uncounted ones through the real tool. 22 sites: 9 counted by
+the gate already, 13 uncounted and harmless (they overshoot 10,003 bytes without minting a handle,
+which this ADR accepts: `_guide_hint`, `_workspace_notice`, the alias prefix, `corrections`), and 3
+uncounted and dangerous:
+
+- `memory`'s `missing` list in the `file_id` fallback arm, which was never measured and is about 87
+  bytes wider than the inline candidate it replaces: two handles from a 9,948-byte section name.
+- `run_command`'s pending-ack and timeout shapes, which have no gate: an unbounded `jobs` list
+  pushes them behind `@tool_*`, and the `@ack_*` handle the caller must act on is visible only
+  inside that buffer.
+- `memory`'s `extra` keys, re-applied to the fallback arm after it is built (latent, not reached).
+
+The common failure is a fallback arm or response shape that nothing measures, not a missing
+carrier. Rule: every arm that can be returned either passes `response_fits` or has a statically
+bounded shape, and a test per arm says which. The survey also found that a counted key is not a
+bounded one: `jobs` carries each job's full command, so the gate counted it and the response was
+still over the limit.
