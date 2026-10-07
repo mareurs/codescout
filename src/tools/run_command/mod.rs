@@ -16,6 +16,103 @@ use serde_json::{json, Value};
 
 pub struct RunCommand;
 
+/// Most background jobs one response lists in `jobs`.
+///
+/// `jobs` names every live job the command mentions, and each entry carries the job's command, so
+/// the list had no size of its own: measured 2026-10-07 through the real tool, `echo hi` naming
+/// three jobs of 4 KB commands made a response `call_content` buffered whole under `@tool_*`
+/// (12,826 B, `buffered_bytes`), and twenty made 83,427 B. A pending acknowledgement or a timeout
+/// in that state hid its own `@ack_*` handle or `timed_out` status inside the buffer. The jobs past
+/// this many are counted in `jobs_not_listed`, which names the route that lists any one of them.
+/// Eight entries of at most [`JOB_COMMAND_BYTES`] each stay under about 3.3 KB.
+// cap-class: RESULT_CAP run_command.jobs_listed — probed
+pub(super) const JOBS_LISTED_MAX: usize = 8;
+
+/// Escaped bytes of one job's `command` in `jobs`. The command is the one the caller started the
+/// job with, so the elided middle is text the caller already holds; the head and tail say which
+/// job it is.
+// cap-class: RESULT_CAP run_command.job_command_bytes — probed
+pub(super) const JOB_COMMAND_BYTES: usize = 300;
+
+/// A job's command bounded to [`JOB_COMMAND_BYTES`] ESCAPED bytes by eliding its middle, behind a
+/// visible marker: a raw-byte cut let a command dense in control characters serialize to six
+/// times its budget.
+fn clip_job_command(command: &str) -> String {
+    crate::util::text::elide_middle_escaped(
+        command,
+        command.len(),
+        JOB_COMMAND_BYTES,
+        "command",
+        "the rest is the command that started this job",
+    )
+}
+
+/// The `jobs_not_listed` note when the command names more than [`JOBS_LISTED_MAX`] live jobs:
+/// how many are not listed, which ones (those named after the last listed handle, since `jobs`
+/// keeps the command's order), and the route that lists any one of them. `None` when all fit.
+fn jobs_not_listed(
+    job_states: &[(String, crate::tools::output_buffer::JobState, String)],
+) -> Option<String> {
+    let omitted = job_states.len().checked_sub(JOBS_LISTED_MAX)?;
+    if omitted == 0 {
+        return None;
+    }
+    let last = &job_states[JOBS_LISTED_MAX - 1].0;
+    Some(format!(
+        "{omitted} more of the {} jobs this command names are not listed: those named after \
+         {last}. A command naming one handle lists its job: run_command(\"true @bg_…\")",
+        job_states.len()
+    ))
+}
+
+/// Envelope keys `shed_envelope_to_fit` sheds, a group at a time and in this order, from a
+/// response over the inline limit: the buffer notices first (one per truncated buffer named, so
+/// the widest), then the job list, then the timeout note.
+const SHED_ORDER: [&[&str]; 3] = [
+    &["buffer_truncated"],
+    &["jobs", "jobs_not_listed"],
+    &["timeout_hint"],
+];
+
+/// Measure a response with every envelope key on it, and shed those keys until it fits.
+///
+/// `handle_successful_output_with` measures the envelope with the response it joins, but can only
+/// cut the streams to make room; the pending acknowledgement, the timeout and the background spawn
+/// are built without it and got their keys in `call`, unmeasured. Either way a response over the
+/// limit was buffered whole under `@tool_*`, and the `@ack_*` handle, `timed_out` status or
+/// `@cmd_*` handle the caller must act on was visible only inside it. Measured 2026-10-07 with 45
+/// truncated buffers named (one `buffer_truncated` notice each) at the server's buffer capacity:
+/// 13,450 B for a pending acknowledgement and 13,720 B for a foreground run (`buffered_bytes`).
+///
+/// A response that fits is returned untouched. Only envelope keys are shed, so the shape's own
+/// keys stay: those are bounded by construction (the reason a command is dangerous is the matched
+/// rule's description; a timeout's text names only its seconds) or by the gate that built them. A
+/// marker names what was shed and the route that shows it. A response still over the limit with
+/// every envelope key shed is left to `call_content`.
+fn shed_envelope_to_fit(obj: &mut serde_json::Map<String, Value>) {
+    let mut shed: Vec<&str> = Vec::new();
+    for group in SHED_ORDER {
+        if crate::tools::response_fits(&Value::Object(obj.clone())) {
+            return;
+        }
+        for key in group.iter() {
+            if obj.remove(*key).is_some() {
+                shed.push(key);
+            }
+        }
+        if !shed.is_empty() {
+            obj.insert(
+                "envelope_omitted".into(),
+                json!(format!(
+                    "{} not shown: with them this response was over the inline limit. A command \
+                     naming one handle carries its notice and its job: run_command(\"true @bg_…\")",
+                    shed.join(", ")
+                )),
+            );
+        }
+    }
+}
+
 /// Keys `run_command` attaches to EVERY response shape, as one map: `buffer_truncated`, `jobs` and
 /// `timeout_hint`. Built for the inline-or-summary gate (`LateKeys::envelope`), which measures them
 /// with the response they join, and again by `RunCommand::call` for the shapes that gate never
@@ -57,15 +154,19 @@ pub(super) fn envelope_keys(
             "jobs".into(),
             json!(job_states
                 .iter()
+                .take(JOBS_LISTED_MAX)
                 .map(|(id, state, cmd)| {
                     json!({
                         "handle": id,
                         "state": state.summary(),
-                        "command": cmd,
+                        "command": clip_job_command(cmd),
                     })
                 })
                 .collect::<Vec<_>>()),
         );
+        if let Some(note) = jobs_not_listed(&job_states) {
+            keys.insert("jobs_not_listed".into(), json!(note));
+        }
     }
     // Said when the timeout parameter was auto-corrected.
     if let Some(hint) = timeout_hint {
@@ -352,12 +453,14 @@ impl Tool for RunCommand {
         // `handle_successful_output_with` already carries them, because its inline-or-summary gate
         // MEASURED them: a key that is present is left exactly as measured, so a value computed
         // again here (a job that finished meanwhile) cannot change the size of a response that was
-        // judged to fit. The other shapes (background, pending ack, timeout) get them here.
+        // judged to fit. The other shapes (background, pending ack, timeout) get them here, and
+        // `shed_envelope_to_fit` measures every shape here, with the keys it carries.
         let envelope = envelope_keys(ctx, command, timeout_hint.as_deref());
         if let Ok(Value::Object(obj)) = &mut result {
             for (key, value) in envelope {
                 obj.entry(key).or_insert(value);
             }
+            shed_envelope_to_fit(obj);
         }
 
         result
