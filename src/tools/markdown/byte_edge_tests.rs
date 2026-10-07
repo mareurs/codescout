@@ -751,3 +751,87 @@ async fn a_multi_heading_overflow_error_echoes_bounded_headings() {
     );
     assert_one_handle_and_fits(input, "multi 80").await;
 }
+/// The multi-heading error keeps `requested_headings` exactly when the error body WITH the list
+/// fits, measured on the SERIALIZED body. The list is swept across the edge in every class (each
+/// heading unclipped, under 200 B), so the body around it crosses 10,003 B. A gate on the
+/// headings' RAW bytes keeps a list whose body is over the limit: in the escaped classes, and in
+/// ASCII too once the message, hint, `file_id` and `next_actions` are counted.
+#[tokio::test]
+async fn a_multi_heading_error_keeps_its_heading_list_exactly_when_the_body_fits() {
+    let dir = tempfile::tempdir().unwrap();
+    let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
+    for (class, unit) in CLASSES.into_iter().chain([("esc", "\u{1b}")]) {
+        let u = json_escaped_len(unit);
+        let m = 180 / u;
+        // One echo: `Hnnn ` and `m` units, quoted, and its comma.
+        let entry = 5 + m * u + 3;
+        let (mut kept, mut omitted) = (0, 0);
+        // One context per class: the error path marks no coverage, so no case sees another's.
+        let ctx = ctx().await;
+        // The list sizes; the rest of the error body adds about 1 KB, so the BODY crosses 10,003 B.
+        for target in (8_500..=10_000).step_by(100) {
+            let n = target / entry;
+            // The remainder is spread a unit at a time, so every heading stays under the 200 B
+            // echo clip.
+            let pad = (target - n * entry) / u;
+            let headings: Vec<String> = (0..n)
+                .map(|i| {
+                    let extra = pad / n + usize::from(i < pad % n);
+                    format!("H{i:03} {}", unit.repeat(m + extra))
+                })
+                .collect();
+            let body: String = headings
+                .iter()
+                .map(|h| format!("## {h}\n{}\n", "b\n".repeat(80)))
+                .collect();
+            let path = dir.path().join(format!("list-{class}-{target}.md"));
+            std::fs::write(&path, &body).unwrap();
+            let asked: Vec<String> = (0..n).map(|i| format!("## H{i:03}")).collect();
+            let input = json!({ "path": path.to_str().unwrap(), "headings": asked });
+            let label = format!("{class} list {target}");
+            let (text, compact) = deliver(&ctx, &input).await;
+            assert!(
+                text.contains("exceeds inline threshold"),
+                "{label}: {text:.300}"
+            );
+            assert!(!text.contains("@tool_"), "{label}: {text:.300}");
+            assert!(handles_in(&text).len() <= 1, "{label}: {text:.300}");
+            assert!(
+                compact <= limit,
+                "{label}: the error body is {compact} B, over the inline limit"
+            );
+            let err = ReadFile.call(input, &ctx).await.unwrap_err();
+            let rec = err.downcast_ref::<RecoverableError>().unwrap();
+            let predicted = json!(headings
+                .iter()
+                .map(|h| format!("## {h}"))
+                .collect::<Vec<_>>());
+            match rec.extra.get("requested_headings") {
+                Some(list) => {
+                    assert_eq!(list, &predicted, "{label}");
+                    kept += 1;
+                }
+                None => {
+                    assert_eq!(
+                        rec.extra["requested_headings_omitted"],
+                        json!(true),
+                        "{label}"
+                    );
+                    // The same body with the list in place of its omission marker.
+                    let with_list = compact - r#""requested_headings_omitted":true"#.len()
+                        + r#""requested_headings":"#.len()
+                        + predicted.to_string().len();
+                    assert!(
+                        with_list > limit,
+                        "{label}: the list was omitted from a body that fits with it ({with_list} B)"
+                    );
+                    omitted += 1;
+                }
+            }
+        }
+        assert!(
+            kept > 0 && omitted > 0,
+            "{class}: the sweep must cross the edge (kept {kept}, omitted {omitted})"
+        );
+    }
+}
