@@ -767,3 +767,168 @@ async fn a_holder_of_the_handle_is_told_once_when_a_path_read_changed_it() {
         "the notice was not consumed: {second:?}"
     );
 }
+
+/// A project root with a `.codescout` dir, canonical, so relative paths resolve against it.
+fn project() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    (dir, root)
+}
+
+/// A context activated on `root`, over a fresh production-sized pool.
+async fn ctx_at(root: &std::path::Path) -> crate::tools::ToolContext {
+    ctx_sharing(
+        Agent::new(Some(root.to_path_buf())).await.unwrap(),
+        std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+    )
+}
+
+/// A `json_path` value of a real file is a SNAPSHOT. It must never be stored as the file's
+/// whole-file handle: dedup finds that handle by path, so the value would overwrite the file's
+/// one handle and get a `source_path`, the archived 2026-08-25 bug class. From review RB
+/// (mutant M21: `inline_or_file_id` calling `store_file`, which survived the suite).
+#[tokio::test]
+async fn a_json_path_value_never_becomes_the_files_handle() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let rows: Vec<String> = (0..600).map(|i| format!("row {i:04} padding")).collect();
+    let body = serde_json::to_string_pretty(&json!({ "k": rows, "other": 1 })).unwrap();
+    let path = write(dir.path(), "v.json", &body);
+    let whole = delivered_handle(&ctx, &json!({ "path": path })).await;
+    let value = delivered_handle(&ctx, &json!({ "path": path, "json_path": "$.k" })).await;
+    assert_ne!(
+        value, whole,
+        "the value was filed under the file's own handle"
+    );
+    assert_eq!(
+        ctx.output_buffer.get_stream(&whole).as_deref(),
+        Some(body.as_str()),
+        "the file's handle no longer holds the file"
+    );
+    assert!(
+        ctx.output_buffer.get(&value).unwrap().source_path.is_none(),
+        "a json_path value must be a snapshot"
+    );
+    // With no whole-file handle yet, the value still must not get a `source_path`.
+    let fresh = ctx_sharing(
+        ctx.agent.clone(),
+        std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+    );
+    let v2 = delivered_handle(&fresh, &json!({ "path": path, "json_path": "$.k" })).await;
+    assert!(fresh.output_buffer.get(&v2).unwrap().source_path.is_none());
+}
+
+/// R3 is "one handle per RESOLVED path": every spelling of one file (relative, `./`, absolute,
+/// `..`, a symlink, `//`) names the same handle, for a whole read and a range read alike. From
+/// review RB (mutant M6: the range arm keyed on the raw path, which survived the suite).
+#[tokio::test]
+async fn every_spelling_of_one_path_names_its_one_handle() {
+    let (_dir, root) = project();
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(root.join("sub/x.txt"), big_text("p", 400)).unwrap();
+    std::os::unix::fs::symlink(root.join("sub/x.txt"), root.join("link.txt")).unwrap();
+    let ctx = ctx_at(&root).await;
+    let abs = root.join("sub/x.txt").to_string_lossy().to_string();
+    let spellings = [
+        "sub/x.txt",
+        "./sub/x.txt",
+        abs.as_str(),
+        "sub/../sub/x.txt",
+        "link.txt",
+        "sub//x.txt",
+    ];
+    let mut handles = BTreeSet::new();
+    for s in spellings {
+        handles.insert(delivered_handle(&ctx, &json!({ "path": s })).await);
+        handles.insert(
+            delivered_handle(
+                &ctx,
+                &json!({ "path": s, "start_line": 2, "end_line": 300 }),
+            )
+            .await,
+        );
+    }
+    assert_eq!(handles.len(), 1, "one file, several handles: {handles:?}");
+    assert_eq!(ctx.output_buffer.entry_count(), 1);
+}
+
+/// The same relative path under two project roots is two files: two handles, each holding its
+/// own file, and switching back finds the first root's handle. From review RB (the other side
+/// of M6: a key on the raw relative path would collide here).
+#[tokio::test]
+async fn the_same_relative_path_in_two_roots_keeps_two_handles() {
+    let (_a, ra) = project();
+    let (_b, rb) = project();
+    let (body_a, body_b) = (big_text("A", 400), big_text("B", 400));
+    std::fs::write(ra.join("same.txt"), &body_a).unwrap();
+    std::fs::write(rb.join("same.txt"), &body_b).unwrap();
+    std::fs::write(ra.join("twin.txt"), &body_a).unwrap();
+    std::fs::write(rb.join("twin.txt"), &body_a).unwrap();
+    let mut ctx = ctx_at(&ra).await;
+    let range = json!({ "path": "twin.txt", "start_line": 1, "end_line": 300 });
+    let ha = delivered_handle(&ctx, &json!({ "path": "same.txt" })).await;
+    let ta = delivered_handle(&ctx, &range).await;
+    ctx.workspace_override = Some(rb.clone());
+    let hb = delivered_handle(&ctx, &json!({ "path": "same.txt" })).await;
+    let tb = delivered_handle(&ctx, &range).await;
+    assert_ne!(ha, hb, "two roots' same.txt shared a handle");
+    assert_ne!(ta, tb, "two roots' identical twin.txt shared a handle");
+    assert_eq!(ctx.output_buffer.get_stream(&ha), Some(body_a.clone()));
+    assert_eq!(ctx.output_buffer.get_stream(&hb), Some(body_b));
+    ctx.workspace_override = None;
+    assert_eq!(
+        delivered_handle(&ctx, &json!({ "path": "same.txt" })).await,
+        ha
+    );
+    assert_eq!(ctx.output_buffer.get_stream(&ha), Some(body_a));
+}
+
+/// At capacity (50, the production size), a re-read of a file whose handle is the pool's
+/// least-recently-used entry returns that handle and evicts nothing: the lookup must scan the
+/// whole pool and run before any eviction. From review RB (mutants M4 evict-before-lookup, M5
+/// scan only the 8 most recent, M29 a hit that evicts; M5 survived the suite).
+#[tokio::test]
+async fn a_reread_at_capacity_reuses_its_handle_and_evicts_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let md = write(
+        dir.path(),
+        "cap.md",
+        &format!(
+            "# C\n\n## A\n{}\n\n## B\n{}\n",
+            big_text("a", 300),
+            big_text("b", 300)
+        ),
+    );
+    let agent = Agent::new(None).await.unwrap();
+    for input in [
+        json!({ "path": md }),
+        json!({ "path": md, "start_line": 3, "end_line": 400 }),
+        json!({ "path": md, "start_line": 3, "end_line": 400, "force": true }),
+        json!({ "path": md, "heading": "## A" }),
+        json!({ "path": md, "headings": ["## A", "## B"] }),
+    ] {
+        let ctx = ctx_sharing(
+            agent.clone(),
+            std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+        );
+        // The file's handle is minted FIRST, so it is the least-recently-used entry.
+        let h = delivered_handle(&ctx, &input).await;
+        let fillers: Vec<String> = (0..49)
+            .map(|i| ctx.output_buffer.store_tool("t", format!("filler {i}")))
+            .collect();
+        assert_eq!(ctx.output_buffer.entry_count(), 50, "fixture: pool full");
+        assert_eq!(
+            delivered_handle(&ctx, &input).await,
+            h,
+            "{input}: a re-read at capacity changed the handle"
+        );
+        assert_eq!(ctx.output_buffer.entry_count(), 50);
+        for f in &fillers {
+            assert!(
+                ctx.output_buffer.get(f).is_some(),
+                "{input}: a re-read at capacity evicted {f}"
+            );
+        }
+    }
+}

@@ -3222,6 +3222,19 @@ mod tests {
             "a survived because the hit bumped it"
         );
     }
+    /// A SNAPSHOT dedup hit (a `json_path`/`toml_key` value, a memory view) is a use and bumps
+    /// LRU exactly like a whole-file hit; `a_store_file_hit_bumps_lru` covers only that kind.
+    /// From review RB (mutant M3b: bump only on whole-file hits, which survived the suite).
+    #[test]
+    fn a_snapshot_hit_bumps_lru() {
+        let buf = OutputBuffer::new(2);
+        let e = buf.store_file_excerpt("/x/f.json".into(), "[1]".into()); // [e]
+        let b = buf.store_tool("t", "B".into()); // [e, b]
+        assert_eq!(buf.store_file_excerpt("/x/f.json".into(), "[1]".into()), e); // hit -> [b, e]
+        let _c = buf.store_tool("t", "C".into()); // evicts the LRU
+        assert!(buf.get(&b).is_none(), "b was LRU and should be evicted");
+        assert!(buf.get(&e).is_some(), "the snapshot hit must have bumped e");
+    }
 
     #[test]
     fn store_pending_write_returns_ack_handle_and_round_trips() {
