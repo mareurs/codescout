@@ -279,6 +279,13 @@ struct BufferInner {
     /// Content-hash → handle id, for `@tool_*` dedup. Kept in sync with
     /// `entries` by `evict_oldest_locked`.
     content_index: HashMap<String, String>,
+    /// `@file_*` handles whose content a whole-file store CHANGED in place (a path read of a
+    /// file that had changed) since the handle last reported a refresh. The disk check in
+    /// `get_with_refresh_flag` cannot see such a change: the store already stamped the entry
+    /// with the file's mtime. Consumed by `get_with_refresh_flag` only, so the next read that
+    /// can tell a holder (`resolve_refs`: `↻ <handle> refreshed from disk`) does, once; a
+    /// plain `get()` leaves it in place. Cleared on eviction.
+    refresh_pending: std::collections::HashSet<String>,
     // --- pending-ack store (commands and writes) ---
     pending_acks: HashMap<String, PendingAck>,
     pending_order: Vec<String>,
@@ -298,6 +305,7 @@ impl OutputBuffer {
                 max_entries,
                 counter: 0,
                 content_index: HashMap::new(),
+                refresh_pending: std::collections::HashSet::new(),
                 pending_acks: HashMap::new(),
                 pending_order: Vec::new(),
                 max_pending: 20,
@@ -316,6 +324,7 @@ impl OutputBuffer {
         if inner.entries.len() >= inner.max_entries {
             if let Some(oldest_id) = inner.order.first().cloned() {
                 inner.order.remove(0);
+                inner.refresh_pending.remove(&oldest_id);
                 if let Some(entry) = inner.entries.remove(&oldest_id) {
                     if let Some(h) = entry.content_hash {
                         // Only clear the slot if it still points at the evicted
@@ -436,11 +445,12 @@ impl OutputBuffer {
     /// For `@file_*` handles (entries with `source_path` set), checks the file's
     /// mtime against the stored timestamp. If the file is newer, re-reads its content
     /// and updates the entry in-place. If the file is gone or unreadable, returns `None`.
+    /// A pending in-place change stays pending: only [`get_with_refresh_flag`] reports it.
     ///
     /// Supports a `.err` suffix on the handle (e.g. `@cmd_xxx.err`),
     /// which returns the same entry (caller decides what to extract).
     pub fn get(&self, id: &str) -> Option<BufferEntry> {
-        self.get_with_refresh_flag(id).map(|(entry, _)| entry)
+        self.resolve(id, false).map(|(entry, _)| entry)
     }
 
     /// Resolve `id` and return **the stream the handle names**, applying the `.err`
@@ -470,14 +480,24 @@ impl OutputBuffer {
         }
     }
 
-    /// Like [`get`], but also returns whether the entry was refreshed from disk.
-    /// Only `@file_*` entries with `source_path` set can refresh; all others return `false`.
+    /// Like [`get`], but also returns whether the entry's content changed since the handle
+    /// last reported it: refreshed from disk now, or changed in place by a whole-file store (a
+    /// path read of the file) since. Only `@file_*` entries with `source_path` set can change;
+    /// all others return `false`. Each change is reported once — this call consumes it — and
+    /// `get` never does, so an internal lookup cannot swallow a holder's notice.
     ///
     /// A refreshed entry is stamped with the mtime observed BEFORE its re-read, the same rule
     /// a whole-file store follows ([`OutputBuffer::store_file_read`]): a write landing during
     /// the re-read leaves the file's mtime above the stamp, so the next read refreshes again
     /// instead of keeping the text read before that write.
     pub fn get_with_refresh_flag(&self, id: &str) -> Option<(BufferEntry, bool)> {
+        self.resolve(id, true)
+    }
+
+    /// Shared body of [`get`] and [`get_with_refresh_flag`]: resolve `id`, refresh a stale
+    /// whole-file entry from disk, bump LRU. `report` says whether a pending in-place change is
+    /// consumed and reported.
+    fn resolve(&self, id: &str, report: bool) -> Option<(BufferEntry, bool)> {
         let canonical = id.strip_suffix(".err").unwrap_or(id);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -496,6 +516,7 @@ impl OutputBuffer {
                         // no content_index slot to clear — see evict_oldest_locked.)
                         inner.order.retain(|k| k != canonical);
                         inner.entries.remove(canonical);
+                        inner.refresh_pending.remove(canonical);
                         return None;
                     }
                     Ok(meta) => {
@@ -525,10 +546,12 @@ impl OutputBuffer {
                     // (file entry only: content_hash is None, no content_index slot.)
                     inner.order.retain(|k| k != canonical);
                     inner.entries.remove(canonical);
+                    inner.refresh_pending.remove(canonical);
                     return None;
                 }
             }
         }
+        let changed_in_place = report && inner.refresh_pending.remove(canonical);
 
         // Refresh LRU order: move to end.
         Self::bump_lru_locked(&mut inner, canonical);
@@ -536,7 +559,7 @@ impl OutputBuffer {
             .entries
             .get(canonical)
             .cloned()
-            .map(|e| (e, needs_refresh))
+            .map(|e| (e, needs_refresh || changed_in_place))
     }
 
     /// Store a file's WHOLE content under its ONE `@file_*` handle, for a caller that does
@@ -658,7 +681,10 @@ impl OutputBuffer {
     ///   [`OutputBuffer::store_file_read`]). An equal mtime overwrites: a file deleted
     ///   and recreated within one mtime tick is told apart only by its bytes. A file
     ///   restored to an older mtime (`cp -p`, `touch -d`) is at the reader's version,
-    ///   so its text is taken too.
+    ///   so its text is taken too. A store that CHANGES the bytes marks the handle so its
+    ///   holders are told once, by the next `get_with_refresh_flag` (review B2: the in-place
+    ///   update had silently replaced the `↻ … refreshed from disk` notice a holder got when
+    ///   the re-read minted a new handle and the old one refreshed itself).
     /// - A snapshot (`source_path` unset: an excerpt, or a synthetic `@…` view) is
     ///   reused only when an entry of the same name holds byte-identical content.
     ///   Same name with different content is a different view (two section filters
@@ -701,15 +727,23 @@ impl OutputBuffer {
                 ..
             } = &kind
             {
+                let mut changed = false;
                 if let Some(entry) = inner.entries.get_mut(&id) {
                     let stale_read =
                         read_mtime.is_some_and(|r| r < entry.timestamp && *now_mtime != Some(r));
                     if !stale_read {
                         if entry.stdout != *content {
                             entry.stdout = content.into_owned();
+                            changed = true;
                         }
                         entry.timestamp = read_mtime.unwrap_or(0);
                     }
+                }
+                // A holder of the handle saw the old bytes; the next read that can tell them
+                // (`get_with_refresh_flag`) does. This store's own caller is handed the new
+                // bytes in its response and is not told.
+                if changed {
+                    inner.refresh_pending.insert(id.clone());
                 }
             }
             Self::bump_lru_locked(&mut inner, &id);
@@ -2919,16 +2953,17 @@ mod tests {
         let first = buf.store_file(path.clone(), "old".into());
         std::fs::write(&p, "new").unwrap();
         let past = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
-        // An mtime in the past: a read of the handle will NOT refresh it, so what the handle
-        // holds below is what the store put there, not what a refresh re-read.
+        // An mtime in the past (a file restored to an older time): the store stamps the entry
+        // with it, so a read of the handle does not re-read the file, and what the handle holds
+        // below is what the store put there.
         filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(past)).unwrap();
         let again = buf.store_file(path.clone(), "new".into());
         assert_eq!(first, again, "a changed file must keep its one handle");
         assert_eq!(buf.entry_count(), 1);
         let (entry, refreshed) = buf.get_with_refresh_flag(&first).unwrap();
         assert!(
-            !refreshed,
-            "the mtime is in the past; this read cannot refresh"
+            refreshed,
+            "the store changed the bytes behind the handle; its holder must be told (review B2)"
         );
         assert_eq!(
             entry.stdout, "new",
@@ -2940,35 +2975,78 @@ mod tests {
             "the entry still refreshes from its file"
         );
     }
-    /// The store that finds the live entry also records WHEN it brought the entry up to the file,
-    /// so a later read does not "refresh" an entry that already holds the file's bytes. Without
-    /// the timestamp, a file written between the first store and the second (mtime in between)
-    /// makes the next `get_with_refresh_flag` re-read it and report a refresh of content the
-    /// caller was just handed, both for changed and for unchanged content.
+    /// The store that finds the live entry also stamps it with the mtime of the version it
+    /// just stored, so a later read does not re-read from disk an entry that already holds the
+    /// file's bytes. Without the stamp, a file written between the first store and the second
+    /// makes the next read re-read it. Observed through the content: after the second store the
+    /// file's bytes are swapped at the SAME mtime, which only a re-read from disk would pick up.
+    /// The refresh FLAG is a different question (review B2): it is raised once when the store
+    /// changed the bytes, for the handle's holders, and never for an unchanged store.
     #[test]
     fn a_store_hit_leaves_nothing_for_a_later_read_to_refresh() {
         let dir = tempfile::tempdir().unwrap();
-        let ms = std::time::Duration::from_millis(20);
+        let ago = |secs| {
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+            )
+        };
         for (first_body, second_body) in [("old", "new"), ("same", "same")] {
             let p = dir.path().join(format!("{first_body}-{second_body}.txt"));
             std::fs::write(&p, first_body).unwrap();
+            filetime::set_file_mtime(&p, ago(100)).unwrap();
             let path = p.to_string_lossy().to_string();
             let buf = OutputBuffer::new(10);
             let first = buf.store_file(path.clone(), first_body.into());
-            std::thread::sleep(ms);
+            // One instant, reused: `ago` read twice would differ by the time between the calls.
+            let t2 = ago(50);
             std::fs::write(&p, second_body).unwrap();
-            // An mtime after the first store and before the second.
-            filetime::set_file_mtime(&p, filetime::FileTime::now()).unwrap();
-            std::thread::sleep(ms);
+            filetime::set_file_mtime(&p, t2).unwrap();
             assert_eq!(buf.store_file(path, second_body.into()), first);
+            // Other bytes, same mtime: invisible to the stamp check, visible to a re-read.
+            std::fs::write(&p, "DISK").unwrap();
+            filetime::set_file_mtime(&p, t2).unwrap();
             let (entry, refreshed) = buf.get_with_refresh_flag(&first).unwrap();
-            assert!(
-                !refreshed,
-                "{first_body}->{second_body}: the store left the entry stale for a read to refresh"
+            assert_eq!(
+                entry.stdout, second_body,
+                "{first_body}->{second_body}: the store left the entry stale, and a read re-read it"
             );
-            assert_eq!(entry.stdout, second_body);
+            assert_eq!(
+                refreshed,
+                first_body != second_body,
+                "{first_body}->{second_body}: the holder's notice"
+            );
+            let (_, again) = buf.get_with_refresh_flag(&first).unwrap();
+            assert!(!again, "{first_body}->{second_body}: reported twice");
         }
     }
+    /// A change a store made in place is reported by `get_with_refresh_flag` only, once. A plain
+    /// `get()` (what `is_markdown_target`, `truncation_notice` and the buffer readers call
+    /// before the read that can show a notice) must not swallow it.
+    #[test]
+    fn an_in_place_change_is_reported_once_and_only_by_the_reporting_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("n.txt");
+        let ago = |secs| {
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+            )
+        };
+        std::fs::write(&p, "old").unwrap();
+        filetime::set_file_mtime(&p, ago(100)).unwrap();
+        let path = p.to_string_lossy().to_string();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file(path.clone(), "old".into());
+        std::fs::write(&p, "new").unwrap();
+        filetime::set_file_mtime(&p, ago(50)).unwrap();
+        assert_eq!(buf.store_file(path, "new".into()), h);
+        assert_eq!(buf.get(&h).unwrap().stdout, "new");
+        assert_eq!(buf.get_stream(&h).as_deref(), Some("new"));
+        let (_, first) = buf.get_with_refresh_flag(&h).unwrap();
+        assert!(first, "a silent get swallowed the holder's notice");
+        let (_, second) = buf.get_with_refresh_flag(&h).unwrap();
+        assert!(!second, "the notice was reported twice");
+    }
+
     /// The stale-write race (review RB-A7) at the store API, with explicit mtimes. Reader B read
     /// v2 when the file's mtime was T2 and stored first; reader A read v1 earlier, at T1 < T2,
     /// and stores late. The file is at T2, not at A's version, so A's text is older than the

@@ -582,3 +582,79 @@ async fn a_late_store_of_an_older_read_never_regresses_the_files_handle() {
         assert_eq!(buf.entry_count(), 1, "{name}");
     }
 }
+
+/// Review B2: a HOLDER of the file's handle is told, once, when a path read changed the bytes
+/// behind it. The path re-read updates the one handle in place (R3) and stamps it with the
+/// file's mtime, so the disk check in `get_with_refresh_flag` finds nothing stale; before the
+/// fix the `↻ … refreshed from disk` notice a holder got on baseline (where the re-read minted
+/// a new handle and the old one refreshed itself) was simply lost. The reader who made the
+/// path read is handed the new bytes and is not told about them.
+#[tokio::test]
+async fn a_holder_of_the_handle_is_told_once_when_a_path_read_changed_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    let ctx = ctx_sharing(
+        Agent::new(Some(root.clone())).await.unwrap(),
+        std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+    );
+    let ago = |secs: u64| {
+        filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+        )
+    };
+    let p = root.join("data.txt");
+    let (v1, v2) = (big_text("v1", 400), big_text("v2v2", 420));
+    std::fs::write(&p, &v1).unwrap();
+    filetime::set_file_mtime(&p, ago(100)).unwrap();
+    let read = || ReadFile.call(json!({ "path": "data.txt" }), &ctx);
+    let h = read().await.unwrap()["file_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let wc = || {
+        let command = format!("wc -c {h}");
+        let ctx = &ctx;
+        async move {
+            crate::tools::run_command::RunCommand
+                .call(json!({ "command": command }), ctx)
+                .await
+                .unwrap()["stdout"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        }
+    };
+    let notice = format!("↻ {h} refreshed from disk");
+    assert!(
+        !wc().await.contains(&notice),
+        "fixture: nothing changed yet"
+    );
+
+    // An unchanged re-read tells nobody anything.
+    read().await.unwrap();
+    assert!(
+        !wc().await.contains(&notice),
+        "an unchanged re-read raised a notice"
+    );
+
+    std::fs::write(&p, &v2).unwrap();
+    filetime::set_file_mtime(&p, ago(50)).unwrap();
+    let again = read().await.unwrap();
+    assert_eq!(again["file_id"].as_str(), Some(h.as_str()));
+    assert!(
+        !again.to_string().contains("refreshed"),
+        "the path reader was told about the bytes it was just handed: {again}"
+    );
+    let first = wc().await;
+    assert!(
+        first.starts_with(&notice),
+        "the holder was not told the handle changed: {first:?}"
+    );
+    assert!(first.contains(&v2.len().to_string()), "{first:?}");
+    let second = wc().await;
+    assert!(
+        !second.contains(&notice),
+        "the notice was not consumed: {second:?}"
+    );
+}
