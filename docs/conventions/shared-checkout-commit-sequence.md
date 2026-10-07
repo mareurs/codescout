@@ -307,7 +307,8 @@ decided set by SHA. That rule is in `docs/RELEASE.md` § *Concurrent-Work Rules*
 pre-push guard, `scripts/pre-push-foreign-session-guard.sh`, refuses a push that carries any commit whose
 `Session-Id` trailer has a hold. It refuses before it reads `CODESCOUT_PUSH_ACK`, so `CODESCOUT_PUSH_ACK=all` does
 not clear a hold. It checks every pushed ref except a deletion, so a tag or a `refs/wip/*` push is covered too, and it
-refuses when it cannot list a push range while any hold exists. It names the reason, the age and the release
+refuses when it cannot list a push range while any hold exists. It names the reason, the age (in seconds, minutes, hours or days; from 24 hours up it counts days, so 49 hours prints
+`2d`) and the release
 command. For each pushed branch ref that carries a held commit, and labelled with that branch, it also says what
 can still be pushed: the prefix push when something unpublished sits below that ref's oldest held commit, "There is
 no prefix to push" when nothing there is unpublished, and, when the remote tip is not in the local object store

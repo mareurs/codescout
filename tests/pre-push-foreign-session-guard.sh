@@ -719,7 +719,7 @@ SCANNED_OPENERS="$(awk '!inb && /<<[A-Za-z_][A-Za-z_0-9]*$/{n++; inb=1; d=$0; su
 # into every body of a COPY and require the scanner to find one hit per body. Invariant to
 # banner length and to rewording; red exactly when the selector goes stale or an opener form
 # appears that it cannot see.
-MUT="$(mktemp)"
+MUT="$(mktemp "$SUITE_TMP/mut-XXXXXX")"
 awk '
     !inb && /<<[A-Za-z_][A-Za-z_0-9]*$/ { d = $0; sub(/^.*<</, "", d); print; print "  injected `probe` line"; inb = 1; next }
     inb && $0 == d                     { inb = 0 }
@@ -1865,6 +1865,66 @@ eq    "G7: a lone guard still refuses a held commit" "$EC" 1
 has   "G7: (as a hold refusal)" "$OUT" "PUBLISH HOLD"
 has   "G7: its age degrades to unknown time" "$OUT" "held for unknown time"
 hasnt "G7: and nothing is 'command not found'" "$OUT" "command not found"
+
+# --- G5b: the per-ref state must be RESET between refs. main carries a held commit, `clean` carries
+# none. The clean ref must get no advice line of its own, whichever order git lists them in, and
+# when main has a pushable prefix that push line must be labelled `main` only.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+git -C "$REPO" branch clean "$BASE"
+commit "$ALICE" "alice pushable on main"; A1=$(sha)
+commit "$BOB"   "bob held on main"; B1=$(sha)
+git -C "$REPO" checkout -q clean
+commit "$ALICE" "alice unheld on clean"; C1=$(sha)
+git -C "$REPO" checkout -q main
+mkhold "$BOB" "reset between refs"
+HELD_FIRST="refs/heads/main $B1 refs/heads/main $BASE"$'\n'"refs/heads/clean $C1 refs/heads/clean $BASE"
+CLEAN_FIRST="refs/heads/clean $C1 refs/heads/clean $BASE"$'\n'"refs/heads/main $B1 refs/heads/main $BASE"
+for ORDER in HELD_FIRST CLEAN_FIRST; do
+    run "$ALICE" all "${!ORDER}"
+    eq    "G5b ($ORDER): refused" "$EC" 1
+    has   "G5b ($ORDER): main's pushable prefix is printed (the hold refusal ran)" "$OUT" "git push origin $A1:main"
+    has   "G5b ($ORDER): main's line carries its own label" "$OUT" "[main] The commits below the oldest held one are not held"
+    hasnt "G5b ($ORDER): the unheld ref gets no advice line of its own" "$OUT" "[clean]"
+    hasnt "G5b ($ORDER): and no push line is labelled with the unheld branch" "$OUT" ":clean"
+done
+# the same with no prefix on main: its no-prefix line is printed, the clean ref still gets nothing
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+git -C "$REPO" branch clean "$BASE"
+commit "$BOB"   "bob held right on the tip"; B1=$(sha)
+git -C "$REPO" checkout -q clean
+commit "$ALICE" "alice unheld on clean"; C1=$(sha)
+git -C "$REPO" checkout -q main
+mkhold "$BOB" "reset between refs, no prefix"
+run "$ALICE" all "refs/heads/main $B1 refs/heads/main $BASE"$'\n'"refs/heads/clean $C1 refs/heads/clean $BASE"
+eq    "G5b (no prefix): refused" "$EC" 1
+has   "G5b (no prefix): main says there is no prefix to push" "$OUT" "[main] There is no prefix to push"
+hasnt "G5b (no prefix): the unheld ref is not given an invented no-prefix line" "$OUT" "[clean]"
+
+# --- G2b/G6b: a held commit that is ALREADY on a remote-tracking ref is published, so a NEW branch
+# (zero sha) or a force push over an UNKNOWN tip above it must pass. Each is paired with the same
+# push where the held commit is on no remote, which must be refused (so neither can pass vacuously).
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob held, already published"; B1=$(sha)
+commit "$ALICE" "alice on top"; U1=$(sha)
+mkhold "$BOB" "published already"
+UNKNOWN="$(printf 'a made-up remote tip for the published case' | git -C "$REPO" hash-object --stdin)"
+git -C "$REPO" update-ref refs/remotes/origin/main "$BASE"
+run "$ALICE" all "refs/heads/main $U1 refs/heads/feature $ZERO"
+eq    "G6b control: held commit on no remote, new branch: refused" "$EC" 1
+has   "G6b control: (as a hold refusal listing it)" "$(report_rows "$OUT")" "bob held, already published"
+run "$ALICE" all "refs/heads/main $U1 refs/heads/main $UNKNOWN"
+eq    "G2b control: held commit on no remote, unknown tip: refused" "$EC" 1
+has   "G2b control: (as a hold refusal listing it)" "$(report_rows "$OUT")" "bob held, already published"
+git -C "$REPO" update-ref refs/remotes/origin/main "$B1"
+run "$ALICE" - "refs/heads/main $U1 refs/heads/feature $ZERO"
+eq    "G6b: the held commit is already on a remote-tracking ref: a new branch above it passes" "$EC" 0
+eq    "G6b: (and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+run "$ALICE" - "refs/heads/main $U1 refs/heads/main $UNKNOWN"
+eq    "G2b: the same over an unknown remote tip passes" "$EC" 0
+eq    "G2b: (and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
 
 # --- NEGATIVE CONTROL: the hold logic deleted from a copy lets the held push through.
 # The marker count is asserted first: without it a sed that matched nothing would copy the

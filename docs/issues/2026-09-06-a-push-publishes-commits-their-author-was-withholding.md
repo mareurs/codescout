@@ -995,7 +995,8 @@ push exit=0
 ```
 
 This transcript predates two wording changes. The age now reads `held for 0s` (the refusal and `hold-publish.sh list`
-share one formatter that prints seconds, minutes, hours or days), and the no-prefix line is labelled with its branch,
+share one formatter that prints seconds, minutes, hours or days; it switches to days from 24 hours up, so 49 hours
+prints `2d`), and the no-prefix line is labelled with its branch,
 `[main] There is no prefix to push: ...`.
 
 The `[?]` is the session state: the two ids were made up, so the session registry has no row for them and the
