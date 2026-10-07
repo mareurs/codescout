@@ -141,7 +141,7 @@ For a wide single line in a `@cmd_*` buffer, `grep -o 'TEXT.\{0,200\}' @cmd_X` o
 
 ## Resume
 
-The recurrence came from per-tool size measures, not from one bad line. Every review of this work found new siblings, so the sweep is not a proof that none remain. The structural follow-up is one helper that measures the real serialized response and is used by every tool that returns its own handle, plus a source-level check that forbids a raw-body `exceeds_inline_limit` beside a serialized return. Take it up before the next tool adds a gate of its own. Promote the class to its own cluster: three bug records now carry it.
+The recurrence came from per-tool size measures, not from one bad line. Every review of this work found new siblings, so the sweep is not a proof that none remain. The structural follow-up is Phase A of `docs/adrs/2026-10-07-one-measure-of-the-delivered-response.md`, which landed on 2026-10-07: one module measures the delivered response, the text predicate is private to `core`, and `tests/inline_gates.rs` fails an unannotated length-form gate. It closes the unit root (a raw body measured, an escaped response returned). It does NOT close the late-key root: a key added after a gate decided is still each tool's job, and only Phases B (a backstop for `file_id` envelopes) and C (one carrier for late keys) address it. Both are undecided and recorded in the ADR. Promote the class to its own cluster: three bug records now carry it.
 
 ## References
 

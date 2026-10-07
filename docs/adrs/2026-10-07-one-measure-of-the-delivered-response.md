@@ -1,7 +1,7 @@
 ---
 id: dbc617677d44cf8a
 kind: adr
-status: proposed
+status: active
 title: ADR-2026-10-07 — One measure of the delivered response
 owners:
 - marius
@@ -16,9 +16,10 @@ topic: tool-contracts
 
 ## Status
 
-Proposed. Written 2026-10-07 after the byte-bound sibling sweep
+Accepted, Phase A built. Written 2026-10-07 after the byte-bound sibling sweep
 (`docs/issues/archive/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools.md`),
-whose Resume section asks for this. Nothing here is built yet.
+whose Resume section asks for this. Phase A landed on `experiments` with the gate green on its
+integration tip. Phases B and C are not decided; see Built for what Phase A does and does not do.
 
 ## Context
 
@@ -62,25 +63,26 @@ The defect had two roots, and they need different cures:
 Build it in three phases, each shippable alone. Phase A is the decision; B and C are recorded so
 they are not rediscovered, and each needs its own go.
 
-**Phase A: one module owns "the response as delivered".** A new `src/tools/core/response_fit.rs`
-(a name this ADR proposes; it does not exist yet) holds:
+**Phase A: one module owns "the response as delivered".** A new `src/tools/core/response_fit.rs` holds:
 
-- `delivered_len(&Value)` (moved from `types.rs`, unchanged);
+- `delivered_len(&Value)`: stays in `types.rs` beside the cut record it knows about; the module uses it;
 - `response_fits(&Value) -> bool`: the serialized, as-delivered response is within the limit;
 - `response_room(widest: &Value) -> usize`: the limit less `delivered_len(widest)`, which replaces
   both existing room functions and gives them the cut-record rule they lack;
 - `body_alone_overflows(raw: &str) -> bool`: true only when the raw body ALONE is over the limit.
   Escaping never shortens text, so `true` proves the response is over. It answers one direction
-  only, so it cannot be used as a "fits" gate; this is the asymmetry that replaces the six raw
-  pre-checks.
+  only, so it cannot be used as a "fits" gate; this is the asymmetry that replaces the raw
+  gates. Five of the six raw checks in `read_file` and `read_markdown` were pure shortcuts; the
+  sixth, in `read_full_file`, is a policy gate (in exploring mode the inline arm returns the first
+  page, so the check is what sends an over-limit file to a summary with a handle).
 
 The text predicate `exceeds_inline_limit(&str)` becomes private to `core` (`call_content` and the
 backstop use it on a string they have already serialized). Code outside `core` can no longer write
-a raw-body gate: the call does not compile. The 31 sites migrate mechanically.
+a raw-body gate: the call does not compile. The 29 sites outside `core` that still used it migrated; `memory` and `file_summary` had moved first.
 
 `exceeds_inline_limit_len(n)` stays callable from `run_command` and `command_summary`, which
-compute a length from parts. Each such site (4 today) carries a `// inline-gate: <what unit n is>`
-annotation, and a source check beside `tests/result_caps.rs` fails a production use without one.
+compute a length from parts. Each such site (2 today) carries a `// inline-gate: <what unit n is>`
+annotation, and `tests/inline_gates.rs` fails a production use without one.
 
 **Phase B (not decided here): extend the backstop to `file_id` envelopes**, so a mis-sized arm still
 cannot mint a second handle. Open question: clipping a page's `content` makes its `shown_lines` and
@@ -141,3 +143,34 @@ carriers by grep. Not measured: how many of the 31 sites already pass a `Value` 
 predicate, so the exact size of the migration. Confidence: high on Phase A's boundary and
 visibility wall, medium on the `_len` annotation check, low on Phase B (the cost is the clipped
 `shown_lines`), medium on Phase C.
+
+## Built
+
+Phase A, landed 2026-10-07: the module with `response_fits`, `response_room` and
+`body_alone_overflows`; 31 production gates moved onto it; the text predicate private to `core` in
+production (tests keep it for delivered text); `buffer_page_room` removed; `tests/inline_gates.rs`
+enforcing the annotation rule and forbidding the text form outside `core`. A production call of the
+text predicate outside `core` now fails to compile, and a deleted annotation fails the source
+check; both were shown by mutating them. Gate on the integration tip: fmt, clippy, lean (4,168
+tests) and default (6,426 tests) green.
+
+Found while building it, and fixed: `compacted_test_value` replaced the `failures` and `stderr`
+fields but kept the cut record naming them, so the compaction gate counted about 25 bytes the
+caller never receives and a run in that window was summarized where it should be compacted. Three
+gates had no test that failed when their measure was swapped for the raw body (the multi-heading
+error, the `coverage` drop and the `siblings` drop); each now has one.
+
+What Phase A does NOT cover, so nobody reads the wall as wider than it is:
+
+- **Late keys (root 2).** A key added after a gate decided is still the tool's job.
+- **`response_fits(&json!(content))`** measures the body alone and brings the old defect back. Types
+  cannot stop it; review and a mutation per arm must.
+- **A length-form function used as a pointer** is not checked by the annotation rule, and
+  `run_command/output.rs` compares `raw_stdout.len() + raw_stderr.len()` to the limit directly as a
+  compaction filter. The source check does not see it.
+- **`over_budget_bodies`** (`legibility`) flags a symbol body only when its raw text alone is over
+  the limit; an escape-heavy body just under it is not flagged although `symbols` would overflow.
+- The source check cuts production from test code by test-gated item, not at the first test module:
+  five files (`librarian/frontmatter.rs`, `librarian/mod.rs`, `audit_doc_refs/parser.rs`,
+  `retrieval/embedder.rs`, `symbol/call_graph/mod.rs`) carry production code after an inline test
+  module. `tests/result_caps.rs` scans whole files, test modules included, so it makes no such cut.
