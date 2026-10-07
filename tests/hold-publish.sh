@@ -228,6 +228,75 @@ eq "list with the helper missing still prints both holds" "$(printf '%s\n' "$OUT
 eq "list with the helper missing marks the first row ?" "$(printf '%s\n' "$OUT" | grep -F "$SID" | cut -f2)" "?"
 eq "list with the helper missing marks the second row ?" "$(printf '%s\n' "$OUT" | grep -F "$OTHER" | cut -f2)" "?"
 hasnt "list with the helper missing reports no 'command not found'" "$OUT" "command not found"
+eq "list with hold-age.sh missing prints ? as the age, never a number" "$(printf '%s\n' "$OUT" | grep -F "$SID" | cut -f3)" "?"
+
+echo
+echo "== list: the age column uses the shared Ns/Nm/Nh/Nd scheme (scripts/hold-age.sh)"
+new_repo
+run "$SID" set "fresh"
+run "$SID" list
+case "$(printf '%s' "$OUT" | cut -f3)" in
+    [0-9]*s) ok "a hold set a moment ago is listed in seconds" ;;
+    *) no "a hold set a moment ago is listed in seconds" "got: $(printf '%s' "$OUT" | cut -f3)" ;;
+esac
+eq "(the row is the hold's own)" "$(printf '%s' "$OUT" | cut -f1)" "$SID"
+mkblob() {  # <reason> <set-at>
+    git -C "$REPO" hash-object -w --stdin <<EOB
+reason: $1
+set-at: $2
+head: x
+EOB
+}
+git -C "$REPO" update-ref "refs/holds/$SID" "$(mkblob thirty "$(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%SZ)")"
+run "$SID" list
+eq "a hold set 30 minutes ago is listed as 30m" "$(printf '%s' "$OUT" | cut -f3)" "30m"
+git -C "$REPO" update-ref "refs/holds/$SID" "$(mkblob three "$(date -u -d '3 hours ago' +%Y-%m-%dT%H:%M:%SZ)")"
+run "$SID" list
+eq "a hold set 3 hours ago is listed as 3h" "$(printf '%s' "$OUT" | cut -f3)" "3h"
+git -C "$REPO" update-ref "refs/holds/$SID" "$(mkblob old "$(date -u -d '49 hours ago' +%Y-%m-%dT%H:%M:%SZ)")"
+run "$SID" list
+eq "a hold set 49 hours ago is listed as 2d" "$(printf '%s' "$OUT" | cut -f3)" "2d"
+git -C "$REPO" update-ref "refs/holds/$SID" "$(mkblob garbled "not a date")"
+run "$SID" list
+eq "an unparseable set-at is listed with ? as its age" "$(printf '%s' "$OUT" | cut -f3)" "?"
+eq "(and the reason is still listed)" "$(printf '%s' "$OUT" | cut -f4)" "garbled"
+
+echo
+echo "== list / release outside a git repository"
+NOREPO="$(mktemp -d "$SCRATCH/norepo-XXXXXX")"
+for sub in list release; do
+    OUT="$(cd "$NOREPO" && GIT_CEILING_DIRECTORIES="$SCRATCH" HOME="$FAKEHOME" CLAUDE_CODE_SESSION_ID="$SID" bash "$SCRIPT" "$sub" 2>&1)"
+    EC=$?
+    eq    "$sub outside a git repository exits 2" "$EC" 2
+    has   "$sub outside a git repository says not a git repository" "$OUT" "not a git repository"
+    hasnt "$sub outside a git repository does not leak git's fatal message" "$OUT" "fatal"
+done
+new_repo
+run "$SID" list
+eq "list inside a repository with no holds still exits 0 (positive control)" "$EC" 0
+run "$SID" release
+eq "release inside a repository still exits 0 (positive control)" "$EC" 0
+has "(and answers about holds, not about the repository)" "$OUT" "no hold"
+
+echo
+echo "== set with no reason keeps an existing reason"
+new_repo
+run "$SID" set "the first reason"
+SETAT_A="$(git -C "$REPO" cat-file -p "refs/holds/$SID" | sed -n 2p)"
+echo y >> "$REPO/f.txt"; git -C "$REPO" commit -q -am more
+HEAD_B="$(git -C "$REPO" rev-parse HEAD)"
+sleep 1.1
+run "$SID" set
+eq "a reasonless set on an existing hold exits 0" "$EC" 0
+KEPT="$(git -C "$REPO" cat-file -p "refs/holds/$SID")"
+eq "it keeps the earlier reason" "$(printf '%s\n' "$KEPT" | sed -n 1p)" "reason: the first reason"
+eq "it keeps the original set-at" "$(printf '%s\n' "$KEPT" | sed -n 2p)" "$SETAT_A"
+eq "it refreshes head" "$(printf '%s\n' "$KEPT" | sed -n 3p)" "head: $HEAD_B"
+run "$SID" set "a new reason"
+eq "an explicit reason still replaces it" "$(git -C "$REPO" cat-file -p "refs/holds/$SID" | sed -n 1p)" "reason: a new reason"
+new_repo
+run "$SID" set
+eq "a FIRST reasonless set still writes an empty reason" "$(git -C "$REPO" cat-file -p "refs/holds/$SID" | sed -n 1p)" "reason: "
 
 echo
 echo "PASS: $PASS  FAIL: $FAIL"

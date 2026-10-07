@@ -78,6 +78,26 @@ set -uo pipefail
 
 ZERO="0000000000000000000000000000000000000000"
 
+# SOURCED ONCE, HERE, BEFORE ANY EARLY EXIT. Both files only DEFINE a function, so the
+# no-session-id path below stays silent. If a file is missing or unreadable the guard DEGRADES
+# TO THE OLD BEHAVIOUR, never to a wrong answer: resolve_sids answers `?` for every sid (the
+# banner prints the bare sid as it always did) and hold_age answers "unknown" (the refusal
+# prints `unknown time`). Kept OUTSIDE the PUBLISH HOLD markers: the foreign refusal needs
+# resolve_sids even in the copy the negative control strips the hold block from.
+_guard_dir="$(dirname "${BASH_SOURCE[0]}")"
+if [ -r "$_guard_dir/resolve-sids.sh" ]; then
+    # shellcheck source=scripts/resolve-sids.sh
+    . "$_guard_dir/resolve-sids.sh"
+else
+    resolve_sids() { printf '%s\t?\t\n' "$@"; }
+fi
+if [ -r "$_guard_dir/hold-age.sh" ]; then
+    # shellcheck source=scripts/hold-age.sh
+    . "$_guard_dir/hold-age.sh"
+else
+    hold_age() { return 1; }
+fi
+
 me="${CLAUDE_CODE_SESSION_ID:-}"
 if [ -z "$me" ]; then
     # No predicate — see "WHAT IT DELIBERATELY DOES NOT REFUSE". Silent: a human running
@@ -148,9 +168,7 @@ untrailered_n=0
 # here because `set -u` is on and an unset read aborts the script mid-run.
 held_sids=""          # comma list of held sids found in the push
 held_report=""         # `    <sha8>  <sid>  <subject>` rows, newest first
-held_oldest_sha=""     # the oldest held commit seen (the loop is newest-first, so the last one)
-held_branch=""         # the branch that ref updates, without refs/heads/
-held_remote_sha=""     # that ref's current remote sha
+held_prefix_rows=""    # one `<branch>\x1f<oldest held sha>\x1f<remote sha>` row PER pushed branch ref that carries a held commit
 hold_yes=","           # lookup cache: sids known held
 hold_no=","            # lookup cache: sids known not held (or unreadable)
 hold_warned=0          # the unreadable-store warning prints once per run
@@ -220,7 +238,7 @@ held_sid_of() {
 }
 
 # hold_scan_ref <local sha> <remote ref> <remote sha>: records every held commit a push of THIS
-# ref would publish, into held_sids / held_report / held_oldest_sha. Called for EVERY pushed ref
+# ref would publish, into held_sids / held_report / held_prefix_rows. Called for EVERY pushed ref
 # that is not a deletion, before the branch filter below, because a tag or refs/wip/x push
 # publishes a commit exactly as a branch push does and the foreign check skips them.
 #
@@ -243,7 +261,7 @@ held_sid_of() {
 # called for a held commit: it accumulates `ack_matched`, which would make the ack notes
 # report an authorisation that applied to nothing.
 hold_scan_ref() {
-    local _ls="$1" _rr="$2" _rs="$3" _tip _out _rc _l _sha _sid _subj
+    local _ls="$1" _rr="$2" _rs="$3" _tip _out _rc _sha _sid _subj _oldest=""
     local _range=()
     _tip="$(git rev-parse -q --verify "${_ls}^{commit}" 2>/dev/null </dev/null)" || return 0
     if [ "$_rs" != "$ZERO" ] && git cat-file -e "${_rs}^{commit}" 2>/dev/null </dev/null; then
@@ -270,15 +288,16 @@ hold_scan_ref() {
             *) held_sids="${held_sids:+$held_sids,}$_held" ;;
         esac
         held_report="${held_report}    ${_sha:0:8}  ${_held}  ${_subj}"$'\n'
-        # The prefix advice is about a BRANCH; a tag or refs/wip/x push gets none.
+        # The prefix advice is about a BRANCH; a tag or refs/wip/x push gets none. The loop is
+        # newest-first, so the LAST held commit met is this ref's oldest.
         case "$_rr" in
-            refs/heads/*)
-                held_oldest_sha="$_sha"
-                held_branch="${_rr#refs/heads/}"
-                held_remote_sha="$_rs"
-                ;;
+            refs/heads/*) _oldest="$_sha" ;;
         esac
     done <<< "$_out"
+    # One row per ref, so a push of several refs gets advice per ref, not the last ref's.
+    if [ -n "$_oldest" ]; then
+        held_prefix_rows="${held_prefix_rows}${_rr#refs/heads/}"$'\x1f'"${_oldest}"$'\x1f'"${_rs}"$'\n'
+    fi
     return 0
 }
 # END PUBLISH HOLD (helper)
@@ -461,26 +480,9 @@ if [ -z "$held_sids" ] && [ "$hold_unlistable" -eq 1 ]; then
     exit 1
 fi
 if [ -n "$held_sids" ]; then
-    _resolve_lib_h="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
-    if [ -r "$_resolve_lib_h" ]; then
-        # shellcheck source=scripts/resolve-sids.sh
-        . "$_resolve_lib_h"
-    else
-        resolve_sids() { printf '%s\t?\t\n' "$@"; }
-    fi
     _hs=()
     IFS=, read -ra _hs <<< "$held_sids"
     held_table="$(resolve_sids "${_hs[@]}")"
-
-    hold_age() {  # <set-at ISO-8601> -> 3h / 12d, or a plain "unknown time"
-        local _then _d
-        [ -n "${1:-}" ] || { printf 'unknown time'; return; }
-        _then="$(date -u -d "$1" +%s 2>/dev/null)" || _then=""
-        [ -n "$_then" ] || { printf 'unknown time'; return; }
-        _d=$(( $(date -u +%s) - _then ))
-        [ "$_d" -ge 0 ] || _d=0
-        if [ "$_d" -lt 172800 ]; then printf '%dh' $((_d / 3600)); else printf '%dd' $((_d / 86400)); fi
-    }
 
     printf '\n  REFUSING THE PUSH: PUBLISH HOLD. It carries commit(s) whose author has withheld them:\n\n' >&2
     printf '%s\n' "$held_report" >&2
@@ -489,7 +491,8 @@ if [ -n "$held_sids" ]; then
         _reason="$(printf '%s\n' "$_blob" | awk 'sub(/^reason: ?/, "") { print; exit }')"
         _setat="$(printf '%s\n' "$_blob" | awk '/^set-at: / { print $2; exit }')"
         _state="$(printf '%s\n' "$held_table" | awk -F'\t' -v s="$_s" '$1 == s { print $2; exit }')"
-        printf '  Held session %s  [%s]  held for %s\n' "$_s" "${_state:-?}" "$(hold_age "$_setat")" >&2
+        _age="$(hold_age "$_setat")" || _age="unknown time"
+        printf '  Held session %s  [%s]  held for %s\n' "$_s" "${_state:-?}" "$_age" >&2
         printf '    reason: %s\n' "$_reason" >&2
         printf '    release (the author or the operator decides): scripts/hold-publish.sh release %s\n\n' "$_s" >&2
     done
@@ -500,26 +503,38 @@ if [ -n "$held_sids" ]; then
     fi
 
     # The commits BELOW the oldest held one are not held, and pushing exactly that prefix is
-    # allowed. Printed only when there is something in it to push.
-    _below=0
-    if [ -n "$held_oldest_sha" ]; then
-        _parent="$(git rev-parse -q --verify "${held_oldest_sha}^" 2>/dev/null </dev/null)" || _parent=""
+    # allowed. Advised PER PUSHED REF, each line labelled with the branch: a push of several refs
+    # has a different oldest held commit and a different remote tip for each, and taking the last
+    # ref's would advise a prefix for the wrong branch.
+    _below=0       # any ref has a pushable prefix (the own-hold sentence below reads it)
+    while IFS=$'\x1f' read -r _pb _po _pr; do
+        [ -n "${_pb:-}" ] || continue
+        _parent="$(git rev-parse -q --verify "${_po}^" 2>/dev/null </dev/null)" || _parent=""
+        _this=0; _unknown=0
         if [ -n "$_parent" ]; then
-            if [ "$held_remote_sha" = "$ZERO" ]; then
-                _below=1
+            if [ "$_pr" = "$ZERO" ]; then
+                # A new remote branch: only what is not already on SOME remote is unpublished.
+                _n="$(git rev-list --count "$_parent" --not --remotes 2>/dev/null </dev/null)" || _n=0
+            elif git cat-file -e "${_pr}^{commit}" 2>/dev/null </dev/null; then
+                _n="$(git rev-list --count "$_pr..$_parent" 2>/dev/null </dev/null)" || _n=0
             else
-                _n="$(git rev-list --count "$held_remote_sha..$_parent" 2>/dev/null </dev/null)" || _n=0
-                [ "${_n:-0}" -gt 0 ] 2>/dev/null && _below=1
+                # The remote tip is not in the local object store, so how much is unpublished
+                # cannot be counted. Saying "nothing is unpublished" here would be a false claim.
+                _n=0; _unknown=1
             fi
+            [ "${_n:-0}" -gt 0 ] 2>/dev/null && _this=1
         fi
-        if [ "$_below" -eq 1 ]; then
-            printf '  The commits below the oldest held one are not held. To publish exactly those:\n\n' >&2
-            printf '    git push %s %s:%s\n\n' "$push_remote" "$_parent" "$held_branch" >&2
+        if [ "$_this" -eq 1 ]; then
+            _below=1
+            printf '  [%s] The commits below the oldest held one are not held. To publish exactly those:\n\n' "$_pb" >&2
+            printf '    git push %s %s:%s\n\n' "$push_remote" "$_parent" "$_pb" >&2
             printf '  That prefix is still subject to the ordinary foreign-session check.\n\n' >&2
+        elif [ "$_unknown" -eq 1 ]; then
+            printf '  [%s] No prefix can be computed: the remote tip %s is not in the local object store. Run git fetch, then push again.\n\n' "$_pb" "${_pr:0:8}" >&2
         else
-            printf '  There is no prefix to push: nothing below the held commit is unpublished.\n\n' >&2
+            printf '  [%s] There is no prefix to push: nothing below the held commit is unpublished.\n\n' "$_pb" >&2
         fi
-    fi
+    done <<< "$held_prefix_rows"
 
     case ",$held_sids," in
         *",$me,"*)
@@ -679,17 +694,6 @@ fi
 [ -n "$foreign_report" ] || exit 0
 
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '<branch>')"
-
-# resolve_sids lives in a sourced file so scripts/hold-publish.sh shares it. If that file is
-# missing or unreadable the guard DEGRADES TO THE OLD BEHAVIOUR, never to a wrong answer: every
-# sid resolves to `?` and the banner prints the bare sid as it always did.
-_resolve_lib="$(dirname "${BASH_SOURCE[0]}")/resolve-sids.sh"
-if [ -r "$_resolve_lib" ]; then
-    # shellcheck source=scripts/resolve-sids.sh
-    . "$_resolve_lib"
-else
-    resolve_sids() { printf '%s\t?\t\n' "$@"; }
-fi
 
 _ifs="$IFS"; IFS=,
 # shellcheck disable=SC2086

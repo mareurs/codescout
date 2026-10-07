@@ -307,9 +307,13 @@ decided set by SHA. That rule is in `docs/RELEASE.md` § *Concurrent-Work Rules*
 pre-push guard, `scripts/pre-push-foreign-session-guard.sh`, refuses a push that carries any commit whose
 `Session-Id` trailer has a hold. It refuses before it reads `CODESCOUT_PUSH_ACK`, so `CODESCOUT_PUSH_ACK=all` does
 not clear a hold. It checks every pushed ref except a deletion, so a tag or a `refs/wip/*` push is covered too, and it
-refuses when it cannot list a push range while any hold exists. It names the reason, the age and the release
-command. When something unpublished sits below the oldest held commit it also names the prefix push that is still
-allowed; otherwise it prints "There is no prefix to push".
+refuses when it cannot list a push range while any hold exists. It names the reason, the age (in seconds, minutes, hours or days; from 24 hours up it counts days, so 49 hours prints
+`2d`) and the release
+command. For each pushed branch ref that carries a held commit, and labelled with that branch, it also says what
+can still be pushed: the prefix push when something unpublished sits below that ref's oldest held commit, "There is
+no prefix to push" when nothing there is unpublished, and, when the remote tip is not in the local object store
+(so the prefix cannot be counted), that no prefix can be computed and that `git fetch` comes first. A refusal
+triggered only by a tag or a `refs/wip/*` push has no branch to name, so it prints none of these lines.
 
 **Limits of the mechanism.**
 
@@ -327,7 +331,9 @@ allowed; otherwise it prints "There is no prefix to push".
   shim runs the toplevel's script). A worktree or branch that predates the merge does not enforce it.
 - A trailer outside the message's final paragraph is invisible to the guard. This was already true.
 - A commit already on any remote-tracking ref counts as published: a new branch is scanned with `--not --remotes`.
-- The one-line warning for an unreadable hold store covers hard git failures only (an exit other than 0 or 1). a store failure that git itself reports as "no such ref" (a permission-denied `refs/holds` directory, a broken loose ref) is not detected and fails open.
+- The one-line warning for an unreadable hold store covers hard git failures only (an exit other than 0 or 1). A store failure that git itself reports as "no such ref" (a permission-denied `refs/holds` directory, a broken loose ref) is not detected and fails open.
+- The hold lookup and the trailer value are matched case-sensitively. A hand-written trailer whose session id is in a
+  different case from the hold's is not matched. (The ack comparison is the exception: it ignores case.)
 
 The record is in
 `docs/issues/2026-09-06-a-push-publishes-commits-their-author-was-withholding.md`.
