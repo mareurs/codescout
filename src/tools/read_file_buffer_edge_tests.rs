@@ -1903,3 +1903,35 @@ async fn the_text_form_counts_the_lines_a_page_shows_not_the_cut_marker() {
         );
     }
 }
+
+/// A clamped line of a `@tool_*` ref is offered a field route to the payload's largest field
+/// only while the `$.key` path fits the echo clip (`INPUT_ECHO_CLIP`, 300 B) — at EXACTLY 300 B
+/// it is offered and following it works; at 301 B it is not (the `grep -o` route stays). From
+/// review M (`rm_k_largest_field_path_is_offered_at_exactly_the_echo_clip`, mutant M1: the
+/// bound's `<=` made `<`, which survived the suite).
+#[tokio::test]
+async fn a_largest_field_route_is_offered_at_exactly_the_echo_clip() {
+    let ctx = ctx().await;
+    let wide = "W".repeat(20_000);
+    for (klen, offered) in [(298usize, true), (299, false)] {
+        let key = "k".repeat(klen);
+        let t = ctx
+            .output_buffer
+            .store_tool("edge", json!({ key.clone(): wide, "s": 1 }).to_string());
+        // Pretty-printed: line 1 is "{", line 2 the wide field ("k…" sorts before "s").
+        let v = ReadFile
+            .call(json!({ "path": t, "start_line": 2, "end_line": 2 }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(v["line_truncated"], json!(true), "fixture: {v:.200}");
+        let hint = v["hint"].as_str().unwrap();
+        let route = format!("json_path=\"$.{key}\"");
+        assert_eq!(hint.contains(&route), offered, "klen {klen}: {hint:.200}");
+        if offered {
+            let r = ReadFile
+                .call(json!({ "path": t, "json_path": format!("$.{key}") }), &ctx)
+                .await;
+            assert!(r.is_ok(), "the offered field route failed: {r:?}");
+        }
+    }
+}
