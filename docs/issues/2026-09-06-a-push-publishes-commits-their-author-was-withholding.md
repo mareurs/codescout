@@ -919,8 +919,9 @@ SHA alone would not, observed rather than argued.
 ## Fix
 
 **Publish hold, written 2026-10-06 (OB-20): the push side now has a mechanism. The commit side does not, so
-this bug stays `open`.** The work is on branch `feat/publish-hold`, not yet merged to `experiments` and not
-pushed. Spec: `docs/superpowers/specs/2026-10-06-publish-hold-design.md`. Plan:
+this bug stays `open`.** The work is merged to `experiments` (merge `4766c07f`, and the later
+minors merge `7efef32d`). As of 2026-10-07 `4766c07f` is on `origin/experiments` (checked with
+`git branch -r --contains 4766c07f`) and `7efef32d` is local only. The branch `feat/publish-hold` is deleted. Spec: `docs/superpowers/specs/2026-10-06-publish-hold-design.md`. Plan:
 `docs/superpowers/plans/2026-10-06-publish-hold.md`.
 
 An author who must withhold its work runs `scripts/hold-publish.sh set <reason>`. That records a blob at
@@ -943,7 +944,7 @@ other than 0 or 1; a store failure that git itself reports as "no such ref" (a p
 `docs/conventions/shared-checkout-commit-sequence.md` § *A session that cannot publish must not commit*, with a
 bullet in `docs/RELEASE.md` § *Concurrent-Work Rules*.
 
-Fix commits on `feat/publish-hold`, cited by patch-id first (`git patch-id --stable`) and SHA second, because
+Fix commits (from the since-deleted branch `feat/publish-hold`), cited by patch-id first (`git patch-id --stable`) and SHA second, because
 the SHA does not survive a rebase (`docs/RELEASE.md` § *Citing a fix*):
 
 | patch-id | SHA | What |
@@ -1095,7 +1096,7 @@ turns on.
 ## Resume
 
 The convention and its push-side mechanism are written (see `## Fix`, 2026-10-06). What is left is
-the operator's agreement, the branch `feat/publish-hold` landing on `experiments`, and the commit-side gap:
+the operator's agreement and the commit-side gap (the branch has landed on `experiments`):
 nothing stops a session committing a change its operator said to hold.
 
 **Third, added 2026-09-11: the PUSHER-side half is a SEPARATE question, and it is already

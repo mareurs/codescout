@@ -265,7 +265,7 @@ Directions if a mechanism is wanted, none free and none yet chosen:
 
 ## Fix provenance
 
-- **Mitigated 2026-10-06 by the publish hold**, merged as `4766c07f` on `experiments` (not pushed). The fix commits, patch-id first and SHA second (the SHA alone does not survive a rebase):
+- **Mitigated 2026-10-06 by the publish hold**, merged as `4766c07f` on `experiments`, which is also on `origin/experiments` (checked 2026-10-07 with `git branch -r --contains 4766c07f`). The fix commits, patch-id first and SHA second (the SHA alone does not survive a rebase):
   - `ec0a017dd099d5a61805d287f9c2ccd0ba9cb2e6` (`46f345b4`): `scripts/hold-publish.sh` records a per-session hold in `refs/holds/<session-id>`.
   - `57b00dc36213b3ebfbd7af28f5ca32b46029bc68` (`4362cb3f`): the pre-push guard refuses a held session's commits, even under `CODESCOUT_PUSH_ACK=all`.
   - `f7c928aab7d8eab03a4330d56edb3440a5fc7d3c` (`79c4a4fe`): the hold check also covers tag and other-ref pushes and fails closed on an unlistable range.
