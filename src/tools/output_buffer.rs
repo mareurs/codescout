@@ -3046,6 +3046,38 @@ mod tests {
         let (_, second) = buf.get_with_refresh_flag(&h).unwrap();
         assert!(!second, "the notice was reported twice");
     }
+    /// A refresh in `get_with_refresh_flag` is stamped with the mtime it observed before
+    /// re-reading, not with the clock. A write whose mtime falls between the two (one landing
+    /// during the re-read, or a file restored to a time before the refresh) must still be
+    /// picked up by the next read; stamped with the clock, the entry would keep the text of the
+    /// refresh for good.
+    #[test]
+    fn a_refresh_is_stamped_with_the_mtime_it_read_not_the_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("r.txt");
+        let ago = |secs| {
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+            )
+        };
+        std::fs::write(&p, "v1").unwrap();
+        filetime::set_file_mtime(&p, ago(100)).unwrap();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file(p.to_string_lossy().to_string(), "v1".into());
+        std::fs::write(&p, "v2").unwrap();
+        filetime::set_file_mtime(&p, ago(50)).unwrap();
+        let (entry, refreshed) = buf.get_with_refresh_flag(&h).unwrap();
+        assert_eq!((entry.stdout.as_str(), refreshed), ("v2", true), "fixture");
+        // Newer than the mtime the refresh saw, older than the clock at the refresh.
+        std::fs::write(&p, "v3").unwrap();
+        filetime::set_file_mtime(&p, ago(20)).unwrap();
+        let (entry, refreshed) = buf.get_with_refresh_flag(&h).unwrap();
+        assert_eq!(
+            (entry.stdout.as_str(), refreshed),
+            ("v3", true),
+            "the refresh stamp hid a later write"
+        );
+    }
 
     /// The stale-write race (review RB-A7) at the store API, with explicit mtimes. Reader B read
     /// v2 when the file's mtime was T2 and stored first; reader A read v1 earlier, at T1 < T2,

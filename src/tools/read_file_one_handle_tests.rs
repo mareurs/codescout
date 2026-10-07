@@ -669,11 +669,15 @@ async fn a_late_store_of_an_older_read_never_regresses_the_files_handle() {
             Some(hb.as_str()),
             "{name}: two handles"
         );
+        let (held, refreshed) = buf.get_with_refresh_flag(&hb).unwrap();
         assert_eq!(
-            buf.get_stream(&hb).as_deref(),
-            Some(v2.as_str()),
+            held.stdout, v2,
             "{name}: the one handle regressed to the text read before the write"
         );
+        // B's entry was stamped with the mtime B read under, and A's refused store changed
+        // nothing: a read of the handle has nothing to refresh or report. An entry stamped with
+        // no read time would re-read the file here, hiding a regressed store behind the re-read.
+        assert!(!refreshed, "{name}: the handle was not left at B's version");
         assert_eq!(buf.entry_count(), 1, "{name}");
     }
 }
