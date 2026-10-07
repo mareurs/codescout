@@ -8,13 +8,15 @@ use serde_json::{json, Value};
 use super::super::{optional_u64_param, RecoverableError, ToolContext};
 use crate::util::text::extract_lines;
 
-/// Resolve the `path` argument to `(resolved_path, text)`: an `@file_` buffer
-/// ref loads from the output buffer; otherwise validate, stat, and read the
-/// `.md` file from disk. The only async phase of `markdown::read`.
+/// Resolve the `path` argument to `(resolved_path, text, read_mtime)`: an `@file_` buffer
+/// ref loads from the output buffer (no read time: its handle is the ref itself); otherwise
+/// validate, stat, and read the `.md` file from disk, taking its mtime BEFORE the read so a
+/// handle stored from this text cannot overwrite a newer reader's
+/// (`OutputBuffer::store_file_read`). The only async phase of `markdown::read`.
 async fn resolve_markdown_source(
     path: &str,
     ctx: &ToolContext,
-) -> Result<(std::path::PathBuf, String)> {
+) -> Result<(std::path::PathBuf, String, Option<u64>)> {
     if path.starts_with("@file_") {
         let buf = ctx
             .output_buffer
@@ -29,7 +31,7 @@ async fn resolve_markdown_source(
             .source_path
             .clone()
             .unwrap_or_else(|| std::path::PathBuf::from(path));
-        Ok((resolved, buf.stdout.clone()))
+        Ok((resolved, buf.stdout.clone(), None))
     } else {
         // Gate: .md files only. Case-insensitive to match `is_markdown_target`'s own
         // lowercasing — `read_file` dispatches here whenever that function says "this
@@ -70,6 +72,7 @@ async fn resolve_markdown_source(
             .into());
         }
 
+        let read_mtime = crate::tools::output_buffer::file_mtime_ms(&resolved);
         let text = std::fs::read_to_string(&resolved).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => RecoverableError::with_hint(
                 format!(
@@ -85,18 +88,21 @@ async fn resolve_markdown_source(
             .into(),
             _ => anyhow::anyhow!("failed to read {}: {}", resolved.display(), e),
         })?;
-        Ok((resolved, text))
+        #[cfg(test)]
+        crate::tools::read_file::read_hook::fire(&resolved);
+        Ok((resolved, text, read_mtime))
     }
 }
 /// The ONE handle for the whole text a markdown read was served from (R3), which every
 /// over-budget arm below names as `file_id`, in that text's own line numbers.
 ///
-/// A real file: [`OutputBuffer::store_file`](crate::tools::output_buffer::OutputBuffer::store_file)
-/// returns the file's live handle (brought up to `text`) and mints it once when there is none,
-/// so a section, a range and a whole read of one file all name the same handle, and reading
-/// any of them again mints nothing. A section or range used to get a handle of its own holding
-/// only that part: a second handle per read, minted afresh each time, whose line 1 was the
-/// section's first line.
+/// A real file: [`OutputBuffer::store_file_read`](crate::tools::output_buffer::OutputBuffer::store_file_read)
+/// returns the file's live handle (brought up to `text`, unless a newer reader already stored
+/// newer text: `read_mtime` is the mtime taken before `text` was read) and mints it once when
+/// there is none, so a section, a range and a whole read of one file all name the same
+/// handle, and reading any of them again mints nothing. A section or range used to get a
+/// handle of its own holding only that part: a second handle per read, minted afresh each
+/// time, whose line 1 was the section's first line.
 ///
 /// A `@file_` ref: the text IS that buffer, so the handle is the ref the caller named. Storing
 /// it again would mint a second handle for a buffer the caller already holds (a snapshot ref
@@ -105,13 +111,14 @@ fn whole_text_handle(
     path: &str,
     resolved: &std::path::Path,
     text: &str,
+    read_mtime: Option<u64>,
     ctx: &ToolContext,
 ) -> String {
     if path.starts_with("@file_") {
         return path.to_string();
     }
     ctx.output_buffer
-        .store_file(resolved.to_string_lossy().to_string(), text.to_string())
+        .store_file_read(&resolved.to_string_lossy(), text, read_mtime)
 }
 /// Whether a `heading=` route on the whole-text handle reaches the heading at `line`.
 ///
@@ -131,6 +138,7 @@ fn read_markdown_multi_heading(
     path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
+    read_mtime: Option<u64>,
     ctx: &ToolContext,
     headings_arr: &[Value],
 ) -> Result<Value> {
@@ -167,7 +175,7 @@ fn read_markdown_multi_heading(
     if !crate::tools::response_fits(&smallest) {
         // The file's one handle, not a handle for the join: the routes below address it by
         // heading or by the file's line numbers.
-        let file_id = whole_text_handle(path, resolved, text, ctx);
+        let file_id = whole_text_handle(path, resolved, text, read_mtime, ctx);
         let lines = content.lines().count();
         let hint = format!(
             "use {:?} — request one heading at a time, or slice with start_line/end_line",
@@ -372,6 +380,7 @@ fn read_markdown_single_heading(
     path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
+    read_mtime: Option<u64>,
     ctx: &ToolContext,
     heading_query: &str,
 ) -> Result<Value> {
@@ -451,7 +460,7 @@ fn read_markdown_single_heading(
     // + next_actions. The agent must pick a sub-heading or a line range, not
     // retry against the original path.
     if !crate::tools::response_fits(&success) {
-        let file_id = whole_text_handle(path, resolved, text, ctx);
+        let file_id = whole_text_handle(path, resolved, text, read_mtime, ctx);
         let section_lines = section_result.content.lines().count();
 
         let (start_ln, end_ln) = section_result.line_range;
@@ -589,6 +598,7 @@ fn read_markdown_line_range(
     path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
+    read_mtime: Option<u64>,
     ctx: &ToolContext,
     start: u64,
     end: u64,
@@ -646,7 +656,7 @@ fn read_markdown_line_range(
     if !crate::tools::response_fits(&inline) {
         // The file's one handle (R3): `shown_lines`, `total_lines` and `next` below are already
         // in the file's line numbers, which are the handle's.
-        let file_id = whole_text_handle(path, resolved, text, ctx);
+        let file_id = whole_text_handle(path, resolved, text, read_mtime, ctx);
         // The page is sized like `read_from_buffer`'s and `read_with_line_range`'s: against the
         // response with `content` empty and every other key at its widest, in SERIALIZED bytes,
         // and a single line wider than that room is clamped. A raw budget with a fixed reserve
@@ -731,6 +741,7 @@ fn read_markdown_default_tiers(
     path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
+    read_mtime: Option<u64>,
     ctx: &ToolContext,
 ) -> Result<Value> {
     let total_lines = text.lines().count();
@@ -809,7 +820,7 @@ fn read_markdown_default_tiers(
     }
 
     // ── Tier 3: large — heading map + hint, no body ──────────────────
-    let file_id = whole_text_handle(path, resolved, text, ctx);
+    let file_id = whole_text_handle(path, resolved, text, read_mtime, ctx);
 
     let hint = if all_headings.is_empty() {
         format!("use {:?} — start_line/end_line", file_id)
@@ -862,7 +873,7 @@ pub(crate) async fn read(input: Value, ctx: &ToolContext) -> Result<Value> {
     )?;
 
     // Resolve path → (resolved PathBuf, text String): @file_ buffer ref or disk read.
-    let (resolved, text) = resolve_markdown_source(path, ctx).await?;
+    let (resolved, text, read_mtime) = resolve_markdown_source(path, ctx).await?;
 
     // Reject librarian-managed artifacts — use doc(action="get") instead.
     // The resolved path lets the guard also catch AUGMENTED artifacts whose
@@ -912,13 +923,13 @@ pub(crate) async fn read(input: Value, ctx: &ToolContext) -> Result<Value> {
 
     // ── Dispatch to the matching read strategy ────────────────────────
     let res = if let Some(headings_arr) = headings_param {
-        read_markdown_multi_heading(path, &text, &resolved, ctx, &headings_arr)
+        read_markdown_multi_heading(path, &text, &resolved, read_mtime, ctx, &headings_arr)
     } else if let Some(heading_query) = heading {
-        read_markdown_single_heading(path, &text, &resolved, ctx, heading_query)
+        read_markdown_single_heading(path, &text, &resolved, read_mtime, ctx, heading_query)
     } else if let (Some(start), Some(end)) = (start_line, end_line) {
-        read_markdown_line_range(path, &text, &resolved, ctx, start, end)
+        read_markdown_line_range(path, &text, &resolved, read_mtime, ctx, start, end)
     } else {
-        read_markdown_default_tiers(path, &text, &resolved, ctx)
+        read_markdown_default_tiers(path, &text, &resolved, read_mtime, ctx)
     };
 
     let mut res = res?;

@@ -17,10 +17,21 @@ use std::collections::BTreeSet;
 
 /// The production pool size (`src/server.rs`), so eviction behaves as it does live.
 async fn ctx() -> crate::tools::ToolContext {
+    ctx_sharing(
+        Agent::new(None).await.unwrap(),
+        std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+    )
+}
+
+/// A context over an existing agent and pool: two of them are two callers of one server.
+fn ctx_sharing(
+    agent: Agent,
+    output_buffer: std::sync::Arc<crate::tools::output_buffer::OutputBuffer>,
+) -> crate::tools::ToolContext {
     crate::tools::ToolContext {
-        agent: Agent::new(None).await.unwrap(),
+        agent,
         lsp: LspManager::new_arc(),
-        output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+        output_buffer,
         progress: None,
         peer: None,
         section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
@@ -474,5 +485,100 @@ async fn a_markdown_read_of_a_snapshot_ref_names_that_ref_and_mints_nothing() {
     ] {
         assert_eq!(delivered_handle(&ctx, &input).await, snap, "{input}");
         assert_eq!(ctx.output_buffer.entry_count(), count, "{input} minted");
+    }
+}
+
+/// The stale-write race (review RB-A7), through two REAL reads of one file sharing one pool.
+/// Reader A reads v1; before A stores its handle, the file is rewritten to v2 and reader B reads
+/// and stores v2; then A stores. A's text was read under an OLDER mtime than the one B's entry
+/// carries, and the file is no longer at A's version, so A's store must not overwrite: the one
+/// handle keeps v2, the text the file holds. Before the fix it ended up holding v1, with its
+/// timestamp reset to the store time, so no later read of the handle ever repaired it.
+#[tokio::test]
+async fn a_late_store_of_an_older_read_never_regresses_the_files_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let body = |tag: &str, md: bool| {
+        if md {
+            format!(
+                "# R\n\n## A\n{}\n\n## B\n{}\n",
+                big_text(tag, 300),
+                big_text(tag, 300)
+            )
+        } else {
+            big_text(tag, 400)
+        }
+    };
+    let ago = |secs: u64| {
+        filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+        )
+    };
+    // The raw arm (`read_full_file`) and the markdown arm (`read_markdown_default_tiers`).
+    for (name, md) in [("race.txt", false), ("race.md", true)] {
+        let p = root.join(name);
+        let (v1, v2) = (body("v1", md), body("v2", md));
+        std::fs::write(&p, &v1).unwrap();
+        filetime::set_file_mtime(&p, ago(100)).unwrap();
+        let path = p.to_str().unwrap().to_string();
+        let agent = Agent::new(None).await.unwrap();
+        let buf = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
+        let b_handle = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        {
+            let (agent, buf, p, path, v2, b_handle) = (
+                agent.clone(),
+                buf.clone(),
+                p.clone(),
+                path.clone(),
+                v2.clone(),
+                b_handle.clone(),
+            );
+            super::read_hook::after_read_of(&p.clone(), move || {
+                // The write lands after A read v1 and before A stores.
+                std::fs::write(&p, &v2).unwrap();
+                filetime::set_file_mtime(&p, ago(50)).unwrap();
+                // Reader B: a whole real read on its own runtime, stored before A's store.
+                let hb = std::thread::spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(async move {
+                            let ctx_b = ctx_sharing(agent, buf);
+                            ReadFile
+                                .call(json!({ "path": path }), &ctx_b)
+                                .await
+                                .unwrap()["file_id"]
+                                .as_str()
+                                .unwrap()
+                                .to_string()
+                        })
+                })
+                .join()
+                .unwrap();
+                *b_handle.lock().unwrap() = Some(hb);
+            });
+        }
+        let ctx_a = ctx_sharing(agent, buf.clone());
+        let a = ReadFile
+            .call(json!({ "path": path }), &ctx_a)
+            .await
+            .unwrap();
+        let hb = b_handle
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the hook did not run");
+        assert_eq!(
+            a["file_id"].as_str(),
+            Some(hb.as_str()),
+            "{name}: two handles"
+        );
+        assert_eq!(
+            buf.get_stream(&hb).as_deref(),
+            Some(v2.as_str()),
+            "{name}: the one handle regressed to the text read before the write"
+        );
+        assert_eq!(buf.entry_count(), 1, "{name}");
     }
 }

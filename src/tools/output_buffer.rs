@@ -3,9 +3,10 @@
 //! Stores stdout/stderr from `run_command` calls and returns opaque
 //! handles (`@cmd_<8hex>`) that the LLM can pass to future tools.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -46,6 +47,36 @@ pub(crate) fn line_addressable_text(handle: &str, raw: String) -> String {
         .unwrap_or(raw)
 }
 
+/// A file's modification time in ms since the epoch: the unit a whole-file `@file_*` entry's
+/// `timestamp` is kept in and `get_with_refresh_flag` compares. `None` when it cannot be
+/// stat'ed. A reader of a real file takes this BEFORE reading and hands it to
+/// [`OutputBuffer::store_file_read`].
+pub(crate) fn file_mtime_ms(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|meta| mtime_ms_of(&meta))
+}
+
+/// `meta`'s modification time in ms since the epoch, 0 when the platform does not report one.
+fn mtime_ms_of(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// How a `@file_*` store finds the entry it may reuse ([`OutputBuffer::store_file_inner`]).
+enum FileStore {
+    /// The WHOLE text of the file at `source`, by a reader that observed the file's mtime as
+    /// `read_mtime` before reading it. `now_mtime` is the file's mtime at store time.
+    Whole {
+        source: PathBuf,
+        read_mtime: Option<u64>,
+        now_mtime: Option<u64>,
+    },
+    /// An excerpt or a synthetic `@…` view, reused only when byte-identical.
+    Snapshot,
+}
+
 /// A single buffered command result.
 #[derive(Debug, Clone)]
 pub struct BufferEntry {
@@ -53,6 +84,9 @@ pub struct BufferEntry {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+    /// For a whole-file `@file_*` entry (`source_path` set): the file's mtime in ms, as
+    /// observed BEFORE the read that produced `stdout`; `get()` refreshes once the file's
+    /// mtime passes it. For every other entry: when it was stored, in ms since the epoch.
     pub timestamp: u64,
     /// Set only for `@file_*` entries. Enables mtime-based auto-refresh in `get()`.
     pub source_path: Option<PathBuf>,
@@ -438,6 +472,11 @@ impl OutputBuffer {
 
     /// Like [`get`], but also returns whether the entry was refreshed from disk.
     /// Only `@file_*` entries with `source_path` set can refresh; all others return `false`.
+    ///
+    /// A refreshed entry is stamped with the mtime observed BEFORE its re-read, the same rule
+    /// a whole-file store follows ([`OutputBuffer::store_file_read`]): a write landing during
+    /// the re-read leaves the file's mtime above the stamp, so the next read refreshes again
+    /// instead of keeping the text read before that write.
     pub fn get_with_refresh_flag(&self, id: &str) -> Option<(BufferEntry, bool)> {
         let canonical = id.strip_suffix(".err").unwrap_or(id);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -446,8 +485,9 @@ impl OutputBuffer {
             return None;
         }
 
-        // For file-backed entries: check mtime and refresh if stale.
-        let needs_refresh = if let Some(entry) = inner.entries.get(canonical) {
+        // For file-backed entries: check mtime and refresh if stale. `Some(m)` = stale, with
+        // `m` the mtime observed now.
+        let stale_at = if let Some(entry) = inner.entries.get(canonical) {
             if let Some(ref path) = entry.source_path {
                 match std::fs::metadata(path) {
                     Err(_) => {
@@ -459,33 +499,25 @@ impl OutputBuffer {
                         return None;
                     }
                     Ok(meta) => {
-                        let mtime_ms = meta
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
-                        mtime_ms > entry.timestamp
+                        let mtime_ms = mtime_ms_of(&meta);
+                        (mtime_ms > entry.timestamp).then_some(mtime_ms)
                     }
                 }
             } else {
-                false
+                None
             }
         } else {
-            false
+            None
         };
+        let needs_refresh = stale_at.is_some();
 
-        if needs_refresh {
+        if let Some(observed) = stale_at {
             let path = inner.entries[canonical].source_path.clone().unwrap();
             match std::fs::read_to_string(&path) {
                 Ok(content) => {
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
                     if let Some(entry) = inner.entries.get_mut(canonical) {
                         entry.stdout = content;
-                        entry.timestamp = now;
+                        entry.timestamp = observed;
                     }
                 }
                 Err(_) => {
@@ -507,7 +539,10 @@ impl OutputBuffer {
             .map(|e| (e, needs_refresh))
     }
 
-    /// Store a file's WHOLE content under its ONE `@file_*` handle.
+    /// Store a file's WHOLE content under its ONE `@file_*` handle, for a caller that does
+    /// not know when it read the file: it is taken to have read the file as it is now.
+    /// Production reads of a real file use [`OutputBuffer::store_file_read`], which carries
+    /// the mtime observed before the read; this stays for synthetic `@…` views and tests.
     ///
     /// Content goes in `stdout`; `stderr` is empty; `exit_code` is 0.
     /// The `command` field holds the source path for diagnostics.
@@ -534,12 +569,49 @@ impl OutputBuffer {
         // Only track source_path for real filesystem paths. Buffer ref paths
         // (starting with '@') have no on-disk representation and must not be
         // stat-checked — doing so evicts the entry on the first get().
-        let source_path = if path.starts_with('@') {
-            None
-        } else {
-            Some(PathBuf::from(&path))
-        };
-        self.store_file_inner(path, content, source_path)
+        if path.starts_with('@') {
+            return self.store_file_inner(path.into(), content.into(), FileStore::Snapshot);
+        }
+        let source = PathBuf::from(&path);
+        let mtime = file_mtime_ms(&source);
+        self.store_file_inner(
+            path.into(),
+            content.into(),
+            FileStore::Whole {
+                source,
+                read_mtime: mtime,
+                now_mtime: mtime,
+            },
+        )
+    }
+
+    /// Store the WHOLE text of a real file a caller has just read, under the file's one
+    /// handle. `read_mtime` is the file's mtime as [`file_mtime_ms`] observed it BEFORE the
+    /// read; the entry is stamped with it, and it decides the race between two readers.
+    ///
+    /// The race (review RB-A7, 2026-10-07): reader A reads v1; the file is rewritten to v2;
+    /// reader B reads v2 and stores it; then A stores v1. Without the read time the late store
+    /// won, so the one handle every caller shares held v1 while the file held v2, and its stamp
+    /// (the store time) was past the file's mtime, so no read of the handle ever repaired it.
+    /// With it, A's store is refused: A stat'ed an older mtime than the entry carries, and the
+    /// file is no longer at A's version. A gets the handle, which holds B's newer text.
+    ///
+    /// Borrowed rather than owned, so a store that finds the handle already holding `content`
+    /// (an unchanged file read again, the common case) allocates nothing: the text is copied
+    /// only when it is minted or changed.
+    pub fn store_file_read(&self, path: &str, content: &str, read_mtime: Option<u64>) -> String {
+        debug_assert!(!path.starts_with('@'), "a buffer ref is not a file: {path}");
+        let source = PathBuf::from(path);
+        let now_mtime = file_mtime_ms(&source);
+        self.store_file_inner(
+            Cow::Borrowed(path),
+            Cow::Borrowed(content),
+            FileStore::Whole {
+                source,
+                read_mtime,
+                now_mtime,
+            },
+        )
     }
 
     /// Store a DERIVED VIEW of a file — a value that is not a run of the file's
@@ -566,12 +638,11 @@ impl OutputBuffer {
     /// "the `## Foo` section". A snapshot is also what every other buffer kind
     /// already is — `@cmd_*` and `@tool_*` never re-run their source either.
     pub fn store_file_excerpt(&self, path: String, content: String) -> String {
-        self.store_file_inner(path, content, None)
+        self.store_file_inner(path.into(), content.into(), FileStore::Snapshot)
     }
 
-    /// Shared find-or-mint behind [`OutputBuffer::store_file`] and
-    /// [`OutputBuffer::store_file_excerpt`] — they differ only in the refresh
-    /// policy they select.
+    /// Shared find-or-mint behind [`OutputBuffer::store_file`],
+    /// [`OutputBuffer::store_file_read`] and [`OutputBuffer::store_file_excerpt`].
     ///
     /// **One live handle per source (R3).** Before this, every call minted, so an
     /// unchanged file read twice came back under two handles, and since each mint
@@ -579,23 +650,28 @@ impl OutputBuffer {
     /// the pool. Measured on the live binary before the fix: two `read_file` calls
     /// on an unchanged 456-line file returned `@file_159e1949` and `@file_159e1a97`.
     ///
-    /// - A whole-file store (`source_path` set) finds the live entry with the same
-    ///   `source_path`. Its content is replaced with `content` and its timestamp
-    ///   reset: exactly what `get_with_refresh_flag` would do to that entry on its
-    ///   next read once the file's mtime advanced, so a caller holding the handle
-    ///   sees nothing it would not have seen anyway, and the file keeps ONE handle.
+    /// - A whole-file store finds the live entry with the same `source_path`, and
+    ///   brings it up to `content`, stamped with the reader's `read_mtime` — unless
+    ///   that reader stat'ed an OLDER mtime than the entry carries and the file is no
+    ///   longer at the reader's version, in which case a newer reader already stored
+    ///   newer text and the entry is kept (the stale-write race, see
+    ///   [`OutputBuffer::store_file_read`]). An equal mtime overwrites: a file deleted
+    ///   and recreated within one mtime tick is told apart only by its bytes. A file
+    ///   restored to an older mtime (`cp -p`, `touch -d`) is at the reader's version,
+    ///   so its text is taken too.
     /// - A snapshot (`source_path` unset: an excerpt, or a synthetic `@…` view) is
     ///   reused only when an entry of the same name holds byte-identical content.
     ///   Same name with different content is a different view (two section filters
     ///   of one memory topic), so it mints.
     ///
     /// The two kinds never match each other: a whole-file entry must keep refreshing,
-    /// and a snapshot must never start.
+    /// and a snapshot must never start. Text is copied only when it is minted or
+    /// changes, and a hit (mint or not) never evicts.
     fn store_file_inner(
         &self,
-        path: String,
-        content: String,
-        source_path: Option<PathBuf>,
+        path: Cow<'_, str>,
+        content: Cow<'_, str>,
+        kind: FileStore,
     ) -> String {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = SystemTime::now()
@@ -610,17 +686,30 @@ impl OutputBuffer {
             .iter()
             .find(|(id, e)| {
                 id.starts_with("@file_")
-                    && match &source_path {
-                        Some(p) => e.source_path.as_ref() == Some(p),
-                        None => e.source_path.is_none() && e.command == path && e.stdout == content,
+                    && match &kind {
+                        FileStore::Whole { source, .. } => e.source_path.as_ref() == Some(source),
+                        FileStore::Snapshot => {
+                            e.source_path.is_none() && e.command == *path && e.stdout == *content
+                        }
                     }
             })
             .map(|(id, _)| id.clone());
         if let Some(id) = live {
-            if source_path.is_some() {
+            if let FileStore::Whole {
+                read_mtime,
+                now_mtime,
+                ..
+            } = &kind
+            {
                 if let Some(entry) = inner.entries.get_mut(&id) {
-                    entry.stdout = content;
-                    entry.timestamp = now;
+                    let stale_read =
+                        read_mtime.is_some_and(|r| r < entry.timestamp && *now_mtime != Some(r));
+                    if !stale_read {
+                        if entry.stdout != *content {
+                            entry.stdout = content.into_owned();
+                        }
+                        entry.timestamp = read_mtime.unwrap_or(0);
+                    }
                 }
             }
             Self::bump_lru_locked(&mut inner, &id);
@@ -629,14 +718,21 @@ impl OutputBuffer {
 
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@file_{:08x}", now.wrapping_add(inner.counter) as u32);
+        let (source_path, timestamp) = match kind {
+            // An unknown read time stamps 0, so the first read of the handle re-checks the file.
+            FileStore::Whole {
+                source, read_mtime, ..
+            } => (Some(source), read_mtime.unwrap_or(0)),
+            FileStore::Snapshot => (None, now),
+        };
 
         Self::evict_oldest_locked(&mut inner);
         let entry = BufferEntry {
-            command: path,
-            stdout: content,
+            command: path.into_owned(),
+            stdout: content.into_owned(),
             stderr: String::new(),
             exit_code: 0,
-            timestamp: now,
+            timestamp,
             source_path,
             content_hash: None,
             // A @file_* entry holds the whole file, or an excerpt the caller
@@ -2872,6 +2968,82 @@ mod tests {
             );
             assert_eq!(entry.stdout, second_body);
         }
+    }
+    /// The stale-write race (review RB-A7) at the store API, with explicit mtimes. Reader B read
+    /// v2 when the file's mtime was T2 and stored first; reader A read v1 earlier, at T1 < T2,
+    /// and stores late. The file is at T2, not at A's version, so A's text is older than the
+    /// entry's: the store is refused and A gets the one handle, holding v2, stamped T2.
+    #[test]
+    fn a_store_of_text_read_under_an_older_mtime_never_overwrites_a_newer_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("race.txt");
+        std::fs::write(&p, "v2").unwrap();
+        let ago = |secs| {
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+            )
+        };
+        filetime::set_file_mtime(&p, ago(50)).unwrap();
+        let path = p.to_string_lossy().to_string();
+        let t2 = file_mtime_ms(&p).unwrap();
+        let t1 = t2 - 50_000;
+
+        let buf = OutputBuffer::new(10);
+        let hb = buf.store_file_read(&path, "v2", Some(t2));
+        let ha = buf.store_file_read(&path, "v1", Some(t1));
+        assert_eq!(ha, hb, "the late reader got a second handle");
+        let (entry, refreshed) = buf.get_with_refresh_flag(&hb).unwrap();
+        assert_eq!(entry.stdout, "v2", "the late store of an older read won");
+        assert_eq!(entry.timestamp, t2, "the stamp regressed to the older read");
+        assert!(!refreshed);
+        assert_eq!(buf.entry_count(), 1);
+
+        // The same two stores in the order they happened: the newer read wins as it should.
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&path, "v1", Some(t1));
+        assert_eq!(buf.store_file_read(&path, "v2", Some(t2)), h);
+        assert_eq!(buf.get_stream(&h).as_deref(), Some("v2"));
+    }
+
+    /// The race rule must not refuse a file that legitimately went BACK to an older mtime
+    /// (`cp -p`, `touch -d`, an archive extract): the reader stat'ed the file at that older
+    /// mtime and it is still there, so its text is the file's. And an EQUAL mtime overwrites:
+    /// a file deleted and recreated within one mtime tick is told apart only by its bytes.
+    #[test]
+    fn an_older_mtime_the_file_still_has_and_an_equal_mtime_both_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("back.txt");
+        let path = p.to_string_lossy().to_string();
+        let ago = |secs| {
+            filetime::FileTime::from_system_time(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+            )
+        };
+        std::fs::write(&p, "new").unwrap();
+        filetime::set_file_mtime(&p, ago(10)).unwrap();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&path, "new", file_mtime_ms(&p));
+
+        std::fs::write(&p, "restored").unwrap();
+        filetime::set_file_mtime(&p, ago(1000)).unwrap();
+        let restored_at = file_mtime_ms(&p);
+        assert_eq!(buf.store_file_read(&path, "restored", restored_at), h);
+        let entry = buf.get(&h).unwrap();
+        assert_eq!(
+            entry.stdout, "restored",
+            "a file restored to an older mtime was refused"
+        );
+        assert_eq!(Some(entry.timestamp), restored_at);
+
+        // Same mtime, other bytes.
+        std::fs::write(&p, "recreated").unwrap();
+        let tick = restored_at.map(|ms| {
+            filetime::FileTime::from_unix_time((ms / 1000) as i64, ((ms % 1000) * 1_000_000) as u32)
+        });
+        filetime::set_file_mtime(&p, tick.unwrap()).unwrap();
+        assert_eq!(file_mtime_ms(&p), restored_at, "fixture: same mtime");
+        assert_eq!(buf.store_file_read(&path, "recreated", restored_at), h);
+        assert_eq!(buf.get_stream(&h).as_deref(), Some("recreated"));
     }
 
     /// A snapshot (excerpt, or a synthetic `@…` view) is reused only when it is byte-identical:

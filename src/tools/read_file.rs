@@ -175,7 +175,13 @@ impl Tool for ReadFile {
             .into());
         }
 
+        // The file's mtime BEFORE its text is read: a handle stored from this text is stamped
+        // with it, so a reader that read an older version cannot overwrite a newer reader's
+        // store (`OutputBuffer::store_file_read`).
+        let read_mtime = crate::tools::output_buffer::file_mtime_ms(&resolved);
         let text = read_file_text(path, &resolved)?;
+        #[cfg(test)]
+        read_hook::fire(&resolved);
 
         // Guard at the shared read, not at the markdown route: `force=true` and
         // `json_path`/`toml_key` both fall through to this raw path *specifically to
@@ -206,6 +212,7 @@ impl Tool for ReadFile {
                 path,
                 &text,
                 &resolved,
+                read_mtime,
                 start,
                 end,
                 &source_tag,
@@ -213,7 +220,7 @@ impl Tool for ReadFile {
                 force,
             );
         }
-        read_full_file(path, &text, &resolved, &input, &source_tag, ctx)
+        read_full_file(path, &text, &resolved, read_mtime, &input, &source_tag, ctx)
     }
 
     fn output_form(&self) -> OutputForm {
@@ -715,6 +722,41 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
     })
 }
 
+/// Test-only: run a callback after a read of a real file has read its text and before it
+/// stores the file's handle, so a test can land a write (and a second reader) inside that
+/// window. That window is where the stale-write race lives: a reader that read the old text
+/// and stores it after a newer reader stored the new text.
+#[cfg(test)]
+pub(crate) mod read_hook {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    type Hook = Box<dyn FnOnce() + Send>;
+    static HOOKS: Mutex<Vec<(PathBuf, Hook)>> = Mutex::new(Vec::new());
+
+    /// Run `f` once, the next time a read of `path` (canonical) has read its text.
+    pub(crate) fn after_read_of(path: &Path, f: impl FnOnce() + Send + 'static) {
+        HOOKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((path.to_path_buf(), Box::new(f)));
+    }
+
+    /// Called by the real-file read paths between reading the text and storing the handle.
+    pub(crate) fn fire(path: &Path) {
+        let hook = {
+            let mut hooks = HOOKS.lock().unwrap_or_else(|e| e.into_inner());
+            hooks
+                .iter()
+                .position(|(p, _)| p == path)
+                .map(|i| hooks.remove(i).1)
+        };
+        if let Some(f) = hook {
+            f();
+        }
+    }
+}
+
 /// How much of the caller's own `json_path` or `toml_key` a response echoes back, in each place
 /// it is echoed (`path`, a `breadcrumb` entry, the `hint`), in SERIALIZED bytes. The value is
 /// the caller's input and has no length of its own: a 6 KB `toml_key` echoed in `breadcrumb` and
@@ -889,6 +931,7 @@ fn read_with_line_range(
     path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
+    read_mtime: Option<u64>,
     start: u64,
     end: u64,
     source_tag: &str,
@@ -1052,7 +1095,7 @@ fn read_with_line_range(
     // (its line 1 = the file's line `start`) that no number in this response used.
     let file_id = ctx
         .output_buffer
-        .store_file(resolved.to_string_lossy().to_string(), text.to_string());
+        .store_file_read(&resolved.to_string_lossy(), text, read_mtime);
     // Continue against the file itself, in the same line numbers `shown_lines` reports — a
     // `next` phrased in the slice buffer's own 1-based frame is off by `start - 1` and
     // re-serves seen lines.
@@ -1172,6 +1215,7 @@ fn read_full_file(
     path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
+    read_mtime: Option<u64>,
     input: &Value,
     source_tag: &str,
     ctx: &ToolContext,
@@ -1200,9 +1244,9 @@ fn read_full_file(
         }
     }
     {
-        let file_id = ctx
-            .output_buffer
-            .store_file(resolved.to_string_lossy().to_string(), text.to_string());
+        let file_id =
+            ctx.output_buffer
+                .store_file_read(&resolved.to_string_lossy(), text, read_mtime);
         let summary =
             match crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy()) {
                 crate::tools::file_summary::FileSummaryType::Source => {
