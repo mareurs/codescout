@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Branch:** experiments
-**Status:** Design approved by the operator (sections 1 to 3, in conversation). Pending written-spec review. Not implemented.
+**Status:** Design approved by the operator (sections 1 to 3, in conversation). Implemented in two phases in the `claude-plugins` repo (first phase and the hook adapter are on `origin/main`). Status as of 2026-10-07: the live work list is the tracker `effort-steering-second-phase` in that repo (`docs/trackers/effort-steering-second-phase.md`, id `af4ccc8b94a95c91`) and the passover `ec8f1f91d436b653`. S4 ran twice on 2026-10-07 (second registration `mechanism_pass`); the verdict is held for a quality check. Two parts of this design have been overtaken by evidence: a Claude Code mod can set effort per request (so the opt-in settings write that the stop rule names as the fallback is not needed), and the steering sentence only has room to work where effort buys thinking (at `xhigh`, not at `medium`).
 
 ## Purpose
 

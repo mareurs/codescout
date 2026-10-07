@@ -6,6 +6,8 @@
 **Spec:** `docs/superpowers/specs/2026-10-04-effort-steering-design.md` (see its section "Constraints carried into the second plan")
 **Findings:** `docs/research/2026-10-04-effort-steering-spike-findings.md`
 
+**Status 2026-10-07:** this document records the first phase (2026-10-04 and 05). The live work list is the tracker `effort-steering-second-phase` in the `claude-plugins` repo (`docs/trackers/effort-steering-second-phase.md`, id `af4ccc8b94a95c91`), with the passover `ec8f1f91d436b653`. The first phase and the hook adapter are on `origin/main` of `claude-plugins`; the rulings below are unchanged.
+
 This document keeps what a gitignored scratch ledger held during the build: the commit map, the review outcomes, the triage of every deferred finding and every decision the controller took on the operator's behalf.
 
 ## What was built

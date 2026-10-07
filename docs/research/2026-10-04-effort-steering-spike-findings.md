@@ -5,6 +5,8 @@
 **Plan:** `docs/superpowers/plans/2026-10-04-effort-steering-core-and-spikes.md` (Task 5)
 **Code:** the `claude-plugins` repo, branch `feat/effort-steering-core`, in the worktree `claude-plugins-effort-steering`. Since 2026-10-05 the branch is merged locally into `main` (fast-forward, `main` = `7475f6d`) and not pushed. Commits: features `claude-plugins:2e7757d` and `claude-plugins:c0e3cd6`; S2 `claude-plugins:13273ea`; S3 `claude-plugins:1b32e2e`, `claude-plugins:e0a355c` and `claude-plugins:e578c9f`; S1 `claude-plugins:c243591`.
 
+**Status 2026-10-07:** this document records the first phase (2026-10-04 and 05). The live work list is the tracker `effort-steering-second-phase` in the `claude-plugins` repo (`docs/trackers/effort-steering-second-phase.md`, id `af4ccc8b94a95c91`), with the passover `ec8f1f91d436b653`. Since then: the first phase and the Claude Code hook adapter are on `origin/main` of `claude-plugins`; S4 ran twice (first registration `mechanism_fail`, floor-bound at `medium`; second at `xhigh` `mechanism_pass`, thinking minus 37 percent, tracker entry ES-21); a Claude Code mod can set effort per request (ES-17); the S4 verdict is held for a quality check (ES-22).
+
 ## Summary
 
 - S1 and S2 answered their questions. The hook input and the transcripts give the adapter everything it needs for logging and for measuring thinking tokens.
