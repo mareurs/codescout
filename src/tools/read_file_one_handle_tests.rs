@@ -677,6 +677,55 @@ async fn a_late_store_of_an_older_read_never_regresses_the_files_handle() {
         assert_eq!(buf.entry_count(), 1, "{name}");
     }
 }
+/// The other half of stamping with the PRE-read mtime: a write landing inside a reader's
+/// read-to-store window, with no second reader to store the new text. The reader stores what it
+/// read (v1) stamped with the mtime it saw before reading, which is older than the file's now,
+/// so the next read of the handle re-reads the file and serves v2. Stamped with the store time,
+/// or with an mtime taken after the write, the handle would hold v1 for good.
+#[tokio::test]
+async fn a_write_inside_the_read_window_is_repaired_by_the_next_handle_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let ago = |secs: u64| {
+        filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() - std::time::Duration::from_secs(secs),
+        )
+    };
+    for (name, md) in [("window.txt", false), ("window.md", true)] {
+        let p = root.join(name);
+        let body = |tag: &str| {
+            if md {
+                format!("# W\n\n## A\n{}\n", big_text(tag, 400))
+            } else {
+                big_text(tag, 400)
+            }
+        };
+        let (v1, v2) = (body("v1"), body("v2"));
+        std::fs::write(&p, &v1).unwrap();
+        filetime::set_file_mtime(&p, ago(100)).unwrap();
+        {
+            let (p, v2) = (p.clone(), v2.clone());
+            super::read_hook::after_read_of(&p.clone(), move || {
+                std::fs::write(&p, &v2).unwrap();
+                filetime::set_file_mtime(&p, ago(50)).unwrap();
+            });
+        }
+        let ctx = ctx().await;
+        let h = ReadFile
+            .call(json!({ "path": p.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap()["file_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (entry, refreshed) = ctx.output_buffer.get_with_refresh_flag(&h).unwrap();
+        assert_eq!(
+            entry.stdout, v2,
+            "{name}: the handle kept the text read before the write"
+        );
+        assert!(refreshed, "{name}: the holder was not told");
+    }
+}
 
 /// Review B2: a HOLDER of the file's handle is told, once, when a path read changed the bytes
 /// behind it. The path re-read updates the one handle in place (R3) and stamps it with the
