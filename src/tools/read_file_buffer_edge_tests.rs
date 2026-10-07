@@ -623,9 +623,10 @@ async fn a_toml_key_read_with_many_siblings_drops_them_from_the_handle_arm() {
 /// are, and the dimension it varies is the other keys, not escaping.
 #[tokio::test]
 async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_handle_drops_them() {
-    const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
+    // The limit a response is judged by: over it, `call_content` buffers it under `@tool_*`.
+    let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
     // Over the limit alone, so the read takes the handle arm, where `siblings` is droppable.
     let value = "a".repeat(12_000);
     let mut in_window = 0;
@@ -638,7 +639,7 @@ async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_handle_drop
         let alone = json!(extracted.siblings).to_string().len();
         // Fits alone (10 B of margin), by less than the arm's other keys need beside it (they
         // are well over 150 B: the `hint` alone names the handle twice).
-        if !(LIMIT - 150..=LIMIT - 10).contains(&alone) {
+        if !(limit - 150..=limit - 10).contains(&alone) {
             continue;
         }
         in_window += 1;
@@ -741,9 +742,10 @@ async fn a_forced_markdown_range_whose_coverage_alone_overflows_keeps_one_handle
 /// Swept so `coverage` serializes just under the limit in every content class.
 #[tokio::test]
 async fn a_forced_markdown_range_whose_coverage_fits_alone_but_not_beside_the_page_drops_it() {
-    const LIMIT: usize = 10_003; // `exceeds_inline_limit`: len / 4 > 2,500
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
+    // The limit a response is judged by: over it, `call_content` buffers it under `@tool_*`.
+    let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
     // Wider than any room a page has, so it is cut whether or not `coverage` rides beside it,
     // and the "a line would show whole without it" reason never drops `coverage`.
     let wide = "a".repeat(12_000);
@@ -768,7 +770,7 @@ async fn a_forced_markdown_range_whose_coverage_fits_alone_but_not_beside_the_pa
                 .len();
             // Fits alone (10 B of margin), by less than the page's other keys need beside it
             // (well over 150 B: `file_id`, `hint`, a `next` naming the temp path).
-            if !(LIMIT - 150..=LIMIT - 10).contains(&alone) {
+            if !(limit - 150..=limit - 10).contains(&alone) {
                 continue;
             }
             in_window += 1;
