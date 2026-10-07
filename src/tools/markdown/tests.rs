@@ -4259,3 +4259,79 @@ fn every_advertised_batch_action_actually_dispatches() {
         );
     }
 }
+
+/// A buffered markdown RANGE page, as DELIVERED (the Text form `call_content` returns, which is
+/// all a caller reads). `format_read`'s content branch printed `content` and a truncation hint
+/// only, and dropped `file_id`, `shown_lines`, `complete` and `next`: the caller got 9 KB of a
+/// range with no handle, no sign the page was partial, and no route to the rest. Measured on
+/// review (baseline, 0499c606 and 6ebd0615 alike): 9,276 B delivered, no `@file_`, no "next".
+/// The page must name its handle, how much it shows, and a `next` route that works.
+#[tokio::test]
+async fn a_buffered_markdown_range_page_delivers_its_handle_count_and_next() {
+    let ctx = test_ctx().await;
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("pg.md");
+    let lines: Vec<String> = (1..=600)
+        .map(|i| format!("a line {i:04} {}", "x".repeat(48)))
+        .collect();
+    std::fs::write(&file, format!("# D\n\n## A\n{}\n", lines.join("\n"))).unwrap();
+    let path = file.to_str().unwrap().to_string();
+    let input = json!({ "path": path, "start_line": 3, "end_line": 500 });
+
+    let v = crate::tools::read_file::ReadFile
+        .call(input.clone(), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        v["format"],
+        json!("markdown"),
+        "fixture: the markdown range arm"
+    );
+    assert_eq!(v["complete"], json!(false), "fixture: a partial page");
+    let file_id = v["file_id"].as_str().unwrap().to_string();
+    let next = v["next"].as_str().unwrap().to_string();
+    let shown = v["content"].as_str().unwrap().lines().count();
+    let total = v["total_lines"].as_u64().unwrap();
+
+    let blocks = crate::tools::read_file::ReadFile
+        .call_content(input, &ctx)
+        .await
+        .unwrap();
+    let text = crate::tools::hint_probe::primary_text(&blocks);
+    assert!(
+        text.contains(&format!("Buffer: {file_id}")),
+        "the page does not name its handle: {:?}",
+        &text[text.len().saturating_sub(300)..]
+    );
+    assert!(
+        text.contains(&format!("[{shown} of {total} lines shown]")),
+        "the page does not say it is partial: {:?}",
+        &text[text.len().saturating_sub(300)..]
+    );
+    assert!(
+        text.contains(&format!("Next: {next}")),
+        "the page names no route to the rest: {:?}",
+        &text[text.len().saturating_sub(300)..]
+    );
+
+    // Following the delivered `next` continues where the page stopped.
+    let route =
+        regex::Regex::new(r#"Next: read_file\("([^"]+)", start_line=(\d+), end_line=(\d+)\)"#)
+            .unwrap();
+    let c = route.captures(&text).expect("a parseable next route");
+    let start: u64 = c[2].parse().unwrap();
+    assert_eq!(start, v["shown_lines"][1].as_u64().unwrap() + 1);
+    let cont = crate::tools::read_file::ReadFile
+        .call(
+            json!({ "path": &c[1], "start_line": start, "end_line": c[3].parse::<u64>().unwrap() }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let first = cont["content"].as_str().unwrap().lines().next().unwrap();
+    assert_eq!(
+        first,
+        lines[(start - 4) as usize],
+        "next resumed at the wrong line"
+    );
+}

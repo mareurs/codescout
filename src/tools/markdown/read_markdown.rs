@@ -1022,6 +1022,27 @@ pub(crate) fn format_read(result: &Value) -> Option<String> {
             out.push('\n');
             out.push_str(hint);
         }
+        // A buffered RANGE page (`read_markdown_line_range`) also carries its handle, whether it
+        // is the whole range, and the route to the rest: printed as the raw renderer prints
+        // them (`format_read_file_body`). This branch dropped all three, so the delivered text
+        // of a partial page was content with no handle, no sign it was partial and no `next`.
+        if result
+            .get("shown_lines")
+            .and_then(|v| v.as_array())
+            .is_some()
+        {
+            let total = result["total_lines"].as_u64().unwrap_or(0);
+            if let Some(file_id) = result.get("file_id").and_then(|v| v.as_str()) {
+                out.push_str(&format!("\n\n  Buffer: {file_id}"));
+            }
+            if !result["complete"].as_bool().unwrap_or(true) {
+                let shown = content.lines().count();
+                out.push_str(&format!("\n  [{shown} of {total} lines shown]"));
+                if let Some(next) = result.get("next").and_then(|v| v.as_str()) {
+                    out.push_str(&format!("\n  Next: {next}"));
+                }
+            }
+        }
         return Some(out);
     }
 

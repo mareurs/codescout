@@ -64,27 +64,13 @@ async fn delivered_handle(ctx: &crate::tools::ToolContext, input: &Value) -> Str
         Ok(blocks) => {
             let text = crate::tools::hint_probe::primary_text(&blocks);
             let handles = handles_in(&text);
-            assert!(
-                handles.len() <= 1,
-                "{input}: expected one handle, got {handles:?}: {text:.400}"
+            assert_eq!(
+                handles.len(),
+                1,
+                "{input}: expected exactly one handle in the delivered text, got {handles:?}: \
+                 {text:.400}"
             );
-            if let Some(h) = handles.into_iter().next() {
-                return h;
-            }
-            // Only a buffered MARKDOWN range page delivers no handle in its text: the markdown
-            // renderer's content branch (`markdown::format_read`) prints `content` and `hint`
-            // and drops `file_id`, `next` and `shown_lines`. That is a rendering gap of its own,
-            // not this file's subject, so for that one shape the handle is read from the result
-            // the text is rendered from. Any other shape with no handle fails here.
-            let v = ReadFile.call(input.clone(), ctx).await.unwrap();
-            assert!(
-                v["format"] == json!("markdown") && v.get("shown_lines").is_some(),
-                "{input}: no handle delivered: {text:.400}"
-            );
-            v["file_id"]
-                .as_str()
-                .unwrap_or_else(|| panic!("{input}: a buffered range page with no file_id: {v}"))
-                .to_string()
+            handles.into_iter().next().unwrap()
         }
         Err(e) => {
             let rec = e
