@@ -1190,6 +1190,38 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "a_red_naming_many_dirty_files_carries_a_bounded_wip_authors",
         },
     },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test names
+        // `JOBS_LISTED_MAX` + 4 live background jobs in one foreground command through the real
+        // tool and asserts the first eight are listed in the command's order, the note counts the
+        // other four, and the route parsed out of the note (`true @bg_…`), run for each omitted
+        // handle, lists that job. The byte sweeps (`*_naming_many_large_jobs_*`, four shapes x seven
+        // content classes x 3, 3 and 20 jobs) assert no shape lists more. Measured before the cap,
+        // with no per-job clip: `echo hi` naming twenty 4 KB jobs was buffered whole under `@tool_*`
+        // (83,427 B `buffered_bytes`). Marker written by production in `run_command::jobs_not_listed`.
+        id: "run_command.jobs_listed",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("jobs this command names are not listed"),
+            mutation: Mutation::Killed,
+            cited_test: "jobs_past_the_cap_are_counted_and_listed_by_the_named_route",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test runs one
+        // job whose command is `HEAD` + 4 KB + `TAIL` in seven content classes (ASCII, `"`, `\`,
+        // `\x01`, `\x1b`, `€`, a 4-byte emoji) through the real tool against `JOB_COMMAND_BYTES` 300
+        // and asserts the marker, head and tail kept, and an escaped length within 12 bytes under the
+        // budget. Measured before the clip: three 4 KB jobs made a pending acknowledgement buffered
+        // under `@tool_*` (12,592 B `buffered_bytes`; 74,032 B for `\x01`), its `@ack_*` handle
+        // visible only inside. Marker written by production in `util::text::elide_middle_escaped`,
+        // called from `run_command::clip_job_command`.
+        id: "run_command.job_command_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("the rest is the command that started this job"),
+            mutation: Mutation::Killed,
+            cited_test: "a_job_command_is_clipped_in_escaped_bytes_with_a_marker",
+        },
+    },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
         id: "call_graph.workspace_files_scan",

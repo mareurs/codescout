@@ -8755,3 +8755,370 @@ async fn a_program_printing_the_summarizer_markers_keeps_one_handle() {
     );
     eprintln!("marker sweep: {checked} runs kept one handle, {summarized} summarized");
 }
+
+// --- `jobs` and the response shapes the inline-or-summary gate never measured -------------------
+
+/// The seven content classes of every byte-bound sweep. Per character they are 1, 1, 1, 1, 1, 3
+/// and 4 raw bytes and serialize to 1, 2, 2, 6, 6, 3 and 4 bytes.
+const LATE_RC_CLASSES: [&str; 7] = ["a", "\"", "\\", "\u{1}", "\u{1b}", "€", "😀"];
+
+/// (jobs, raw bytes of each job's command): three short ones, three of 4 KB, and fifty of 4 KB. The
+/// buffer keeps the newest 20 jobs live, so the fifty-job command names 20 jobs `jobs` can report.
+const LATE_RC_SIZES: [(usize, usize); 3] = [(3, 100), (3, 4096), (50, 4096)];
+
+/// The response shapes `run_command` builds around a command that names `@bg_*` handles.
+#[derive(Clone, Copy, Debug)]
+enum JobsShape {
+    /// Ran to completion: built by `handle_successful_output_with`.
+    Foreground,
+    /// A dangerous command held for acknowledgement: the `pending_ack` shape.
+    PendingAck,
+    /// Killed at `timeout_secs`: the `timed_out` shape.
+    Timeout,
+    /// `run_in_background`: the spawn-time `output_id` shape.
+    Background,
+}
+
+impl JobsShape {
+    fn input(self, refs: &str) -> Value {
+        match self {
+            JobsShape::Foreground => json!({ "command": format!("echo hi {refs}") }),
+            JobsShape::PendingAck => {
+                json!({ "command": format!("rm -rf /tmp/late-rc-nonexistent-dir {refs}") })
+            }
+            JobsShape::Timeout => {
+                json!({ "command": format!("sleep 3; : /dev/null {refs}"), "timeout_secs": 1 })
+            }
+            JobsShape::Background => json!({
+                "command": format!(": /dev/null {refs}"),
+                "run_in_background": true,
+            }),
+        }
+    }
+
+    /// The key that says what happened, which the DELIVERED response must carry at top level.
+    fn status_failure(self, parsed: &Value) -> Option<String> {
+        let ok = match self {
+            JobsShape::Foreground => parsed["exit_code"] == 0,
+            JobsShape::PendingAck => parsed["pending_ack"]
+                .as_str()
+                .is_some_and(|h| h.starts_with("@ack_")),
+            JobsShape::Timeout => parsed["timed_out"] == true,
+            JobsShape::Background => parsed["output_id"]
+                .as_str()
+                .is_some_and(|h| h.starts_with("@bg_")),
+        };
+        (!ok).then(|| "its status key is not in the delivered response".to_string())
+    }
+}
+
+/// Store `n` running background jobs whose commands are `unit` repeated to at most `size` raw
+/// bytes, each with a real log file under `dir`. Returns the handles in store order.
+fn store_jobs(
+    ctx: &ToolContext,
+    dir: &std::path::Path,
+    n: usize,
+    unit: &str,
+    size: usize,
+) -> Vec<String> {
+    (0..n)
+        .map(|i| {
+            let log_path = dir.join(format!("late-rc-job-{i}.log"));
+            std::fs::write(&log_path, "log line\n").unwrap();
+            ctx.output_buffer
+                .store_background(crate::tools::output_buffer::BackgroundJob {
+                    log_path,
+                    command: unit.repeat(size / unit.len()),
+                    state: crate::tools::output_buffer::JobState::Running,
+                })
+        })
+        .collect()
+}
+
+/// What a DELIVERED response naming background jobs must hold, as failure lines (none when it
+/// holds), so a sweep reports every failing case with its bytes instead of the first.
+fn jobs_response_failures(
+    label: &str,
+    shape: JobsShape,
+    text: &str,
+    parsed: &Value,
+    ctx: &ToolContext,
+    handles: &[String],
+) -> Vec<String> {
+    let bytes = text.len();
+    let mut out = Vec::new();
+    if bytes > 10_003 {
+        out.push(format!(
+            "{label}: delivered {bytes} B, over the 10,003 B limit"
+        ));
+    }
+    if text.contains("@tool_") {
+        out.push(format!(
+            "{label}: a @tool_* handle was minted ({bytes} B delivered, {} B buffered)",
+            parsed["buffered_bytes"]
+        ));
+    }
+    let actionable = ["output_id", "pending_ack"]
+        .iter()
+        .filter(|k| parsed.get(**k).is_some())
+        .count();
+    if actionable > 1 {
+        out.push(format!("{label}: {actionable} actionable handles"));
+    }
+    if let Some(why) = shape.status_failure(parsed) {
+        out.push(format!("{label}: {why} ({bytes} B delivered)"));
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    // Every live job the command names is either listed or counted as not listed.
+    let live = handles
+        .iter()
+        .filter(|h| ctx.output_buffer.get_background(h).is_some())
+        .count();
+    let listed = parsed["jobs"].as_array().cloned().unwrap_or_default();
+    let not_listed = parsed["jobs_not_listed"]
+        .as_str()
+        .map(|s| {
+            s.split(' ')
+                .next()
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("{label}: `jobs_not_listed` leads with no count: {s}"))
+        })
+        .unwrap_or(0);
+    let shed = parsed["envelope_omitted"]
+        .as_str()
+        .is_some_and(|s| s.contains("jobs"));
+    if listed.len() > JOBS_LISTED_MAX {
+        out.push(format!(
+            "{label}: {} jobs listed, over JOBS_LISTED_MAX {JOBS_LISTED_MAX}",
+            listed.len()
+        ));
+    }
+    if !shed && listed.len() + not_listed != live {
+        out.push(format!(
+            "{label}: {} listed + {not_listed} not listed != {live} live jobs named",
+            listed.len()
+        ));
+    }
+    for job in &listed {
+        let handle = job["handle"].as_str().unwrap_or_default();
+        let Some(stored) = ctx.output_buffer.get_background(handle) else {
+            out.push(format!("{label}: listed {handle}, which is not a live job"));
+            continue;
+        };
+        let shown = job["command"].as_str().unwrap_or_default();
+        if shown != stored.command
+            && !shown.contains("bytes shown; the rest is the command that started this job")
+        {
+            out.push(format!(
+                "{label}: {handle}'s command was cut with no marker"
+            ));
+        }
+        let escaped = crate::util::text::json_escaped_len(shown);
+        if escaped > JOB_COMMAND_BYTES {
+            out.push(format!(
+                "{label}: {handle}'s command is {escaped} escaped bytes, over {JOB_COMMAND_BYTES}"
+            ));
+        }
+    }
+    out
+}
+
+/// Run every class x size of `shape` through the real tool; the failure lines of every case.
+async fn jobs_sweep(shape: JobsShape) -> Vec<String> {
+    let (dir, ctx) = project_ctx().await;
+    let mut failures = Vec::new();
+    for unit in LATE_RC_CLASSES {
+        for (n, size) in LATE_RC_SIZES {
+            // A command can only name a LIVE job (an evicted handle is refused before anything
+            // runs), so of the fifty stored it names the twenty the buffer keeps.
+            let handles: Vec<String> = store_jobs(&ctx, dir.path(), n, unit, size)
+                .into_iter()
+                .filter(|h| ctx.output_buffer.get_background(h).is_some())
+                .collect();
+            let label = format!("{shape:?} {}x{size} B of {unit:?}", handles.len());
+            let (text, parsed) = run_query(&ctx, shape.input(&handles.join(" "))).await;
+            eprintln!("{label}: {} B delivered", text.len());
+            failures.extend(jobs_response_failures(
+                &label, shape, &text, &parsed, &ctx, &handles,
+            ));
+        }
+    }
+    failures
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_foreground_run_naming_many_large_jobs_stays_inline() {
+    let failures = jobs_sweep(JobsShape::Foreground).await;
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pending_ack_naming_many_large_jobs_delivers_its_ack_handle() {
+    let failures = jobs_sweep(JobsShape::PendingAck).await;
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_timeout_naming_many_large_jobs_delivers_its_timed_out_status() {
+    let failures = jobs_sweep(JobsShape::Timeout).await;
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_background_spawn_naming_many_large_jobs_stays_inline() {
+    let failures = jobs_sweep(JobsShape::Background).await;
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// `jobs` lists the first `JOBS_LISTED_MAX` jobs in the command's order and counts the rest in
+/// `jobs_not_listed`, whose route, parsed out of the note and run, lists each omitted job.
+#[cfg(unix)]
+#[tokio::test]
+async fn jobs_past_the_cap_are_counted_and_listed_by_the_named_route() {
+    let (dir, ctx) = project_ctx().await;
+    let handles = store_jobs(&ctx, dir.path(), JOBS_LISTED_MAX + 4, "a", 100);
+    let (text, parsed) = run_query(
+        &ctx,
+        json!({ "command": format!("echo hi {}", handles.join(" ")) }),
+    )
+    .await;
+    let listed: Vec<&str> = parsed["jobs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no jobs: {text:.400}"))
+        .iter()
+        .map(|j| j["handle"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        listed,
+        handles[..JOBS_LISTED_MAX],
+        "the first jobs, in order"
+    );
+    let note = parsed["jobs_not_listed"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no jobs_not_listed: {text:.400}"));
+    let total = JOBS_LISTED_MAX + 4;
+    assert!(
+        note.starts_with(&format!(
+            "4 more of the {total} jobs this command names are not listed"
+        )),
+        "{note}"
+    );
+    assert!(
+        note.contains(&format!(
+            "those named after {}",
+            handles[JOBS_LISTED_MAX - 1]
+        )),
+        "{note}"
+    );
+    let route = regex::Regex::new(r#"run_command\("([^"]+)"\)"#)
+        .expect("static pattern")
+        .captures(note)
+        .unwrap_or_else(|| panic!("no route in the note: {note}"))[1]
+        .to_string();
+    assert_eq!(route, "true @bg_…");
+    for omitted in &handles[JOBS_LISTED_MAX..] {
+        let (text, parsed) =
+            run_query(&ctx, json!({ "command": route.replace("@bg_…", omitted) })).await;
+        assert_eq!(parsed["exit_code"], 0, "the route ran: {text:.400}");
+        assert_eq!(
+            parsed["jobs"],
+            json!([{"handle": omitted, "state": "running", "command": "a".repeat(100)}]),
+            "the route lists the omitted job whole: {text:.400}"
+        );
+    }
+}
+
+/// A job's `command` is cut in ESCAPED bytes, middle elided behind the marker, head and tail kept.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_job_command_is_clipped_in_escaped_bytes_with_a_marker() {
+    let (dir, ctx) = project_ctx().await;
+    for unit in LATE_RC_CLASSES {
+        let log_path = dir.path().join("late-rc-job-clip.log");
+        std::fs::write(&log_path, "log line\n").unwrap();
+        let id = ctx
+            .output_buffer
+            .store_background(crate::tools::output_buffer::BackgroundJob {
+                log_path,
+                command: format!("HEAD{}TAIL", unit.repeat(4096 / unit.len())),
+                state: crate::tools::output_buffer::JobState::Running,
+            });
+        let (text, parsed) = run_query(&ctx, json!({ "command": format!("echo hi {id}") })).await;
+        let shown = parsed["jobs"][0]["command"].as_str().unwrap_or_default();
+        assert!(
+            shown.contains("bytes shown; the rest is the command that started this job"),
+            "{unit:?}: no marker: {text:.400}"
+        );
+        assert!(
+            shown.starts_with("HEAD") && shown.ends_with("TAIL"),
+            "{unit:?}: head or tail lost: {shown}"
+        );
+        let escaped = crate::util::text::json_escaped_len(shown);
+        assert!(
+            escaped <= JOB_COMMAND_BYTES && escaped + 12 >= JOB_COMMAND_BYTES,
+            "{unit:?}: {escaped} escaped bytes against a budget of {JOB_COMMAND_BYTES}"
+        );
+    }
+}
+
+/// The shapes `handle_successful_output_with` never measures, over the limit by a key that is not
+/// `jobs`: one `buffer_truncated` notice per truncated buffer the command names. At the server's
+/// buffer capacity (50) the notices alone are over the limit, so only a gate on the shape itself,
+/// not the bound on `jobs`, can keep the status key and the jobs in front of the caller.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unmeasured_shape_over_the_limit_by_buffer_notices_keeps_its_status() {
+    let (dir, mut ctx) = project_ctx().await;
+    ctx.output_buffer = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
+    let cmd_refs: Vec<String> = (0..45)
+        .map(|_| {
+            ctx.output_buffer.store_truncated(
+                "cmd".into(),
+                "kept\n".into(),
+                String::new(),
+                0,
+                Some(crate::tools::output_buffer::Truncation {
+                    kept_lines: 1,
+                    total_lines: 1_000_000,
+                }),
+            )
+        })
+        .collect();
+    let mut failures = Vec::new();
+    for shape in [
+        JobsShape::PendingAck,
+        JobsShape::Timeout,
+        JobsShape::Background,
+    ] {
+        let jobs = store_jobs(&ctx, dir.path(), 3, "a", 100);
+        let refs = format!("{} {}", cmd_refs.join(" "), jobs.join(" "));
+        let (text, parsed) = run_query(&ctx, shape.input(&refs)).await;
+        let label = format!("{shape:?} + 45 buffer notices");
+        eprintln!("{label}: {} B delivered", text.len());
+        let mut these = jobs_response_failures(&label, shape, &text, &parsed, &ctx, &jobs);
+        if these.is_empty() {
+            // The notices are what was over, so they are what is shed, and the jobs survive.
+            if parsed["jobs"].as_array().map(Vec::len) != Some(3) {
+                these.push(format!(
+                    "{label}: the three short jobs were shed: {text:.400}"
+                ));
+            }
+            if !parsed["envelope_omitted"]
+                .as_str()
+                .is_some_and(|s| s.contains("buffer_truncated"))
+            {
+                these.push(format!(
+                    "{label}: no marker names the shed notices: {text:.400}"
+                ));
+            }
+        }
+        failures.extend(these);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
