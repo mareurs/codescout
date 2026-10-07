@@ -268,10 +268,10 @@ async fn a_control_char_heading_echo_is_clipped_in_escaped_bytes() {
         let path = dir.path().join(format!("echo-{class}.md"));
         // 1,000 units: over the clip in every class, yet one line still fits a range read once
         // escaped. A wider line is clamped by whichever arm serves the range: a `.md` path, and
-        // the `@file_` a WHOLE markdown file is stored under, go to `read_markdown_line_range`
-        // (`a_markdown_range_over_a_wide_line_keeps_one_handle`); a section's `@file_` is an
-        // excerpt with no source path, so its ranges go to `read_from_buffer`
-        // (`an_oversized_section_route_reaches_the_end_of_the_section`).
+        // the `@file_` a markdown file is stored under (whole, and named by its section reads
+        // too), go to `read_markdown_line_range`
+        // (`a_markdown_range_over_a_wide_line_keeps_one_handle`,
+        // `an_oversized_section_route_reaches_the_end_of_the_section`).
         let sub = unit.repeat(1_000);
         let mut body = format!("## Big {sub}\n### {sub}\nfirst body\n\n");
         for i in 2..=40 {
@@ -586,18 +586,25 @@ async fn a_markdown_range_over_a_wide_line_keeps_one_handle() {
 /// the lines that fit inline, so when the section's SECOND line was wide the route was
 /// `end_line=1`: it returned the `## S` line alone, with no `next`, and led nowhere. Followed
 /// with its `next` chain, the route must reach the section's last line.
+///
+/// The route is on the FILE's one handle (R3), in the file's line numbers, so it starts at the
+/// section's own first line. The section sits below a preamble so that a route stated in a
+/// section-only frame (`start_line=1`) would start in the preamble and fail the first check.
 #[tokio::test]
 async fn an_oversized_section_route_reaches_the_end_of_the_section() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
     let range =
-        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=1, end_line=(\d+)\)"#)
+        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=(\d+), end_line=(\d+)\)"#)
             .unwrap();
-    let spans = regex::Regex::new(r"spans (\d+) lines").unwrap();
     for (class, unit) in classes7() {
         for wide in [12_000, 60_000] {
             let p = dir.path().join(format!("sec-{class}-{wide}.md"));
-            let body = format!("## S\n{}\n{}\n", one_line(unit, wide), payload("b", 3_000));
+            let body = format!(
+                "# Top\n\nintro\n\n## S\n{}\n{}\n",
+                one_line(unit, wide),
+                payload("b", 3_000)
+            );
             std::fs::write(&p, body).unwrap();
             let label = format!("section route {class}/{wide}");
             let input = json!({ "path": p.to_str().unwrap(), "heading": "## S" });
@@ -605,7 +612,11 @@ async fn an_oversized_section_route_reaches_the_end_of_the_section() {
             let rec = err
                 .downcast_ref::<RecoverableError>()
                 .expect("an oversized section is a RecoverableError");
-            let lines: u64 = spans.captures(&rec.message).unwrap()[1].parse().unwrap();
+            let (first, last_line) = (
+                rec.extra["line_range"][0].as_u64().unwrap(),
+                rec.extra["line_range"][1].as_u64().unwrap(),
+            );
+            assert_eq!(first, 5, "{label}: fixture: `## S` is file line 5");
             let actions: Vec<String> = rec.extra["next_actions"]
                 .as_array()
                 .unwrap()
@@ -616,15 +627,20 @@ async fn an_oversized_section_route_reaches_the_end_of_the_section() {
                 .iter()
                 .find_map(|a| range.captures(a))
                 .unwrap_or_else(|| panic!("{label}: no range route in {actions:?}"));
+            assert_eq!(
+                c[2].parse::<u64>().unwrap(),
+                first,
+                "{label}: the route must start at the section's first line in the file: {actions:?}"
+            );
             let route = json!({
                 "path": &c[1],
-                "start_line": 1,
-                "end_line": c[2].parse::<u64>().unwrap(),
+                "start_line": c[2].parse::<u64>().unwrap(),
+                "end_line": c[3].parse::<u64>().unwrap(),
             });
             let (_, last) = md_read_through(&ctx, route, &label).await;
             assert!(
-                last >= lines,
-                "{label}: the route stops at line {last} of {lines}: {actions:?}"
+                last >= last_line,
+                "{label}: the route stops at line {last} of {last_line}: {actions:?}"
             );
         }
     }

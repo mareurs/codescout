@@ -519,10 +519,12 @@ impl OutputBuffer {
     ///
     /// The entry auto-refreshes: `get_with_refresh_flag` re-reads `source_path`
     /// in full whenever the file's mtime advances. That is correct only because
-    /// the stored content IS the file. For a line range, a heading section, or
-    /// any other derived subset use [`OutputBuffer::store_file_excerpt`], which
-    /// mints a snapshot — refreshing one of those widens the handle to content
-    /// the caller never asked for.
+    /// the stored content IS the file. A line range or a heading section of a
+    /// real file is not stored on its own: its read names this whole-file handle
+    /// and states every number in the file's line numbers (R3), so a refresh
+    /// widens nothing — the handle never claimed to be the range. A derived value
+    /// that is not a run of the file's lines (a `json_path` or `toml_key` value)
+    /// uses [`OutputBuffer::store_file_excerpt`], a snapshot.
     ///
     /// `source_path` is set only when `path` is a real filesystem path (not a
     /// buffer ref like `@file_*` or `@tool_*`). Buffer refs are not on disk, so
@@ -540,23 +542,26 @@ impl OutputBuffer {
         self.store_file_inner(path, content, source_path)
     }
 
-    /// Store a DERIVED SUBSET of a file — a line range, one heading section, a
-    /// set of sections — under a `@file_*` handle. The entry is a snapshot:
-    /// `path` is recorded in `command` for diagnostics, but `source_path` is
-    /// deliberately left unset. A live snapshot of the same `path` holding
-    /// byte-identical content is returned instead of minting a second one.
+    /// Store a DERIVED VIEW of a file — a value that is not a run of the file's
+    /// lines, such as a `json_path` or `toml_key` value — under a `@file_*` handle.
+    /// The entry is a snapshot: `path` is recorded in `command` for diagnostics,
+    /// but `source_path` is deliberately left unset. A live snapshot of the same
+    /// `path` holding byte-identical content is returned instead of minting a
+    /// second one.
     ///
     /// [`OutputBuffer::store_file`] must not be used for this.
     /// `get_with_refresh_flag` re-reads `source_path` **whole**, which is the
     /// intended freshness guarantee for a handle minted by a whole-file read and
     /// silently wrong for an excerpt: the handle widens to content the caller
-    /// never asked for, while the response's `shown_lines` / `total_lines` still
-    /// describe the excerpt. Measured 2026-08-25 — a handle minted as 12 lines
-    /// served 41 after one append, and its line 1 was the file's line 1
+    /// never asked for, while the response still describes the excerpt. Measured
+    /// 2026-08-25 — a handle minted as 12 lines served 41 after one append, and
+    /// its line 1 was the file's line 1
     /// (`docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`).
     ///
-    /// Re-extracting the range on refresh was considered and rejected: two of
-    /// the four excerpt call sites extract by HEADING, and a heading's line
+    /// Line ranges and heading sections of a real file used this until R3 (one
+    /// real file, one live handle): they now name the file's whole-file handle in
+    /// the file's own line numbers, so that frame mismatch cannot arise for them.
+    /// Re-extracting on refresh was considered and rejected: a heading's line
     /// range moves when text above it changes, so no stored range reproduces
     /// "the `## Foo` section". A snapshot is also what every other buffer kind
     /// already is — `@cmd_*` and `@tool_*` never re-run their source either.

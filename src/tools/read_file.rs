@@ -625,7 +625,7 @@ pub(super) fn over_budget_line_hint(path: &str) -> String {
     } else {
         // Every caller passes a buffer ref: `read_from_buffer` the ref it was asked to read,
         // and `read_with_line_range` and the markdown range arm (`read_markdown_line_range`)
-        // the `@file_*` handle they just stored the slice under. So this is a `@cmd_*` /
+        // the file's one `@file_*` handle. So this is a `@cmd_*` /
         // `@file_*` ref, and `json_path` is refused on those ("only supported on @tool_*
         // refs"). The branch used to advise it anyway.
         format!(
@@ -1044,11 +1044,15 @@ fn read_with_line_range(
         }
     }
 
-    // Proactive buffering: oversized extracted ranges are stored as @file_* refs
-    // so callers can navigate by line number (BUG-025 class).
+    // An over-budget range is served beside the FILE's one handle (R3), never a handle of its
+    // own: `store_file` returns the live whole-file handle when the file has one and mints it
+    // once otherwise. That handle holds the whole file, so its line N is the file's line N, the
+    // frame `shown_lines`, `total_lines` and `next` below are stated in. A handle holding only
+    // the range was a second handle for the same file, minted again on every read, in a frame
+    // (its line 1 = the file's line `start`) that no number in this response used.
     let file_id = ctx
         .output_buffer
-        .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
+        .store_file(resolved.to_string_lossy().to_string(), text.to_string());
     // Continue against the file itself, in the same line numbers `shown_lines` reports — a
     // `next` phrased in the slice buffer's own 1-based frame is off by `start - 1` and
     // re-serves seen lines.
@@ -1072,7 +1076,7 @@ fn read_with_line_range(
     let orig_start = start as usize;
     // The page sized with every other key counted at its widest: `shown_lines` ends at most
     // at `end` and `next` resumes at most at `end + 1`. The over-wide-line hint names the
-    // slice's own handle, where `grep -o` reaches the line. `coverage` is decided beside it by
+    // file's handle, where `grep -o` reaches the line. `coverage` is decided beside it by
     // the rule the markdown range arm uses ([`page_beside_coverage`]).
     let widest = json!({
         "content": "",
@@ -4340,17 +4344,19 @@ mod tests {
         );
     }
 
-    /// Bug 2026-08-25-file-slice-handle-refreshes-to-whole-file: the
-    /// `@file_*` handle returned for an oversized RANGE is minted with
-    /// `source_path` pointing at the whole file, so the first `get()` after
-    /// an mtime bump replaces the excerpt with the file's entire contents —
-    /// under a handle whose `shown_lines`/`total_lines` still describe the
-    /// range, and which the caller was handed in order to grep the range.
+    /// R3: an oversized RANGE of a real file names the FILE's one handle, in the file's line
+    /// numbers, so the handle follows the file when it changes, and that widens nothing.
     ///
-    /// Measured 2026-08-25 against the live server: a handle minted as 12
-    /// lines reported 41 and served the file's line 1.
+    /// History: bug 2026-08-25-file-slice-handle-refreshes-to-whole-file. The range used to get
+    /// its own handle, minted with `source_path` pointing at the whole file, so the first
+    /// `get()` after an mtime bump replaced the 12-line excerpt with the entire file under a
+    /// handle whose numbers described the excerpt (measured: minted as 12 lines, served 41, its
+    /// line 1 the file's line 1). The fix then made the range a snapshot of its own. Under R3
+    /// the range has no handle of its own: the handle IS the file, and `shown_lines` /
+    /// `total_lines` were always in the file's frame, so "its line 13 is the file's line 13"
+    /// holds before and after the change.
     #[tokio::test]
-    async fn ranged_read_handle_stays_the_range_after_the_file_changes() {
+    async fn a_ranged_read_names_the_files_one_handle_which_follows_the_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("big.txt");
         let lines: Vec<String> = (1..=40)
@@ -4370,27 +4376,34 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("oversized range should be buffered: {result}"))
             .to_string();
+        assert_eq!(result["shown_lines"][0], json!(13), "{result}");
+        assert_eq!(result["total_lines"], json!(40), "{result}");
+        let held = ctx.output_buffer.get_stream(&file_id).unwrap();
+        assert_eq!(
+            held.lines().nth(12),
+            Some(lines[12].as_str()),
+            "the handle's line 13 must be the file's line 13"
+        );
+        assert_eq!(held.lines().count(), 40, "the handle holds the whole file");
+        let whole = ReadFile
+            .call(json!({ "path": path.to_str().unwrap() }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            whole["file_id"].as_str(),
+            Some(file_id.as_str()),
+            "a whole read of the same file must name the same handle"
+        );
 
-        // Replace the file and push its mtime past the entry's timestamp —
-        // the exact trigger `get_with_refresh_flag` watches for.
+        // Replace the file and push its mtime past the entry's timestamp: the handle is the
+        // file's, so it now holds the new file.
         std::fs::write(&path, "REPLACED\n").unwrap();
         let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
         filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future)).unwrap();
-
-        let entry = ctx
-            .output_buffer
-            .get(&file_id)
-            .expect("the excerpt handle should still resolve");
-        assert!(
-            !entry.stdout.contains("REPLACED"),
-            "an excerpt handle must not absorb content from outside the range \
-                 it was minted for; got: {:?}",
-            entry.stdout.chars().take(80).collect::<String>()
-        );
         assert_eq!(
-            entry.stdout.lines().count(),
-            12,
-            "the handle was minted as lines 13-24 and must stay 12 lines"
+            ctx.output_buffer.get_stream(&file_id).as_deref(),
+            Some("REPLACED\n"),
+            "the file's handle must follow the file"
         );
     }
 

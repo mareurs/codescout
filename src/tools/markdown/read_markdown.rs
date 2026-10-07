@@ -88,11 +88,47 @@ async fn resolve_markdown_source(
         Ok((resolved, text))
     }
 }
+/// The ONE handle for the whole text a markdown read was served from (R3), which every
+/// over-budget arm below names as `file_id`, in that text's own line numbers.
+///
+/// A real file: [`OutputBuffer::store_file`](crate::tools::output_buffer::OutputBuffer::store_file)
+/// returns the file's live handle (brought up to `text`) and mints it once when there is none,
+/// so a section, a range and a whole read of one file all name the same handle, and reading
+/// any of them again mints nothing. A section or range used to get a handle of its own holding
+/// only that part: a second handle per read, minted afresh each time, whose line 1 was the
+/// section's first line.
+///
+/// A `@file_` ref: the text IS that buffer, so the handle is the ref the caller named. Storing
+/// it again would mint a second handle for a buffer the caller already holds (a snapshot ref
+/// has no `source_path`, so its text would be stored under the ref's own name).
+fn whole_text_handle(
+    path: &str,
+    resolved: &std::path::Path,
+    text: &str,
+    ctx: &ToolContext,
+) -> String {
+    if path.starts_with("@file_") {
+        return path.to_string();
+    }
+    ctx.output_buffer
+        .store_file(resolved.to_string_lossy().to_string(), text.to_string())
+}
+/// Whether a `heading=` route on the whole-text handle reaches the heading at `line`.
+///
+/// The route resolves against the WHOLE text, not just the section it was taken from (a
+/// section's own handle used to scope it). A heading repeated elsewhere in the file is then
+/// refused as ambiguous, and a clipped prefix can match an earlier heading first, so a route is
+/// offered only when it lands where it says; the range route beside it always does.
+fn heading_route_lands(text: &str, query: &str, line: usize) -> bool {
+    crate::tools::file_summary::resolve_section_range(text, query)
+        .is_ok_and(|range| range.heading_line == line)
+}
 
 /// Multi-heading navigation: extract each requested section, join them, and
 /// either return the combined content (+ coverage) or, when the join exceeds
 /// the inline limit, buffer it and return a paginating hint error.
 fn read_markdown_multi_heading(
+    path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
     ctx: &ToolContext,
@@ -105,6 +141,7 @@ fn read_markdown_multi_heading(
 
     let mut sections = Vec::new();
     let mut seen_headings = Vec::new();
+    let mut seen_lines = Vec::new();
 
     for query in &heading_queries {
         let section = crate::tools::file_summary::extract_markdown_section(text, query)?;
@@ -115,6 +152,7 @@ fn read_markdown_multi_heading(
                 .cloned()
                 .unwrap_or_else(|| query.clone()),
         );
+        seen_lines.push(section.line_range.0);
         sections.push(section.content);
     }
 
@@ -127,9 +165,9 @@ fn read_markdown_multi_heading(
     // parked under `@tool_*`. If even that does not fit, the read takes this error path.
     let smallest = finalize_multi(json!({ "content": &content }), &["sections", "coverage"]);
     if !crate::tools::response_fits(&smallest) {
-        let file_id = ctx
-            .output_buffer
-            .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
+        // The file's one handle, not a handle for the join: the routes below address it by
+        // heading or by the file's line numbers.
+        let file_id = whole_text_handle(path, resolved, text, ctx);
         let lines = content.lines().count();
         let hint = format!(
             "use {:?} — request one heading at a time, or slice with start_line/end_line",
@@ -139,12 +177,15 @@ fn read_markdown_multi_heading(
         // (an unquoted `heading=## A` is not a call a caller can paste back). The list has as many
         // entries as the caller asked for, so it is dropped (marked `requested_headings_omitted`)
         // when the body would not fit: an `Err` body is put inline by the server, and 3 headings
-        // of 12 KB made it 72,413 B. `next_actions` is at most three clipped routes.
+        // of 12 KB made it 72,413 B. `next_actions` is at most three clipped routes, each one
+        // that lands on its section in the whole file ([`heading_route_lands`]).
         let requested: Vec<String> = seen_headings.iter().map(|h| clip_heading(h).0).collect();
         let next_actions: Vec<String> = seen_headings
             .iter()
+            .zip(&seen_lines)
+            .filter(|(h, line)| heading_route_lands(text, clip_heading_embedded(h), **line))
             .take(3)
-            .map(|h| {
+            .map(|(h, _)| {
                 let quoted = serde_json::to_string(clip_heading_embedded(h)).unwrap_or_default();
                 format!("read_file({:?}, heading={quoted})", file_id)
             })
@@ -410,27 +451,22 @@ fn read_markdown_single_heading(
     // + next_actions. The agent must pick a sub-heading or a line range, not
     // retry against the original path.
     if !crate::tools::response_fits(&success) {
-        let file_id = ctx.output_buffer.store_file_excerpt(
-            resolved.to_string_lossy().to_string(),
-            section_result.content.clone(),
-        );
+        let file_id = whole_text_handle(path, resolved, text, ctx);
         let section_lines = section_result.content.lines().count();
 
         let (start_ln, end_ln) = section_result.line_range;
-        // Every number below addresses `file_id`, which holds ONLY this section,
-        // so they are stated in that buffer's frame — where the section's first
-        // line is 1, not `start_ln`. The server already reports it that way: ask
-        // the handle for a heading that does not exist and the listing comes
-        // back `### Sub A  L3`, not L306. `line_range` stays file-relative on
-        // purpose; it is the one field here that describes where the section
-        // lives rather than how to address the handle.
+        // Every number below addresses `file_id`, the FILE's one handle (R3), which holds the
+        // whole file: so they are the file's own line numbers, and `section_map`'s `l`,
+        // `line_range` and the range route all name the same lines in the file and in the
+        // handle. (The handle used to hold ONLY this section, and these numbers were then
+        // stated in its frame, the section's first line as 1.)
         let all_headings = crate::tools::file_summary::parse_all_headings(text);
         let nested: Vec<serde_json::Value> = all_headings
             .iter()
             .filter(|h| h.line > start_ln && h.line <= end_ln)
             .map(|h| {
                 let (text, clipped_from) = clip_heading(&h.text);
-                let mut entry = json!({"h": text, "l": h.line - start_ln + 1});
+                let mut entry = json!({"h": text, "l": h.line});
                 if let Some(n) = clipped_from {
                     entry["h_bytes"] = json!(n);
                 }
@@ -460,13 +496,16 @@ fn read_markdown_single_heading(
         let next_actions: Vec<String> = {
             let mut actions = Vec::new();
             if let Some(first) = nested.first() {
+                let line = first.get("l").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 if let Some(h) = first.get("h").and_then(|v| v.as_str()) {
                     // The heading is quoted as a JSON string, the form a caller passes it in:
                     // `{:?}` wrote a control character as `\u{1}`, which no JSON parser reads,
                     // and an unquoted `heading=### Sub A` is not a call the caller can paste back.
-                    let quoted = serde_json::to_string(clip_heading_embedded(h))
-                        .unwrap_or_else(|_| format!("{h:?}"));
-                    actions.push(format!("read_file({:?}, heading={quoted})", file_id));
+                    let routed = clip_heading_embedded(h);
+                    let quoted = serde_json::to_string(routed).unwrap_or_else(|_| format!("{h:?}"));
+                    if heading_route_lands(text, routed, line) {
+                        actions.push(format!("read_file({:?}, heading={quoted})", file_id));
+                    }
                 }
             }
             // The range spans the WHOLE section and lets the read page itself. It used to be
@@ -476,9 +515,9 @@ fn read_markdown_single_heading(
             // a line wider than its page, and names `next` until the section is read, so this
             // route reaches the section's last line under one handle per page.
             actions.push(format!(
-                "read_file({:?}, start_line=1, end_line={})",
+                "read_file({:?}, start_line={start_ln}, end_line={})",
                 file_id,
-                section_lines.max(1)
+                end_ln.max(start_ln)
             ));
             actions
         };
@@ -500,8 +539,8 @@ fn read_markdown_single_heading(
         // `HEADING_ECHO_CLIP` first (an entry larger than its half of the allowance is DROPPED
         // by `cut_array_middle`, and so is anything `fit_envelope` cannot shrink: it never
         // re-checks the response around an empty summary). The note adds
-        // `read_file(path=<file_id>, start_line=.., end_line=..)` for the middle, in the buffer's
-        // own line frame, which is the frame `section_map`'s `l` values are in.
+        // `read_file(path=<file_id>, start_line=.., end_line=..)` for the middle, in the file's
+        // line numbers, which are the handle's (it holds the whole file) and `section_map`'s.
         let finish = |map: Value, notes: &[String]| -> Value {
             let mut body = serde_json::Map::new();
             body.insert("error".into(), json!(message));
@@ -605,9 +644,9 @@ fn read_markdown_line_range(
 
     // Buffer large extracts
     if !crate::tools::response_fits(&inline) {
-        let file_id = ctx
-            .output_buffer
-            .store_file_excerpt(resolved.to_string_lossy().to_string(), content.clone());
+        // The file's one handle (R3): `shown_lines`, `total_lines` and `next` below are already
+        // in the file's line numbers, which are the handle's.
+        let file_id = whole_text_handle(path, resolved, text, ctx);
         // The page is sized like `read_from_buffer`'s and `read_with_line_range`'s: against the
         // response with `content` empty and every other key at its widest, in SERIALIZED bytes,
         // and a single line wider than that room is clamped. A raw budget with a fixed reserve
@@ -689,6 +728,7 @@ fn with_format(mut result: Value) -> Value {
 /// map + buffer, no body), tier 2 (medium → full content + soft hint), tier 1
 /// (small → full content).
 fn read_markdown_default_tiers(
+    path: &str,
     text: &str,
     resolved: &std::path::PathBuf,
     ctx: &ToolContext,
@@ -769,9 +809,7 @@ fn read_markdown_default_tiers(
     }
 
     // ── Tier 3: large — heading map + hint, no body ──────────────────
-    let file_id = ctx
-        .output_buffer
-        .store_file(resolved.to_string_lossy().to_string(), text.to_string());
+    let file_id = whole_text_handle(path, resolved, text, ctx);
 
     let hint = if all_headings.is_empty() {
         format!("use {:?} — start_line/end_line", file_id)
@@ -874,13 +912,13 @@ pub(crate) async fn read(input: Value, ctx: &ToolContext) -> Result<Value> {
 
     // ── Dispatch to the matching read strategy ────────────────────────
     let res = if let Some(headings_arr) = headings_param {
-        read_markdown_multi_heading(&text, &resolved, ctx, &headings_arr)
+        read_markdown_multi_heading(path, &text, &resolved, ctx, &headings_arr)
     } else if let Some(heading_query) = heading {
         read_markdown_single_heading(path, &text, &resolved, ctx, heading_query)
     } else if let (Some(start), Some(end)) = (start_line, end_line) {
         read_markdown_line_range(path, &text, &resolved, ctx, start, end)
     } else {
-        read_markdown_default_tiers(&text, &resolved, ctx)
+        read_markdown_default_tiers(path, &text, &resolved, ctx)
     };
 
     let mut res = res?;
