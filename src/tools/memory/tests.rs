@@ -549,26 +549,36 @@ async fn an_overflowing_memory_list_hints_a_path_that_returns_the_topics() {
     let (jp, followed) = follow_hint(&envelope, &ctx).await;
     let value =
         followed.unwrap_or_else(|e| panic!("following the hinted route {jp:?} failed: {e}"));
-    // The projected array is itself over the inline budget, so it comes back parked under a
-    // `@file_*` handle (one line per topic between the brackets). Read its first and last
-    // lines through that handle: the route must deliver the topics, not merely not error.
+    // The projected array is itself over the inline budget, so it comes back as the first
+    // page of the value, on the SAME `@tool_*` handle (one line per topic between the
+    // brackets). Read its first and last lines through that handle and `json_path`: the
+    // route must deliver the topics, not merely not error.
     assert_eq!(
         value["value_type"], "array",
         "{jp:?} must project an array: {value}"
     );
-    let file_id = value["file_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("an oversized extraction must name its buffer: {value}"));
+    assert!(
+        value.get("file_id").is_none(),
+        "a read of a buffer mints no handle: {value}"
+    );
+    let handle = envelope["output_id"].as_str().unwrap();
+    assert!(
+        value["next"]
+            .as_str()
+            .is_some_and(|n| n.contains(handle) && n.contains("json_path=")),
+        "an oversized extraction must page on its own handle: {value}"
+    );
     let line = |n: u64| {
         let ctx = &ctx;
+        let jp = jp.clone();
         async move {
             crate::tools::read_file::ReadFile
                 .call(
-                    json!({ "path": file_id, "start_line": n, "end_line": n }),
+                    json!({ "path": handle, "json_path": jp, "start_line": n, "end_line": n }),
                     ctx,
                 )
                 .await
-                .unwrap_or_else(|e| panic!("reading line {n} of {file_id} failed: {e}"))
+                .unwrap_or_else(|e| panic!("reading line {n} of {handle} {jp} failed: {e}"))
                 .to_string()
         }
     };

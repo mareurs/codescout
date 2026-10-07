@@ -266,11 +266,13 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
 
 /// Read from an output buffer ref (`@file_*`, `@cmd_*`, `@tool_*`).
 ///
-/// Handles json_path navigation for `@tool_*` refs and line-range slicing.
-/// Never re-wraps its own result in a `@tool_*` envelope: oversized content is
-/// paginated via `shown_lines` / `next`, both stated in the ref's own line
-/// numbers, with the slice parked under a `@file_*` handle so it stays
-/// greppable.
+/// Every response names the ref it was asked to read, and no other: a read of a buffer never
+/// mints a handle. One handle holds the whole buffer, and every view of it is that handle plus a
+/// line range, or, on a `@tool_*` ref, a `json_path` plus a line range of the extracted value
+/// (ADR 2026-10-05 carries the one-handle rule this extends). Oversized content is paged through
+/// `shown_lines` / `next`, both stated in the line numbers the caller addresses: the ref's own,
+/// or the extracted value's under `json_path`, whose `next` repeats that `json_path`. Each page is
+/// sized as the response it returns, so `call_content` never re-wraps it in a `@tool_*` envelope.
 fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Value> {
     let raw = ctx.output_buffer.get_stream(path).ok_or_else(|| {
         RecoverableError::with_hint(
@@ -310,6 +312,42 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         .into());
     }
 
+    let start = optional_u64_param(input, "start_line");
+    let end = optional_u64_param(input, "end_line");
+    // The real-file rule (`validate_read_nav_params`), not a silent whole-buffer answer: a
+    // caller who passed an end and no start asked for something this read cannot serve. A
+    // `start_line` that is not a non-negative integer reads as absent here exactly as it does
+    // there, so `start_line=-1` with an end is refused by the same check.
+    if start.is_none() && end.is_some() {
+        return Err(RecoverableError::with_hint(
+            "end_line provided without start_line",
+            "Pass start_line (end_line defaults to start_line+49), or pass both for an explicit range.",
+        )
+        .into());
+    }
+    // start_line alone defaults end_line to a 50-line window — same as the real-file path.
+    let end = match (start, end) {
+        (Some(s), None) => Some(s.saturating_add(49)),
+        (_, e) => e,
+    };
+    let range = match (start, end) {
+        (Some(s), Some(e)) => {
+            if s == 0 || e < s {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "invalid line range: start_line={} end_line={} \
+                         (start_line must be >= 1 and end_line >= start_line)",
+                        s, e
+                    ),
+                    "Lines are 1-indexed. Example: start_line=1, end_line=50",
+                )
+                .into());
+            }
+            Some((s as usize, e as usize))
+        }
+        _ => None,
+    };
+
     // json_path navigation is only meaningful for @tool_* (always JSON), and it RE-PARSES
     // the text it is handed — so it reads the pretty-printed form UN-expanded, and must run
     // before `line_addressable_text` below. See that function's doc comment.
@@ -319,6 +357,8 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 .ok()
                 .and_then(|v| serde_json::to_string_pretty(&v).ok())
                 .unwrap_or_else(|| raw.clone());
+            // A pure function of the stored text and `jp`: the same value is numbered the same
+            // way on every read, which is what lets a `next` resume where the last page ended.
             let (content, type_name, count) =
                 crate::tools::file_summary::extract_json_path(&text, jp)?;
             let echo = clip_input_echo(jp, "json_path");
@@ -327,11 +367,11 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
             // the limit is buffered again by `call_content` under a second handle. The raw
             // pre-check only skips building a candidate that cannot fit: escaping never
             // shrinks a string, so raw bytes over the limit mean the response is too.
-            if !crate::tools::body_alone_overflows(&content) {
+            if range.is_none() && !crate::tools::body_alone_overflows(&content) {
                 let mut inline = json!({
                     "content": &content,
-                    "path": echo,
-                    "value_type": type_name,
+                    "path": &echo,
+                    "value_type": &type_name,
                     "format": "json",
                 });
                 if let Some(c) = count {
@@ -342,168 +382,272 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                     return Ok(inline);
                 }
             }
-            let line_count = content.lines().count().max(1);
-            let file_id = ctx
-                .output_buffer
-                .store_file(format!("{path}:{jp}"), content);
-            let mut result = json!({
-                "file_id": file_id,
-                "path": echo,
+            let mut keys = json!({
+                "path": &echo,
                 "value_type": type_name,
                 "format": "json",
-                "total_lines": line_count,
-                "hint": format!(
-                    "Extracted value at {echo} ({line_count} lines). \
-                     read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
-                     or run_command(\"grep pattern {file_id}\") to search."
-                ),
             });
             if let Some(c) = count {
-                result["count"] = json!(c);
+                keys["count"] = json!(c);
             }
-            return Ok(noted(result));
+            // The extracted value is addressed through THIS handle: a page of it resumes with
+            // the same `json_path` and the value's own line numbers. The route quotes the path
+            // whole, as a JSON string literal so a bracketed key's quotes survive, while that
+            // leaves the page `JSON_PATH_ROUTE_ROOM_FLOOR` of room; past it the continuation is
+            // stated in prose with its numbers, since a route that fits cannot be written.
+            let jp_lit = serde_json::to_string(jp).unwrap_or_else(|_| format!("\"{jp}\""));
+            let route = |s: usize, e: usize| {
+                format!("read_file(\"{path}\", json_path={jp_lit}, start_line={s}, end_line={e})")
+            };
+            let prose = |s: usize, e: usize| {
+                format!(
+                    "call read_file on {path} again with the json_path you passed and \
+                     start_line={s}, end_line={e}"
+                )
+            };
+            return Ok(page_of_buffer_text(
+                &content,
+                &keys,
+                range,
+                &route,
+                Some(&prose),
+                &json_path_line_hint(path),
+                &noted,
+            ));
         }
     }
+
+    // A clamped line on a `@tool_*` ref is offered a field route only to a field that IS on
+    // this payload: a `json_path` named for some other tool's shape fails when followed.
+    let hint = if path.starts_with("@tool_") {
+        line_hint(path, largest_field_path(&raw).as_deref())
+    } else {
+        over_budget_line_hint(path)
+    };
 
     // ONE derivation, shared with `grep`. Never inline this — see its doc comment.
     let text = crate::tools::output_buffer::line_addressable_text(path, raw);
 
-    let total_lines = text.lines().count();
-    let start = optional_u64_param(input, "start_line");
-    let end = optional_u64_param(input, "end_line");
-    // start_line alone defaults end_line to a 50-line window — same as the real-file path.
-    let end = match (start, end) {
-        (Some(s), None) => Some(s.saturating_add(49)),
-        (_, e) => e,
-    };
-
-    if let (Some(s), Some(e)) = (start, end) {
-        if s == 0 || e < s {
-            return Err(RecoverableError::with_hint(
-                format!(
-                    "invalid line range: start_line={} end_line={} \
-                     (start_line must be >= 1 and end_line >= start_line)",
-                    s, e
-                ),
-                "Lines are 1-indexed. Example: start_line=1, end_line=50",
-            )
-            .into());
-        }
-        let content = extract_lines(&text, s as usize, e as usize);
-        // The inline arm is chosen on the response it returns, not on the slice's raw bytes:
-        // one line of 2,000 `\x01` is 2,000 raw bytes and 12,039 serialized, and was returned
-        // here for `call_content` to buffer under `@tool_*`. The raw pre-check only skips a
-        // candidate that cannot fit (escaping never shrinks a string).
-        if !crate::tools::body_alone_overflows(&content) {
-            let inline = noted(json!({ "content": &content, "total_lines": total_lines }));
-            if crate::tools::response_fits(&inline) {
-                return Ok(inline);
-            }
-        }
-        {
-            // The slice is still stored under its own handle: that keeps it
-            // greppable, and it keeps THIS response small enough that
-            // `call_content()` will not re-wrap it in a `@tool_*` envelope
-            // (BUG-026, archived 2026-03-15).
-            //
-            // Navigation, though, continues against the ORIGINAL ref. `shown_lines`
-            // and `total_lines` are that buffer's line numbers, so a `next` phrased
-            // in the slice's own 1-based frame is off by `s - 1` and sends the
-            // caller back over lines it has already seen — on a fresh handle each
-            // time, which is what made these chains look like they never converged.
-            let file_id = ctx
-                .output_buffer
-                .store_file(format!("{}[{}-{}]", path, s, e), content.clone());
-            let orig_start = s as usize;
-            // The page sized with every other key it can carry counted. `shown_lines` ends
-            // at most at `e` and `next` resumes at most at `e + 1`, so these are the widest
-            // values those keys can take.
-            let widest = noted(json!({
-                "content": "",
-                "file_id": file_id,
-                "total_lines": total_lines,
-                "shown_lines": [orig_start, e],
-                "complete": false,
-                "line_truncated": true,
-                "hint": over_budget_line_hint(path),
-                "next": format!(
-                    "read_file(\"{path}\", start_line={}, end_line={e})",
-                    e.saturating_add(1)
-                ),
-            }));
-            let (chunk, lines_shown, complete, line_truncated) =
-                buffer_page(&content, crate::tools::response_room(&widest));
-            let orig_end = orig_start + lines_shown.saturating_sub(1);
-            let mut result = json!({
-                "content": chunk,
-                "file_id": file_id,
-                "total_lines": total_lines,
-                "shown_lines": [orig_start, orig_end],
-                "complete": complete,
-            });
-            if line_truncated {
-                // Deliberately does NOT set `next`: the only range that would
-                // advance past this line is the same one that produced it, so a
-                // `next` here rebuilds the retry loop the valve exists to break.
-                // The hint routes to an addressing mode that can reach the value.
-                result["line_truncated"] = json!(true);
-                result["hint"] = json!(over_budget_line_hint(path));
-            }
-            if !complete {
-                // `complete == false` means the budget stopped us short of `e`, and
-                // the safety valve in `extract_lines_with_cost` always yields at
-                // least one line — so this strictly advances and terminates.
-                result["next"] = json!(format!(
-                    "read_file(\"{path}\", start_line={}, end_line={e})",
-                    orig_end + 1
-                ));
-            }
-            return Ok(noted(result));
-        }
-    }
-
     // Full buffer: paginate if the RESPONSE is over the inline limit. Never re-buffer.
-    if !crate::tools::body_alone_overflows(&text) {
-        let inline = noted(json!({ "content": &text, "total_lines": total_lines }));
+    if range.is_none() && !crate::tools::body_alone_overflows(&text) {
+        let inline = noted(json!({ "content": &text, "total_lines": text.lines().count() }));
         if crate::tools::response_fits(&inline) {
             return Ok(inline);
         }
     }
-    {
+    let route = |s: usize, e: usize| format!("read_file(\"{path}\", start_line={s}, end_line={e})");
+    Ok(page_of_buffer_text(
+        &text,
+        &json!({}),
+        range,
+        &route,
+        None,
+        &hint,
+        &noted,
+    ))
+}
+
+/// The response of a buffer read over `text`, the line space the caller addresses: the ref's
+/// own line-addressable text, or the value a `json_path` extracted from a `@tool_*` ref.
+///
+/// With a `range`, the lines `s..=e` inline when that response fits, else the first page of
+/// them. Without one, the first page of the whole `text`: the caller has already tried the
+/// inline response, whose shape differs per kind (a `json_path` read carries no `total_lines`).
+/// Every return shape is `keys` plus the page fields, and `noted` is applied to the response as
+/// measured, so nothing is added after the size is decided.
+///
+/// No handle is minted here, and none is needed to keep the page in bounds: it is sized with
+/// [`crate::tools::response_room`] against the widest skeleton every key can take, so
+/// `call_content` leaves it alone. The slice arm used to store its lines under a fresh `@file_*`
+/// handle "so `call_content()` will not re-wrap" it (BUG-026, archived 2026-03-15); that store
+/// never made the response smaller, because the page carried the same lines beside the handle.
+/// `next` resumes in the caller's own frame through `route`, so a chain of pages names one
+/// handle from first page to last, and following `next` until there is none reaches the last
+/// line asked for. Given `prose`, a route that would leave the page less than
+/// [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room is replaced by `prose`, the same continuation in words.
+fn page_of_buffer_text(
+    text: &str,
+    keys: &Value,
+    range: Option<(usize, usize)>,
+    route: &dyn Fn(usize, usize) -> String,
+    prose: Option<&dyn Fn(usize, usize) -> String>,
+    clamp_hint: &str,
+    noted: &dyn Fn(Value) -> Value,
+) -> Value {
+    let total_lines = text.lines().count();
+    let with_keys = |mut v: Value| -> Value {
+        if let (Some(obj), Some(extra)) = (v.as_object_mut(), keys.as_object()) {
+            for (k, val) in extra {
+                obj.insert(k.clone(), val.clone());
+            }
+        }
+        v
+    };
+
+    let Some((s, e)) = range else {
         // A page that stops short has `lines_shown < total_lines`, so `next` resumes at
-        // most at `total_lines`: these are the widest values every key can take.
-        let widest = noted(json!({
-            "content": "",
-            "total_lines": total_lines,
-            "shown_lines": [1, total_lines],
-            "complete": false,
-            "line_truncated": true,
-            "hint": over_budget_line_hint(path),
-            "next": format!(
-                "read_file(\"{path}\", start_line={total_lines}, end_line={total_lines})"
-            ),
-        }));
+        // most at `total_lines` and ends at `total_lines`: these are the widest values every
+        // key can take.
+        let skeleton = |next: String| {
+            noted(with_keys(json!({
+                "content": "",
+                "total_lines": total_lines,
+                "shown_lines": [1, total_lines],
+                "complete": false,
+                "line_truncated": true,
+                "hint": clamp_hint,
+                "next": next,
+            })))
+        };
+        let (widest, continuation) =
+            price_continuation(&skeleton, route, prose, total_lines, total_lines);
         let (chunk, lines_shown, complete, line_truncated) =
-            buffer_page(&text, crate::tools::response_room(&widest));
-        let mut result = json!({
+            buffer_page(text, crate::tools::response_room(&widest));
+        let mut result = with_keys(json!({
             "content": chunk,
             "total_lines": total_lines,
             "shown_lines": [1, lines_shown],
             "complete": complete,
-        });
+        }));
         if line_truncated {
             result["line_truncated"] = json!(true);
-            result["hint"] = json!(over_budget_line_hint(path));
+            result["hint"] = json!(clamp_hint);
         }
         if !complete {
-            let next_start = lines_shown + 1;
-            let next_end = (next_start + lines_shown - 1).min(total_lines);
-            result["next"] = json!(format!(
-                "read_file(\"{path}\", start_line={next_start}, end_line={next_end})"
-            ));
+            // To the END of the text, not one page-sized window. A window that fits comes back
+            // inline, and an inline answer carries no `next`, so a caller who follows `next`
+            // alone stopped there, short of the last line (measured: 3,046 of 20,000 short
+            // lines). A range to the end is paged by the arm below, whose `next` always
+            // resumes to its `e`, so the chain reaches `total_lines`.
+            result["next"] = json!(continuation(lines_shown + 1, total_lines));
         }
-        Ok(noted(result))
+        return noted(result);
+    };
+
+    let content = extract_lines(text, s, e);
+    // The inline arm is chosen on the response it returns, not on the slice's raw bytes:
+    // one line of 2,000 `\x01` is 2,000 raw bytes and 12,039 serialized, and was returned
+    // here for `call_content` to buffer under `@tool_*`. The raw pre-check only skips a
+    // candidate that cannot fit (escaping never shrinks a string).
+    if !crate::tools::body_alone_overflows(&content) {
+        let inline = noted(with_keys(
+            json!({ "content": &content, "total_lines": total_lines }),
+        ));
+        if crate::tools::response_fits(&inline) {
+            return inline;
+        }
     }
+    // The page sized with every other key it can carry counted. `shown_lines` ends at most at
+    // `e` and `next` resumes at most at `e + 1`, so these are the widest values those keys can
+    // take. Both are the caller's line numbers, not the slice's own 1-based frame: a `next` in
+    // that frame is off by `s - 1` and sends the caller back over lines it has already seen.
+    let skeleton = |next: String| {
+        noted(with_keys(json!({
+            "content": "",
+            "total_lines": total_lines,
+            "shown_lines": [s, e],
+            "complete": false,
+            "line_truncated": true,
+            "hint": clamp_hint,
+            "next": next,
+        })))
+    };
+    let (widest, continuation) =
+        price_continuation(&skeleton, route, prose, e.saturating_add(1), e);
+    let (chunk, lines_shown, complete, line_truncated) =
+        buffer_page(&content, crate::tools::response_room(&widest));
+    let shown_end = s + lines_shown.saturating_sub(1);
+    let mut result = with_keys(json!({
+        "content": chunk,
+        "total_lines": total_lines,
+        "shown_lines": [s, shown_end],
+        "complete": complete,
+    }));
+    if line_truncated {
+        // Deliberately does NOT set `next` on that account: the only range that would advance
+        // past this line is the same one that produced it, so a `next` here rebuilds the retry
+        // loop the valve exists to break. The hint routes to an addressing mode that can reach
+        // the value.
+        result["line_truncated"] = json!(true);
+        result["hint"] = json!(clamp_hint);
+    }
+    if !complete {
+        // `complete == false` means the budget stopped us short of `e`, and the safety valve
+        // in `extract_lines_with_cost` always yields at least one line — so this strictly
+        // advances and terminates.
+        result["next"] = json!(continuation(shown_end + 1, e));
+    }
+    noted(result)
+}
+
+/// The least room, in serialized bytes, a page of a `json_path` value must keep for its lines
+/// for its `next` to quote the caller's path whole.
+///
+/// The route is part of the page's widest skeleton, so a path of K bytes costs the page K bytes
+/// of room on every call. 2,000 B is about 40 lines of 50 B, which keeps a value read in a few
+/// dozen calls; with the rest of the page's keys that admits paths up to about 7 KB, measured by
+/// the cited test's sweep. A longer path would leave less than that, and at about 9 KB none: the
+/// page then overflows the limit and `call_content` buffers it under a second handle. Past the
+/// floor `next` says the same thing in prose, with the caller's own path implied and the line
+/// numbers given, which costs no room in proportion to the path.
+// cap-class: RESULT_CAP read_file.json_path_route_room — probed
+const JSON_PATH_ROUTE_ROOM_FLOOR: usize = 2_000;
+
+/// The continuation a page's `next` is phrased in, and the page's widest skeleton priced with
+/// it at `next(s, e)`, the widest values it can take.
+///
+/// `route` when it leaves the page at least [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room, or when no
+/// `prose` alternative is given; `prose` otherwise.
+fn price_continuation<'a>(
+    skeleton: &dyn Fn(String) -> Value,
+    route: &'a dyn Fn(usize, usize) -> String,
+    prose: Option<&'a dyn Fn(usize, usize) -> String>,
+    s: usize,
+    e: usize,
+) -> (Value, &'a dyn Fn(usize, usize) -> String) {
+    let widest = skeleton(route(s, e));
+    match prose {
+        Some(prose) if crate::tools::response_room(&widest) < JSON_PATH_ROUTE_ROOM_FLOOR => {
+            (skeleton(prose(s, e)), prose)
+        }
+        _ => (widest, route),
+    }
+}
+
+/// The field a clamped line of a `@tool_*` payload most likely sits in, as a `json_path` that
+/// resolves on THIS payload: its largest top-level field (`$.stdout` on a `run_command`
+/// envelope, `$.symbols` on a `symbols` result). `None` when the payload is not a JSON object,
+/// or its largest key is not a plain identifier: a path the hint would have to quote with
+/// brackets is left to the `grep -o` route, which always works.
+fn largest_field_path(raw: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(raw).ok()?;
+    let (key, _) = v
+        .as_object()?
+        .iter()
+        .max_by_key(|(_, val)| val.to_string().len())?;
+    let mut chars = key.chars();
+    let plain = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    plain
+        .then(|| format!("$.{key}"))
+        .filter(|jp| jp.len() <= INPUT_ECHO_CLIP)
+}
+
+/// The advisory a clamped line carries on a page of a `json_path` value.
+///
+/// [`line_hint`] tells a `@tool_*` reader to address the field instead of the line,
+/// which this caller has already done: the line is wide inside the field. What remains is to
+/// print the part of the line that matters. `grep -o` on the ref does that; it reads the ref as
+/// pretty JSON, so it searches the whole buffer (not only this value) with the value's quotes,
+/// backslashes and newlines still escaped.
+fn json_path_line_hint(path: &str) -> String {
+    format!(
+        "A single line of this value is wider than the inline budget, so it is shown truncated. \
+         run_command(\"grep -o 'PATTERN[^,]*' {path}\") prints just the matching part; it \
+         searches the whole {path} buffer as JSON text, not only this value."
+    )
 }
 
 /// Cut a chunk down when a SINGLE line is wider than the room its page has for it.
@@ -602,24 +746,39 @@ pub(crate) fn page_beside_coverage(
     (page, keep)
 }
 
-/// The advisory attached whenever [`clamp_over_budget_line`] cuts.
+/// The advisory attached whenever [`clamp_over_budget_line`] cuts, when the payload behind the
+/// ref is not known: a `@cmd_*` / `@file_*` ref, or a `@tool_*` ref read without looking.
 ///
-/// Kept separate from the cut so the wording is testable without a
-/// `ToolContext`, and so both call sites phrase it identically. It names
-/// `json_path` because on a `@tool_*` ref an over-budget line is almost always a
-/// JSON-escaped payload, and field addressing reaches it in one call where line
-/// addressing cannot reach it at all.
+/// Kept separate from the cut so the wording is testable without a `ToolContext`, and so every
+/// call site phrases it identically. A `@tool_*` read in `read_from_buffer` passes the field it
+/// found on that payload to [`line_hint`] instead, so the field route it names resolves there.
 pub(super) fn over_budget_line_hint(path: &str) -> String {
+    line_hint(path, None)
+}
+
+/// [`over_budget_line_hint`] with the `json_path` of a field that resolves on the payload behind
+/// `path`, when the caller knows one ([`largest_field_path`]).
+///
+/// A field route is offered only with such a path. This hint used to name
+/// `json_path="$.stdout"` on every `@tool_*` ref "for a run_command envelope", and on any other
+/// tool's ref following it failed (`path segment 'stdout' not found`). With no field known, the
+/// `grep -o` route is the one it names, and that works on every kind.
+fn line_hint(path: &str, field: Option<&str>) -> String {
     // `grep -o` prints only the part of the line that matched. Plain `grep` returns the whole
     // line, which is the thing that was too wide; `[^,]*` ends the match at the next comma,
     // which bounds a hit inside JSON or CSV. The `PATTERN` placeholder is the caller's to fill.
     let grep = format!("run_command(\"grep -o 'PATTERN[^,]*' {path}\")");
     if path.starts_with("@tool_") {
+        let field_route = match field {
+            Some(jp) => format!(
+                " — address the field instead of the line: read_file(\"{path}\", \
+                 json_path=\"{jp}\") reads this payload's largest field"
+            ),
+            None => String::new(),
+        };
         format!(
             "A single line here is wider than the inline budget, so it is shown truncated. \
-             On a @tool_* ref that is usually a JSON-escaped payload on one line — address the \
-             field instead of the line: read_file(\"{path}\", json_path=\"$.stdout\") for a \
-             run_command envelope, or json_path=\"$.<field>\" generally. \
+             On a @tool_* ref that is usually a JSON-escaped payload on one line{field_route}. \
              {grep} prints just the matching part of the line."
         )
     } else {
@@ -719,8 +878,14 @@ fn read_file_text(path: &str, resolved: &std::path::PathBuf) -> Result<String> {
 /// it is echoed (`path`, a `breadcrumb` entry, the `hint`), in SERIALIZED bytes. The value is
 /// the caller's input and has no length of its own: a 6 KB `toml_key` echoed in `breadcrumb` and
 /// in the hint of the `file_id` arm made a 12,287 B response, which `call_content` buffered again
-/// under `@tool_*` beside that `file_id`. No route quotes the echo (each names the handle), so a
-/// clipped echo loses nothing a caller needs, and the marker says the rest is what they passed.
+/// under `@tool_*` beside that `file_id`. No route is built from the echo, so a clipped echo
+/// loses nothing a caller needs to continue, and the marker says the rest is what they passed.
+/// One route does carry the caller's `json_path`: the `next` of a page of a value extracted from
+/// a `@tool_*` ref. It quotes the path WHOLE, never this echo, and only while that leaves the
+/// page [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room; past that, `next` states the continuation in
+/// prose with its line numbers and no path at all. The paths that clip here (over 300 B) and
+/// the paths whose route moves to prose (about 7 KB) are therefore two different sets: a
+/// 3 KB path is clipped in `path` and quoted whole in `next`.
 // cap-class: RESULT_CAP read_file.input_echo_bytes — probed
 const INPUT_ECHO_CLIP: usize = 300;
 
@@ -1430,7 +1595,17 @@ fn format_read_file_body(val: &Value) -> String {
         let total = val["total_lines"].as_u64().unwrap_or(0);
         let complete = val["complete"].as_bool().unwrap_or(true);
         let content = val["content"].as_str().unwrap_or("");
-        let lines_shown = content.lines().count();
+        // The count of lines SHOWN is the span `shown_lines` names. Counting `content.lines()`
+        // counted the marker a cut line ends with (`\n…[truncated: …]`) as a second line, so a
+        // page of one clamped line read `[2 of 2 lines shown]` beside `shown_lines: [1, 1]` and
+        // a `next` resuming at line 2.
+        let lines_shown = match (
+            val["shown_lines"][0].as_u64(),
+            val["shown_lines"][1].as_u64(),
+        ) {
+            (Some(first), Some(last)) if last >= first => (last - first + 1) as usize,
+            _ => content.lines().count(),
+        };
 
         let mut out = format!("{total} lines\n\n");
         out.push_str(content);
@@ -2384,14 +2559,18 @@ mod tests {
     }
 
     /// D4b, by FOLLOWING every route the hint offers on a real buffer of each ref kind.
-    /// `over_budget_line_hint` is only called from `read_from_buffer`, so its path is always a
-    /// buffer ref. Its non-`@tool_` branch used to advise `json_path` on `@cmd_*`/`@file_*`
-    /// refs, which `read_file` refuses; following that route fails with
-    /// `json_path is only supported on @tool_* refs`. So this runs each `json_path` route through
-    /// `read_file` and each `run_command` route through `run_command`, and every one must work:
-    /// a `json_path` offered on a refused kind, or a grep that cannot find the needle, is a red.
-    /// A literal `$.<field>` is a template and is filled with `stdout`, the key of a
-    /// `run_command` envelope; a literal `$.field` is not filled and would fail when followed.
+    /// `over_budget_line_hint` is only called with a buffer ref as its path. Its non-`@tool_`
+    /// branch used to advise `json_path` on `@cmd_*`/`@file_*` refs, which `read_file` refuses;
+    /// following that route fails with `json_path is only supported on @tool_* refs`. So this
+    /// runs each `json_path` route through `read_file` and each `run_command` route through
+    /// `run_command`, and every one must work: a `json_path` offered on a refused kind, or a grep
+    /// that cannot find the needle, is a red. A literal `$.<field>` is a template and is filled
+    /// with `stdout`, the key of a `run_command` envelope; a literal `$.field` is not filled and
+    /// would fail when followed.
+    ///
+    /// The same discipline covers the page of a `json_path` value: its clamped line carries its
+    /// own hint, taken here from what real `json_path` reads return, on a `run_command` envelope
+    /// and on another tool's `@tool_*` ref.
     #[tokio::test]
     async fn the_over_budget_hint_never_names_a_route_the_ref_refuses() {
         use crate::tools::hint_probe::{commands_in, json_paths_in};
@@ -2408,22 +2587,91 @@ mod tests {
         let cmd = ctx
             .output_buffer
             .store("wide".into(), wide.clone(), String::new(), 0);
-        // A `@file_*` handle in production is a slice or extraction of another buffer, stored
-        // under a derived name (`<ref>[1-1]`), not under the path of a file that is not there.
+        // A `@file_*` handle in production holds a real file whole (`read_full_file`), an excerpt
+        // of one, or a memory view; a read of another buffer no longer mints one. This is the
+        // whole-file kind, stored under the path of a file that IS there, as `read_full_file`
+        // stores it, so `get` neither evicts it nor refreshes it into other text.
+        let wide_file = dir.path().join("wide.txt");
+        std::fs::write(&wide_file, &wide).unwrap();
         let file = ctx
             .output_buffer
-            .store_file(format!("{cmd}[1-1]"), wide.clone());
+            .store_file(wide_file.to_string_lossy().into_owned(), wide.clone());
         let tool = ctx.output_buffer.store_tool(
             "run_command",
             json!({ "exit_code": 0, "stdout": wide }).to_string(),
         );
 
-        for (kind, handle) in [("@cmd_", cmd), ("@file_", file), ("@tool_", tool)] {
+        // The json_path page's hint, as a real read of the wide value returns it: from a
+        // `run_command` envelope, and from a `@tool_*` ref of another tool, which has no `stdout`
+        // key, so a hint that offers `json_path="$.<field>"` (filled with `stdout`) fails there.
+        let probe = ctx
+            .output_buffer
+            .store_tool("probe", json!({ "v": wide }).to_string());
+        let mut json_path_hints = Vec::new();
+        for (handle, jp) in [(&tool, "$.stdout"), (&probe, "$.v")] {
+            let page = ReadFile
+                .call(json!({ "path": handle, "json_path": jp }), &ctx)
+                .await
+                .unwrap();
+            assert_eq!(
+                page["line_truncated"],
+                json!(true),
+                "precondition: the json_path read must clamp the wide value: {page:.300}"
+            );
+            json_path_hints.push((handle.clone(), page["hint"].as_str().unwrap().to_string()));
+        }
+        // The route a json_path page offers searches the whole handle, so a hit can lie outside
+        // the value the page shows; the hint must name that scope, or a match elsewhere in the
+        // payload reads as a match in this value.
+        for (handle, hint) in &json_path_hints {
+            assert!(
+                hint.contains("not only this value"),
+                "the json_path page hint on {handle} does not name its search's scope: {hint}"
+            );
+        }
+        let [(_, tool_jp_hint), (_, probe_jp_hint)] = <[_; 2]>::try_from(json_path_hints).unwrap();
+
+        // The plain line read's hint on each `@tool_*` ref, as the read returns it. It names a
+        // field route only to a field that IS on that payload: `$.stdout` on the envelope, `$.v`
+        // on the other tool's ref, which has no `stdout` (the hint used to name `$.stdout` on
+        // both, and on that ref following it failed with "Available keys: v").
+        let mut plain_hints = Vec::new();
+        for (handle, line, field) in [(&tool, 3, "$.stdout"), (&probe, 2, "$.v")] {
+            let page = ReadFile
+                .call(
+                    json!({ "path": handle, "start_line": line, "end_line": line }),
+                    &ctx,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                page["line_truncated"],
+                json!(true),
+                "precondition: line {line} of {handle} must be the wide one: {page:.300}"
+            );
+            let hint = page["hint"].as_str().unwrap().to_string();
+            assert_eq!(
+                json_paths_in(&hint, "stdout"),
+                [field],
+                "the plain read of {handle} must offer the field on that payload: {hint}"
+            );
+            plain_hints.push(hint);
+        }
+        let [tool_plain_hint, probe_plain_hint] = <[_; 2]>::try_from(plain_hints).unwrap();
+
+        for (kind, handle, hint) in [
+            ("@cmd_", cmd.clone(), over_budget_line_hint(&cmd)),
+            ("@file_", file.clone(), over_budget_line_hint(&file)),
+            ("@tool_", tool.clone(), over_budget_line_hint(&tool)),
+            ("@tool_", tool.clone(), tool_plain_hint),
+            ("@tool_", probe.clone(), probe_plain_hint),
+            ("@tool_", tool.clone(), tool_jp_hint),
+            ("@tool_", probe.clone(), probe_jp_hint),
+        ] {
             assert!(
                 handle.starts_with(kind),
                 "fixture: {handle} is not a {kind} ref"
             );
-            let hint = over_budget_line_hint(&handle);
 
             for jp in json_paths_in(&hint, "stdout") {
                 crate::tools::read_file::ReadFile
