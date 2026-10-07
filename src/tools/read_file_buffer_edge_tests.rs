@@ -1311,7 +1311,11 @@ async fn a_json_path_value_paged_to_its_end_reassembles_the_value() {
         .map(|i| format!("row {i:04} \"q\" \\ {}", "v".repeat(30)))
         .collect::<Vec<_>>()
         .join("\n");
-    for key in ["short.key".to_string(), "k".repeat(3_000)] {
+    for key in [
+        "short.key".to_string(),
+        "k".repeat(3_000),
+        "k".repeat(12_000),
+    ] {
         let tool = ctx
             .output_buffer
             .store_tool("probe", json!({ key.clone(): value }).to_string());
@@ -1366,4 +1370,63 @@ async fn a_json_path_value_paged_to_its_end_reassembles_the_value() {
             "{label}: the pages are not the value"
         );
     }
+}
+
+/// `json_path` with a line range slices the VALUE's lines: a string's own lines, or a non-string's
+/// pretty-printed JSON. It used to ignore the range without a word, and answered with the whole
+/// value (or a fresh `@file_*` handle for it). Without a range, an inline value answers exactly as
+/// before: `content`, `path`, `value_type`, `format` (and `count` for a container), no
+/// `total_lines`. A range that cannot be one is refused, as on any other buffer read.
+#[tokio::test]
+async fn a_json_path_range_slices_the_value_and_an_unranged_inline_read_is_unchanged() {
+    let ctx = ctx().await;
+    let keys = |v: &Value| -> Vec<String> { v.as_object().unwrap().keys().cloned().collect() };
+    let s = ctx.output_buffer.store_tool(
+        "probe",
+        json!({ "v": "line one\nline two\nline three" }).to_string(),
+    );
+    let a = ctx
+        .output_buffer
+        .store_tool("probe", json!({ "v": ["a", "b", "c"] }).to_string());
+    let read = |input: Value| {
+        let ctx = &ctx;
+        async move { ReadFile.call(input, ctx).await }
+    };
+
+    let whole = read(json!({ "path": s, "json_path": "$.v" }))
+        .await
+        .unwrap();
+    assert_eq!(whole["content"], json!("line one\nline two\nline three"));
+    assert_eq!(keys(&whole), ["content", "path", "value_type", "format"]);
+    let whole = read(json!({ "path": a, "json_path": "$.v" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        keys(&whole),
+        ["content", "path", "value_type", "format", "count"]
+    );
+
+    let slice = read(json!({ "path": s, "json_path": "$.v", "start_line": 2, "end_line": 3 }))
+        .await
+        .unwrap();
+    assert_eq!(slice["content"], json!("line two\nline three"), "{slice}");
+    assert_eq!(slice["total_lines"], json!(3), "{slice}");
+    assert_eq!(slice["value_type"], json!("string"), "{slice}");
+    // `start_line` alone is a 50-line window, as on every other read.
+    let alone = read(json!({ "path": s, "json_path": "$.v", "start_line": 2 }))
+        .await
+        .unwrap();
+    assert_eq!(alone["content"], json!("line two\nline three"), "{alone}");
+
+    let slice = read(json!({ "path": a, "json_path": "$.v", "start_line": 2, "end_line": 3 }))
+        .await
+        .unwrap();
+    assert_eq!(slice["content"], json!("  \"a\",\n  \"b\","), "{slice}");
+    assert_eq!(slice["total_lines"], json!(5), "{slice}");
+    assert_eq!(slice["count"], json!(3), "{slice}");
+
+    let err = read(json!({ "path": s, "json_path": "$.v", "start_line": 3, "end_line": 2 }))
+        .await
+        .expect_err("an inverted range beside json_path must be refused, not ignored");
+    assert!(err.to_string().contains("invalid line range"), "{err}");
 }
