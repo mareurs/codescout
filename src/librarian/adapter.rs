@@ -506,8 +506,10 @@ impl crate::tools::Tool for LibrarianAdapter {
         // either, only `result`, so it is recomputed here. `emit_guide_sections` gates
         // `"progressive-disclosure"` on `ctx.overflowing` regardless of what this
         // function names, so if this ever drifts from that formula the topic silently
-        // stops firing again rather than erroring -- keep the two in lockstep with the
-        // one in `src/tools/core/types.rs::exceeds_inline_limit`.
+        // stops firing again rather than erroring -- keep the two in lockstep:
+        // `response_fits` (`src/tools/core/response_fit.rs`) measures `result` compact and
+        // without a cut record, as `call_content` measures its `json`, and `result` here has
+        // already had its record stripped by `clip_prebuffered_envelope`.
         //
         // A response naming a path under `docs/issues/` or `docs/trackers/` is a
         // bug-file or tracker operation, and `tracker-conventions` (frontmatter, the
@@ -533,13 +535,12 @@ impl crate::tools::Tool for LibrarianAdapter {
         // deleted outright rather than corrected: there the number did no work.
         //
         // See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
-        let overflowing = crate::tools::exceeds_inline_limit(
-            &serde_json::to_string(result).unwrap_or_else(|_| result.to_string()),
-        ) || result
-            .as_object()
-            .and_then(|o| o.get("output_id"))
-            .and_then(|v| v.as_str())
-            .is_some();
+        let overflowing = !crate::tools::response_fits(result)
+            || result
+                .as_object()
+                .and_then(|o| o.get("output_id"))
+                .and_then(|v| v.as_str())
+                .is_some();
         if overflowing {
             return Some("progressive-disclosure");
         }
@@ -2738,6 +2739,57 @@ mod tests {
         assert_eq!(
             a.relevant_guide_topic(&plain_tracker_result),
             Some("tracker-conventions")
+        );
+    }
+    /// The overflow gate measures the WHOLE result as serialized, never a raw field alone: a result
+    /// can be over the limit while no field is over it by itself, because escaping widens `"`, `\`
+    /// and control characters, and because bulk spread over several fields adds up. Sized around
+    /// the 10,003 B limit in each class, plus the edge itself.
+    #[test]
+    fn overflow_is_judged_on_the_serialized_result_not_on_any_raw_field() {
+        use serde_json::Value;
+        let a = adapter_for_test();
+        let path = "docs/trackers/tool-usage-patterns.md";
+        let one = |s: String| json!({"abs_path": path, "padding": s});
+        let two = |s: String| json!({"abs_path": path, "a": s.clone(), "b": s});
+        let cases: Vec<(&str, Value)> = vec![
+            ("quote", one("\"".repeat(5_002))),
+            ("backslash", one("\\".repeat(5_002))),
+            ("x01", one("\x01".repeat(1_700))),
+            ("x1b", one("\x1b".repeat(1_700))),
+            ("ascii", two("a".repeat(5_100))),
+            ("euro", two("€".repeat(1_700))),
+            ("emoji", two("😀".repeat(1_300))),
+        ];
+        for (class, result) in cases {
+            let fields = result.as_object().unwrap();
+            assert!(
+                fields
+                    .values()
+                    .filter_map(Value::as_str)
+                    .all(|s| !crate::tools::body_alone_overflows(s)),
+                "{class}: fixture: no field may be over the limit alone"
+            );
+            assert!(
+                !crate::tools::response_fits(&result),
+                "{class}: fixture: the whole result must be over the limit"
+            );
+            assert_eq!(
+                a.relevant_guide_topic(&result),
+                Some("progressive-disclosure"),
+                "{class}"
+            );
+        }
+        // The edge: a result exactly on the limit fits, one byte more does not.
+        let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
+        let base = one(String::new()).to_string().len();
+        let on = one("a".repeat(limit - base));
+        assert_eq!(on.to_string().len(), limit);
+        assert_eq!(a.relevant_guide_topic(&on), Some("tracker-conventions"));
+        let over = one("a".repeat(limit - base + 1));
+        assert_eq!(
+            a.relevant_guide_topic(&over),
+            Some("progressive-disclosure")
         );
     }
 

@@ -133,7 +133,7 @@ pub fn over_budget_bodies(files: &[FileSymbols]) -> Vec<StructuralDefect> {
         collect_bodies(&f.symbols, &mut bodies);
         for sym in bodies {
             let (body, lines) = body_text(&f.lines, sym);
-            if !body.is_empty() && crate::tools::exceeds_inline_limit(&body) {
+            if !body.is_empty() && crate::tools::body_alone_overflows(&body) {
                 out.push(StructuralDefect {
                     rel_file: f.rel_file.clone(),
                     name_path: sym.name_path.clone(),

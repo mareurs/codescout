@@ -188,7 +188,8 @@ pub(crate) fn clip_prebuffered_envelope(mut val: Value, force_inline: bool) -> V
     else {
         return val;
     };
-    if !exceeds_inline_limit(&val.to_string()) {
+    // `take_cut_record` already ran above, so `response_fits` measures exactly `val.to_string()`.
+    if super::response_fit::response_fits(&val) {
         return val;
     }
 
@@ -254,7 +255,7 @@ pub(crate) fn clip_prebuffered_envelope(mut val: Value, force_inline: bool) -> V
             ));
         }
     }
-    if exceeds_inline_limit(&work.to_string()) {
+    if !super::response_fit::response_fits(&work) {
         val
     } else {
         work

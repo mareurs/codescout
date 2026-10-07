@@ -159,11 +159,11 @@ const SUMMARY_TEXT_FIELDS: [&str; 4] = ["stdout", "stderr", "failures", "first_e
 /// A response whose skeleton alone is over the limit comes back as built; the backstop in
 /// `call_content` is for that.
 pub(crate) fn fit_summary(render: impl Fn(&SummaryBudget) -> Value) -> Value {
-    use crate::tools::{delivered_len, exceeds_inline_limit_len, INLINE_MAX_RESPONSE_LEN};
+    use crate::tools::{response_fits, response_room};
     // Measured as DELIVERED, without the cut record the summarizers attach: the backstop strips it,
     // so counting it here would cut text to make room for bytes the caller never receives.
     let natural = render(&SummaryBudget::default());
-    if !exceeds_inline_limit_len(delivered_len(&natural)) {
+    if response_fits(&natural) {
         return natural;
     }
     let mut skeleton = natural.clone();
@@ -174,7 +174,7 @@ pub(crate) fn fit_summary(render: impl Fn(&SummaryBudget) -> Value) -> Value {
             skeleton[key] = json!("");
         }
     }
-    let room = INLINE_MAX_RESPONSE_LEN.saturating_sub(delivered_len(&skeleton));
+    let room = response_room(&skeleton);
     let mut budget = SummaryBudget::default();
     for (key, share) in share_room(&wanted, room) {
         match key {
@@ -383,6 +383,8 @@ pub(crate) fn inline_response_exceeds_limit(
     extras: usize,
 ) -> bool {
     use crate::tools::exceeds_inline_limit_len;
+    // inline-gate: raw stream bytes plus the serialized extras, a LOWER bound on the delivered
+    // length (escaping never shortens), so only its `true` is read: the response is over.
     if exceeds_inline_limit_len(stdout.len() + stderr.len() + extras) {
         return true;
     }
@@ -394,6 +396,8 @@ pub(crate) fn inline_response_exceeds_limit(
     if !stderr.is_empty() {
         response.insert("stderr".into(), json!(stderr));
     }
+    // inline-gate: compact serialized bytes of the inline response (built here, no cut record)
+    // plus `extras`, the serialized cost of the late keys (`extras_len`): the delivered length.
     exceeds_inline_limit_len(Value::Object(response).to_string().len() + extras)
 }
 
