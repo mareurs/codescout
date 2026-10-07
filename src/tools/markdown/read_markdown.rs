@@ -149,7 +149,7 @@ fn read_markdown_multi_heading(
 
     let mut sections = Vec::new();
     let mut seen_headings = Vec::new();
-    let mut seen_lines = Vec::new();
+    let mut seen_ranges = Vec::new();
 
     for query in &heading_queries {
         let section = crate::tools::file_summary::extract_markdown_section(text, query)?;
@@ -160,7 +160,7 @@ fn read_markdown_multi_heading(
                 .cloned()
                 .unwrap_or_else(|| query.clone()),
         );
-        seen_lines.push(section.line_range.0);
+        seen_ranges.push(section.line_range);
         sections.push(section.content);
     }
 
@@ -185,17 +185,28 @@ fn read_markdown_multi_heading(
         // (an unquoted `heading=## A` is not a call a caller can paste back). The list has as many
         // entries as the caller asked for, so it is dropped (marked `requested_headings_omitted`)
         // when the body would not fit: an `Err` body is put inline by the server, and 3 headings
-        // of 12 KB made it 72,413 B. `next_actions` is at most three clipped routes, each one
-        // that lands on its section in the whole file ([`heading_route_lands`]).
+        // of 12 KB made it 72,413 B. `next_actions` is at most three routes, one per section in
+        // the order asked: its heading route when that lands on it in the whole file
+        // ([`heading_route_lands`]), else a range route over its lines, which always does. With
+        // only heading routes, a request whose every heading was ambiguous in the file got
+        // `next_actions=[]` and no line number to go on (review C).
         let requested: Vec<String> = seen_headings.iter().map(|h| clip_heading(h).0).collect();
         let next_actions: Vec<String> = seen_headings
             .iter()
-            .zip(&seen_lines)
-            .filter(|(h, line)| heading_route_lands(text, clip_heading_embedded(h), **line))
+            .zip(&seen_ranges)
             .take(3)
-            .map(|(h, _)| {
-                let quoted = serde_json::to_string(clip_heading_embedded(h)).unwrap_or_default();
-                format!("read_file({:?}, heading={quoted})", file_id)
+            .map(|(h, &(start, end))| {
+                let routed = clip_heading_embedded(h);
+                if heading_route_lands(text, routed, start) {
+                    let quoted = serde_json::to_string(routed).unwrap_or_default();
+                    format!("read_file({:?}, heading={quoted})", file_id)
+                } else {
+                    format!(
+                        "read_file({:?}, start_line={start}, end_line={})",
+                        file_id,
+                        end.max(start)
+                    )
+                }
             })
             .collect();
         let message = format!(

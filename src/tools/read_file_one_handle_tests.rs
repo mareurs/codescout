@@ -367,36 +367,73 @@ async fn a_section_of_a_changed_file_names_the_same_handle_holding_the_new_file(
     );
 }
 
-/// The section the `heading=` route `route` (a `read_file(...)` string) reaches, as its first
-/// line in the file: from the success (`line_range`) or from an oversized section's error
-/// (`extra.line_range`). `None` when the route fails in any other way.
-async fn landing_line(ctx: &crate::tools::ToolContext, route: &str) -> Option<u64> {
-    let re =
+/// Where a route a response offers (a `read_file(...)` string on a handle) lands, as the first
+/// line in the file of what it serves, and that line's text as the route served it:
+/// - a `heading=` route: the section's `line_range[0]` from the success or from an oversized
+///   section's error; the text is that section's heading (its breadcrumb's last entry);
+/// - a range route: its `start_line`, and the first line of the content it returned.
+///
+/// `None` when the route does not parse or fails in any other way.
+async fn landing_line(ctx: &crate::tools::ToolContext, route: &str) -> Option<(u64, String)> {
+    let heading =
         regex::Regex::new(r#"^read_file\("(@file_[0-9a-f]+)", heading=("(?:[^"\\]|\\.)*")\)$"#)
             .unwrap();
-    let c = re.captures(route)?;
-    let heading: String = serde_json::from_str(&c[2]).unwrap();
-    let input = json!({ "path": &c[1], "heading": heading });
-    match ReadFile.call(input, ctx).await {
-        Ok(v) => v["line_range"][0].as_u64(),
-        Err(e) => e
-            .downcast_ref::<RecoverableError>()
-            .and_then(|r| r.extra.get("line_range"))
-            .and_then(|l| l[0].as_u64()),
+    let range = regex::Regex::new(
+        r#"^read_file\("(@file_[0-9a-f]+)", start_line=(\d+), end_line=(\d+)\)$"#,
+    )
+    .unwrap();
+    if let Some(c) = heading.captures(route) {
+        let query: String = serde_json::from_str(&c[2]).unwrap();
+        let input = json!({ "path": &c[1], "heading": query });
+        let found = match ReadFile.call(input, ctx).await {
+            Ok(v) => v,
+            Err(e) => {
+                let rec = e.downcast_ref::<RecoverableError>()?;
+                json!({ "line_range": rec.extra.get("line_range")?, "breadcrumb": rec.extra.get("breadcrumb")? })
+            }
+        };
+        let line = found["line_range"][0].as_u64()?;
+        let text = found["breadcrumb"]
+            .as_array()?
+            .last()?
+            .as_str()?
+            .to_string();
+        return Some((line, text));
     }
+    let c = range.captures(route)?;
+    let (start, end): (u64, u64) = (c[2].parse().ok()?, c[3].parse().ok()?);
+    let v = ReadFile
+        .call(
+            json!({ "path": &c[1], "start_line": start, "end_line": end }),
+            ctx,
+        )
+        .await
+        .ok()?;
+    let first = v["content"].as_str()?.lines().next()?.to_string();
+    Some((start, first))
 }
 
 /// A `heading=` route on the file's handle resolves against the WHOLE file, where a section's
 /// own handle used to scope it to the section. So every heading route a response offers must
 /// land on the section it was taken from: a sub-heading repeated elsewhere in the file (refused
 /// as ambiguous) and a clipped heading whose prefix an earlier heading shares (resolved to that
-/// earlier heading) must not be offered as routes. The range route beside them always lands.
+/// earlier heading) must not be offered as heading routes; a range route, which always lands,
+/// stands in. And a heading route that DOES land must still be offered: without the positive
+/// cases below, a check that dropped every heading route passed this test (review M12, M19).
 #[tokio::test]
 async fn every_heading_route_on_the_files_handle_lands_on_its_section() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
+    let actions_of = |rec: &RecoverableError| -> Vec<String> {
+        rec.extra["next_actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a.as_str().unwrap().to_string())
+            .collect()
+    };
 
-    // Single heading: the oversized section's first sub-heading also exists earlier.
+    // Single heading, a sub-heading repeated earlier: no heading route, the range route stays.
     let dup = write(
         dir.path(),
         "dup.md",
@@ -410,27 +447,48 @@ async fn every_heading_route_on_the_files_handle_lands_on_its_section() {
         .await
         .unwrap_err();
     let rec = err.downcast_ref::<RecoverableError>().unwrap();
-    let first_sub = rec.extra["section_map"][0]["l"].as_u64().unwrap();
-    assert_eq!(first_sub, 6, "fixture: the section's `### Notes` is line 6");
-    let actions: Vec<String> = rec.extra["next_actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|a| a.as_str().unwrap().to_string())
-        .collect();
+    assert_eq!(rec.extra["section_map"][0]["l"], json!(6), "fixture");
+    let actions = actions_of(rec);
     assert!(
-        actions.iter().any(|a| a.contains("start_line=5,")),
-        "the range route must remain: {actions:?}"
+        !actions.iter().any(|a| a.contains("heading=")),
+        "an ambiguous heading route was offered: {actions:?}"
     );
-    for route in actions.iter().filter(|a| a.contains("heading=")) {
-        assert_eq!(
-            landing_line(&ctx, route).await,
-            Some(first_sub),
-            "the heading route {route} does not land on line {first_sub}"
-        );
-    }
+    let range = actions
+        .iter()
+        .find(|a| a.contains("start_line="))
+        .unwrap_or_else(|| panic!("the range route must remain: {actions:?}"));
+    assert_eq!(
+        landing_line(&ctx, range).await,
+        Some((5, "## Big".to_string()))
+    );
 
-    // Several headings: two sections whose headings share a prefix longer than the clip.
+    // Single heading, a unique sub-heading: the heading route is offered and lands.
+    let unique = write(
+        dir.path(),
+        "unique.md",
+        &format!(
+            "# T\n## Other\nsmall\n## Big\n### Only Here\n{}\n",
+            big_text("u", 300)
+        ),
+    );
+    let err = ReadFile
+        .call(json!({ "path": unique, "heading": "## Big" }), &ctx)
+        .await
+        .unwrap_err();
+    let rec = err.downcast_ref::<RecoverableError>().unwrap();
+    let actions = actions_of(rec);
+    let heading_route = actions
+        .iter()
+        .find(|a| a.contains("heading="))
+        .unwrap_or_else(|| panic!("a heading route that lands was not offered: {actions:?}"));
+    assert_eq!(
+        landing_line(&ctx, heading_route).await,
+        Some((5, "### Only Here".to_string()))
+    );
+
+    // Several headings sharing a prefix longer than the clip: `one` keeps its heading route
+    // (the prefix resolves to it first); `two`'s would land on `one`, so a range route on its
+    // own lines stands in.
     let p = "x".repeat(250);
     let shared = write(
         dir.path(),
@@ -441,26 +499,77 @@ async fn every_heading_route_on_the_files_handle_lands_on_its_section() {
             big_text("w", 200)
         ),
     );
-    let one = format!("## {p} one");
-    let two = format!("## {p} two");
+    let (one, two) = (format!("## {p} one"), format!("## {p} two"));
     let err = ReadFile
-        .call(json!({ "path": shared, "headings": [one, two] }), &ctx)
+        .call(
+            json!({ "path": shared, "headings": [one.clone(), two.clone()] }),
+            &ctx,
+        )
         .await
         .unwrap_err();
     let rec = err.downcast_ref::<RecoverableError>().unwrap();
-    let mut landed = Vec::new();
-    for route in rec.extra["next_actions"].as_array().unwrap() {
-        let route = route.as_str().unwrap();
-        let line = landing_line(&ctx, route)
-            .await
-            .unwrap_or_else(|| panic!("the heading route {route} does not work"));
-        assert!(
-            !landed.contains(&line),
-            "two heading routes land on the same section (line {line}): {:?}",
-            rec.extra["next_actions"]
-        );
-        landed.push(line);
-    }
+    let actions = actions_of(rec);
+    assert_eq!(actions.len(), 2, "one route per section: {actions:?}");
+    assert!(
+        actions[0].contains("heading="),
+        "`one`'s heading route lands and must be offered: {actions:?}"
+    );
+    let (line, text) = landing_line(&ctx, &actions[0]).await.unwrap();
+    assert_eq!(line, 2);
+    assert!(one.starts_with(&text), "{text}");
+    assert!(
+        actions[1].contains("start_line=203,"),
+        "`two` gets a range route on its own lines: {actions:?}"
+    );
+    assert_eq!(landing_line(&ctx, &actions[1]).await, Some((203, two)));
+}
+
+/// Review C: a multi-heading request whose every heading is ambiguous in the file (each query
+/// fuzzy-matches a heading that appears twice) offered NO route at all once the heading routes
+/// were checked against the whole file: `next_actions=[]`, and the error named no line numbers.
+/// Each section must get a range route on the file's one handle, in the file's line numbers,
+/// landing on that section's own heading.
+#[tokio::test]
+async fn a_multi_heading_error_routes_every_section_even_when_its_heading_is_ambiguous() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let body = format!(
+        "# T\n## A\n### Notes\n{}\n### Details\n{}\n## B\n### Notes\nx\n### Details\ny\n",
+        big_text("na", 150),
+        big_text("da", 150)
+    );
+    let md = write(dir.path(), "multi.md", &body);
+    let err = ReadFile
+        .call(
+            json!({ "path": md, "headings": ["### Not", "### Det"] }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    let rec = err.downcast_ref::<RecoverableError>().unwrap();
+    let file_id = rec.extra["file_id"].as_str().unwrap().to_string();
+    let actions: Vec<String> = rec.extra["next_actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            format!("read_file({file_id:?}, start_line=3, end_line=153)"),
+            format!("read_file({file_id:?}, start_line=154, end_line=304)"),
+        ],
+        "one range route per section, in the file's lines"
+    );
+    assert_eq!(
+        landing_line(&ctx, &actions[0]).await,
+        Some((3, "### Notes".to_string()))
+    );
+    assert_eq!(
+        landing_line(&ctx, &actions[1]).await,
+        Some((154, "### Details".to_string()))
+    );
 }
 
 /// A markdown read served FROM a `@file_` snapshot (no `source_path`, so heading reads reach it
