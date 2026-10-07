@@ -1,17 +1,17 @@
 ---
 id: '5cbaa87d92772a51'
 kind: bug
-status: open
+status: fixed
 title: 'RESIDUAL: Make CI invoke the plugin repo''s tests/run-all.sh runner so skill-colocated tests actually run; add a test for the self-identification half'
 tags:
 - cluster/addressing-without-an-escape-hatch
-closed: null
+closed: 2026-10-07
 opened: 2026-09-24
 owner: marius
 related:
 - docs/issues/archive/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md
 severity: low
-unverified: 'PARTIAL FIX (claude-plugins:502365e, claude-plugins:8a95728): plugin CI now runs tests/run-all.sh. NOT done: the self-identification test of the reaching-peer-sessions skill. See ## Partial fix.'
+unverified: No CI run was opened after the test and the duplicate-line removal landed, so green in CI is not observed; the local suite passes (11 of 11 for this skill).
 ---
 
 ## Summary
@@ -45,7 +45,18 @@ At the bytes: `.github/workflows/cross-platform-hooks.yml` lines ~65-116 hold th
 
 Note: `CS_TEST_SKIP` lists `pre-tool-guard.test.sh` twice (workflow lines ~114-115). Harmless (the runner matches by basename), worth deleting the duplicate.
 
-**What remains (not done):** a test for the self-identification half of `bb14719` (the walk that terminates on socket presence rather than on `comm == claude`). `codescout-companion/skills/reaching-peer-sessions/reaching-peer-sessions.test.sh` (header, lines ~16-26) says it cannot be tested without editing the skill: `SKILL.md`'s walk reads `/proc` and `/run/user/<uid>/cc-socks` by hardcoded absolute path, and a source-text assertion would be a proxy, not the behaviour. It was verified by hand on 2026-09-03 only. Making it testable is a change to a shared skill in the plugin repo (parameterise the two roots, then drive it against a fixture tree); size M. The `claude-plugins` repo is out of scope for this sweep.
+**What remains: DONE 2026-10-07, see the Update below.** It was: a test for the self-identification half of `bb14719` (the walk that terminates on socket presence rather than on `comm == claude`). `codescout-companion/skills/reaching-peer-sessions/reaching-peer-sessions.test.sh` (header, lines ~16-26) says it cannot be tested without editing the skill: `SKILL.md`'s walk reads `/proc` and `/run/user/<uid>/cc-socks` by hardcoded absolute path, and a source-text assertion would be a proxy, not the behaviour. It was verified by hand on 2026-09-03 only. Making it testable is a change to a shared skill in the plugin repo (parameterise the two roots, then drive it against a fixture tree); size M. The `claude-plugins` repo is out of scope for this sweep.
+
+**Update 2026-10-07: the self-identification test is written and merged.**
+
+- **SHA:** `claude-plugins:ffe67e5` (branch `main` of `claude-plugins`, via the merge `231cd81`)
+- **patch-id:** `67f3c4dfaeb358aa59a4881ae0cd049472b55964`
+
+Step 1 of `SKILL.md` now reads its two roots from `CS_PEERS_PROC` and `CS_PEERS_SOCKS`, which default to the real `/proc` and `/run/user/<uid>/cc-socks`, so the skill's behaviour is unchanged. The test file gains cases 8 to 11. They run the block extracted from `SKILL.md` against a fixture tree with real unix sockets: a version-pinned socket owner is found and marked `<-- you`, an orphan prints the loud warning and marks no row, the walk climbs past socket-less ancestors, and a control runs the old `comm`-keyed rule on the same fixture and must fail it. The same commit deletes the duplicate `pre-tool-guard.test.sh` from `CS_TEST_SKIP`, which the note above asked for.
+
+Re-run 2026-10-06 in the fork's worktree: `reaching-peer-sessions.test.sh` 11 passed, 0 failed. The fork also mutation-checked it against the real skill (restoring the `comm` rule fails cases 8 and 10; silencing the warning fails case 9). The merge into `main` was checked on 2026-10-07: the patch-id appears among the last 30 commits of `main`.
+
+Not verified: a CI run. The only workflow change is the removed duplicate line, and nobody opened a run, so "green in CI" is not observed.
 
 ## Resume
 

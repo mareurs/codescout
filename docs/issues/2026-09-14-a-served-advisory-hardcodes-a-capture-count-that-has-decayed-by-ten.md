@@ -9,7 +9,7 @@ tags:
 - hooks
 - shared-checkout
 - stale-count
-unverified: 'PARTIAL FIX (ce9aa15f): the codescout half no longer carries a count. The plugin half is NOT fixed: claude-plugins codescout-companion hooks/pre-edit-dirty-check.mjs lines ~8 and ~118 still say ''Four such captures''. See ## Partial fix.'
+unverified: 'PARTIAL FIX (ce9aa15f, claude-plugins:949c85e): both halves are fixed in source. The plugin half is merged on claude-plugins main but NOT released: the installed caches of all three profiles (codescout-companion 1.20.13 to 1.20.15) still serve ''Four such captures''. Closes when a release ships and the caches refresh.'
 ---
 
 # BUG: a served advisory hardcodes "Four such captures are recorded" against a corpus now at fourteen
@@ -152,6 +152,15 @@ file reporting the class closed.
 **Still live in the plugin repo** (`/home/marius/work/claude/claude-plugins`, working tree clean at HEAD; last commit touching the file `9169527`): `codescout-companion/hooks/pre-edit-dirty-check.mjs` line 8 (header comment: "... land together, under your message. Four such") and line 118 (the served advisory string: "... it lands under your message. Four such\n"). The advisory still tells a reader "Four such captures are recorded in codescout's docs/issues/2026-08-31-peer-commit-captures-another-sessions-working-tree.md" against a corpus this file measured at 17 `## Instance` headings (highest `Instance 18`) on 2026-09-22. I read the file; I did not edit the plugin repo, which this record says a live session owns.
 
 **Remaining work (plugin repo, minutes):** delete the word "Four" at both sites, leaving "Such captures are recorded in codescout's `docs/issues/2026-08-31-...`", exactly as codescout's own script now reads. No test is wanted: as this record's `## Tests added` argues, an assertion on the absence of a digit is monotone under the rewording that would reintroduce one. Not filed as a separate item.
+
+**Update 2026-10-07: the plugin half is fixed in source and merged, and NOT yet released.**
+
+- **SHA:** `claude-plugins:949c85e` (branch `main` of `claude-plugins`, via the merge `231cd81`)
+- **patch-id:** `9d3ea0632381204696a1c19a634da21380c2bfda`
+
+Both sites of "Four" are deleted in `codescout-companion/hooks/pre-edit-dirty-check.mjs`, the header comment and the served advisory, so it now reads as codescout's own script does. The fix commit also adds two cases to `tests/test-pre-edit-dirty-check.sh` (11 and 12): one rejects any word directly before "such captures", and one pins the ledger citation. This goes against the advice above that no test is wanted. The test is a floor and says so, because a rewording such as "a dozen of these" would pass it. Re-run 2026-10-06 in the fork's worktree: 13 passed, 0 failed. The merge into `main` was checked on 2026-10-07: the patch-id appears among the last 30 commits of `main`.
+
+What is NOT done: the release. `release.sh` has not run, and the installed plugin caches of all three profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, `codescout-companion` 1.20.13, 1.20.14 and 1.20.15) still serve "Four such captures" (grep, 2026-10-07). The advisory a reader sees comes from those caches, so the symptom persists until a release ships and the caches refresh.
 
 ## Tests added
 
