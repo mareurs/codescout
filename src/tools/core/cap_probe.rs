@@ -1231,4 +1231,24 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
              `paths_touched_since`'s own doc comment",
         ),
     },
+    // -- src/tools/memory/mod.rs --
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test reads
+        // a topic through the real tool naming one real section and 100 absent ones, short (kept
+        // 40, the other 60 counted under `missing_names_omitted`) and 1 KB wide (the kept list is
+        // over the limit, so the measured `file_id` arm drops it and counts all 100 under
+        // `missing_omitted`), and asserts one handle at most, no `@tool_*`, a response within the
+        // limit and a hint route that reads the section. Before the cap the cited test failed on
+        // its first case: no `missing_names_omitted`, and the short names echoed past forty.
+        // Marker written by production in `memory::apply_sections_filter` (`with_keys`).
+        id: "memory.missing_names_kept",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("missing_names_omitted"),
+            mutation: Mutation::NotYet(
+                "the cap and its marker are new in this commit; the count-cap mutation is run \
+                 against it once it is committed, and this row says Killed only after that run",
+            ),
+            cited_test: "a_read_naming_many_missing_sections_keeps_forty_and_counts_the_rest",
+        },
+    },
 ];
