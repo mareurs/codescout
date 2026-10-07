@@ -1241,13 +1241,13 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // limit and a hint route that reads the section. Before the cap the cited test failed on
         // its first case: no `missing_names_omitted`, and the short names echoed past forty.
         // Marker written by production in `memory::apply_sections_filter` (`with_keys`).
+        // MUTATION (2026-10-07): `bounded_missing` keeping every name (`.take(usize::MAX)`) turns
+        // the cited test red (100 names kept, not 40); so does `missing` never being dropped
+        // from the measured `file_id` arm (12,246 B delivered with two handles).
         id: "memory.missing_names_kept",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("missing_names_omitted"),
-            mutation: Mutation::NotYet(
-                "the cap and its marker are new in this commit; the count-cap mutation is run \
-                 against it once it is committed, and this row says Killed only after that run",
-            ),
+            mutation: Mutation::Killed,
             cited_test: "a_read_naming_many_missing_sections_keeps_forty_and_counts_the_rest",
         },
     },
