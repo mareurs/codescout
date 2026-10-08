@@ -97,7 +97,8 @@ enum FileStore {
         read_mtime: Option<u64>,
         now_mtime: Option<u64>,
     },
-    /// An excerpt or a synthetic `@…` view, reused only when byte-identical.
+    /// A synthetic `@…` view (the `memory` tool's filtered view of a topic), reused only when
+    /// byte-identical. It never refreshes: no file is behind it.
     Snapshot,
 }
 
@@ -626,7 +627,11 @@ impl OutputBuffer {
     /// and states every number in the file's line numbers (R3), so a refresh
     /// widens nothing — the handle never claimed to be the range. A derived value
     /// that is not a run of the file's lines (a `json_path` or `toml_key` value)
-    /// uses [`OutputBuffer::store_file_excerpt`], a snapshot.
+    /// is not stored at all: its read pages it on the file's own path. It must never
+    /// be stored here under the file's path: the refresh would re-read the WHOLE file
+    /// into a handle that claims to be the value (measured 2026-08-25, a handle minted
+    /// as 12 lines served 41 after one append,
+    /// `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`).
     ///
     /// `source_path` is set only when `path` is a real filesystem path (not a
     /// buffer ref like `@file_*` or `@tool_*`). Buffer refs are not on disk, so
@@ -684,35 +689,8 @@ impl OutputBuffer {
         )
     }
 
-    /// Store a DERIVED VIEW of a file — a value that is not a run of the file's
-    /// lines, such as a `json_path` or `toml_key` value — under a `@file_*` handle.
-    /// The entry is a snapshot: `path` is recorded in `command` for diagnostics,
-    /// but `source_path` is deliberately left unset. A live snapshot of the same
-    /// `path` holding byte-identical content is returned instead of minting a
-    /// second one.
-    ///
-    /// [`OutputBuffer::store_file`] must not be used for this.
-    /// `get_with_refresh_flag` re-reads `source_path` **whole**, which is the
-    /// intended freshness guarantee for a handle minted by a whole-file read and
-    /// silently wrong for an excerpt: the handle widens to content the caller
-    /// never asked for, while the response still describes the excerpt. Measured
-    /// 2026-08-25 — a handle minted as 12 lines served 41 after one append, and
-    /// its line 1 was the file's line 1
-    /// (`docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`).
-    ///
-    /// Line ranges and heading sections of a real file used this until R3 (one
-    /// real file, one live handle): they now name the file's whole-file handle in
-    /// the file's own line numbers, so that frame mismatch cannot arise for them.
-    /// Re-extracting on refresh was considered and rejected: a heading's line
-    /// range moves when text above it changes, so no stored range reproduces
-    /// "the `## Foo` section". A snapshot is also what every other buffer kind
-    /// already is — `@cmd_*` and `@tool_*` never re-run their source either.
-    pub fn store_file_excerpt(&self, path: String, content: String) -> String {
-        self.store_file_inner(path.into(), content.into(), FileStore::Snapshot)
-    }
-
-    /// Shared find-or-mint behind [`OutputBuffer::store_file`],
-    /// [`OutputBuffer::store_file_read`] and [`OutputBuffer::store_file_excerpt`].
+    /// Shared find-or-mint behind [`OutputBuffer::store_file`] and
+    /// [`OutputBuffer::store_file_read`].
     ///
     /// **One live handle per source (R3).** Before this, every call minted, so an
     /// unchanged file read twice came back under two handles, and since each mint
@@ -733,10 +711,12 @@ impl OutputBuffer {
     ///   holders are told once, by the next `get_with_refresh_flag` (review B2: the in-place
     ///   update had silently replaced the `↻ … refreshed from disk` notice a holder got when
     ///   the re-read minted a new handle and the old one refreshed itself).
-    /// - A snapshot (`source_path` unset: an excerpt, or a synthetic `@…` view) is
+    /// - A snapshot (`source_path` unset: a synthetic `@…` view, which today is the
+    ///   `memory` tool's filtered view of a topic, `@memory:<topic>:filtered`) is
     ///   reused only when an entry of the same name holds byte-identical content.
     ///   Same name with different content is a different view (two section filters
-    ///   of one memory topic), so it mints.
+    ///   of one memory topic), so it mints. A snapshot never refreshes: it has no
+    ///   file behind it.
     ///
     /// The two kinds never match each other: a whole-file entry must keep refreshing,
     /// and a snapshot must never start. Text is copied only when it is minted or
@@ -817,7 +797,7 @@ impl OutputBuffer {
             timestamp,
             source_path,
             content_hash: None,
-            // A @file_* entry holds the whole file, or an excerpt the caller
+            // A @file_* entry holds the whole file, or a synthetic view the caller
             // explicitly asked for. Neither is a silent prefix.
             truncated: None,
         };
@@ -2360,51 +2340,6 @@ mod tests {
         assert_eq!(entry.stdout, "updated content");
     }
 
-    /// The excerpt twin of `get_file_handle_refreshes_when_file_modified`.
-    ///
-    /// A handle minted by `store_file_excerpt` holds a DERIVED SUBSET, so the
-    /// same mtime trigger that correctly refreshes a whole-file handle must not
-    /// widen this one to the file. Bug
-    /// `docs/issues/archive/2026-08-25-file-slice-handle-refreshes-to-whole-file.md`.
-    #[test]
-    fn excerpt_handle_does_not_refresh_into_the_whole_file() {
-        use std::fs;
-
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test.txt");
-        fs::write(&file_path, "one\ntwo\nthree\nfour\n").unwrap();
-
-        let buf = OutputBuffer::new(10);
-        // The excerpt: lines 2-3 of that file, and nothing else.
-        let id = buf.store_file_excerpt(
-            file_path.to_string_lossy().to_string(),
-            "two\nthree".to_string(),
-        );
-
-        // Advance mtime past the entry timestamp — the exact condition that
-        // makes a store_file handle re-read its source in full.
-        fs::write(&file_path, "ONE\nTWO\nTHREE\nFOUR\nFIVE\n").unwrap();
-        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
-        filetime::set_file_mtime(&file_path, filetime::FileTime::from_system_time(future)).unwrap();
-
-        let (entry, refreshed) = buf
-            .get_with_refresh_flag(&id)
-            .expect("an excerpt handle must survive a change to its source file");
-        assert!(
-            !refreshed,
-            "an excerpt is a snapshot — it must never report a refresh"
-        );
-        assert_eq!(
-            entry.stdout, "two\nthree",
-            "the excerpt must keep the content it was minted with"
-        );
-        assert_eq!(
-            entry.command,
-            file_path.to_string_lossy().to_string(),
-            "the originating path is still recorded, for diagnostics"
-        );
-    }
-
     #[test]
     fn get_file_handle_returns_none_when_file_deleted() {
         use std::fs;
@@ -2964,9 +2899,9 @@ mod tests {
         let f1 = buf.store_file("/tmp/codescout-a".to_string(), "SAME".to_string());
         let f2 = buf.store_file("/tmp/codescout-b".to_string(), "SAME".to_string());
         assert_ne!(f1, f2, "two files with equal content are still two files");
-        let e1 = buf.store_file_excerpt("/tmp/codescout-a".to_string(), "PART".to_string());
-        let e2 = buf.store_file_excerpt("/tmp/codescout-b".to_string(), "PART".to_string());
-        assert_ne!(e1, e2, "equal excerpts of two files are two snapshots");
+        let e1 = buf.store_file("@memory:a:filtered".to_string(), "PART".to_string());
+        let e2 = buf.store_file("@memory:b:filtered".to_string(), "PART".to_string());
+        assert_ne!(e1, e2, "equal views of two topics are two snapshots");
     }
     /// R3: one real file has one live handle. A second whole-file store of the same path
     /// and the same content returns the first handle and mints nothing.
@@ -3422,7 +3357,7 @@ mod tests {
         assert_eq!(buf.get_stream(&h).as_deref(), Some("recreated"));
     }
 
-    /// A snapshot (excerpt, or a synthetic `@…` view) is reused only when it is byte-identical:
+    /// A snapshot (a synthetic `@…` view) is reused only when it is byte-identical:
     /// the same name with other content is another view, and must not overwrite the first.
     #[test]
     fn a_snapshot_is_reused_only_for_identical_content() {
@@ -3437,24 +3372,14 @@ mod tests {
             "## A\nx",
             "the first view was overwritten"
         );
-        let e = buf.store_file_excerpt("/x/f.json".into(), "[1]".into());
-        let e2 = buf.store_file_excerpt("/x/f.json".into(), "[1]".into());
-        assert_eq!(e, e2, "an identical excerpt must keep its handle");
-        let e3 = buf.store_file_excerpt("/x/f.json".into(), "[2]".into());
-        assert_ne!(
-            e, e3,
-            "another excerpt of the same file is another snapshot"
-        );
-        assert_eq!(
-            buf.get(&e).unwrap().stdout,
-            "[1]",
-            "the first excerpt was overwritten"
-        );
-        assert_eq!(buf.entry_count(), 4);
+        assert_eq!(buf.entry_count(), 2);
     }
 
-    /// A whole-file entry and a snapshot of the same path never stand in for each other: the
-    /// whole-file handle must keep refreshing and the snapshot must never start to.
+    /// A whole-file entry and a snapshot holding the same bytes never stand in for each other:
+    /// the whole-file handle must keep refreshing and the snapshot must never start to. Since
+    /// `store_file_excerpt` is gone, a snapshot is always a `@`-named synthetic view, so the
+    /// two kinds cannot share a name; what remains to pin is that neither store returns the
+    /// other kind's entry for identical content.
     ///
     /// Each direction gets a buffer where the OTHER kind is the only candidate. With both
     /// present, a scan that crossed kinds could still pick the right one by `HashMap` order
@@ -3465,21 +3390,22 @@ mod tests {
         let p = dir.path().join("a.txt");
         std::fs::write(&p, "same").unwrap();
         let path = p.to_string_lossy().to_string();
+        let view = "@memory:a:filtered".to_string();
 
-        // A whole-file store when only a snapshot of the path exists.
+        // A whole-file store when only a snapshot of the same bytes exists.
         let buf = OutputBuffer::new(10);
-        let snap = buf.store_file_excerpt(path.clone(), "same".into());
+        let snap = buf.store_file(view.clone(), "same".into());
         let whole = buf.store_file(path.clone(), "same".into());
         assert_ne!(snap, whole, "a whole-file store reused a snapshot");
         assert!(buf.get(&snap).unwrap().source_path.is_none());
         assert!(buf.get(&whole).unwrap().source_path.is_some());
 
-        // A snapshot store when only the whole-file entry of the path exists.
+        // A snapshot store when only the whole-file entry exists.
         let buf = OutputBuffer::new(10);
         let whole = buf.store_file(path.clone(), "same".into());
-        let snap = buf.store_file_excerpt(path.clone(), "same".into());
+        let snap = buf.store_file(view.clone(), "same".into());
         assert_ne!(snap, whole, "a snapshot store reused the whole-file entry");
-        assert_eq!(buf.store_file_excerpt(path.clone(), "same".into()), snap);
+        assert_eq!(buf.store_file(view, "same".into()), snap);
         assert_eq!(buf.store_file(path, "same".into()), whole);
     }
     /// A `@file_` store only ever reuses a `@file_` entry. `@cmd_` and `@tool_` entries share
@@ -3491,14 +3417,12 @@ mod tests {
         let buf = OutputBuffer::new(10);
         let cmd = buf.store("x.json".into(), "SAME".into(), String::new(), 0);
         let tool = buf.store_tool("@x.json", "SAME".into());
-        let excerpt = buf.store_file_excerpt("x.json".into(), "SAME".into());
         let synthetic = buf.store_file("@x.json".into(), "SAME".into());
-        assert!(excerpt.starts_with("@file_"), "got {excerpt} beside {cmd}");
         assert!(
             synthetic.starts_with("@file_"),
-            "got {synthetic} beside {tool}"
+            "got {synthetic} beside {tool} and {cmd}"
         );
-        assert_eq!(buf.entry_count(), 4);
+        assert_eq!(buf.entry_count(), 3);
     }
 
     /// A dedup hit is a use: it bumps the entry to most-recently-used, so the file a caller keeps
@@ -3520,15 +3444,15 @@ mod tests {
             "a survived because the hit bumped it"
         );
     }
-    /// A SNAPSHOT dedup hit (a `json_path`/`toml_key` value, a memory view) is a use and bumps
-    /// LRU exactly like a whole-file hit; `a_store_file_hit_bumps_lru` covers only that kind.
+    /// A SNAPSHOT dedup hit (a memory view) is a use and bumps LRU exactly like a whole-file
+    /// hit; `a_store_file_hit_bumps_lru` covers only that kind.
     /// From review RB (mutant M3b: bump only on whole-file hits, which survived the suite).
     #[test]
     fn a_snapshot_hit_bumps_lru() {
         let buf = OutputBuffer::new(2);
-        let e = buf.store_file_excerpt("/x/f.json".into(), "[1]".into()); // [e]
+        let e = buf.store_file("@memory:t:filtered".into(), "[1]".into()); // [e]
         let b = buf.store_tool("t", "B".into()); // [e, b]
-        assert_eq!(buf.store_file_excerpt("/x/f.json".into(), "[1]".into()), e); // hit -> [b, e]
+        assert_eq!(buf.store_file("@memory:t:filtered".into(), "[1]".into()), e); // hit -> [b, e]
         let _c = buf.store_tool("t", "C".into()); // evicts the LRU
         assert!(buf.get(&b).is_none(), "b was LRU and should be evicted");
         assert!(buf.get(&e).is_some(), "the snapshot hit must have bumped e");
