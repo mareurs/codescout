@@ -73,8 +73,13 @@ first `run_command` that reads it, that the file was refreshed.
 - the `grep` tool's own `@tool_*` result, and `run_command` over a buffer that makes a new `@cmd_*`: each
   answers a new question and is a new artifact;
 - the `@tool_*` content-hash deduplication and the `call_content` backstop;
-- `read_file` with `json_path` or `toml_key` on a real file, and the filtered view of a `memory` topic:
-  each stays a snapshot handle, deduplicated only when name and bytes are identical.
+- the filtered view of a `memory` topic: it stays a snapshot handle, deduplicated only when name and bytes
+  are identical.
+
+**Added 2026-10-08.** A `json_path` or `toml_key` value of a real file that is larger than one page is paged
+on the file's own path: `read_file("<path>", json_path=…, start_line=N, end_line=M)`. It makes no handle. The
+line numbers are the value's own, because the value is re-serialized and has no lines in the file. This was
+the last place where one real file had a second handle, and `store_file_excerpt` is deleted.
 
 ## Alternatives considered
 
@@ -102,6 +107,12 @@ first `run_command` that reads it, that the file was refreshed.
   because the file's mtime stays past the stamp and the next read re-reads it.
 - Residual: `\r\n` is dropped, and a trailing newline is lost when `json_path` pages are joined. Line
   addressing uses `str::lines()` and did so before.
+- Harder, **a value of a real file is recomputed on every page**: the file is re-read and re-parsed each time.
+  A reviewer measured 0.9 s per page for a 17.8 MB JSON file in a debug build and 78-112 ms in release, and
+  9 to 10 s per page with 1.3 GB peak memory for a 181 MB file. There is no size guard. If the file changes
+  between two pages, the pages mix two versions: after ten lines were inserted at the top, page 2 started ten
+  lines before where page 1 ended, and only `total_lines` moved. Plain real-file range pages behave the same
+  way. A `@tool_*` value cannot change, so it does not.
 
 ## Change scenarios absorbed
 
@@ -118,8 +129,9 @@ first `run_command` that reads it, that the file was refreshed.
   whole budget: admit it alone and flush the rest, make the store fallible, or truncate it and break
   "line N of the handle is line N of the file". (2) A lazy whole-file entry: retention for real files
   drops to about zero, and each handle access reads the disk.
-- `read_file` with `json_path` or `toml_key` on a real file should page the value on the same path, as
-  `@tool_*` now does. The value is re-serialized, so it has no line numbers in the file.
+- Done 2026-10-08: `read_file` with `json_path` or `toml_key` on a real file pages the value on the file's own
+  path (see Decision). Reopen it if the per-page re-parse becomes a problem; a cache would need an owner for
+  its staleness.
 - `peer knowledge` returns a large remote buffer whole, so the local `call_content` makes a `@tool_*`. The
   remote handle cannot be addressed locally. The tool is opt-in.
 - A tool ships a second handle. The `file_id` backstop (Phase B of
@@ -149,6 +161,23 @@ Eighteen commits on `experiments`, merged from two branches. Patch-ids (`git pat
 | `d669fa67` | `864f984d4c602c5fbe07da280baf844b4c8367bb` | a range page's text counts the lines it shows |
 | `ea164515` | `322d8417f10b4f422ec6d51915ff9bb68ca93fa6` | pin the largest-field route at the echo clip |
 | `ee13088b` | `c51f094c99d9befde0350d52398e5b5ccb38b373` | a second `read_hook` pins "mtime before read" |
+
+A second round, merged on 2026-10-08 on top of the peer's `840fba50`, added the real-file value paging and the
+fix of the `run_command` cut-off hint. Patch-ids:
+
+| SHA | patch-id | Change |
+|---|---|---|
+| `2cd90b71` | `a6efa912705b8d25cd2148659560248233029a80` | a cut-off buffer query that is not a slice pages its own output |
+| `2c4967b5` | `f6faa8b326c7a4fc2c942706ebdc3801beb32aa8` | tests: a non-slice hint's room, a piped slice |
+| `97970e3d` | `bcae102dd42620f6be891ba1e022015b8eb20b48` | non-slice paging follows what each page showed; quoting it cannot model |
+| `9319d9fa` | `1d9de6f500ba8522712b979900a81b296fb9ed8c` | tests that kill two survivors of the paging fix |
+| `0374c4c5` | `3d06d55bcd5d290419a8e6742fd7f3a6e5b57aa7` | the adversarial table builds its regex once |
+| `9e621dc0` | `cc044046bce35954f3b7f16c76533256fd677581` | a `json_path`/`toml_key` value of a real file is paged on its path |
+| `327541ba` | `213d338dbeb72164cb4965576e7824a5a3fa0fe4` | tests: the key is off line 1 |
+| `9304793d` | `217c61bf5441a06b6bc67eb17d2ffaecce102410` | siblings and breadcrumb judged together; a real file's handle routes to its path |
+| `a9ae2ed8` | `8efaa9127b856be6cc888b08b589785b1960618b` | an empty `siblings` list is not droppable |
+| `5eb486bd` | `6a531492e85a46a96ed0333fa56dbcea580c7e98` | page-loop cap in a test |
+| `19ab7993` | `df13954a4fa7659ba119ef18af2a383c1f2ecd77` | hint tests are dash-safe; review killers; the `@file_` refusal names a route only if the file type accepts it |
 
 ## Evidence
 
