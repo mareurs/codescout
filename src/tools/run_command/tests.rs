@@ -9437,3 +9437,57 @@ async fn a_wide_line_a_non_slice_query_prints_is_windowed_by_appending_to_the_qu
     let (_, hint, _) = lines_and_hint(&ctx, format!("grep WIDE {id}")).await;
     assert!(!hint.contains("sed -n"), "{hint}");
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_slice_piped_into_another_stage_is_not_a_slice() {
+    // `sed -n '1,3000p' @cmd_X` is a slice; with `| grep -n ""` after it, it is not. A pattern that
+    // was not anchored to the whole command read the first stage and advised `sed` on the handle.
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
+    let query = format!("sed -n '1,3000p' {id} | grep -n \"\"");
+
+    let (_, hint, _) = lines_and_hint(&ctx, query.clone()).await;
+    assert!(
+        !hint.contains(&format!("p' {id}")),
+        "a source page route: {hint}"
+    );
+    let pager = appended_pager(&hint).unwrap_or_else(|| panic!("no appended pager: {hint}"));
+    let (page, _, _) = lines_and_hint(&ctx, format!("{query} {pager}")).await;
+    let want: Vec<String> = (101..=200).map(|i| format!("{i}:{i}")).collect();
+    assert_eq!(page, want);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_non_slice_query_cut_by_bytes_fits_beside_its_longest_hint() {
+    // A non-slice hint names a next page only while lines remain, so it is LONGER at
+    // `shown < total` than at `shown == total`. The room for stdout is measured from a skeleton
+    // hint; measured at `shown == total` alone it is ~190 B too generous, and a response cut by
+    // the byte budget crosses the inline limit and is re-buffered under `@tool_*`.
+    let (_dir, ctx) = project_ctx().await;
+    let mut over = Vec::new();
+    for width in 97..=140usize {
+        let stored: String = (0..200)
+            .map(|i| format!("row{i:03} {}\n", "r".repeat(width - 7)))
+            .collect();
+        let (_id, text, parsed) =
+            query_stored(&ctx, stored, String::new(), |id| format!("grep row {id}")).await;
+        if has_tool_handle(&text) || crate::tools::exceeds_inline_limit(&text) {
+            over.push(width);
+            continue;
+        }
+        assert_eq!(parsed["truncated"], true, "width {width}: {text:.200}");
+        assert!(
+            appended_pager(parsed["hint"].as_str().unwrap_or_default()).is_some(),
+            "width {width}: the premise is the longer hint: {}",
+            parsed["hint"]
+        );
+    }
+    assert!(
+        over.is_empty(),
+        "widths whose response crossed the limit: {over:?}"
+    );
+}
