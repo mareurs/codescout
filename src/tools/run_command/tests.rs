@@ -9886,6 +9886,7 @@ async fn adversarial_query_shapes_get_a_route_that_returns_their_own_output() {
         .arg("--version")
         .output()
         .is_ok();
+    let window_re = regex::Regex::new(r"(?s)^(.*\S)\s*\|\s*sed -n '(\d+),\d+p'\s*$").unwrap();
     let mut report = Vec::new();
     let mut failures = Vec::new();
     for (i, (template, want)) in table.iter().enumerate() {
@@ -9933,8 +9934,7 @@ async fn adversarial_query_shapes_get_a_route_that_returns_their_own_output() {
         // ending in `| sed -n 'A,Bp'` is read as a window over the query before it, and its hints
         // page THAT output from line A on, past B: the hint says so in those words.
         if class == "pager" && *want != "random" {
-            let window = regex::Regex::new(r"(?s)^(.*\S)\s*\|\s*sed -n '(\d+),\d+p'\s*$")
-                .unwrap()
+            let window = window_re
                 .captures(&query)
                 .map(|c| (c[1].to_string(), c[2].parse::<usize>().unwrap()));
             let (oracle, skip) = window.unwrap_or((query.clone(), 1));
