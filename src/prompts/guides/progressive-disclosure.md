@@ -64,7 +64,9 @@ real ones. `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw 
 `@tool_*` ref answers with pages of that same ref. `next` names the ref and counts in the ref's own
 lines. A `json_path` value that is larger than one page is paged on the same ref: add
 `start_line` and `end_line`, for example `read_file("@tool_xyz", json_path="$.foo", start_line=N,
-end_line=M)`. The line numbers are the value's own. A real file keeps one `@file_*` handle for
+end_line=M)`. The line numbers are the value's own. A `json_path` or `toml_key` value of a real
+file is paged on the file's path the same way, with no handle. `next` repeats the path, the key and
+the value's line numbers. A real file keeps one `@file_*` handle for
 every read of it (whole, range or markdown section) for as long as the pool holds it. When the file
 changes, the handle follows it. The first `run_command` that reads the handle then reports
 `↻ … refreshed from disk`.

@@ -87,9 +87,7 @@ const REFS: [Ref; 3] = [Ref::File, Ref::Cmd, Ref::Tool];
 /// `escaped_for` compensates so the swept size still lands near the edge.
 fn park(ctx: &crate::tools::ToolContext, kind: Ref, text: String) -> String {
     match kind {
-        Ref::File => ctx
-            .output_buffer
-            .store_file_excerpt("probe.txt".into(), text),
+        Ref::File => ctx.output_buffer.store_file("@probe.txt".into(), text),
         Ref::Cmd => ctx
             .output_buffer
             .store("probe".into(), text, String::new(), 0),
@@ -561,22 +559,21 @@ fn units_for(size: usize, cost: impl Fn(usize) -> usize) -> usize {
 
 /// A `json_path` or `toml_key` read of a REAL file had no inline gate: the value went out
 /// whole and `call_content` buffered it as `@tool_*`. Measured before the fix: a json_path read
-/// minted `@tool_` at 10,004 B. A response over the limit must come back as one `file_id`
-/// whose `hint` names a line route that reads it to the end.
+/// minted `@tool_` at 10,004 B. A response over the limit is a page of the value on the file's
+/// own path, which mints no handle (it was a `file_id` snapshot until ADR 2026-10-08's "Revisit
+/// when" item 2 was built), and whose `next` chain reads the value to its end.
 #[tokio::test]
 async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
-    let hint_route =
-        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=N, end_line=M\)"#).unwrap();
     let json_text = |v: &Value| v.to_string();
     // A JSON string or array literal is a valid TOML basic string or inline array (`\uXXXX`,
     // `\"`, `\\`). The `toml` serializer overflows on these values in a debug build.
     let toml_text = |v: &Value| format!("k = {}\n", v["k"]);
     // A JSON string or array literal is also a YAML double-quoted scalar or flow sequence
-    // (`\uXXXX`, `\"`, `\\`): a YAML key read takes the same `inline_or_file_id` as TOML.
+    // (`\uXXXX`, `\"`, `\\`): a YAML key read takes the same `value_of_a_file` as TOML.
     let yaml_text = |v: &Value| format!("k: {}\n", v["k"]);
-    let mut buffered = 0;
+    let mut paged = 0;
     for (class, unit) in CLASSES.into_iter().chain([("esc", "\u{1b}")]) {
         // One string value, and a value of many 40-unit lines.
         let one = |n: usize| json!({ "k": unit.repeat(n) });
@@ -606,29 +603,34 @@ async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
                     input["path"] = json!(p.to_str().unwrap());
                     let label = format!("{fmt} {class}/{shape}/{size}");
                     let (v, _) = page(&ctx, &input, "", &label).await;
-                    let Some(fid) = v["file_id"].as_str() else {
+                    assert!(v.get("file_id").is_none(), "{label}: {v:.300}");
+                    if v.get("shown_lines").is_none() {
                         assert!(v.get("content").is_some(), "{label}: no content: {v:.300}");
                         continue;
-                    };
-                    buffered += 1;
-                    let hint = v["hint"].as_str().unwrap_or_default();
-                    let c = hint_route
-                        .captures(hint)
-                        .unwrap_or_else(|| panic!("{label}: the hint names no line route: {hint}"));
-                    assert_eq!(&c[1], fid, "{label}: the hint names another handle");
-                    let total = v["total_lines"].as_u64().unwrap();
-                    let route = json!({ "path": fid, "start_line": 1, "end_line": total });
-                    read_through(&ctx, route, fid, &label).await;
+                    }
+                    paged += 1;
+                    let path = p.to_str().unwrap();
+                    let (nav_name, key) = nav.as_object().unwrap().iter().next().unwrap();
+                    let (_, _, last, total) = follow_value(
+                        &ctx,
+                        path,
+                        nav_name,
+                        key.as_str().unwrap(),
+                        input.clone(),
+                        &label,
+                    )
+                    .await;
+                    assert_eq!(last, total, "{label}: did not reach the last line");
                 }
             }
         }
     }
-    assert!(buffered > 0, "no read took the file_id arm");
+    assert!(paged > 0, "no read took the paged arm");
 }
 
 /// `siblings` of a `toml_key` read is capped in count upstream but not in width. A read whose
-/// handle arm would be over the limit with about 12 KB of sibling names beside it drops them,
-/// marked `siblings_omitted`, so that arm is not buffered again under `@tool_*`.
+/// page would be over the limit with about 12 KB of sibling names beside it drops them,
+/// marked `siblings_omitted`, so the page is not buffered again under `@tool_*`.
 #[tokio::test]
 async fn a_toml_key_read_with_many_siblings_drops_them_from_the_handle_arm() {
     let ctx = ctx().await;
@@ -645,22 +647,26 @@ async fn a_toml_key_read_with_many_siblings_drops_them_from_the_handle_arm() {
         let label = format!("siblings {shape}");
         let (v, _) = page(&ctx, &input, "", &label).await;
         assert_eq!(v["siblings_omitted"], json!(true), "{label}: {v:.300}");
-        assert!(v.get("file_id").is_some(), "{label}: {v:.300}");
+        assert!(
+            v.get("shown_lines").is_some(),
+            "{label}: not a page: {v:.300}"
+        );
+        assert!(v.get("file_id").is_none(), "{label}: {v:.300}");
     }
 }
-/// The handle arm of a `toml_key` read drops `siblings` when the arm WITH them is over the
-/// limit, measured on that whole arm. Siblings that fit ALONE but not beside the arm's other
-/// keys (`file_id`, `hint`, `line_range`, ...) are the case a measure of `siblings` by itself
-/// misses: the arm kept them and `call_content` buffered it under a second handle. The sweep
-/// puts the sibling list just under the limit on its own; it is ASCII because bare TOML keys
-/// are, and the dimension it varies is the other keys, not escaping.
+/// A page of a `toml_key` value drops `siblings` when the page WITH them is over the
+/// limit, measured on that whole page skeleton. Siblings that fit ALONE but not beside the page's
+/// other keys (`shown_lines`, `next`, the clamp `hint`, `line_range`, ...) are the case a measure
+/// of `siblings` by itself misses: kept, `call_content` buffered the response under a second
+/// handle. The sweep puts the sibling list just under the limit on its own; it is ASCII because
+/// bare TOML keys are, and the dimension it varies is the other keys, not escaping.
 #[tokio::test]
 async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_handle_drops_them() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
     // The limit a response is judged by: over it, `call_content` buffers it under `@tool_*`.
     let limit = crate::tools::INLINE_MAX_RESPONSE_LEN;
-    // Over the limit alone, so the read takes the handle arm, where `siblings` is droppable.
+    // Over the limit alone, so the read is paged, where `siblings` is droppable.
     let value = "a".repeat(12_000);
     let mut in_window = 0;
     for w in 250..=400 {
@@ -670,8 +676,8 @@ async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_handle_drop
         let text = format!("[k]\nv = \"{value}\"\n{siblings}");
         let extracted = crate::tools::file_summary::extract_toml_key(&text, "k").unwrap();
         let alone = json!(extracted.siblings).to_string().len();
-        // Fits alone (10 B of margin), by less than the arm's other keys need beside it (they
-        // are well over 150 B: the `hint` alone names the handle twice).
+        // Fits alone (10 B of margin), by less than the page's other keys need beside it (they
+        // are well over 150 B: the clamp `hint` alone names the file twice).
         if !(limit - 150..=limit - 10).contains(&alone) {
             continue;
         }
@@ -681,13 +687,59 @@ async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_handle_drop
         let input = json!({ "path": p.to_str().unwrap(), "toml_key": "k" });
         let label = format!("siblings of width {w} ({alone} B alone)");
         let (v, _) = page(&ctx, &input, "", &label).await;
-        assert!(v.get("file_id").is_some(), "{label}: {v:.300}");
+        assert!(
+            v.get("shown_lines").is_some(),
+            "{label}: not a page: {v:.300}"
+        );
         assert_eq!(v["siblings_omitted"], json!(true), "{label}: {v:.300}");
     }
     assert!(
         in_window > 0,
         "no width put the sibling list just under the limit alone"
     );
+}
+
+/// The other half of the droppable rule a page applies to `siblings` (the rule
+/// `page_beside_coverage` applies to `coverage`): siblings that FIT beside a page are dropped
+/// only when they would cost its first line whole and the line shows whole without them, and are
+/// kept otherwise. YAML, whose `toml_key` value starts on the key's own line, so that line is the
+/// page's first: about 6 KB of sibling keys beside a 5 KB first line, and beside 600 short ones.
+#[tokio::test]
+async fn a_toml_key_page_keeps_siblings_unless_they_cost_its_first_line() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let siblings: String = (0..40)
+        .map(|i| format!("s{i:02}{}: 1\n", "n".repeat(150)))
+        .collect();
+    let rows: String = rows().iter().map(|r| format!("  - {r}\n")).collect();
+    for (shape, value, dropped) in [
+        ("wide", format!(" {}\n", "a".repeat(5_000)), true),
+        ("rows", format!("\n{rows}"), false),
+    ] {
+        let p = dir.path().join(format!("first-{shape}.yaml"));
+        std::fs::write(&p, format!("k:{value}{siblings}")).unwrap();
+        let path = p.to_str().unwrap();
+        let input = json!({ "path": path, "toml_key": "k" });
+        let label = format!("first line {shape}");
+        let v = read_minting_nothing(&ctx, &input, "", &label)
+            .await
+            .unwrap();
+        assert!(
+            v.get("shown_lines").is_some(),
+            "{label}: not a page: {v:.300}"
+        );
+        assert_eq!(
+            v["siblings_omitted"] == json!(true),
+            dropped,
+            "{label}: {v:.300}"
+        );
+        assert_eq!(v.get("siblings").is_some(), !dropped, "{label}: {v:.300}");
+        assert!(
+            v.get("line_truncated").is_none(),
+            "{label}: the first line was cut: {v:.300}"
+        );
+        follow_value(&ctx, path, "toml_key", "k", input, &label).await;
+    }
 }
 
 /// The seven content classes: [`CLASSES`] and the escape character `\x1b`, which serializes to
@@ -829,16 +881,15 @@ async fn a_forced_markdown_range_whose_coverage_fits_alone_but_not_beside_the_pa
 /// path of several KB pushed a response that already carried a `file_id` over the limit, and
 /// `call_content` buffered it again under `@tool_*`: measured before, a 6 KB YAML key made a
 /// 12,287 B response with two handles. Each echo is clipped in ESCAPED bytes with a visible
-/// marker; the routes name the handle, never the echo. A key of 40 segments of 290 B each makes
-/// `breadcrumb` long though every entry fits: it is dropped, marked `breadcrumb_omitted`.
+/// marker; a page's `next` quotes the key whole or says it in prose, never the echo. A key of
+/// 40 segments of 290 B each makes `breadcrumb` long though every entry fits: it is dropped,
+/// marked `breadcrumb_omitted`.
 #[tokio::test]
 async fn an_overlong_json_path_or_key_echo_keeps_one_handle() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
-    let hint_route =
-        regex::Regex::new(r#"read_file\("(@file_[0-9a-f]+)", start_line=N, end_line=M\)"#).unwrap();
     let mut resolved = BTreeSet::new();
-    let mut clipped = 0;
+    let (mut clipped, mut followed) = (0, 0);
     let segments: Vec<String> = (0..40)
         .map(|i| format!("s{i:02}{}", "q".repeat(287)))
         .collect();
@@ -910,17 +961,22 @@ async fn an_overlong_json_path_or_key_echo_keeps_one_handle() {
                         "{label}: the echo carries no marker: {text:.300}"
                     );
                     clipped += 1;
-                    let Some(fid) = v["file_id"].as_str() else {
+                    if v.get("shown_lines").is_none() || !input_ref.is_empty() {
                         continue;
+                    }
+                    // A real file's value over one page is paged on the file's path: every
+                    // `next`, a route quoting the whole key or prose past the floor, is followed
+                    // to the end, minting nothing.
+                    let path = input["path"].as_str().unwrap();
+                    let (nav, key) = if let Some(jp) = input["json_path"].as_str() {
+                        ("json_path", jp)
+                    } else {
+                        ("toml_key", input["toml_key"].as_str().unwrap())
                     };
-                    let hint = v["hint"].as_str().unwrap_or_default();
-                    let c = hint_route.captures(hint).unwrap_or_else(|| {
-                        panic!("{label}: the hint names no line route: {hint:.300}")
-                    });
-                    assert_eq!(&c[1], fid, "{label}: the hint names another handle");
-                    let total = v["total_lines"].as_u64().unwrap();
-                    let route = json!({ "path": fid, "start_line": 1, "end_line": total });
-                    read_through(&ctx, route, fid, &label).await;
+                    let (_, _, last, total) =
+                        follow_value(&ctx, path, nav, key, input.clone(), &label).await;
+                    assert_eq!(last, total, "{label}: did not reach the last line");
+                    followed += 1;
                 }
             }
         }
@@ -938,6 +994,7 @@ async fn an_overlong_json_path_or_key_echo_keeps_one_handle() {
         );
     }
     assert!(clipped > 0, "no echo was clipped");
+    assert!(followed > 0, "no real file's value was paged and followed");
 }
 
 /// `heading=` on a NON-markdown real file. Measured: what arm serves it, and how large its
@@ -1261,7 +1318,7 @@ async fn no_read_of_an_existing_buffer_mints_a_handle() {
             "{}.err",
             buf.store("probe".into(), "x".into(), body.clone(), 1)
         );
-        let file = buf.store_file_excerpt("probe.txt".into(), body.clone());
+        let file = buf.store_file("@probe.txt".into(), body.clone());
         let envelope = json!({ "stdout": body }).to_string();
         let tool = buf.store_tool("run_command", envelope.clone());
         let tool_lines = std::rc::Rc::new(crate::tools::output_buffer::line_addressable_text(
@@ -1933,5 +1990,503 @@ async fn a_largest_field_route_is_offered_at_exactly_the_echo_clip() {
                 .await;
             assert!(r.is_ok(), "the offered field route failed: {r:?}");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A `json_path` or `toml_key` value of a REAL file is paged on the file's own path and mints no
+// handle (ADR 2026-10-08, "Revisit when" item 2). It used to be stored as a snapshot under a
+// `@file_*` handle beside the file's own (`OutputBuffer::store_file_excerpt`, now deleted) and
+// browsed by line range there: a second handle for one file.
+// ---------------------------------------------------------------------------------------------
+
+/// A context over a pool at the PRODUCTION capacity (50, `src/server.rs`), so a mint evicts.
+async fn ctx50() -> crate::tools::ToolContext {
+    let mut ctx = ctx().await;
+    ctx.output_buffer = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
+    ctx
+}
+
+/// Fill `ctx`'s pool to its capacity of 50: from here every mint evicts the least recently used
+/// entry, so a guard on the SET of handles sees it even though the count holds.
+fn fill_pool(ctx: &crate::tools::ToolContext) {
+    while ctx.output_buffer.handles().len() < 50 {
+        ctx.output_buffer
+            .store("filler".into(), "f".into(), String::new(), 0);
+    }
+    assert_eq!(ctx.output_buffer.handles().len(), 50, "fixture: pool full");
+}
+
+/// Follow a `json_path`/`toml_key` read of the REAL file `path` until there is no `next`. A
+/// route-shaped `next` is executed EXACTLY as written: its path must be `path`, its navigation
+/// parameter `nav`, and its literal must parse back to `key`. A prose `next` must name `path`,
+/// `nav` and both line numbers, and is followed with the caller's own `key`. Every page goes
+/// through [`read_minting_nothing`] with no handle of its own, so it must leave the pool's set
+/// of handles as it found it and name no handle at all. Each page must resume on the line after
+/// the last one shown, and `complete` must be false exactly when it carries a `next`. Returns
+/// the pages' contents, every `next` emitted, and the last line reached with `total_lines`.
+async fn follow_value(
+    ctx: &crate::tools::ToolContext,
+    path: &str,
+    nav: &str,
+    key: &str,
+    first: Value,
+    label: &str,
+) -> (Vec<String>, Vec<String>, u64, u64) {
+    let route = regex::Regex::new(
+        r#"^read_file\("([^"]+)", (json_path|toml_key)=("(?:[^"\\]|\\.)*"), start_line=(\d+), end_line=(\d+)\)$"#,
+    )
+    .unwrap();
+    let prose = regex::Regex::new(
+        r"^call read_file on (.+) again with the (json_path|toml_key) you passed and start_line=(\d+), end_line=(\d+)$",
+    )
+    .unwrap();
+    let (mut input, mut got, mut nexts) = (first, Vec::new(), Vec::new());
+    let mut last = input["start_line"].as_u64().unwrap_or(1) - 1;
+    let mut total = 0;
+    for _ in 0..2_000 {
+        let v = read_minting_nothing(ctx, &input, "", label)
+            .await
+            .unwrap_or_else(|| panic!("{label}: {input:.300} failed"));
+        assert!(v.get("file_id").is_none(), "{label}: {v:.300}");
+        let ((a, b), _) = page_span(&input, &v);
+        assert_eq!(
+            a,
+            last + 1,
+            "{label}: a page does not resume after line {last}"
+        );
+        last = b;
+        total = v["total_lines"].as_u64().unwrap_or(total);
+        if let Some(complete) = v["complete"].as_bool() {
+            assert_eq!(
+                v["next"].is_string(),
+                !complete,
+                "{label}: complete={complete} with next={}",
+                v["next"]
+            );
+        }
+        got.push(v["content"].as_str().unwrap().to_string());
+        let Some(next) = v["next"].as_str() else {
+            return (got, nexts, last, total);
+        };
+        nexts.push(next.to_string());
+        let (p, n, k, s, e) = if let Some(c) = route.captures(next) {
+            let k: String = serde_json::from_str(&c[3]).expect("a JSON string literal");
+            (
+                c[1].to_string(),
+                c[2].to_string(),
+                k,
+                c[4].to_string(),
+                c[5].to_string(),
+            )
+        } else {
+            let c = prose.captures(next).unwrap_or_else(|| {
+                panic!("{label}: next is neither a route nor the prose: {next:.300}")
+            });
+            (
+                c[1].to_string(),
+                c[2].to_string(),
+                key.to_string(),
+                c[3].to_string(),
+                c[4].to_string(),
+            )
+        };
+        assert_eq!(p, path, "{label}: next leaves the file's path");
+        assert_eq!(n, nav, "{label}: next changes the navigation parameter");
+        assert_eq!(k, key, "{label}: next is not the key given");
+        input = json!({
+            "path": p,
+            n: k,
+            "start_line": s.parse::<u64>().unwrap(),
+            "end_line": e.parse::<u64>().unwrap(),
+        });
+    }
+    panic!("{label}: the next chain does not end");
+}
+
+/// 600 rows of 50 B: a value far over one page.
+fn rows() -> Vec<String> {
+    (1..=600)
+        .map(|i| format!("row {i:04} {}", "v".repeat(40)))
+        .collect()
+}
+
+/// A JSON string value, a JSON array value, a TOML table found by the summary (a run of the
+/// file's lines), a TOML table resolved through the full parse (re-serialized: dotted keys with
+/// no header), and a YAML top-level key, each over one page. Through the REAL `call_content`, in
+/// a pool at production capacity and FULL, with and without a whole-file handle for the file:
+/// the first page, whole or ranged to the end, then every `next` executed as written. The pages
+/// joined are the value's lines, the chain ends on the value's last line, and no call changes
+/// the set of handles or names one.
+#[tokio::test]
+async fn a_value_of_a_real_file_is_paged_on_its_path_and_mints_no_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = rows();
+    let joined = rows.join("\n");
+    let write = |name: &str, body: String| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, body).unwrap();
+        p.to_str().unwrap().to_string()
+    };
+    let json_file = write(
+        "v.json",
+        serde_json::to_string_pretty(&json!({ "k": joined, "arr": rows, "other": 1 })).unwrap(),
+    );
+    let table: String = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| format!("r{i:04} = \"{r}\"\n"))
+        .collect();
+    let toml_table = write("t.toml", format!("[k]\n{table}\n[other]\nx = 1\n"));
+    let dotted: String = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| format!("k.r{i:04} = \"{r}\"\n"))
+        .collect();
+    let toml_dotted = write("d.toml", format!("top = 1\n{dotted}"));
+    let list: String = rows.iter().map(|r| format!("  - {r}\n")).collect();
+    let yaml_file = write("y.yaml", format!("k:\n{list}other: 1\n"));
+
+    let read = |p: &str| std::fs::read_to_string(p).unwrap();
+    let fs = crate::tools::file_summary::extract_json_path;
+    let cases: Vec<(&str, &str, &str, &str, String)> = vec![
+        (
+            "json string",
+            &json_file,
+            "json_path",
+            "$.k",
+            joined.clone(),
+        ),
+        (
+            "json array",
+            &json_file,
+            "json_path",
+            "$.arr",
+            fs(&read(&json_file), "$.arr").unwrap().0,
+        ),
+        (
+            "toml table",
+            &toml_table,
+            "toml_key",
+            "k",
+            crate::tools::file_summary::extract_toml_key(&read(&toml_table), "k")
+                .unwrap()
+                .content,
+        ),
+        (
+            "toml dotted",
+            &toml_dotted,
+            "toml_key",
+            "k",
+            crate::tools::file_summary::extract_toml_key(&read(&toml_dotted), "k")
+                .unwrap()
+                .content,
+        ),
+        (
+            "yaml",
+            &yaml_file,
+            "toml_key",
+            "k",
+            crate::tools::file_summary::extract_yaml_key(&read(&yaml_file), "k")
+                .unwrap()
+                .content,
+        ),
+    ];
+    // Fixture checks: the summary path is a run of the file's lines, the full parse is not.
+    assert!(
+        read(&toml_table).contains(&cases[2].4),
+        "fixture: toml table"
+    );
+    assert!(
+        !read(&toml_dotted).contains(&cases[3].4) && cases[3].4.lines().count() >= 600,
+        "fixture: the dotted table must be re-serialized and long: {:.200}",
+        cases[3].4
+    );
+    for (label, path, nav, key, value) in &cases {
+        let want: Vec<&str> = value.lines().collect();
+        for has_handle in [false, true] {
+            for ranged in [false, true] {
+                let ctx = ctx50().await;
+                let handle = if has_handle {
+                    let v = ReadFile.call(json!({ "path": path }), &ctx).await.unwrap();
+                    Some(
+                        v["file_id"]
+                            .as_str()
+                            .expect("fixture: whole read buffered")
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
+                fill_pool(&ctx);
+                let before = ctx.output_buffer.handles();
+                let mut first = json!({ "path": path, *nav: key });
+                if ranged {
+                    first["start_line"] = json!(1);
+                    first["end_line"] = json!(100_000);
+                }
+                let label = format!("{label} handle={has_handle} ranged={ranged}");
+                let (got, nexts, last, total) =
+                    follow_value(&ctx, path, nav, key, first, &label).await;
+                assert!(!nexts.is_empty(), "{label}: the value was never paged");
+                assert_eq!(total as usize, want.len(), "{label}: total_lines");
+                assert_eq!(last, total, "{label}: did not reach the last line");
+                assert!(
+                    got.join("\n") == want.join("\n"),
+                    "{label}: the pages joined are not the value"
+                );
+                assert_eq!(ctx.output_buffer.handles(), before, "{label}");
+                if let Some(h) = handle {
+                    assert_eq!(
+                        ctx.output_buffer.get_stream(&h),
+                        Some(read(path)),
+                        "{label}: the file's one handle no longer holds the file"
+                    );
+                }
+            }
+        }
+    }
+    // An independent oracle for one case: the string value's own lines are the rows.
+    assert_eq!(cases[0].4, joined);
+}
+
+/// The `next` of a page of a real file's value quotes the caller's `json_path` (or `toml_key`)
+/// WHOLE, as a route that runs as written, while that leaves the page
+/// `JSON_PATH_ROUTE_ROOM_FLOOR` of room, and states the continuation in prose past it, never a
+/// placeholder. json_paths of 9, 301, 3,005 and 12,005 B; YAML keys of 4 and 12,000 B; and keys
+/// carrying a quote, a backslash, `€` and an emoji, whose literal must parse back to the key.
+#[tokio::test]
+async fn a_real_file_value_next_is_a_whole_route_or_plain_prose() {
+    let ctx = ctx50().await;
+    fill_pool(&ctx);
+    let dir = tempfile::tempdir().unwrap();
+    let value = rows().join("\n");
+    let mut kinds = Vec::new();
+    let odd = "q\"b\\s€😀".to_string();
+    // The odd key in the dot form: the bracket form's `["…"]` takes no escapes, so a key with a
+    // quote in it is addressed `$.q"b\s€😀`, and the route must still carry it as a literal that
+    // parses back to exactly that.
+    let bracket = |key: &str| format!("$[{}]", serde_json::to_string(key).unwrap());
+    for (i, (key, jp)) in [
+        ("k".repeat(4), bracket(&"k".repeat(4))),
+        ("k".repeat(296), bracket(&"k".repeat(296))),
+        ("k".repeat(3_000), bracket(&"k".repeat(3_000))),
+        ("k".repeat(12_000), bracket(&"k".repeat(12_000))),
+        (odd.clone(), format!("$.{odd}")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let p = dir.path().join(format!("route-{i}.json"));
+        std::fs::write(&p, json!({ key.clone(): value }).to_string()).unwrap();
+        let path = p.to_str().unwrap();
+        let label = format!("json {} B path", jp.len());
+        let first = json!({ "path": path, "json_path": jp });
+        let (got, nexts, last, total) =
+            follow_value(&ctx, path, "json_path", &jp, first, &label).await;
+        assert_eq!(last, total, "{label}: did not reach the last line");
+        assert!(
+            got.join("\n") == value,
+            "{label}: the pages are not the value"
+        );
+        kinds.push((jp.len(), nexts[0].starts_with("read_file(")));
+        for n in &nexts {
+            assert!(
+                !n.contains("<your") && !n.contains("not repeated here"),
+                "{label}: a placeholder a caller would copy: {n:.300}"
+            );
+        }
+    }
+    eprintln!("route (true) or prose (false) by path length: {kinds:?}");
+    let expect = [(9, true), (301, true), (3_005, true), (12_005, false)];
+    for ((len, route), (want_len, want_route)) in kinds.iter().zip(expect) {
+        assert_eq!(*len, want_len, "fixture: path length");
+        assert_eq!(*route, want_route, "a {len} B path: route={route}");
+    }
+    assert!(kinds[4].1, "the odd key's route must be quoted whole");
+
+    let list: String = rows().iter().map(|r| format!("  - {r}\n")).collect();
+    for (key, want_route) in [
+        ("k".repeat(4), true),
+        ("k".repeat(12_000), false),
+        (odd, true),
+    ] {
+        let p = dir.path().join(format!("route-{}.yaml", key.len()));
+        std::fs::write(&p, format!("{key}:\n{list}other: 1\n")).unwrap();
+        let path = p.to_str().unwrap();
+        let label = format!("yaml {} B key", key.len());
+        let first = json!({ "path": path, "toml_key": key });
+        let (_, nexts, last, total) =
+            follow_value(&ctx, path, "toml_key", &key, first, &label).await;
+        assert_eq!(last, total, "{label}: did not reach the last line");
+        assert_eq!(
+            nexts[0].starts_with("read_file("),
+            want_route,
+            "{label}: {:.200}",
+            nexts[0]
+        );
+        if !want_route {
+            assert!(
+                nexts[0].contains("with the toml_key you passed"),
+                "{label}: {:.200}",
+                nexts[0]
+            );
+        }
+    }
+}
+
+/// `start_line`/`end_line` beside `json_path` or `toml_key` on a real file slice the VALUE's own
+/// lines, by the rules a buffer read applies. They used to be refused outright ("navigation
+/// parameters are mutually exclusive with start_line/end_line"). Without a range, an inline value
+/// answers exactly as before: the navigation keys and `content`, no `total_lines`.
+#[tokio::test]
+async fn a_range_beside_json_path_or_toml_key_slices_a_real_files_value() {
+    let ctx = ctx50().await;
+    let dir = tempfile::tempdir().unwrap();
+    let keys = |v: &Value| -> Vec<String> { v.as_object().unwrap().keys().cloned().collect() };
+    let j = dir.path().join("s.json");
+    std::fs::write(
+        &j,
+        json!({ "v": "line one\nline two\nline three" }).to_string(),
+    )
+    .unwrap();
+    let t = dir.path().join("s.toml");
+    std::fs::write(&t, "[k]\na = 1\nb = 2\n\n[o]\nx = 1\n").unwrap();
+    let y = dir.path().join("s.yaml");
+    std::fs::write(&y, "k:\n  - a\n  - b\nother: 1\n").unwrap();
+    let (j, t, y) = (
+        j.to_str().unwrap(),
+        t.to_str().unwrap(),
+        y.to_str().unwrap(),
+    );
+    let read = |input: Value| {
+        let ctx = &ctx;
+        async move { ReadFile.call(input, ctx).await }
+    };
+    let jp = |extra: Value| {
+        let mut v = json!({ "path": j, "json_path": "$.v" });
+        v.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        v
+    };
+
+    let whole = read(jp(json!({}))).await.unwrap();
+    assert_eq!(keys(&whole), ["path", "value_type", "format", "content"]);
+    let whole = read(json!({ "path": t, "toml_key": "k" })).await.unwrap();
+    assert_eq!(
+        keys(&whole),
+        ["line_range", "breadcrumb", "siblings", "format", "content"]
+    );
+
+    let slice = read(jp(json!({ "start_line": 2, "end_line": 3 })))
+        .await
+        .unwrap();
+    assert_eq!(slice["content"], json!("line two\nline three"), "{slice}");
+    assert_eq!(slice["total_lines"], json!(3), "{slice}");
+    assert_eq!(slice["value_type"], json!("string"), "{slice}");
+    // `start_line` alone is a 50-line window, as on every other read.
+    let alone = read(jp(json!({ "start_line": 2 }))).await.unwrap();
+    assert_eq!(alone["content"], json!("line two\nline three"), "{alone}");
+    // Past the end of the value: an empty slice that names the value's length, as a buffer
+    // read past its end does.
+    let past = read(jp(json!({ "start_line": 10, "end_line": 12 })))
+        .await
+        .unwrap();
+    assert_eq!(past["content"], json!(""), "{past}");
+    assert_eq!(past["total_lines"], json!(3), "{past}");
+    let text = crate::tools::hint_probe::primary_text(
+        &ReadFile
+            .call_content(jp(json!({ "start_line": 10, "end_line": 12 })), &ctx)
+            .await
+            .unwrap(),
+    );
+    assert!(text.contains("past the end"), "{text}");
+
+    let toml = read(json!({ "path": t, "toml_key": "k", "start_line": 2, "end_line": 3 }))
+        .await
+        .unwrap();
+    assert_eq!(toml["content"], json!("a = 1\nb = 2"), "{toml}");
+    assert_eq!(toml["format"], json!("toml"), "{toml}");
+    let yaml = read(json!({ "path": y, "toml_key": "k", "start_line": 2, "end_line": 2 }))
+        .await
+        .unwrap();
+    assert_eq!(yaml["content"], json!("  - a"), "{yaml}");
+
+    for (nav, refused, want) in [
+        (
+            jp(json!({})),
+            json!({ "start_line": 3, "end_line": 2 }),
+            "invalid line range",
+        ),
+        (
+            jp(json!({})),
+            json!({ "start_line": 0, "end_line": 2 }),
+            "invalid line range",
+        ),
+        (
+            jp(json!({})),
+            json!({ "end_line": 2 }),
+            "end_line provided without start_line",
+        ),
+        (
+            json!({ "path": t, "toml_key": "k" }),
+            json!({ "start_line": 3, "end_line": 2 }),
+            "invalid line range",
+        ),
+        (
+            json!({ "path": y, "toml_key": "k" }),
+            json!({ "start_line": 0, "end_line": 2 }),
+            "invalid line range",
+        ),
+    ] {
+        let mut input = nav;
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(refused.as_object().unwrap().clone());
+        let err = read(input.clone())
+            .await
+            .expect_err("a range that cannot be one must be refused");
+        assert!(err.to_string().contains(want), "{input}: {err}");
+    }
+}
+
+/// The Text form of a page of a real file's value says how many lines it shows of the value's
+/// total, and prints its `next`, which names the file's path and the `json_path`.
+#[tokio::test]
+async fn the_text_form_of_a_real_files_value_page_counts_and_continues() {
+    let ctx = ctx50().await;
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("text.json");
+    std::fs::write(&p, json!({ "k": rows().join("\n") }).to_string()).unwrap();
+    let path = p.to_str().unwrap();
+    for input in [
+        json!({ "path": path, "json_path": "$.k" }),
+        json!({ "path": path, "json_path": "$.k", "start_line": 100, "end_line": 600 }),
+    ] {
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        let (a, b) = (
+            v["shown_lines"][0].as_u64().unwrap(),
+            v["shown_lines"][1].as_u64().unwrap(),
+        );
+        let text = crate::tools::hint_probe::primary_text(
+            &ReadFile.call_content(input.clone(), &ctx).await.unwrap(),
+        );
+        let want = format!("[{} of 600 lines shown]", b - a + 1);
+        assert!(
+            text.contains(&want),
+            "{input}: want {want:?} in {text:.300}"
+        );
+        let next = format!(
+            "Next: read_file(\"{path}\", json_path=\"$.k\", start_line={}, end_line={})",
+            b + 1,
+            input["end_line"].as_u64().unwrap_or(600)
+        );
+        assert!(
+            text.contains(&next),
+            "{input}: want {next:?} in {text:.300}"
+        );
+        assert!(handles_in(&text).is_empty(), "{input}: {text:.300}");
     }
 }

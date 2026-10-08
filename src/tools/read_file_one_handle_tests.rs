@@ -199,11 +199,12 @@ async fn a_changed_file_keeps_its_one_handle_and_it_holds_the_new_content() {
     );
 }
 
-/// A `json_path` value is a snapshot beside the file's handle (it is re-serialized, not a run
-/// of the file's lines). Read again from an unchanged file it is byte-identical, so it gets the
-/// same handle back and nothing is minted.
+/// A `json_path` value of a real file is a pure function of the file's bytes and the path: read
+/// again from an unchanged file, each page is byte-identical, numbered the same way, so a `next`
+/// resumes where the last page ended. No read of it mints anything. (It used to be a snapshot
+/// handle beside the file's, found again by its identical bytes.)
 #[tokio::test]
-async fn an_identical_json_path_value_read_again_keeps_its_handle() {
+async fn an_identical_json_path_value_read_again_is_the_same_page_and_mints_nothing() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
     let rows: Vec<String> = (0..600).map(|i| format!("row {i:04} padding")).collect();
@@ -212,18 +213,26 @@ async fn an_identical_json_path_value_read_again_keeps_its_handle() {
         "v.json",
         &json!({ "k": rows, "other": 1 }).to_string(),
     );
-    let input = json!({ "path": path, "json_path": "$.k" });
-    let first = delivered_handle(&ctx, &input).await;
-    let after_first = ctx.output_buffer.entry_count();
-    assert_eq!(delivered_handle(&ctx, &input).await, first);
-    assert_eq!(ctx.output_buffer.entry_count(), after_first);
+    for input in [
+        json!({ "path": path, "json_path": "$.k" }),
+        json!({ "path": path, "json_path": "$.k", "start_line": 200, "end_line": 602 }),
+    ] {
+        let first = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        assert!(
+            first["next"].is_string(),
+            "fixture: not paged: {first:.300}"
+        );
+        assert_eq!(ReadFile.call(input.clone(), &ctx).await.unwrap(), first);
+        assert_eq!(ctx.output_buffer.entry_count(), 0, "{input} minted");
+    }
 }
 
 /// THE GUARD for R3. Every over-budget read of ONE real file (whole, a line range through the
 /// markdown arm and through the forced raw arm, a section, the same section again, a different
 /// section, several sections, a whole read again) names the SAME handle, and the pool's entry
 /// count never grows after the first read. The handle holds the whole file, so a section or a
-/// range never gets a handle of its own.
+/// range never gets a handle of its own. A `json_path` or `toml_key` value of a file, paged or
+/// sliced, names no handle at all and leaves that one entry the only one.
 #[tokio::test]
 async fn every_over_budget_read_of_one_file_names_its_one_handle() {
     let ctx = ctx().await;
@@ -272,6 +281,69 @@ async fn every_over_budget_read_of_one_file_names_its_one_handle() {
         Some(body.as_str()),
         "the one handle holds the whole file, so its line N is the file's line N"
     );
+
+    // A `json_path` or `toml_key` read of a file is paged on the file's PATH and names no
+    // handle at all: not the file's, and not one of its own beside it (it used to be stored as
+    // a snapshot under a second `@file_*`). Interleaved with whole and range reads of the same
+    // file, the file keeps its ONE handle and the pool its ONE entry.
+    let rows: Vec<String> = (0..600).map(|i| format!("row {i:04} padding")).collect();
+    let table: String = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| format!("r{i:04} = \"{r}\"\n"))
+        .collect();
+    let fmt_files = [
+        (
+            write(
+                dir.path(),
+                "v.json",
+                &serde_json::to_string_pretty(&json!({ "k": rows, "other": 1 })).unwrap(),
+            ),
+            "json_path",
+            "$.k",
+        ),
+        (
+            write(dir.path(), "v.toml", &format!("[k]\n{table}\n[o]\nx = 1\n")),
+            "toml_key",
+            "k",
+        ),
+    ];
+    for (path, nav, key) in fmt_files {
+        let ctx = self::ctx().await;
+        let whole = delivered_handle(&ctx, &json!({ "path": path })).await;
+        assert_eq!(ctx.output_buffer.entry_count(), 1, "{path}: fixture");
+        for input in [
+            json!({ "path": path, nav: key }),
+            json!({ "path": path, nav: key, "start_line": 100, "end_line": 500 }),
+            json!({ "path": path, "start_line": 2, "end_line": 600 }),
+            json!({ "path": path, nav: key }),
+            json!({ "path": path }),
+        ] {
+            let before = ctx.output_buffer.handles();
+            let blocks = ReadFile.call_content(input.clone(), &ctx).await.unwrap();
+            let text = crate::tools::hint_probe::primary_text(&blocks);
+            let named = handles_in(&text);
+            if input.get(nav).is_some() {
+                assert!(
+                    named.is_empty() && text.contains("lines shown]"),
+                    "{input}: a value page names a handle, or is not a page: {text:.300}"
+                );
+            } else {
+                assert_eq!(named, BTreeSet::from([whole.clone()]), "{input}");
+            }
+            assert_eq!(ctx.output_buffer.handles(), before, "{input}: minted");
+            assert_eq!(
+                ctx.output_buffer.entry_count(),
+                1,
+                "{input}: a second entry"
+            );
+        }
+        assert_eq!(
+            ctx.output_buffer.get_stream(&whole),
+            std::fs::read_to_string(&path).ok(),
+            "{path}: the file's one handle no longer holds the file"
+        );
+    }
 }
 
 /// When the first read of a file is a section or a range, it mints the file's whole-text
@@ -570,9 +642,9 @@ async fn a_markdown_read_of_a_snapshot_ref_names_that_ref_and_mints_nothing() {
         big_text("a", 300),
         big_text("b", 300)
     );
-    let snap = ctx
-        .output_buffer
-        .store_file_excerpt("notes.md".into(), text);
+    // A synthetic `@` name: a snapshot with no file behind it, the kind the `memory` tool's
+    // filtered view stores. `store_file_excerpt`, which used to make this fixture, is gone.
+    let snap = ctx.output_buffer.store_file("@notes.md".into(), text);
     let count = ctx.output_buffer.entry_count();
     for input in [
         json!({ "path": snap, "heading": "## A" }),
@@ -877,10 +949,13 @@ async fn ctx_at(root: &std::path::Path) -> crate::tools::ToolContext {
     )
 }
 
-/// A `json_path` value of a real file is a SNAPSHOT. It must never be stored as the file's
-/// whole-file handle: dedup finds that handle by path, so the value would overwrite the file's
-/// one handle and get a `source_path`, the archived 2026-08-25 bug class. From review RB
-/// (mutant M21: `inline_or_file_id` calling `store_file`, which survived the suite).
+/// A `json_path` value of a real file is never STORED, least of all as the file's whole-file
+/// handle: dedup finds that handle by path, so a value stored under the file's path would
+/// overwrite the file's one handle and refresh into the whole file, the archived 2026-08-25 bug
+/// class. With the file's handle live, every value read (whole, paged, ranged) leaves it holding
+/// the file and the pool at one entry; with none, it mints nothing. From review RB (mutant M21:
+/// `inline_or_file_id` calling `store_file`, which survived the suite); the value is now paged
+/// on the file's path, so the property pinned is that no store happens at all.
 #[tokio::test]
 async fn a_json_path_value_never_becomes_the_files_handle() {
     let ctx = ctx().await;
@@ -889,27 +964,31 @@ async fn a_json_path_value_never_becomes_the_files_handle() {
     let body = serde_json::to_string_pretty(&json!({ "k": rows, "other": 1 })).unwrap();
     let path = write(dir.path(), "v.json", &body);
     let whole = delivered_handle(&ctx, &json!({ "path": path })).await;
-    let value = delivered_handle(&ctx, &json!({ "path": path, "json_path": "$.k" })).await;
-    assert_ne!(
-        value, whole,
-        "the value was filed under the file's own handle"
-    );
-    assert_eq!(
-        ctx.output_buffer.get_stream(&whole).as_deref(),
-        Some(body.as_str()),
-        "the file's handle no longer holds the file"
-    );
-    assert!(
-        ctx.output_buffer.get(&value).unwrap().source_path.is_none(),
-        "a json_path value must be a snapshot"
-    );
-    // With no whole-file handle yet, the value still must not get a `source_path`.
+    let reads = [
+        json!({ "path": path, "json_path": "$.k" }),
+        json!({ "path": path, "json_path": "$.k", "start_line": 300, "end_line": 602 }),
+        json!({ "path": path, "json_path": "$.other" }),
+    ];
+    for input in &reads {
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        assert!(v.get("file_id").is_none(), "{input}: {v:.300}");
+        assert_eq!(ctx.output_buffer.handles(), vec![whole.clone()], "{input}");
+        let (held, refreshed) = ctx.output_buffer.get_with_refresh_flag(&whole).unwrap();
+        assert_eq!(
+            held.stdout, body,
+            "{input}: the file's handle no longer holds the file"
+        );
+        assert!(!refreshed, "{input}: the file's handle was overwritten");
+    }
+    // With no whole-file handle yet, a value read stores nothing either.
     let fresh = ctx_sharing(
         ctx.agent.clone(),
         std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
     );
-    let v2 = delivered_handle(&fresh, &json!({ "path": path, "json_path": "$.k" })).await;
-    assert!(fresh.output_buffer.get(&v2).unwrap().source_path.is_none());
+    for input in &reads {
+        ReadFile.call(input.clone(), &fresh).await.unwrap();
+        assert_eq!(fresh.output_buffer.entry_count(), 0, "{input} stored");
+    }
 }
 
 /// R3 is "one handle per RESOLVED path": every spelling of one file (relative, `./`, absolute,

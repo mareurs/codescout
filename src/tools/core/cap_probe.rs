@@ -1121,7 +1121,8 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // ref) and a `toml_key` (YAML and TOML) of 3, 6, 9 and 12 KB in seven content classes
         // (ASCII, `"`, `\`, `\x01`, `\x1b`, `€`, a 4-byte emoji) against `INPUT_ECHO_CLIP` 300,
         // through the real tool, and asserts one handle at most, no `@tool_*`, a response within
-        // the limit and a hint route that reads the value to the end. Measured before the clip:
+        // the limit and, for a real file's value over one page, a `next` chain (a route quoting
+        // the key whole, or prose past the route floor) that reads the value to the end. Measured before the clip:
         // a 6 KB YAML key made a 12,287 B response with a `@file_*` and a `@tool_*` handle.
         // Marker written by production in `read_file::clip_input_echo` (`elide_middle_escaped`).
         // MUTATION (2026-10-06): `clip_input_echo` returning its input whole turns the cited

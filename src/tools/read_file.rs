@@ -200,11 +200,16 @@ impl Tool for ReadFile {
             crate::util::librarian_guard::Access::Read,
         )?;
 
+        // `start_line`/`end_line` beside a navigation parameter slice the extracted VALUE's own
+        // lines, by the same rules a buffer read applies (`requested_line_range`). The value is
+        // paged on this path and no handle is stored for it (`value_of_a_file`).
         if let Some(jp) = input["json_path"].as_str() {
-            return read_json_path_nav(&text, &resolved, jp, ctx);
+            let range = requested_line_range(start_line, end_line)?;
+            return read_json_path_nav(path, &text, &resolved, jp, range);
         }
         if let Some(tk) = input["toml_key"].as_str() {
-            return read_toml_yaml_key(&text, &resolved, tk, ctx);
+            let range = requested_line_range(start_line, end_line)?;
+            return read_toml_yaml_key(path, &text, &resolved, tk, range);
         }
 
         let force = input["force"].as_bool().unwrap_or(false);
@@ -321,41 +326,10 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         .into());
     }
 
-    let start = optional_u64_param(input, "start_line");
-    let end = optional_u64_param(input, "end_line");
-    // The real-file rule (`validate_read_nav_params`), not a silent whole-buffer answer: a
-    // caller who passed an end and no start asked for something this read cannot serve. A
-    // `start_line` that is not a non-negative integer reads as absent here exactly as it does
-    // there, so `start_line=-1` with an end is refused by the same check.
-    if start.is_none() && end.is_some() {
-        return Err(RecoverableError::with_hint(
-            "end_line provided without start_line",
-            "Pass start_line (end_line defaults to start_line+49), or pass both for an explicit range.",
-        )
-        .into());
-    }
-    // start_line alone defaults end_line to a 50-line window — same as the real-file path.
-    let end = match (start, end) {
-        (Some(s), None) => Some(s.saturating_add(49)),
-        (_, e) => e,
-    };
-    let range = match (start, end) {
-        (Some(s), Some(e)) => {
-            if s == 0 || e < s {
-                return Err(RecoverableError::with_hint(
-                    format!(
-                        "invalid line range: start_line={} end_line={} \
-                         (start_line must be >= 1 and end_line >= start_line)",
-                        s, e
-                    ),
-                    "Lines are 1-indexed. Example: start_line=1, end_line=50",
-                )
-                .into());
-            }
-            Some((s as usize, e as usize))
-        }
-        _ => None,
-    };
+    let range = requested_line_range(
+        optional_u64_param(input, "start_line"),
+        optional_u64_param(input, "end_line"),
+    )?;
 
     // json_path navigation is only meaningful for @tool_* (always JSON), and it RE-PARSES
     // the text it is handed — so it reads the pretty-printed form UN-expanded, and must run
@@ -400,26 +374,15 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
                 keys["count"] = json!(c);
             }
             // The extracted value is addressed through THIS handle: a page of it resumes with
-            // the same `json_path` and the value's own line numbers. The route quotes the path
-            // whole, as a JSON string literal so a bracketed key's quotes survive, while that
-            // leaves the page `JSON_PATH_ROUTE_ROOM_FLOOR` of room; past it the continuation is
-            // stated in prose with its numbers, since a route that fits cannot be written.
-            let jp_lit = serde_json::to_string(jp).unwrap_or_else(|_| format!("\"{jp}\""));
-            let route = |s: usize, e: usize| {
-                format!("read_file(\"{path}\", json_path={jp_lit}, start_line={s}, end_line={e})")
-            };
-            let prose = |s: usize, e: usize| {
-                format!(
-                    "call read_file on {path} again with the json_path you passed and \
-                     start_line={s}, end_line={e}"
-                )
-            };
-            return Ok(page_of_buffer_text(
+            // the same `json_path` and the value's own line numbers.
+            let cont = ValueContinuation::new(path, "json_path", jp);
+            return Ok(page_of_text(
                 &content,
                 &keys,
+                &[],
                 range,
-                &route,
-                Some(&prose),
+                &|s, e| cont.route(s, e),
+                Some(&|s, e| cont.prose(s, e)),
                 &json_path_line_hint(path),
                 &noted,
             ));
@@ -445,9 +408,10 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         }
     }
     let route = |s: usize, e: usize| format!("read_file(\"{path}\", start_line={s}, end_line={e})");
-    Ok(page_of_buffer_text(
+    Ok(page_of_text(
         &text,
         &json!({}),
+        &[],
         range,
         &route,
         None,
@@ -456,8 +420,9 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     ))
 }
 
-/// The response of a buffer read over `text`, the line space the caller addresses: the ref's
-/// own line-addressable text, or the value a `json_path` extracted from a `@tool_*` ref.
+/// The response of a paged read over `text`, the line space the caller addresses: a buffer ref's
+/// own line-addressable text, a value a `json_path` extracted from a `@tool_*` ref, or a value a
+/// `json_path` or `toml_key` extracted from a real file ([`value_of_a_file`]).
 ///
 /// With a `range`, the lines `s..=e` inline when that response fits, else the first page of
 /// them. Without one, the first page of the whole `text`: the caller has already tried the
@@ -471,12 +436,20 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
 /// handle "so `call_content()` will not re-wrap" it (BUG-026, archived 2026-03-15); that store
 /// never made the response smaller, because the page carried the same lines beside the handle.
 /// `next` resumes in the caller's own frame through `route`, so a chain of pages names one
-/// handle from first page to last, and following `next` until there is none reaches the last
-/// line asked for. Given `prose`, a route that would leave the page less than
+/// handle (or one path) from first page to last, and following `next` until there is none
+/// reaches the last line asked for. Given `prose`, a route that would leave the page less than
 /// [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room is replaced by `prose`, the same continuation in words.
-fn page_of_buffer_text(
+///
+/// `droppable` keys of `keys` have no length of their own (a `toml_key` read's `siblings` and
+/// `breadcrumb`). Each, in order, rides in the skeleton and is dropped, marked `<key>_omitted`,
+/// by the rule [`page_beside_coverage`] applies to `coverage`: when the skeleton with it is over
+/// the limit by itself, or when it would cost the page its first line whole and the line shows
+/// whole without it.
+#[allow(clippy::too_many_arguments)]
+fn page_of_text(
     text: &str,
     keys: &Value,
+    droppable: &[&str],
     range: Option<(usize, usize)>,
     route: &dyn Fn(usize, usize) -> String,
     prose: Option<&dyn Fn(usize, usize) -> String>,
@@ -484,7 +457,7 @@ fn page_of_buffer_text(
     noted: &dyn Fn(Value) -> Value,
 ) -> Value {
     let total_lines = text.lines().count();
-    let with_keys = |mut v: Value| -> Value {
+    let with_keys = |mut v: Value, keys: &Value| -> Value {
         if let (Some(obj), Some(extra)) = (v.as_object_mut(), keys.as_object()) {
             for (k, val) in extra {
                 obj.insert(k.clone(), val.clone());
@@ -493,85 +466,95 @@ fn page_of_buffer_text(
         v
     };
 
-    let Some((s, e)) = range else {
-        // A page that stops short has `lines_shown < total_lines`, so `next` resumes at
-        // most at `total_lines` and ends at `total_lines`: these are the widest values every
-        // key can take.
-        let skeleton = |next: String| {
-            noted(with_keys(json!({
-                "content": "",
-                "total_lines": total_lines,
-                "shown_lines": [1, total_lines],
-                "complete": false,
-                "line_truncated": true,
-                "hint": clamp_hint,
-                "next": next,
-            })))
-        };
-        let (widest, continuation) =
-            price_continuation(&skeleton, route, prose, total_lines, total_lines);
-        let (chunk, lines_shown, complete, line_truncated) =
-            buffer_page(text, crate::tools::response_room(&widest));
-        let mut result = with_keys(json!({
-            "content": chunk,
-            "total_lines": total_lines,
-            "shown_lines": [1, lines_shown],
-            "complete": complete,
-        }));
-        if line_truncated {
-            result["line_truncated"] = json!(true);
-            result["hint"] = json!(clamp_hint);
+    // The lines this read pages, the span `shown_lines` can name at its widest, and the widest
+    // `next` the page can carry. A whole read that stops short has `lines_shown < total_lines`,
+    // so its `next` resumes at most at `total_lines` and ends there. A range's `shown_lines`
+    // ends at most at `e` and its `next` resumes at most at `e + 1`. Both are the caller's line
+    // numbers, not the slice's own 1-based frame: a `next` in that frame is off by `s - 1` and
+    // sends the caller back over lines it has already seen.
+    let (body, s, e, widest_next) = match range {
+        None => (
+            std::borrow::Cow::Borrowed(text),
+            1,
+            total_lines,
+            (total_lines, total_lines),
+        ),
+        Some((s, e)) => {
+            let content = extract_lines(text, s, e);
+            // The inline arm is chosen on the response it returns, not on the slice's raw
+            // bytes: one line of 2,000 `\x01` is 2,000 raw bytes and 12,039 serialized, and was
+            // returned here for `call_content` to buffer under `@tool_*`. The raw pre-check only
+            // skips a candidate that cannot fit (escaping never shrinks a string).
+            if !crate::tools::body_alone_overflows(&content) {
+                let inline = noted(with_keys(
+                    json!({ "content": &content, "total_lines": total_lines }),
+                    keys,
+                ));
+                if crate::tools::response_fits(&inline) {
+                    return inline;
+                }
+            }
+            (
+                std::borrow::Cow::Owned(content),
+                s,
+                e,
+                (e.saturating_add(1), e),
+            )
         }
-        if !complete {
-            // To the END of the text, not one page-sized window. A window that fits comes back
-            // inline, and an inline answer carries no `next`, so a caller who follows `next`
-            // alone stopped there, short of the last line (measured: 3,046 of 20,000 short
-            // lines). A range to the end is paged by the arm below, whose `next` always
-            // resumes to its `e`, so the chain reaches `total_lines`.
-            result["next"] = json!(continuation(lines_shown + 1, total_lines));
-        }
-        return noted(result);
     };
 
-    let content = extract_lines(text, s, e);
-    // The inline arm is chosen on the response it returns, not on the slice's raw bytes:
-    // one line of 2,000 `\x01` is 2,000 raw bytes and 12,039 serialized, and was returned
-    // here for `call_content` to buffer under `@tool_*`. The raw pre-check only skips a
-    // candidate that cannot fit (escaping never shrinks a string).
-    if !crate::tools::body_alone_overflows(&content) {
-        let inline = noted(with_keys(
-            json!({ "content": &content, "total_lines": total_lines }),
-        ));
-        if crate::tools::response_fits(&inline) {
-            return inline;
+    // The page's widest skeleton over `keys`, priced with the continuation it will carry.
+    let price = |keys: &Value| {
+        let skeleton = |next: String| {
+            noted(with_keys(
+                json!({
+                    "content": "",
+                    "total_lines": total_lines,
+                    "shown_lines": [s, e],
+                    "complete": false,
+                    "line_truncated": true,
+                    "hint": clamp_hint,
+                    "next": next,
+                }),
+                keys,
+            ))
+        };
+        price_continuation(&skeleton, route, prose, widest_next.0, widest_next.1)
+    };
+
+    let mut keys = keys.clone();
+    for key in droppable {
+        if keys.get(*key).is_none() {
+            continue;
+        }
+        let (with, _) = price(&keys);
+        let over_alone = !crate::tools::response_fits(&with);
+        if over_alone || buffer_page(&body, crate::tools::response_room(&with)).3 {
+            let mut without = keys.clone();
+            if let Some(obj) = without.as_object_mut() {
+                obj.remove(*key);
+                obj.insert(format!("{key}_omitted"), json!(true));
+            }
+            let (lean, _) = price(&without);
+            if over_alone || !buffer_page(&body, crate::tools::response_room(&lean)).3 {
+                keys = without;
+            }
         }
     }
-    // The page sized with every other key it can carry counted. `shown_lines` ends at most at
-    // `e` and `next` resumes at most at `e + 1`, so these are the widest values those keys can
-    // take. Both are the caller's line numbers, not the slice's own 1-based frame: a `next` in
-    // that frame is off by `s - 1` and sends the caller back over lines it has already seen.
-    let skeleton = |next: String| {
-        noted(with_keys(json!({
-            "content": "",
-            "total_lines": total_lines,
-            "shown_lines": [s, e],
-            "complete": false,
-            "line_truncated": true,
-            "hint": clamp_hint,
-            "next": next,
-        })))
-    };
-    let (widest, continuation) =
-        price_continuation(&skeleton, route, prose, e.saturating_add(1), e);
+
+    let (widest, continuation) = price(&keys);
     let (chunk, lines_shown, complete, line_truncated) =
-        buffer_page(&content, crate::tools::response_room(&widest));
+        buffer_page(&body, crate::tools::response_room(&widest));
     let shown_end = s + lines_shown.saturating_sub(1);
-    let mut result = with_keys(json!({
-        "content": chunk,
-        "total_lines": total_lines,
-        "shown_lines": [s, shown_end],
-        "complete": complete,
-    }));
+    let mut result = with_keys(
+        json!({
+            "content": chunk,
+            "total_lines": total_lines,
+            "shown_lines": [s, shown_end],
+            "complete": complete,
+        }),
+        &keys,
+    );
     if line_truncated {
         // Deliberately does NOT set `next` on that account: the only range that would advance
         // past this line is the same one that produced it, so a `next` here rebuilds the retry
@@ -582,8 +565,12 @@ fn page_of_buffer_text(
     }
     if !complete {
         // `complete == false` means the budget stopped us short of `e`, and the safety valve
-        // in `extract_lines_with_cost` always yields at least one line — so this strictly
-        // advances and terminates.
+        // in `extract_lines_with_cost` always yields at least one line, so this strictly
+        // advances and terminates. Unranged, `e` is the END of the text, not one page-sized
+        // window: a window that fits comes back inline, and an inline answer carries no
+        // `next`, so a caller who follows `next` alone stopped there, short of the last line
+        // (measured: 3,046 of 20,000 short lines). A range to the end is paged like any range,
+        // whose `next` always resumes to its `e`, so the chain reaches `total_lines`.
         result["next"] = json!(continuation(shown_end + 1, e));
     }
     noted(result)
@@ -644,7 +631,7 @@ fn largest_field_path(raw: &str) -> Option<String> {
         .filter(|jp| jp.len() <= INPUT_ECHO_CLIP)
 }
 
-/// The advisory a clamped line carries on a page of a `json_path` value.
+/// The advisory a clamped line carries on a page of a `json_path` value of a `@tool_*` ref.
 ///
 /// [`line_hint`] tells a `@tool_*` reader to address the field instead of the line,
 /// which this caller has already done: the line is wide inside the field. What remains is to
@@ -652,11 +639,97 @@ fn largest_field_path(raw: &str) -> Option<String> {
 /// pretty JSON, so it searches the whole buffer (not only this value) with the value's quotes,
 /// backslashes and newlines still escaped.
 fn json_path_line_hint(path: &str) -> String {
+    value_line_hint(path, &format!("the whole {path} buffer as JSON text"))
+}
+
+/// The advisory a clamped line carries on a page of a value read from `target` (a `@tool_*`
+/// ref or a real file), with `searched` saying what a `grep -o` of `target` searches: all of
+/// it, as stored or as written, never only this value.
+fn value_line_hint(target: &str, searched: &str) -> String {
     format!(
         "A single line of this value is wider than the inline budget, so it is shown truncated. \
-         run_command(\"grep -o 'PATTERN[^,]*' {path}\") prints just the matching part; it \
-         searches the whole {path} buffer as JSON text, not only this value."
+         run_command(\"grep -o 'PATTERN[^,]*' {target}\") prints just the matching part; it \
+         searches {searched}, not only this value."
     )
+}
+
+/// How a page of a value extracted by `nav` (`json_path` or `toml_key`) continues: on the same
+/// `target` (the `@tool_*` ref it was read from, or the real file's path as the caller gave it),
+/// with the same `nav` value and the value's own line numbers.
+///
+/// [`ValueContinuation::route`] quotes the caller's `nav` value WHOLE, as a JSON string literal
+/// so a bracketed key's quotes and backslashes survive, and runs as written.
+/// [`ValueContinuation::prose`] says the same in words with the numbers and no value at all, for
+/// a value too long to quote while the page keeps [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room (the
+/// choice is [`price_continuation`]'s). Neither ever carries a placeholder: a copied placeholder
+/// fails (`path segment '<your json_path: …' not found`).
+struct ValueContinuation<'a> {
+    target: &'a str,
+    nav: &'static str,
+    literal: String,
+}
+
+impl<'a> ValueContinuation<'a> {
+    fn new(target: &'a str, nav: &'static str, value: &str) -> Self {
+        let literal = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
+        Self {
+            target,
+            nav,
+            literal,
+        }
+    }
+
+    fn route(&self, s: usize, e: usize) -> String {
+        format!(
+            "read_file(\"{}\", {}={}, start_line={s}, end_line={e})",
+            self.target, self.nav, self.literal
+        )
+    }
+
+    fn prose(&self, s: usize, e: usize) -> String {
+        format!(
+            "call read_file on {} again with the {} you passed and start_line={s}, end_line={e}",
+            self.target, self.nav
+        )
+    }
+}
+
+/// The line range a read of a buffer ref or of a `json_path`/`toml_key` value asked for, by the
+/// real-file rules: `end_line` without `start_line` is refused with the words
+/// `validate_read_nav_params` uses (not answered with the whole text as if it had not been
+/// passed), `start_line` alone is a 50-line window, and a range that starts at 0 or ends before
+/// it starts is refused. A `start_line` that is not a non-negative integer reads as absent here
+/// exactly as it does on a real file, so `start_line=-1` with an end is refused by the same
+/// check. `None` when no range was passed.
+fn requested_line_range(start: Option<u64>, end: Option<u64>) -> Result<Option<(usize, usize)>> {
+    if start.is_none() && end.is_some() {
+        return Err(RecoverableError::with_hint(
+            "end_line provided without start_line",
+            "Pass start_line (end_line defaults to start_line+49), or pass both for an explicit range.",
+        )
+        .into());
+    }
+    let end = match (start, end) {
+        (Some(s), None) => Some(s.saturating_add(49)),
+        (_, e) => e,
+    };
+    match (start, end) {
+        (Some(s), Some(e)) => {
+            if s == 0 || e < s {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "invalid line range: start_line={} end_line={} \
+                         (start_line must be >= 1 and end_line >= start_line)",
+                        s, e
+                    ),
+                    "Lines are 1-indexed. Example: start_line=1, end_line=50",
+                )
+                .into());
+            }
+            Ok(Some((s as usize, e as usize)))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Cut a chunk down when a SINGLE line is wider than the room its page has for it.
@@ -807,8 +880,13 @@ fn line_hint(path: &str, field: Option<&str>) -> String {
 /// Validate navigation parameter combinations for real-file reads.
 ///
 /// `start_line` alone is allowed — the caller defaults `end_line` to a 50-line
-/// window. The validation only rejects mutually-exclusive combinations and the
-/// (None, Some) shape (end_line without start_line is meaningless).
+/// window. The validation only rejects mutually-exclusive combinations (`json_path`
+/// with `toml_key`) and the (None, Some) shape (end_line without start_line is
+/// meaningless). A range beside `json_path` or `toml_key` is not one of them: it slices the
+/// extracted VALUE's own lines ([`value_of_a_file`]), as it does beside `json_path` on a
+/// `@tool_*` ref. It used to be refused here ("navigation parameters are mutually exclusive
+/// with start_line/end_line"), so a value over one page could only be browsed through a
+/// second handle.
 fn validate_read_nav_params(
     input: &Value,
     start_line: Option<u64>,
@@ -823,18 +901,10 @@ fn validate_read_nav_params(
     }
     let json_path = input["json_path"].as_str();
     let toml_key = input["toml_key"].as_str();
-    let nav_count = usize::from(json_path.is_some()) + usize::from(toml_key.is_some());
-    if nav_count > 1 {
+    if json_path.is_some() && toml_key.is_some() {
         return Err(RecoverableError::with_hint(
             "only one navigation parameter allowed at a time",
             "Use json_path OR toml_key, not both",
-        )
-        .into());
-    }
-    if nav_count > 0 && (start_line.is_some() || end_line.is_some()) {
-        return Err(RecoverableError::with_hint(
-            "navigation parameters are mutually exclusive with start_line/end_line",
-            "Use either json_path/toml_key OR start_line+end_line",
         )
         .into());
     }
@@ -946,13 +1016,14 @@ pub(crate) mod read_hook {
 /// How much of the caller's own `json_path` or `toml_key` a response echoes back, in each place
 /// it is echoed (`path`, a `breadcrumb` entry, the `hint`), in SERIALIZED bytes. The value is
 /// the caller's input and has no length of its own: a 6 KB `toml_key` echoed in `breadcrumb` and
-/// in the hint of the `file_id` arm made a 12,287 B response, which `call_content` buffered again
-/// under `@tool_*` beside that `file_id`. No route is built from the echo, so a clipped echo
+/// in the hint of the old `file_id` arm made a 12,287 B response, which `call_content` buffered
+/// again under `@tool_*` beside that `file_id`. No route is built from the echo, so a clipped echo
 /// loses nothing a caller needs to continue, and the marker says the rest is what they passed.
-/// One route does carry the caller's `json_path`: the `next` of a page of a value extracted from
-/// a `@tool_*` ref. It quotes the path WHOLE, never this echo, and only while that leaves the
+/// One route does carry the caller's `json_path` or `toml_key`: the `next` of a page of a value
+/// extracted from a `@tool_*` ref or a real file ([`ValueContinuation`]). It quotes the key
+/// WHOLE, never this echo, and only while that leaves the
 /// page [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room; past that, `next` states the continuation in
-/// prose with its line numbers and no path at all. The paths that clip here (over 300 B) and
+/// prose with its line numbers and no key at all. The paths that clip here (over 300 B) and
 /// the paths whose route moves to prose (about 7 KB) are therefore two different sets: a
 /// 3 KB path is clipped in `path` and quoted whole in `next`.
 // cap-class: RESULT_CAP read_file.input_echo_bytes — probed
@@ -970,12 +1041,14 @@ pub(crate) fn clip_input_echo(value: &str, what: &str) -> String {
     )
 }
 
-/// Handle `json_path` navigation for JSON files.
+/// Handle `json_path` navigation for JSON files. `path` is the file as the caller named it, the
+/// target every `next` of a paged value names.
 fn read_json_path_nav(
+    path: &str,
     text: &str,
     resolved: &std::path::Path,
     jp: &str,
-    ctx: &ToolContext,
+    range: Option<(usize, usize)>,
 ) -> Result<Value> {
     let file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
     if !matches!(file_type, crate::tools::file_summary::FileSummaryType::Json) {
@@ -995,79 +1068,77 @@ fn read_json_path_nav(
     if let Some(c) = count {
         keys["count"] = json!(c);
     }
-    Ok(inline_or_file_id(
+    Ok(value_of_a_file(
+        path,
         content,
         keys,
         &[],
-        &resolved.to_string_lossy(),
-        &format!("Extracted value at {echo}"),
-        ctx,
+        range,
+        "json_path",
+        jp,
     ))
 }
 
-/// The response of a format-navigation read (`json_path`, `toml_key`) of a REAL file: the
-/// extracted `content` beside `keys` when that whole response fits the inline limit, else the
-/// content stored under one `@file_*` handle that is browsed by line range.
+/// The response of a format-navigation read (`json_path`, `toml_key`) of a REAL file, paged on
+/// the file's own `path` (as the caller named it) and minting no handle (ADR 2026-10-08, "Revisit
+/// when" item 2): the extracted `content` beside `keys` when that whole response fits the inline
+/// limit and no range was asked for, else a page of the value with `total_lines`, `shown_lines`,
+/// `complete` and a `next` of `read_file("<path>", <nav>=…, start_line=N, end_line=M)`.
 ///
-/// Decided on the response it would return, as the `@tool_*` `json_path` arm of
-/// [`read_from_buffer`] decides: these reads had no gate at all, so a value over the limit went
-/// out whole and `call_content` buffered it under `@tool_*`. The raw pre-check only skips a
-/// candidate that cannot fit (escaping never shrinks a string). `droppable` keys have no length
-/// of their own (`siblings`): the handle arm carries one only when it still fits, and marks it
-/// `<key>_omitted` otherwise, so that arm stays small enough for `call_content` to leave alone.
-fn inline_or_file_id(
+/// The line numbers are the VALUE's own. It is not in general a run of the file's lines (a JSON
+/// value is re-serialized, a string value unescaped, and a TOML key resolved through the full
+/// parse is re-serialized), so it has no numbers in the file to state them in. A range beside
+/// `nav` slices those lines, as it does beside `json_path` on a `@tool_*` ref.
+///
+/// The value is a pure function of the file's bytes and the key, so each page re-reads and
+/// re-parses the file and numbers the same value the same way. A file that changes between two
+/// pages renumbers the value, exactly as a changed buffer would renumber a `@tool_*` value;
+/// nothing tracks it.
+///
+/// It used to be stored as a snapshot under a `@file_*` handle beside the file's own and
+/// browsed by line range there: a second handle for one file. Decided on the response it would
+/// return, as the `@tool_*` `json_path` arm of [`read_from_buffer`] decides; the raw pre-check
+/// only skips a candidate that cannot fit (escaping never shrinks a string). `droppable` keys
+/// have no length of their own (`siblings`): a page drops each when it does not fit beside the
+/// page ([`page_of_text`]) and marks it `<key>_omitted`.
+fn value_of_a_file(
+    path: &str,
     content: String,
     keys: Value,
     droppable: &[&str],
-    source: &str,
-    what: &str,
-    ctx: &ToolContext,
+    range: Option<(usize, usize)>,
+    nav: &'static str,
+    nav_value: &str,
 ) -> Value {
-    if !crate::tools::body_alone_overflows(&content) {
+    if range.is_none() && !crate::tools::body_alone_overflows(&content) {
         let mut inline = keys.clone();
         inline["content"] = json!(&content);
         if crate::tools::response_fits(&inline) {
             return inline;
         }
     }
-    let line_count = content.lines().count().max(1);
-    // An excerpt: a snapshot of the extracted value. `store_file` would treat the source as
-    // the WHOLE file, refresh the handle to it on the next mtime change, and, given a name
-    // that is not a real path, evict it on the first read. The same value read again from an
-    // unchanged file gets the same handle back (identical snapshot), so nothing is minted.
-    // It is still a handle BESIDE the file's own whole-file handle: the value is not in general
-    // a run of the file's lines (a JSON value is re-serialized, a string value unescaped, and a
-    // TOML/YAML key resolved through the full parse is re-serialized), so it cannot be phrased
-    // in the file's line numbers.
-    let file_id = ctx
-        .output_buffer
-        .store_file_excerpt(source.to_string(), content);
-    let mut result = keys;
-    result["file_id"] = json!(file_id);
-    result["total_lines"] = json!(line_count);
-    result["hint"] = json!(format!(
-        "{what} ({line_count} lines). \
-         read_file(\"{file_id}\", start_line=N, end_line=M) to browse, \
-         or run_command(\"grep pattern {file_id}\") to search."
-    ));
-    for key in droppable {
-        if !crate::tools::response_fits(&result) {
-            if let Some(obj) = result.as_object_mut() {
-                if obj.remove(*key).is_some() {
-                    obj.insert(format!("{key}_omitted"), json!(true));
-                }
-            }
-        }
-    }
-    result
+    let cont = ValueContinuation::new(path, nav, nav_value);
+    page_of_text(
+        &content,
+        &keys,
+        droppable,
+        range,
+        &|s, e| cont.route(s, e),
+        Some(&|s, e| cont.prose(s, e)),
+        &value_line_hint(path, &format!("the whole file {path} as it is written")),
+        &|v| v,
+    )
 }
 
-/// Handle `toml_key` navigation for TOML and YAML files.
+/// Handle `toml_key` navigation for TOML and YAML files (a YAML key is a TOP-LEVEL key only:
+/// `extract_yaml_key` resolves no nested path). `path` is the file as the caller named it, the
+/// target every `next` of a paged value names.
 fn read_toml_yaml_key(
+    path: &str,
     text: &str,
     resolved: &std::path::Path,
     tk: &str,
-    ctx: &ToolContext,
+    range: Option<(usize, usize)>,
 ) -> Result<Value> {
     let mut file_type = crate::tools::file_summary::detect_file_type(&resolved.to_string_lossy());
     // Cargo.lock (and most `.lock` files) are TOML, but detect_file_type
@@ -1094,8 +1165,8 @@ fn read_toml_yaml_key(
         }
     };
     // Each `breadcrumb` entry is clipped like every echo of the key; a key of very many
-    // segments makes the list itself long, so it is dropped after `siblings` when the handle arm
-    // is still over the limit.
+    // segments makes the list itself long, so a page drops it after `siblings` when it still
+    // does not fit beside the page.
     let breadcrumb: Vec<String> = result
         .breadcrumb
         .iter()
@@ -1107,13 +1178,14 @@ fn read_toml_yaml_key(
         "siblings": result.siblings,
         "format": format,
     });
-    Ok(inline_or_file_id(
+    Ok(value_of_a_file(
+        path,
         result.content,
         keys,
         &["siblings", "breadcrumb"],
-        &resolved.to_string_lossy(),
-        &format!("Extracted value at {}", clip_input_echo(tk, "toml_key")),
-        ctx,
+        range,
+        "toml_key",
+        tk,
     ))
 }
 
@@ -2675,8 +2747,9 @@ mod tests {
         let cmd = ctx
             .output_buffer
             .store("wide".into(), wide.clone(), String::new(), 0);
-        // A `@file_*` handle in production holds a real file whole (`read_full_file`), an excerpt
-        // of one, or a memory view; a read of another buffer no longer mints one. This is the
+        // A `@file_*` handle in production holds a real file whole (`read_full_file`) or a
+        // memory view; a read of another buffer, or of a file's `json_path` value, no longer
+        // mints one. This is the
         // whole-file kind, stored under the path of a file that IS there, as `read_full_file`
         // stores it, so `get` neither evicts it nor refreshes it into other text.
         let wide_file = dir.path().join("wide.txt");
