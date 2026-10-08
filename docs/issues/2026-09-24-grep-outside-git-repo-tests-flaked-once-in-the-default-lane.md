@@ -16,6 +16,22 @@ severity: low
 
 In one `./scripts/gate.sh` run, three `tools::grep` tests failed in the default lane. They had passed in the same run's lean lane minutes earlier, and they passed on an immediate re-run. The failing assertion says a `.gitignore` was honoured in a tempdir with no `.git` above it. The cause is unknown. It is recorded now so the next occurrence can be matched against it, instead of being re-read as a regression in whatever diff is under test.
 
+
+### Re-checked 2026-10-08 — no reproduction in twenty targeted default-feature runs
+
+Ran all three named tests together, twenty times, using `CODESCOUT_SKIP_ONNX_TESTS=1 scripts/with-slot.sh` and `cargo test --lib -- <three full test names>`. Read every repetition's result and all three named verdicts: **20 completed runs, each 3 passed and 0 failed**, final command exit 0. These are 60 successful test invocations in total, not 60 full-suite runs. All three tests also passed in today's full lean and full default-feature runs. This establishes no recurrence in those two full-suite executions, not a root cause or a fix; the gate's overall verdict is reported separately.
+
+Re-read all three fixtures, `rooted_ctx`, `Grep::call`, `WalkAudit::git_ignore_in_effect`, and the two CWD-changing tests named by the record. The grep fixtures supply absolute tempdir paths. The warning predicate walks those absolute paths' ancestors. The current `ignore` dependency's repository discovery also walks the search path's canonical ancestors for `.git` or `.jj`. None of this establishes CWD mutation as the original cause; it remains an unproven candidate. A grouped rerun excludes most of the other tests and cannot settle a suite-wide race.
+
+Keep open for diagnosis rather than claim fixed. On recurrence, capture each tempdir and its ancestor markers at the failure, the warning clause actually emitted, and concurrent CWD-changing tests. No production fix or regression test was added.
+
+
+Gate fallback completed with `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`. The default lane's failures were exclusively `codescout-embed`'s two real-weight ONNX tests, both reporting missing `CODESCOUT_TEST_ONNX_DIR`; the fallback had omitted gate.sh's `CODESCOUT_SKIP_ONNX_TESTS=1` default. A focused `CODESCOUT_SKIP_ONNX_TESTS=1 scripts/with-slot.sh cargo test -p codescout-embed --features local-embed` rerun exited 0. This is fixture setup, not recurrence of the grep flake, and the opt-out does not validate actual ONNX vectors.
+
+### Implementation gate re-check 2026-10-08
+
+The subsequent implementation gate completed with `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. The outside-repository grep cases did not recur. No grep production change was made and this remains open; the root-cause hypotheses above are still unproven.
+
 ## Symptom (Effect)
 
 Gate run 2026-09-24 22:25:50 local, `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`, `5812 passed; 3 failed`:

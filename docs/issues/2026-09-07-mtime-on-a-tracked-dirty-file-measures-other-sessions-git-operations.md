@@ -25,6 +25,17 @@ by *any* session sharing the checkout. The write carries no content change and n
 therefore drifts **forward only**, so a file looks fresher every time someone else commits or
 rebases, and a staleness triage gets a newer answer each time it asks.
 
+
+### Re-verified 2026-10-08 — identical git rewrites cause a false buffer change notice
+
+Live server: `workspace(status).server.git_sha=a2871af0`, `git_dirty=true`, `exe_deleted=false`. Code inspected at HEAD `21237e7f2734d8757c6b9666e2f79a9cfd6a318c`.
+
+In a disposable git repo under `/tmp`, committed a baseline, left `tracked.txt` dirty (600 lines, 27,000 bytes), set its mtime to 1700000000000000000 ns, and read it through the live MCP to obtain one file handle. `git stash push` followed by `git stash pop` advanced mtime to 1791434122835862084 ns. SHA-256 before and after was identical: `4c1d8cc098e6c361a9aef49a20ca431860c5ceaddad14cf9466f7d958780734f`. The first `run_command(wc -l <handle>)` then printed `refreshed from disk (file changed since last read)`; the second printed no notice. Both returned 600 lines.
+
+This now affects code: `OutputBuffer::resolve` reports `needs_refresh` whenever mtime advances, without comparing the re-read bytes. The older statement that there is nothing to repair in code applies to authorship triage, not this new change notice. Keep mtime as a signal to re-read; compare bytes before claiming a content change.
+
+Separately, `store_file_inner` rejects a late read only when its mtime predates the entry stamp and the disk no longer has that read's mtime. An identical rewrite can make an old store ineligible, but this probe did not establish corruption or loss of a newer version. The ordered stale-read regression is present; equal-millisecond changes remain a separate limit of this instrument. Keep the authorship/doctor proposal open. The buffer consequence is fixed below.
+
 ## Symptom (Effect)
 
 Two files, restored by one `--autostash` pop, to the same nanosecond, neither with any content
@@ -139,6 +150,13 @@ subsequent rounds. Having the right field in hand did not prevent reaching for t
    outlives it.
 
 ## Fix
+### Buffer mitigation verified 2026-10-08
+
+The refresh-notice consequence is fixed in experiments `4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34` (patch-id `7e1a3a2858f3c27a5b777db567352e50b31b6d44`). Mtime still triggers a re-read and advances the read stamp; only changed bytes enqueue a content-change notice. Silent reads retain that pending notice for the next reporting read. An identical git rewrite no longer produces a spurious content-change notice.
+
+The full gate passed. Buffer tests cover unchanged rewrites, silent refreshes, existing pending notices, future mtimes and one-shot reporting. The updated plain/Markdown read-race regression passed and killed independently applied late-stat mutations on both paths. A fresh stdio MCP probe observed unchanged-byte silence and a changed-byte notice exactly once. The installed MCP binary was not replaced.
+
+This fixes the buffer consequence, not git's filesystem property or the authored-field/doctor proposal below. The stale-write guard is unchanged; equal-millisecond changes remain outside this probe's conclusion.
 ### Re-verified 2026-09-24 — the most frequent trigger is gone; the property is not
 
 Open-bug sweep (`deep-agent-workflow-observations:DWF-7`), verifier evidence. **The per-commit trigger is removed:** `074b749e` (patch-id `4c3958557408b19cdf60354a5f8288167e4342e4`) retired pre-commit's stash-and-restore cycle. `scripts/pre-commit-run.sh` mentions stash only in comments, the installed `.git/hooks/pre-commit` has 0 `stash` occurrences, and `rebase.autoStash` is unset. **The property this file describes still holds:** reproduced in a temp repo, an explicit `git stash; git stash pop` moved a dirty file's mtime from 2026-09-01 00:00 to 2026-09-24 14:46 with no content change, and `rebase --autostash` behaves the same way. So mtime on a tracked, dirty file is still not authorship evidence, just much less often wrong. The remedy this file proposes, a triage rule plus a `doctor` `last_observed` check, was never built (0 hits in `src/librarian`). This is a property of git rather than a code defect in this repo.

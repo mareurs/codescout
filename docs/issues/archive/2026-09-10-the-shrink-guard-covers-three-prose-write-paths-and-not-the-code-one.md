@@ -1,13 +1,14 @@
 ---
-id: 7dc6ea026d9881e6
+id: '7dc6ea026d9881e6'
 kind: bug
-status: mitigated
+status: fixed
 title: 'BUG: the shrink guard covers three prose write paths and not the code one'
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
-unverified: 'TRACKED 8ba3a7dcbaac9777 — Advisory only - edit_code(action=replace) WARNS and does not refuse, so a caller who ignores the warning still loses the code. src/tools/create_file.rs (overwrite: true) remains unguarded, now recorded in the class gate''s EXEMPT list with its reason rather than silently. The class gate proves each surface''s module CONTAINS a guard call, not that the call runs on the right operands.'
+closed: 2026-10-08
+unverified: 'CLEARED 2026-10-08 by a7b44ebae482645a, experiments 4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34, patch-id 7e1a3a2858f3c27a5b777db567352e50b31b6d44. Was: edit_code replacement was advisory, create_file overwrite was exempt, and the class gate proved textual presence rather than runtime operands.'
 ---
 
 # BUG: the shrink guard covers three prose write paths and not the code one
@@ -122,6 +123,15 @@ to escape.
    reader.
 
 ## Fix
+### Residual discharged 2026-10-08
+
+The residual [a7b44ebae482645a](2026-09-24-residual-edit-code-and-create-file-shrink-refusal.md) is now fixed: both paths refuse large reductions without force, overwrite intent remains separate, and the class gate exercises each registered content writer on its actual operands. The full gate and a fresh stdio MCP probe passed; applied mutation review killed the guard/operand bypasses. Earlier implementation history below remains dated to its original verification.
+
+**SHA (experiments):** `4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34`.
+
+**patch-id:** `7e1a3a2858f3c27a5b777db567352e50b31b6d44`.
+
+### Earlier mitigation history
 
 **Mitigated, not fixed** — `edit_code(action="replace")` now runs the guard and **warns**; it
 still does not refuse, so the loss remains possible for a caller who ignores the warning. Status is
@@ -242,15 +252,11 @@ For the surfaces still unguarded — notably `create_file(overwrite: true)` — 
 Read the file first.
 ## Resume
 
-Design the population predicate for the set-difference test described under **What is still owed**.
-It cannot be a grep over read/write primitives: that yields 70 files needing 66 exemptions AND
-misses `src/tools/create_file.rs`, measured 2026-09-11. Start from the tool schemas instead — a
-write-capable tool whose input schema carries a caller-supplied content property (`body`, `content`,
-`new_string`) — and check that against the four known-guarded surfaces plus `create_file` as a
-known-answer fixture.
+N/A — the residual guard and runtime-class obligations were discharged by a7b44ebae482645a on experiments on 2026-10-08.
+## Fix provenance
 
-Separately, decide whether `create_file(overwrite: true)` should read-before-write in order to be
-guardable at all. That is a behaviour change, not a patch, and belongs with whoever owns that tool.
+- **SHA:** `4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34` (`experiments`)
+- **patch-id:** `7e1a3a2858f3c27a5b777db567352e50b31b6d44`
 ## References
 - `src/util/shrink_guard.rs` (the guard, and its own "three copies" note)
 - `src/librarian/tools/update.rs`, `src/tools/markdown/edit_markdown.rs`,

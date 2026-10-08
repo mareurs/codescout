@@ -10,10 +10,10 @@
 //! moved the guard shipped without anything to stop the next class being appended below it, which
 //! is what this file is.
 //!
-//! **Why a Rust test, not a Python one.** No CI job, gate lane or hook runs `tests/test_*.py`; they
-//! are run by hand. A guard written in Python would sit in the same hand-run population as the
-//! thing it guards, so it would fail only for whoever already thought to run it. This lane runs
-//! on every gate.
+//! **Why it began as a Rust test.** Python suites were run by hand when this guard was added,
+//! so a Python guard would have shared the unwired path it guarded. Since 2026-10-08,
+//! `scripts/python-tests.py` runs the light suites in the local gate and both light/heavy lanes
+//! in CI. This structural guard remains in the Rust gate.
 //!
 //! **What it checks, and the ceiling.** It checks the MECHANISM, not the symptom: nothing at
 //! column 0 may follow the first entry guard, because a direct run exits before reaching it. It

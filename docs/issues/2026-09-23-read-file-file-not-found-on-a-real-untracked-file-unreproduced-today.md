@@ -32,6 +32,13 @@ this one.
 reproduced, cause unconfirmed: a class tag would assert a mechanism nobody has seen. Re-classify if it
 recurs with evidence. Checked by sessionId `e4fbc7ef-27b7-4707-8469-ccdffa8e4e92`.
 
+
+### Re-checked 2026-10-08 — remains zombie on an identified live binary
+
+Live server identified by `workspace(status)`: build `a2871af0`, dirty build, `exe_deleted=false`. Created disposable markdown and plain-text files at this repository's root; `git status --porcelain` reported both untracked and `git check-ignore -v` returned exit 1 with no output. The markdown fixture was about 5.6 KB, matching the original report's size. Live `read_file` succeeded for both. Equivalent untracked markdown/plain-text reads also succeeded in a disposable git repo under `/tmp`.
+
+The original incident was in `claude-plugins`; today's probe did not recreate that workspace's original session state. No root cause is established. Status was already `zombie` and stays there, with `last_observed` unchanged at 2026-09-23. A successful fresh read is evidence of non-reproduction, not a verified fix. Probe files were removed after verifying their exact expected content.
+
 ## Symptom (Effect)
 
 Original report (relayed, not independently witnessed by this session):
