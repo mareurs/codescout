@@ -553,10 +553,15 @@ fn page_of_text(
     // skeleton within the limit, then, if the first line is still cut, the fewest more that show
     // it whole (none, if no prefix does). Judged one key at a time, two keys that only together
     // cost the first line were both kept and the line cut.
+    // An empty list (a lone key's `siblings: []`) saves nothing when dropped and would be marked
+    // `<key>_omitted` with nothing omitted, so it is not one of them.
     let present: Vec<&str> = droppable
         .iter()
         .copied()
-        .filter(|k| keys.get(*k).is_some())
+        .filter(|k| {
+            keys.get(*k)
+                .is_some_and(|v| !v.as_array().is_some_and(Vec::is_empty))
+        })
         .collect();
     let without = |n: usize| -> Value {
         let mut lean = keys.clone();
@@ -1130,10 +1135,10 @@ fn read_json_path_nav(
 ///
 /// The value is a pure function of the file's bytes and the key, and it is recomputed from the
 /// file on EVERY page: nothing is kept between pages. A file that changes between two pages
-/// therefore makes the pages mix two versions of the value. Inserting 10 lines at the top of the
-/// value between two pages made page 2 start 10 lines before where page 1 ended, and the only
-/// signal is `total_lines` moving (600, then 610). Plain range pages of a real file have the same
-/// property. Nothing tracks it.
+/// therefore makes the pages mix two versions of the value. Measured: 10 lines inserted at the top
+/// of a 600-line value between two pages made page 2 (`start_line=186`) open with the 10 lines
+/// page 1 had just ended on, and the only signal is `total_lines` moving (600, then 610). Plain
+/// range pages of a real file have the same property. Nothing tracks it.
 ///
 /// It used to be stored as a snapshot under a `@file_*` handle beside the file's own and
 /// browsed by line range there: a second handle for one file. Decided on the response it would

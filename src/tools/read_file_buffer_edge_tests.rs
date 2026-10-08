@@ -2649,6 +2649,11 @@ async fn a_breadcrumb_that_costs_the_first_line_is_dropped() {
         if v["breadcrumb_omitted"] == json!(true) && v.get("line_truncated").is_none() {
             dropped_whole += 1;
         }
+        // A lone key has no siblings: `siblings: []` stays, and nothing is marked omitted.
+        assert!(
+            v["siblings_omitted"].is_null() && v["siblings"] == json!([]),
+            "w={w}: an empty siblings list was dropped or marked: {v:.300}"
+        );
     }
     assert!(
         dropped_whole > 0,
