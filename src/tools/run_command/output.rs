@@ -556,34 +556,80 @@ fn bound_buffer_stderr(
     (bounded, shown, total)
 }
 
-/// The line the queried range starts at: `A` for `sed -n 'A,Bp' @ref`, else 1.
+/// The line a PLAIN SLICE of the queried stream starts at, in that stream's own numbering: `1` for
+/// `cat <ref>`, `A` for `sed -n 'A,Bp' <ref>` (quotes single, double or none; the ref may carry
+/// `.err`). `None` for every other command.
 ///
-/// A page hint counts lines of the OUTPUT it follows. For a whole-buffer read that is the buffer's
-/// own numbering; for a ranged `sed` it starts at `A`, so "next page: sed -n '1,100p'" sent a
-/// reader that had just read lines 2..101 back to the top. Only this one literal shape is
-/// recognised, because it is the shape the hint itself advises; any other command keeps the
-/// old relative numbering.
-fn query_first_line(command: &str) -> usize {
+/// Only a plain slice prints a contiguous run of the queried stream, so only for one can a page
+/// route be written as `sed -n '..' <ref>`. Anchored to the WHOLE command: matched anywhere,
+/// `grep x @cmd_X | sed -n '5,10p'` read as a slice starting at line 5 of `@cmd_X`, and a
+/// `grep -n "" @cmd_X` cut at line 100 was sent to `sed -n '101,200p' @cmd_X`, which prints
+/// source lines without the `N:` prefix (and, for a filtering grep, lines that never matched).
+/// `@bg_*` is not listed: `queried_stream` cannot name it, so a route on it would be a placeholder.
+fn plain_slice_first_line(command: &str) -> Option<usize> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"sed\s+-n\s+'?(\d+),\d+p'?").expect("static pattern"))
-        .captures(command)
-        .and_then(|c| c[1].parse::<usize>().ok())
-        .map_or(1, |a| a.max(1))
+    let caps = RE
+        .get_or_init(|| {
+            regex::Regex::new(
+                r#"^\s*(?:cat|sed\s+-n\s+(?:'(\d+),\d+p'|"(\d+),\d+p"|(\d+),\d+p))\s+@(?:cmd|file|tool)_[A-Za-z0-9_]+(?:\.err)?\s*$"#,
+            )
+            .expect("static pattern")
+        })
+        .captures(command)?;
+    match caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
+        Some(a) => a.as_str().parse::<usize>().ok().map(|a| a.max(1)),
+        None => Some(1),
+    }
 }
 
-/// How to read a window of a line wider than the response budget, in terms of the ref the caller
-/// queried. These are the routes that work on a wide line: `sed -n` and a bare `grep` return the
-/// whole line or nothing, `jq` needs JSON.
-fn wide_line_remedy(command: &str) -> String {
+/// Whether `stage` appended to `query` reads all of the query's output AND would be run: the query
+/// is one pipeline, and the IL3 gate does not refuse the joined command. Asked of the gate itself,
+/// so a route a hint offers is one `run_command` accepts; a list of "safe" producers kept here
+/// would drift from it.
+fn can_append_stage(query: &str, stage: &str) -> bool {
+    crate::util::path_security::is_one_pipeline(query)
+        && crate::util::path_security::detect_il3_violation(&format!("{query} {stage}")).is_none()
+}
+
+/// The stage a non-slice query appends to read a window of a wide line.
+const WIDE_LINE_STAGE: &str = "| cut -c1-4000";
+
+/// How to read a window of a line wider than the response budget. These routes work on a wide
+/// line: `sed -n` and a bare `grep` return the whole line or nothing, `jq` needs JSON.
+///
+/// The routes name the queried ref only when the output starts at line 1 of it (`cat <ref>`,
+/// `sed -n '1,Bp' <ref>`): then `cut -c1-4000 <ref>` reaches the clipped line. For any other
+/// command the clipped line is the COMMAND's, not the ref's. A filtering `grep` may print source
+/// line 300 first, and `cut` on the ref stops at line 100. A transforming `jq` prints a line the
+/// ref does not hold at all. So the cut is appended to the query instead, or, when it cannot be,
+/// the caller is told to narrow the query.
+fn wide_line_route(command: &str) -> String {
     let r = queried_stream(command).unwrap_or("@ref");
+    if plain_slice_first_line(command) == Some(1) {
+        format!("read a window of it with `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`")
+    } else if can_append_stage(command, WIDE_LINE_STAGE) {
+        format!("read a window of it by appending `{WIDE_LINE_STAGE}` to this query")
+    } else {
+        "it is stored nowhere, so narrow the query to print less of it".to_string()
+    }
+}
+
+/// The marker a clipped wide line carries: see [`wide_line_route`].
+fn wide_line_remedy(command: &str) -> String {
     format!(
-        "this line is wider than the response budget; read a window of it with \
-         `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`"
+        "this line is wider than the response budget; {}",
+        wide_line_route(command)
     )
 }
 
-/// The hint on a capped buffer query: the next page, in the buffer's own line numbers, and the
-/// route for a wide first line when one was clipped.
+/// The hint on a capped buffer query: the next page and, when the first line was clipped, the
+/// route for a wide line.
+///
+/// Two populations. A PLAIN SLICE (`cat <ref>`, `sed -n 'A,Bp' <ref>`) prints a run of the queried
+/// stream, so its next page is `sed -n '..' <ref>` in that stream's own numbering. Any other
+/// command printed its OWN lines, which no buffer holds: the next page is the same query with a
+/// pager appended, counted in the output's own numbering. The query itself is never echoed: it
+/// can be arbitrarily wide, and this hint is measured before the stdout it sits beside is cut.
 fn capped_hint(
     query: &str,
     shown: usize,
@@ -594,9 +640,6 @@ fn capped_hint(
 ) -> String {
     use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
     let r = queried_stream(query).unwrap_or("@ref");
-    let first = query_first_line(query);
-    let next_start = first + shown;
-    let next_end = first - 1 + shown + BUFFER_QUERY_INLINE_CAP;
     // The reason is the TRUE one: a cut at line 24 of 60 by the byte budget is not "capped at 100
     // lines", and a reader told so goes looking for a line cap that was never reached.
     let why = if by_bytes {
@@ -604,16 +647,48 @@ fn capped_hint(
     } else {
         format!("Output capped at {BUFFER_QUERY_INLINE_CAP} lines")
     };
-    let mut hint = format!(
-        "{why} \
-         (stdout {shown}/{total}{stderr_note}). \
-         Next page: sed -n '{next_start},{next_end}p' {r}. \
-         Or grep 'keyword' {r} for targeted search."
-    );
+    let mut hint = match plain_slice_first_line(query) {
+        Some(first) => {
+            let next_start = first + shown;
+            let next_end = first - 1 + shown + BUFFER_QUERY_INLINE_CAP;
+            format!(
+                "{why} \
+                 (stdout {shown}/{total}{stderr_note}). \
+                 Next page: sed -n '{next_start},{next_end}p' {r}. \
+                 Or grep 'keyword' {r} for targeted search."
+            )
+        }
+        None => {
+            let mut hint = format!("{why} ({shown}/{total} lines{stderr_note}).");
+            if shown < total {
+                let pager = format!(
+                    "| sed -n '{},{}p'",
+                    shown + 1,
+                    shown + BUFFER_QUERY_INLINE_CAP
+                );
+                hint.push_str(&format!(
+                    " This output is not a slice of {r}, and the rest of it is stored nowhere."
+                ));
+                if can_append_stage(query, &pager) {
+                    hint.push_str(&format!(
+                        " Next page: append `{pager}` to this query. Then step the range by \
+                         {BUFFER_QUERY_INLINE_CAP} up to line {total}."
+                    ));
+                } else {
+                    hint.push_str(
+                        " To read it, narrow the query so it prints fewer lines, for example with \
+                         a tighter pattern.",
+                    );
+                }
+            }
+            hint.push_str(&format!(" Or grep 'keyword' {r} for targeted search."));
+            hint
+        }
+    };
     if clipped_wide {
         hint.push_str(&format!(
-            " The first line is wider than the response budget and is shown clipped: read a \
-             window of it with `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`."
+            " The first line is wider than the response budget and is shown clipped: {}.",
+            wide_line_route(query)
         ));
     }
     hint
@@ -1118,17 +1193,32 @@ pub(crate) async fn handle_successful_output_with(
             // for a one-line query the keys and hint take 211 B (383 B with the clipped-line
             // sentence), which leaves room for 9,780 B of stdout where the 800 B reserve left 9,200 B.
             let room_for = |clipped_wide: bool| {
+                // The hint at its widest. A non-slice query's hint names a next page only while
+                // lines remain, so `shown == total` is not always the widest: measure `total - 1`
+                // too. Every number in the hint grows with `shown`, so these two bound every value
+                // `shown` can take.
+                let widest_hint = [stdout_lines.saturating_sub(1), stdout_lines]
+                    .into_iter()
+                    .map(|shown| {
+                        truncation_hint(
+                            original_command,
+                            shown,
+                            stdout_lines,
+                            &stderr_note,
+                            clipped_wide,
+                            // The byte-budget wording is the longer one, so the room measured with
+                            // it can only be short of the true room, never over it.
+                            true,
+                        )
+                    })
+                    .max_by_key(String::len)
+                    .unwrap_or_default();
                 let mut skeleton = json!({
                     "exit_code": exit_code,
                     "truncated": true,
                     "stdout_shown": stdout_lines,
                     "stdout_total": stdout_lines,
-                    "hint": truncation_hint(
-                        original_command, stdout_lines, stdout_lines, &stderr_note, clipped_wide,
-                        // The byte-budget wording is the longer one, so the room measured with it
-                        // can only be short of the true room, never over it.
-                        true,
-                    ),
+                    "hint": widest_hint,
                 });
                 if !stderr_out.is_empty() {
                     skeleton["stderr"] = json!(stderr_out);
@@ -1543,6 +1633,65 @@ mod tests {
             "the wide-line sentence only appears when a line was clipped"
         );
     }
+    /// Only the WHOLE command `cat <ref>` or `sed -n 'A,Bp' <ref>` is a slice. A ranged `sed`
+    /// anywhere else in a command used to set the numbering of a hint about a different output.
+    #[test]
+    fn only_a_whole_cat_or_ranged_sed_of_one_ref_is_a_plain_slice() {
+        for (command, want) in [
+            ("cat @cmd_abc12345", Some(1)),
+            ("  cat @cmd_abc12345.err  ", Some(1)),
+            ("sed -n '2,101p' @cmd_abc12345", Some(2)),
+            ("sed -n \"7,9p\" @file_abc12345", Some(7)),
+            ("sed -n 7,9p @cmd_abc12345.err", Some(7)),
+            ("sed -n '0,9p' @cmd_abc12345", Some(1)),
+            ("grep x @cmd_abc12345 | sed -n '5,10p'", None),
+            ("sed -n '5,10p' @cmd_abc12345 | grep x", None),
+            ("cat @cmd_abc12345 @cmd_abc12346", None),
+            ("cat -n @cmd_abc12345", None),
+            ("cat @cmd_abc12345 > out.txt", None),
+            ("cat @cmd_abc12345; ls", None),
+            ("cat @bg_abc12345", None),
+            ("grep -n \"\" @cmd_abc12345", None),
+        ] {
+            assert_eq!(plain_slice_first_line(command), want, "{command}");
+        }
+    }
+
+    /// A non-slice query is paged by appending to it, numbered from 1, and never by a `sed` on the
+    /// handle; the hint never echoes the query.
+    #[test]
+    fn a_non_slice_hint_appends_a_pager_and_does_not_echo_the_query() {
+        let hint = capped_hint(
+            "grep 1 @cmd_abc12345 | sed -n '5,300p'",
+            100,
+            296,
+            "",
+            false,
+            false,
+        );
+        assert!(
+            hint.contains("append `| sed -n '101,200p'` to this query"),
+            "{hint}"
+        );
+        assert!(!hint.contains("p' @cmd_abc12345"), "{hint}");
+        assert!(!hint.contains("grep 1"), "the query is not echoed: {hint}");
+        // A list cannot take a stage that reads all of its output.
+        let listed = capped_hint(
+            "grep -c 1 @cmd_abc12345; grep 1 @cmd_abc12345",
+            100,
+            296,
+            "",
+            false,
+            false,
+        );
+        assert!(!listed.contains("| sed"), "{listed}");
+        assert!(listed.contains("narrow the query"), "{listed}");
+        // Nothing left: no next page.
+        let done = capped_hint("grep 1 @cmd_abc12345", 1, 1, "", true, true);
+        assert!(!done.contains("sed -n"), "{done}");
+        assert!(done.contains("appending `| cut -c1-4000`"), "{done}");
+    }
+
     // -- the gate and the budgets measure the response; nothing here is a reserve --
 
     fn full_attachments() -> serde_json::Map<String, Value> {

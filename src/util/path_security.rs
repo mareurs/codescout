@@ -1264,6 +1264,25 @@ fn pipeline_segments(command: &str) -> Vec<String> {
     // docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     split_outside_quotes(command, &["&&", "||", ";", "\n", "&"])
 }
+/// Whether `command` is ONE pipeline, so that a stage appended to its end reads ALL of its stdout:
+/// `grep -n "" @cmd_X | sed -n '101,200p'` pages the whole output of the grep.
+///
+/// False whenever the appended stage would read something else or nothing. A list (`a; b`,
+/// `a && b`, `a || b`, a newline, a background `&`) hands the stage the LAST command only. A
+/// heredoc's body follows the line the stage would join. An unquoted `#` can open a comment that
+/// swallows the stage. A trailing `\`, `|`, `;` or `&` leaves the joined text malformed.
+/// Conservative by design: a `false` costs a caller a route, a wrong `true` hands it one that
+/// returns other text.
+pub(crate) fn is_one_pipeline(command: &str) -> bool {
+    let trimmed = command.trim();
+    if trimmed.is_empty() || trimmed.ends_with(['\\', '|', ';', '&']) {
+        return false;
+    }
+    // Any unquoted `<<` or `#` makes the split differ from the whole: either a second segment
+    // appears, or the one segment is shorter than `trimmed`.
+    pipeline_segments(trimmed) == [trimmed]
+        && split_outside_quotes(trimmed, &["<<", "#"]) == [trimmed]
+}
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
 /// command's output to a **trimmer** that hides a subset of it
@@ -4814,6 +4833,30 @@ mod tests {
     fn split_outside_quotes_no_separators() {
         let parts = split_outside_quotes("git status", &["&&", "||", ";", "|"]);
         assert_eq!(parts, vec!["git status"]);
+    }
+    #[test]
+    fn is_one_pipeline_refuses_every_shape_an_appended_stage_would_not_read_whole() {
+        for (command, want) in [
+            ("grep -n \"\" @cmd_abc", true),
+            ("grep x @cmd_abc | sort -u", true),
+            ("grep 'a;b' @cmd_abc", true),
+            ("grep \"#x\" @cmd_abc", true),
+            ("grep x @cmd_abc 2>&1", true),
+            ("grep -c x @cmd_abc; grep y @cmd_abc", false),
+            ("grep x @cmd_abc && ls", false),
+            ("grep x @cmd_abc || true", false),
+            ("grep x @cmd_abc\ngrep y @cmd_abc", false),
+            ("sleep 1 & grep x @cmd_abc", false),
+            ("grep x @cmd_abc # note", false),
+            ("grep x @cmd_abc #", false),
+            ("grep -f - @cmd_abc <<EOF\nx\nEOF", false),
+            ("grep x @cmd_abc |", false),
+            ("grep x @cmd_abc \\", false),
+            ("grep x @cmd_abc;", false),
+            ("   ", false),
+        ] {
+            assert_eq!(is_one_pipeline(command), want, "{command:?}");
+        }
     }
 
     #[test]
