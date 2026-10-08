@@ -1755,6 +1755,9 @@ mod tests {
             ("cat @cmd_abc12345 > out.txt", None),
             ("cat @cmd_abc12345; ls", None),
             ("cat @bg_abc12345", Some(1)),
+            // Ends like a slice, starts like something else: the START anchor's cases.
+            ("grep -c x @cmd_abc12345; cat @cmd_abc12345", None),
+            ("echo x | cat @cmd_abc12345", None),
             ("grep -n \"\" @cmd_abc12345", None),
         ] {
             assert_eq!(plain_slice_first_line(command), want, "{command}");

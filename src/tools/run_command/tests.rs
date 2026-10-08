@@ -9764,7 +9764,7 @@ async fn a_background_log_query_names_its_handle_and_the_routes_run() {
     assert_eq!(page.first().map(String::as_str), Some("101"));
 }
 
-/// A reviewer's adversarial table (2026-10-08): 79 query shapes over one buffer whose lines carry
+/// A reviewer's adversarial table (2026-10-08): 79 query shapes, plus one of ours, over one buffer whose lines carry
 /// every quote and separator (`'`, `"`, `#`, `|`, `;`). For each, the route class the hint offers
 /// is pinned, and every offered route is FOLLOWED by the hints alone to the end of the output and
 /// compared with what `sh` prints for the same query over a real file. `withheld` marks a shape
@@ -9879,6 +9879,8 @@ async fn adversarial_query_shapes_get_a_route_that_returns_their_own_output() {
         (r#"grep -n "" {A} >&2"#, "none"),      // stdout goes to stderr
         (r#"exec 2>&1; grep -n "" {A}"#, "withheld"), // a list
         (r#"grep -n "$(echo '"')" {A}; grep -c a {A}"#, "withheld"), // `$(…)` and a list
+        // Not the reviewer's: a list that ENDS like a slice (`cat <ref>`) is no slice.
+        (r#"grep -c a {A}; cat {A}"#, "withheld"), // a list
     ];
     let has_rg = std::process::Command::new("rg")
         .arg("--version")
@@ -9957,4 +9959,46 @@ async fn adversarial_query_shapes_get_a_route_that_returns_their_own_output() {
         failures.join("\n"),
         report.join("\n")
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_pager_window_that_fits_only_without_its_hint_is_cut_not_rebuffered() {
+    // A full 100-line window that fits whole carries the route to the next window. The inline
+    // gate must count that hint: a page that fits only WITHOUT it would otherwise be returned
+    // whole, cross the limit with the hint added, and be re-buffered under `@tool_*`. Widths are
+    // swept so one lands in the ~180 B the hint costs.
+    let (_dir, ctx) = project_ctx().await;
+    let mut seen_full = false;
+    for width in 85..=100usize {
+        let stored: String = (0..100)
+            .map(|i| format!("p{i:03} {}\n", "q".repeat(width - 5)))
+            .collect();
+        let id = ctx
+            .output_buffer
+            .store("cmd".into(), stored, String::new(), 0);
+        let query = format!("grep p {id} | sed -n '1,100p'");
+        let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+        assert!(
+            handles_named(&text).is_subset(&handles_named(&query)),
+            "width {width}: re-buffered: {text:.200}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "width {width}: {} B",
+            text.len()
+        );
+        let hint = parsed["hint"].as_str().unwrap_or_default();
+        let route = next_route_in_hint(&query, hint)
+            .unwrap_or_else(|| panic!("width {width}: no route: {hint}"));
+        seen_full |= parsed.get("truncated").is_none();
+        if parsed.get("truncated").is_none() {
+            assert_eq!(
+                route,
+                format!("grep p {id} | sed -n '101,200p'"),
+                "width {width}"
+            );
+        }
+    }
+    assert!(seen_full, "the premise: some width fits whole");
 }
