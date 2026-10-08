@@ -2596,6 +2596,7 @@ async fn every_page_of_a_real_files_value_carries_count_and_line_range() {
             let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
             assert_eq!(v[field], want, "{path} page {pages}: {v:.200}");
             pages += 1;
+            assert!(pages < 500, "{path}: the next chain does not end");
             let Some(n) = next_value_input(&v) else { break };
             input = n;
         }
