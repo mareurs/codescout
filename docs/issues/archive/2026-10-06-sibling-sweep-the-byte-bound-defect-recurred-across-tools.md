@@ -163,3 +163,4 @@ The recurrence came from per-tool size measures, not from one bad line. Every re
 - `docs/adrs/2026-10-05-a-result-keeps-the-one-handle-its-tool-gave-it.md`
 - `docs/issues/archive/2026-10-05-run-command-json-stdout-overflow-has-no-working-json-path-recovery.md`
 - `docs/issues/archive/2026-10-05-run-command-test-envelope-failures-field-has-no-byte-bound.md`
+- `docs/adrs/2026-10-08-a-read-keeps-the-handle-it-reads-and-one-real-file-has-one-handle.md` (the follow-on: a read of a buffer keeps its handle; one real file has one handle)

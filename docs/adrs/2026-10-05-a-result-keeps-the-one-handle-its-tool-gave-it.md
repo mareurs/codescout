@@ -69,7 +69,10 @@ The elision helper moved to `util::text::elide_middle_bytes`, so `core` does not
   (`docs/issues/archive/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools.md`)
   bounds its summary, so a read returns one handle, and a byte-edge sweep of the merged tip found no
   response with two. These tools still do not pass through `clip_prebuffered_envelope`: each bounds
-  its own summary.
+  its own summary. Update 2026-10-08: `read_file` of a buffer ref no longer returns a `file_id` at all,
+  and a real file keeps one handle for every read
+  (`docs/adrs/2026-10-08-a-read-keeps-the-handle-it-reads-and-one-real-file-has-one-handle.md`). `file_id`
+  now belongs to real-file reads, `read_markdown` and `memory` only.
 
 ## Change scenarios absorbed
 

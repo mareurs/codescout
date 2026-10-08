@@ -138,7 +138,8 @@ measured or statically bounded), applied site by site.
 
 Another late-key bug appears in a shape the survey did not cover (then re-survey; a unified
 carrier needs a shared interface first), or a `file_id` tool ships a second handle (then do
-Phase B), or the `Tool` trait is reworked for another reason (then reconsider the `Draft` design).
+Phase B; since 2026-10-08 that means a real-file, `read_markdown` or `memory` arm, because `read_file` of a
+buffer ref carries no `file_id`: `docs/adrs/2026-10-08-a-read-keeps-the-handle-it-reads-and-one-real-file-has-one-handle.md`), or the `Tool` trait is reworked for another reason (then reconsider the `Draft` design).
 
 ## Evidence
 

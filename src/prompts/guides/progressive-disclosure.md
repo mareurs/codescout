@@ -60,6 +60,15 @@ real ones. `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw 
 `sed -n` or plain `grep` cannot page inside it: print the part you need with
 `grep -o 'PATTERN[^,]*'`.
 
+**Reading a buffer never makes another buffer.** `read_file` on a `@cmd_*`, `@file_*` or
+`@tool_*` ref answers with pages of that same ref. `next` names the ref and counts in the ref's own
+lines. A `json_path` value that is larger than one page is paged on the same ref: add
+`start_line` and `end_line`, for example `read_file("@tool_xyz", json_path="$.foo", start_line=N,
+end_line=M)`. The line numbers are the value's own. A real file keeps one `@file_*` handle for
+every read of it (whole, range or markdown section) for as long as the pool holds it. When the file
+changes, the handle follows it. The first `run_command` that reads the handle then reports
+`↻ … refreshed from disk`.
+
 A `run_command` result keeps its `@cmd_*` handle: a long stream in its summary is cut to
 `N of M bytes shown` (stderr: `.err`), and an oversized envelope is clipped to fit. An
 envelope that cannot be clipped to fit (bulk nested, spread over many small fields, or in strings
