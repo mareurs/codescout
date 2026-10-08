@@ -2137,7 +2137,11 @@ async fn a_value_of_a_real_file_is_paged_on_its_path_and_mints_no_handle() {
         .enumerate()
         .map(|(i, r)| format!("r{i:04} = \"{r}\"\n"))
         .collect();
-    let toml_table = write("t.toml", format!("[k]\n{table}\n[other]\nx = 1\n"));
+    // Not at line 1: a value numbered in the FILE's lines would be off by the 3 lines above it.
+    let toml_table = write(
+        "t.toml",
+        format!("[pre]\nx = 1\n\n[k]\n{table}\n[other]\nx = 1\n"),
+    );
     let dotted: String = rows
         .iter()
         .enumerate()
@@ -2145,7 +2149,8 @@ async fn a_value_of_a_real_file_is_paged_on_its_path_and_mints_no_handle() {
         .collect();
     let toml_dotted = write("d.toml", format!("top = 1\n{dotted}"));
     let list: String = rows.iter().map(|r| format!("  - {r}\n")).collect();
-    let yaml_file = write("y.yaml", format!("k:\n{list}other: 1\n"));
+    // Not at line 1, as the TOML table above.
+    let yaml_file = write("y.yaml", format!("pre: 1\nk:\n{list}other: 1\n"));
 
     let read = |p: &str| std::fs::read_to_string(p).unwrap();
     let fs = crate::tools::file_summary::extract_json_path;
@@ -2350,10 +2355,11 @@ async fn a_range_beside_json_path_or_toml_key_slices_a_real_files_value() {
         json!({ "v": "line one\nline two\nline three" }).to_string(),
     )
     .unwrap();
+    // Neither key at line 1: a slice numbered in the FILE's lines would land on other text.
     let t = dir.path().join("s.toml");
-    std::fs::write(&t, "[k]\na = 1\nb = 2\n\n[o]\nx = 1\n").unwrap();
+    std::fs::write(&t, "[o]\nx = 1\n\n[k]\na = 1\nb = 2\n").unwrap();
     let y = dir.path().join("s.yaml");
-    std::fs::write(&y, "k:\n  - a\n  - b\nother: 1\n").unwrap();
+    std::fs::write(&y, "other: 1\nk:\n  - a\n  - b\n").unwrap();
     let (j, t, y) = (
         j.to_str().unwrap(),
         t.to_str().unwrap(),
