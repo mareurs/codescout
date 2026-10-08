@@ -2962,9 +2962,12 @@ async fn a_wide_first_line_is_shown_clipped_never_dropped() {
         "a clipped line must say so: {:.160}",
         stdout
     );
+    // `grep status` is not a slice of the buffer, so the route appends to the query rather than
+    // naming the handle: on the handle, `cut` reads the SOURCE's first lines, which need not hold
+    // the line the query printed.
     assert!(
-        stdout.contains("grep -o") && stdout.contains(&id),
-        "the marker names a working route on the queried handle: {:.400}",
+        stdout.contains("appending `| cut -c1-4000` to this query"),
+        "the marker names a working route for the query's own line: {:.400}",
         stdout.chars().skip(1000).collect::<String>()
     );
     assert_eq!(
@@ -2973,7 +2976,7 @@ async fn a_wide_first_line_is_shown_clipped_never_dropped() {
     );
     let hint = parsed["hint"].as_str().unwrap_or_default();
     assert!(
-        hint.contains("grep -o"),
+        hint.contains("appending `| cut -c1-4000` to this query"),
         "the hint must name a route that works on a wide line: {hint}"
     );
     assert!(
@@ -3133,9 +3136,10 @@ async fn a_truncated_cmd_query_gets_routes_that_work_on_a_cmd_ref() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_truncated_tool_query_keeps_json_path_and_the_route_returns_data() {
-    // `json_path` IS the right route on a `@tool_*` ref, so it stays, on the real handle, and the
-    // route must WORK: following the hint's `read_file` call returns the field it names.
+async fn a_truncated_tool_query_names_a_real_route_on_its_own_handle_and_it_runs() {
+    // A slice of a `@tool_*` ref is paged like any other ref: `sed -n` on the handle, in real
+    // numbers. This test pinned `read_file("@tool_X", json_path="$.<field>")` until 2026-10-08: a
+    // route with a placeholder in it, offered to every query on the ref, slice or not.
     let (_dir, ctx) = project_ctx().await;
     let blob = format!(
         "{{\"meta\":\"found-me\",\"rows\":[\"{}\"]}}",
@@ -3147,24 +3151,21 @@ async fn a_truncated_tool_query_keeps_json_path_and_the_route_returns_data() {
     assert_eq!(parsed["truncated"], true, "{text:.300}");
     let hint = parsed["hint"].as_str().unwrap_or_default();
     assert!(
-        hint.contains(&format!("read_file(\"{id}\", json_path=")),
-        "a tool ref is read with json_path on ITS OWN handle: {hint}"
+        !hint.contains("<field>") && !hint.contains("@tool_abc"),
+        "{hint}"
     );
-    assert!(
-        !hint.contains("@tool_abc"),
-        "the placeholder is gone: {hint}"
-    );
+    let shown = parsed["stdout_shown"].as_u64().unwrap();
+    let route = format!("sed -n '{},{}p' {id}", shown + 1, shown + 100);
+    assert!(hint.contains(&route), "{hint}");
 
-    // Follow it, with the field the hint leaves for the caller to fill in.
-    assert!(hint.contains("json_path=\"$.<field>\""), "{hint}");
-    let got = crate::tools::read_file::ReadFile
-        .call(json!({ "path": id, "json_path": "$.meta" }), &ctx)
-        .await
-        .unwrap_or_else(|e| panic!("the hinted json_path route failed: {e}"));
+    // Follow it: the page after the three short lines is the wide row, which comes back clipped.
+    let (t2, p2) = buffer_query(&ctx, route.clone()).await;
     assert!(
-        got.to_string().contains("found-me"),
-        "the route returned no data: {:.200}",
-        got.to_string()
+        p2["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("    \"rrrr"),
+        "`{route}` did not continue the slice: {t2:.300}"
     );
 }
 // ---- the summary-or-inline gate measures the response, not the raw output ----
@@ -3372,7 +3373,10 @@ async fn following_the_wide_line_hint_returns_the_data_it_promised() {
     let id = ctx
         .output_buffer
         .store("cmd".into(), line.clone(), String::new(), 0);
-    let (_t, first) = buffer_query(&ctx, format!("grep status {id}")).await;
+    // `cat`: a plain slice, whose routes name the handle. A non-slice query's route appends to the
+    // query instead; that one is followed in
+    // `a_wide_line_a_non_slice_query_prints_is_windowed_by_appending_to_the_query`.
+    let (_t, first) = buffer_query(&ctx, format!("cat {id}")).await;
     let hint = first["hint"].as_str().unwrap_or_default().to_string();
 
     // Route 1: a window of the line around a token that occurs ONCE.
@@ -8037,13 +8041,23 @@ async fn blank_leading_lines_do_not_hide_a_wide_line_and_the_hint_routes_to_it()
             assert!(!has_tool_handle(&text), "{what}: {text:.200}");
             assert!(text.len() <= 10_003, "{what}: {} B", text.len());
 
-            // FOLLOW the hint's route for a wide line.
+            // FOLLOW the hint's route for a wide line. `cat` is a slice and its route names the
+            // handle; `grep -v` is not, and its route appends to the query.
             let hint = parsed["hint"].as_str().unwrap_or_default();
-            assert!(
-                hint.contains(&format!("cut -c1-4000 {id}")),
-                "{what}: the hint names no window route: {hint}"
-            );
-            let (t2, p2) = buffer_query(&ctx, format!("cut -c1-4000 {id}")).await;
+            let route = if query == "cat" {
+                assert!(
+                    hint.contains(&format!("cut -c1-4000 {id}")),
+                    "{what}: the hint names no window route: {hint}"
+                );
+                format!("cut -c1-4000 {id}")
+            } else {
+                assert!(
+                    hint.contains("appending `| cut -c1-4000` to this query"),
+                    "{what}: the hint names no window route: {hint}"
+                );
+                format!("{query} {id} | cut -c1-4000")
+            };
+            let (t2, p2) = buffer_query(&ctx, route).await;
             let window = p2["stdout"]
                 .as_str()
                 .unwrap_or_else(|| panic!("{what}: the hint's route returned nothing: {t2:.300}"));
@@ -9137,4 +9151,868 @@ async fn a_shape_over_the_limit_by_buffer_notices_keeps_its_status() {
         failures.extend(these);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// ---- the cut-off hint of a NON-SLICE buffer query pages the query's own output ----
+//
+// BUG docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
+// `grep -n "" @cmd_X` over `seq 1 3000` was cut at line 100 and advised
+// `Next page: sed -n '101,200p' @cmd_X`, which prints source lines `101`.. without the `N:` prefix,
+// and for a filtering grep prints lines that never matched. The query's own output is stored
+// nowhere, so the only route to the rest of it is the same query with a pager appended. Every test
+// here RUNS the route the hint names.
+
+/// `1\n2\n…\n{n}\n`, what `seq 1 n` prints.
+fn seq_lines(n: usize) -> String {
+    (1..=n).map(|i| format!("{i}\n")).collect()
+}
+
+/// The pager stage a non-slice hint tells the reader to append, parsed out of the hint.
+fn appended_pager(hint: &str) -> Option<String> {
+    regex::Regex::new(r"append `(\| sed -n '\d+,\d+p')` to this query")
+        .expect("static pattern")
+        .captures(hint)
+        .map(|c| c[1].to_string())
+}
+
+/// Run `query` as a buffer query and return `(stdout lines, hint)`.
+async fn lines_and_hint(ctx: &ToolContext, query: String) -> (Vec<String>, String, Value) {
+    let (text, parsed) = buffer_query(ctx, query.clone()).await;
+    let lines = parsed["stdout"]
+        .as_str()
+        .unwrap_or_else(|| panic!("`{query}` returned no stdout: {text:.300}"))
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let hint = parsed["hint"].as_str().unwrap_or_default().to_string();
+    (lines, hint, parsed)
+}
+
+/// Follow the hints of a buffer query to the end of its output, using ONLY the edit each hint
+/// names: append the stage it quotes, or replace the query's last stage with the one it quotes. No
+/// arithmetic of the caller's own. Returns every line collected, the first page included.
+///
+/// Every page is checked: none makes a second handle, and an empty page names no further route,
+/// so the walk cannot loop on nothing.
+async fn follow_pager_to_the_end(ctx: &ToolContext, query: &str) -> Vec<String> {
+    let mut all = Vec::new();
+    let mut q = query.to_string();
+    for _ in 0..1_000 {
+        let (text, parsed) = buffer_query(ctx, q.clone()).await;
+        assert!(
+            parsed.get("output_id").is_none(),
+            "`{q}` made a handle: {text:.300}"
+        );
+        assert!(
+            handles_named(&text).is_subset(&handles_named(&q)),
+            "`{q}` named a handle it did not query (re-buffered?): {text:.300}"
+        );
+        let page: Vec<String> = parsed["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let hint = parsed["hint"].as_str().unwrap_or_default();
+        let next = next_route_in_hint(&q, hint);
+        assert!(
+            !page.is_empty() || next.is_none(),
+            "`{q}` printed nothing and still names a route: {hint}"
+        );
+        all.extend(page);
+        match next {
+            Some(n) => q = n,
+            None => return all,
+        }
+    }
+    panic!("`{query}`: no end after 1,000 pages")
+}
+
+/// The next query a hint names, built only by the edit it states.
+fn next_route_in_hint(query: &str, hint: &str) -> Option<String> {
+    if let Some(stage) = appended_pager(hint) {
+        return Some(format!("{query} {stage}"));
+    }
+    let stage = regex::Regex::new(r"replace that last stage with `(sed -n '\d+,\d+p')`")
+        .expect("static pattern")
+        .captures(hint)?[1]
+        .to_string();
+    let last = regex::Regex::new(r"\|\s*sed -n '\d+,\d+p'\s*$")
+        .expect("static pattern")
+        .find(query)
+        .unwrap_or_else(|| panic!("the hint says replace, `{query}` ends in no sed: {hint}"));
+    Some(format!("{}| {stage}", &query[..last.start()]))
+}
+
+/// What `query` prints when run by `sh` over real files: each `(handle, path)` pair substitutes a
+/// handle with a file holding the same bytes. The oracle a followed walk is compared against.
+fn shell_truth(
+    dir: &std::path::Path,
+    query: &str,
+    subs: &[(String, std::path::PathBuf)],
+) -> String {
+    let mut cmd = query.to_string();
+    for (handle, path) in subs {
+        cmd = cmd.replace(handle.as_str(), &path.display().to_string());
+    }
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&cmd)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_numbered_grep_over_a_buffer_pages_its_own_output_to_the_end() {
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
+    let query = format!("grep -n \"\" {id}");
+
+    let (shown, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
+    assert_eq!(parsed["stdout_total"], json!(3000), "{parsed}");
+    assert!(
+        !hint.contains(&format!("sed -n '101,200p' {id}")),
+        "the route pages the SOURCE, which prints `101`, not `101:101`: {hint}"
+    );
+    assert_eq!(
+        appended_pager(&hint).as_deref(),
+        Some("| sed -n '101,200p'"),
+        "{hint}"
+    );
+    assert!(hint.contains("stored nowhere"), "{hint}");
+    assert_eq!(shown.last().map(String::as_str), Some("100:100"));
+
+    // The route, executed, returns the very next lines of THIS output.
+    let (page, _, _) = lines_and_hint(&ctx, format!("{query} | sed -n '101,200p'")).await;
+    let want: Vec<String> = (101..=200).map(|i| format!("{i}:{i}")).collect();
+    assert_eq!(page, want);
+
+    // Followed to the end, the pages are exactly the whole output.
+    let all = follow_pager_to_the_end(&ctx, &query).await;
+    let full: Vec<String> = (1..=3000).map(|i| format!("{i}:{i}")).collect();
+    assert_eq!(all, full);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_filtering_grep_over_a_buffer_pages_to_its_next_matches_not_the_next_source_lines() {
+    let (_dir, ctx) = project_ctx().await;
+    // 10,000 lines, so the ~3,400 matches overflow the response: a query that FITS is returned
+    // whole at any line count and gets no hint at all (813 matches over 3,000 lines did).
+    let id = ctx
+        .output_buffer
+        .store("seq 1 10000".into(), seq_lines(10_000), String::new(), 0);
+    let query = format!("grep -n 7 {id}");
+    let matches: Vec<String> = (1..=10_000)
+        .filter(|i| i.to_string().contains('7'))
+        .map(|i| format!("{i}:{i}"))
+        .collect();
+    assert!(matches.len() > 200, "the premise needs a second page");
+
+    let (_, hint, _) = lines_and_hint(&ctx, query.clone()).await;
+    let pager = appended_pager(&hint).unwrap_or_else(|| panic!("no appended pager: {hint}"));
+    let (page, _, _) = lines_and_hint(&ctx, format!("{query} {pager}")).await;
+    assert_eq!(
+        page,
+        matches[100..200].to_vec(),
+        "the NEXT MATCHES, via `{pager}`"
+    );
+    assert_ne!(
+        page.first().map(String::as_str),
+        Some("101"),
+        "not source line 101"
+    );
+    assert_eq!(follow_pager_to_the_end(&ctx, &query).await, matches);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_query_that_merely_contains_a_ranged_sed_is_numbered_from_its_own_first_line() {
+    // `grep … | sed -n '5,2000p'` is NOT a slice of the buffer starting at line 5. Read as one, the
+    // hint said `sed -n '105,204p' @cmd_X`, which prints source lines without the `N:` prefix. It
+    // IS lines 5.. of the grep's output, so the next page replaces its last stage: never a `sed`
+    // on the handle, and never a second `sed` stacked on the first.
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
+    // To line 2,000, so the output overflows the response and is cut (296 lines would fit whole).
+    let query = format!("grep -n \"\" {id} | sed -n '5,2000p'");
+
+    let (_, hint, _) = lines_and_hint(&ctx, query.clone()).await;
+    assert!(
+        !hint.contains(&format!("p' {id}")),
+        "a route on the handle: {hint}"
+    );
+    assert!(
+        appended_pager(&hint).is_none(),
+        "a stacked second sed: {hint}"
+    );
+    let next = next_route_in_hint(&query, &hint).unwrap_or_else(|| panic!("no route: {hint}"));
+    assert_eq!(next, format!("grep -n \"\" {id} | sed -n '105,204p'"));
+    let (page, _, _) = lines_and_hint(&ctx, next).await;
+    let want: Vec<String> = (105..=204).map(|i| format!("{i}:{i}")).collect();
+    assert_eq!(page, want);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_non_slice_query_of_the_err_stream_pages_that_stream() {
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), "x\n".into(), seq_lines(3000), 0);
+    let query = format!("grep -n \"\" {id}.err");
+
+    let (_, hint, _) = lines_and_hint(&ctx, query.clone()).await;
+    assert!(
+        hint.contains(&format!("grep 'keyword' {id}.err ")),
+        "the search route names the stream queried: {hint}"
+    );
+    assert!(
+        !hint.contains(&format!("p' {id}")),
+        "no source page route: {hint}"
+    );
+    let pager = appended_pager(&hint).unwrap_or_else(|| panic!("no appended pager: {hint}"));
+    let (page, _, _) = lines_and_hint(&ctx, format!("{query} {pager}")).await;
+    let want: Vec<String> = (101..=200).map(|i| format!("{i}:{i}")).collect();
+    assert_eq!(page, want, "lines 101.. of the STDERR, numbered");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pager_the_il3_gate_or_a_list_would_defeat_is_never_offered() {
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
+    let gated = format!("cargo --version | cat - {id}");
+    // The premise, pinned against the gate itself: appending a pager to this query is refused,
+    // because the pipe's left-hand side is `cargo` and the buffer is only in its second stage.
+    assert!(
+        crate::util::path_security::detect_il3_violation(&format!("{gated} | sed -n '101,200p'"))
+            .is_some(),
+        "the premise needs a query the gate would refuse a pager on"
+    );
+    // A list: an appended stage would read the LAST command only.
+    let listed = format!("grep -c 1 {id}; grep -n \"\" {id}");
+
+    for query in [gated, listed] {
+        let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
+        assert_eq!(parsed["truncated"], true, "`{query}`: {parsed}");
+        assert!(
+            !hint.contains("| sed"),
+            "`{query}`: a route that cannot work: {hint}"
+        );
+        assert!(hint.contains("narrow the query"), "`{query}`: {hint}");
+        // What it DOES name runs, and is not refused.
+        let search = format!("grep '2999' {id}");
+        assert!(
+            hint.contains(&format!("grep 'keyword' {id} ")),
+            "`{query}`: {hint}"
+        );
+        let (found, _, _) = lines_and_hint(&ctx, search).await;
+        assert_eq!(found, vec!["2999".to_string()]);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_non_slice_hint_does_not_grow_with_the_query() {
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
+    let short = format!("grep -n \"\" {id}");
+    // Same output: the second pattern never matches a digit line.
+    let long = format!("grep -n -e \"\" -e \"{}\" {id}", "z".repeat(4_000));
+
+    let (a, hint_short, _) = lines_and_hint(&ctx, short).await;
+    let (b, hint_long, _) = lines_and_hint(&ctx, long).await;
+    assert_eq!(a, b, "the premise: both queries print the same lines");
+    assert_eq!(
+        hint_short, hint_long,
+        "a 4 KB query must not widen the hint: the query is never echoed"
+    );
+    assert!(hint_long.len() < 400, "{} B: {hint_long}", hint_long.len());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_wide_line_a_non_slice_query_prints_is_windowed_by_appending_to_the_query() {
+    // The wide line is source line 300, behind 299 lines of 50 B, so `cut -c1-4000 @cmd_X` (which
+    // cuts source lines 1..) overflows the response and is cut itself at line 100: it never
+    // reaches the line the query printed clipped.
+    let (_dir, ctx) = project_ctx().await;
+    let wide = "WIDE".repeat(3_000);
+    let head: String = (1..=299).map(|i| format!("{i:>50}\n")).collect();
+    let stored = format!("{head}{wide}\n{}", {
+        (301..=400).map(|i| format!("{i}\n")).collect::<String>()
+    });
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stored, String::new(), 0);
+
+    let (plain_cut, _, _) = lines_and_hint(&ctx, format!("cut -c1-4000 {id}")).await;
+    assert!(
+        !plain_cut.iter().any(|l| l.starts_with("WIDE")),
+        "the premise: the source route does not reach line 300"
+    );
+
+    for query in [format!("grep WIDE {id}"), format!("sed -n '300,301p' {id}")] {
+        let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+        let stdout = parsed["stdout"].as_str().unwrap_or_default();
+        let hint = parsed["hint"].as_str().unwrap_or_default();
+        assert!(
+            stdout.starts_with("WIDEWIDE") && stdout.contains("bytes shown"),
+            "{text:.200}"
+        );
+        for (what, surface) in [("marker", stdout), ("hint", hint)] {
+            assert!(
+                surface.contains("appending `| cut -c1-4000` to this query"),
+                "`{query}`: the {what} names no route that reaches the line"
+            );
+            assert!(
+                !surface.contains(&format!("cut -c1-4000 {id}")),
+                "`{query}`: the {what} names the source route"
+            );
+        }
+        let (window, _, _) = lines_and_hint(&ctx, format!("{query} | cut -c1-4000")).await;
+        assert_eq!(window[0], wide[..4_000], "`{query} | cut -c1-4000`");
+    }
+
+    // The grep printed ONE line and showed it: there is no next page to advise.
+    let (_, hint, _) = lines_and_hint(&ctx, format!("grep WIDE {id}")).await;
+    assert!(!hint.contains("sed -n"), "{hint}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_slice_piped_into_another_stage_is_not_a_slice() {
+    // `sed -n '1,3000p' @cmd_X` is a slice; with `| grep -n ""` after it, it is not. A pattern that
+    // was not anchored to the whole command read the first stage and advised `sed` on the handle.
+    let (_dir, ctx) = project_ctx().await;
+    let id = ctx
+        .output_buffer
+        .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
+    let query = format!("sed -n '1,3000p' {id} | grep -n \"\"");
+
+    let (_, hint, _) = lines_and_hint(&ctx, query.clone()).await;
+    assert!(
+        !hint.contains(&format!("p' {id}")),
+        "a source page route: {hint}"
+    );
+    let pager = appended_pager(&hint).unwrap_or_else(|| panic!("no appended pager: {hint}"));
+    let (page, _, _) = lines_and_hint(&ctx, format!("{query} {pager}")).await;
+    let want: Vec<String> = (101..=200).map(|i| format!("{i}:{i}")).collect();
+    assert_eq!(page, want);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_non_slice_query_cut_by_bytes_fits_beside_its_longest_hint() {
+    // A non-slice hint names a next page only while lines remain, so it is LONGER at
+    // `shown < total` than at `shown == total`. The room for stdout is measured from a skeleton
+    // hint; measured at `shown == total` alone it is ~190 B too generous, and a response cut by
+    // the byte budget crosses the inline limit and is re-buffered under `@tool_*`.
+    let (_dir, ctx) = project_ctx().await;
+    let mut over = Vec::new();
+    for width in 97..=140usize {
+        let stored: String = (0..200)
+            .map(|i| format!("row{i:03} {}\n", "r".repeat(width - 7)))
+            .collect();
+        let (_id, text, parsed) =
+            query_stored(&ctx, stored, String::new(), |id| format!("grep row {id}")).await;
+        if has_tool_handle(&text) || crate::tools::exceeds_inline_limit(&text) {
+            over.push(width);
+            continue;
+        }
+        assert_eq!(parsed["truncated"], true, "width {width}: {text:.200}");
+        assert!(
+            appended_pager(parsed["hint"].as_str().unwrap_or_default()).is_some(),
+            "width {width}: the premise is the longer hint: {}",
+            parsed["hint"]
+        );
+    }
+    assert!(
+        over.is_empty(),
+        "widths whose response crossed the limit: {over:?}"
+    );
+}
+
+// ---- following ONLY the hints reaches every line of a non-slice query's output, exactly once ----
+//
+// A reviewer's probe on 2c4967b5: `grep row @B` over 1,000 rows of 200 B showed 48 lines and said
+// "append `| sed -n '49,148p'` … then step the range by 100". That page was cut again at 48 lines
+// (49..96), the next step started at 149, and following the hint literally collected 528 of 1,000
+// lines. Page 2's own hint was computed against page 2's output and would have stacked a second
+// `sed`. Now each page names the next one from what it actually showed, by replacing its last stage.
+
+#[cfg(unix)]
+#[tokio::test]
+async fn following_only_the_hints_returns_every_line_of_a_non_slice_query_once() {
+    let (dir, ctx) = project_ctx().await;
+    let wide: String = (1..=1000)
+        .map(|i| format!("row{i:04} {}\n", "r".repeat(190)))
+        .collect();
+    // Widths 50..400 B, deterministic, so a page holds a varying number of lines.
+    let varied: String = (1..=600usize)
+        .map(|i| format!("v{i:04} {}\n", "x".repeat(44 + (i * 7919) % 351)))
+        .collect();
+    let seq3000 = seq_lines(3000);
+    let seq10000 = seq_lines(10_000);
+    let errs: String = (1..=30).map(|i| format!("warn{i}\n")).collect();
+
+    let mut subs = Vec::new();
+    let mut store = |name: &str, out: &str, err: &str| {
+        let id = ctx
+            .output_buffer
+            .store(name.into(), out.to_string(), err.to_string(), 0);
+        let path = dir.path().join(format!("{name}.txt"));
+        std::fs::write(&path, out).unwrap();
+        subs.push((id.clone(), path));
+        id
+    };
+    let b = store("wide", &wide, "");
+    let v = store("varied", &varied, "");
+    let s = store("seq3000", &seq3000, "");
+    let t = store("seq10000", &seq10000, "");
+    // 30 stored stderr lines: the stdout line budget drops to 80.
+    let c = store("witherr", &seq3000, &errs);
+
+    let mut queries = vec![
+        format!("grep row {b}"),
+        format!("grep -n \"\" {v}"),
+        format!("grep -n \"\" {s}"),
+        format!("grep -n 7 {t}"),
+        format!("grep -n \"\" {c}"),
+        format!("awk '{{print NR\": \"$0}}' {v}"),
+    ];
+    if std::process::Command::new("rg")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        queries.push(format!("rg -n row {b}"));
+    } else {
+        eprintln!("rg not installed: the rg case did not run");
+    }
+    for query in queries {
+        let truth = shell_truth(dir.path(), &query, &subs);
+        assert!(
+            truth.lines().count() > 200,
+            "`{query}`: the premise needs pages"
+        );
+        let got = follow_pager_to_the_end(&ctx, &query).await;
+        assert_eq!(
+            format!("{}\n", got.join("\n")),
+            truth,
+            "`{query}`: following the hints did not return the output, byte for byte"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_list_hidden_by_quoting_the_splitter_does_not_model_is_offered_no_pager() {
+    // Each was called one pipeline on 2c4967b5, offered `| sed -n '101,200p'`, and that route paged
+    // the LAST command of the list. Now they are withheld: the hint says to narrow the query.
+    let (_dir, ctx) = project_ctx().await;
+    let rows: String = (1..=3000).map(|i| format!("{i} a'b\"c#d|e;f\n")).collect();
+    let x = ctx
+        .output_buffer
+        .store("gen".into(), rows, String::new(), 0);
+    for query in [
+        format!(r#"grep -c $'\'' {x}; grep -n "" {x}"#),
+        format!(r#"echo "$(grep -c '"' {x})"; grep -n "" {x}"#),
+        format!("grep -c \"`echo '\"'`\" {x}; grep -n \"\" {x}"),
+        format!(r#"grep -n "$(echo '"')" {x} # x"#),
+        format!(r#"grep -n "$(echo '"')" {x}; grep -c a {x}"#),
+    ] {
+        let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
+        assert_eq!(
+            parsed["truncated"], true,
+            "`{query}`: the premise is a cut: {parsed}"
+        );
+        assert!(!hint.contains("| sed"), "`{query}`: {hint}");
+        assert!(
+            next_route_in_hint(&query, &hint).is_none(),
+            "`{query}`: {hint}"
+        );
+        assert!(hint.contains("narrow the query"), "`{query}`: {hint}");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_query_with_a_trailing_newline_is_offered_no_route_it_cannot_take() {
+    // The caller appends to its OWN text: `grep -n '' @X\n | sed -n '101,200p'` runs as two lines,
+    // and the first prints lines 1.. again.
+    let (_dir, ctx) = project_ctx().await;
+    let a = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    let query = format!("grep -n '' {a}\n");
+    let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
+    assert_eq!(parsed["truncated"], true, "{parsed}");
+    if let Some(p) = appended_pager(&hint) {
+        let (page, _, _) = lines_and_hint(&ctx, format!("{query} {p}")).await;
+        assert_eq!(page.first().map(String::as_str), Some("101:101"), "{hint}");
+    }
+    assert!(hint.contains("narrow the query"), "{hint}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_tool_ref_query_gets_routes_with_real_numbers_and_each_one_runs() {
+    // The `@tool_*` arm told every query, `grep -n '"i"' @tool_X` included, to
+    // `read_file("@tool_X", json_path="$.<field>")` or `start_line=N, end_line=M`: routes on the
+    // SOURCE, with literal placeholders. Now a `@tool_*` ref takes the same two-population rule.
+    let (dir, ctx) = project_ctx().await;
+    let rows: Vec<Value> = (0..3000).map(|i| json!({ "i": i, "s": "x" })).collect();
+    let blob = serde_json::to_string(&json!({ "rows": rows })).unwrap();
+    let t = ctx.output_buffer.store_tool("probe", blob.clone());
+    // `run_command` reads a `@tool_*` ref pretty-printed: that is the oracle's file too.
+    let pretty =
+        serde_json::to_string_pretty(&serde_json::from_str::<Value>(&blob).unwrap()).unwrap();
+    let path = dir.path().join("tool.json");
+    std::fs::write(&path, &pretty).unwrap();
+    let subs = vec![(t.clone(), path)];
+
+    // A slice: the next page is a `sed` on the handle, in real numbers.
+    let (shown, hint, _) = lines_and_hint(&ctx, format!("cat {t}")).await;
+    for placeholder in ["<field>", "start_line=N", "end_line=M", "@ref"] {
+        assert!(!hint.contains(placeholder), "{placeholder}: {hint}");
+    }
+    let page = regex::Regex::new(r"Next page: (sed -n '\d+,\d+p' @tool_[0-9a-f]+)\.")
+        .unwrap()
+        .captures(&hint)
+        .unwrap_or_else(|| panic!("no slice route: {hint}"))[1]
+        .to_string();
+    let (next, _, _) = lines_and_hint(&ctx, page.clone()).await;
+    let want: Vec<String> = pretty.lines().map(str::to_string).collect();
+    assert_eq!(
+        next[0],
+        want[shown.len()],
+        "`{page}` does not continue the slice"
+    );
+
+    // Not a slice: the query's own output, paged to the end by the hints alone.
+    let query = format!("grep -n '\"i\"' {t}");
+    let (_, hint, _) = lines_and_hint(&ctx, query.clone()).await;
+    assert!(!hint.contains("read_file"), "a route on the source: {hint}");
+    let got = follow_pager_to_the_end(&ctx, &query).await;
+    assert_eq!(
+        format!("{}\n", got.join("\n")),
+        shell_truth(dir.path(), &query, &subs)
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_list_query_own_stderr_marker_does_not_name_a_stage_to_append() {
+    // The marker on a query's OWN stderr said to append `2>&1 >/dev/null | cut -c1-4000`. On a list
+    // that stage reads the LAST command's stderr only.
+    let (_dir, ctx) = project_ctx().await;
+    let a = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(10), String::new(), 0);
+    let query = format!("grep -c 1 {a}; printf '%3000s\\n' | tr ' ' e >&2");
+    let (_, parsed) = buffer_query(&ctx, query.clone()).await;
+    let stderr = parsed["stderr"].as_str().unwrap_or_default();
+    assert!(
+        stderr.contains("bytes shown"),
+        "the premise is a cut stderr: {parsed}"
+    );
+    assert!(!stderr.contains("2>&1 >/dev/null"), "{stderr:.0}");
+    assert!(stderr.contains("narrow the query"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_background_log_query_names_its_handle_and_the_routes_run() {
+    // `queried_stream` could not name `@bg_*`, so the hint said `@ref`: a placeholder.
+    let (dir, ctx) = project_ctx().await;
+    let started = RunCommand
+        .call(
+            json!({ "command": "seq 1 3000", "run_in_background": true, "timeout_secs": 10 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let bg = started["output_id"].as_str().unwrap().to_string();
+    assert!(bg.starts_with("@bg_"), "{started}");
+    let mut done = false;
+    for _ in 0..100 {
+        let (_, parsed) = buffer_query(&ctx, format!("grep -c '' {bg}")).await;
+        if parsed["stdout"].as_str().unwrap_or_default().trim() == "3000" {
+            done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(done, "the background job never wrote 3,000 lines");
+
+    let query = format!("grep -n \"\" {bg}");
+    let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
+    assert_eq!(parsed["truncated"], true, "{parsed}");
+    assert!(!hint.contains("@ref"), "{hint}");
+    assert!(hint.contains(&format!("grep 'keyword' {bg} ")), "{hint}");
+    let path = dir.path().join("bg.txt");
+    std::fs::write(&path, seq_lines(3000)).unwrap();
+    let got = follow_pager_to_the_end(&ctx, &query).await;
+    assert_eq!(
+        format!("{}\n", got.join("\n")),
+        shell_truth(dir.path(), &query, &[(bg.clone(), path)])
+    );
+    // A slice of the log keeps the route on the handle, and it continues the slice.
+    let (_, hint, _) = lines_and_hint(&ctx, format!("cat {bg}")).await;
+    assert!(hint.contains(&format!("sed -n '101,200p' {bg}")), "{hint}");
+    let (page, _, _) = lines_and_hint(&ctx, format!("sed -n '101,200p' {bg}")).await;
+    assert_eq!(page.first().map(String::as_str), Some("101"));
+}
+
+/// A reviewer's adversarial table (2026-10-08): 79 query shapes, plus one of ours, over one buffer whose lines carry
+/// every quote and separator (`'`, `"`, `#`, `|`, `;`). For each, the route class the hint offers
+/// is pinned, and every offered route is FOLLOWED by the hints alone to the end of the output and
+/// compared with what `sh` prints for the same query over a real file. `withheld` marks a shape
+/// the hint refuses a pager for although one would work: the price of not modelling `$(…)`,
+/// backticks, `$'…'`, comments, heredocs, here-strings and lists.
+#[cfg(unix)]
+#[tokio::test]
+async fn adversarial_query_shapes_get_a_route_that_returns_their_own_output() {
+    let (dir, ctx) = project_ctx().await;
+    let a_out: String = (1..=3000).map(|i| format!("{i} a'b\"c#d|e;f\n")).collect();
+    let a = ctx
+        .output_buffer
+        .store("gen".into(), a_out.clone(), String::new(), 0);
+    let e_err: String = (1..=3000).map(|i| format!("e{i}\n")).collect();
+    let e = ctx
+        .output_buffer
+        .store("gen".into(), "x\n".into(), e_err.clone(), 0);
+    let (pa, pe_out, pe_err) = (
+        dir.path().join("a.txt"),
+        dir.path().join("e.txt"),
+        dir.path().join("e.err.txt"),
+    );
+    std::fs::write(&pa, &a_out).unwrap();
+    std::fs::write(&pe_out, "x\n").unwrap();
+    std::fs::write(&pe_err, &e_err).unwrap();
+    let subs = vec![
+        (format!("{e}.err"), pe_err),
+        (e.clone(), pe_out),
+        (a.clone(), pa),
+    ];
+    // (query template, expected route class)
+    let table: Vec<(&str, &str)> = vec![
+        (r#"grep -n "" {A}"#, "pager"),
+        (r#"grep -n 'a' {A}"#, "pager"),
+        (r#"grep -n "a'b" {A}"#, "pager"),
+        (r#"grep -n 'e;f' {A}"#, "pager"),
+        (r#"grep -n 'd|e' {A}"#, "pager"),
+        (r##"grep -n "#d" {A}"##, "pager"),
+        (r#"grep -n 'c#d' {A}"#, "pager"),
+        (r#"grep -n "" {A} 2>&1"#, "pager"),
+        (r#"grep -n "" {A} 2>/dev/null"#, "handle"), // `2>/dev/null` names a path: not a buffer query, it makes its own handle
+        (r#"grep -n "" {A} |& cat"#, "pager"),
+        (r#"grep -n "" {A} | cat"#, "pager"),
+        (r#"grep -n "" {A} | sed -n '1,500p'"#, "pager"),
+        (r#"grep -n "" {A} | head -n 300"#, "none"), // 300 short lines fit whole
+        (r#"grep -n "" {A} | sed -n '5,400p'"#, "none"), // 396 short lines fit whole
+        (r#"cat {A} | grep -n a"#, "pager"),
+        (r#"grep -n "" {E}.err"#, "pager"),
+        (r#"awk '{print NR": "$0}' {A}"#, "pager"),
+        (r#"awk '{print NR"|"$0}' {A}"#, "pager"),
+        (r#"cut -c1-5 {A}"#, "pager"),
+        (r#"cat -n {A}"#, "pager"),
+        (r#"tac {A}"#, "pager"),
+        (r#"grep -n \"c {A}"#, "pager"),
+        (r#"grep -n \' {A}"#, "pager"),
+        (r#"grep -n d\|e {A}"#, "pager"),
+        (r#"grep -n "$(printf a)" {A}"#, "handle"), // a word starting with `$` reads as a path: not a buffer query
+        (r#"grep -n "$(echo 'a|b' | cut -c1)" {A}"#, "handle"), // same
+        (r#"grep -n $(echo a) {A}"#, "handle"),     // same
+        (r#"grep -n $(echo a | cat) {A}"#, "handle"), // same
+        (r#"grep -n `echo a` {A}"#, "withheld"), // a backtick: not modelled, so refused although the route would work
+        (r#"grep -n `echo a | cat` {A}"#, "withheld"), // same
+        (r#"cat <(grep -n "" {A})"#, "pager"),
+        (r#"(grep -n "" {A})"#, "pager"),
+        (r#"{ grep -n "" {A}; }"#, "withheld"), // a `;` inside braces is a list to the splitter
+        (r#"(grep -c a {A}; grep -n "" {A})"#, "withheld"), // a list in a subshell
+        (r#"grep -n "" {A} # comment"#, "withheld"), // a comment would swallow the stage
+        (r#"grep -n a#b {A}"#, "none"),         // no line matches
+        (r#"grep -n "" {A} > /dev/null"#, "none"), // stdout goes to /dev/null
+        (r#"grep -n "" {A} | tee /dev/null"#, "handle"), // `/dev/null` names a path
+        (r#"! grep -n "" {A}"#, "pager"),
+        ("grep -n \"\" {A} \\\n| cat", "pager"),
+        ("grep -n \"a\nb\" {A}", "pager"),
+        ("grep -n '' {A}\n", "withheld"), // a trailing newline: the appended stage would run as a second line
+        (r#"grep -n "" {A};"#, "withheld"), // a trailing `;`
+        (r#"grep -n "" {A} &"#, "withheld"), // a background `&`
+        (r#"grep -n "" {A} && true"#, "withheld"), // a list
+        (r#"grep -n "" {A} || true"#, "withheld"), // a list
+        (r#"true && grep -n "" {A}"#, "withheld"), // a list
+        (r#"grep -c a {A}; grep -n "" {A}"#, "withheld"), // a list
+        (r#"grep -n "" {A} <<< "x""#, "withheld"), // a here-string `<<<`: not modelled
+        ("grep -f - -n {A} <<EOF\na\nEOF", "withheld"), // a heredoc: its body follows the line a stage would join
+        (r#"grep -n "" {A} | sed 's/a/ä/'"#, "handle"), // `s/a/ä/` contains a slash and reads as a path
+        (r#"grep -n "ä|ö" {A}"#, "none"),               // no line matches
+        (r#"grep -c $'\'' {A}; grep -n "" {A}"#, "withheld"), // `$'…'`: not modelled
+        (r#"echo "$(grep -c '"' {A})"; grep -n "" {A}"#, "withheld"), // `$(…)` and a list
+        (r#"grep -n $'a\'b' {A}"#, "withheld"), // `$'…'`: not modelled, although the route would work
+        (r#"grep -n "" {A} | sed -n '1,5p'"#, "none"), // 5 lines fit
+        (r#"grep -n "" {A} | head -n 3"#, "none"), // 3 lines fit
+        (r#"grep -n "" {A} 2>&1 >/dev/null"#, "none"), // stdout goes to /dev/null
+        (r#"echo {A} | xargs grep -n """#, "pager"),
+        (
+            r#"grep -n "" {A} | while read l; do echo "$l"; done"#,
+            "handle",
+        ), // `$l` reads as a path
+        (r#"for f in {A}; do grep -n "" $f; done"#, "handle"), // `$f` reads as a path
+        (r#"if true; then grep -n "" {A}; fi"#, "withheld"), // `if …; fi` is a list to the splitter
+        (r#"grep -n "" {A} | awk 'NR>0' # x"#, "withheld"),  // a comment would swallow the stage
+        (r#"grep -n "" "{A}""#, "pager"),
+        (r#"rg -n "" {A}"#, "pager"),
+        (r#"rg -n "" {A} | cat"#, "pager"),
+        (r#"cargo --version | cat - {A}"#, "withheld"), // IL3 refuses a pager after a `cargo` left-hand side
+        (r#"git --version | cat - {A}"#, "withheld"), // IL3 refuses a pager after a `git` left-hand side
+        (r#"grep -n "\\" {A} ; true"#, "none"),       // no line matches
+        ("grep -c \"`echo '\"'`\" {A}; grep -n \"\" {A}", "withheld"), // a backtick and a list
+        (r#"grep -n "$(echo '"')" {A} # x"#, "withheld"), // `$(…)` hiding a comment
+        (r#"grep -n "" {A} | tee /dev/stderr"#, "handle"), // `/dev/stderr` names a path
+        (r#"shuf {A}"#, "random"), // `shuf` prints a new order on every run: a re-run route cannot continue it
+        (r#"grep -n "" {A} | sed -n '1,5000p' | cat"#, "pager"),
+        (r#"grep -n "" {A} ${x#y}"#, "handle"), // `${x#y}` reads as a path
+        (r#"grep -n "" {A} 1>&2 | cat"#, "none"), // stdout goes to stderr
+        (r#"grep -n "" {A} >&2"#, "none"),      // stdout goes to stderr
+        (r#"exec 2>&1; grep -n "" {A}"#, "withheld"), // a list
+        (r#"grep -n "$(echo '"')" {A}; grep -c a {A}"#, "withheld"), // `$(…)` and a list
+        // Not the reviewer's: a list that ENDS like a slice (`cat <ref>`) is no slice.
+        (r#"grep -c a {A}; cat {A}"#, "withheld"), // a list
+    ];
+    let has_rg = std::process::Command::new("rg")
+        .arg("--version")
+        .output()
+        .is_ok();
+    let window_re = regex::Regex::new(r"(?s)^(.*\S)\s*\|\s*sed -n '(\d+),\d+p'\s*$").unwrap();
+    let mut report = Vec::new();
+    let mut failures = Vec::new();
+    for (i, (template, want)) in table.iter().enumerate() {
+        let query = template.replace("{A}", &a).replace("{E}", &e);
+        if query.starts_with("rg") && !has_rg {
+            eprintln!("#{i}: rg not installed, skipped");
+            continue;
+        }
+        let input = json!({ "command": query, "timeout_secs": 30 });
+        let content = match RunCommand.call_content(input, &ctx).await {
+            Ok(c) => c,
+            Err(_) => {
+                report.push(format!("#{i:02} refused   {template:?}"));
+                if *want != "refused" {
+                    failures.push(format!("#{i} {template:?}: refused, want {want}"));
+                }
+                continue;
+            }
+        };
+        let text = content[0]
+            .as_text()
+            .map(|t| t.text.clone())
+            .unwrap_or_default();
+        let parsed: Value = serde_json::from_str(&text).unwrap_or(json!({}));
+        let hint = parsed["hint"].as_str().unwrap_or_default();
+        let truncated = parsed["truncated"] == json!(true);
+        let class = if parsed.get("output_id").is_some() {
+            "handle"
+        } else if next_route_in_hint(&query, hint).is_some() {
+            "pager"
+        } else if hint.contains("narrow the query") {
+            "withheld"
+        } else if hint.contains("Next page: sed -n") {
+            "slice"
+        } else if truncated {
+            "other"
+        } else {
+            "none"
+        };
+        report.push(format!("#{i:02} {class:<9} {template:?}"));
+        if class != *want && !(*want == "random" && class == "pager") {
+            failures.push(format!("#{i} {template:?}: class {class}, want {want}"));
+        }
+        // Every offered route, followed by the hints alone, returns the query's own output. A query
+        // ending in `| sed -n 'A,Bp'` is read as a window over the query before it, and its hints
+        // page THAT output from line A on, past B: the hint says so in those words.
+        if class == "pager" && *want != "random" {
+            let window = window_re
+                .captures(&query)
+                .map(|c| (c[1].to_string(), c[2].parse::<usize>().unwrap()));
+            let (oracle, skip) = window.unwrap_or((query.clone(), 1));
+            let truth: Vec<String> = shell_truth(dir.path(), &oracle, &subs)
+                .lines()
+                .skip(skip - 1)
+                .map(str::to_string)
+                .collect();
+            let got = follow_pager_to_the_end(&ctx, &query).await;
+            if got != truth {
+                failures.push(format!(
+                    "#{i} {template:?}: following the hints returned {} lines, want {}",
+                    got.len(),
+                    truth.len()
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}\n\nall:\n{}",
+        failures.join("\n"),
+        report.join("\n")
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_pager_window_that_fits_only_without_its_hint_is_cut_not_rebuffered() {
+    // A full 100-line window that fits whole carries the route to the next window. The inline
+    // gate must count that hint: a page that fits only WITHOUT it would otherwise be returned
+    // whole, cross the limit with the hint added, and be re-buffered under `@tool_*`. Widths are
+    // swept so one lands in the ~180 B the hint costs.
+    let (_dir, ctx) = project_ctx().await;
+    let mut seen_full = false;
+    for width in 85..=100usize {
+        let stored: String = (0..100)
+            .map(|i| format!("p{i:03} {}\n", "q".repeat(width - 5)))
+            .collect();
+        let id = ctx
+            .output_buffer
+            .store("cmd".into(), stored, String::new(), 0);
+        let query = format!("grep p {id} | sed -n '1,100p'");
+        let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+        assert!(
+            handles_named(&text).is_subset(&handles_named(&query)),
+            "width {width}: re-buffered: {text:.200}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "width {width}: {} B",
+            text.len()
+        );
+        let hint = parsed["hint"].as_str().unwrap_or_default();
+        let route = next_route_in_hint(&query, hint)
+            .unwrap_or_else(|| panic!("width {width}: no route: {hint}"));
+        seen_full |= parsed.get("truncated").is_none();
+        if parsed.get("truncated").is_none() {
+            assert_eq!(
+                route,
+                format!("grep p {id} | sed -n '101,200p'"),
+                "width {width}"
+            );
+        }
+    }
+    assert!(seen_full, "the premise: some width fits whole");
 }

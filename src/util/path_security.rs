@@ -1264,6 +1264,63 @@ fn pipeline_segments(command: &str) -> Vec<String> {
     // docs/issues/archive/2026-09-30-source-gate-is-bypassed-by-background-ampersand-sudo-xargs-and-command-substitution.md
     split_outside_quotes(command, &["&&", "||", ";", "\n", "&"])
 }
+/// Whether `command` is ONE pipeline, so that a stage appended to its end reads ALL of its stdout:
+/// `grep -n "" @cmd_X | sed -n '101,200p'` pages the whole output of the grep.
+///
+/// False whenever the appended stage would read something else or nothing. A list (`a; b`,
+/// `a && b`, `a || b`, a newline, a background `&`) hands the stage the LAST command only. A
+/// heredoc's body follows the line the stage would join. An unquoted `#` can open a comment that
+/// swallows the stage. A trailing `\`, `|`, `;` or `&` leaves the joined text malformed, and so
+/// does a trailing NEWLINE: the caller appends to its own text, so `q\n | sed` runs as two lines.
+///
+/// `split_outside_quotes` models single quotes, double quotes and backslashes, nothing more. So any
+/// `$'…'`, `$(…)` or backtick is refused outright: each can hide a quote that flips its state,
+/// and with it a `;` or `#` (reproduced: `grep -c $'\'' @X; grep -n "" @X` read as one pipeline).
+/// A `$(…)` or backtick query whose route would have worked is merely withheld; an unbalanced
+/// quote is refused for the same reason.
+/// Conservative by design: a `false` costs a caller a route, a wrong `true` hands it one that
+/// returns other text.
+pub(crate) fn is_one_pipeline(command: &str) -> bool {
+    if command
+        .trim_end_matches([' ', '\t'])
+        .ends_with(['\n', '\r'])
+    {
+        return false;
+    }
+    let trimmed = command.trim();
+    if trimmed.is_empty() || trimmed.ends_with(['\\', '|', ';', '&']) {
+        return false;
+    }
+    if trimmed.contains("$'")
+        || trimmed.contains("$(")
+        || trimmed.contains('`')
+        || !quotes_balanced(trimmed)
+    {
+        return false;
+    }
+    // Any unquoted `<<` or `#` makes the split differ from the whole: either a second segment
+    // appears, or the one segment is shorter than `trimmed`.
+    pipeline_segments(trimmed) == [trimmed]
+        && split_outside_quotes(trimmed, &["<<", "#"]) == [trimmed]
+}
+
+/// Whether every single and double quote in `s` is closed, by the rules `split_outside_quotes`
+/// applies (a backslash escapes the next character outside single quotes).
+fn quotes_balanced(s: &str) -> bool {
+    let (mut in_single, mut in_double, mut escaped) = (false, false, false);
+    for c in s.chars() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' && !in_single {
+            escaped = true;
+        } else if c == '\'' && !in_double {
+            in_single = !in_single;
+        } else if c == '"' && !in_single {
+            in_double = !in_double;
+        }
+    }
+    !in_single && !in_double
+}
 
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
 /// command's output to a **trimmer** that hides a subset of it
@@ -4814,6 +4871,58 @@ mod tests {
     fn split_outside_quotes_no_separators() {
         let parts = split_outside_quotes("git status", &["&&", "||", ";", "|"]);
         assert_eq!(parts, vec!["git status"]);
+    }
+    #[test]
+    fn is_one_pipeline_refuses_every_shape_an_appended_stage_would_not_read_whole() {
+        for (command, want) in [
+            ("grep -n \"\" @cmd_abc", true),
+            ("grep x @cmd_abc | sort -u", true),
+            ("grep 'a;b' @cmd_abc", true),
+            ("grep \"#x\" @cmd_abc", true),
+            ("grep x @cmd_abc 2>&1", true),
+            ("grep -c x @cmd_abc; grep y @cmd_abc", false),
+            ("grep x @cmd_abc && ls", false),
+            ("grep x @cmd_abc || true", false),
+            ("grep x @cmd_abc\ngrep y @cmd_abc", false),
+            ("sleep 1 & grep x @cmd_abc", false),
+            ("grep x @cmd_abc # note", false),
+            ("grep x @cmd_abc #", false),
+            ("grep -f - @cmd_abc <<EOF\nx\nEOF", false),
+            ("grep x @cmd_abc |", false),
+            ("grep x @cmd_abc \\", false),
+            ("grep x @cmd_abc;", false),
+            ("   ", false),
+        ] {
+            assert_eq!(is_one_pipeline(command), want, "{command:?}");
+        }
+    }
+    /// `split_outside_quotes` models single and double quotes and backslashes only. ANSI-C quoting
+    /// (`$'…'`), quotes nested inside `$(…)` or backticks, and a comment hidden behind either, all
+    /// shift its quote state, so a LIST read as one pipeline and an appended pager read the last
+    /// command only. Each query below was reproduced returning wrong lines by a reviewer. A trailing
+    /// newline is refused too: the caller appends to its own text, and `q\n | sed` runs as two lines.
+    #[test]
+    fn is_one_pipeline_refuses_quoting_its_splitter_does_not_model() {
+        for command in [
+            r#"grep -c $'\'' @cmd_abc; grep -n "" @cmd_abc"#,
+            r#"echo "$(grep -c '"' @cmd_abc)"; grep -n "" @cmd_abc"#,
+            "grep -c \"`echo '\"'`\" @cmd_abc; grep -n \"\" @cmd_abc",
+            r#"grep -n "$(echo '"')" @cmd_abc # x"#,
+            r#"grep -n "$(echo '"')" @cmd_abc; grep -c a @cmd_abc"#,
+            // Withheld though it would work: refusing every `$(`, `$'` and backtick is the price of
+            // not modelling them.
+            r#"grep -n "$(printf a)" @cmd_abc"#,
+            "grep -n `echo a` @cmd_abc",
+            r#"grep -n $'a' @cmd_abc"#,
+            "grep -n '' @cmd_abc\n",
+            "grep -n '' @cmd_abc \n ",
+            // An unbalanced quote is a shell syntax error, and it hides every separator after it.
+            "grep -n 'a @cmd_abc; grep b @cmd_abc",
+        ] {
+            assert!(!is_one_pipeline(command), "{command:?}");
+        }
+        // A LEADING newline and trailing blanks on the same line stay one pipeline.
+        assert!(is_one_pipeline("\ngrep -n '' @cmd_abc  "));
     }
 
     #[test]
