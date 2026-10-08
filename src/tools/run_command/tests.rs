@@ -5195,21 +5195,35 @@ async fn run_command_prepends_refresh_indicator_for_stale_file_handle() {
         .output_buffer
         .store_file(path.to_string_lossy().to_string(), "original".to_string());
 
-    // Make the file look newer than the cached entry
+    // A newer mtime without changed bytes must stay silent.
     let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
     filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future)).unwrap();
+    let unchanged = RunCommand
+        .call(json!({ "command": format!("cat {}", id) }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(unchanged["stdout"], "original");
 
+    fs::write(&path, "edited").unwrap();
+    filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future)).unwrap();
     let result = RunCommand
         .call(json!({ "command": format!("cat {}", id) }), &ctx)
         .await
         .unwrap();
-
     let stdout = result["stdout"].as_str().unwrap();
     assert!(
         stdout.starts_with(&format!("↻ {} refreshed from disk", id)),
-        "expected refresh indicator, got: {:?}",
-        stdout
+        "expected change notice, got: {stdout:?}"
     );
+    assert!(
+        stdout.ends_with("edited"),
+        "the command must read the new bytes: {stdout:?}"
+    );
+    let second = RunCommand
+        .call(json!({ "command": format!("cat {}", id) }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(second["stdout"], "edited", "notice must be reported once");
 }
 
 #[cfg(unix)]

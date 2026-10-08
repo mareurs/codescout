@@ -258,6 +258,8 @@ The glob is matched against the path relative to the search directory, so `**/*.
 |------|------|----------|---------|-------------|
 | `path` | string | yes | — | File path relative to project root |
 | `content` | string | yes | — | Full file content to write |
+| `overwrite` | boolean | no | `false` | Allow replacing an existing file |
+| `force` | boolean | no | `false` | Acknowledge an intentional reduction of more than half the existing file’s bytes or lines (original at least 200 bytes); also requires `overwrite=true` |
 
 **Example:**
 
@@ -275,7 +277,7 @@ The glob is matched against the path relative to the search directory, so `**/*.
 
 **Tips:**
 - Creates parent directories if they don't exist.
-- Overwrites without warning — check that the path is correct before writing.
+- An existing file requires `overwrite: true`. A large reduction additionally requires `force: true`; otherwise the original file is preserved.
 - For editing existing files, use `edit_file` instead.
 
 See [Editing](editing.md#create_file) for more usage guidance.

@@ -15,6 +15,7 @@ Consolidates the older individual tools (`replace_symbol`, `insert_code`, `renam
 | `position` | string | no | `insert` only — `"before"` or `"after"` the symbol (default `"after"`) |
 | `reindent` | boolean | no | `replace` and `insert` only, default `true`. `false` splices `body` exactly as written, with no re-basing onto the symbol's column — see [Indentation](#indentation) |
 | `new_name` | string | rename only | New identifier for the symbol |
+| `force` | boolean | no | `replace` only, default `false`: acknowledge an intentional reduction of more than half the replaced symbol’s bytes or lines (original range at least 200 bytes) |
 
 ### Indentation
 
@@ -28,7 +29,9 @@ Pass `reindent: false` and the body is spliced **exactly as written**, with your
 
 ### `replace`
 
-Overwrites the symbol's body with new content. The declaration line is preserved — only the body between the braces changes.
+Replaces the symbol’s complete declaration with the supplied `body`, including its signature. Read the full symbol first with `symbols(include_body=true)`.
+
+A replacement that removes more than half the replaced range’s bytes or lines is refused before writing when the original range is at least 200 bytes. If that reduction is intentional, pass `force: true`. The name, syntax, and sibling checks still apply.
 
 ```json
 {

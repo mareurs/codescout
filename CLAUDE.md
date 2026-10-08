@@ -12,7 +12,7 @@ A line earns residency here only if a session that never opens another doc would
 
 ## Development Commands
 
-**Run `./scripts/gate.sh`, which runs `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a `target/` leased for that run from a pool, before completing any task.** For a targeted `cargo test`, use `scripts/with-slot.sh cargo test …`. Why those four in that order → [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md); what they do not cover is printed by `gate.sh` on every run. Live-MCP release build: `./scripts/rb.sh`, then `/mcp` (more → memory `development-commands`).
+**Run `./scripts/gate.sh`: Python tests, then `./scripts/fmt-mine.sh`, `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, `cargo test --workspace --no-default-features`, `cargo test --workspace` in a `target/` leased for that run from a pool, before completing any task.** For a targeted `cargo test`, use `scripts/with-slot.sh cargo test …`. Why those four in that order → [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md); what they do not cover is printed by `gate.sh` on every run. Live-MCP release build: `./scripts/rb.sh`, then `/mcp` (more → memory `development-commands`).
 
 ## Testing Discipline — what a green suite is evidence for
 

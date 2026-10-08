@@ -760,35 +760,38 @@ impl Foo {
     .await;
 
     let new_body = "    fn a(&self) -> i32 {\n        99\n    }";
-    let err = EditCode
-        .call(
-            json!({
-                "path": "src/lib.rs",
-                "symbol": "impl Foo/a",
-                "action": "replace",
-                "body": new_body
-            }),
-            &ctx,
-        )
-        .await
-        .unwrap_err();
+    for force in [false, true] {
+        let err = EditCode
+            .call(
+                json!({
+                    "path": "src/lib.rs",
+                    "symbol": "impl Foo/a",
+                    "action": "replace",
+                    "body": new_body,
+                    "force": force
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
 
-    let msg = err.to_string();
-    assert!(
-        msg.contains("dropped sibling symbols") || msg.contains("overshot"),
-        "sibling-drop error expected; got: {msg}"
-    );
-    assert!(
-        msg.contains("Foo/beta") || msg.contains("Foo/alpha"),
-        "error must name the dropped sibling(s); got: {msg}"
-    );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("dropped sibling symbols") || msg.contains("overshot"),
+            "sibling-drop error expected; got: {msg}"
+        );
+        assert!(
+            msg.contains("Foo/beta") || msg.contains("Foo/alpha"),
+            "error must name the dropped sibling(s); got: {msg}"
+        );
 
-    // File must be untouched.
-    let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
-    assert_eq!(
-        result, src,
-        "file must be restored after sibling-drop rollback"
-    );
+        // File must be untouched.
+        let result = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+        assert_eq!(
+            result, src,
+            "file must be restored after sibling-drop rollback"
+        );
+    }
 }
 /// A three-method Python class with TRUTHFUL ranges, so neither the sibling-drop check nor
 /// a stale-range repair can be what refuses an edit made through it. Whatever refuses a
@@ -2246,8 +2249,7 @@ async fn insert_code_after_repairs_truncated_end_in_nested_fn() {
     //  5: "        assert_eq!(x, 1);"
     //  6: "    }"                       ← actual end=6, resolved from the AST
     //  7: "}"                           ← module closer
-    let src =
-        "#[cfg(test)]\nmod tests {\n    #[test]\n    fn target_test() {\n        let x = 1;\n        assert_eq!(x, 1);\n    }\n}\n";
+    let src = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn target_test() {\n        let x = 1;\n        assert_eq!(x, 1);\n    }\n}\n";
 
     let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", src)], |root| {
         let file = root.join("src/lib.rs");
@@ -4119,68 +4121,111 @@ fn trailing_five() {}
 ";
 
 #[tokio::test]
-async fn replace_warns_when_the_new_body_is_less_than_half_the_symbol() {
+async fn replace_refuses_shrink_before_writing_and_reports_the_symbol_range() {
     let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", SHRINK_FIXTURE)], |root| {
         let file = root.join("src/lib.rs");
-        // `target` occupies 0-indexed lines 5..=14.
         MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 5, 14, file)])
     })
     .await;
+    let before = std::fs::read(dir.path().join("src/lib.rs")).unwrap();
+    for force in [None, Some(false)] {
+        let mut input = json!({
+            "path": "src/lib.rs", "symbol": "target", "action": "replace",
+            "body": "fn target() {\n    let first = compute_the_first_intermediate_value();\n}"
+        });
+        if let Some(force) = force {
+            input["force"] = json!(force);
+        }
+        let err = EditCode
+            .call(input, &ctx)
+            .await
+            .expect_err("a partial symbol body must be refused before writing")
+            .to_string();
+        assert!(
+            err.contains("shrink guard") && err.contains("target"),
+            "{err}"
+        );
+        assert!(
+            err.contains("10 → 3 lines"),
+            "must measure the symbol, not its file: {err}"
+        );
+        assert!(
+            err.contains("would reduce") && err.contains("force=true"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("src/lib.rs")).unwrap(),
+            before
+        );
+    }
+}
 
+#[tokio::test]
+async fn replace_force_allows_an_intentional_shrink_and_preserves_siblings() {
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", SHRINK_FIXTURE)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 5, 14, file)])
+    })
+    .await;
+    let body = "fn target() {\n    42\n}";
     let result = EditCode
         .call(
             json!({
-                "path": "src/lib.rs",
-                "symbol": "target",
-                "action": "replace",
-                // A partial body: the shape a caller produces after reading only
-                // the top of the function out of a grep window.
-                "body": "fn target() {\n    let first = compute_the_first_intermediate_value();\n}"
+                "path": "src/lib.rs", "symbol": "target", "action": "replace",
+                "body": body, "force": true
             }),
             &ctx,
         )
         .await
         .unwrap();
-
-    let warning = result
-        .get("warning")
-        .and_then(|w| w.as_str())
-        .unwrap_or_else(|| panic!("a 10 -> 3 line replace must warn; got: {result}"));
-
-    assert!(
-        warning.contains("shrink:"),
-        "the advisory must be identifiable as the shrink one — another warning \
-         sharing this key is not a pass. got: {warning}"
+    assert_eq!(result["status"], "ok");
+    let lines: Vec<_> = SHRINK_FIXTURE.lines().collect();
+    let expected = format!(
+        "{}\n{}\n{}\n",
+        lines[..5].join("\n"),
+        body,
+        lines[15..].join("\n")
     );
-    assert!(
-        warning.contains("10 → 3 lines"),
-        "the report must be scoped to the REPLACED RANGE (10 lines), not the whole \
-         file (20 lines) — a whole-file check is monotone under this defect for any \
-         symbol that is a small fraction of its file. got: {warning}"
-    );
-    assert!(
-        warning.contains("reduced"),
-        "past tense: the write already landed, and `would reduce` in a response whose \
-         status is `ok` reads as a refusal that did not happen. got: {warning}"
-    );
-    assert!(
-        warning.contains("target"),
-        "the advisory must name the symbol it is about. got: {warning}"
-    );
-
-    // The write still lands — this surface warns, it does not refuse.
-    let on_disk = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
-    assert!(
-        !on_disk.contains("persist_the_normalised_value"),
-        "replace must still apply; warning is advisory, not a refusal"
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+        expected
     );
 }
 
 #[tokio::test]
+async fn replace_force_never_bypasses_name_or_syntax_checks() {
+    for (body, expected) in [
+        (
+            "fn target() {\n    let broken = ;\n    42\n}",
+            "syntactically invalid",
+        ),
+        ("fn renamed() {\n    42\n}", "cannot rename"),
+        (
+            "    let result = 42;\n    result",
+            "dropped the symbol definition",
+        ),
+    ] {
+        let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", SHRINK_FIXTURE)], |root| {
+            let file = root.join("src/lib.rs");
+            MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 5, 14, file)])
+        })
+        .await;
+        let err = EditCode.call(json!({
+            "path":"src/lib.rs","symbol":"target","action":"replace","body":body,"force":true
+        }), &ctx).await.expect_err("force only bypasses the size guard").to_string();
+        assert!(err.contains(expected), "wrong corruption refusal: {err}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+            SHRINK_FIXTURE,
+            "a forced corrupting replacement must restore the original bytes"
+        );
+    }
+}
+
+#[tokio::test]
 async fn replace_stays_silent_when_the_new_body_is_proportionate() {
-    // The discriminator. Without it, `shrink_warns` above is satisfied by an
-    // unconditional warning, which would fire on every legitimate replace and
-    // teach callers to ignore the field.
+    // The allow control: an unconditional shrink refusal would block this
+    // legitimate replacement as well as the incomplete body above.
     let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", SHRINK_FIXTURE)], |root| {
         let file = root.join("src/lib.rs");
         MockLspClient::new().with_symbols(file.clone(), vec![sym("target", 5, 14, file)])

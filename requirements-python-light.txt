@@ -1,0 +1,2 @@
+# Test runner, including unittest subtests. CI uses Python 3.12.
+pytest>=9,<10

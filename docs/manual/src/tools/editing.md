@@ -43,6 +43,8 @@ something small that is not naturally symbol-scoped.
 |------|------|----------|---------|-------------|
 | `path` | string | yes | — | Destination path, relative to project root |
 | `content` | string | yes | — | Full content to write |
+| `overwrite` | boolean | no | `false` | Allow replacing an existing file |
+| `force` | boolean | no | `false` | Acknowledge a reduction of more than half the existing file’s bytes or lines (original at least 200 bytes); also requires `overwrite=true` |
 
 **Example:**
 
@@ -56,11 +58,7 @@ something small that is not naturally symbol-scoped.
 **Output:**
 
 ```json
-{
-  "status": "ok",
-  "path": "/home/user/project/src/util/helpers.rs",
-  "bytes": 58
-}
+"ok"
 ```
 
 **Tips:**

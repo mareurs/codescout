@@ -1,0 +1,4 @@
+-r requirements-python-light.txt
+# CPU wheels are sufficient; CI installs Torch from its CPU wheel index first.
+torch>=2,<3
+scikit-learn>=1.3,<2

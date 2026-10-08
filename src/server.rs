@@ -3376,24 +3376,14 @@ mod tests {
         ("edit_file", "src/tools/markdown/edit_markdown.rs"),
         ("memory", "src/memory/mod.rs"),
         ("edit_code", "src/tools/symbol/edit_code.rs"),
+        ("create_file", "src/tools/create_file.rs"),
     ];
 
     /// A content-bearing tool that deliberately runs no shrink guard, with the
     /// reason. Same shape as `tests/feature_lanes.rs`'s `EXEMPT` and for the same
     /// purpose: an escape hatch that must state its own justification, so the
     /// silent option is the one removed.
-    const EXEMPT: &[(&str, &str)] = &[(
-        "create_file",
-        "`overwrite: true` IS its guard. The tool refuses outright when the file exists and \
-         the flag is absent, so a caller reaching the destructive path has affirmatively \
-         declared intent — where `edit_code(action=\"replace\")` has no such opt-in and every \
-         replace is implicitly total, which is what makes a partial body there an accident. \
-         And `content` is by definition the whole file, with no prior structure it must match: \
-         regenerating a fixture as something entirely different is ordinary use, so a shrink \
-         advisory would fire on correct calls far more often than on mistaken ones. \
-         Mechanically it COULD be guarded — it stats the path already and one read would give \
-         it the operands — so the reason is that it should not be, not that it cannot be.",
-    )];
+    const EXEMPT: &[(&str, &str)] = &[];
 
     fn shrink_gate_repo_root() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -3428,10 +3418,9 @@ mod tests {
     /// it proves: it establishes that each surface's module CONTAINS a guard call,
     /// not that the call runs on the right operands or is even reachable. A guard
     /// handed the whole file instead of the replaced range satisfies this test.
-    /// That property is per-surface and belongs to the surface's own tests —
-    /// `replace_warns_when_the_new_body_is_less_than_half_the_symbol` and its
-    /// silent twin in `tests/symbol_lsp.rs` are `edit_code`'s, and they were driven
-    /// to an observed RED by exactly that mutation.
+    /// The runtime class gate below exercises every registered content writer;
+    /// edit_code's fixture measures a small symbol surrounded by many siblings.
+    /// Per-surface tests separately discriminate byte-only and line-only reductions.
     #[tokio::test]
     async fn every_content_bearing_tool_is_shrink_guarded_or_has_a_reason() {
         let (_dir, server) = make_server().await;
@@ -3476,6 +3465,165 @@ mod tests {
                  `shrink_guard::check` call. Either the guard was removed — in which case that \
                  surface silently accepts arbitrary deletion again — or the call moved and \
                  this entry needs repointing."
+            );
+        }
+    }
+
+    /// Inventory plus runtime evidence: every registered content writer needs a
+    /// fixture that refuses a shrink, permits a proportionate edit, and allows an
+    /// explicitly forced reduction. Future tools cannot inherit a textual claim.
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_content_bearing_tool_runs_its_shrink_guard_before_writing() {
+        use crate::lsp::{MockLspClient, MockLspProvider, SymbolInfo, SymbolKind};
+        use serde_json::json;
+
+        let (dir, server) = make_server().await;
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let mut ctx = crate::server::test_support::shared_ctx(&server);
+        let original = format!("# Probe\n\n{}", "original line\n".repeat(40));
+        let target = format!(
+            "fn target() {{\n{}    42\n}}",
+            "    let original_value = compute_a_long_intermediate_value();\n".repeat(6)
+        );
+        let rust_path = root.join("runtime.rs");
+        let siblings = (0..80)
+            .map(|i| format!("fn sibling_{i}() {{}}\n"))
+            .collect::<String>();
+        std::fs::write(&rust_path, format!("{siblings}{target}\n")).unwrap();
+        ctx.lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(
+            rust_path.clone(),
+            vec![SymbolInfo {
+                name: "target".into(),
+                name_path: "target".into(),
+                kind: SymbolKind::Function,
+                file: rust_path.clone(),
+                start_line: 80,
+                end_line: 88,
+                start_col: 0,
+                children: vec![],
+                range_start_line: None,
+                detail: None,
+            }],
+        ));
+
+        let population = content_bearing_tools(&server);
+        assert!(
+            population.len() >= 5,
+            "a truncated registry makes the runtime walk vacuous"
+        );
+        for name in population {
+            let tool = server.find_tool(&name).unwrap();
+            let (input, proportionate, backing_path) = match name.as_str() {
+                "create_file" => {
+                    let path = root.join("runtime.txt");
+                    std::fs::write(&path, &original).unwrap();
+                    (
+                        json!({"path":"runtime.txt","content":"tiny","overwrite":true}),
+                        json!({"path":"runtime.txt","content":original.replace("original", "modified"),"overwrite":true}),
+                        Some(path),
+                    )
+                }
+                "edit_file" => {
+                    let path = root.join("runtime.md");
+                    std::fs::write(&path, &original).unwrap();
+                    (
+                        json!({"path":"runtime.md","heading":"# Probe","action":"replace","body":"tiny"}),
+                        json!({"path":"runtime.md","heading":"# Probe","action":"replace","body":"modified line\n".repeat(40)}),
+                        Some(path),
+                    )
+                }
+                "edit_code" => (
+                    json!({"path":"runtime.rs","symbol":"target","action":"replace","body":"fn target() {\n    42\n}"}),
+                    json!({"path":"runtime.rs","symbol":"target","action":"replace","body":target.replace("original", "modified")}),
+                    Some(rust_path.clone()),
+                ),
+                "memory" => {
+                    tool.call(json!({"action":"write","topic":"runtime-probe","private":true,"content":original}), &ctx).await.unwrap();
+                    (
+                        json!({"action":"write","topic":"runtime-probe","private":true,"content":"tiny"}),
+                        json!({"action":"write","topic":"runtime-probe","private":true,"content":original.replace("original", "modified")}),
+                        None,
+                    )
+                }
+                "doc" => {
+                    let seeded = tool
+                        .call(
+                            json!({
+                                "action":"create","kind":"spec","title":"Runtime probe",
+                                "rel_path":"docs/runtime-probe.md","body":original
+                            }),
+                            &ctx,
+                        )
+                        .await
+                        .unwrap();
+                    let id = seeded["id"].as_str().expect("creation must return an id");
+                    (
+                        json!({"action":"update","id":id,"patch":{"body":"tiny"}}),
+                        json!({"action":"update","id":id,"patch":{"body":original.replace("original", "modified")}}),
+                        Some(root.join("docs/runtime-probe.md")),
+                    )
+                }
+                _ => panic!("content-bearing tool {name} has no runtime shrink fixture"),
+            };
+            let read_current = || async {
+                if let Some(path) = &backing_path {
+                    std::fs::read_to_string(path).unwrap()
+                } else {
+                    let read = tool
+                        .call(
+                            json!({"action":"read","topic":"runtime-probe","private":true}),
+                            &ctx,
+                        )
+                        .await
+                        .unwrap();
+                    read["content"].as_str().unwrap().to_string()
+                }
+            };
+            let before = read_current().await;
+            for force in [None, Some(false)] {
+                let mut refused = input.clone();
+                if let Some(force) = force {
+                    refused["force"] = json!(force);
+                }
+                let err = tool
+                    .call(refused, &ctx)
+                    .await
+                    .expect_err("shrink must be refused before writing")
+                    .to_string();
+                assert!(err.contains("shrink"), "{name}: wrong refusal: {err}");
+                if name == "edit_code" {
+                    assert!(
+                        err.contains("9 → 3 lines"),
+                        "{name}: guard measured the file instead of the symbol: {err}"
+                    );
+                }
+                assert_eq!(
+                    read_current().await,
+                    before,
+                    "{name}: refusal changed existing content"
+                );
+            }
+            tool.call(proportionate, &ctx)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: proportionate edit refused: {e}"));
+            assert!(
+                read_current().await.contains("modified"),
+                "{name}: allow control did not write"
+            );
+            let mut forced = input;
+            forced["force"] = json!(true);
+            tool.call(forced, &ctx)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: intentional reduction refused: {e}"));
+            let after = read_current().await;
+            assert!(
+                after.contains(if name == "edit_code" {
+                    "fn target() {\n    42\n}"
+                } else {
+                    "tiny"
+                }),
+                "{name}: forced write did not land"
             );
         }
     }
@@ -3666,14 +3814,14 @@ mod tests {
     #[test]
     fn description_declares_an_alias_matches_only_the_real_alias_prose() {
         assert!(description_declares_an_alias(
-                "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back."
-            ));
+            "Alias for path — pass a returned @tool_*/@cmd_*/@file_* buffer handle here to read it back."
+        ));
         assert!(description_declares_an_alias(
             "Substring or exact symbol name (alias of query)."
         ));
         assert!(!description_declares_an_alias(
-                "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted."
-            ));
+            "Native-Read-style alias: line count from offset (end_line = offset + limit - 1). offset defaults to line 1 if omitted."
+        ));
         assert!(!description_declares_an_alias(
             "For fix=rehome: absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface."
         ));
@@ -5306,8 +5454,15 @@ mod tests {
     /// the target's column, so a method plus a top-level class, both written at the left margin,
     /// nest the class inside the enclosing one. In Python that is still valid code, so nothing
     /// reports it: pytest silently collected 48 of 54 tests in the reported incident.
+    ///
+    /// **Ratcheted UP 2026-10-08, 57_150 → 57_491 (+341), for shrink refusal on
+    /// `edit_code(replace)` and `create_file(overwrite)`.** The report test measured
+    /// 57_713 before shortening the new descriptions, then 57_491. The bytes buy
+    /// two explicit `force` switches, their size thresholds, and the separate
+    /// overwrite requirement. Removing that guidance would hide how to acknowledge
+    /// an intentional reduction; both tools now refuse instead of silently writing.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_150;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_491;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
@@ -9993,9 +10148,9 @@ mod tests {
             .expect("run_command result should expose `stdout` as a string");
 
         assert!(
-        stdout.contains(&abs),
-        "run_command stdout must keep the absolute project path verbatim.\n  expected substring: {abs}\n  actual stdout: {stdout}"
-    );
+            stdout.contains(&abs),
+            "run_command stdout must keep the absolute project path verbatim.\n  expected substring: {abs}\n  actual stdout: {stdout}"
+        );
     }
 
     #[tokio::test]
@@ -12239,11 +12394,11 @@ mod guide_hint_tests {
             .await
             .unwrap();
         assert_eq!(
-                result.len(),
-                2,
-                "expected 2 content blocks on first librarian-topic call (primary + auto-injected guide section), got {}",
-                result.len()
-            );
+            result.len(),
+            2,
+            "expected 2 content blocks on first librarian-topic call (primary + auto-injected guide section), got {}",
+            result.len()
+        );
         let second = result[1].as_text().expect("second block must be text");
         assert!(
             second

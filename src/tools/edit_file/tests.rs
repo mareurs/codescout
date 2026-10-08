@@ -1323,6 +1323,86 @@ async fn create_file_overwrites_with_explicit_flag() {
     let contents = std::fs::read_to_string(&file).unwrap();
     assert_eq!(contents, "new content");
 }
+#[tokio::test]
+async fn create_file_refuses_overwrite_shrink_without_force() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("existing.txt");
+    let cases = [
+        ("x".repeat(400), "tiny".to_string(), "bytes"),
+        ("abcdefghijk\n".repeat(20), "y".repeat(250), "lines"),
+    ];
+    for (original, replacement, dimension) in cases {
+        std::fs::write(&file, &original).unwrap();
+        for force in [None, Some(false)] {
+            let mut input = json!({
+                "path": file.to_str().unwrap(), "content": replacement, "overwrite": true
+            });
+            if let Some(force) = force {
+                input["force"] = json!(force);
+            }
+            let err = CreateFile
+                .call(input, &ctx)
+                .await
+                .expect_err("overwrite=true must not authorise accidental shrink")
+                .to_string();
+            assert!(
+                err.contains("shrink guard") && err.contains("force=true"),
+                "{err}"
+            );
+            assert!(err.contains(dimension), "{err}");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        }
+    }
+}
+
+#[tokio::test]
+async fn create_file_force_allows_shrink_but_does_not_authorise_overwrite() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("existing.txt");
+    let original = "original content\n".repeat(30);
+    std::fs::write(&file, &original).unwrap();
+    let err = CreateFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(), "content": "tiny", "force": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("file already exists"), "{err}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    CreateFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(), "content": "tiny", "overwrite": true, "force": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "tiny");
+}
+
+#[tokio::test]
+async fn create_file_accepts_a_proportionate_overwrite_without_force() {
+    let (dir, ctx) = project_ctx().await;
+    let file = dir.path().join("existing.txt");
+    let original = "original content\n".repeat(30);
+    let replacement = "replacement content\n".repeat(30);
+    std::fs::write(&file, original).unwrap();
+    CreateFile
+        .call(
+            json!({
+                "path": file.to_str().unwrap(), "content": replacement, "overwrite": true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), replacement);
+}
 
 // ── Tree (glob mode) ─────────────────────────────────────────────────
 
@@ -3965,8 +4045,7 @@ fn guard_reads_a_trailing_comment_as_prose_but_still_catches_a_smuggled_definiti
     // The `//` is load-bearing: move it to the start of the line and the pre-existing
     // line-leading filter handles the case, and this asserts nothing new.
     let unchanged = "pub fn alpha() -> usize {\n    1\n}";
-    let commented =
-        "pub fn alpha() -> usize {\n    1 // this trailing comment mentions a fn but defines nothing\n}";
+    let commented = "pub fn alpha() -> usize {\n    1 // this trailing comment mentions a fn but defines nothing\n}";
     assert!(
         guard_structural_rewrite("subject.rs", unchanged, commented).is_ok(),
         "a keyword in a trailing comment is prose — the edit must be allowed"

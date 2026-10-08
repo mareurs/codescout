@@ -43,7 +43,12 @@ impl Tool for CreateFile {
                 "overwrite": {
                     "type": "boolean",
                     "default": false,
-                    "description": "If true, allow replacing an existing file. Default: false (create_file refuses to overwrite)."
+                    "description": "Allow replacing an existing file. Default false; large reductions also require force=true."
+                },
+                "force": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Allow a >50% byte or line reduction when the existing file is at least 200 bytes. Requires overwrite=true."
                 }
             }
         })
@@ -73,9 +78,20 @@ impl Tool for CreateFile {
             return Err(super::RecoverableError::with_hint(
                 format!("file already exists: {}", resolved.display()),
                 "Use edit_file to modify, or pass overwrite: true to replace. \
-                     create_file is for new files only.",
+                 create_file is for new files only.",
             )
             .into());
+        }
+        if overwrite && resolved.exists() && !super::parse_bool_param(&input["force"]) {
+            let original = std::fs::read_to_string(&resolved)?;
+            if let Some(report) = crate::util::shrink_guard::check(&original, content) {
+                return Err(super::RecoverableError::with_hint(
+                    format!("shrink guard: overwriting '{}' {}", path, report.describe()),
+                    "Read the existing file before replacing it. If the reduction is intentional, \
+                 repeat create_file(path=..., content=..., overwrite=true, force=true).",
+                )
+                .into());
+            }
         }
         crate::util::fs::write_utf8(&resolved, content)?;
         ctx.lsp.notify_file_changed(&resolved).await;

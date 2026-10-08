@@ -155,6 +155,8 @@ reaches `#[test]` code and `codescout-embed`'s feature-gated `local` module. CI 
 second.
 
 ```bash
+python3 -m pip install -r requirements-python-light.txt
+python3 scripts/python-tests.py --lane light
 cargo fmt
 cargo clippy -- -D warnings
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
@@ -178,6 +180,29 @@ Development Commands is authoritative**, and
 [`docs/conventions/gate-ordering.md`](docs/conventions/gate-ordering.md) carries the rationale for
 every command above — if
 the two ever disagree, this block is the bug.
+
+## Python Test Lanes
+
+Use `python3 scripts/python-tests.py --lane light` for the top-level `tests/test_*.py`
+suites without Torch or scikit-learn. It discovers new files automatically and reports the
+selected and excluded files. The local gate runs this lane before the four Rust commands;
+CI runs it in `python-light`.
+
+The three explicitly classified suites — `test_phase1b_step4.py`, `test_phase1b_step5.py`,
+and `test_phase1b_training.py` — need Torch and scikit-learn. Install their declared
+dependencies in a venv and run:
+
+```bash
+python3 -m venv .venv-python-tests
+.venv-python-tests/bin/python -m pip install -r requirements-python-heavy.txt
+.venv-python-tests/bin/python scripts/python-tests.py --lane heavy
+```
+
+CPU Torch is sufficient; CI's separate `python-heavy` job installs its CPU wheel first.
+`--lane all` runs both groups with the heavy dependencies. Every lane fails if a
+classified heavy file is missing, if its selected inventory is empty, or if pytest fails
+(including collection errors). Missing dependencies print an installation hint and fail.
+The runner disables pytest's cache and Python bytecode writes.
 
 ## What to Contribute
 

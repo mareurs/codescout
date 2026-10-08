@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the four-command gate in a `target/` LEASED for this run from a small pool, so the
+# Run the light Python lane and four Rust commands in a `target/` LEASED for this run, so the
 # lane cannot be corrupted by — or corrupt — another session sharing this checkout.
 #
 # WHY THIS EXISTS, and why ordering the lanes correctly is not enough.
@@ -48,14 +48,16 @@ if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
 gate.sh: CLAUDE_CODE_SESSION_ID is unset. Step 1, `fmt-mine.sh`, needs it to tell your
 files from a peer's, and outside a Claude session you are almost certainly the only writer
 to this checkout, which is the case the shared `target/` is already correct for. Run the
-four commands directly:
+light Python lane and four Rust commands directly:
 
+  python3 ./scripts/python-tests.py --lane light ; \
   ./scripts/fmt-mine.sh ; \
   cargo clippy --workspace --all-targets --features local-embed -- -D warnings ; \
   cargo test --workspace --no-default-features ; \
   cargo test --workspace
 
-Chain them with `;` and read the four exit codes. Never `&&`: `cargo test` builds THEN
+Install Python prerequisites with `python3 -m pip install -r requirements-python-light.txt`.
+Chain them with `;` and read all five exit codes. Never `&&`: `cargo test` builds THEN
 runs, so a failing lean lane has already overwritten target/debug/codescout by the time
 anything can fail, and `&&` would then skip the default lane that repairs it.
 EOF
@@ -102,6 +104,10 @@ echo
 # the tokenizer files and unset this.
 export CODESCOUT_SKIP_ONNX_TESTS="${CODESCOUT_SKIP_ONNX_TESTS:-1}"
 
+# Run Python first so the default Cargo lane still finishes last, even if Python fails.
+python3 ./scripts/python-tests.py --lane light
+PYTHON_LIGHT=$?
+
 # `;` throughout, never `&&` — see the heredoc above. The default lane does two jobs,
 # reporting AND rebuilding, and only the first should ever be short-circuited.
 ./scripts/fmt-mine.sh
@@ -116,12 +122,14 @@ DEFAULT=$?
 echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
 [ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
+echo "PYTHON LIGHT EXIT -> PYTHON_LIGHT=$PYTHON_LIGHT"
 echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT"
 
 # What a green run here does NOT cover. Printed every time because this output is what a
 # session reads when it decides "green". Pinned by gate_script_prints_what_green_does_not_cover
 # (src/prompts/mod.rs), which reads these echo lines.
 echo "gate.sh: green here does not cover:"
+echo "  - the three heavy Python suites: install requirements-python-heavy.txt and run python3 scripts/python-tests.py --lane heavy (CI job python-heavy)"
 echo "  - server-stack, which cargo rb ships and no lane compiles: read CI job test-server-stack (kept alive by every_declared_feature_has_a_lane_or_a_reason)"
 echo "  - librarian code in LEAN: the librarian is off there, so only DEFAULT runs its tests"
 if [ "$CODESCOUT_SKIP_ONNX_TESTS" = 1 ]; then
@@ -145,7 +153,7 @@ other three codes are unaffected either way.
 EOF
 fi
 
-# Exit non-zero if ANY lane failed. The four codes above are the real report — this
+# Exit non-zero if ANY lane failed. The five codes above are the real report — this
 # status exists so a caller that checks `$?` is not told everything passed, which is
 # exactly what a trailing `echo` does to a `;`-chained sequence.
-[ "$FMT" -eq 0 ] && [ "$CLIPPY" -eq 0 ] && [ "$LEAN" -eq 0 ] && [ "$DEFAULT" -eq 0 ]
+[ "$PYTHON_LIGHT" -eq 0 ] && [ "$FMT" -eq 0 ] && [ "$CLIPPY" -eq 0 ] && [ "$LEAN" -eq 0 ] && [ "$DEFAULT" -eq 0 ]

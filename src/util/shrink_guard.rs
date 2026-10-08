@@ -84,10 +84,8 @@ impl ShrinkReport {
     /// The applied-write twin of [`ShrinkReport::describe`], for a surface that
     /// WARNS after the write instead of refusing before it.
     ///
-    /// `edit_code(action="replace")` is that surface. It does not refuse and has
-    /// no `force` escape, because a legitimate refactor collapsing a long
-    /// function into a short one is byte-identical to an accidental partial
-    /// body — so refusing would block the first to catch the second.
+    /// `edit_code(action="replace", force=true)` uses this after an explicitly
+    /// acknowledged shrink. The ordinary replacement refuses before writing.
     ///
     /// The tense is the entire reason this exists rather than a second caller of
     /// [`ShrinkReport::describe`]. "would reduce" inside a response whose
@@ -147,10 +145,12 @@ pub fn check(original: &str, new: &str) -> Option<ShrinkReport> {
     Some(ShrinkReport {
         old_bytes: original.len(),
         new_bytes: new.len(),
-        byte_pct: 100 - (new.len() * 100 / original.len().max(1)),
+        // Either dimension may grow while the other triggers the guard.
+        // Growth loses zero percent; unsigned subtraction must not panic.
+        byte_pct: 100usize.saturating_sub(new.len() * 100 / original.len().max(1)),
         old_lines,
         new_lines,
-        line_pct: 100 - (new_lines * 100 / old_lines.max(1)),
+        line_pct: 100usize.saturating_sub(new_lines * 100 / old_lines.max(1)),
         dimension,
     })
 }
@@ -218,6 +218,51 @@ mod tests {
         // rather than the true 99.3%. Overstating a loss is the safe direction
         // for a warning; understating it would be the bug.
         assert_eq!(r.byte_pct, 100);
+    }
+
+    #[test]
+    fn reports_zero_loss_when_the_other_dimension_grows() {
+        for (
+            original,
+            new,
+            dimension,
+            old_bytes,
+            new_bytes,
+            old_lines,
+            new_lines,
+            byte_pct,
+            line_pct,
+        ) in [
+            (
+                "x".repeat(600),
+                "x\n".repeat(20),
+                ShrinkDimension::Bytes,
+                600,
+                40,
+                1,
+                20,
+                94,
+                0,
+            ),
+            (
+                "abcdefghijk\n".repeat(20),
+                "y".repeat(250),
+                ShrinkDimension::Lines,
+                240,
+                250,
+                20,
+                1,
+                0,
+                95,
+            ),
+        ] {
+            let report =
+                check(&original, &new).expect("one shrinking dimension must trigger the guard");
+            assert_eq!(report.dimension, dimension);
+            assert_eq!((report.old_bytes, report.new_bytes), (old_bytes, new_bytes));
+            assert_eq!((report.old_lines, report.new_lines), (old_lines, new_lines));
+            assert_eq!((report.byte_pct, report.line_pct), (byte_pct, line_pct));
+        }
     }
 
     #[test]

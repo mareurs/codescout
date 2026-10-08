@@ -733,7 +733,7 @@ async fn a_write_inside_the_read_window_is_repaired_by_the_next_handle_read() {
 /// The read-start mtime is taken BEFORE the text is read. A write landing between the two is
 /// one the reader cannot place: it may have read the text before or after it. So its entry must
 /// be stamped below the file's mtime, and the next read of the handle re-reads the file (and
-/// reports it). An mtime taken AFTER the read equals the file's and leaves nothing to re-check;
+/// reports a notice only if bytes differ). An mtime taken AFTER the read equals the file's and leaves nothing to re-check;
 /// when the write lands between the read and that late stat, the old text stays for good.
 /// Review M: mutants M12/M17 (stat moved after the read) survived while the only hook fired after
 /// the read, where both orders look alike; this one fires between the stat and the read.
@@ -773,15 +773,21 @@ async fn a_write_between_the_stat_and_the_read_leaves_the_handle_to_re_check() {
             .as_str()
             .unwrap()
             .to_string();
-        let (entry, refreshed) = ctx.output_buffer.get_with_refresh_flag(&h).unwrap();
+        // Keep the post-hook mtime fixed while changing disk bytes. The pre-read
+        // stamp must still force a re-read; a late-stat stamp equals this mtime and
+        // incorrectly keeps v2. Checking a notice on identical v2 bytes cannot
+        // establish re-reading now that notices require a real content change.
+        let post_hook_mtime =
+            filetime::FileTime::from_last_modification_time(&std::fs::metadata(&p).unwrap());
+        let v3 = body("v3");
+        std::fs::write(&p, &v3).unwrap();
+        filetime::set_file_mtime(&p, post_hook_mtime).unwrap();
+        let (entry, changed) = ctx.output_buffer.get_with_refresh_flag(&h).unwrap();
         assert_eq!(
-            entry.stdout, v2,
-            "{name}: fixture: the reader read after the write"
+            entry.stdout, v3,
+            "{name}: a late-stat stamp hid the intervening edit"
         );
-        assert!(
-            refreshed,
-            "{name}: the entry was stamped with an mtime taken after the read, so nothing re-checks it"
-        );
+        assert!(changed, "{name}: the re-read did not report changed bytes");
     }
 }
 

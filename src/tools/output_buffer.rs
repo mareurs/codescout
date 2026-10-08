@@ -304,10 +304,10 @@ struct BufferInner {
     /// Content-hash → handle id, for `@tool_*` dedup. Kept in sync with
     /// `entries` by `evict_oldest_locked`.
     content_index: HashMap<String, String>,
-    /// `@file_*` handles whose content a whole-file store CHANGED in place (a path read of a
-    /// file that had changed) since the handle last reported a refresh. The disk check in
-    /// `get_with_refresh_flag` cannot see such a change: the store already stamped the entry
-    /// with the file's mtime. Consumed by `get_with_refresh_flag` only, so the next read that
+    /// `@file_*` handles whose content changed in a whole-file store or disk refresh
+    /// since the handle last reported it. Even a silent `get` records a disk change:
+    /// a later mtime check cannot see it after the refresh advances the read stamp.
+    /// Consumed by `get_with_refresh_flag` only, so the next read that
     /// can tell a holder (`resolve_refs`: `↻ <handle> refreshed from disk`) does, once; a
     /// plain `get()` leaves it in place. Cleared on eviction.
     refresh_pending: std::collections::HashSet<String>,
@@ -533,7 +533,7 @@ impl OutputBuffer {
     }
 
     /// Shared body of [`get`] and [`get_with_refresh_flag`]: resolve `id`, refresh a stale
-    /// whole-file entry from disk, bump LRU. `report` says whether a pending in-place change is
+    /// whole-file entry from disk, bump LRU. `report` says whether a pending content change is
     /// consumed and reported.
     fn resolve(&self, id: &str, report: bool) -> Option<(BufferEntry, bool)> {
         let canonical = id.strip_suffix(".err").unwrap_or(id);
@@ -568,15 +568,21 @@ impl OutputBuffer {
         } else {
             None
         };
-        let needs_refresh = stale_at.is_some();
 
         if let Some(observed) = stale_at {
             let path = inner.entries[canonical].source_path.clone().unwrap();
             match std::fs::read_to_string(&path) {
                 Ok(content) => {
-                    if let Some(entry) = inner.entries.get_mut(canonical) {
+                    let changed_on_disk = if let Some(entry) = inner.entries.get_mut(canonical) {
+                        let changed = entry.stdout != content;
                         entry.stdout = content;
                         entry.timestamp = capped_stamp(Some(observed), now_ms());
+                        changed
+                    } else {
+                        false
+                    };
+                    if changed_on_disk {
+                        inner.refresh_pending.insert(canonical.to_string());
                     }
                 }
                 Err(_) => {
@@ -589,7 +595,7 @@ impl OutputBuffer {
                 }
             }
         }
-        let changed_in_place = report && inner.refresh_pending.remove(canonical);
+        let content_changed = report && inner.refresh_pending.remove(canonical);
 
         // Refresh LRU order: move to end.
         Self::bump_lru_locked(&mut inner, canonical);
@@ -597,7 +603,7 @@ impl OutputBuffer {
             .entries
             .get(canonical)
             .cloned()
-            .map(|e| (e, needs_refresh || changed_in_place))
+            .map(|e| (e, content_changed))
     }
 
     /// Store a file's WHOLE content under its ONE `@file_*` handle, for a caller that does
@@ -3088,6 +3094,110 @@ mod tests {
         let (_, second) = buf.get_with_refresh_flag(&h).unwrap();
         assert!(!second, "the notice was reported twice");
     }
+
+    #[test]
+    fn refresh_notice_ignores_identical_bytes_and_advances_the_read_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("unchanged.txt");
+        let old = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+        let newer = filetime::FileTime::from_unix_time(1_700_000_050, 0);
+        std::fs::write(&p, "same bytes\n").unwrap();
+        filetime::set_file_mtime(&p, old).unwrap();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&p.to_string_lossy(), "same bytes\n", file_mtime_ms(&p));
+        // A git operation may recreate a dirty file without changing its bytes.
+        std::fs::write(&p, "same bytes\n").unwrap();
+        filetime::set_file_mtime(&p, newer).unwrap();
+        let (entry, changed) = buf.get_with_refresh_flag(&h).unwrap();
+        assert_eq!(entry.stdout, "same bytes\n");
+        assert_eq!(entry.timestamp, 1_700_000_050_000);
+        assert!(!changed, "an mtime-only rewrite is not a content change");
+        assert!(!buf.get_with_refresh_flag(&h).unwrap().1);
+        std::fs::write(&p, "real edit\n").unwrap();
+        filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_700_000_100, 0)).unwrap();
+        let (entry, changed) = buf.get_with_refresh_flag(&h).unwrap();
+        assert_eq!(entry.stdout, "real edit\n");
+        assert!(changed, "a later edit must still be detected");
+        assert!(!buf.get_with_refresh_flag(&h).unwrap().1);
+    }
+
+    #[test]
+    fn refresh_notice_survives_a_silent_disk_refresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("silent.txt");
+        std::fs::write(&p, "old").unwrap();
+        filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_700_000_000, 0)).unwrap();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&p.to_string_lossy(), "old", file_mtime_ms(&p));
+        std::fs::write(&p, "changed").unwrap();
+        filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_700_000_050, 0)).unwrap();
+        assert_eq!(buf.get(&h).unwrap().stdout, "changed");
+        assert_eq!(buf.get_stream(&h).as_deref(), Some("changed"));
+        assert!(
+            buf.get_with_refresh_flag(&h).unwrap().1,
+            "silent reads swallowed a content-change notice"
+        );
+        assert!(
+            !buf.get_with_refresh_flag(&h).unwrap().1,
+            "notice reported twice"
+        );
+    }
+
+    #[test]
+    fn refresh_notice_preserves_a_pending_store_change_after_identical_disk_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("pending.txt");
+        std::fs::write(&p, "old").unwrap();
+        filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_700_000_000, 0)).unwrap();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&p.to_string_lossy(), "old", file_mtime_ms(&p));
+        std::fs::write(&p, "changed").unwrap();
+        filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_700_000_050, 0)).unwrap();
+        assert_eq!(
+            buf.store_file_read(&p.to_string_lossy(), "changed", file_mtime_ms(&p)),
+            h
+        );
+        std::fs::write(&p, "changed").unwrap();
+        filetime::set_file_mtime(&p, filetime::FileTime::from_unix_time(1_700_000_100, 0)).unwrap();
+        assert_eq!(buf.get_stream(&h).as_deref(), Some("changed"));
+        assert!(
+            buf.get_with_refresh_flag(&h).unwrap().1,
+            "the unchanged re-read cleared a real pending change"
+        );
+        assert!(!buf.get_with_refresh_flag(&h).unwrap().1);
+    }
+
+    #[test]
+    fn refresh_notice_does_not_repeat_for_an_unchanged_future_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("future-notice.txt");
+        std::fs::write(&p, "same").unwrap();
+        let future = filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() + std::time::Duration::from_secs(86_400),
+        );
+        filetime::set_file_mtime(&p, future).unwrap();
+        let buf = OutputBuffer::new(10);
+        let h = buf.store_file_read(&p.to_string_lossy(), "same", file_mtime_ms(&p));
+        for _ in 0..3 {
+            let (entry, changed) = buf.get_with_refresh_flag(&h).unwrap();
+            assert_eq!(entry.stdout, "same");
+            assert!(
+                entry.timestamp < file_mtime_ms(&p).unwrap(),
+                "future mtime must stay capped"
+            );
+            assert!(
+                !changed,
+                "unchanged bytes under a future mtime must stay silent"
+            );
+        }
+        std::fs::write(&p, "edited").unwrap();
+        filetime::set_file_mtime(&p, future).unwrap();
+        let (entry, changed) = buf.get_with_refresh_flag(&h).unwrap();
+        assert_eq!(entry.stdout, "edited");
+        assert!(changed);
+        assert!(!buf.get_with_refresh_flag(&h).unwrap().1);
+    }
+
     /// A refresh in `get_with_refresh_flag` is stamped with the mtime it observed before
     /// re-reading, not with the clock. A write whose mtime falls between the two (one landing
     /// during the re-read, or a file restored to a time before the refresh) must still be

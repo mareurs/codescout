@@ -157,7 +157,7 @@ impl Tool for EditCode {
                     "type": "string",
                     "description": format!(
                         "{} 'replace': the new symbol body. 'insert': the code to inject. \
-                     Not read by 'rename' or 'remove'.",
+             Not read by 'rename' or 'remove'.",
                         required_for(BODY_REQUIRED_ACTIONS)
                     )
                 },
@@ -174,6 +174,11 @@ impl Tool for EditCode {
                 "reindent": {
                     "type": "boolean",
                     "description": "replace and insert only, default true. false splices the body exactly as written, with no re-base onto the symbol's column, for a body that mixes levels (a method plus a top-level class)."
+                },
+                "force": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "replace only: allow a >50% byte or line reduction of a symbol range of at least 200 bytes. Other corruption checks still apply."
                 },
                 "at_line": {
                     "type": "integer",
@@ -234,8 +239,8 @@ impl Tool for EditCode {
             "symbol",
             &["name_path"],
             "Name the symbol, e.g. symbol=\"MyStruct/my_method\" for a method or \
-             symbol=\"my_fn\" for a free function. `name_path` is accepted as an alias \
-             (that is symbols()' name for the same address).",
+         symbol=\"my_fn\" for a free function. `name_path` is accepted as an alias \
+         (that is symbols()' name for the same address).",
         )?;
         let rel_path = require_path_param(&input)?;
         // `action` indexes a different enum per tool, so the shared table has no entry.
@@ -246,8 +251,8 @@ impl Tool for EditCode {
             "action",
             &[],
             "Pass the operation, e.g. action=\"replace\". One of: rename, remove, replace, \
-         insert. `replace` and `insert` also require `body`; `rename` also requires \
-         `new_name`.",
+     insert. `replace` and `insert` also require `body`; `rename` also requires \
+     `new_name`.",
         )?;
         // Optional tie-breaker for two symbols whose name_paths are byte-identical
         // (two inherent impl blocks for one type, two #[cfg]-gated definitions).
@@ -315,6 +320,7 @@ impl Tool for EditCode {
                         attributes.as_deref(),
                         at_line,
                         reindent,
+                        crate::tools::parse_bool_param(&input["force"]),
                     )
                     .await?;
                 result["hint"] = json!(format!(
@@ -1133,6 +1139,9 @@ impl EditCode {
     // Eight arguments with `reindent`. The caller's options (`at_line`, `attributes`,
     // `reindent`) are independent per-call choices that arrive together from `call()`; a
     // bundle struct would be used by exactly these two methods and read no better.
+    // Nine arguments with `reindent` and `force`. The caller's options (`at_line`, `attributes`,
+    // `reindent`, `force`) are independent per-call choices that arrive together from `call()`; a
+    // bundle struct would be used by exactly these two methods and read no better.
     #[allow(clippy::too_many_arguments)]
     async fn do_replace(
         &self,
@@ -1143,6 +1152,7 @@ impl EditCode {
         attributes: Option<&[String]>,
         at_line: Option<u32>,
         reindent: bool,
+        force: bool,
     ) -> anyhow::Result<Value> {
         let full_path =
             resolve_write_path_for(&ctx.agent, ctx.workspace_override.as_deref(), rel_path).await?;
@@ -1328,13 +1338,24 @@ impl EditCode {
         // its file — which is most of them — so it would pass on exactly the writes
         // worth catching.
         //
-        // It warns rather than refuses, and there is deliberately no `force` to
-        // escape: a refactor that legitimately collapses a long function into a short
-        // one is byte-identical to the defect, so refusing would block the first in
-        // order to catch the second. See `ShrinkReport::describe_applied` for why the
-        // warning is past tense.
+        // Refuse before writing; `force` acknowledges an intentional reduction.
+        // It bypasses only this size guard, never the corruption checks below.
         let shrink =
             crate::util::shrink_guard::check(&lines[start..end].join("\n"), &effective_body);
+
+        if let Some(report) = shrink.as_ref().filter(|_| !force) {
+            return Err(RecoverableError::with_hint(
+                format!(
+                    "shrink guard: replacing '{}' {}",
+                    sym.name,
+                    report.describe()
+                ),
+                "Re-read the complete declaration with symbols(include_body=true). \
+                 If the reduction is intentional, repeat edit_code(action=\"replace\", \
+                 symbol=..., path=..., body=..., force=true).",
+            )
+            .into());
+        }
 
         let mut new_lines = Vec::new();
         new_lines.extend_from_slice(&lines[..start]);
@@ -1376,11 +1397,11 @@ impl EditCode {
             match &verdict {
                 CorruptionVerdict::TargetRenamed(new_name) => Some((
                     format!(
-                    "edit_code replace('{name_path}') was given a complete declaration, but it \
+                        "edit_code replace('{name_path}') was given a complete declaration, but it \
                      declares `{new_name}` instead of `{name_path}`. `replace` cannot rename — \
                      applying this would have removed `{name_path}` and added a different \
                      symbol. File restored."
-                ),
+                    ),
                     "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
                  replace the body in a second call if it also changed. To replace only the \
                  body, keep the declared name identical to `symbol`.",
@@ -1438,9 +1459,7 @@ impl EditCode {
         }
         if let Some(report) = shrink {
             warnings.push(format!(
-                "shrink: the replace of '{}' {}. If you supplied a partial body — having \
-                 read only part of the symbol — the remainder is gone. Re-read it with \
-                 symbols(name_path=..., include_body=true) and replace again.",
+                "shrink: forced replace of '{}' {}.",
                 sym.name,
                 report.describe_applied()
             ));
