@@ -310,18 +310,44 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     // Navigation params this buffer ref cannot honor must fail loudly, not be
     // silently ignored (which masks caller misuse). `toml_key` is never valid
     // on a buffer (buffers are not TOML files); `json_path` is only meaningful
-    // for @tool_* JSON refs — @cmd_*/@file_* buffers are raw text.
+    // for @tool_* JSON refs — @cmd_*/@file_* buffers are raw text. A `@file_*` ref that
+    // holds a REAL file (it has a `source_path`) is named back to that file, where both
+    // parameters work: the route its hint gives is the file's path, not the ref.
+    let real_file_route = |nav: &str| -> Option<String> {
+        if !path.starts_with("@file_") {
+            return None;
+        }
+        let source = ctx.output_buffer.get(path)?.source_path?;
+        let value = input[nav].as_str()?;
+        let source = source.display();
+        Some(if value.len() <= INPUT_ECHO_CLIP {
+            let literal = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
+            format!(
+                "{path} holds the real file {source}. Read the value on the file's path: \
+                 read_file(\"{source}\", {nav}={literal})."
+            )
+        } else {
+            format!(
+                "{path} holds the real file {source}. Call read_file on {source} with the \
+                 {nav} you passed."
+            )
+        })
+    };
     if input["toml_key"].as_str().is_some() {
         return Err(RecoverableError::with_hint(
             format!("toml_key is not supported on buffer refs (got '{path}')"),
-            "Buffer refs are not TOML files. Slice with start_line/end_line, or grep the ref, e.g. run_command(\"grep pattern @ref\").",
+            real_file_route("toml_key").unwrap_or_else(|| {
+                "Buffer refs are not TOML files. Slice with start_line/end_line, or grep the ref, e.g. run_command(\"grep pattern @ref\").".to_string()
+            }),
         )
         .into());
     }
     if input["json_path"].as_str().is_some() && !path.starts_with("@tool_") {
         return Err(RecoverableError::with_hint(
             format!("json_path is only supported on @tool_* refs, not '{path}'"),
-            "@cmd_*/@file_* buffers are raw text. Slice with start_line/end_line, or grep the ref.",
+            real_file_route("json_path").unwrap_or_else(|| {
+                "@cmd_*/@file_* buffers are raw text. Slice with start_line/end_line, or grep the ref.".to_string()
+            }),
         )
         .into());
     }
@@ -441,10 +467,10 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
 /// [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room is replaced by `prose`, the same continuation in words.
 ///
 /// `droppable` keys of `keys` have no length of their own (a `toml_key` read's `siblings` and
-/// `breadcrumb`). Each, in order, rides in the skeleton and is dropped, marked `<key>_omitted`,
-/// by the rule [`page_beside_coverage`] applies to `coverage`: when the skeleton with it is over
-/// the limit by itself, or when it would cost the page its first line whole and the line shows
-/// whole without it.
+/// `breadcrumb`). They ride in the skeleton and are dropped, each marked `<key>_omitted`, by the
+/// rule [`page_beside_coverage`] applies to `coverage`, judged for the keys TOGETHER and always
+/// in the order given: the fewest that bring the skeleton within the limit, then the fewest more
+/// that show the page's first line whole, when some number of them does.
 #[allow(clippy::too_many_arguments)]
 fn page_of_text(
     text: &str,
@@ -522,26 +548,38 @@ fn page_of_text(
         price_continuation(&skeleton, route, prose, widest_next.0, widest_next.1)
     };
 
-    let mut keys = keys.clone();
-    for key in droppable {
-        if keys.get(*key).is_none() {
-            continue;
-        }
-        let (with, _) = price(&keys);
-        let over_alone = !crate::tools::response_fits(&with);
-        if over_alone || buffer_page(&body, crate::tools::response_room(&with)).3 {
-            let mut without = keys.clone();
-            if let Some(obj) = without.as_object_mut() {
+    // The droppable keys this page carries, in the order they go, and `keys` with the first `n`
+    // of them dropped and marked. Dropped as a PREFIX of that order: the fewest that bring the
+    // skeleton within the limit, then, if the first line is still cut, the fewest more that show
+    // it whole (none, if no prefix does). Judged one key at a time, two keys that only together
+    // cost the first line were both kept and the line cut.
+    let present: Vec<&str> = droppable
+        .iter()
+        .copied()
+        .filter(|k| keys.get(*k).is_some())
+        .collect();
+    let without = |n: usize| -> Value {
+        let mut lean = keys.clone();
+        if let Some(obj) = lean.as_object_mut() {
+            for key in &present[..n] {
                 obj.remove(*key);
                 obj.insert(format!("{key}_omitted"), json!(true));
             }
-            let (lean, _) = price(&without);
-            if over_alone || !buffer_page(&body, crate::tools::response_room(&lean)).3 {
-                keys = without;
-            }
+        }
+        lean
+    };
+    let cuts_first_line =
+        |k: &Value| buffer_page(&body, crate::tools::response_room(&price(k).0)).3;
+    let mut n = 0;
+    while n < present.len() && !crate::tools::response_fits(&price(&without(n)).0) {
+        n += 1;
+    }
+    if n < present.len() && cuts_first_line(&without(n)) {
+        if let Some(m) = (n + 1..=present.len()).find(|&m| !cuts_first_line(&without(m))) {
+            n = m;
         }
     }
-
+    let keys = without(n);
     let (widest, continuation) = price(&keys);
     let (chunk, lines_shown, complete, line_truncated) =
         buffer_page(&body, crate::tools::response_room(&widest));
@@ -1090,10 +1128,12 @@ fn read_json_path_nav(
 /// parse is re-serialized), so it has no numbers in the file to state them in. A range beside
 /// `nav` slices those lines, as it does beside `json_path` on a `@tool_*` ref.
 ///
-/// The value is a pure function of the file's bytes and the key, so each page re-reads and
-/// re-parses the file and numbers the same value the same way. A file that changes between two
-/// pages renumbers the value, exactly as a changed buffer would renumber a `@tool_*` value;
-/// nothing tracks it.
+/// The value is a pure function of the file's bytes and the key, and it is recomputed from the
+/// file on EVERY page: nothing is kept between pages. A file that changes between two pages
+/// therefore makes the pages mix two versions of the value. Inserting 10 lines at the top of the
+/// value between two pages made page 2 start 10 lines before where page 1 ended, and the only
+/// signal is `total_lines` moving (600, then 610). Plain range pages of a real file have the same
+/// property. Nothing tracks it.
 ///
 /// It used to be stored as a snapshot under a `@file_*` handle beside the file's own and
 /// browsed by line range there: a second handle for one file. Decided on the response it would

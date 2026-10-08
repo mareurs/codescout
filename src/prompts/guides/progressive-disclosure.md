@@ -55,8 +55,9 @@ The envelope's `hint` is the tool's guess at where the payload is: usually the l
 any element type (`$.key[*]`); `read_file` and `memory` name their `content` string, and a
 librarian result names its long text field (`markdown`, `body`) when its only arrays are id lists.
 With none of these it is the placeholder `$.field` — **not a key**; a wrong path's error lists the
-real ones. `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw text, so use
-`grep`, `jq` or line ranges. A line wider than the inline budget is shown clipped and marked, and
+real ones. Among buffers, `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw
+text, so use `grep`, `jq` or line ranges. On a real JSON file, pass `json_path` with the file's
+path. A line wider than the inline budget is shown clipped and marked, and
 `sed -n` or plain `grep` cannot page inside it: print the part you need with
 `grep -o 'PATTERN[^,]*'`.
 
@@ -65,11 +66,11 @@ real ones. `json_path` addresses `@tool_*` only; `@cmd_*` and `@file_*` are raw 
 lines. A `json_path` value that is larger than one page is paged on the same ref: add
 `start_line` and `end_line`, for example `read_file("@tool_xyz", json_path="$.foo", start_line=N,
 end_line=M)`. The line numbers are the value's own. A `json_path` or `toml_key` value of a real
-file is paged on the file's path the same way, with no handle. `next` repeats the path, the key and
-the value's line numbers. A real file keeps one `@file_*` handle for
-every read of it (whole, range or markdown section) for as long as the pool holds it. When the file
-changes, the handle follows it. The first `run_command` that reads the handle then reports
-`↻ … refreshed from disk`.
+file is paged on the file's path the same way, with no handle. `next` repeats the path and the
+value's line numbers, and the key too unless it is very long. A real file keeps one `@file_*`
+handle for every read of it (whole, range or markdown section) for as long as the pool holds it.
+When the file changes, the handle follows it. The first `run_command` that reads the handle then
+reports `↻ … refreshed from disk`.
 
 A `run_command` result keeps its `@cmd_*` handle: a long stream in its summary is cut to
 `N of M bytes shown` (stderr: `.err`), and an oversized envelope is clipped to fit. An
