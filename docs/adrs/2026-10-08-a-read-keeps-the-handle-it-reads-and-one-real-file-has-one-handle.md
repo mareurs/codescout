@@ -153,7 +153,10 @@ Eighteen commits on `experiments`, merged from two branches. Patch-ids (`git pat
 ## Evidence
 
 Measured on the merged tip and on baseline `38265405` by an independent reviewer, in-process through
-`ReadFile.call` and `call_content`, pool of 50:
+`ReadFile.call` and `call_content`, pool of 50. A live probe on the rebuilt binary on 2026-10-08 agreed (a
+file read twice gave one handle; a wide buffer line read twice gave none; a `json_path` value paged with a
+working `Next:`; an edited file kept its handle and told its holder once). The calls are in the bug record
+(`docs/issues/archive/2026-10-08-a-read-of-a-buffer-made-another-buffer-and-one-real-file-had-many-handles.md`):
 
 | Case | Baseline | Merged |
 |---|---|---|

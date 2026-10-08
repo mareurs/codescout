@@ -83,4 +83,4 @@ creates a handle for a command over a buffer.
 ## References
 
 - `docs/adrs/2026-10-08-a-read-keeps-the-handle-it-reads-and-one-real-file-has-one-handle.md`
-- `docs/issues/2026-10-08-a-read-of-a-buffer-made-another-buffer-and-one-real-file-had-many-handles.md`
+- `docs/issues/archive/2026-10-08-a-read-of-a-buffer-made-another-buffer-and-one-real-file-had-many-handles.md`

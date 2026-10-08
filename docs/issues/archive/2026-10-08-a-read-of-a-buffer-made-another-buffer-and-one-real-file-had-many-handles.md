@@ -1,5 +1,5 @@
 ---
-id: d60740c08ab80380
+id: 5deb547504115de9
 kind: bug
 status: fixed
 title: 'BUG: a read of a buffer made another buffer on every call, and one real file had a new handle per read'
@@ -17,7 +17,7 @@ related:
 - docs/adrs/2026-10-05-a-result-keeps-the-one-handle-its-tool-gave-it.md
 - docs/issues/archive/2026-10-06-sibling-sweep-the-byte-bound-defect-recurred-across-tools.md
 severity: medium
-unverified: 'Not landed on experiments and not probed on a rebuilt binary: every figure above comes from in-process tests through ReadFile.call and call_content, not from the live MCP server. Mutation counts were reported by the fixing agents and reviewers. The pool has no byte budget (section Still open).'
+unverified: 'CLEARED 2026-10-08. Was: not landed on experiments and not probed on a rebuilt binary. Landed as a fast-forward to a2871af0 and probed live on the rebuilt binary the same day (section Fix provenance). What the live probe did not reach is listed there and in Still open.'
 ---
 
 # BUG: a read of a buffer made another buffer on every call, and one real file had a new handle per read
@@ -109,6 +109,38 @@ Eighteen commits, two branches merged, listed with their patch-ids in the ADR (s
   with the pre-read mtime capped at the clock, and marks the change for the holder.
 - `read_markdown` reuses the file's handle for ranges and sections through `whole_text_handle`.
 
+## Fix provenance
+
+- **SHA:** `e62f14446f293d87cf44f6f3ad01c9fd51c2b7bd` (`experiments`)
+- **patch-id:** `8898abac7ab0669fc3348a18aa0e4e1b7812da7b`
+
+That commit is the one that stopped `read_from_buffer` from minting. It is the anchor of a series: the other
+seventeen code commits and their patch-ids are in the ADR, section Built.
+
+Landed on `experiments` as a fast-forward to `a2871af0` on 2026-10-08, after a gate on that exact tip:
+`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, 86 `test result:` lines, 0 FAILED. Nothing is pushed by this session
+(`origin/experiments` was `e0bdad97`). The eighteen code commits and their patch-ids are in the ADR, section
+Built; the docs commit is `d37cf5ff`. The catalog rows made in the worktree were folded with
+`librarian(action="merge_worktree")` before the worktree was removed (4 merged, 3 reseated, no conflicts).
+
+**Live probe on the rebuilt binary, 2026-10-08** (real MCP calls, not in-process tests):
+
+| Call | Result |
+|---|---|
+| `read_file("docs/RELEASE.md", force=true)`, twice, file unchanged | `@file_19bf4485` both times (baseline: two handles) |
+| `read_file("docs/RELEASE.md", heading="## Standard Ship Sequence")` (oversized) | error carries `file_id` `@file_19bf4485`, the same handle; `next_actions` in the file's lines, `start_line=77, end_line=264` |
+| `read_file("@cmd_19bf41cd", start_line=1, end_line=1)` on a 3,000-byte `\x01` line, twice | no `Buffer:` line, no new handle; the hint's `grep -o` route names `@cmd_19bf41cd` |
+| `read_file("@tool_19bfb7fe", json_path="$.file_groups")` (764 lines) | first page `[246 of 764 lines shown]`, `Next: read_file("@tool_19bfb7fe", json_path="$.file_groups", start_line=247, end_line=764)`; no new handle |
+| the same with `start_line=1, end_line=3` | the first 3 lines of the value; no handle |
+| `read_file("@tool_19bfb7fe", end_line=5)` | refused: `end_line provided without start_line` |
+| a 600-line file read twice, edited (`v1`→`v2`), read by path again | the same handle `@file_19bfb470`, now holding `v2` |
+| `wc -l @file_19bfb470` after that edit, then again | first call prints `↻ @file_19bfb470 refreshed from disk (file changed since last read)`; second prints none; `read_file(handle, 1..2)` shows `v2` |
+| `grep` tool over `docs/RELEASE.md` (189 matches) | still a new `@tool_19bfb7fe`: the class that stays |
+
+Not reached by the live probe: the stale-write race, the future-mtime case, eviction at a full pool of 50,
+`peer knowledge`, and a `json_path` longer than 7 KB (prose `next`). Those rest on the in-process tests and the
+three independent reviews.
+
 ## Tests added
 
 - `no_read_of_an_existing_buffer_mints_a_handle`: 54 cases, every source kind and arm, pool full, follows every `next`.
@@ -133,9 +165,10 @@ hint pages the wrong stream.
 
 ## Resume
 
-Land on `experiments` (fast-forward), rebuild with `./scripts/rb.sh`, reconnect, and probe the live tools:
-the cases in Reproduction, and a `json_path` value paged with `start_line`/`end_line`. Then archive this
-file with `doc(action="move")` and clear the `unverified` caveat.
+Nothing owed on this defect. Remaining work is in Still open and in the ADR (Revisit when): a byte budget for the
+buffer pool, paging a `json_path`/`toml_key` value of a real file on its own path, and `peer knowledge`. The
+related `run_command` hint bug is filed separately
+(`docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`).
 
 ## References
 
