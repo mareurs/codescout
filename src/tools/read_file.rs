@@ -278,6 +278,22 @@ fn strip_buffer_ref_quotes(path: &str) -> &str {
     path
 }
 
+/// Whether `read_file` accepts `nav` (`json_path` or `toml_key`) for the file at `source`: the type
+/// rule the two value arms apply, so a route a refusal names for a file is one the file accepts. A
+/// `.lock` file takes `toml_key` because the arm coerces it to TOML.
+fn file_accepts_value_nav(source: &str, nav: &str) -> bool {
+    use crate::tools::file_summary::{detect_file_type, FileSummaryType};
+    let kind = detect_file_type(source);
+    match nav {
+        "json_path" => kind == FileSummaryType::Json,
+        "toml_key" => {
+            matches!(kind, FileSummaryType::Toml | FileSummaryType::Yaml)
+                || source.to_lowercase().ends_with(".lock")
+        }
+        _ => false,
+    }
+}
+
 /// Read from an output buffer ref (`@file_*`, `@cmd_*`, `@tool_*`).
 ///
 /// Every response names the ref it was asked to read, and no other: a read of a buffer never
@@ -319,6 +335,10 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         }
         let source = ctx.output_buffer.get(path)?.source_path?;
         let value = input[nav].as_str()?;
+        // Only a route the file's type accepts: `toml_key` on a `.json` file is refused on the path.
+        if !file_accepts_value_nav(&source.to_string_lossy(), nav) {
+            return None;
+        }
         let source = source.display();
         Some(if value.len() <= INPUT_ECHO_CLIP {
             let literal = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));

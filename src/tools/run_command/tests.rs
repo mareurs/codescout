@@ -9623,11 +9623,15 @@ async fn following_only_the_hints_returns_every_line_of_a_non_slice_query_once()
 async fn a_list_hidden_by_quoting_the_splitter_does_not_model_is_offered_no_pager() {
     // Each was called one pipeline on 2c4967b5, offered `| sed -n '101,200p'`, and that route paged
     // the LAST command of the list. Now they are withheld: the hint says to narrow the query.
-    let (_dir, ctx) = project_ctx().await;
+    let (dir, ctx) = project_ctx().await;
     let rows: String = (1..=3000).map(|i| format!("{i} a'b\"c#d|e;f\n")).collect();
+    let path = dir.path().join("rows.txt");
+    std::fs::write(&path, &rows).unwrap();
     let x = ctx
         .output_buffer
         .store("gen".into(), rows, String::new(), 0);
+    let subs = vec![(x.clone(), path)];
+    let mut ran = 0;
     for query in [
         format!(r#"grep -c $'\'' {x}; grep -n "" {x}"#),
         format!(r#"echo "$(grep -c '"' {x})"; grep -n "" {x}"#),
@@ -9635,6 +9639,14 @@ async fn a_list_hidden_by_quoting_the_splitter_does_not_model_is_offered_no_page
         format!(r#"grep -n "$(echo '"')" {x} # x"#),
         format!(r#"grep -n "$(echo '"')" {x}; grep -c a {x}"#),
     ] {
+        // The premise is output worth cutting. A `sh` that rejects the syntax prints nothing for the
+        // query (dash rejects `$'...'`, which Ubuntu CI runs as `/bin/sh`), so there is nothing to
+        // page and no hint to check. The oracle is the same `sh` the tool runs.
+        if shell_truth(dir.path(), &query, &subs).is_empty() {
+            eprintln!("`{query}`: this sh prints nothing for it, skipped");
+            continue;
+        }
+        ran += 1;
         let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
         assert_eq!(
             parsed["truncated"], true,
@@ -9647,6 +9659,8 @@ async fn a_list_hidden_by_quoting_the_splitter_does_not_model_is_offered_no_page
         );
         assert!(hint.contains("narrow the query"), "`{query}`: {hint}");
     }
+    // Only the `$'...'` row may be lost to a stricter `sh`: the test must still run the rest.
+    assert!(ran >= 4, "only {ran} of 5 queries ran");
 }
 
 #[cfg(unix)]
@@ -9909,6 +9923,13 @@ async fn adversarial_query_shapes_get_a_route_that_returns_their_own_output() {
             eprintln!("#{i}: rg not installed, skipped");
             continue;
         }
+        // Every class but `none` needs output to cut. A `sh` that rejects the syntax (dash: `|&`,
+        // `<(`, `<<<`, `$'...'`) prints nothing for the row, so it has no hint to classify.
+        if !matches!(*want, "none" | "refused") && shell_truth(dir.path(), &query, &subs).is_empty()
+        {
+            eprintln!("#{i}: this sh prints nothing for {template:?}, skipped");
+            continue;
+        }
         let input = json!({ "command": query, "timeout_secs": 30 });
         let content = match RunCommand.call_content(input, &ctx).await {
             Ok(c) => c,
@@ -10015,4 +10036,113 @@ async fn a_full_pager_window_that_fits_only_without_its_hint_is_cut_not_rebuffer
         }
     }
     assert!(seen_full, "the premise: some width fits whole");
+}
+
+// A trailing `| sed -n '...p'` is the pager the hint itself advised, whatever its quoting: the next
+// page REPLACES it. Unquoted, single- and double-quoted forms are all recognised.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_trailing_pager_is_replaced_in_every_quote_form() {
+    let (_dir, ctx) = project_ctx().await;
+    let x = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    for pager in ["sed -n '1,100p'", "sed -n \"1,100p\"", "sed -n 1,100p"] {
+        let q = format!("grep -n \"\" {x} | {pager}");
+        let (_, hint, _) = lines_and_hint(&ctx, q.clone()).await;
+        assert!(
+            hint.contains("replace that last stage with `sed -n '101,200p'`"),
+            "{q}: {hint}"
+        );
+    }
+}
+
+// A window that did not fill (50 of 100 lines) is the end of the output: it names no next window.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_short_last_window_names_no_next_window() {
+    let (_dir, ctx) = project_ctx().await;
+    let x = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    let q = format!("grep -n \"\" {x} | sed -n '2951,3050p'");
+    let (lines, hint, _) = lines_and_hint(&ctx, q.clone()).await;
+    assert_eq!(lines.len(), 50, "{q}");
+    assert!(
+        hint.is_empty(),
+        "a window that did not fill names no next one: {hint}"
+    );
+}
+
+// `sed -n '5,3p'` is a reversed range: it prints line 5 only and is no pager. A mutant that dropped
+// the `b >= a` guard panicked with an overflow in debug builds.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_reversed_trailing_range_is_not_a_pager() {
+    let (_dir, ctx) = project_ctx().await;
+    let x = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    let q = format!("grep -n \"\" {x} | sed -n '5,3p'");
+    let (lines, hint, _) = lines_and_hint(&ctx, q.clone()).await;
+    assert_eq!(lines, vec!["5:5".to_string()], "{q}");
+    assert!(hint.is_empty(), "{hint}");
+}
+
+// A slice that starts after line 1 of its ref (`sed -n '5,10p' <ref>`) clips a wide line that is
+// not the ref's line 1, so `cut -c1-4000 <ref>` would never reach it: the route is appended instead.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_ranged_slices_wide_first_line_route_is_not_on_the_handle() {
+    let (_dir, ctx) = project_ctx().await;
+    let marker = "WIDEMARK";
+    let stored = format!("a\nb\nc\nd\n{marker}{}\nf\ng\n", "w".repeat(50_000));
+    let id = ctx
+        .output_buffer
+        .store("cmd".into(), stored, String::new(), 0);
+    let q = format!("sed -n '5,10p' {id}");
+    let (_, hint, _) = lines_and_hint(&ctx, q.clone()).await;
+    assert!(
+        !hint.contains(&format!("cut -c1-4000 {id}")),
+        "the handle's line 1 is not this output's line 1: {hint}"
+    );
+    assert!(
+        hint.contains("appending `| cut -c1-4000` to this query"),
+        "{hint}"
+    );
+    let (lines, _, _) = lines_and_hint(&ctx, format!("{q} | cut -c1-4000")).await;
+    assert!(lines[0].starts_with(marker), "{:.40}", lines[0]);
+}
+
+// A quoted newline inside the base query does not make it a list: the trailing pager is still replaced.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_base_with_a_quoted_newline_still_gets_its_pager_replaced() {
+    let (_dir, ctx) = project_ctx().await;
+    let x = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    let q = format!("grep -n \"1\n2\" {x} | sed -n '1,100p'");
+    let (lines, hint, _) = lines_and_hint(&ctx, q.clone()).await;
+    assert_eq!(lines.len(), 100, "{q}");
+    assert!(
+        hint.contains("replace that last stage with `sed -n '101,200p'`"),
+        "{q}: {hint}"
+    );
+}
+
+// `q \r\n`: the `\r` is an argument and the `\n` ends the line, so an appended stage would run as a
+// second command. No stage is offered.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_trailing_crlf_after_a_word_gets_no_appended_stage() {
+    let (_dir, ctx) = project_ctx().await;
+    let x = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    let q = format!("grep -n '' {x} \r\n");
+    let (_, hint, parsed) = lines_and_hint(&ctx, q.clone()).await;
+    assert_eq!(parsed["truncated"], true, "{parsed}");
+    assert!(appended_pager(&hint).is_none(), "{q:?}: {hint}");
+    assert!(hint.contains("narrow the query"), "{hint}");
 }

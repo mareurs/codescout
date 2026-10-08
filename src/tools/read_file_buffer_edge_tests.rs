@@ -2831,3 +2831,72 @@ async fn a_value_read_of_a_real_files_handle_names_the_files_route() {
         assert!(text.contains("raw text"), "{r}: {text}");
     }
 }
+
+/// A key of exactly `INPUT_ECHO_CLIP` bytes on a real file's `@file_*` handle is still quoted whole in
+/// the route the refusal names (the threshold is inclusive), and the route runs.
+#[tokio::test]
+async fn a_handle_refusal_quotes_a_key_of_exactly_the_clip_whole() {
+    let ctx = ctx50().await;
+    let dir = tempfile::tempdir().unwrap();
+    let key = "k".repeat(super::INPUT_ECHO_CLIP - 5);
+    let jp = format!("$[\"{key}\"]");
+    assert_eq!(jp.len(), super::INPUT_ECHO_CLIP, "fixture");
+    let j = dir.path().join("clip.json");
+    std::fs::write(
+        &j,
+        serde_json::to_string_pretty(&json!({ key.clone(): rows() })).unwrap(),
+    )
+    .unwrap();
+    let file = j.to_str().unwrap();
+    let handle = ReadFile.call(json!({ "path": file }), &ctx).await.unwrap()["file_id"]
+        .as_str()
+        .expect("fixture: buffered")
+        .to_string();
+    let err = ReadFile
+        .call(json!({ "path": handle, "json_path": jp }), &ctx)
+        .await
+        .expect_err("refused")
+        .to_string();
+    let lit = serde_json::to_string(&jp).unwrap();
+    assert!(
+        err.contains(&format!("read_file(\"{file}\", json_path={lit})")),
+        "{err:.400}"
+    );
+}
+
+/// A refusal on a real file's `@file_*` handle names the file's own route only when the file's type
+/// accepts that parameter: `toml_key` on a `.json` file and `json_path` on a `.txt` file are refused on
+/// the path too, so the hint falls back to the raw-text advice.
+#[tokio::test]
+async fn a_handle_refusal_names_no_route_the_file_type_would_refuse() {
+    let ctx = ctx50().await;
+    let dir = tempfile::tempdir().unwrap();
+    let json = dir.path().join("h.json");
+    std::fs::write(
+        &json,
+        serde_json::to_string_pretty(&json!({ "k": rows() })).unwrap(),
+    )
+    .unwrap();
+    let txt = dir.path().join("h.txt");
+    std::fs::write(&txt, "x\n".repeat(20_000)).unwrap();
+    for (file, nav, value) in [(&json, "toml_key", "k"), (&txt, "json_path", "$.k")] {
+        let path = file.to_str().unwrap();
+        let handle = ReadFile.call(json!({ "path": path }), &ctx).await.unwrap()["file_id"]
+            .as_str()
+            .expect("fixture: buffered")
+            .to_string();
+        let err = ReadFile
+            .call(json!({ "path": handle, nav: value }), &ctx)
+            .await
+            .expect_err("refused")
+            .to_string();
+        assert!(
+            !err.contains("holds the real file"),
+            "{nav} on {path}: {err:.400}"
+        );
+        assert!(
+            !err.contains(&format!("read_file(\"{path}\"")),
+            "{nav} on {path}: {err:.400}"
+        );
+    }
+}
