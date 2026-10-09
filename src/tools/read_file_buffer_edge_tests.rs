@@ -2432,6 +2432,21 @@ async fn the_text_of_a_toml_key_read_places_the_value_in_its_file() {
     }
     assert!(pages > 1, "fixture: not paged");
 
+    // No other form of read grows the line: a markdown section (its JSON has a `line_range` too),
+    // a JSON value, a plain range and a whole file say what they said before.
+    let md = write("m.md", "# A\n\ntext\n\n## B\nbody\n");
+    let js = write("v.json", "{\"a\": 1, \"k\": [1, 2]}");
+    for input in [
+        json!({ "path": md, "heading": "## B" }),
+        json!({ "path": md }),
+        json!({ "path": js, "json_path": "$.k" }),
+        json!({ "path": below, "start_line": 2, "end_line": 3 }),
+        json!({ "path": below }),
+    ] {
+        let t = text_of(input.clone()).await;
+        assert!(!t.contains("file lines"), "{input}: {t}");
+    }
+
     // A sibling list too long to show is dropped, marked in the JSON, and now in the text.
     let siblings: String = (0..40)
         .map(|i| format!("[key_{i:04}{}]\nx = 1\n", "n".repeat(400)))
