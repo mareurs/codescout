@@ -216,8 +216,8 @@ const _: () = assert!(MIN_POOL_BYTES / 2 > crate::tools::INLINE_MAX_RESPONSE_LEN
 /// follows it at each site, chosen by the handle's kind ([`ref_gone_hint`]).
 pub(crate) const REF_GONE: &str = "Buffer refs expire when the session resets. The pool also \
      drops its least recently used handle when it holds its maximum number of handles (50), and \
-     its least recently used command and tool handles to stay under its byte limit. A @file_* \
-     handle also goes when its file is deleted or can no longer be read.";
+     its least recently used command, tool and memory-view handles to stay under its byte \
+     limit. A @file_* handle also goes when its file is deleted or can no longer be read.";
 
 /// The whole hint of a "buffer reference not found" refusal for `handle`: [`REF_GONE`], then the
 /// route to a fresh ref. A `@file_*` handle came from a read of a file (or of a memory view), so
@@ -1067,7 +1067,9 @@ impl OutputBuffer {
     /// before a read of this same text, and this read changes nothing. And a read reads the file
     /// at most [`RESOLVE_READS`] times: if the entry changed under the last of them, the text it
     /// read is served WITHOUT being stored, and reported as a change when it differs from what
-    /// the entry holds. A pass that reads nothing (it only stat'ed the file) is not counted.
+    /// the entry holds; a pending notice is consumed only when it is the entry's text. A pass
+    /// that reads nothing (it only stat'ed the file) is not counted, and one that finds the entry
+    /// only restamped (same text, same residency) serves it as it is.
     ///
     /// A demoted whole-file entry ([`BufferEntry::demoted`]) is read from disk on EVERY read and
     /// the text is served without being put back, so a read can never take the pool past its
@@ -1121,16 +1123,36 @@ impl OutputBuffer {
                 && read
                     .as_ref()
                     .is_some_and(|(_, hash)| current.2.as_ref() == Some(hash));
+            // A pass that only stat'ed the file, while another caller only restamped the entry
+            // (same text, same residency): the entry it would serve is the one it saw, so it is
+            // served as it is now. Starting over let a stream of restamps keep one read going for
+            // as long as it lasted (review F-C: 501 passes, none of them reading the disk).
+            let restamped = read.is_none() && !gone && current.1 == seen.1 && current.2 == seen.2;
+            if restamped {
+                return Some(Self::finish_locked(inner, canonical, report, None));
+            }
             if current != seen && !settled {
                 // Changed while the disk was read: what was read may be older than what the entry
                 // now holds, so look again, unless this was the last read allowed. That one is
                 // served as read and not stored.
+                //
+                // The pending notice is consumed only when the text served IS the entry's text
+                // (review F-A): a notice for text the entry holds and this read did not serve
+                // stays, so the holder, served this text now, is told again when the handle
+                // serves the entry's. A served text that is not the entry's is reported as a
+                // change. Known limit (review F-B): the next read then reports a change again,
+                // even when it serves the same text, because nothing records what this read
+                // served; the holder sees one spurious `↻ … refreshed from disk`.
                 if reads >= RESOLVE_READS {
                     if let Some((content, hash)) = read {
-                        let differs = current.2.as_deref() != Some(hash.as_str());
-                        let (entry, pending) =
-                            Self::finish_locked(inner, canonical, report, Some(content));
-                        return Some((entry, pending || (report && differs)));
+                        let is_entrys = current.2.as_deref() == Some(hash.as_str());
+                        let (entry, pending) = Self::finish_locked(
+                            inner,
+                            canonical,
+                            report && is_entrys,
+                            Some(content),
+                        );
+                        return Some((entry, pending || (report && !is_entrys)));
                     }
                 }
                 continue;

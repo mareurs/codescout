@@ -1475,3 +1475,266 @@ fn a_read_stopped_at_the_cap_reports_new_text_as_a_change() {
     assert_eq!(buf.bytes_of(&f), Some(v0.len()), "nothing was stored");
     buf.assert_accounting();
 }
+
+/// Review F-A (probe rv_p07): a read stopped at the cap serves text the entry does not hold, so
+/// it must not consume a refresh notice that belongs to the entry's own, newer text. On each of
+/// the first two passes a path read stores x{k} and the file then moves on to y{k}; on the third
+/// a path read stores x3 only. The read serves y2 and tells a change; the holder, who last saw y2,
+/// must then be told once more when the handle serves x3.
+#[test]
+fn a_read_stopped_at_the_cap_leaves_the_notice_of_text_it_did_not_serve() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let p = write(dir.path(), "f", &numbered("v0", 40_000), 1_000);
+    let f = read_into(&buf, &p);
+    write(dir.path(), "f", &numbered("w0", 40_001), 990);
+    let x = |n: usize| numbered(&format!("x{n}"), 40_000 + n);
+    let y = |n: usize| numbered(&format!("y{n}"), 41_000 + n);
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let passes = passes.clone();
+        let buf2 = buf.clone();
+        let dir = dir.path().to_path_buf();
+        let p = p.clone();
+        buf.set_read_done_hook(Some(Arc::new(move || {
+            let k = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if k > 3 {
+                return;
+            }
+            write(&dir, "f", &x(k), 980 - 3 * k as u64);
+            read_into(&buf2, &p);
+            if k < 3 {
+                write(&dir, "f", &y(k), 980 - 3 * k as u64 - 1);
+            }
+        })));
+    }
+    let (served, told) = buf.get_with_refresh_flag(&f).unwrap();
+    buf.set_read_done_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        RESOLVE_READS
+    );
+    assert_eq!(
+        served.stdout,
+        y(2),
+        "the read at the cap serves what it read"
+    );
+    assert!(told, "y2 is not the text the holder saw");
+    let (next, next_told) = buf.get_with_refresh_flag(&f).unwrap();
+    assert_eq!(next.stdout, x(3));
+    assert!(
+        next_told,
+        "the holder was served y2, then x3: the change to x3 must be told"
+    );
+    let (_, again) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(!again, "and told once");
+    buf.assert_accounting();
+}
+
+/// The F-D scenario: a read whose every pass loses only because the entry's residency flips
+/// (a path read makes it resident, then it is demoted, then a path read makes it resident again),
+/// so it stops at the cap having read, on its last pass, exactly the text the entry then holds.
+/// `change` rewrites the file once before the read, so the first path read changes the entry.
+/// Returns what the read served and told, and what the next reporting read told.
+fn read_at_the_cap_of_the_entrys_own_text(change: bool) -> (String, bool, bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v0 = numbered("v0", 40_000);
+    let p = write(dir.path(), "f", &v0, 1_000);
+    let f = read_into(&buf, &p);
+    OutputBuffer::demote_locked(&mut buf.inner.lock().unwrap(), &f);
+    let text = if change {
+        numbered("x", 40_100)
+    } else {
+        v0.clone()
+    };
+    write(dir.path(), "f", &text, 990);
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let passes = passes.clone();
+        let buf2 = buf.clone();
+        let dir = dir.path().to_path_buf();
+        let p = p.clone();
+        let f = f.clone();
+        let text = text.clone();
+        buf.set_read_done_hook(Some(Arc::new(move || {
+            let k = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64 + 1;
+            match k {
+                1 | 3 => {
+                    write(&dir, "f", &text, 980 - 3 * k);
+                    read_into(&buf2, &p);
+                    // Newer than the stamp, so the next pass reads the disk.
+                    write(&dir, "f", &text, 980 - 3 * k - 1);
+                }
+                2 => OutputBuffer::demote_locked(&mut buf2.inner.lock().unwrap(), &f),
+                _ => {}
+            }
+        })));
+    }
+    let (served, told) = buf.get_with_refresh_flag(&f).unwrap();
+    buf.set_read_done_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        RESOLVE_READS,
+        "every pass lost, and the read stopped at the cap"
+    );
+    let (_, next_told) = buf.get_with_refresh_flag(&f).unwrap();
+    buf.assert_accounting();
+    (served.stdout, told, next_told)
+}
+
+/// Review F-D (mutant M09, `differs = true`): a read stopped at the cap that serves the entry's
+/// OWN text, unchanged since the holder last saw it, tells no change.
+#[test]
+fn a_read_stopped_at_the_cap_serving_unchanged_text_tells_no_change() {
+    let (served, told, next_told) = read_at_the_cap_of_the_entrys_own_text(false);
+    assert_eq!(served, numbered("v0", 40_000));
+    assert!(!told, "nothing the holder saw changed");
+    assert!(!next_told);
+}
+
+/// Review F-A (mutant M23, the cap's serve never consuming the notice): a read stopped at the cap
+/// that serves the entry's own text, which changed since the holder last saw it, tells the change
+/// and consumes the notice, so the next read does not tell it again.
+#[test]
+fn a_read_stopped_at_the_cap_serving_the_entrys_new_text_tells_it_once() {
+    let (served, told, next_told) = read_at_the_cap_of_the_entrys_own_text(true);
+    assert_eq!(served, numbered("x", 40_100));
+    assert!(told, "the entry's text changed since the holder saw it");
+    assert!(!next_told, "told once");
+}
+
+/// Review F-D (mutant M05): only passes that READ the file count toward the cap. Four passes that
+/// only stat the file lose (a path read stores new text each time, stamped at the file's mtime,
+/// so the next pass finds it fresh), then three passes read and lose: the read stops after those
+/// three, on its seventh pass, and serves what the last of them read.
+#[test]
+fn passes_that_only_stat_the_file_do_not_count_toward_the_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let p = write(dir.path(), "f", &numbered("v0", 40_000), 1_000);
+    let f = read_into(&buf, &p);
+    let v = |n: u64| numbered(&format!("v{n}"), 40_000 + n as usize);
+    let w = |n: u64| numbered(&format!("w{n}"), 41_000 + n as usize);
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let passes = passes.clone();
+        let buf2 = buf.clone();
+        let dir = dir.path().to_path_buf();
+        let p = p.clone();
+        buf.set_read_done_hook(Some(Arc::new(move || {
+            let k = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64 + 1;
+            if k > 7 {
+                return;
+            }
+            write(&dir, "f", &v(k), 980 - 3 * k);
+            read_into(&buf2, &p);
+            if k >= 4 {
+                write(&dir, "f", &w(k), 980 - 3 * k - 1);
+            }
+        })));
+    }
+    let served = buf.get(&f).unwrap().stdout;
+    buf.set_read_done_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        4 + RESOLVE_READS,
+        "four stat-only passes, then the cap's three reads"
+    );
+    assert_eq!(served, w(6), "the third read read w6");
+    buf.assert_accounting();
+}
+
+/// Review F-C (probe rv_p12): a pass that only stat'ed the file, while another caller only
+/// restamped the entry (same text, same residency), finishes with the entry as it is. Every
+/// such pass used to start over, and a stream of restamps kept one read going for as long as it
+/// lasted (probe: 501 passes, 587 ms).
+#[test]
+fn a_stat_only_pass_over_a_restamped_entry_finishes() {
+    const RESTAMPS: u64 = 50;
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v1 = numbered("v1", 40_000);
+    let p = write(dir.path(), "f", &v1, 10_000);
+    let f = read_into(&buf, &p);
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let passes = passes.clone();
+        let buf2 = buf.clone();
+        let p = p.clone();
+        buf.set_read_done_hook(Some(Arc::new(move || {
+            let k = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64 + 1;
+            if k > RESTAMPS {
+                return;
+            }
+            let t = SystemTime::now() - Duration::from_secs(10_000 - k);
+            filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(t)).unwrap();
+            read_into(&buf2, &p);
+        })));
+    }
+    let (e, told) = buf.get_with_refresh_flag(&f).unwrap();
+    buf.set_read_done_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the restamp changed nothing the pass saw"
+    );
+    assert_eq!(e.stdout, v1);
+    assert!(!told);
+    buf.assert_accounting();
+}
+
+/// Review F-E (probe rv_p17): the byte limit evicts a memory view's `@file_*` snapshot, which the
+/// refusal names, with the route back to it.
+#[test]
+fn the_byte_limit_drops_a_memory_view_and_the_refusal_names_it() {
+    let buf = pool();
+    let s = buf.store_file("@memory:t:filtered".into(), numbered("m", 400_000));
+    cmd(&buf, "c1", 500_000);
+    cmd(&buf, "c2", 500_000);
+    assert!(!buf.handles().contains(&s), "the view was evicted");
+    let hint = ref_gone_hint(&s);
+    assert!(hint.contains("memory-view handles"), "{hint}");
+    assert!(hint.contains("read the memory topic again"), "{hint}");
+}
+
+/// Review F-B, a KNOWN LIMIT pinned so its fix shows up here: after a read stopped at the cap
+/// served text the entry does not hold (and told it), the next reporting read serves the SAME
+/// text and tells it again, because nothing records what the read at the cap served. A
+/// `run_command` of the handle then prints one spurious `↻ … refreshed from disk`. When this
+/// reds, the limit is fixed: drop it from the comment at the cap in `resolve`.
+#[test]
+fn after_a_read_stopped_at_the_cap_the_next_read_tells_the_same_text_again_known_limitation() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v0 = numbered("v0", 100_000);
+    let p = write(dir.path(), "f", &v0, 1_000);
+    let f = read_into(&buf, &p);
+    let w = |n: usize| numbered(&format!("w{n}"), 110_000 + n);
+    {
+        let buf2 = buf.clone();
+        let dir = dir.path().to_path_buf();
+        let p = p.clone();
+        let v0 = v0.clone();
+        let passes = std::sync::atomic::AtomicUsize::new(0);
+        buf.set_disk_hook(Some(Arc::new(move || {
+            let n = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64 + 1;
+            if n > 10 {
+                return;
+            }
+            write(&dir, "f", &v0, 1_000 - 2 * n);
+            buf2.store_file_read(&p.to_string_lossy(), &v0, file_mtime_ms(&p));
+            write(&dir, "f", &w(n as usize), 1_000 - 2 * n - 1);
+        })));
+    }
+    let (first, told) = buf.get_with_refresh_flag(&f).unwrap();
+    buf.set_disk_hook(None);
+    assert_eq!(first.stdout, w(RESOLVE_READS));
+    assert!(told);
+    let (second, told_again) = buf.get_with_refresh_flag(&f).unwrap();
+    assert_eq!(second.stdout, first.stdout, "the same text");
+    assert!(told_again, "told a second time: the known limit");
+    let (_, third) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(!third, "but only twice");
+    buf.assert_accounting();
+}
