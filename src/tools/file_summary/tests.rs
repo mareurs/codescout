@@ -2485,10 +2485,18 @@ fn yaml_key_span_stops_before_a_document_marker() {
         yaml_key("a: 1\n...\nb: 2\n", "a"),
         ("a: 1".to_string(), (1, 1))
     );
-    // A marker may carry a tag or a comment after it.
+    // A marker may carry a tag or a comment after it, and the comment may hold `: `.
     assert_eq!(
         yaml_key("a: 1\n--- # next\nb: 2\n", "a"),
         ("a: 1".to_string(), (1, 1))
+    );
+    assert_eq!(
+        yaml_key("a: 1\n... # note: done\nb: 2\n", "a"),
+        ("a: 1".to_string(), (1, 1))
+    );
+    assert_eq!(
+        yaml_refusal_hint("a: 1\n... # note: done\nb: 2\n", "nope"),
+        "Available keys: a, b"
     );
     assert_eq!(
         yaml_key("a: 1\n--- !t\nb: 2\n", "a"),
@@ -2588,8 +2596,12 @@ fn yaml_key_a_colon_without_a_space_after_it_does_not_end_the_key() {
     assert_eq!(yaml_key("a:\t1\nc: 2\n", "a").0, "a:\t1");
     assert_eq!(yaml_key("time: 12:30\nc: 2\n", "time").0, "time: 12:30");
     assert_eq!(yaml_key("a:   \nc: 2\n", "a").0, "a:   ");
-    // A url as a scalar line is no key.
+    // A url as a scalar line is no key, and a line that is only a colon names no key.
     assert!(yaml_refuses("http://x.y/z\nc: 2\n", "http"));
+    assert_eq!(
+        yaml_refusal_hint(": x\n\"\": y\nc: 2\n", "nope"),
+        "Available keys: c"
+    );
 }
 
 #[test]

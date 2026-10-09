@@ -1220,7 +1220,6 @@ fn yaml_key_of_line(line: &str) -> Option<String> {
         }
         key
     } else {
-        let line = line.trim_end();
         let mut from = 0;
         loop {
             let at = from + line[from..].find(':')?;
