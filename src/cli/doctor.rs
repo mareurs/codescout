@@ -413,4 +413,82 @@ mod tests {
             "the refusal must list what IS accepted: {text}"
         );
     }
+
+    /// Parser and forwarding tests above are necessary but insufficient: the scanner could
+    /// acknowledge `scope` while ignoring it. This fixture proves a CLI-selected scope changes
+    /// the scanner population by giving a sibling project one scoped row-grain violation.
+    #[tokio::test]
+    async fn scope_flag_changes_the_scanner_population() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path().join("repo");
+        // `project_root` is a child of this root, so `repo` (unlike `project`) admits
+        // the sibling below; making them equal removes the population distinction.
+        let project_root = repo_root.join("mine");
+        let foreign_root = repo_root.join("sibling-project");
+        let cat = crate::librarian::catalog::Catalog::open_in_memory().unwrap();
+
+        for (id, path, body) in [
+            ("mine", project_root.join("docs/mine.md"), "# mine\n"),
+            // This frontmatter id deliberately differs from its catalog id (`theirs`),
+            // arming the scoped `frontmatter_id_mismatch` finding the assertions select.
+            (
+                "theirs",
+                foreign_root.join("docs/theirs.md"),
+                "---\nid: 0000000000000000\nkind: bug\nstatus: open\n---\n\n# theirs\n",
+            ),
+        ] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, body).unwrap();
+            let row = crate::librarian::catalog::artifact::TestArtifactRowBuilder::new(id)
+                .with_abs_path(&path)
+                .build();
+            crate::librarian::catalog::artifact::upsert(&cat, &row).unwrap();
+        }
+
+        let ctx = crate::librarian::tools::TestToolContextBuilder::new(cat)
+            .with_current_project(std::sync::Arc::new(
+                crate::librarian::current_project::CurrentProject {
+                    abs_path: project_root.clone(),
+                    git_root: repo_root,
+                    main_root: None,
+                    umbrella: None,
+                },
+            ))
+            .build();
+        let project_args = parse(&["--scope", "project"]).expect("accepted scope parses");
+        let project =
+            crate::librarian::tools::doctor::call(&ctx, Value::Object(to_tool_args(&project_args)))
+                .await
+                .expect("doctor runs");
+        let repo_args = parse(&["--scope", "repo"]).expect("accepted scope parses");
+        let repo =
+            crate::librarian::tools::doctor::call(&ctx, Value::Object(to_tool_args(&repo_args)))
+                .await
+                .expect("doctor runs");
+        let foreign_path = foreign_root
+            .join("docs/theirs.md")
+            .to_string_lossy()
+            .into_owned();
+        let has_foreign_id_mismatch = |report: &Value| {
+            report["violations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|violation| {
+                    violation["check"] == "frontmatter_id_mismatch"
+                        && violation["path"].as_str() == Some(foreign_path.as_str())
+                })
+        };
+
+        assert_eq!(project["scope"]["applied"], "project");
+        assert!(
+            !has_foreign_id_mismatch(&project),
+            "project scope must exclude the sibling project's finding: {project:#?}"
+        );
+        assert_eq!(repo["scope"]["applied"], "repo");
+        assert!(
+            has_foreign_id_mismatch(&repo),
+            "--scope repo must widen the scanner population to the sibling project's finding: {repo:#?}"
+        );
+    }
 }
