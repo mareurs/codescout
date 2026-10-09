@@ -208,6 +208,12 @@ fn a_handle_shaped_token_inside_a_name_is_broken_so_the_resolver_does_not_see_it
             "@tool_00000000 @ack_0123abcd",
             r#"grep -o 'PATTERN[^,]*' '@''tool_00000000 @''ack_0123abcd'"#,
         ),
+        // A handle at the END of a longer name is not that handle: only a whole-target handle
+        // is left for the resolver.
+        (
+            "dir/@file_0123abcd",
+            r#"grep -o 'PATTERN[^,]*' dir/@''file_0123abcd"#,
+        ),
         // Longer than a handle: not a handle, and the resolver matches its 8-hex prefix.
         (
             "@cmd_deadbeefXX",
