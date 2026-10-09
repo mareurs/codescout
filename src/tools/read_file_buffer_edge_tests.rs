@@ -628,15 +628,15 @@ async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
     assert!(paged > 0, "no read took the paged arm");
 }
 
-/// `siblings` of a `toml_key` read is capped in count upstream but not in width. A read whose
-/// page would be over the limit with about 12 KB of sibling names beside it drops them,
+/// `siblings` of a `toml_key` read has no cap, in count or in width. A read whose
+/// page would be over the limit with about 16 KB of sibling names beside it drops them,
 /// marked `siblings_omitted`, so the page is not buffered again under `@tool_*`.
 #[tokio::test]
 async fn a_toml_key_read_with_many_siblings_drops_them_from_the_page() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
-    // Siblings are capped in count upstream (about 30), not in width: 40 tables with 400-byte
-    // names put about 12 KB of them beside the value.
+    // Siblings are not capped, in count or in width: 40 tables with 400-byte
+    // names put about 16 KB of them beside the value.
     let siblings: String = (0..40)
         .map(|i| format!("[key_{i:04}{}]\nx = 1\n", "n".repeat(400)))
         .collect();
@@ -669,7 +669,7 @@ async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_page_drops_
     // Over the limit alone, so the read is paged, where `siblings` is droppable.
     let value = "a".repeat(12_000);
     let mut in_window = 0;
-    for w in 250..=400 {
+    for w in 200..=300 {
         let siblings: String = (0..40)
             .map(|i| format!("[s{i:02}{}]\nx = 1\n", "n".repeat(w)))
             .collect();
@@ -2111,9 +2111,9 @@ fn rows() -> Vec<String> {
         .collect()
 }
 
-/// A JSON string value, a JSON array value, a TOML table found by the summary (a run of the
-/// file's lines), a TOML table resolved through the full parse (re-serialized: dotted keys with
-/// no header), and a YAML top-level key, each over one page. Through the REAL `call_content`, in
+/// A JSON string value, a JSON array value, a TOML table (a run of the file's lines, below its
+/// line 1), a TOML dotted group with no header (a run of the file's lines too), and a YAML
+/// top-level key, each over one page. Through the REAL `call_content`, in
 /// a pool at production capacity and FULL, with and without a whole-file handle for the file:
 /// the first page, whole or ranged to the end, then every `next` executed as written. The pages
 /// joined are the value's lines, the chain ends on the value's last line, and no call changes
@@ -2197,14 +2197,17 @@ async fn a_value_of_a_real_file_is_paged_on_its_path_and_mints_no_handle() {
                 .content,
         ),
     ];
-    // Fixture checks: the summary path is a run of the file's lines, the full parse is not.
+    // Fixture checks: a `toml_key` value is a run of the file's own lines, long, and neither starts
+    // at the file's line 1, so a value numbered in the FILE's lines would be off by the lines above.
     assert!(
-        read(&toml_table).contains(&cases[2].4),
+        read(&toml_table).contains(&cases[2].4) && !read(&toml_table).starts_with(&cases[2].4),
         "fixture: toml table"
     );
     assert!(
-        !read(&toml_dotted).contains(&cases[3].4) && cases[3].4.lines().count() >= 600,
-        "fixture: the dotted table must be re-serialized and long: {:.200}",
+        read(&toml_dotted).contains(&cases[3].4)
+            && !read(&toml_dotted).starts_with(&cases[3].4)
+            && cases[3].4.lines().count() >= 600,
+        "fixture: the dotted group must be a long run of the file's lines below line 1: {:.200}",
         cases[3].4
     );
     for (label, path, nav, key, value) in &cases {
@@ -2253,6 +2256,210 @@ async fn a_value_of_a_real_file_is_paged_on_its_path_and_mints_no_handle() {
     }
     // An independent oracle for one case: the string value's own lines are the rows.
     assert_eq!(cases[0].4, joined);
+}
+
+/// A `toml_key` value is the key's own lines of the file, so what pages is what the file says: a
+/// multi-line string of 600 rows (it was ONE line of escaped text, which paging cannot read), an
+/// array of 300 tables (it was the first element), and a table with 200 children under their full
+/// headers (they lost the parent's name). The oracle is built from the rows, not from the
+/// extractor: the pages joined are the file's lines, the chain ends on the value's last line, and
+/// every page carries the `line_range` of the lines in the FILE (so the value's line 1 is the
+/// file's line `line_range[0]`).
+#[tokio::test]
+async fn a_toml_key_value_over_one_page_pages_the_files_own_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = rows();
+    let string_value = format!("s = \"\"\"\n{}\n\"\"\"", rows.join("\n"));
+    let tables: Vec<String> = (0..300)
+        .map(|i| format!("[[k]]\nname = \"e{i:03}\"\npad = \"{}\"", "p".repeat(40)))
+        .collect();
+    let array_value = tables.join("\n\n");
+    let children: Vec<String> = (0..200)
+        .map(|i| format!("[k.c{i:03}]\nv = \"{}\"", "x".repeat(50)))
+        .collect();
+    let table_value = format!("[k]\nown = 1\n\n{}", children.join("\n\n"));
+    // Each value sits below a line or more of other keys and above a foreign one, so the value's
+    // own line 1 is never the file's line 1 and the lines after it are not its.
+    let cases = [
+        (
+            "string",
+            format!("top = 1\n{string_value}\nafter = 2\n"),
+            "s",
+            2,
+        ),
+        (
+            "array of tables",
+            format!("top = 1\n\n{array_value}\n\n[tail]\nz = 1\n"),
+            "k",
+            3,
+        ),
+        (
+            "table with children",
+            format!("top = 1\n\n{table_value}\n\n[tail]\nz = 1\n"),
+            "k",
+            3,
+        ),
+    ];
+    for (label, file, key, first_line) in cases {
+        let p = dir.path().join(format!("{}.toml", label.replace(' ', "-")));
+        std::fs::write(&p, &file).unwrap();
+        let path = p.to_str().unwrap();
+        let want: String = file
+            .lines()
+            .skip(first_line - 1)
+            .take_while(|l| !l.starts_with("after") && !l.starts_with("[tail]"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let want = want.trim_end().to_string();
+        let ctx = ctx50().await;
+        fill_pool(&ctx);
+        let first = json!({ "path": path, "toml_key": key });
+        let (got, nexts, last, total) =
+            follow_value(&ctx, path, "toml_key", key, first, label).await;
+        assert!(!nexts.is_empty(), "{label}: the value was never paged");
+        assert_eq!(total as usize, want.lines().count(), "{label}: total_lines");
+        assert_eq!(last, total, "{label}: did not reach the last line");
+        assert!(
+            got.join("\n") == want,
+            "{label}: the pages joined are not the file's lines"
+        );
+        // Every page names the lines of the file the value came from.
+        let last_line = first_line + want.lines().count() - 1;
+        let mut input = json!({ "path": path, "toml_key": key });
+        let mut pages = 0;
+        loop {
+            let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+            assert_eq!(
+                v["line_range"],
+                json!([first_line, last_line]),
+                "{label} page {pages}: {v:.200}"
+            );
+            pages += 1;
+            let Some(n) = next_value_input(&v) else { break };
+            input = n;
+        }
+        assert!(pages > 1, "{label}: fixture: not paged");
+    }
+}
+
+/// The TEXT a `toml_key` read returns (what the model reads; the JSON is not shown to it) places
+/// the value in its file: lines of the span that belong to other keys were left out, and the value's
+/// line numbers are not the file's. Through the real `call_content`, on every page of a paged
+/// value, for TOML and YAML; and a read whose value starts the file, or any other form of
+/// read, gets no such line.
+#[tokio::test]
+async fn the_text_of_a_toml_key_read_places_the_value_in_its_file() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, body: &str| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, body).unwrap();
+        p.to_str().unwrap().to_string()
+    };
+    let text_of = |input: Value| {
+        let ctx = &ctx;
+        async move {
+            crate::tools::hint_probe::primary_text(
+                &ReadFile.call_content(input, ctx).await.unwrap(),
+            )
+        }
+    };
+
+    // A contiguous value below line 1 names its lines; one that starts the file names nothing.
+    let below = write("below.toml", "top = 1\n[a]\nx = 1\n");
+    let t = text_of(json!({ "path": below, "toml_key": "a" })).await;
+    assert_eq!(t, "2 lines\n  file lines 2-3\n\n[a]\nx = 1", "{t}");
+    let first = write("first.toml", "k = 1\nz = 2\n");
+    let t = text_of(json!({ "path": first, "toml_key": "k" })).await;
+    assert_eq!(t, "1 line\n\nk = 1", "{t}");
+
+    // Not contiguous: it says how many of the span's lines are the value.
+    let gap = write("gap.toml", "k.x = 1\nz = 3\nk.y = 2\n");
+    let t = text_of(json!({ "path": gap, "toml_key": "k" })).await;
+    assert!(
+        t.starts_with(
+            "2 lines\n  file lines 1-3; 2 of them are this value (the other lines of the span belong to other keys)\n\n"
+        ),
+        "{t}"
+    );
+
+    // YAML: a key below line 1.
+    let yaml = write("y.yaml", "pre: 1\nk:\n  - a\nother: 1\n");
+    let t = text_of(json!({ "path": yaml, "toml_key": "k" })).await;
+    assert!(t.starts_with("2 lines\n  file lines 2-3\n\n"), "{t}");
+
+    // 300 `[[k]]` elements with a foreign section between the two halves: paged, and every page
+    // (not only the first) carries the line.
+    let element = |i: usize| format!("[[k]]\nname = \"e{i:03}\"\npad = \"{}\"", "p".repeat(40));
+    let half = |from: usize, to: usize| (from..to).map(element).collect::<Vec<_>>().join("\n\n");
+    let file = format!(
+        "top = 1\n\n{}\n\n[foreign]\nz = 1\n\n{}\n",
+        half(0, 150),
+        half(150, 300)
+    );
+    let big = write("big.toml", &file);
+    let v = ReadFile
+        .call(json!({ "path": big, "toml_key": "k" }), &ctx)
+        .await
+        .unwrap();
+    let (a, b) = (
+        v["line_range"][0].as_u64().unwrap(),
+        v["line_range"][1].as_u64().unwrap(),
+    );
+    assert_eq!(a, 3, "{v:.200}");
+    assert_eq!(
+        b as usize,
+        3 + half(0, 150).lines().count() + 4 + half(150, 300).lines().count() - 1
+    );
+    let in_value = v["total_lines"].as_u64().unwrap();
+    assert_eq!(
+        in_value as usize,
+        half(0, 150).lines().count() + half(150, 300).lines().count()
+    );
+    let want = format!(
+        "  file lines {a}-{b}; {in_value} of them are this value (the other lines of the span belong to other keys)\n"
+    );
+    let mut input = json!({ "path": big, "toml_key": "k" });
+    let mut pages = 0;
+    loop {
+        let blocks = ReadFile.call_content(input.clone(), &ctx).await.unwrap();
+        let t = crate::tools::hint_probe::primary_text(&blocks);
+        assert!(t.contains(&want), "page {pages}: {t:.400}");
+        pages += 1;
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        let Some(n) = next_value_input(&v) else { break };
+        input = n;
+    }
+    assert!(pages > 1, "fixture: not paged");
+
+    // No other form of read grows the line: a markdown section (its JSON has a `line_range` too),
+    // a JSON value, a plain range and a whole file say what they said before.
+    let md = write("m.md", "# A\n\ntext\n\n## B\nbody\n");
+    let js = write("v.json", "{\"a\": 1, \"k\": [1, 2]}");
+    for input in [
+        json!({ "path": md, "heading": "## B" }),
+        json!({ "path": md }),
+        json!({ "path": js, "json_path": "$.k" }),
+        json!({ "path": below, "start_line": 2, "end_line": 3 }),
+        json!({ "path": below }),
+    ] {
+        let t = text_of(input.clone()).await;
+        assert!(!t.contains("file lines"), "{input}: {t}");
+    }
+
+    // A sibling list too long to show is dropped, marked in the JSON, and now in the text.
+    let siblings: String = (0..40)
+        .map(|i| format!("[key_{i:04}{}]\nx = 1\n", "n".repeat(400)))
+        .collect();
+    let sib = write("sib.toml", &format!("[k]\nv = \"a\"\n{siblings}"));
+    let input = json!({ "path": sib, "toml_key": "k" });
+    let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+    assert_eq!(v["siblings_omitted"], json!(true), "{v:.300}");
+    let t = text_of(input).await;
+    assert!(
+        t.contains("\n  sibling sections not listed (too many to show)\n"),
+        "{t:.400}"
+    );
 }
 
 /// The `next` of a page of a real file's value quotes the caller's `json_path` (or `toml_key`)

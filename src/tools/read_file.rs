@@ -1224,9 +1224,10 @@ fn read_json_path_nav(
 /// limit and no range was asked for, else a page of the value with `total_lines`, `shown_lines`,
 /// `complete` and a `next` of `read_file("<path>", <nav>=…, start_line=N, end_line=M)`.
 ///
-/// The line numbers are the VALUE's own. It is not in general a run of the file's lines (a JSON
-/// value is re-serialized, a string value unescaped, and a TOML key resolved through the full
-/// parse is re-serialized), so it has no numbers in the file to state them in. A range beside
+/// The line numbers are the VALUE's own, counted from 1. They are not in general the file's
+/// (a JSON value is re-serialized and a string value unescaped; a TOML key is a run of the file's
+/// lines, but not one that starts at the file's line 1, and its `line_range` says where it came
+/// from), so a number of the value is not a line of the file. A range beside
 /// `nav` slices those lines, as it does beside `json_path` on a `@tool_*` ref.
 ///
 /// The value is a pure function of the file's bytes and the key, and it is recomputed from the
@@ -1873,8 +1874,45 @@ pub(super) fn format_read_file(val: &Value) -> String {
     // the notice reports.
     insert_below_header(
         format_read_file_body(val),
-        &crate::tools::format::truncation_head(val),
+        &format!(
+            "{}{}",
+            crate::tools::format::truncation_head(val),
+            key_read_head(val)
+        ),
     )
+}
+
+/// Where a TOML or YAML `toml_key` value sits in its file, for the text form (the JSON carries
+/// `line_range` and `siblings_omitted`; the text did not, so a reader could not tell that the
+/// value's line numbers are not the file's, nor that lines of the span were left out because
+/// they belong to other keys). Empty for every other read, and for a value that is the file's
+/// own lines from line 1 on. Placed under the header, like the notices above.
+fn key_read_head(val: &Value) -> String {
+    if !matches!(val["format"].as_str(), Some("toml" | "yaml")) {
+        return String::new();
+    }
+    let (Some(first), Some(last)) = (val["line_range"][0].as_u64(), val["line_range"][1].as_u64())
+    else {
+        return String::new();
+    };
+    let shown_in_value = val["total_lines"].as_u64().unwrap_or_else(|| {
+        val["content"]
+            .as_str()
+            .map_or(0, |c| c.lines().count() as u64)
+    });
+    let span = last.saturating_sub(first) + 1;
+    let mut out = String::new();
+    if span > shown_in_value {
+        out.push_str(&format!(
+            "  file lines {first}-{last}; {shown_in_value} of them are this value (the other lines of the span belong to other keys)\n"
+        ));
+    } else if first != 1 {
+        out.push_str(&format!("  file lines {first}-{last}\n"));
+    }
+    if val["siblings_omitted"].as_bool() == Some(true) {
+        out.push_str("  sibling sections not listed (too many to show)\n");
+    }
+    out
 }
 
 /// How many lines a page SHOWS: the span its `shown_lines` names, for the `[N of M lines shown]`

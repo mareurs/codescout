@@ -1650,6 +1650,653 @@ fn extract_yaml_key_past_summary_cap() {
         result.content
     );
 }
+// ---------------------------------------------------------------------------------------------
+// `toml_key` returns the key's SOURCE lines (docs/issues/2026-10-08-toml-key-extractor-prints-
+// debug-text-and-drops-elements-and-parents.md). Each case below is the exact input of that
+// record or a shape the same rule has to hold on.
+// ---------------------------------------------------------------------------------------------
+
+/// `(text, (first, last))` of `extract_toml_key(content, key)`, failing the test on a refusal.
+fn toml_key(content: &str, key: &str) -> (String, (usize, usize)) {
+    let r = extract_toml_key(content, key)
+        .unwrap_or_else(|e| panic!("toml_key={key} on {content:?} was refused: {}", e.message));
+    (r.content, r.line_range)
+}
+
+/// The refusal of `extract_toml_key(content, key)`, failing the test when it answers.
+fn toml_refusal(content: &str, key: &str) -> crate::tools::RecoverableError {
+    match extract_toml_key(content, key) {
+        Err(e) => e,
+        Ok(r) => panic!("toml_key={key} on {content:?} answered {:?}", r.content),
+    }
+}
+
+#[test]
+fn toml_key_scalar_is_its_source_line_not_rust_debug_text() {
+    // Case 1 of the record: the serializer fallback printed `String("t")`.
+    let (text, range) = toml_key("t = \"t\"\nn = 1\n", "t");
+    assert_eq!(text, "t = \"t\"");
+    assert_eq!(range, (1, 1));
+    let (text, range) = toml_key("t = \"t\"\nn = 1\n", "n");
+    assert_eq!(text, "n = 1");
+    assert_eq!(range, (2, 2));
+}
+
+#[test]
+fn toml_key_multi_line_string_keeps_its_real_lines() {
+    // It used to become ONE line of escaped text, which paging cannot read.
+    let content = "top = 1\ns = \"\"\"\nline one\nline two\n\"\"\"\nafter = 2\n";
+    let (text, range) = toml_key(content, "s");
+    assert_eq!(text, "s = \"\"\"\nline one\nline two\n\"\"\"");
+    assert_eq!(range, (2, 5));
+}
+
+#[test]
+fn toml_key_array_of_tables_returns_every_element_in_order_with_headers() {
+    // Case 2 of the record: only the first element came back.
+    let content = "[[k]]\nname = \"a\"\n\n[[k]]\nname = \"b\"\n\n[[k]]\nname = \"c\"\n";
+    let (text, range) = toml_key(content, "k");
+    assert_eq!(
+        text,
+        "[[k]]\nname = \"a\"\n\n[[k]]\nname = \"b\"\n\n[[k]]\nname = \"c\""
+    );
+    assert_eq!(range, (1, 8));
+}
+
+#[test]
+fn toml_key_array_of_tables_with_a_foreign_table_between_elements_carries_only_its_lines() {
+    // The foreign `[other]` section sits between two elements: the text is the key's lines in
+    // file order, the range is the span they cover.
+    let content = "[[k]]\nn = 1\n[other]\nq = 9\n[[k]]\nn = 2\n";
+    let (text, range) = toml_key(content, "k");
+    assert_eq!(text, "[[k]]\nn = 1\n[[k]]\nn = 2");
+    assert_eq!(range, (1, 6));
+}
+
+#[test]
+fn toml_key_array_of_tables_takes_the_sub_tables_of_each_element() {
+    let content = "[[k]]\nname = \"a\"\n[k.sub]\nx = 1\n[[k]]\nname = \"b\"\n[tail]\nz = 1\n";
+    let (text, range) = toml_key(content, "k");
+    assert_eq!(
+        text,
+        "[[k]]\nname = \"a\"\n[k.sub]\nx = 1\n[[k]]\nname = \"b\""
+    );
+    assert_eq!(range, (1, 6));
+}
+
+#[test]
+fn toml_key_child_table_keeps_its_full_header() {
+    // Case 3 of the record: `toml_key=a` on `[a.b]` returned `[b]` without the parent name.
+    let (text, range) = toml_key("top = 1\n\n[a.b]\ny = 2\n", "a");
+    assert_eq!(text, "[a.b]\ny = 2");
+    assert_eq!(range, (3, 4));
+}
+
+#[test]
+fn toml_key_with_child_tables_returns_its_own_lines_and_the_children_with_full_headers() {
+    let content = "[a]\nx = 1\n\n[a.b]\ny = 2\n\n[a.c]\nz = 3\n\n[other]\nq = 1\n";
+    let (text, range) = toml_key(content, "a");
+    assert_eq!(text, "[a]\nx = 1\n\n[a.b]\ny = 2\n\n[a.c]\nz = 3");
+    assert_eq!(range, (1, 8));
+    // A child reached by its own dotted path is exactly its section, and a leaf in the
+    // parent is exactly its line.
+    assert_eq!(
+        toml_key(content, "a.b"),
+        ("[a.b]\ny = 2".to_string(), (4, 5))
+    );
+    assert_eq!(toml_key(content, "a.x"), ("x = 1".to_string(), (2, 2)));
+}
+
+#[test]
+fn toml_key_header_defined_later_than_its_children_still_leads_with_its_header() {
+    // `[a.b]` is written before `[a]`: the children are not after the parent in the file.
+    let content = "[a.b]\ny = 2\n\n[a]\nx = 1\n";
+    let (text, range) = toml_key(content, "a");
+    assert_eq!(text, "[a.b]\ny = 2\n\n[a]\nx = 1");
+    assert_eq!(range, (1, 5));
+}
+
+#[test]
+fn toml_key_dotted_group_reports_its_span_and_carries_only_its_lines() {
+    // Case 4 of the record: `line_range` was the whole file, `[1, 4]`, for a group on lines 2-3.
+    let (text, range) = toml_key("top = 1\nk.x = 1\nk.y = 2\nz = 3\n", "k");
+    assert_eq!(text, "k.x = 1\nk.y = 2");
+    assert_eq!(range, (2, 3));
+}
+
+#[test]
+fn toml_key_dotted_group_with_a_foreign_key_between_skips_that_line() {
+    // Rule: the text is the lines of the key in file order and nothing else; `line_range` is
+    // their span, so its length can exceed the text's line count when the key is not contiguous.
+    let (text, range) = toml_key("k.x = 1\nz = 3\nk.y = 2\nw = 4\n", "k");
+    assert_eq!(text, "k.x = 1\nk.y = 2");
+    assert_eq!(range, (1, 3));
+}
+
+#[test]
+fn toml_key_dotted_group_with_only_blank_and_comment_lines_between_keeps_them() {
+    let (text, range) = toml_key("k.x = 1\n\n# about y\nk.y = 2\nw = 4\n", "k");
+    assert_eq!(text, "k.x = 1\n\n# about y\nk.y = 2");
+    assert_eq!(range, (1, 4));
+}
+
+#[test]
+fn toml_key_dotted_group_inside_a_table_is_reached_by_its_full_path() {
+    let (text, range) = toml_key("[a]\nb.c = 1\nb.d = 2\ne = 3\n", "a.b");
+    assert_eq!(text, "b.c = 1\nb.d = 2");
+    assert_eq!(range, (2, 3));
+}
+
+#[test]
+fn toml_key_range_is_the_keys_lines_in_a_file_it_does_not_start_in() {
+    let content = "[pre]\nx = 1\n\n[k]\nv = 1\nw = 2\n\n[post]\ny = 2\n";
+    let (text, range) = toml_key(content, "k");
+    assert_eq!(text, "[k]\nv = 1\nw = 2");
+    assert_eq!(range, (4, 6));
+    assert_eq!(text.lines().count(), range.1 - range.0 + 1);
+}
+
+#[test]
+fn toml_key_prefix_of_another_key_matches_only_itself() {
+    // `a` is a prefix of `ab` and `abc`, which are written before and after it.
+    let content = "[ab]\nv = 1\n\n[a]\nv = 2\n\n[abc]\nv = 3\n";
+    let (text, range) = toml_key(content, "a");
+    assert_eq!(text, "[a]\nv = 2");
+    assert_eq!(range, (4, 5));
+    assert_eq!(toml_key(content, "ab"), ("[ab]\nv = 1".to_string(), (1, 2)));
+    // The same for keys that are not tables.
+    let (text, range) = toml_key("ab = 1\na = 2\nabc = 3\n", "a");
+    assert_eq!(text, "a = 2");
+    assert_eq!(range, (2, 2));
+    // And a key that is only a prefix of what the file holds is not found.
+    assert!(extract_toml_key("[abc]\nv = 1\n", "a").is_err());
+    assert!(extract_toml_key("[a]\nv = 1\n", "ab").is_err());
+}
+
+#[test]
+fn toml_key_quoted_keys_are_addressed_by_their_text() {
+    let content = "\"quoted key\" = 1\n['q t']\nv = 2\n[plain.\"in ner\"]\nw = 3\n";
+    assert_eq!(
+        toml_key(content, "quoted key"),
+        ("\"quoted key\" = 1".to_string(), (1, 1))
+    );
+    assert_eq!(
+        toml_key(content, "q t"),
+        ("['q t']\nv = 2".to_string(), (2, 3))
+    );
+    assert_eq!(
+        toml_key(content, "plain"),
+        ("[plain.\"in ner\"]\nw = 3".to_string(), (4, 5))
+    );
+}
+
+#[test]
+fn toml_key_table_keeps_comments_and_blank_lines_inside_it_not_around_it() {
+    let content =
+        "# about a\n[a]\n# c1\nx = 1 # inline\n\n# c2\ny = 2\n# tail comment\n\n[b]\nz = 3\n";
+    let (text, range) = toml_key(content, "a");
+    assert_eq!(text, "[a]\n# c1\nx = 1 # inline\n\n# c2\ny = 2");
+    assert_eq!(range, (2, 7));
+}
+
+#[test]
+fn toml_key_header_with_a_trailing_comment_is_kept_whole() {
+    let (text, range) = toml_key("[a] # about a\nx = 1\n", "a");
+    assert_eq!(text, "[a] # about a\nx = 1");
+    assert_eq!(range, (1, 2));
+}
+
+#[test]
+fn toml_key_empty_table_is_its_header_alone() {
+    let (text, range) = toml_key("[a]\n\n[b]\nx = 1\n", "a");
+    assert_eq!(text, "[a]");
+    assert_eq!(range, (1, 1));
+}
+
+#[test]
+fn toml_key_crlf_file_has_the_right_lines_and_no_carriage_returns() {
+    let content =
+        "t = \"t\"\r\n\r\n[a]\r\nx = \"\"\"\r\nl1\r\nl2\"\"\"\r\ny = 2\r\n\r\n[b]\r\nz = 3\r\n";
+    let (text, range) = toml_key(content, "a");
+    assert_eq!(text, "[a]\nx = \"\"\"\nl1\nl2\"\"\"\ny = 2");
+    assert_eq!(range, (3, 7));
+    assert_eq!(toml_key(content, "t"), ("t = \"t\"".to_string(), (1, 1)));
+    assert_eq!(toml_key(content, "b.z").1, (10, 10));
+}
+
+#[test]
+fn toml_key_inline_table_is_its_source_line() {
+    let (text, range) = toml_key("i = { a = 1, b = \"two\" }\nz = 1\n", "i");
+    assert_eq!(text, "i = { a = 1, b = \"two\" }");
+    assert_eq!(range, (1, 1));
+    // A key inside an inline table has no line of its own: it is the line it is written on.
+    assert_eq!(
+        toml_key("i = { a = 1, b = \"two\" }\nz = 1\n", "i.b").1,
+        (1, 1)
+    );
+}
+
+#[test]
+fn toml_key_array_spanning_lines_keeps_every_line() {
+    let content = "top = 1\narr = [\n  1,\n  # two\n  2,\n]\nafter = 3\n";
+    let (text, range) = toml_key(content, "arr");
+    assert_eq!(text, "arr = [\n  1,\n  # two\n  2,\n]");
+    assert_eq!(range, (2, 6));
+}
+
+#[test]
+fn toml_key_array_of_inline_tables_spanning_lines_is_one_value() {
+    let content = "pts = [\n  { x = 1 },\n  { x = 2 },\n]\nz = 1\n";
+    let (text, range) = toml_key(content, "pts");
+    assert_eq!(text, "pts = [\n  { x = 1 },\n  { x = 2 },\n]");
+    assert_eq!(range, (1, 4));
+}
+
+#[test]
+fn toml_key_multi_line_inline_table_keeps_its_opening_and_closing_lines() {
+    // TOML 1.1 lets an inline table span lines: the lines that hold only `i = {` and `}` are the
+    // key's, though no pair inside it starts on them.
+    let content = "i = {\n  a = 1,\n  b = 2,\n}\nz = 1\n";
+    let (text, range) = toml_key(content, "i");
+    assert_eq!(text, "i = {\n  a = 1,\n  b = 2,\n}");
+    assert_eq!(range, (1, 4));
+}
+
+#[test]
+fn toml_key_empty_array_and_empty_inline_table_are_their_source_line() {
+    // An empty array holds no table: it must not be taken for an array of tables with no lines.
+    let content = "e = []\nt = {}\nz = 1\n";
+    assert_eq!(toml_key(content, "e"), ("e = []".to_string(), (1, 1)));
+    assert_eq!(toml_key(content, "t"), ("t = {}".to_string(), (2, 2)));
+}
+
+#[test]
+fn toml_key_through_a_value_that_is_not_a_table_is_refused_naming_it() {
+    let err = toml_refusal("[package]\nname = \"foo\"\n", "package.name.x");
+    assert_eq!(err.message, "key 'package.name.x' not found in TOML");
+    let hint = err.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+    assert_eq!(
+        hint,
+        "'package.name' is not a table, it is a value of type string"
+    );
+    // An array of tables is addressed whole (`k`), not by an element's field.
+    let err = toml_refusal("[[k]]\nn = 1\n[[k]]\nn = 2\n", "k.n");
+    let hint = err.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+    assert_eq!(hint, "'k' is not a table, it is a value of type array");
+}
+
+/// The text parses as TOML (a fragment such as `k = { v = 1, f = [` does not).
+fn assert_parses_as_toml(text: &str) {
+    if let Err(e) = text.parse::<toml::Table>() {
+        panic!("not TOML: {e}\n{text}");
+    }
+}
+
+#[test]
+fn toml_key_member_of_an_inline_table_is_the_whole_pair_that_holds_it() {
+    // A dotted key inside an inline table implies a table whose span is that of its key, so
+    // the members of `a` all sit on the lines of `p`'s pair: the answer is `p`'s whole pair, not
+    // a fragment of it and not its lines twice.
+    let one = "p = { a.x = 1, a.y = 2 }\nz = 1\n";
+    let two = "p = { a.x = 1, a.y = [\n  1,\n] }\nz = 1\n";
+    let three = "p = { a.y = [\n  1,\n], a.x = 1 }\nz = 1\n";
+    for (content, keys, want, range) in [
+        (
+            one,
+            &["p", "p.a", "p.a.x"][..],
+            "p = { a.x = 1, a.y = 2 }",
+            (1, 1),
+        ),
+        (
+            two,
+            &["p", "p.a", "p.a.y"][..],
+            "p = { a.x = 1, a.y = [\n  1,\n] }",
+            (1, 3),
+        ),
+        (
+            three,
+            &["p", "p.a", "p.a.x"][..],
+            "p = { a.y = [\n  1,\n], a.x = 1 }",
+            (1, 3),
+        ),
+    ] {
+        for key in keys {
+            let (text, got) = toml_key(content, key);
+            assert_eq!(text, want, "toml_key={key} on {content:?}");
+            assert_eq!(got, range, "toml_key={key} on {content:?}");
+            assert_parses_as_toml(&text);
+        }
+    }
+}
+
+#[test]
+fn toml_key_member_of_a_multi_line_inline_table_in_a_table_is_its_whole_pair() {
+    let content = "[dependencies]\nserde = { version = \"1\", features = [\n  \"derive\",\n] }\ntokio = \"1\"\n";
+    for key in [
+        "dependencies.serde",
+        "dependencies.serde.version",
+        "dependencies.serde.features",
+    ] {
+        let (text, range) = toml_key(content, key);
+        assert_eq!(
+            text, "serde = { version = \"1\", features = [\n  \"derive\",\n] }",
+            "{key}"
+        );
+        assert_eq!(range, (2, 4), "{key}");
+        assert_parses_as_toml(&text);
+    }
+    // A single-line inline table: a member is the line it is written on.
+    let (text, range) = toml_key("i = { a = 1, b = \"two\" }\nz = 1\n", "i.b");
+    assert_eq!(
+        (text.as_str(), range),
+        ("i = { a = 1, b = \"two\" }", (1, 1))
+    );
+}
+
+#[test]
+fn toml_key_member_of_nested_inline_tables_is_the_pair_of_the_outermost_one() {
+    let content = "p = {\n  a = {\n    b.c = 1,\n    b.d = 2 },\n}\nz = 1\n";
+    for key in ["p", "p.a", "p.a.b", "p.a.b.c"] {
+        let (text, range) = toml_key(content, key);
+        assert_eq!(
+            text, "p = {\n  a = {\n    b.c = 1,\n    b.d = 2 },\n}",
+            "{key}"
+        );
+        assert_eq!(range, (1, 5), "{key}");
+        assert_parses_as_toml(&text);
+    }
+}
+
+#[test]
+fn toml_key_that_smuggles_a_value_into_the_key_grammar_names_nothing() {
+    // `<key> = 0` parses for this key as `a = 5` followed by a comment: not a key path.
+    let e = toml_refusal("a = 1\n", "a = 5 #");
+    assert_eq!(e.message, "key 'a = 5 #' not found in TOML");
+}
+
+#[test]
+fn toml_key_that_is_not_key_grammar_is_split_at_every_dot() {
+    // `a b` is no bare key, so the key is not TOML key grammar; it names the quoted key
+    // `"a b"` and the dots still separate segments.
+    let content = "[\"a b\"]\nx = 1\n";
+    assert_eq!(toml_key(content, "a b.x"), ("x = 1".to_string(), (2, 2)));
+    assert_eq!(
+        toml_key(content, "a b"),
+        ("[\"a b\"]\nx = 1".to_string(), (1, 2))
+    );
+}
+
+#[test]
+fn toml_key_names_in_a_hint_are_quoted_exactly_when_they_cannot_be_bare() {
+    let content = "[a.my_key]\n[a.my-key]\n[a.\"q\\\"x\"]\n[a.\"b c\"]\n[a.\"\"]\n";
+    let e = toml_refusal(content, "a.nope");
+    let hint = e.guidance.as_ref().map(|g| g.text().to_string()).unwrap();
+    assert_eq!(
+        hint,
+        "Available keys in 'a': my_key, my-key, \"q\\\"x\", \"b c\", \"\""
+    );
+    // Each name offered resolves when typed back.
+    for key in [
+        "a.my_key",
+        "a.my-key",
+        "a.\"q\\\"x\"",
+        "a.\"b c\"",
+        "a.\"\"",
+    ] {
+        assert_eq!(toml_key(content, key).0.lines().count(), 1, "{key}");
+    }
+}
+
+#[test]
+fn toml_key_multi_line_value_after_another_item_is_kept_to_its_end() {
+    let content = "k.a = 1\nk.b = \"\"\"\nx\ny\n\"\"\"\nz = 2\n";
+    let (text, range) = toml_key(content, "k");
+    assert_eq!(text, "k.a = 1\nk.b = \"\"\"\nx\ny\n\"\"\"");
+    assert_eq!(range, (1, 5));
+    assert_parses_as_toml(&text);
+}
+
+#[test]
+fn toml_key_with_a_quoted_segment_can_be_named_as_it_is_written() {
+    for (content, key, want, range) in [
+        (
+            "[a.\"b.c\"]\nx = 1\n",
+            "a.\"b.c\"",
+            "[a.\"b.c\"]\nx = 1",
+            (1, 2),
+        ),
+        (
+            "[package]\nname = \"n\"\n\n[package.metadata.\"docs.rs\"]\nall-features = true\n",
+            "package.metadata.\"docs.rs\"",
+            "[package.metadata.\"docs.rs\"]\nall-features = true",
+            (4, 5),
+        ),
+        (
+            "[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n",
+            "target.'cfg(unix)'.dependencies",
+            "[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"",
+            (1, 2),
+        ),
+        ("\"a.b\" = 1\nc = 2\n", "\"a.b\"", "\"a.b\" = 1", (1, 1)),
+    ] {
+        assert_eq!(toml_key(content, key), (want.to_string(), range), "{key}");
+    }
+}
+
+#[test]
+fn toml_key_hint_offers_names_that_can_be_typed_back() {
+    let content = "[a.\"b.c\"]\nx = 1\n\n[a.d]\ny = 1\n\n[\"quoted key\"]\nz = 1\n";
+    let hint = |key: &str| {
+        let e = toml_refusal(content, key);
+        e.guidance.as_ref().map(|g| g.text().to_string()).unwrap()
+    };
+    // The name of a key with a dot in it is offered quoted, and quoted it resolves.
+    assert_eq!(hint("a.nope"), "Available keys in 'a': \"b.c\", d");
+    assert!(toml_key(content, "a.\"b.c\"").0.starts_with("[a.\"b.c\"]"));
+    assert_eq!(hint("nope"), "Available top-level keys: a, \"quoted key\"");
+    assert!(toml_key(content, "\"quoted key\"")
+        .0
+        .starts_with("[\"quoted key\"]"));
+    // The scope of a refusal one level down is itself a name that can be typed back.
+    let e = toml_refusal("[a.\"b.c\"]\nx = 1\n", "a.\"b.c\".x.y");
+    let hint = e.guidance.as_ref().map(|g| g.text().to_string()).unwrap();
+    assert_eq!(
+        hint,
+        "'a.\"b.c\".x' is not a table, it is a value of type integer"
+    );
+}
+
+#[test]
+fn toml_key_multi_line_string_in_a_crlf_file_is_read_with_lf_newlines() {
+    // TOML lets a parser normalise a newline inside a multi-line string, and the text is the
+    // file's lines joined with `\n`: the value a reader parses back differs by exactly that.
+    let content = "s = \"\"\"\r\nl1\r\nl2\"\"\"\r\nz = 1\r\n";
+    let (text, range) = toml_key(content, "s");
+    assert_eq!(text, "s = \"\"\"\nl1\nl2\"\"\"");
+    assert_eq!(range, (1, 3));
+    assert!(!text.contains('\r'));
+    // The value read back differs from the file's by exactly that: `\r\n` became `\n`.
+    let back: toml::Table = text.parse().unwrap();
+    let original: toml::Table = content.parse().unwrap();
+    assert_eq!(original["s"].as_str(), Some("l1\r\nl2"));
+    assert_eq!(back["s"].as_str(), Some("l1\nl2"));
+}
+
+#[test]
+fn toml_key_that_is_missing_still_names_its_scope() {
+    let err = toml_refusal("[package]\nname = \"foo\"\n\n[dep]\nx = 1\n", "nope");
+    assert_eq!(err.message, "key 'nope' not found in TOML");
+    let hint = err.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+    // Source order, whatever order the TOML map type keeps.
+    assert_eq!(hint, "Available top-level keys: package, dep");
+    // Missing one level down: the keys listed are the ones of the level that lacks it.
+    let err = toml_refusal("[package]\nname = \"foo\"\n", "package.nope");
+    assert_eq!(err.message, "key 'package.nope' not found in TOML");
+    let hint = err.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+    assert_eq!(hint, "Available keys in 'package': name");
+}
+
+#[test]
+fn toml_key_that_does_not_parse_is_refused_with_the_parse_error() {
+    let err = toml_refusal("a = \n", "a");
+    assert!(
+        err.message.starts_with("failed to parse TOML"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn toml_key_of_a_table_lists_the_other_sections_as_siblings() {
+    let (siblings, heading, crumbs) = {
+        let r =
+            extract_toml_key("[a]\nx = 1\n[b]\ny = 1\n[[c]]\nz = 1\n[[c]]\nz = 2\n", "b").unwrap();
+        (r.siblings, r.heading_text, r.breadcrumb)
+    };
+    assert_eq!(siblings, ["[a]", "[[c]]"]);
+    assert_eq!(heading, "b");
+    assert_eq!(crumbs, ["b"]);
+    // A key of a leaf has no sibling list.
+    let r = extract_toml_key("[a]\nx = 1\n[b]\ny = 1\n", "a.x").unwrap();
+    assert!(r.siblings.is_empty());
+    assert_eq!(r.breadcrumb, ["a", "x"]);
+    assert_eq!(r.heading_text, "a.x");
+}
+
+#[test]
+fn toml_key_siblings_are_in_file_order_uncapped_and_never_the_keys_own_headers() {
+    // `[z]` is written first and sorts last; 40 more sections follow `[k]`. The list is not cut
+    // at a count (`read_file` drops it by width, marked): every other header is in it, once.
+    let mut content = String::from("[z]\nx = 1\n[k]\nv = 1\n[k.sub]\nw = 1\n");
+    for i in 0..40 {
+        content.push_str(&format!("[s{i:02}]\nx = 1\n"));
+    }
+    let r = extract_toml_key(&content, "k").unwrap();
+    assert_eq!(r.siblings.len(), 41);
+    assert_eq!(r.siblings[0], "[z]");
+    assert_eq!(r.siblings[1], "[s00]");
+    assert_eq!(r.siblings[40], "[s39]");
+    assert!(
+        !r.siblings.iter().any(|s| s == "[k]" || s == "[k.sub]"),
+        "{:?}",
+        r.siblings
+    );
+}
+
+#[test]
+fn toml_key_dotted_pairs_and_a_header_below_them_are_one_key() {
+    // The TOML spec's own example: a table that dotted keys define and a header extends.
+    let content = "[fruit]\napple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple.texture]\nsmooth = true\n\n[other]\nx = 1\n";
+    let (text, range) = toml_key(content, "fruit.apple");
+    assert_eq!(
+        text,
+        "apple.color = \"red\"\napple.taste.sweet = true\n\n[fruit.apple.texture]\nsmooth = true"
+    );
+    assert_eq!(range, (2, 6));
+}
+
+#[test]
+fn toml_key_of_every_key_of_this_repos_manifest_and_lockfile_is_lines_of_the_file() {
+    // A crash-and-consistency net, NOT an oracle: real files, every top-level key and every key
+    // one level down, each answered without a panic, with a first and last line equal to the
+    // file's lines at `line_range` and every line a line of the file, in order. It cannot tell a
+    // short answer from a whole one, so the one independent count it makes is the `[[k]]`
+    // headers: the text holds as many as the file does.
+    for (name, content) in [
+        ("Cargo.toml", include_str!("../../../Cargo.toml")),
+        ("Cargo.lock", include_str!("../../../Cargo.lock")),
+    ] {
+        let file: Vec<&str> = content.lines().collect();
+        let table: toml::Table = content.parse().unwrap();
+        let mut keys: Vec<String> = Vec::new();
+        for (k, v) in &table {
+            keys.push(k.clone());
+            if let toml::Value::Table(inner) = v {
+                keys.extend(inner.keys().map(|ik| format!("{k}.{ik}")));
+            }
+        }
+        let want_keys = if name == "Cargo.toml" { 10 } else { 2 };
+        assert!(
+            keys.len() >= want_keys,
+            "{name}: fixture: only {} keys",
+            keys.len()
+        );
+        for key in keys {
+            if key.contains(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+            {
+                continue; // a quoted key, which `toml_key` cannot name
+            }
+            let (text, (first, last)) = toml_key(content, &key);
+            let header = format!("[[{key}]]");
+            let count = |lines: &mut dyn Iterator<Item = &str>| {
+                lines.filter(|l| l.trim_end() == header).count()
+            };
+            assert_eq!(
+                count(&mut text.lines()),
+                count(&mut file.iter().copied()),
+                "{name} {key}: the `{header}` headers of the file and of the text"
+            );
+            let got: Vec<&str> = text.lines().collect();
+            assert!(!got.is_empty(), "{name} {key}: empty");
+            assert!(
+                1 <= first && first <= last && last <= file.len(),
+                "{name} {key}"
+            );
+            assert_eq!(got[0], file[first - 1], "{name} {key}: first line");
+            assert_eq!(
+                got[got.len() - 1],
+                file[last - 1],
+                "{name} {key}: last line"
+            );
+            let mut at = first - 1;
+            for line in &got {
+                while file[at] != *line {
+                    at += 1;
+                    assert!(
+                        at < last,
+                        "{name} {key}: {line:?} is not a line of the file in order"
+                    );
+                }
+                at += 1;
+            }
+        }
+    }
+}
+
+// ---- YAML: the same four shapes, measured --------------------------------------------------
+
+#[test]
+fn yaml_key_scalar_is_its_source_line() {
+    let r = extract_yaml_key("t: t\nn: 1\n", "t").unwrap();
+    assert_eq!(r.content, "t: t");
+    assert_eq!(r.line_range, (1, 1));
+}
+
+#[test]
+fn yaml_key_sequence_of_maps_returns_every_element() {
+    let r = extract_yaml_key("k:\n  - name: a\n  - name: b\n  - name: c\nz: 1\n", "k").unwrap();
+    assert_eq!(r.content, "k:\n  - name: a\n  - name: b\n  - name: c");
+    assert_eq!(r.line_range, (1, 4));
+}
+
+#[test]
+fn yaml_key_line_range_is_the_span_of_the_returned_lines() {
+    let content = "top: 1\nk:\n  x: 1\n\n  y: 2\nz: 3\n";
+    let r = extract_yaml_key(content, "k").unwrap();
+    assert_eq!(
+        r.content.lines().count(),
+        r.line_range.1 - r.line_range.0 + 1
+    );
+    assert_eq!(r.line_range.0, 2);
+    assert!(r.content.starts_with("k:") && r.content.contains("y: 2"));
+}
+
+#[test]
+fn yaml_key_nested_path_is_refused_not_answered_with_a_part() {
+    // YAML resolves top-level keys only: a nested path must refuse, never return a child
+    // without its parent.
+    assert!(extract_yaml_key("a:\n  b: 1\n", "a.b").is_err());
+}
 
 #[test]
 fn parse_all_headings_basic() {
