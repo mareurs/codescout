@@ -1382,6 +1382,10 @@ pub(crate) async fn handle_successful_output_with(
                 raw_stderr.clone(),
                 exit_code,
             );
+            // Streams bigger than the pool's byte limit are kept as a marked prefix. The caller is
+            // told here, inside the render so `fit_summary` measures it, and by every later read
+            // of the handle.
+            let output_cut = ctx.output_buffer.truncation_notices_in(&output_id);
 
             let cmd_type = detect_command_type(original_command);
             let tee_present = unfiltered_ref.is_some();
@@ -1405,6 +1409,9 @@ pub(crate) async fn handle_successful_output_with(
                 // Rebuild with correct field order so output_id appears before content fields.
                 let mut response = rebuild_buffered_summary(cmd_summary, &output_id);
                 attach(&mut response, late.clone(), tee_present);
+                if !output_cut.is_empty() {
+                    response["output_truncated"] = json!(output_cut);
+                }
                 // Inside the render, so `fit_summary` measures it. A summary with no `stdout` (a
                 // test or build summary) gets one holding just the refresh line, which was
                 // otherwise never delivered on that shape.

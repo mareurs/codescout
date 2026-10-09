@@ -1805,6 +1805,12 @@ pub trait Tool: Send + Sync {
                 "hint": hint,
                 "buffered_bytes": json_len,
             });
+            // A result bigger than the pool's byte limit is kept as a marked prefix; the
+            // notice says how many lines were kept and how many dropped.
+            let output_cut = ctx.output_buffer.truncation_notices_in(&ref_id);
+            if !output_cut.is_empty() {
+                buffered["output_truncated"] = serde_json::json!(output_cut);
+            }
             if let Some((topic, shape)) = &guide_hint {
                 inject_hint(&mut buffered, topic, *shape);
             }

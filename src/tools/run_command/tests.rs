@@ -10146,3 +10146,62 @@ async fn a_trailing_crlf_after_a_word_gets_no_appended_stage() {
     assert!(appended_pager(&hint).is_none(), "{q:?}: {hint}");
     assert!(hint.contains("narrow the query"), "{hint}");
 }
+
+// ---- the pool's byte budget ----
+
+/// An output bigger than the pool's byte limit (lowered to the 1 MiB floor here), through the
+/// real `RunCommand`: the pool keeps a marked prefix, the response names how many lines were
+/// kept and dropped, a later read of the handle carries the notice, and line N of the handle is
+/// still line N of the output.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_oversized_output_is_a_marked_prefix_and_the_response_says_so() {
+    let (_dir, mut ctx) = project_ctx().await;
+    let limit = crate::tools::output_buffer::MIN_POOL_BYTES;
+    ctx.output_buffer = std::sync::Arc::new(
+        crate::tools::output_buffer::OutputBuffer::with_byte_limit(50, limit),
+    );
+    let (text, parsed) = buffer_query_free(&ctx, "seq 1 300000").await;
+    let id = parsed["output_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no output_id: {text:.400}"))
+        .to_string();
+    let t = ctx
+        .output_buffer
+        .get(&id)
+        .unwrap()
+        .truncated
+        .expect("the pool cut the output");
+    assert_eq!(t.total_lines, 300_000);
+    let counts = format!(
+        "{} of 300000 lines kept, {} omitted",
+        t.kept_lines,
+        300_000 - t.kept_lines
+    );
+    let names_the_cut = |v: &Value| {
+        v.as_array().is_some_and(|a| {
+            a.iter().any(|n| {
+                n.as_str()
+                    .is_some_and(|s| s.contains(&counts) && s.contains(&id))
+            })
+        })
+    };
+    assert!(
+        names_the_cut(&parsed["output_truncated"]),
+        "the response must say what was kept and dropped: {text:.800}"
+    );
+    assert!(ctx.output_buffer.bytes_of(&id).unwrap() <= limit);
+    ctx.output_buffer.assert_accounting();
+
+    let n = t.kept_lines / 2;
+    let (text, parsed) = buffer_query(&ctx, format!("sed -n '{n}p' {id}")).await;
+    assert_eq!(
+        parsed["stdout"].as_str().map(str::trim),
+        Some(n.to_string().as_str()),
+        "line {n} of the handle is line {n} of the output: {text:.400}"
+    );
+    assert!(
+        names_the_cut(&parsed["buffer_truncated"]),
+        "a later read of the handle carries the notice: {text:.800}"
+    );
+}

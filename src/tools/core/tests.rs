@@ -4134,3 +4134,52 @@ async fn a_read_tool_repairs_and_notes_the_same_ambiguous_input() {
         "the notice must name the superseded alias: {t}"
     );
 }
+
+/// A result bigger than the pool's byte limit (lowered to the 1 MiB floor) at `call_content`'s
+/// backstop: it is buffered as a marked prefix, never whole, and the envelope names how many
+/// lines were kept and dropped.
+#[tokio::test]
+async fn an_oversized_result_is_buffered_as_a_marked_prefix_and_the_envelope_says_so() {
+    let mut ctx = bare_ctx().await;
+    let limit = crate::tools::output_buffer::MIN_POOL_BYTES;
+    ctx.output_buffer = std::sync::Arc::new(
+        crate::tools::output_buffer::OutputBuffer::with_byte_limit(20, limit),
+    );
+    let rows: Vec<String> = (0..120_000).map(|i| format!("row {i:06}")).collect();
+    let tool = EchoTool {
+        result: serde_json::json!({ "rows": rows }),
+        user_summary: None,
+    };
+    let content = tool
+        .call_content(serde_json::json!({}), &ctx)
+        .await
+        .unwrap();
+    let text = content[0]
+        .as_text()
+        .map(|t| t.text.clone())
+        .unwrap_or_default();
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let id = parsed["output_id"].as_str().expect("buffered");
+    let t = ctx
+        .output_buffer
+        .get(id)
+        .unwrap()
+        .truncated
+        .expect("the result is over the limit, so it is cut");
+    let counts = format!(
+        "{} of {} lines kept, {} omitted",
+        t.kept_lines,
+        t.total_lines,
+        t.total_lines - t.kept_lines
+    );
+    assert!(
+        parsed["output_truncated"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|n| n
+                .as_str()
+                .is_some_and(|s| s.contains(&counts) && s.contains(id)))),
+        "the envelope must say what was kept and dropped: {text:.800}"
+    );
+    assert!(ctx.output_buffer.bytes_of(id).unwrap() <= limit);
+    ctx.output_buffer.assert_accounting();
+}

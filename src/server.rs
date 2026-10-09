@@ -444,7 +444,11 @@ impl CodeScoutServer {
                 tools.extend(crate::librarian::adapters_for(lib_ctx));
             }
         }
-        let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
+        // 50 handles and at most `MAX_POOL_BYTES` (128 MiB) of text; a lower byte limit goes here.
+        let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::with_byte_limit(
+            50,
+            crate::tools::output_buffer::MAX_POOL_BYTES,
+        ));
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
