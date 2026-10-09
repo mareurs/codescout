@@ -5202,8 +5202,14 @@ async fn run_command_prepends_refresh_indicator_for_stale_file_handle() {
         .output_buffer
         .store_file(path.to_string_lossy().to_string(), "original".to_string());
 
-    // A newer mtime without changed bytes must stay silent.
-    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+    // A newer mtime without changed bytes must stay silent. The mtime is an HOUR ahead, not a
+    // couple of seconds: `capped_stamp` stamps a read of the file with its mtime capped at the
+    // clock, so with a lead of 2 s any delay over 2 s between setting the mtime and the first read
+    // (a loaded gate can add one) lets the stamp reach the mtime, and the second
+    // edit, written with the same mtime, is not above the stamp: the handle serves the old text and
+    // says nothing. An hour is out of reach of any load delay. Proved on the old lead of 2 s: the
+    // same scenario with a 3 s pause before the first read fails every time, and passes with an hour.
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
     filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future)).unwrap();
     let unchanged = RunCommand
         .call(json!({ "command": format!("cat {}", id) }), &ctx)
@@ -11134,4 +11140,356 @@ async fn a_shape_the_wrap_cannot_take_gets_the_narrow_advice_not_a_route() {
             "`{query}`: {stderr:.0}"
         );
     }
+}
+// ---- an own stderr cut ONLY by the 20-line cap carries the route to the rest ----
+//
+// `cat @A >&2` over 3,000 short lines answered `{"stderr":"1\n..\n20","stderr_shown":20,
+// "stderr_total":3000}`: the 20 lines fit the byte budget, so the byte cut (whose marker holds the
+// remedy) never ran and the counters were all the caller had. The query's own stderr is stored
+// nowhere, so without the marker no route to line 21 exists in the response at all.
+
+/// `seq 1 n` as a stored buffer and as a real file: the pair `shell_truth` substitutes.
+fn stored_and_real(
+    dir: &std::path::Path,
+    ctx: &ToolContext,
+    text: &str,
+    name: &str,
+) -> (String, (String, std::path::PathBuf)) {
+    let handle = ctx
+        .output_buffer
+        .store("gen".into(), text.to_string(), String::new(), 0);
+    let path = dir.join(name);
+    std::fs::write(&path, text).unwrap();
+    (handle.clone(), (handle, path))
+}
+/// Each window `(a, b)` of `expected`, read through the tool as `route | sed -n 'a,bp'`, equals the
+/// lines `a..=b` of the stream `sh` prints for the route. The route is no buffer query (it holds
+/// `>/dev/null`), so past ~10 KB it comes back as a summary and the pager is what returns a window
+/// whole; every window here is under the inline limit.
+async fn assert_stream_windows_through_the_tool(
+    ctx: &ToolContext,
+    route: &str,
+    expected: &str,
+    windows: &[(usize, usize)],
+) {
+    let lines: Vec<&str> = expected.lines().collect();
+    for &(a, b) in windows {
+        let query = format!("{route} | sed -n '{a},{b}p'");
+        let (text, parsed) = buffer_query(ctx, query.clone()).await;
+        let got: Vec<&str> = parsed["stdout"]
+            .as_str()
+            .unwrap_or_else(|| panic!("`{query}` printed nothing: {text:.300}"))
+            .lines()
+            .collect();
+        assert_eq!(got, lines[a - 1..b.min(lines.len())], "`{query}`");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_own_stderr_cut_only_by_the_line_cap_names_the_route_to_the_rest() {
+    let (dir, ctx) = project_ctx().await;
+    let (a, sub) = stored_and_real(dir.path(), &ctx, &seq_lines(3000), "a.txt");
+    let subs = vec![sub];
+    let query = format!("cat {a} >&2");
+
+    let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+    assert_eq!(parsed["stderr_shown"], 20, "{text:.300}");
+    assert_eq!(parsed["stderr_total"], 3000, "{text:.300}");
+    let stderr = parsed["stderr"].as_str().expect("the query's own stderr");
+    assert!(
+        !stderr.contains("bytes shown"),
+        "the premise is a cut by the LINE cap alone: {stderr:.0}"
+    );
+    assert!(
+        stderr.contains("20 of 3000 lines shown"),
+        "a cut by lines says so: {stderr:.0}"
+    );
+    assert!(stderr.contains("stored nowhere"), "{stderr:.0}");
+
+    // The route the marker names, executed under the real `sh`: all 3,000 lines of the stream
+    // that was cut.
+    let route = wrapped_route_in(stderr, &query)
+        .unwrap_or_else(|| panic!("no route in the marker: {stderr:.0}"));
+    assert_eq!(
+        route,
+        format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000")
+    );
+    let expected = cut_4000(&shell_stderr(dir.path(), &query, &subs));
+    assert_eq!(expected.lines().count(), 3000);
+    assert!(same_stream(
+        &shell_truth(dir.path(), &route, &subs),
+        &expected
+    ));
+
+    // And through the tool. The route holds `>/dev/null`, so it is no buffer query and its 3,000
+    // lines come back as a summary behind a handle of its own; a window of it, by a pager the
+    // caller appends, is what comes back whole.
+    assert_stream_windows_through_the_tool(
+        &ctx,
+        &route,
+        &expected,
+        &[(21, 120), (1000, 1099), (2901, 3000)],
+    )
+    .await;
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn the_route_of_a_line_cut_own_stderr_reads_the_stream_for_every_pipeline_shape() {
+    // The wrapped route of the byte cut is proved for these shapes; a cut by LINES takes the same
+    // remedy, and each shape here is run twice: over short lines (the 20 shown fit the byte
+    // budget: cut by lines alone) and over 115 B lines (the 20 shown are 2,300 B: cut by lines AND
+    // bytes, the byte marker standing for both).
+    let (dir, ctx) = project_ctx().await;
+    let short = seq_lines(3000);
+    let long: String = (1..=3000)
+        .map(|i| format!("r{i:04} {}\n", "a".repeat(108)))
+        .collect();
+    for (what, text, needle, windows) in [
+        (
+            "short lines",
+            short,
+            "20 of 3000 lines shown",
+            vec![(21, 120), (2901, 3000)],
+        ),
+        (
+            "long lines",
+            long,
+            "bytes shown",
+            vec![(21, 60), (2961, 3000)],
+        ),
+    ] {
+        let (a, sub) = stored_and_real(
+            dir.path(),
+            &ctx,
+            &text,
+            &format!("{}.txt", what.replace(' ', "_")),
+        );
+        let subs = vec![sub];
+        let shapes = [
+            // One command.
+            format!("cat {a} >&2"),
+            format!("! cat {a} >&2"),
+            format!("(cat {a} >&2)"),
+            // A pipeline whose stderr writer is its first, middle and last stage.
+            format!("cat {a} >&2 | tr a b"),
+            format!("cat {a} | tr a b >&2 | cat"),
+            format!("cat {a} | cat >&2 | wc -l"),
+            format!("cat {a} | tr a b >&2"),
+        ];
+        for query in shapes {
+            let expected = cut_4000(&shell_stderr(dir.path(), &query, &subs));
+            assert_eq!(expected.lines().count(), 3000, "{what}: `{query}`");
+
+            let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+            assert_eq!(parsed["stderr_shown"], 20, "{what}: `{query}`: {text:.300}");
+            assert_eq!(parsed["stderr_total"], 3000, "{what}: `{query}`");
+            let stderr = parsed["stderr"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{what}: `{query}`: no stderr: {text:.300}"));
+            assert!(stderr.contains(needle), "{what}: `{query}`: {stderr:.0}");
+            assert_eq!(
+                stderr.contains("bytes shown"),
+                what == "long lines",
+                "{what}: `{query}`: the premise is which cut ran"
+            );
+            let route = wrapped_route_in(stderr, &query)
+                .unwrap_or_else(|| panic!("{what}: `{query}`: no route in {stderr:.0}"));
+            assert_eq!(
+                route,
+                format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000")
+            );
+
+            // The route, executed under the real `sh`, prints the stream that was cut ...
+            assert!(
+                same_stream(&shell_truth(dir.path(), &route, &subs), &expected),
+                "{what}: `{route}` does not print the cut stream"
+            );
+            // ... and through the tool, a window of it comes back whole.
+            assert_stream_windows_through_the_tool(&ctx, &route, &expected, &windows).await;
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stderr_that_fits_whole_is_silent_and_one_line_over_the_cap_is_not() {
+    // The line cap is 20: 20 lines are the stream whole (no marker, no counters), 21 are not. Both
+    // sources, since the marker's remedy differs: the query's own stderr names the rerun route, a
+    // stored stderr names its `.err` handle.
+    let (dir, ctx) = project_ctx().await;
+    for n in [1usize, 19, 20, 21, 22] {
+        let text = seq_lines(n);
+        let (a, _) = stored_and_real(dir.path(), &ctx, &text, "own.txt");
+        let (text_own, own) = buffer_query(&ctx, format!("cat {a} >&2")).await;
+        let (id, text_stored, stored) = query_stored(&ctx, "x\n".into(), text.clone(), |id| {
+            format!("grep -c x {id}")
+        })
+        .await;
+        for (source, parsed, resp) in [("own", &own, &text_own), ("stored", &stored, &text_stored)]
+        {
+            if n <= 20 {
+                assert_eq!(parsed["stderr"], text.as_str(), "{source} {n}: {resp:.300}");
+                assert!(parsed.get("stderr_shown").is_none(), "{source} {n}");
+                assert!(parsed.get("stderr_total").is_none(), "{source} {n}");
+                continue;
+            }
+            let stderr = parsed["stderr"].as_str().expect("a cut stderr");
+            assert!(
+                stderr.starts_with(&seq_lines(20)),
+                "{source} {n}: the first twenty lines stay: {stderr:.80}"
+            );
+            assert!(
+                stderr.contains(&format!("20 of {n} lines shown")),
+                "{source} {n}: {stderr:.0}"
+            );
+            assert_eq!(parsed["stderr_shown"], 20, "{source} {n}");
+            assert_eq!(parsed["stderr_total"], n, "{source} {n}");
+        }
+        if n > 20 {
+            let stored_stderr = stored["stderr"].as_str().unwrap_or_default();
+            assert!(
+                stored_stderr.contains(&format!("all of it: {id}.err")),
+                "{n}: {stored_stderr:.0}"
+            );
+            assert!(!stored_stderr.contains("QUERY"), "{n}: {stored_stderr:.0}");
+            let own_stderr = own["stderr"].as_str().unwrap_or_default();
+            assert!(
+                own_stderr.contains("stored nowhere"),
+                "{n}: {own_stderr:.0}"
+            );
+            assert!(!own_stderr.contains(".err"), "{n}: {own_stderr:.0}");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_shape_the_wrap_cannot_take_and_cut_by_lines_alone_gets_the_narrow_advice() {
+    // The gate is the byte cut's own (`can_wrap_query`): a list, a trailing comment, a heredoc.
+    // 3,000 short lines are cut by the LINE cap alone here, and the marker says to narrow the
+    // query, naming no route that would read the wrong stream.
+    let (_dir, ctx) = project_ctx().await;
+    let a = ctx
+        .output_buffer
+        .store("seq".into(), seq_lines(3000), String::new(), 0);
+    for query in [
+        format!("grep -c 1 {a}; cat {a} >&2"),
+        format!("grep -c 1 {a} && cat {a} >&2"),
+        format!("cat {a} >&2 # {a}"),
+        format!("cat {a} >&2 <<EOF\nx\nEOF"),
+    ] {
+        let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+        let stderr = parsed["stderr"].as_str().unwrap_or_default();
+        assert!(
+            stderr.contains("20 of 3000 lines shown"),
+            "`{query}`: the premise is a stderr cut by lines alone: {text:.300}"
+        );
+        assert!(!stderr.contains("bytes shown"), "`{query}`: {stderr:.0}");
+        assert!(!stderr.contains("QUERY"), "`{query}`: {stderr:.0}");
+        assert!(
+            stderr.contains("narrow the query"),
+            "`{query}`: {stderr:.0}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_line_cut_stderr_stays_inside_the_byte_budget_at_every_width_across_the_edge() {
+    // Twenty shown lines of width w are 20w + 38 escaped bytes (the 19 newlines between them cost
+    // two each): 1,698 to 2,118 as w goes 83 to 104, across the 2,000 B budget and across the
+    // (budget - line marker) edge below it. The marker is part of the budget, so the escaped
+    // length is never over it; and whichever cut ran, a marker says so and the route is in it.
+    // Three zones: the lines and their marker fit; the lines fit but not beside the marker, so the
+    // byte cut makes room for the marker it then carries; the lines alone are over the budget, and
+    // the byte cut uses all of it.
+    let (dir, ctx) = project_ctx().await;
+    let (mut by_lines, mut squeezed, mut by_bytes) = (0, 0, 0);
+    for w in 83..=104usize {
+        let text: String = (0..30).map(|i| format!("{i:0>w$}\n")).collect();
+        let (a, _) = stored_and_real(dir.path(), &ctx, &text, "w.txt");
+        let query = format!("cat {a} >&2");
+        let (resp, parsed) = buffer_query(&ctx, query.clone()).await;
+        let stderr = parsed["stderr"]
+            .as_str()
+            .unwrap_or_else(|| panic!("w={w}: no stderr: {resp:.300}"));
+        let escaped = crate::util::text::json_escaped_len(stderr);
+        assert!(escaped <= 2_000, "w={w}: {escaped} B escaped");
+        assert_eq!(parsed["stderr_total"], 30, "w={w}");
+        assert!(
+            wrapped_route_in(stderr, &query).is_some(),
+            "w={w}: no route in {stderr:.0}"
+        );
+        if stderr.contains("bytes shown") {
+            if 20 * w + 38 > 2_000 {
+                by_bytes += 1;
+                assert!(
+                    escaped >= 2_000 - 3,
+                    "w={w}: only {escaped} B of the budget"
+                );
+            } else {
+                squeezed += 1;
+            }
+        } else {
+            by_lines += 1;
+            assert!(
+                stderr.contains("20 of 30 lines shown"),
+                "w={w}: {stderr:.0}"
+            );
+        }
+        assert!(!has_tool_handle(&resp), "w={w}: {resp:.200}");
+    }
+    assert!(
+        by_lines >= 3 && squeezed >= 3 && by_bytes >= 3,
+        "the sweep must cross both edges: {by_lines} by lines, {squeezed} squeezed, {by_bytes} by bytes"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_line_marker_is_inside_the_inline_gate_at_the_exact_edge() {
+    // The query's own stderr is 30 lines, cut to 20 behind a marker the response carries. Sized
+    // from a MEASURED response, as the counters' edge test is: stdout of N bytes makes the compact
+    // response `base + N`, so N* lands it on 10,003. A gate that did not count the marker would
+    // call N*+1 small, and the response would go over the limit.
+    let probe = |n: usize| async move {
+        let (_dir, ctx) = project_ctx().await;
+        let (_id, text, parsed) = query_stored(&ctx, "a".repeat(n), String::new(), |id| {
+            format!(
+                "awk 'BEGIN{{ for(i=0;i<30;i++) print \"e\" i | \"cat 1>&2\" }} {{print}}' {id}"
+            )
+        })
+        .await;
+        (text, parsed)
+    };
+    let (small, small_parsed) = probe(100).await;
+    assert!(
+        small_parsed["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("20 of 30 lines shown"),
+        "the premise is the line marker: {small:.300}"
+    );
+    let n_edge = 10_003 - (small.len() - 100);
+
+    let (at, at_parsed) = probe(n_edge).await;
+    assert_eq!(at.len(), 10_003, "the measured size is not the edge");
+    assert!(at_parsed.get("truncated").is_none(), "cut for nothing");
+
+    let (over, over_parsed) = probe(n_edge + 1).await;
+    assert_eq!(over_parsed["truncated"], true, "one byte over must be cut");
+    assert!(!has_tool_handle(&over), "{over:.200}");
+    assert!(
+        over.len() <= 10_003,
+        "{} B: the marker was not counted by the gate",
+        over.len()
+    );
+    assert!(
+        over_parsed["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("20 of 30 lines shown"),
+        "{over:.300}"
+    );
 }
