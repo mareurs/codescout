@@ -1816,10 +1816,11 @@ fn toml_key_name(segment: &str) -> String {
 /// line break: a basic string ends at the first `"` that no backslash escapes, a literal one at
 /// the first `'`.
 ///
-/// Only the line break is load-bearing today: the parser itself fails on, or does not end in the
-/// appended `0` for, every key without one that has an `=`, `#`, `[` or `]` outside quotes
-/// (`sweep_of_short_keys_shows_only_line_breaks_reach_the_probe`). Those are refused here anyway,
-/// so the claim that such a key names nothing does not rest on the parser's treatment of it.
+/// Only the line feed is load-bearing today: the parser itself fails on, or does not end in the
+/// appended `0` for, every key without one that has an `=`, `#`, `[` or `]` outside quotes or a
+/// bare `\r` (`sweep_of_short_keys_shows_only_line_breaks_reach_the_probe`). Those are refused
+/// here anyway, so the claim that such a key names nothing does not rest on the parser's
+/// treatment of it.
 fn toml_key_is_a_path(key: &str) -> bool {
     if key.contains(['\n', '\r']) {
         return false;
@@ -2238,11 +2239,13 @@ mod toml_key_pieces {
     #[test]
     fn sweep_of_short_keys_shows_only_line_breaks_reach_the_probe() {
         // Every key of up to five characters over an alphabet of the characters in question
-        // (no line break among them): the probe never resolves one that `toml_key_is_a_path`
-        // refuses, so the refusal of `=`, `#`, `[` and `]` outside quotes restates the parser.
-        // Not vacuous: keys the probe does resolve are counted, and so are the refused.
+        // (a lone `\r` among them, but no `\n`): the probe never resolves one that
+        // `toml_key_is_a_path` refuses, so the refusal of `=`, `#`, `[`, `]` outside quotes and of
+        // a bare `\r` restates the parser (TOML has no bare carriage return). The `\n` IS
+        // load-bearing, asserted below. Not vacuous: keys the probe does resolve are counted, and
+        // so are the refused.
         let alphabet = [
-            'a', '.', '=', '#', '[', ']', ' ', '"', '\'', '0', '{', '}', ',', '\\',
+            'a', '.', '=', '#', '[', ']', ' ', '"', '\'', '0', '{', '}', ',', '\\', '\r',
         ];
         let (mut refused, mut resolved) = (0usize, 0usize);
         let mut key = String::new();
@@ -2276,6 +2279,58 @@ mod toml_key_pieces {
         for k in ["[a]\nb", "# x\nz", "\na.b"] {
             assert!(toml_probe_segments(k).is_some(), "{k:?}");
             assert!(!toml_key_is_a_path(k), "{k:?}");
+        }
+    }
+
+    #[test]
+    fn a_key_is_a_path_unless_it_has_a_line_break_or_an_unquoted_header_comment_or_value() {
+        // The predicate's own contract, character by character. It is observable here and not
+        // through `toml_key_segments`, where the parser refuses most of these keys anyway.
+        for path in [
+            "a",
+            "a.b",
+            "a . b",
+            "my key",
+            "a.\"b.c\"",
+            "target.'cfg(unix)'.dependencies",
+            // Quoted segments may hold any of `=`, `#`, `[`, `]`.
+            "\"a=b\"",
+            "\"#\"",
+            "'[x]'",
+            "a.\"b#\".c",
+            "'p]q'",
+            // A `\"` does not end a basic string; a literal string has no escape.
+            "\"q\\\"=\"",
+            "'a\\'",
+            "\"x\\\\\"",
+        ] {
+            assert!(toml_key_is_a_path(path), "{path:?}");
+        }
+        for not_path in [
+            "a=b",
+            "a = 1",
+            "a #",
+            "# x",
+            "[a]",
+            "a]",
+            "a.[b]",
+            "\"a\"=1",
+            "\"x\"#",
+            "'x'[",
+            "'x']",
+            // After the escaped backslash the string is closed.
+            "\"q\\\\\"=",
+            // A literal string ends at the next `'`, backslash or not.
+            "'a\\'=",
+            // A line break, anywhere, quoted or not.
+            "a\nb",
+            "a\rb",
+            "\"a\nb\"",
+            "\"a\\\nb\"",
+            "\n",
+            "\r",
+        ] {
+            assert!(!toml_key_is_a_path(not_path), "{not_path:?}");
         }
     }
 
