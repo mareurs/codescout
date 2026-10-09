@@ -185,6 +185,7 @@ pub fn truncation_marker(t: Truncation) -> String {
         omitted = t.total_lines.saturating_sub(t.kept_lines)
     )
 }
+
 /// The notice a read of the handle `id` carries for the cut `t`: one format for every site, the
 /// handle's reads ([`OutputBuffer::truncation_notice`]) and a store's own caller.
 pub fn cut_notice(id: &str, t: Truncation) -> String {
@@ -217,6 +218,7 @@ pub(crate) const REF_GONE: &str = "Buffer refs expire when the session resets. T
      drops its least recently used handle when it holds its maximum number of handles (50), and \
      its least recently used command and tool handles to stay under its byte limit. A @file_* \
      handle also goes when its file is deleted or can no longer be read.";
+
 /// The whole hint of a "buffer reference not found" refusal for `handle`: [`REF_GONE`], then the
 /// route to a fresh ref. A `@file_*` handle came from a read of a file (or of a memory view), so
 /// the route is to read it again; every other handle came from a call, so the route is to re-run
@@ -450,6 +452,10 @@ pub struct OutputBuffer {
     /// test hold a read there and show the pool is not locked meanwhile.
     #[cfg(test)]
     disk_hook: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
+    /// Run in [`Self::resolve`] after the disk was read and before the lock is taken again: lets a
+    /// test change the entry between a read's stat and its re-check.
+    #[cfg(test)]
+    read_done_hook: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
     /// How many times a whole-file store copied its text into an existing entry: lets a test
     /// show text that can never be kept is not copied.
     #[cfg(test)]
@@ -525,6 +531,8 @@ impl OutputBuffer {
             max_bytes: clamped,
             #[cfg(test)]
             disk_hook: Mutex::new(None),
+            #[cfg(test)]
+            read_done_hook: Mutex::new(None),
             #[cfg(test)]
             retained_copies: std::sync::atomic::AtomicUsize::new(0),
         }
@@ -802,6 +810,25 @@ impl OutputBuffer {
     pub(crate) fn set_disk_hook(&self, hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
         *self.disk_hook.lock().unwrap_or_else(|e| e.into_inner()) = hook;
     }
+
+    /// Set (or clear) the hook [`Self::resolve`] runs after it read the disk, before its re-check.
+    #[cfg(test)]
+    pub(crate) fn set_read_done_hook(&self, hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
+        *self
+            .read_done_hook
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = hook;
+    }
+
+    /// Run the test hook in `slot`, if one is set, with the slot unlocked while it runs.
+    #[cfg(test)]
+    fn run_hook(slot: &Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>) {
+        let hook = slot.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
     /// How many times a whole-file store copied its text into an existing entry.
     #[cfg(test)]
     pub(crate) fn retained_copies(&self) -> usize {
@@ -1063,16 +1090,7 @@ impl OutputBuffer {
             let (stamp, demoted, _) = &seen;
 
             #[cfg(test)]
-            {
-                let hook = self
-                    .disk_hook
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                if let Some(hook) = hook {
-                    hook();
-                }
-            }
+            Self::run_hook(&self.disk_hook);
             // `None` = the file is gone or unreadable. `Some(m)` in `stale_at` = stale, with `m` the
             // mtime observed now, BEFORE the read below.
             let observed = std::fs::metadata(&path).ok().map(|meta| mtime_ms_of(&meta));
@@ -1087,6 +1105,8 @@ impl OutputBuffer {
                 None
             };
             let gone = observed.is_none() || ((stale_at.is_some() || *demoted) && read.is_none());
+            #[cfg(test)]
+            Self::run_hook(&self.read_done_hook);
 
             let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             let inner = &mut *guard;

@@ -1260,3 +1260,40 @@ fn a_read_of_new_text_after_a_stamp_only_change_starts_over() {
     );
     buf.assert_accounting();
 }
+
+/// Review F2: a read that applies over a stamp-only change keeps the stamp the other read set.
+/// The held read stat'ed the file before it was rewritten (same text, later mtime) and another
+/// read stamped that later mtime; re-stamped with its own older observation, the entry would
+/// look stale again and the next read would read and hash the file for nothing.
+#[test]
+fn a_stamp_only_apply_never_moves_the_stamp_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v1 = numbered("v1", 100_000);
+    let p = write(dir.path(), "f", &v1, 100);
+    let f = read_into(&buf, &p);
+    write(dir.path(), "f", &v1, 90);
+
+    let (hold, entered, release) = hold_first_pass();
+    buf.set_read_done_hook(Some(hold));
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read read the disk");
+    let later = file_mtime_ms(&write(dir.path(), "f", &v1, 80)).unwrap();
+    assert_eq!(buf.get(&f).unwrap().stdout, v1);
+    assert_eq!(buf.inner.lock().unwrap().entries[&f].timestamp, later);
+    release.send(()).unwrap();
+    assert_eq!(reader.join().unwrap().as_deref(), Some(v1.as_str()));
+    buf.set_read_done_hook(None);
+    assert_eq!(
+        buf.inner.lock().unwrap().entries[&f].timestamp,
+        later,
+        "the later stamp is kept"
+    );
+    buf.assert_accounting();
+}
