@@ -867,13 +867,14 @@ fn attachments(
         String,
         Option<crate::tools::output_buffer::Truncation>,
         usize,
+        Vec<String>,
     )>,
     redacted: usize,
     tee_skipped: &Option<String>,
     envelope: &serde_json::Map<String, Value>,
 ) -> serde_json::Map<String, Value> {
     let mut keys = serde_json::Map::new();
-    if let Some((ref_id, truncation, line_count)) = unfiltered {
+    if let Some((ref_id, truncation, line_count, pool_cut)) = unfiltered {
         keys.insert("unfiltered_output".into(), json!(ref_id));
         keys.insert("unfiltered_output_lines".into(), json!(line_count));
         if let Some(t) = truncation {
@@ -882,6 +883,9 @@ fn attachments(
             // next to it. Naming only the first left a reader to assume one number covered both,
             // which is the misread this key exists to prevent.
             keys.insert("unfiltered_buffered_lines".into(), json!(t.kept_lines));
+        }
+        if !pool_cut.is_empty() {
+            keys.insert("output_truncated".into(), json!(pool_cut));
         }
     }
     for (key, value) in diagnostics {
@@ -1018,6 +1022,7 @@ pub(crate) async fn handle_successful_output_with(
         String,
         Option<crate::tools::output_buffer::Truncation>,
         usize,
+        Vec<String>,
     )> = if let Some(ref tmpfile) = unfiltered_tmpfile {
         // `.ok()` here used to discard the error, and that is how a transient read
         // failure became an ABSENT key group rather than a reported one: the caller
@@ -1104,7 +1109,17 @@ pub(crate) async fn handle_successful_output_with(
                 exit_code,
                 truncation,
             );
-            Some((ref_id, truncation, line_count))
+            // The capture is not inline-sized: `take_while` keeps the line that empties the
+            // budget, however long, so the pool can cut it again. What the response reports is
+            // the HANDLE's own record, and a cut the pool made is announced (review probe: a
+            // 1.5 MB single line reported 1 buffered line while the handle kept 0 of 1).
+            let held = ctx.output_buffer.stored_truncation(&ref_id);
+            let pool_cut = if held == truncation {
+                Vec::new()
+            } else {
+                ctx.output_buffer.truncation_notices_in(&ref_id)
+            };
+            Some((ref_id, held, line_count, pool_cut))
         })
     } else {
         None
@@ -1382,6 +1397,10 @@ pub(crate) async fn handle_successful_output_with(
                 raw_stderr.clone(),
                 exit_code,
             );
+            // Streams bigger than the pool's byte limit are kept as a marked prefix. The caller is
+            // told here, inside the render so `fit_summary` measures it, and by every later read
+            // of the handle.
+            let output_cut = ctx.output_buffer.truncation_notices_in(&output_id);
 
             let cmd_type = detect_command_type(original_command);
             let tee_present = unfiltered_ref.is_some();
@@ -1405,6 +1424,9 @@ pub(crate) async fn handle_successful_output_with(
                 // Rebuild with correct field order so output_id appears before content fields.
                 let mut response = rebuild_buffered_summary(cmd_summary, &output_id);
                 attach(&mut response, late.clone(), tee_present);
+                if !output_cut.is_empty() {
+                    response["output_truncated"] = json!(output_cut);
+                }
                 // Inside the render, so `fit_summary` measures it. A summary with no `stdout` (a
                 // test or build summary) gets one holding just the refresh line, which was
                 // otherwise never delivered on that shape.
@@ -1832,6 +1854,7 @@ mod tests {
                     total_lines: 9_999_999,
                 }),
                 9_999_999,
+                Vec::new(),
             )),
             3,
             &Some("no space left".to_string()),
@@ -1947,6 +1970,7 @@ mod tests {
                     total_lines: 2,
                 }),
                 2,
+                Vec::new(),
             )),
             1,
             &Some("skipped".to_string()),

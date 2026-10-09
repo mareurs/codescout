@@ -1304,4 +1304,22 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "a_read_naming_many_missing_sections_keeps_forty_and_counts_the_rest",
         },
     },
+    // -- src/tools/output_buffer.rs --
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test lowers
+        // the pool to its 1 MiB floor (`MIN_POOL_BYTES`; `MAX_POOL_BYTES` itself is 128 MiB, too
+        // big for a unit test) and runs `seq 1 300000`, about 2 MB, through the real `RunCommand`.
+        // The pool keeps a marked prefix, and `output_truncated` carries the kept and omitted line
+        // counts. Marker written by production in `run_command/output.rs` (the summary arm); the
+        // same notice reaches `call_content`'s `@tool_*` envelope in `core/types.rs`, driven by
+        // `an_oversized_result_is_buffered_as_a_marked_prefix_and_the_envelope_says_so`.
+        // MUTATION (2026-10-09, `scripts/mutation-probe.sh`): deleting either `output_truncated`
+        // write turns its test red.
+        id: "output_buffer.pool_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.output_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "an_oversized_output_is_a_marked_prefix_and_the_response_says_so",
+        },
+    },
 ];

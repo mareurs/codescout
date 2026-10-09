@@ -3551,6 +3551,35 @@ fn a_file_id_arm_with_wide_layout_paths_is_measured_and_fits() {
     assert_eq!(v["write_target"], json!(mid), "the paths stay whole");
 }
 
+/// Fix 5: a memory view larger than one entry's share of the pool is kept as a marked prefix,
+/// the response says so beside a `total_lines` that counts the whole view, and the same view read
+/// again is the same handle. Driven on `apply_sections_filter` with the pool at its floor.
+#[test]
+fn an_oversized_memory_view_is_cut_says_so_and_keeps_one_handle() {
+    let buf = Arc::new(crate::tools::output_buffer::OutputBuffer::with_byte_limit(
+        20,
+        crate::tools::output_buffer::MIN_POOL_BYTES,
+    ));
+    let content: String = (1..=150_000).map(|i| format!("line {i:07}\n")).collect();
+    let first = apply_sections_filter(content.clone(), "t", &[], &buf, &[]).unwrap();
+    let id = first["file_id"].as_str().expect("buffered").to_string();
+    assert_eq!(first["total_lines"], json!(150_000));
+    let t = buf.stored_truncation(&id).expect("the view is cut");
+    let counts = format!(
+        "{} of 150000 lines kept, {} omitted",
+        t.kept_lines,
+        150_000 - t.kept_lines
+    );
+    assert!(
+        first["output_truncated"].as_array().is_some_and(|a| a
+            .iter()
+            .any(|n| n.as_str().is_some_and(|s| s.contains(&counts)))),
+        "the response must say the view is cut: {first:.600}"
+    );
+    let again = apply_sections_filter(content, "t", &[], &buf, &[]).unwrap();
+    assert_eq!(again["file_id"], json!(id), "one view, one handle");
+}
+
 /// `memory` renders a read as TEXT, and `format_read_memory` rendered `content` alone, so the
 /// sections that matched nothing never reached the caller: a read naming one real and one absent
 /// section looked exactly like a read naming only the real one.

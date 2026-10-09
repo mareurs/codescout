@@ -10146,3 +10146,190 @@ async fn a_trailing_crlf_after_a_word_gets_no_appended_stage() {
     assert!(appended_pager(&hint).is_none(), "{q:?}: {hint}");
     assert!(hint.contains("narrow the query"), "{hint}");
 }
+
+// ---- the pool's byte budget ----
+
+/// An output bigger than the pool's byte limit (lowered to the 1 MiB floor here), through the
+/// real `RunCommand`: the pool keeps a marked prefix, the response names how many lines were
+/// kept and dropped, a later read of the handle carries the notice, and line N of the handle is
+/// still line N of the output.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_oversized_output_is_a_marked_prefix_and_the_response_says_so() {
+    let (_dir, mut ctx) = project_ctx().await;
+    let limit = crate::tools::output_buffer::MIN_POOL_BYTES;
+    ctx.output_buffer = std::sync::Arc::new(
+        crate::tools::output_buffer::OutputBuffer::with_byte_limit(50, limit),
+    );
+    let (text, parsed) = buffer_query_free(&ctx, "seq 1 300000").await;
+    let id = parsed["output_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no output_id: {text:.400}"))
+        .to_string();
+    let t = ctx
+        .output_buffer
+        .get(&id)
+        .unwrap()
+        .truncated
+        .expect("the pool cut the output");
+    assert_eq!(t.total_lines, 300_000);
+    let counts = format!(
+        "{} of 300000 lines kept, {} omitted",
+        t.kept_lines,
+        300_000 - t.kept_lines
+    );
+    let names_the_cut = |v: &Value| {
+        v.as_array().is_some_and(|a| {
+            a.iter().any(|n| {
+                n.as_str()
+                    .is_some_and(|s| s.contains(&counts) && s.contains(&id))
+            })
+        })
+    };
+    assert!(
+        names_the_cut(&parsed["output_truncated"]),
+        "the response must say what was kept and dropped: {text:.800}"
+    );
+    assert!(ctx.output_buffer.bytes_of(&id).unwrap() <= limit / 2);
+    ctx.output_buffer.assert_accounting();
+
+    let n = t.kept_lines / 2;
+    let (text, parsed) = buffer_query(&ctx, format!("sed -n '{n}p' {id}")).await;
+    assert_eq!(
+        parsed["stdout"].as_str().map(str::trim),
+        Some(n.to_string().as_str()),
+        "line {n} of the handle is line {n} of the output: {text:.400}"
+    );
+    assert!(
+        names_the_cut(&parsed["buffer_truncated"]),
+        "a later read of the handle carries the notice: {text:.800}"
+    );
+}
+
+/// The pool lowered to its floor, for the budget tests below.
+async fn floor_ctx() -> (tempfile::TempDir, ToolContext) {
+    let (dir, mut ctx) = project_ctx().await;
+    ctx.output_buffer =
+        std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::with_byte_limit(
+            50,
+            crate::tools::output_buffer::MIN_POOL_BYTES,
+        ));
+    (dir, ctx)
+}
+
+/// Fix 3 (review probe RPG): the `grep` tool over a handle that holds only a prefix carries the
+/// notice, for the bare handle and for `.err`. `^299999$` is in the output and past the prefix,
+/// so a bare `0 matches` would read as "not printed".
+#[cfg(unix)]
+#[tokio::test]
+async fn a_grep_of_a_cut_handle_carries_the_truncation_notice() {
+    let (_dir, ctx) = floor_ctx().await;
+    let (_, parsed) = buffer_query_free(&ctx, "seq 1 300000").await;
+    let id = parsed["output_id"].as_str().unwrap().to_string();
+    let grep = |path: String| {
+        let ctx = &ctx;
+        async move {
+            let blocks = crate::tools::grep::Grep
+                .call_content(json!({ "pattern": "^299999$", "path": path }), ctx)
+                .await
+                .unwrap();
+            crate::tools::hint_probe::primary_text(&blocks)
+        }
+    };
+    let text = grep(id.clone()).await;
+    assert!(text.starts_with("0 matches"), "{text}");
+    assert!(
+        text.contains(crate::tools::output_buffer::TRUNCATION_SENTINEL_PREFIX)
+            && text.contains(&id),
+        "a zero over a cut handle must say the handle is cut: {text}"
+    );
+
+    let err_id = ctx.output_buffer.store(
+        "e".into(),
+        String::new(),
+        (1..=300_000).map(|i| format!("{i}\n")).collect(),
+        1,
+    );
+    let text = grep(format!("{err_id}.err")).await;
+    assert!(
+        text.contains(&format!("{err_id}.err")) && text.contains("lines kept"),
+        "a grep of a cut stderr carries the stderr notice: {text}"
+    );
+}
+
+/// Fix 7: the tee capture keeps the line that empties its budget, however long, so the pool can
+/// cut it. The response must report the HANDLE (0 of 1 lines kept for one 1.5 MB line, not 1)
+/// and announce the pool's cut.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_tee_capture_the_pool_cuts_reports_the_handle_it_kept() {
+    let (_dir, ctx) = floor_ctx().await;
+    let (text, parsed) =
+        buffer_query_free(&ctx, "head -c 1500000 /dev/zero | tr '\\0' x | grep -c x").await;
+    let tee = parsed["unfiltered_output"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no tee capture: {text:.600}"))
+        .to_string();
+    let held = ctx
+        .output_buffer
+        .stored_truncation(&tee)
+        .expect("the capture is cut");
+    assert_eq!(
+        held.kept_lines, 0,
+        "one line longer than the share keeps nothing"
+    );
+    assert_eq!(
+        parsed["unfiltered_buffered_lines"],
+        json!(held.kept_lines),
+        "the response must report the handle's own count: {text:.600}"
+    );
+    assert!(
+        parsed["output_truncated"].as_array().is_some_and(|a| a
+            .iter()
+            .any(|n| n.as_str().is_some_and(|s| s.contains(&tee)))),
+        "the pool's cut is announced: {text:.800}"
+    );
+}
+
+/// R-A: a handle the pool dropped to stay under its byte limit is refused with that cause named,
+/// not only "the session reset" (review probe S2: an output of the whole limit was evicted by the
+/// next small one, and the refusal named the wrong cause).
+#[tokio::test]
+async fn a_dropped_handle_is_refused_naming_the_byte_limit_and_the_route() {
+    let (_dir, ctx) = floor_ctx().await;
+    let gone = ctx.output_buffer.store(
+        "a".into(),
+        "a".repeat(crate::tools::output_buffer::MIN_POOL_BYTES / 2),
+        String::new(),
+        0,
+    );
+    ctx.output_buffer.store(
+        "b".into(),
+        "b".repeat(crate::tools::output_buffer::MIN_POOL_BYTES / 2),
+        String::new(),
+        0,
+    );
+    ctx.output_buffer
+        .store("c".into(), "c".into(), String::new(), 0);
+    assert_eq!(
+        ctx.output_buffer.bytes_of(&gone),
+        None,
+        "precondition: dropped"
+    );
+    let err = crate::tools::read_file::ReadFile
+        .call(json!({ "path": gone }), &ctx)
+        .await
+        .unwrap_err();
+    let rec = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .expect("recoverable");
+    let hint = rec
+        .guidance
+        .as_ref()
+        .map(|g| g.text().to_string())
+        .unwrap_or_default();
+    assert!(
+        hint.contains("byte limit") && hint.contains("Re-run the command"),
+        "{hint}"
+    );
+}

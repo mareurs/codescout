@@ -1144,3 +1144,44 @@ async fn a_handle_first_read_under_a_future_mtime_still_follows_an_edit() {
         v["content"]
     );
 }
+
+/// The retention the ADR measured (twelve 5 MB files read by range kept 62.9 MB in a pool that
+/// capped entries, not bytes), scaled to a pool lowered to the 1 MiB floor: twelve ~200 KB
+/// files, 2.4 MB in all, read by an over-budget range through the real `ReadFile`. The pool now
+/// keeps at most its limit, the counter is the real sum, and every handle still serves its whole
+/// file in the file's own line numbers.
+#[tokio::test]
+async fn twelve_range_reads_of_large_files_stay_within_the_byte_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let limit = crate::tools::output_buffer::MIN_POOL_BYTES;
+    let buf = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::with_byte_limit(
+        50, limit,
+    ));
+    let ctx = ctx_sharing(Agent::new(None).await.unwrap(), buf.clone());
+    let mut read = Vec::new();
+    for i in 0..12 {
+        let body = big_text(&format!("f{i}"), 3_300);
+        let path = write(dir.path(), &format!("f{i}.txt"), &body);
+        let input = json!({ "path": path, "start_line": 1, "end_line": 3_000 });
+        let handle = delivered_handle(&ctx, &input).await;
+        assert!(handle.starts_with("@file_"), "{handle}");
+        buf.assert_accounting();
+        read.push((handle, body));
+    }
+    let read_bytes: usize = read.iter().map(|(_, b)| b.len()).sum();
+    assert!(
+        read_bytes > 2 * limit,
+        "the reads must overflow the limit: {read_bytes}"
+    );
+    assert!(buf.total_bytes() <= limit, "{} held", buf.total_bytes());
+    for (handle, body) in &read {
+        let served = buf.get(handle).unwrap().stdout;
+        assert_eq!(served, *body, "{handle} serves its whole file");
+        assert_eq!(served.lines().nth(2_999), body.lines().nth(2_999));
+    }
+    assert!(
+        buf.total_bytes() > 0,
+        "the newest file is held, not dropped"
+    );
+    buf.assert_accounting();
+}

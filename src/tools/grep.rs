@@ -610,12 +610,23 @@ pub(super) fn format_grep(val: &Value) -> String {
     // zero case, so appending it further down would leave it invisible exactly where it is the
     // whole point — references.rs paid for that lesson under its BUG 2026-05-21.
     let warning = val.get("completeness_warning").and_then(|v| v.as_str());
+    // A buffer that holds only a prefix: the same placement, for the same reason — a zero over a
+    // cut buffer is exactly the result that must carry it.
+    let cut_notices: Vec<&str> = val
+        .get("buffer_truncated")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|n| n.as_str()).collect())
+        .unwrap_or_default();
 
     if total == 0 {
         let mut out = "0 matches".to_string();
         if let Some(w) = warning {
             out.push_str("\n\nwarning: ");
             out.push_str(w);
+        }
+        for notice in &cut_notices {
+            out.push_str("\n\n");
+            out.push_str(notice);
         }
         return out;
     }
@@ -685,6 +696,9 @@ pub(super) fn format_grep(val: &Value) -> String {
     let mut head_extra = overflow_head(val);
     if let Some(w) = warning {
         head_extra.push_str(&format!("warning: {w}\n"));
+    }
+    for notice in &cut_notices {
+        head_extra.push_str(&format!("{notice}\n"));
     }
     insert_below_header(out, &head_extra)
 }
@@ -965,7 +979,10 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     let raw = ctx.output_buffer.get_stream(raw_path).ok_or_else(|| {
         RecoverableError::with_hint(
             format!("buffer reference not found: '{raw_path}'"),
-            "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+            format!(
+                "{} Re-run the command to get a fresh ref.",
+                crate::tools::output_buffer::REF_GONE
+            ),
         )
     })?;
 
@@ -1149,6 +1166,12 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
              symbols(name='{name}') for declarations, \
              references(symbol='{name}') for direct callers."
         ));
+    }
+    // A handle that holds only a prefix says so here too: a search that finds nothing in it has
+    // not shown the tail lacks the pattern (review probe RPG: `^299999$` on a cut
+    // `seq 1 300000` returned 0 with no notice). The stream is the one `raw_path` names.
+    if let Some(notice) = ctx.output_buffer.truncation_notice(raw_path) {
+        result["buffer_truncated"] = json!([notice]);
     }
     Ok(result)
 }

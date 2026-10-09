@@ -116,7 +116,8 @@ pub struct BufferEntry {
     pub timestamp: u64,
     /// Set only for `@file_*` entries. Enables mtime-based auto-refresh in `get()`.
     pub source_path: Option<PathBuf>,
-    /// SHA-256 of `stdout`, set only for `@tool_*` entries (content-dedup key).
+    /// SHA-256 of the content `store_tool` was given (before any cut to the byte budget), set
+    /// only for `@tool_*` entries (content-dedup key).
     /// `None` for every other store kind — the type encodes the store_tool-only scope.
     pub content_hash: Option<String>,
     /// `Some(_)` when `stdout` holds only a **prefix** of what was captured;
@@ -131,6 +132,18 @@ pub struct BufferEntry {
     ///
     /// BUG docs/issues/archive/2026-08-27-unfiltered-output-lines-counts-the-source-not-the-buffer.md
     pub truncated: Option<Truncation>,
+    /// The same record for `stderr`, which only the pool's byte budget cuts
+    /// ([`OutputBuffer::store_truncated`]). The `.err` form of the handle reports it.
+    pub stderr_truncated: Option<Truncation>,
+    /// SHA-256 of the WHOLE text, set for `@file_*` entries only. A whole-file entry: the text
+    /// the handle last served, so a store or a read can tell a changed file from an unchanged one
+    /// (`refresh_pending`) even when `stdout` holds no copy. A snapshot: the content it was given
+    /// before any cut, its dedup key. Computed outside the pool's lock.
+    text_hash: Option<String>,
+    /// A whole-file entry that holds no text: demoted to keep the pool under its byte limit, or
+    /// born bigger than one entry may hold. `stdout` is empty; the id, path, stamp and
+    /// `text_hash` stay, and every read takes the text from disk without retaining it.
+    demoted: bool,
 }
 
 /// How much of a capture a truncated buffer actually holds.
@@ -171,6 +184,111 @@ pub fn truncation_marker(t: Truncation) -> String {
         total = t.total_lines,
         omitted = t.total_lines.saturating_sub(t.kept_lines)
     )
+}
+
+/// The most bytes the pool may hold (the `stdout` and `stderr` of every entry), and its
+/// default: 128 MiB. **Chosen, not measured** — no measurement backs this number. A lower limit
+/// can be set with [`OutputBuffer::with_byte_limit`]; a higher one is clamped to this, so no
+/// setting can raise it. One entry holds at most HALF the limit ([`OutputBuffer::entry_cap`]):
+/// an entry of the whole limit left no other handle holding text, and the next small store
+/// evicted it in turn.
+///
+/// Before it the pool capped entries, not bytes: twelve 5 MB files read by range kept 62.9 MB,
+/// and 50 large files could fill memory (ADR 2026-10-08, *Consequences*).
+// cap-class: RESULT_CAP output_buffer.pool_bytes — probed
+pub(crate) const MAX_POOL_BYTES: usize = 128 * 1024 * 1024;
+
+/// The lowest byte limit a setting can give the pool: 1 MiB, so one entry may hold 512 KiB.
+/// Chosen, not measured. A lower setting is raised to it, with a warning. It holds the
+/// truncation marker with room to spare and keeps a compacted test run (whose raw streams fit
+/// the inline limit) whole. The tee capture is not inline-sized (it keeps the line that empties
+/// its budget, however long), so the pool can cut it, and its response says so.
+pub(crate) const MIN_POOL_BYTES: usize = 1024 * 1024;
+const _: () = assert!(MIN_POOL_BYTES / 2 > crate::tools::INLINE_MAX_RESPONSE_LEN);
+
+/// The hint of a "buffer reference not found" refusal: every way a handle can go. A route
+/// follows it at each site.
+pub(crate) const REF_GONE: &str = "Buffer refs expire when the session resets, and the pool \
+     drops its least recently used handles to stay under its byte limit.";
+
+/// The marked prefix of `text` that fits in `room` bytes, for an entry bigger than the pool's
+/// byte budget: the longest run of WHOLE lines that fits beside the marker, then the marker
+/// line. Whole lines, so line N of the prefix is line N of `text` for every line it keeps.
+/// `total_lines` is the length of the capture `text` came from (more than `text`'s own when
+/// `text` was already cut, in which case its marker is the last line and is never kept).
+///
+/// A single line longer than `room` is not kept at all: a part of a line would make "K of N
+/// lines kept" false.
+fn marked_prefix(text: &str, room: usize, total_lines: usize) -> (String, Truncation) {
+    // Room for the widest marker these numbers can give: `kept` and `omitted` are each at most
+    // `total_lines`, so the marker for `kept == total_lines`, with `omitted`'s digits counted
+    // as `total_lines`'s, and its newline, is never shorter.
+    let widest = truncation_marker(Truncation {
+        kept_lines: total_lines,
+        total_lines,
+    })
+    .len()
+        + total_lines.to_string().len()
+        + 1;
+    let fit = room.saturating_sub(widest).min(text.len());
+    let cut = text.as_bytes()[..fit]
+        .iter()
+        .rposition(|b| *b == b'\n')
+        .map_or(0, |i| i + 1);
+    let prefix = &text[..cut];
+    let t = Truncation {
+        kept_lines: crate::util::text::count_lines(prefix),
+        total_lines,
+    };
+    (format!("{prefix}{}\n", truncation_marker(t)), t)
+}
+
+/// The streams of a `@cmd_*` entry cut to fit `max` bytes together, with the record of each
+/// cut. `stderr`'s room is what `stdout` leaves, but at least half the limit; `stdout`'s room is
+/// what `stderr` then holds. A stream is cut only past its room, so streams that fit together
+/// are never cut. Each cut is a marked prefix ([`marked_prefix`]). `truncated` is the record
+/// `stdout` already carries: a capture cut before it was stored keeps counting the lines of the
+/// whole capture.
+fn fit_streams(
+    max: usize,
+    stdout: String,
+    stderr: String,
+    truncated: Option<Truncation>,
+) -> (String, String, Option<Truncation>, Option<Truncation>) {
+    let stderr_room = max.saturating_sub(stdout.len()).max(max / 2);
+    let (stderr, stderr_truncated) = if stderr.len() > stderr_room {
+        let (cut, t) = marked_prefix(
+            &stderr,
+            stderr_room,
+            crate::util::text::count_lines(&stderr),
+        );
+        (cut, Some(t))
+    } else {
+        (stderr, None)
+    };
+    let stdout_room = max - stderr.len();
+    let (stdout, truncated) = if stdout.len() > stdout_room {
+        let total = truncated.map_or_else(
+            || crate::util::text::count_lines(&stdout),
+            |t| t.total_lines,
+        );
+        let (cut, t) = marked_prefix(&stdout, stdout_room, total);
+        (cut, Some(t))
+    } else {
+        (stdout, truncated)
+    };
+    (stdout, stderr, truncated, stderr_truncated)
+}
+
+/// The bytes an entry holds, as `total_bytes` counts them.
+fn entry_bytes(entry: &BufferEntry) -> usize {
+    entry.stdout.len() + entry.stderr.len()
+}
+
+/// What [`OutputBuffer::resolve`] checks is unchanged between its two lock holds: the stamp,
+/// whether the entry is demoted, and the hash of its text.
+fn file_state(entry: &BufferEntry) -> (u64, bool, Option<String>) {
+    (entry.timestamp, entry.demoted, entry.text_hash.clone())
 }
 
 /// A dangerous command held pending agent acknowledgment.
@@ -291,9 +409,19 @@ pub struct BackgroundJob {
 ///
 /// `store()` inserts an entry and returns an opaque `@cmd_<8hex>` handle.
 /// `get()` retrieves it and refreshes the LRU position.
-/// When capacity is reached the least-recently-used entry is evicted.
+/// When capacity is reached the least-recently-used entry is evicted. The bytes held are
+/// bounded too ([`MAX_POOL_BYTES`]): a store that would pass the limit first demotes
+/// least-recently-used whole-file entries, then evicts least-recently-used others; the text of
+/// a whole file never evicts anything, because it is on disk.
 pub struct OutputBuffer {
     inner: Mutex<BufferInner>,
+    /// The byte limit, within [`MIN_POOL_BYTES`, `MAX_POOL_BYTES`]. Fixed at construction, so
+    /// a store can size its entry before it takes the lock.
+    max_bytes: usize,
+    /// Run between the two lock holds of [`Self::resolve`], where it touches the disk: lets a
+    /// test hold a read there and show the pool is not locked meanwhile.
+    #[cfg(test)]
+    disk_hook: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 struct BufferInner {
@@ -301,6 +429,12 @@ struct BufferInner {
     /// LRU order: index 0 = oldest (evict first), last = most recently used.
     order: Vec<String>,
     max_entries: usize,
+    /// `stdout.len() + stderr.len()` summed over `entries`, never above
+    /// [`OutputBuffer::max_bytes`]. Every change to an entry's text or to `entries` goes through
+    /// a helper that keeps this in step: [`OutputBuffer::admit_locked`],
+    /// [`OutputBuffer::remove_locked`], [`OutputBuffer::demote_locked`] and
+    /// [`OutputBuffer::retain_file_text_locked`].
+    total_bytes: usize,
     counter: u64,
     /// Content-hash → handle id, for `@tool_*` dedup. Kept in sync with
     /// `entries` by `evict_oldest_locked`.
@@ -322,13 +456,31 @@ struct BufferInner {
 }
 
 impl OutputBuffer {
-    /// Create a new buffer with the given maximum capacity.
+    /// Create a new buffer with the given maximum capacity and the default byte limit,
+    /// [`MAX_POOL_BYTES`].
     pub fn new(max_entries: usize) -> Self {
+        Self::with_byte_limit(max_entries, MAX_POOL_BYTES)
+    }
+
+    /// Create a new buffer holding at most `max_entries` handles and `max_bytes` bytes of text.
+    ///
+    /// `max_bytes` can only LOWER the limit: a value above [`MAX_POOL_BYTES`] is clamped to it,
+    /// and one below [`MIN_POOL_BYTES`] is raised to that floor. Either clamp is logged.
+    pub fn with_byte_limit(max_entries: usize, max_bytes: usize) -> Self {
+        let clamped = max_bytes.clamp(MIN_POOL_BYTES, MAX_POOL_BYTES);
+        if clamped != max_bytes {
+            tracing::warn!(
+                requested = max_bytes,
+                used = clamped,
+                "output buffer byte limit clamped to [MIN_POOL_BYTES, MAX_POOL_BYTES]"
+            );
+        }
         Self {
             inner: Mutex::new(BufferInner {
                 entries: HashMap::new(),
                 order: Vec::new(),
                 max_entries,
+                total_bytes: 0,
                 counter: 0,
                 content_index: HashMap::new(),
                 refresh_pending: std::collections::HashSet::new(),
@@ -338,29 +490,172 @@ impl OutputBuffer {
                 background_jobs: HashMap::new(),
                 background_order: Vec::new(),
             }),
+            max_bytes: clamped,
+            #[cfg(test)]
+            disk_hook: Mutex::new(None),
         }
     }
 
+    /// The most bytes one entry may hold: half the pool's limit. A `@cmd_*`, `@tool_*` or
+    /// snapshot entry above it is stored as a marked prefix; a whole file above it is demoted.
+    pub(crate) fn entry_cap(&self) -> usize {
+        self.max_bytes / 2
+    }
+
     /// Evict the least-recently-used entry from the shared `entries`/`order`
-    /// maps when at capacity, clearing its `content_index` slot if it had one.
-    /// Shared by every store_* method that uses those maps (`store`,
-    /// `store_file`, `store_tool`), so a tool entry evicted by a shell `store`
-    /// never leaves a dangling index slot.
+    /// maps when at capacity ([`Self::remove_locked`]). Shared by every store_* method that
+    /// mints into those maps (`store`, `store_file`, `store_tool`) through
+    /// [`Self::admit_locked`].
     fn evict_oldest_locked(inner: &mut BufferInner) {
         if inner.entries.len() >= inner.max_entries {
             if let Some(oldest_id) = inner.order.first().cloned() {
-                inner.order.remove(0);
-                inner.refresh_pending.remove(&oldest_id);
-                if let Some(entry) = inner.entries.remove(&oldest_id) {
-                    if let Some(h) = entry.content_hash {
-                        // Only clear the slot if it still points at the evicted
-                        // id — never invalidate a live, re-pointed slot.
-                        if inner.content_index.get(&h) == Some(&oldest_id) {
-                            inner.content_index.remove(&h);
-                        }
-                    }
+                Self::remove_locked(inner, &oldest_id);
+            }
+        }
+    }
+
+    /// Remove `id` from `entries`, `order` and `refresh_pending`, take its bytes off
+    /// `total_bytes`, and clear its `content_index` slot if it had one, so a tool entry
+    /// evicted by a shell `store` never leaves a dangling index slot. Every removal of an
+    /// entry goes through here.
+    fn remove_locked(inner: &mut BufferInner, id: &str) {
+        inner.order.retain(|k| k != id);
+        inner.refresh_pending.remove(id);
+        if let Some(entry) = inner.entries.remove(id) {
+            inner.total_bytes = inner.total_bytes.saturating_sub(entry_bytes(&entry));
+            if let Some(h) = entry.content_hash {
+                // Only clear the slot if it still points at the evicted
+                // id — never invalidate a live, re-pointed slot.
+                if inner.content_index.get(&h).map(String::as_str) == Some(id) {
+                    inner.content_index.remove(&h);
                 }
             }
+        }
+    }
+
+    /// Drop the text of the whole-file entry `id`, keeping its id, path, stamp and `text_hash`:
+    /// every later read of the handle takes the text from disk ([`Self::resolve`]). Nothing is
+    /// hashed here, under the lock: the hash was taken when the text was stored.
+    fn demote_locked(inner: &mut BufferInner, id: &str) {
+        if let Some(entry) = inner.entries.get_mut(id) {
+            let text = std::mem::take(&mut entry.stdout);
+            entry.demoted = true;
+            inner.total_bytes = inner.total_bytes.saturating_sub(text.len());
+        }
+    }
+
+    /// Bring `total_bytes + need` within `max`, and say whether it now fits. FIRST demote
+    /// least-recently-used whole-file entries, whose text is on disk. Only for a store whose text
+    /// exists nowhere else (`evict`: a `@cmd_*`, `@tool_*` or snapshot) then evict
+    /// least-recently-used entries of those kinds; the text of a whole file never evicts anything.
+    ///
+    /// The ceiling is checked, not assumed. If evicting everything evictable still leaves no room,
+    /// `total_bytes` has drifted from the entries; it is logged and recounted, which holds no more
+    /// than the entries do.
+    fn make_room_locked(inner: &mut BufferInner, max: usize, need: usize, evict: bool) -> bool {
+        let fits = |inner: &BufferInner| inner.total_bytes.saturating_add(need) <= max;
+        if fits(inner) {
+            return true;
+        }
+        let lru: Vec<String> = inner.order.clone();
+        for id in &lru {
+            if fits(inner) {
+                return true;
+            }
+            if inner
+                .entries
+                .get(id)
+                .is_some_and(|e| e.source_path.is_some() && !e.stdout.is_empty())
+            {
+                Self::demote_locked(inner, id);
+            }
+        }
+        if !evict {
+            return fits(inner);
+        }
+        for id in &lru {
+            if fits(inner) {
+                return true;
+            }
+            if inner
+                .entries
+                .get(id)
+                .is_some_and(|e| e.source_path.is_none() && entry_bytes(e) > 0)
+            {
+                Self::remove_locked(inner, id);
+            }
+        }
+        if !fits(inner) {
+            tracing::error!(
+                total_bytes = inner.total_bytes,
+                need,
+                max,
+                "output buffer byte accounting drifted; recounting from the entries"
+            );
+            inner.total_bytes = inner.entries.values().map(entry_bytes).sum();
+        }
+        fits(inner)
+    }
+
+    /// Insert a new entry under `id` as the most recently used, within both limits: evict the
+    /// least-recently-used entry at the entry cap, then make room for its bytes. A caller cuts a
+    /// bigger entry to [`Self::entry_cap`] first. A whole file that finds no room is kept demoted;
+    /// any other entry that finds none (only a caller bug or unrepairable drift can do that) keeps
+    /// no text and records the cut, so the ceiling holds and no read takes it for complete.
+    fn admit_locked(inner: &mut BufferInner, max: usize, id: String, mut entry: BufferEntry) {
+        Self::evict_oldest_locked(inner);
+        let is_file = entry.source_path.is_some();
+        let mut bytes = entry_bytes(&entry);
+        if !Self::make_room_locked(inner, max, bytes, !is_file) {
+            if !is_file {
+                tracing::error!(bytes, max, "output buffer entry stored without its text");
+                entry.truncated = Some(Truncation {
+                    kept_lines: 0,
+                    total_lines: entry.truncated.map_or_else(
+                        || crate::util::text::count_lines(&entry.stdout),
+                        |t| t.total_lines,
+                    ),
+                });
+                entry.stderr.clear();
+            }
+            entry.stdout.clear();
+            entry.demoted = is_file;
+            bytes = 0;
+        }
+        inner.total_bytes += bytes;
+        inner.entries.insert(id.clone(), entry);
+        inner.order.push(id);
+    }
+
+    /// Replace the text of the whole-file entry `id` with `content`: the one place an existing
+    /// entry's text changes size. The text is kept only if it is within one entry's share (half of
+    /// `max`) and fits the room left: a store (`displace`) may demote OTHER files for it; a read's
+    /// refresh from disk displaces nothing. Neither evicts any entry. Text that is not kept leaves
+    /// the entry demoted and is handed back to the caller.
+    fn retain_file_text_locked(
+        inner: &mut BufferInner,
+        max: usize,
+        id: &str,
+        content: String,
+        displace: bool,
+    ) -> Option<String> {
+        let old = std::mem::take(&mut inner.entries.get_mut(id)?.stdout);
+        inner.total_bytes = inner.total_bytes.saturating_sub(old.len());
+        let kept = content.len() <= max / 2
+            && if displace {
+                Self::make_room_locked(inner, max, content.len(), false)
+            } else {
+                inner.total_bytes.saturating_add(content.len()) <= max
+            };
+        let entry = inner.entries.get_mut(id)?;
+        if kept {
+            inner.total_bytes += content.len();
+            entry.stdout = content;
+            entry.demoted = false;
+            None
+        } else {
+            entry.demoted = true;
+            Some(content)
         }
     }
 
@@ -402,6 +697,79 @@ impl OutputBuffer {
         ids
     }
 
+    /// The bytes the pool says it holds (`total_bytes`).
+    #[cfg(test)]
+    pub(crate) fn total_bytes(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .total_bytes
+    }
+
+    /// The byte limit this pool enforces.
+    #[cfg(test)]
+    pub(crate) fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    /// The bytes the entry `id` holds (`stdout` and `stderr`), or `None` when the pool has no
+    /// such entry. Read without [`get`](Self::get), so a demoted file is not read from disk.
+    pub(crate) fn bytes_of(&self, id: &str) -> Option<usize> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.entries.get(id).map(entry_bytes)
+    }
+
+    /// The stdout cut record of the entry `id`, as stored: `None` when it is complete or absent.
+    pub(crate) fn stored_truncation(&self, id: &str) -> Option<Truncation> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.entries.get(id).and_then(|e| e.truncated)
+    }
+
+    /// Set (or clear) the hook [`Self::resolve`] runs while it touches the disk.
+    #[cfg(test)]
+    pub(crate) fn set_disk_hook(&self, hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
+        *self.disk_hook.lock().unwrap_or_else(|e| e.into_inner()) = hook;
+    }
+
+    /// Whether the entry `id` is a whole-file entry demoted to keep the pool under its limit.
+    #[cfg(test)]
+    pub(crate) fn is_demoted(&self, id: &str) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.entries.get(id).is_some_and(|e| e.demoted)
+    }
+
+    /// Panic unless the byte accounting holds: `total_bytes` equals the sum over the entries,
+    /// it is within the limit, no entry holds more than one entry's share, and a demoted entry
+    /// holds no text. A drift between the counter and the entries is the defect class the budget
+    /// can hide, so the tests call this after every scenario.
+    #[cfg(test)]
+    pub(crate) fn assert_accounting(&self) {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let sum: usize = inner.entries.values().map(entry_bytes).sum();
+        assert_eq!(
+            inner.total_bytes, sum,
+            "total_bytes drifted from the entries"
+        );
+        assert!(
+            inner.total_bytes <= self.max_bytes,
+            "{} bytes held over the limit of {}",
+            inner.total_bytes,
+            self.max_bytes
+        );
+        for (id, e) in &inner.entries {
+            assert!(
+                entry_bytes(e) <= self.entry_cap(),
+                "{id} holds {} bytes, over one entry's share of {}",
+                entry_bytes(e),
+                self.entry_cap()
+            );
+            assert!(
+                !e.demoted || e.stdout.is_empty(),
+                "{id} is demoted but holds text"
+            );
+        }
+    }
+
     /// Store command output and return an opaque handle (`@cmd_<8hex>`).
     pub fn store(&self, command: String, stdout: String, stderr: String, exit_code: i32) -> String {
         self.store_truncated(command, stdout, stderr, exit_code, None)
@@ -413,6 +781,12 @@ impl OutputBuffer {
     /// the inline budget, `None` when it is complete. Recording it on the entry —
     /// rather than only on the response that minted the handle — is what lets a
     /// later read of the same handle, in any tool and any turn, say so.
+    ///
+    /// Streams bigger together than one entry's share of the pool ([`Self::entry_cap`]) are stored
+    /// as marked prefixes that fit it ([`fit_streams`]), cut before the lock is taken and recorded
+    /// the same way, so every read of the handle (and of its `.err`) says what was dropped. A
+    /// caller reports it with [`truncation_notices_in`](Self::truncation_notices_in) on the
+    /// returned handle.
     pub fn store_truncated(
         &self,
         command: String,
@@ -421,6 +795,8 @@ impl OutputBuffer {
         exit_code: i32,
         truncated: Option<Truncation>,
     ) -> String {
+        let (stdout, stderr, truncated, stderr_truncated) =
+            fit_streams(self.entry_cap(), stdout, stderr, truncated);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -429,8 +805,6 @@ impl OutputBuffer {
         inner.counter = inner.counter.wrapping_add(1);
         // Truncate to u32 so the hex portion is always exactly 8 characters.
         let id = format!("@cmd_{:08x}", now.wrapping_add(inner.counter) as u32);
-
-        Self::evict_oldest_locked(&mut inner);
 
         let entry = BufferEntry {
             command,
@@ -441,10 +815,12 @@ impl OutputBuffer {
             source_path: None,
             content_hash: None,
             truncated,
+            stderr_truncated,
+            text_hash: None,
+            demoted: false,
         };
 
-        inner.entries.insert(id.clone(), entry);
-        inner.order.push(id.clone());
+        Self::admit_locked(&mut inner, self.max_bytes, id.clone(), entry);
         id
     }
 
@@ -454,9 +830,19 @@ impl OutputBuffer {
     /// is minted once — on the response that created the handle — and is gone by
     /// the next turn, while the handle keeps working for the rest of the session.
     /// A caller who greps the ref three turns later has no response to consult.
+    ///
+    /// The stream is the one the handle names: `@cmd_x.err` reports the cut of `stderr`. The
+    /// entry is looked up without [`get`](Self::get), which would read a demoted file whole from
+    /// disk to answer a question no file entry can say yes to.
     pub fn truncation_notice(&self, id: &str) -> Option<String> {
-        let entry = self.get(id)?;
-        let t = entry.truncated?;
+        let canonical = id.strip_suffix(".err").unwrap_or(id);
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = inner.entries.get(canonical)?;
+        let t = if canonical == id {
+            entry.truncated
+        } else {
+            entry.stderr_truncated
+        }?;
         Some(format!("⚠ {id} {}", truncation_marker(t)))
     }
 
@@ -466,6 +852,9 @@ impl OutputBuffer {
     /// its return tuple: that tuple is destructured at ~20 call sites, and widening
     /// it would spend the whole diff on churn that has nothing to do with the
     /// defect. The regex is the same one `resolve_refs` uses.
+    ///
+    /// Each handle reports both of its streams, so a cut `stderr` is never silent. A command
+    /// string that is one handle (a store's own result) gets that handle's notices.
     pub fn truncation_notices_in(&self, command: &str) -> Vec<String> {
         static REF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
         let re = REF_RE
@@ -474,7 +863,13 @@ impl OutputBuffer {
         re.find_iter(command)
             .map(|m| m.as_str())
             .filter(|tok| seen.insert(*tok))
-            .filter_map(|tok| self.truncation_notice(tok))
+            .flat_map(|tok| {
+                [
+                    self.truncation_notice(tok),
+                    self.truncation_notice(&format!("{tok}.err")),
+                ]
+            })
+            .flatten()
             .collect()
     }
 
@@ -536,75 +931,111 @@ impl OutputBuffer {
     /// Shared body of [`get`] and [`get_with_refresh_flag`]: resolve `id`, refresh a stale
     /// whole-file entry from disk, bump LRU. `report` says whether a pending content change is
     /// consumed and reported.
+    ///
+    /// The disk is touched with the pool UNLOCKED: the entry's path, stamp and state are taken
+    /// under the lock, the file is stat'ed, read and hashed without it, and the result is applied
+    /// under the lock again only if the entry is still as it was seen; otherwise the read starts
+    /// over. Before this, a read of a 300 MB demoted file held the one lock for 8.9 s and every
+    /// other call on the pool waited (review probe RP8, debug build).
+    ///
+    /// A demoted whole-file entry ([`BufferEntry::demoted`]) is read from disk on EVERY read and
+    /// the text is served without being put back, so a read can never take the pool past its
+    /// byte limit. Its change test is the hash of the text it last served, so unlike a resident
+    /// entry it also sees a write that left the mtime at or below the stamp. A resident entry's
+    /// refresh keeps the new text only if it fits in the room left, and is demoted otherwise; a
+    /// read displaces no other entry.
     fn resolve(&self, id: &str, report: bool) -> Option<(BufferEntry, bool)> {
         let canonical = id.strip_suffix(".err").unwrap_or(id);
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-
-        if !inner.entries.contains_key(canonical) {
-            return None;
-        }
-
-        // For file-backed entries: check mtime and refresh if stale. `Some(m)` = stale, with
-        // `m` the mtime observed now.
-        let stale_at = if let Some(entry) = inner.entries.get(canonical) {
-            if let Some(ref path) = entry.source_path {
-                match std::fs::metadata(path) {
-                    Err(_) => {
-                        // File gone or unreadable — evict and return None.
-                        // (file entry only: content_hash is None here, so there is
-                        // no content_index slot to clear — see evict_oldest_locked.)
-                        inner.order.retain(|k| k != canonical);
-                        inner.entries.remove(canonical);
-                        inner.refresh_pending.remove(canonical);
-                        return None;
-                    }
-                    Ok(meta) => {
-                        let mtime_ms = mtime_ms_of(&meta);
-                        (mtime_ms > entry.timestamp).then_some(mtime_ms)
-                    }
+        loop {
+            let (path, seen) = {
+                let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+                let inner = &mut *guard;
+                let entry = inner.entries.get(canonical)?;
+                match entry.source_path.clone() {
+                    None => return Some(Self::finish_locked(inner, canonical, report, None)),
+                    Some(path) => (path, file_state(entry)),
                 }
+            };
+            let (stamp, demoted, _) = &seen;
+
+            #[cfg(test)]
+            {
+                let hook = self
+                    .disk_hook
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                if let Some(hook) = hook {
+                    hook();
+                }
+            }
+            // `None` = the file is gone or unreadable. `Some(m)` in `stale_at` = stale, with `m` the
+            // mtime observed now, BEFORE the read below.
+            let observed = std::fs::metadata(&path).ok().map(|meta| mtime_ms_of(&meta));
+            let stale_at = observed.filter(|mtime| mtime > stamp);
+            let read = if observed.is_some() && (stale_at.is_some() || *demoted) {
+                std::fs::read_to_string(&path).ok().map(|content| {
+                    let hash = content_hash(&content);
+                    (content, hash)
+                })
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
+            let gone = observed.is_none() || ((stale_at.is_some() || *demoted) && read.is_none());
 
-        if let Some(observed) = stale_at {
-            let path = inner.entries[canonical].source_path.clone().unwrap();
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    let changed_on_disk = if let Some(entry) = inner.entries.get_mut(canonical) {
-                        let changed = entry.stdout != content;
-                        entry.stdout = content;
-                        entry.timestamp = capped_stamp(Some(observed), now_ms());
-                        changed
-                    } else {
-                        false
-                    };
-                    if changed_on_disk {
-                        inner.refresh_pending.insert(canonical.to_string());
-                    }
-                }
-                Err(_) => {
-                    // Became unreadable between stat and read — evict.
-                    // (file entry only: content_hash is None, no content_index slot.)
-                    inner.order.retain(|k| k != canonical);
-                    inner.entries.remove(canonical);
-                    inner.refresh_pending.remove(canonical);
+            let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let inner = &mut *guard;
+            if inner.entries.get(canonical).map(file_state) != Some(seen.clone()) {
+                // Changed (or gone) while the disk was read: what was read may be older than what
+                // the entry now holds, so look again.
+                if !inner.entries.contains_key(canonical) {
                     return None;
                 }
+                continue;
             }
+            if gone {
+                // File gone or unreadable — evict and return None.
+                Self::remove_locked(inner, canonical);
+                return None;
+            }
+            let Some((content, hash)) = read else {
+                return Some(Self::finish_locked(inner, canonical, report, None));
+            };
+            let entry = inner.entries.get_mut(canonical)?;
+            let changed = entry.text_hash.as_deref() != Some(hash.as_str());
+            entry.text_hash = Some(hash);
+            if let Some(observed) = stale_at {
+                entry.timestamp = capped_stamp(Some(observed), now_ms());
+            }
+            if changed {
+                inner.refresh_pending.insert(canonical.to_string());
+            }
+            // The text a demoted entry, or a refresh that did not fit, serves without retaining it.
+            let served = if *demoted {
+                Some(content)
+            } else {
+                Self::retain_file_text_locked(inner, self.max_bytes, canonical, content, false)
+            };
+            return Some(Self::finish_locked(inner, canonical, report, served));
         }
-        let content_changed = report && inner.refresh_pending.remove(canonical);
+    }
 
-        // Refresh LRU order: move to end.
-        Self::bump_lru_locked(&mut inner, canonical);
-        inner
-            .entries
-            .get(canonical)
-            .cloned()
-            .map(|e| (e, content_changed))
+    /// The end of [`Self::resolve`], under the lock: consume the pending change notice if
+    /// `report`, bump `canonical` to most recently used, and clone it out, with `served` as its
+    /// text when the entry does not hold it.
+    fn finish_locked(
+        inner: &mut BufferInner,
+        canonical: &str,
+        report: bool,
+        served: Option<String>,
+    ) -> (BufferEntry, bool) {
+        let content_changed = report && inner.refresh_pending.remove(canonical);
+        Self::bump_lru_locked(inner, canonical);
+        let mut entry = inner.entries[canonical].clone();
+        if let Some(text) = served {
+            entry.stdout = text;
+        }
+        (entry, content_changed)
     }
 
     /// Store a file's WHOLE content under its ONE `@file_*` handle, for a caller that does
@@ -616,8 +1047,8 @@ impl OutputBuffer {
     /// The `command` field holds the source path for diagnostics.
     ///
     /// A path that already has a live handle gets that handle back, with its
-    /// content brought up to `content`; nothing is minted and nothing is evicted
-    /// (see [`OutputBuffer::store_file_inner`]). A `@`-prefixed synthetic path is a
+    /// content brought up to `content`; nothing is minted, and an entry is evicted only to make
+    /// room for text that grew (see [`OutputBuffer::store_file_inner`]). A `@`-prefixed synthetic path is a
     /// snapshot, and is reused only for byte-identical content.
     ///
     /// The entry auto-refreshes: `get_with_refresh_flag` re-reads `source_path`
@@ -710,24 +1141,42 @@ impl OutputBuffer {
     ///   so its text is taken too. A store that CHANGES the bytes marks the handle so its
     ///   holders are told once, by the next `get_with_refresh_flag` (review B2: the in-place
     ///   update had silently replaced the `↻ … refreshed from disk` notice a holder got when
-    ///   the re-read minted a new handle and the old one refreshed itself).
+    ///   the re-read minted a new handle and the old one refreshed itself). Bytes are compared
+    ///   by `text_hash`, so a demoted entry compares too, and takes the text back when it fits.
     /// - A snapshot (`source_path` unset: a synthetic `@…` view, which today is the
     ///   `memory` tool's filtered view of a topic, `@memory:<topic>:filtered`) is
-    ///   reused only when an entry of the same name holds byte-identical content.
-    ///   Same name with different content is a different view (two section filters
-    ///   of one memory topic), so it mints. A snapshot never refreshes: it has no
-    ///   file behind it.
+    ///   reused only when an entry of the same name was given byte-identical content (by
+    ///   `text_hash`, so a view that was cut still dedups). Same name with different content is a
+    ///   different view (two section filters of one memory topic), so it mints. A snapshot never
+    ///   refreshes: it has no file behind it.
     ///
     /// The two kinds never match each other: a whole-file entry must keep refreshing,
-    /// and a snapshot must never start. Text is copied only when it is minted or
-    /// changes, and a hit (mint or not) never evicts.
+    /// and a snapshot must never start. Text is copied only when it is minted, changes, or
+    /// returns to a demoted entry.
+    ///
+    /// One entry holds at most [`OutputBuffer::entry_cap`]. A whole file's text is kept only if
+    /// it is within that share and fits the room left after demoting OLDER files: it never evicts
+    /// an entry whose text exists nowhere else, and otherwise the file is minted or kept demoted
+    /// (its disk copy serves every read). A snapshot, which has no disk copy, is stored as a
+    /// marked prefix of the share ([`marked_prefix`]). The hash and the cut are computed before
+    /// the lock is taken.
     fn store_file_inner(
         &self,
         path: Cow<'_, str>,
         content: Cow<'_, str>,
         kind: FileStore,
     ) -> String {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let hash = content_hash(&content);
+        let snapshot_cut =
+            (matches!(kind, FileStore::Snapshot) && content.len() > self.entry_cap()).then(|| {
+                marked_prefix(
+                    &content,
+                    self.entry_cap(),
+                    crate::util::text::count_lines(&content),
+                )
+            });
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = &mut *guard;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -743,7 +1192,9 @@ impl OutputBuffer {
                     && match &kind {
                         FileStore::Whole { source, .. } => e.source_path.as_ref() == Some(source),
                         FileStore::Snapshot => {
-                            e.source_path.is_none() && e.command == *path && e.stdout == *content
+                            e.source_path.is_none()
+                                && e.command == *path
+                                && e.text_hash.as_ref() == Some(&hash)
                         }
                     }
             })
@@ -755,26 +1206,37 @@ impl OutputBuffer {
                 ..
             } = &kind
             {
-                let mut changed = false;
-                if let Some(entry) = inner.entries.get_mut(&id) {
+                // `Some((changed, demoted))` when this store's text is taken.
+                let taken = inner.entries.get_mut(&id).and_then(|entry| {
                     let stale_read =
                         read_mtime.is_some_and(|r| r < entry.timestamp && *now_mtime != Some(r));
-                    if !stale_read {
-                        if entry.stdout != *content {
-                            entry.stdout = content.into_owned();
-                            changed = true;
-                        }
-                        entry.timestamp = capped_stamp(*read_mtime, now);
+                    if stale_read {
+                        return None;
+                    }
+                    entry.timestamp = capped_stamp(*read_mtime, now);
+                    let changed = entry.text_hash.as_ref() != Some(&hash);
+                    entry.text_hash = Some(hash);
+                    Some((changed, entry.demoted))
+                });
+                if let Some((changed, demoted)) = taken {
+                    if changed || demoted {
+                        Self::retain_file_text_locked(
+                            inner,
+                            self.max_bytes,
+                            &id,
+                            content.into_owned(),
+                            true,
+                        );
+                    }
+                    // A holder of the handle saw the old bytes; the next read that can tell them
+                    // (`get_with_refresh_flag`) does. This store's own caller is handed the new
+                    // bytes in its response and is not told.
+                    if changed {
+                        inner.refresh_pending.insert(id.clone());
                     }
                 }
-                // A holder of the handle saw the old bytes; the next read that can tell them
-                // (`get_with_refresh_flag`) does. This store's own caller is handed the new
-                // bytes in its response and is not told.
-                if changed {
-                    inner.refresh_pending.insert(id.clone());
-                }
             }
-            Self::bump_lru_locked(&mut inner, &id);
+            Self::bump_lru_locked(inner, &id);
             return id;
         }
 
@@ -787,22 +1249,28 @@ impl OutputBuffer {
             } => (Some(source), capped_stamp(read_mtime, now)),
             FileStore::Snapshot => (None, now),
         };
+        let (stdout, truncated, demoted) = match snapshot_cut {
+            Some((cut, t)) => (cut, Some(t), false),
+            None if source_path.is_some() && content.len() > self.entry_cap() => {
+                (String::new(), None, true)
+            }
+            None => (content.into_owned(), None, false),
+        };
 
-        Self::evict_oldest_locked(&mut inner);
         let entry = BufferEntry {
             command: path.into_owned(),
-            stdout: content.into_owned(),
+            stdout,
             stderr: String::new(),
             exit_code: 0,
             timestamp,
             source_path,
             content_hash: None,
-            // A @file_* entry holds the whole file, or a synthetic view the caller
-            // explicitly asked for. Neither is a silent prefix.
-            truncated: None,
+            truncated,
+            stderr_truncated: None,
+            text_hash: Some(hash),
+            demoted,
         };
-        inner.entries.insert(id.clone(), entry);
-        inner.order.push(id.clone());
+        Self::admit_locked(inner, self.max_bytes, id.clone(), entry);
         id
     }
 
@@ -811,11 +1279,32 @@ impl OutputBuffer {
     /// If `content` is byte-identical to a still-buffered tool entry, the
     /// existing handle is returned (and bumped to most-recently-used) instead
     /// of minting a new one. `command` holds the tool name for diagnostics.
+    ///
+    /// A result bigger than one entry's share ([`Self::entry_cap`]) cannot be held as JSON. It is
+    /// stored in its line-addressable form ([`line_addressable_text`]), the line space every
+    /// reader of the handle numbers: whole when that form fits the share, else as a marked prefix
+    /// of it, so line N of the handle is line N of the whole result either way. Neither form is
+    /// JSON, so `json_path` cannot read it ([`Self::entry_cap`] tells a caller when). A caller
+    /// reports a cut with [`truncation_notices_in`](Self::truncation_notices_in) on the returned
+    /// handle. The hash and the reshaping happen before the lock is taken.
     pub fn store_tool(&self, tool_name: &str, content: String) -> String {
+        let hash = content_hash(&content);
+        let cap = self.entry_cap();
+        let (stdout, truncated) = if content.len() <= cap {
+            // A @tool_* entry holds the complete serialized tool result.
+            (content, None)
+        } else {
+            let lines = line_addressable_text("@tool_", content);
+            if lines.len() <= cap {
+                (lines, None)
+            } else {
+                let (cut, t) = marked_prefix(&lines, cap, crate::util::text::count_lines(&lines));
+                (cut, Some(t))
+            }
+        };
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
         // Content-dedup: identical tool output already buffered → reuse handle.
-        let hash = content_hash(&content);
         if let Some(existing) = inner.content_index.get(&hash).cloned() {
             if inner.entries.contains_key(&existing) {
                 Self::bump_lru_locked(&mut inner, &existing); // re-access (ADR-3)
@@ -831,21 +1320,20 @@ impl OutputBuffer {
         inner.counter = inner.counter.wrapping_add(1);
         let id = format!("@tool_{:08x}", now.wrapping_add(inner.counter) as u32);
 
-        Self::evict_oldest_locked(&mut inner);
-
         let entry = BufferEntry {
             command: tool_name.to_string(),
-            stdout: content,
+            stdout,
             stderr: String::new(),
             exit_code: 0,
             timestamp: now,
             source_path: None,
             content_hash: Some(hash.clone()),
-            // A @tool_* entry holds the complete serialized tool result.
-            truncated: None,
+            truncated,
+            stderr_truncated: None,
+            text_hash: None,
+            demoted: false,
         };
-        inner.entries.insert(id.clone(), entry);
-        inner.order.push(id.clone());
+        Self::admit_locked(&mut inner, self.max_bytes, id.clone(), entry);
         inner.content_index.insert(hash, id.clone());
         id
     }
@@ -1239,15 +1727,15 @@ impl OutputBuffer {
                 continue;
             }
 
-            let (entry, was_refreshed) = self
-                .get_with_refresh_flag(base_id)
-                .ok_or_else(|| RecoverableError::with_hint(
+            let (entry, was_refreshed) = self.get_with_refresh_flag(base_id).ok_or_else(|| {
+                RecoverableError::with_hint(
                     format!("buffer reference not found: {}", token),
                     mention_escape_hint(
                         token,
-                        "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+                        &format!("{REF_GONE} Re-run the command to get a fresh ref."),
                     ),
-                ))?;
+                )
+            })?;
 
             if was_refreshed {
                 refreshed_handles.push(token.to_string());
@@ -3501,3 +3989,7 @@ mod tests {
         assert!(!looks_like_ack_handle("@ack_short"));
     }
 }
+
+#[cfg(test)]
+#[path = "output_buffer_budget_tests.rs"]
+mod budget_tests;

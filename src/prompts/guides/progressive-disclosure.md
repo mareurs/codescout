@@ -70,7 +70,12 @@ file is paged on the file's path the same way, with no handle. `next` repeats th
 value's line numbers, and the key too unless it is very long. A real file keeps one `@file_*`
 handle for every read of it (whole, range or markdown section) for as long as the pool holds it.
 When the file changes, the handle follows it. The first `run_command` that reads the handle then
-reports `↻ … refreshed from disk`.
+reports `↻ … refreshed from disk`. The pool holds at most 128 MiB, and one handle at most half of
+it. Past that a `@file_*` handle drops its copy and re-reads the file on each use, before any
+other handle is evicted; an evicted handle is refused as not found, so re-run the command. A
+larger output is kept as a prefix whose last line counts the kept and omitted lines: every
+`read_file`, `grep` or `run_command` of its handle carries `buffer_truncated`, and `json_path`
+cannot read a `@tool_*` kept that way.
 
 A `run_command` result keeps its `@cmd_*` handle: a long stream in its summary is cut to
 `N of M bytes shown` (stderr: `.err`), and an oversized envelope is clipped to fit. An

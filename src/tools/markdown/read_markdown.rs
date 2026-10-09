@@ -18,15 +18,15 @@ async fn resolve_markdown_source(
     ctx: &ToolContext,
 ) -> Result<(std::path::PathBuf, String, Option<u64>)> {
     if path.starts_with("@file_") {
-        let buf = ctx
-            .output_buffer
-            .get(path)
-            .ok_or_else(|| {
-                RecoverableError::with_hint(
-                    format!("buffer reference not found: '{}'", path),
-                    "Buffer refs expire when the session resets. Re-run read_file on the file to get a fresh ref.",
-                )
-            })?;
+        let buf = ctx.output_buffer.get(path).ok_or_else(|| {
+            RecoverableError::with_hint(
+                format!("buffer reference not found: '{}'", path),
+                format!(
+                    "{} Re-run read_file on the file to get a fresh ref.",
+                    crate::tools::output_buffer::REF_GONE
+                ),
+            )
+        })?;
         let resolved = buf
             .source_path
             .clone()
