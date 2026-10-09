@@ -1816,19 +1816,22 @@ fn toml_key_name(segment: &str) -> String {
 /// segment, `=`, `#`, `[` or `]`. A quoted segment (`"a=b"`, `'p#q'`) may hold any of those but a
 /// line break: a basic string ends at the first `"` that no backslash escapes, a literal one at
 /// the first `'`.
+///
+/// Only the line break is load-bearing today: the parser itself fails on, or does not end in the
+/// appended `0` for, every key without one that has an `=`, `#`, `[` or `]` outside quotes
+/// (`sweep_of_short_keys_shows_only_line_breaks_reach_the_probe`). Those are refused here anyway,
+/// so the claim that such a key names nothing does not rest on the parser's treatment of it.
 fn toml_key_is_a_path(key: &str) -> bool {
+    if key.contains(['\n', '\r']) {
+        return false;
+    }
     let mut quote: Option<char> = None;
     let mut chars = key.chars();
     while let Some(c) = chars.next() {
-        if matches!(c, '\n' | '\r') {
-            return false;
-        }
         match (quote, c) {
+            // The character after a backslash in a basic string is escaped: `\"` does not end it.
             (Some('"'), '\\') => {
-                // The escaped character: a line break after the backslash is refused too.
-                if matches!(chars.next(), Some('\n' | '\r')) {
-                    return false;
-                }
+                chars.next();
             }
             (Some(q), c) if c == q => quote = None,
             (Some(_), _) => {}
@@ -1851,30 +1854,33 @@ fn toml_key_is_a_path(key: &str) -> bool {
 /// outside quotes). The latter is never given to the parser, so it cannot resolve through the
 /// document it would make.
 fn toml_key_segments(key: &str) -> Vec<String> {
-    let probe = format!("{key} = 0");
-    if let Some(parsed) = toml_key_is_a_path(key)
-        .then(|| DeTable::parse(&probe).ok())
+    toml_key_is_a_path(key)
+        .then(|| toml_probe_segments(key))
         .flatten()
-    {
-        let mut path = Vec::new();
-        let mut table = parsed.get_ref();
-        while table.len() == 1 {
-            let Some((k, v)) = table.iter().next() else {
-                break;
-            };
-            path.push(k.get_ref().to_string());
-            match v.get_ref() {
-                DeValue::Table(inner) => table = inner,
-                // The `0` this function appended, and nothing a key could have smuggled in
-                // (`x = 5 #`): it is the last byte of the probe.
-                DeValue::Integer(_) if v.span() == (probe.len() - 1..probe.len()) => {
-                    return path;
-                }
-                _ => break,
+        .unwrap_or_else(|| key.split('.').map(str::to_string).collect())
+}
+
+/// The segments `key` has as TOML key grammar, asked of the parser by parsing `<key> = 0`, or
+/// `None` when that document is not a single path ending in the `0` it appended.
+fn toml_probe_segments(key: &str) -> Option<Vec<String>> {
+    let probe = format!("{key} = 0");
+    let parsed = DeTable::parse(&probe).ok()?;
+    let mut path = Vec::new();
+    let mut table = parsed.get_ref();
+    while table.len() == 1 {
+        let (k, v) = table.iter().next()?;
+        path.push(k.get_ref().to_string());
+        match v.get_ref() {
+            DeValue::Table(inner) => table = inner,
+            // The `0` this function appended, and nothing a key could have smuggled in
+            // (`x = 5 #`): it is the last byte of the probe.
+            DeValue::Integer(_) if v.span() == (probe.len() - 1..probe.len()) => {
+                return Some(path);
             }
+            _ => return None,
         }
     }
-    key.split('.').map(str::to_string).collect()
+    None
 }
 
 /// A line that may sit INSIDE a run of one key's lines: blank, or a comment.
@@ -2228,6 +2234,50 @@ mod toml_key_pieces {
             offered_names(&mixed),
             format!("{}, … (+2 more not shown)", names(100, 8).join(", "))
         );
+    }
+
+    #[test]
+    fn sweep_of_short_keys_shows_only_line_breaks_reach_the_probe() {
+        // Every key of up to five characters over an alphabet of the characters in question
+        // (no line break among them): the probe never resolves one that `toml_key_is_a_path`
+        // refuses, so the refusal of `=`, `#`, `[` and `]` outside quotes restates the parser.
+        // Not vacuous: keys the probe does resolve are counted, and so are the refused.
+        let alphabet = [
+            'a', '.', '=', '#', '[', ']', ' ', '"', '\'', '0', '{', '}', ',', '\\',
+        ];
+        let (mut refused, mut resolved) = (0usize, 0usize);
+        let mut key = String::new();
+        let mut sweep = vec![String::new()];
+        for _ in 0..5 {
+            let mut next = Vec::new();
+            for prefix in &sweep {
+                for c in alphabet {
+                    key.clear();
+                    key.push_str(prefix);
+                    key.push(c);
+                    next.push(key.clone());
+                }
+            }
+            for k in &next {
+                if toml_key_is_a_path(k) {
+                    resolved += usize::from(toml_probe_segments(k).is_some());
+                } else {
+                    refused += 1;
+                    assert!(
+                        toml_probe_segments(k).is_none(),
+                        "{k:?} is refused as a path but the probe resolves it"
+                    );
+                }
+            }
+            sweep = next;
+        }
+        assert!(refused > 100_000, "fixture: only {refused} refused");
+        assert!(resolved > 100, "fixture: only {resolved} resolved");
+        // The line break IS load-bearing: these resolve through the probe and are refused.
+        for k in ["[a]\nb", "# x\nz", "\na.b"] {
+            assert!(toml_probe_segments(k).is_some(), "{k:?}");
+            assert!(!toml_key_is_a_path(k), "{k:?}");
+        }
     }
 
     #[test]
