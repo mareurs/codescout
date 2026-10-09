@@ -191,6 +191,7 @@ fn grep_o_route_names_no_route_for_a_line_break_and_leaves_a_handle_alone() {
 /// empty `''` between the `@` and the kind, which the shell reads as the same word.
 #[test]
 fn a_handle_shaped_token_inside_a_name_is_broken_so_the_resolver_does_not_see_it() {
+    let token = regex::Regex::new(r"@(?:cmd|file|tool|bg|ack)_[0-9a-f]{8}").unwrap();
     for (name, command) in [
         (
             "x @cmd_deadbeef y.json",
@@ -223,7 +224,6 @@ fn a_handle_shaped_token_inside_a_name_is_broken_so_the_resolver_does_not_see_it
         let route = grep_o_route(name).unwrap_or_else(|| panic!("{name:?}: no route"));
         let (args, _) = call_in(&route, "run_command(").unwrap();
         assert_eq!(args[0].1, json!(command), "{name:?}");
-        let token = regex::Regex::new(r"@(?:cmd|file|tool|bg|ack)_[0-9a-f]{8}").unwrap();
         assert!(
             !token.is_match(command),
             "{name:?}: a handle-shaped token is left in {command}"
