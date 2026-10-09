@@ -2015,6 +2015,18 @@ fn toml_key_that_smuggles_a_value_into_the_key_grammar_names_nothing() {
 }
 
 #[test]
+fn toml_key_that_is_not_key_grammar_is_split_at_every_dot() {
+    // `a b` is no bare key, so the key is not TOML key grammar; it names the quoted key
+    // `"a b"` and the dots still separate segments.
+    let content = "[\"a b\"]\nx = 1\n";
+    assert_eq!(toml_key(content, "a b.x"), ("x = 1".to_string(), (2, 2)));
+    assert_eq!(
+        toml_key(content, "a b"),
+        ("[\"a b\"]\nx = 1".to_string(), (1, 2))
+    );
+}
+
+#[test]
 fn toml_key_names_in_a_hint_are_quoted_exactly_when_they_cannot_be_bare() {
     let content = "[a.my_key]\n[a.my-key]\n[a.\"q\\\"x\"]\n[a.\"b c\"]\n[a.\"\"]\n";
     let e = toml_refusal(content, "a.nope");
