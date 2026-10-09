@@ -22,7 +22,8 @@ topic: tool-contracts
 Accepted — active. Decided 2026-10-07 by the operator after a live probe of the rebuilt binary showed
 that `read_file` of a buffer gave a new handle on every call. It extends
 `docs/adrs/2026-10-05-a-result-keeps-the-one-handle-its-tool-gave-it.md` from "one handle per result" to
-"one handle per thing that was read".
+"one handle per thing that was read". Amended 2026-10-09: the pool that holds those handles has a hard byte
+budget (see Decision, *Added 2026-10-09*).
 
 ## Context
 
@@ -81,6 +82,34 @@ on the file's own path: `read_file("<path>", json_path=…, start_line=N, end_li
 line numbers are the value's own, because the value is re-serialized and has no lines in the file. This was
 the last place where one real file had a second handle, and `store_file_excerpt` is deleted.
 
+**Added 2026-10-09. The pool has a hard byte budget.** `BufferInner.total_bytes` counts `stdout` plus
+`stderr` of every entry and is changed only by four helpers (`admit_locked`, `remove_locked`,
+`demote_locked`, `retain_file_text_locked`), all under the pool's one lock. The rulings:
+
+- **The ceiling is 128 MiB (`MAX_POOL_BYTES`), default and maximum. Chosen, not measured.**
+  `OutputBuffer::with_byte_limit` can only lower it: it clamps to [1 MiB, 128 MiB]. The 1 MiB floor
+  (`MIN_POOL_BYTES`, also chosen) is above twice the inline limit, so the stores that are inline-sized by
+  construction (the tee capture, a compacted test run) are never cut. The server passes 128 MiB.
+- **Eviction order.** A store that would pass the limit first DEMOTES least-recently-used whole-file
+  `@file_*` entries: the text is dropped and the id, path and stamp stay. Only if that is not enough are
+  least-recently-used `@cmd_*`, `@tool_*` and snapshot entries evicted, whose text exists nowhere else.
+  The 50-entry cap stays. A read of a demoted handle takes the text from disk and does not put it back,
+  so a read never grows the pool. A path read of the file (a store) takes the text back when it fits.
+  A resident entry refreshed by a read keeps the new text only if it fits in the room left; otherwise it
+  is demoted. A read displaces no other entry.
+- **An entry bigger than the whole limit is never stored as is.** A `@cmd_*`, `@tool_*` or snapshot
+  entry is stored as a marked prefix of WHOLE lines that fits the limit, with the existing `Truncation`
+  and `truncation_marker`, so line N of the handle is line N of the output for every kept line and every
+  later read carries `buffer_truncated`. A `@tool_*` is cut in its line-addressable form, the line space
+  its readers number. `stderr` is cut on its own record (`stderr_truncated`, read through `.err`) and
+  keeps at most half the limit when both streams are over. The responses that can mint such an entry,
+  `run_command`'s summary and `call_content`'s `@tool_*` envelope, carry `output_truncated` with the
+  kept and omitted line counts. A whole file bigger than the limit is minted demoted: its handle holds no
+  text and every read takes it from disk.
+- **R3 and the stamp rules are unchanged.** A demoted entry keeps its one handle, its stamp, the
+  stale-write rule and the once-only refresh notice. It holds the SHA-256 of the text it last served, so
+  a read can tell a changed file from an unchanged one without a copy of the old text.
+
 ## Alternatives considered
 
 - **Keep the slice handle** so a slice stays greppable. Rejected: the reason was false, and the source
@@ -90,15 +119,29 @@ the last place where one real file had a second handle, and `store_file_excerpt`
 - **Use the whole-file handle only below a size limit.** Offered, not chosen. The operator kept one handle
   for every size.
 - **A byte budget on the pool**, or a lazy whole-file entry that keeps the path, stamp and length and reads
-  the text on access. Not built (see Revisit when).
+  the text on access. Built together on 2026-10-09: the budget, with the lazy entry as what a whole file
+  becomes when it is demoted (see Decision, *Added 2026-10-09*). Of the three answers to an entry larger
+  than the whole budget, the operator chose the third for `@cmd_*` and `@tool_*` (a marked prefix) and a
+  lazy entry for a whole file; the store stays infallible.
 
 ## Consequences
 
 - Easier: a caller holds one ref for a buffer and one for a file. The pool no longer fills with copies of
   one text. By code reading (not measured), fifty repeated whole reads of one 736 KB file could keep fifty copies before. They keep one now.
 - Harder, **retention**: a range or section read of a file now keeps the whole file. A probe of 12 files of
-  5 MB read by range kept 62,914,560 bytes, against 288,948 bytes before (217 times). The pool caps entries,
-  not bytes, so 50 large files can fill memory.
+  5 MB read by range kept 62,914,560 bytes, against 288,948 bytes before (217 times). The pool capped
+  entries, not bytes, so 50 large files could fill memory. Bounded since 2026-10-09 at 128 MiB (see
+  Decision): the same case scaled to a 1 MiB pool (twelve ~205 KB files, 2.4 MB) keeps at most 1 MiB
+  (`twelve_range_reads_of_large_files_stay_within_the_byte_limit`).
+- Harder, **the budget's own costs** (2026-10-09, by code reading and the unit tests, not measured live):
+  one entry of the full limit leaves nothing else holding text; while `@cmd_*` and `@tool_*` fill the
+  pool, every whole file is demoted by the next store, even one just read, because demotion comes before
+  any eviction; each read of a demoted handle reads and hashes the whole file. A demoted entry also sees a
+  write that left the mtime at or below its stamp, which a resident entry does not. A cut `@tool_*` is not
+  JSON, so `json_path` cannot read it, and its envelope's `hint` and `buffered_bytes` still describe the
+  whole result. `run_command` still holds a command's whole output in memory before the pool sees it
+  (`wait_with_output`), and a whole-file `read_file` still has no size limit: the budget bounds what the
+  pool RETAINS, not what a call reads.
 - Harder, **line numbers move**: a range or section handle now follows the file, as a whole-file handle
   already did. After an edit above the range, a line number a holder noted earlier names other text.
 - Harder, **the refresh notice reaches only `run_command`**. A `read_file` of the handle does not report it.
@@ -124,11 +167,9 @@ the last place where one real file had a second handle, and `store_file_excerpt`
 
 ## Revisit when
 
-- Pool memory becomes a problem. Two designs are written down, neither built. (1) `total_bytes` and
-  `max_bytes` in `BufferInner`, with eviction in a loop. It needs a ruling on an entry larger than the
-  whole budget: admit it alone and flush the rest, make the store fallible, or truncate it and break
-  "line N of the handle is line N of the file". (2) A lazy whole-file entry: retention for real files
-  drops to about zero, and each handle access reads the disk.
+- Done 2026-10-09: a byte budget on the pool (see Decision). Reopen it if 128 MiB proves wrong (no
+  measurement backs it), if one full-size entry flushing the pool hurts, or if re-reading demoted files
+  from disk becomes a cost worth a cache.
 - Done 2026-10-08: `read_file` with `json_path` or `toml_key` on a real file pages the value on the file's own
   path (see Decision). Reopen it if the per-page re-parse becomes a problem; a cache would need an owner for
   its staleness.
@@ -178,6 +219,20 @@ fix of the `run_command` cut-off hint. Patch-ids:
 | `a9ae2ed8` | `8efaa9127b856be6cc888b08b589785b1960618b` | an empty `siblings` list is not droppable |
 | `5eb486bd` | `6a531492e85a46a96ed0333fa56dbcea580c7e98` | page-loop cap in a test |
 | `19ab7993` | `df13954a4fa7659ba119ef18af2a383c1f2ecd77` | hint tests are dash-safe; review killers; the `@file_` refusal names a route only if the file type accepts it |
+
+A third round, on branch `fix/buffer-pool-byte-budget` (2026-10-09), added the byte budget. Patch-ids:
+
+| SHA | patch-id | Change |
+|---|---|---|
+| `267d318e` | `1c006d08245fdaa27bccee38880bc8d08a7cf9dc` | a hard byte budget on the buffer pool |
+| `46135fc2` | `971162b1564208bcf2c0463978f766f536bee236` | tests that kill the survivors of its mutation run |
+
+Mutation runs through `scripts/mutation-probe.sh`, one mutant at a time: the first run of 23 mutants left 5
+survivors (one equivalent edge, three edges with no case at exactly the limit, one assertion monotone under
+shrinking); after the repair, 25 of 25 mutants were killed, each run with a `test result:` line. The
+mutants cover the demote-before-evict order, the LRU direction, every `total_bytes` update, the clamp,
+the prefix size and its marker reserve, every `<=` at the budget edge, the read path of a demoted entry,
+its change hash, stderr's half-limit room, the `.err` notice, and both response fields.
 
 ## Evidence
 
