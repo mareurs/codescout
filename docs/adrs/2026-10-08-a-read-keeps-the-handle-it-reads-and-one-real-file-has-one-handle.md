@@ -1,5 +1,5 @@
 ---
-id: '9c493e95a48b29ad'
+id: b1ffbe9b27336a49
 kind: adr
 status: active
 title: ADR-2026-10-08 — A read keeps the handle it reads, and one real file has one handle

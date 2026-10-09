@@ -1,5 +1,5 @@
 ---
-id: d830b95eb2a07ce2
+id: 8031bda216e96ddd
 kind: bug
 status: open
 title: 'BUG: the own-stderr remedy of a buffer query tells a multi-stage pipeline to append a redirection that only reaches its last command'

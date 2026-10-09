@@ -1,5 +1,5 @@
 ---
-id: '52efc05f9241f73f'
+id: eaf249fc805ad33a
 kind: bug
 status: open
 title: 'BUG: toml_key prints Rust debug text for a scalar and returns only the first element, the child without its parent, and the whole file as line_range'

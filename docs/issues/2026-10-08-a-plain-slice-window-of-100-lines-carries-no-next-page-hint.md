@@ -1,5 +1,5 @@
 ---
-id: '9665b32b963f464c'
+id: d64d81d07ba58b6b
 kind: bug
 status: open
 title: 'BUG: a plain-slice window of exactly 100 lines carries no next-page hint, so following the hints stops at line 200'
