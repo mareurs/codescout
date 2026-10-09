@@ -1208,3 +1208,55 @@ fn a_store_returns_the_cut_it_kept_even_once_the_handle_is_gone() {
     assert_eq!(buf.bytes_of(&id), None, "the count cap evicted it");
     assert!(t.kept_lines < t.total_lines, "{t:?}");
 }
+
+/// Review F2, the other half of the stamp-only rule: a read that finds only the stamp moved
+/// applies only when the text it read has the hash the entry holds. Here it does not: a read is
+/// held at the disk, another read stamps the entry (the file was rewritten with the same text),
+/// then the file changes. The held read must start over, so the text it keeps is stamped with the
+/// mtime it saw before reading THAT text, not with the stamp of the other read's text.
+#[test]
+fn a_read_of_new_text_after_a_stamp_only_change_starts_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v1 = numbered("v1", 100_000);
+    let p = write(dir.path(), "f", &v1, 100);
+    let f = read_into(&buf, &p);
+    assert!(!buf.is_demoted(&f));
+
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (hold, entered, release) = hold_first_pass();
+    {
+        let passes = passes.clone();
+        buf.set_disk_hook(Some(Arc::new(move || {
+            passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            hold();
+        })));
+    }
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read reached the disk");
+    write(dir.path(), "f", &v1, 90);
+    assert_eq!(buf.get(&f).unwrap().stdout, v1, "the same text, restamped");
+    let v2 = numbered("v2", 100_000);
+    let m2 = file_mtime_ms(&write(dir.path(), "f", &v2, 80)).unwrap();
+    release.send(()).unwrap();
+    assert_eq!(reader.join().unwrap().as_deref(), Some(v2.as_str()));
+    buf.set_disk_hook(None);
+
+    assert_eq!(
+        buf.inner.lock().unwrap().entries[&f].timestamp,
+        m2,
+        "the text kept is stamped with the mtime seen before reading it"
+    );
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "the held read started over once"
+    );
+    buf.assert_accounting();
+}
