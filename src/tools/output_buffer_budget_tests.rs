@@ -1361,3 +1361,79 @@ fn a_stamp_moved_back_by_the_same_text_costs_no_second_read() {
     assert_eq!(buf.inner.lock().unwrap().entries[&f].timestamp, older);
     buf.assert_accounting();
 }
+
+/// Review F2: a read held at the disk while a path read stored the very text it then reads (the
+/// entry now describes that text) applies it without a second disk read.
+#[test]
+fn a_read_of_the_text_a_path_read_just_stored_costs_no_second_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let p = write(dir.path(), "f", &numbered("v1", 100_000), 100);
+    let f = read_into(&buf, &p);
+    write(dir.path(), "f", &numbered("v1", 100_000), 95);
+
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (hold, entered, release) = hold_first_pass();
+    {
+        let passes = passes.clone();
+        buf.set_disk_hook(Some(Arc::new(move || {
+            passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            hold();
+        })));
+    }
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read reached the disk");
+    let v2 = numbered("v2", 100_000);
+    let m2 = file_mtime_ms(&write(dir.path(), "f", &v2, 90)).unwrap();
+    assert_eq!(read_into(&buf, &p), f);
+    release.send(()).unwrap();
+    assert_eq!(reader.join().unwrap().as_deref(), Some(v2.as_str()));
+    buf.set_disk_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the held read applied without reading the file again"
+    );
+    assert_eq!(buf.inner.lock().unwrap().entries[&f].timestamp, m2);
+    assert_eq!(buf.get(&f).unwrap().stdout, v2);
+    buf.assert_accounting();
+}
+
+/// Review F2: a read never puts text back into an entry that was demoted while it read the disk,
+/// even when only the stamp and the demotion changed and the text is the same: a read of a
+/// demoted handle serves the text without storing it, so a read never grows the pool.
+#[test]
+fn a_read_never_restores_an_entry_demoted_while_it_read_the_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v1 = numbered("v1", 40_000);
+    let p = write(dir.path(), "f", &v1, 100);
+    let f = read_into(&buf, &p);
+    write(dir.path(), "f", &v1, 90);
+
+    let (hold, entered, release) = hold_first_pass();
+    buf.set_disk_hook(Some(hold));
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read reached the disk");
+    assert_eq!(read_into(&buf, &p), f, "restamped, the same text");
+    OutputBuffer::demote_locked(&mut buf.inner.lock().unwrap(), &f);
+    let before = buf.total_bytes();
+    release.send(()).unwrap();
+    assert_eq!(reader.join().unwrap().as_deref(), Some(v1.as_str()));
+    buf.set_disk_hook(None);
+    assert!(buf.is_demoted(&f), "the read put no text back");
+    assert_eq!(buf.total_bytes(), before, "a read never grows the pool");
+    buf.assert_accounting();
+}
