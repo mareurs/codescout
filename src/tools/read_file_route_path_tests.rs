@@ -265,17 +265,19 @@ async fn a_line_range_next_of_an_awkward_path_is_a_call_that_parses_back_and_run
 
 /// The escapes of a path are part of the page's skeleton. A route that priced the page with the
 /// raw path would leave it room for bytes the real `next` then needs, and the page would be
-/// buffered again by `call_content`. 120 quotes make 240 B of escapes in the literal and more in
-/// the serialized response; 3,000 rows of 6 B pack a page to within a few bytes of the limit.
+/// buffered again by `call_content`. The skeleton also carries a `hint` and `line_truncated` that
+/// a page without a cut line does not, about 330 B of slack, so the escapes must outweigh that:
+/// each of 240 quotes costs 2 more serialized bytes in the literal than raw, 480 B in all; 3,000
+/// rows of 6 B pack a page to within a few bytes of the limit.
 #[tokio::test]
 async fn a_path_full_of_escapes_still_leaves_every_page_inside_the_limit() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = project_ctx(dir.path()).await;
     let rows: Vec<String> = (0..3_000).map(|i| format!("r{i:04}")).collect();
     for (ext, stem) in [
-        ("txt", "\"".repeat(120)),
-        ("md", "\"".repeat(120)),
-        ("txt", "\\".repeat(120)),
+        ("txt", "\"".repeat(240)),
+        ("md", "\"".repeat(240)),
+        ("txt", "\\".repeat(240)),
     ] {
         let path = write(dir.path(), &format!("{stem}.{ext}"), rows.join("\n") + "\n");
         let label = format!("{} escapes in .{ext}", stem.len());
@@ -434,6 +436,15 @@ fn the_clamp_advisory_quotes_its_target_in_both_routes() {
     let (args, _) = call_in(&hint, "read_file(").expect("the field route");
     assert_eq!(args[0], (None, json!(target)), "{hint}");
     assert_eq!(args[1], (Some("json_path".into()), json!("$.k")), "{hint}");
+    // A field the caller's payload could only have through a bracketed key is quoted too.
+    let hint = line_hint(target, Some("$.q\"k\\x"));
+    let (args, _) = call_in(&hint, "read_file(").expect("the field route");
+    assert_eq!(
+        args[1],
+        (Some("json_path".into()), json!("$.q\"k\\x")),
+        "{hint}"
+    );
+    let hint = line_hint(target, Some("$.k"));
     let (args, _) = call_in(&hint, "run_command(").expect("the grep route");
     assert_eq!(
         args[0].1,
