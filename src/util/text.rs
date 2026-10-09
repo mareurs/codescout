@@ -728,6 +728,26 @@ pub(crate) fn shell_quote(s: &str) -> Option<String> {
     }
     Some(format!("'{}'", s.replace('\'', r"'\''")))
 }
+/// Test instrument: the JSON string literal that follows `marker` in `text`, parsed with a real
+/// JSON parser, and the text after the literal.
+///
+/// A route in a hint or a refusal is text a caller copies and runs, so the check on a builder that
+/// writes a path into one is to read the argument back the way the caller's parser would, not to
+/// look for the path as a substring (a raw path contains itself). A literal that does not parse
+/// (`marker` followed by `"a"b"`, or by a bare word) panics with the whole text.
+#[cfg(test)]
+pub(crate) fn json_string_after<'a>(text: &'a str, marker: &str) -> (String, &'a str) {
+    let at = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker:?} is not in {text:?}"))
+        + marker.len();
+    let mut values = serde_json::Deserializer::from_str(&text[at..]).into_iter::<String>();
+    let value = values
+        .next()
+        .unwrap_or_else(|| panic!("no value after {marker:?} in {text:?}"))
+        .unwrap_or_else(|e| panic!("no JSON string after {marker:?} ({e}) in {text:?}"));
+    (value, &text[at + values.byte_offset()..])
+}
 
 /// Shared walk behind the two budgeted extractors — they differ only in what a
 /// line is charged.

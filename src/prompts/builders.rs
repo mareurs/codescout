@@ -962,8 +962,11 @@ Step 2: Spawn {} subagents IN PARALLEL — one per project:",
         );
 
         for (id, path) in project_prompts {
+            // `path` carries the project's id (`onboarding-project-<id>.md`), which a workspace
+            // file names: a JSON string literal, so a `"` or `\` in an id still parses.
             instructions.push_str(&format!(
-                "\n  - {id}: read_file(\"{path}\") and follow all instructions",
+                "\n  - {id}: read_file({}) and follow all instructions",
+                crate::util::text::json_quote(path),
             ));
         }
 
@@ -991,8 +994,11 @@ Step 2: Explore each project one at a time:",
         );
 
         for (id, path) in project_prompts {
+            // `path` carries the project's id (`onboarding-project-<id>.md`), which a workspace
+            // file names: a JSON string literal, so a `"` or `\` in an id still parses.
             instructions.push_str(&format!(
-                "\n  - {id}: read_file(\"{path}\") and follow all instructions",
+                "\n  - {id}: read_file({}) and follow all instructions",
+                crate::util::text::json_quote(path),
             ));
         }
 
@@ -1003,5 +1009,62 @@ Step 3: Read the synthesis prompt and write workspace memories:\n\
         ));
 
         instructions
+    }
+}
+
+#[cfg(test)]
+mod route_path_tests {
+    use super::build_workspace_instructions;
+    use crate::util::text::json_string_after;
+
+    /// What a project id can hold that a raw `read_file("…")` cannot carry. The prompt file of a
+    /// project is `.codescout/tmp/onboarding-project-<id>.md`, so the id is in the path. Not files:
+    /// the builder takes the paths as `&str`.
+    const IDS: [&str; 9] = [
+        "plain",
+        "sp ace",
+        "q\"uote",
+        "it's",
+        "back\\slash",
+        "tab\there",
+        "ünï€😀 日本",
+        "a\"b\\c 'd' $e `f` ü",
+        "e\\\"\\\\\"",
+    ];
+
+    /// Each project's prompt is named as a `read_file(<path>)` call that reads back to the path,
+    /// in the instructions for a client that spawns subagents and in the ones for a client that
+    /// does not: the two build the line at two sites.
+    #[test]
+    fn the_prompt_file_of_each_project_reads_back_to_its_path() {
+        let project_prompts: Vec<(String, String)> = IDS
+            .iter()
+            .map(|id| {
+                (
+                    id.to_string(),
+                    format!(".codescout/tmp/onboarding-project-{id}.md"),
+                )
+            })
+            .collect();
+        for subagent_capable in [true, false] {
+            let text = build_workspace_instructions(
+                ".codescout/tmp/onboarding-prompt.md",
+                &project_prompts,
+                ".codescout/tmp/onboarding-workspace-synthesis.md",
+                subagent_capable,
+            );
+            for (id, path) in &project_prompts {
+                let marker = format!("  - {id}: read_file(");
+                let (got, rest) = json_string_after(&text, &marker);
+                assert_eq!(
+                    &got, path,
+                    "subagent_capable={subagent_capable} {id:?}: {text}"
+                );
+                assert!(
+                    rest.starts_with(") and follow all instructions"),
+                    "subagent_capable={subagent_capable} {id:?}: {text}"
+                );
+            }
+        }
     }
 }

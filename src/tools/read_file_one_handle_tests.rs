@@ -1000,6 +1000,10 @@ async fn a_json_path_value_never_becomes_the_files_handle() {
 /// R3 is "one handle per RESOLVED path": every spelling of one file (relative, `./`, absolute,
 /// `..`, a symlink, `//`) names the same handle, for a whole read and a range read alike. From
 /// review RB (mutant M6: the range arm keyed on the raw path, which survived the suite).
+///
+/// Unix-only because it makes a symlink with `std::os::unix::fs::symlink`, a module Windows does
+/// not have (E0433 in the Windows lib-test build); creating one there also needs elevation.
+#[cfg(unix)]
 #[tokio::test]
 async fn every_spelling_of_one_path_names_its_one_handle() {
     let (_dir, root) = project();

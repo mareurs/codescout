@@ -15,7 +15,17 @@ use super::types::{RecoverableError, ToolContext};
 ///
 /// docs/issues/archive/2026-09-30-the-worktree-read-notice-still-names-list-0-as-the-tree-to-activate.md
 pub(crate) fn activate_main_repo_call(root: &std::path::Path) -> String {
-    format!("workspace(action='activate', path=\"{}\")", root.display())
+    activate_call(&root.display().to_string())
+}
+
+/// `workspace(action='activate', path=<path>)` as a call a caller can paste: `path` is written as a
+/// JSON string literal ([`crate::util::text::json_quote`]), not between two raw quotes, so a `"` or
+/// `\` in a directory name (or a Windows separator) reads back as the path it names.
+pub(crate) fn activate_call(path: &str) -> String {
+    format!(
+        "workspace(action='activate', path={})",
+        crate::util::text::json_quote(path)
+    )
 }
 
 /// Block write operations when git worktrees exist but the agent hasn't

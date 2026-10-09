@@ -1096,17 +1096,43 @@ async fn worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree
         notice.contains(&wt.display().to_string()),
         "the worktree list is the disclosure and must stay in the notice; got: {notice}"
     );
-    let marker = "workspace(action='activate', path=\"";
-    let start = notice
-        .find(marker)
-        .unwrap_or_else(|| panic!("the notice must still prescribe activate; got: {notice}"))
-        + marker.len();
-    let arg = &notice[start..start + notice[start..].find('"').expect("unterminated path arg")];
+    // The argument is a JSON string literal, read back the way the caller's parser reads it: the
+    // raw text between the quotes is not the path when the path holds a `"` or a `\` (a Windows
+    // separator is one).
+    let (arg, _) =
+        crate::util::text::json_string_after(&notice, "workspace(action='activate', path=");
     assert_eq!(
         arg,
         root.display().to_string(),
         "activate must be aimed at the main repo, not a worktree the filesystem listed first; got: {notice}"
     );
+}
+/// `activate_main_repo_call` and `activate_call` write the directory as a JSON string literal, so
+/// the call a worktree notice prescribes reads back to the directory it names. Fed a `&str` that is
+/// not a real directory, so it runs on every platform.
+#[test]
+fn the_activate_call_a_notice_prescribes_reads_back_to_the_directory() {
+    for dir in [
+        "/home/me/plain",
+        "/home/me/sp ace",
+        "/home/me/q\"uote",
+        "/home/me/it's",
+        "/home/me/back\\slash",
+        "/home/me/tab\there",
+        "/home/me/ünï€😀 日本",
+        "/home/me/a\"b\\c 'd' $e `f` ü",
+        "C:\\Users\\me\\work\\\"x\"",
+    ] {
+        for call in [
+            super::guards::activate_main_repo_call(std::path::Path::new(dir)),
+            super::guards::activate_call(dir),
+        ] {
+            let (got, rest) =
+                crate::util::text::json_string_after(&call, "workspace(action='activate', path=");
+            assert_eq!(got, dir, "{call}");
+            assert_eq!(rest, ")", "{call}");
+        }
+    }
 }
 
 /// docs/issues/archive/2026-09-02-the-write-guard-refuses-a-correctly-pinned-call.md

@@ -444,7 +444,7 @@ impl Tool for Grep {
                     .iter()
                     .map(|(file, n)| {
                         let plus = if hit_cap { "+" } else { "" };
-                        format!("path=\"{file}\" ({n}{plus} matches)")
+                        path_candidate(file, &format!("{n}{plus} matches"))
                     })
                     .collect();
                 let narrow = if top.is_empty() {
@@ -537,7 +537,7 @@ impl Tool for Grep {
                 let top: Vec<String> = ranked
                     .iter()
                     .take(3)
-                    .map(|(f, n)| format!("path=\"{f}\" ({n} matches)"))
+                    .map(|(f, n)| path_candidate(f, &format!("{n} matches")))
                     .collect();
                 let hint = if top.is_empty() {
                     format!(
@@ -603,6 +603,16 @@ impl Tool for Grep {
 }
 
 // ── format helpers ──────────────────────────────────────────────────────
+
+/// One narrowing candidate of an overflow hint: `path="<file>" (<tally>)`.
+///
+/// The hint is text a caller copies and runs, and `file` is a real file's path, so it is written as
+/// a JSON string literal ([`crate::util::text::json_quote`]): a `"` or `\` in the name would
+/// otherwise end the literal early or start an escape, and the candidate would not parse as the
+/// argument it claims to be.
+pub(crate) fn path_candidate(file: &str, tally: &str) -> String {
+    format!("path={} ({tally})", crate::util::text::json_quote(file))
+}
 
 pub(super) fn format_grep(val: &Value) -> String {
     let total = val["total"].as_u64().unwrap_or(0) as usize;
@@ -3245,3 +3255,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "grep_route_path_tests.rs"]
+mod route_path_tests;

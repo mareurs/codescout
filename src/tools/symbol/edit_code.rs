@@ -265,10 +265,7 @@ impl Tool for EditCode {
                     return Err(RecoverableError::new("action 'rename' requires 'new_name'").into());
                 };
                 let mut result = self.do_rename(ctx, name_path, rel_path, new_name).await?;
-                result["hint"] = json!(format!(
-                    "verify callers: references(symbol=\"{}\", path=\"{}\")",
-                    name_path, rel_path
-                ));
+                result["hint"] = json!(verify_callers_hint(name_path, rel_path));
                 Ok(result)
             }
             "remove" => self.do_remove(ctx, name_path, rel_path, at_line).await,
@@ -323,10 +320,7 @@ impl Tool for EditCode {
                         crate::tools::parse_bool_param(&input["force"]),
                     )
                     .await?;
-                result["hint"] = json!(format!(
-                    "verify callers: references(symbol=\"{}\", path=\"{}\")",
-                    name_path, rel_path
-                ));
+                result["hint"] = json!(verify_callers_hint(name_path, rel_path));
                 Ok(result)
             }
             "insert" => {
@@ -345,6 +339,20 @@ impl Tool for EditCode {
             _ => Err(RecoverableError::new(format!("unknown action '{action}'")).into()),
         }
     }
+}
+
+/// The `hint` a successful `rename` or `replace` carries: the `references(...)` call that checks
+/// the symbol's callers.
+///
+/// It is text a caller copies and runs, and both arguments are strings the caller gave (a path with
+/// a `"` or `\` in it, or a symbol name), so each is written as a JSON string literal
+/// ([`crate::util::text::json_quote`]) rather than between two raw quotes.
+pub(super) fn verify_callers_hint(name_path: &str, rel_path: &str) -> String {
+    format!(
+        "verify callers: references(symbol={}, path={})",
+        crate::util::text::json_quote(name_path),
+        crate::util::text::json_quote(rel_path)
+    )
 }
 
 /// Rollback message for a `replace` whose re-parse lost sibling symbols.

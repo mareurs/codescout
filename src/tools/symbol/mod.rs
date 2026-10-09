@@ -13,6 +13,9 @@ mod symbols;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod route_path_tests;
+
 pub use call_graph::CallGraph;
 pub use edit_code::EditCode;
 pub use references::References;
