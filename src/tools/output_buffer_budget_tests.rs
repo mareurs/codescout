@@ -1,15 +1,19 @@
-//! The pool's byte budget: `total_bytes` never passes the limit, whole-file entries are demoted
-//! before anything whose text exists nowhere else is evicted, and an entry bigger than the whole
-//! limit is never stored as is. Every test runs at the floor limit (`MIN_POOL_BYTES`, 1 MiB)
-//! with sizes scaled to it, and checks `assert_accounting` after each step: a counter that
-//! drifts from the entries is the defect a budget can hide behind a green ceiling check.
+//! The pool's byte budget: `total_bytes` never passes the limit, one entry holds at most half of
+//! it, whole-file entries are demoted before anything whose text exists nowhere else is evicted,
+//! the text of a whole file never evicts anything, and an entry bigger than its share is never
+//! stored as is. Every test runs at the floor limit (`MIN_POOL_BYTES`, 1 MiB, so one entry holds
+//! 512 KiB) with sizes scaled to it, and checks `assert_accounting` after each step: a counter
+//! that drifts from the entries is the defect a budget can hide behind a green ceiling check.
 
 use super::*;
 use std::path::Path;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, SystemTime};
 
 // cap-class: NOT_A_CAP — test-only alias of MIN_POOL_BYTES that sizes the pools these tests build; it bounds no runtime path
 const LIMIT: usize = MIN_POOL_BYTES;
+// cap-class: NOT_A_CAP — test-only alias of one entry's share at LIMIT; it bounds no runtime path
+const SHARE: usize = LIMIT / 2;
 
 fn pool() -> OutputBuffer {
     OutputBuffer::with_byte_limit(50, LIMIT)
@@ -30,6 +34,15 @@ fn numbered(tag: &str, bytes: usize) -> String {
 /// A command entry of exactly `bytes` of stdout.
 fn cmd(buf: &OutputBuffer, tag: &str, bytes: usize) -> String {
     buf.store(tag.into(), numbered(tag, bytes), String::new(), 0)
+}
+
+/// Two commands of 500 KB: 1,000,000 bytes, which leaves 48,576 of the 1 MiB limit, so any
+/// resident file of more than that is demoted to make room for them.
+fn squeeze(buf: &OutputBuffer, tag: &str) -> (String, String) {
+    (
+        cmd(buf, &format!("{tag}1"), 500_000),
+        cmd(buf, &format!("{tag}2"), 500_000),
+    )
 }
 
 /// Write `text` to `dir/name` with its mtime `secs_ago` seconds in the past. Explicit mtimes,
@@ -98,12 +111,12 @@ fn the_pool_never_holds_more_than_its_byte_limit_across_mixed_stores() {
         buf.get(&f).unwrap().stdout,
         std::fs::read_to_string(&p).unwrap()
     );
-    buf.assert_accounting();
     assert!(
         buf.total_bytes() > LIMIT / 2,
         "the pool was drained, not budgeted: {} held",
         buf.total_bytes()
     );
+    buf.assert_accounting();
 }
 
 /// Ruling 2, both halves: a store over the limit demotes a whole file even when an OLDER
@@ -160,6 +173,78 @@ fn demotion_takes_the_least_recently_used_file_first() {
     assert_eq!(buf.bytes_of(&f1), Some(300_000));
 }
 
+/// Fix 1 (review probe RP2): a path read of an unchanged demoted file must not evict a command
+/// to hold text that is already on disk. The file stays demoted and both commands survive.
+#[test]
+fn a_path_read_of_a_demoted_file_never_evicts_a_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let p = write(dir.path(), "f", &numbered("f", 400_000), 100);
+    let f = read_into(&buf, &p);
+    let (c1, c2) = squeeze(&buf, "c");
+    assert!(buf.is_demoted(&f));
+
+    assert_eq!(read_into(&buf, &p), f);
+    buf.assert_accounting();
+    assert!(buf.is_demoted(&f), "no room without evicting a command");
+    assert_eq!(buf.bytes_of(&c1), Some(500_000), "the command survives");
+    assert_eq!(buf.bytes_of(&c2), Some(500_000));
+}
+
+/// Fix 1 (review probe RP1): a NEW file read into a pool full of commands is minted demoted;
+/// its handle still serves the file.
+#[test]
+fn a_new_file_read_into_a_full_pool_is_minted_demoted() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let (c1, c2) = squeeze(&buf, "c");
+    let text = numbered("f", 300_000);
+    let f = read_into(&buf, &write(dir.path(), "f", &text, 100));
+    buf.assert_accounting();
+    assert!(buf.is_demoted(&f));
+    assert_eq!(buf.bytes_of(&c1), Some(500_000));
+    assert_eq!(buf.bytes_of(&c2), Some(500_000));
+    assert_eq!(buf.get(&f).unwrap().stdout, text);
+}
+
+/// A path read of a demoted file takes its text back by demoting another FILE when that makes
+/// room, never by evicting a command. And the stale-write rule holds for a demoted entry: a late
+/// store of text read under an older mtime is refused and leaves it demoted (taken, it would
+/// bring the stale text back into the pool).
+#[test]
+fn a_stale_store_is_refused_and_a_fresh_read_takes_the_text_back_from_another_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let text1 = numbered("v1", 100_000);
+    let p = write(dir.path(), "f", &text1, 100);
+    let t1 = file_mtime_ms(&p);
+    let f = read_into(&buf, &p);
+    let text2 = numbered("v2", 100_000);
+    write(dir.path(), "f", &text2, 50);
+    assert_eq!(read_into(&buf, &p), f);
+    let g = read_into(&buf, &write(dir.path(), "g", &numbered("g", 300_000), 100));
+    let x = cmd(&buf, "x", 500_000);
+    let y = cmd(&buf, "y", 200_000);
+    assert!(buf.is_demoted(&f), "f was the least recently used file");
+    assert!(!buf.is_demoted(&g));
+
+    assert_eq!(buf.store_file_read(&p.to_string_lossy(), &text1, t1), f);
+    assert!(
+        buf.is_demoted(&f),
+        "a store of text read under an older mtime is refused"
+    );
+    buf.assert_accounting();
+
+    assert_eq!(read_into(&buf, &p), f);
+    buf.assert_accounting();
+    assert!(!buf.is_demoted(&f), "a fresh read takes the text back");
+    assert_eq!(buf.bytes_of(&f), Some(text2.len()));
+    assert!(buf.is_demoted(&g), "by demoting the other file");
+    assert_eq!(buf.bytes_of(&x), Some(500_000), "no command was evicted");
+    assert_eq!(buf.bytes_of(&y), Some(200_000));
+    assert_eq!(buf.get(&f).unwrap().stdout, text2);
+}
+
 /// A demoted handle still serves the file, line for line, from disk, and the read puts nothing
 /// back into the pool. Its refresh notice works as a resident entry's does: a change is reported
 /// once, by the reporting read, even when a silent `get` saw it first.
@@ -170,7 +255,7 @@ fn a_demoted_file_is_read_from_disk_and_the_read_does_not_grow_the_pool() {
     let text1 = numbered("v1", 300_000);
     let p = write(dir.path(), "f", &text1, 100);
     let f = read_into(&buf, &p);
-    cmd(&buf, "x", 800_000);
+    squeeze(&buf, "x");
     assert!(buf.is_demoted(&f));
     let before = buf.total_bytes();
 
@@ -204,45 +289,134 @@ fn a_demoted_file_is_read_from_disk_and_the_read_does_not_grow_the_pool() {
     buf.assert_accounting();
 }
 
-/// The stale-write rule holds for a demoted entry: a late store of text read under an older
-/// mtime is refused and leaves it demoted (taken, it would put the stale text back into the
-/// pool). A fresh path read takes the text back, within the limit.
+/// A demoted file that is demoted-over again (more stores squeeze the pool) is not taken for
+/// changed: its hash is the text it last served, untouched by the squeeze.
 #[test]
-fn a_stale_store_leaves_a_demoted_entry_demoted_and_a_fresh_read_takes_it_back() {
+fn a_demoted_file_survives_a_second_squeeze_without_a_false_refresh() {
     let dir = tempfile::tempdir().unwrap();
     let buf = pool();
-    let text1 = numbered("v1", 200_000);
-    let p = write(dir.path(), "f", &text1, 100);
-    let t1 = file_mtime_ms(&p);
-    let f = read_into(&buf, &p);
-    let text2 = numbered("v2", 200_000);
-    write(dir.path(), "f", &text2, 50);
-    assert_eq!(read_into(&buf, &p), f);
-    cmd(&buf, "x", 900_000);
+    let text = numbered("f", 300_000);
+    let f = read_into(&buf, &write(dir.path(), "f", &text, 100));
+    squeeze(&buf, "a");
     assert!(buf.is_demoted(&f));
-
-    assert_eq!(buf.store_file_read(&p.to_string_lossy(), &text1, t1), f);
-    assert!(
-        buf.is_demoted(&f),
-        "a store of text read under an older mtime is refused"
-    );
-    buf.assert_accounting();
-
-    assert_eq!(read_into(&buf, &p), f);
-    assert!(!buf.is_demoted(&f), "a fresh read takes the text back");
-    assert_eq!(buf.bytes_of(&f), Some(text2.len()));
-    assert_eq!(buf.get(&f).unwrap().stdout, text2);
+    squeeze(&buf, "b");
+    let (e, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+    assert_eq!(e.stdout, text);
+    assert!(!refreshed, "nothing changed on disk");
     buf.assert_accounting();
 }
 
-/// Ruling 3 for a command: output bigger than the whole limit is a marked prefix of WHOLE lines
-/// that uses the room, its line N is still line N, and the record, the in-buffer marker and the
-/// notice every later read carries state the same numbers.
+/// A resident file whose new text does not fit the room left is demoted by the read, and the
+/// change is reported once.
+#[test]
+fn a_refresh_that_does_not_fit_reports_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let p = write(dir.path(), "f", &numbered("v1", 100_000), 100);
+    let f = read_into(&buf, &p);
+    cmd(&buf, "a", 500_000);
+    cmd(&buf, "b", 400_000);
+    let v2 = numbered("v2", 300_000);
+    write(dir.path(), "f", &v2, 50);
+    let (e, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+    assert_eq!(e.stdout, v2);
+    assert!(refreshed);
+    assert!(buf.is_demoted(&f), "the new text did not fit the room left");
+    let (_, again) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(!again, "reported once");
+    buf.assert_accounting();
+}
+
+/// A path read of an unchanged demoted file marks no refresh: nothing a holder saw changed.
+#[test]
+fn an_unchanged_path_read_of_a_demoted_file_marks_no_refresh() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let p = write(dir.path(), "f", &numbered("f", 300_000), 100);
+    let f = read_into(&buf, &p);
+    squeeze(&buf, "a");
+    assert!(buf.is_demoted(&f));
+    assert_eq!(read_into(&buf, &p), f);
+    let (_, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(!refreshed);
+}
+
+/// A file born demoted (bigger than one entry's share) reports no refresh while it is unchanged,
+/// however often it is read.
+#[test]
+fn an_oversized_file_reports_no_refresh_while_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let p = write(dir.path(), "big", &numbered("big", 1_500_000), 100);
+    let f = read_into(&buf, &p);
+    assert!(buf.is_demoted(&f));
+    for _ in 0..2 {
+        let (_, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+        assert!(!refreshed);
+    }
+    assert_eq!(read_into(&buf, &p), f);
+    let (_, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(!refreshed);
+}
+
+/// Fix 4 (review probe RP8): a read of a demoted file touches the disk with the pool UNLOCKED.
+/// The read is held at the disk by a hook while another thread stores; the store must finish
+/// before the read is let go. With the disk read under the lock the store would wait, and the
+/// timeout below reds.
+#[test]
+fn a_store_completes_while_a_demoted_file_is_being_read_from_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let text = numbered("big", 1_500_000);
+    let f = read_into(&buf, &write(dir.path(), "big", &text, 100));
+    assert!(buf.is_demoted(&f));
+
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let entered_tx = std::sync::Mutex::new(entered_tx);
+    let release_rx = std::sync::Mutex::new(release_rx);
+    buf.set_disk_hook(Some(Arc::new(move || {
+        let _ = entered_tx.lock().unwrap().send(());
+        let _ = release_rx
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(30));
+    })));
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered_rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read reached the disk");
+    let (done_tx, done_rx) = mpsc::channel();
+    let writer = {
+        let buf = buf.clone();
+        std::thread::spawn(move || {
+            let _ = done_tx.send(buf.store("small".into(), "ok\n".into(), String::new(), 0));
+        })
+    };
+    let stored = done_rx.recv_timeout(Duration::from_secs(5));
+    release_tx.send(()).unwrap();
+    assert!(
+        stored.is_ok(),
+        "a store must not wait for another thread's disk read"
+    );
+    assert_eq!(reader.join().unwrap(), Some(text));
+    writer.join().unwrap();
+    buf.set_disk_hook(None);
+    buf.assert_accounting();
+}
+
+/// Ruling 3 for a command: output bigger than one entry's share is a marked prefix of WHOLE
+/// lines that uses the share, its line N is still line N, and the record, the in-buffer marker
+/// and the notice every later read carries state the same numbers.
 #[test]
 fn an_oversized_command_is_a_marked_prefix_whose_lines_keep_their_numbers() {
     let buf = pool();
     let out: String = (1..=200_000).map(|i| format!("{i}\n")).collect();
-    assert!(out.len() > LIMIT);
+    assert!(out.len() > SHARE);
     let id = buf.store("seq".into(), out, String::new(), 0);
     buf.assert_accounting();
 
@@ -251,7 +425,7 @@ fn an_oversized_command_is_a_marked_prefix_whose_lines_keep_their_numbers() {
         .truncated
         .expect("an oversized command is recorded as cut");
     assert_eq!(t.total_lines, 200_000);
-    assert!(t.kept_lines > 160_000 && t.kept_lines < 200_000, "{t:?}");
+    assert!(t.kept_lines > 80_000 && t.kept_lines < 200_000, "{t:?}");
     let lines: Vec<&str> = e.stdout.lines().collect();
     assert_eq!(
         lines.len(),
@@ -273,16 +447,16 @@ fn an_oversized_command_is_a_marked_prefix_whose_lines_keep_their_numbers() {
     assert!(notice.contains(&counts), "{notice}");
 
     let held = buf.bytes_of(&id).unwrap();
-    assert!(held <= LIMIT, "{held}");
+    assert!(held <= SHARE, "{held}");
     assert!(
-        held > LIMIT - 1_000,
-        "the prefix uses the room, not a fraction of it: {held}"
+        held > SHARE - 1_000,
+        "the prefix uses the share, not a fraction of it: {held}"
     );
 }
 
 /// The pool cuts `stderr` too. A cut `stderr` is recorded on its own, and reported by the
 /// `.err` handle and by the notices for the bare handle, never by the complete `stdout`. With
-/// both streams over, `stderr` keeps at most half the limit.
+/// both streams over, `stderr` keeps half the share.
 #[test]
 fn an_oversized_stderr_is_cut_and_its_err_handle_says_so() {
     let buf = pool();
@@ -312,7 +486,7 @@ fn an_oversized_stderr_is_cut_and_its_err_handle_says_so() {
         "{notices:?}"
     );
     let held = buf.bytes_of(&id).unwrap();
-    assert!(held <= LIMIT && held > LIMIT - 1_000, "{held}");
+    assert!(held <= SHARE && held > SHARE - 1_000, "{held}");
 
     let both = buf.store(
         "y".into(),
@@ -324,78 +498,77 @@ fn an_oversized_stderr_is_cut_and_its_err_handle_says_so() {
     let e = buf.get(&both).unwrap();
     assert!(e.truncated.is_some() && e.stderr_truncated.is_some());
     assert!(
-        e.stderr.len() <= LIMIT / 2 && e.stderr.len() > LIMIT / 2 - 1_000,
-        "stderr keeps half the limit, no more and not much less: {}",
+        e.stderr.len() <= SHARE / 2 && e.stderr.len() > SHARE / 2 - 1_000,
+        "stderr keeps half the share, no more and not much less: {}",
         e.stderr.len()
     );
     let held = buf.bytes_of(&both).unwrap();
-    assert!(held <= LIMIT && held > LIMIT - 2_000, "{held}");
+    assert!(held <= SHARE && held > SHARE - 2_000, "{held}");
     assert_eq!(buf.truncation_notices_in(&both).len(), 2);
 }
 
-/// The budget edge is inclusive: two halves fit together, an entry of exactly the limit is
-/// stored whole (and, the known limit, leaves nothing else holding text), and one byte more is
-/// cut.
+/// Both edges are inclusive. Two entries of exactly one share each fill the pool and both stay
+/// (the limit edge); one byte more evicts the least recently used of them (F1: a `<= max + 1`
+/// edge kept both); an entry of exactly one share is stored whole and one byte more is cut.
 #[test]
-fn the_budget_edge_admits_an_entry_of_exactly_the_limit() {
+fn the_budget_edges_are_inclusive() {
     let buf = pool();
-    let a = buf.store("a".into(), "a".repeat(LIMIT / 2), String::new(), 0);
-    let b = buf.store("b".into(), "b".repeat(LIMIT / 2), String::new(), 0);
+    let a = buf.store("a".into(), "a".repeat(SHARE), String::new(), 0);
+    let b = buf.store("b".into(), "b".repeat(SHARE), String::new(), 0);
     buf.assert_accounting();
-    assert_eq!(
-        buf.bytes_of(&a),
-        Some(LIMIT / 2),
-        "a full pool is not over it"
+    assert_eq!(buf.bytes_of(&a), Some(SHARE), "a full pool is not over it");
+    assert!(
+        // Read without `get`, which would make `a` the most recently used entry.
+        buf.stored_truncation(&a).is_none(),
+        "one share is whole"
     );
     assert_eq!(buf.total_bytes(), LIMIT);
 
-    let c = buf.store("c".into(), "c".repeat(LIMIT), String::new(), 0);
+    let c = buf.store("c".into(), "c".into(), String::new(), 0);
     buf.assert_accounting();
-    let e = buf.get(&c).unwrap();
-    assert!(e.truncated.is_none(), "exactly the limit is stored whole");
-    assert_eq!(e.stdout.len(), LIMIT);
-    assert_eq!(buf.bytes_of(&a), None);
-    assert_eq!(buf.bytes_of(&b), None);
+    assert_eq!(buf.bytes_of(&a), None, "one byte over the limit evicts");
+    assert_eq!(buf.bytes_of(&b), Some(SHARE));
+    assert_eq!(buf.bytes_of(&c), Some(1));
 
-    let d = buf.store("d".into(), numbered("d", LIMIT + 1), String::new(), 0);
+    let d = buf.store("d".into(), numbered("d", SHARE + 1), String::new(), 0);
     buf.assert_accounting();
     assert!(
         buf.get(&d).unwrap().truncated.is_some(),
-        "one byte over is cut"
+        "one byte over the share is cut"
     );
-    assert!(buf.bytes_of(&d).unwrap() <= LIMIT);
+    assert!(buf.bytes_of(&d).unwrap() <= SHARE);
 }
 
-/// The same inclusive edge for every store kind and for an in-place change: a `stderr`, a tool
-/// result, a whole file and a snapshot of exactly the limit are held whole, a file that grows by
-/// a path read to exactly the limit stays resident, and a refresh that exactly fills the room left
-/// stays resident.
+/// The same inclusive share edge for every store kind and for an in-place change: a `stderr`, a
+/// tool result, a whole file and a snapshot of exactly one share are held whole, a file that
+/// grows by a path read to exactly one share stays resident, and a refresh that exactly fills
+/// the room left stays resident.
 #[test]
 fn the_budget_edge_holds_for_every_store_kind() {
     let buf = pool();
-    let id = buf.store("e".into(), String::new(), "e".repeat(LIMIT), 1);
+    let id = buf.store("e".into(), String::new(), "e".repeat(SHARE), 1);
     let e = buf.get(&id).unwrap();
     assert!(
         e.stderr_truncated.is_none(),
-        "a stderr of the limit is whole"
+        "a stderr of one share is whole"
     );
-    assert_eq!(e.stderr.len(), LIMIT);
+    assert_eq!(e.stderr.len(), SHARE);
 
     let buf = pool();
-    let id = buf.store_tool("t", "t".repeat(LIMIT));
+    let id = buf.store_tool("t", "t".repeat(SHARE));
     let e = buf.get(&id).unwrap();
-    assert!(e.truncated.is_none(), "a tool result of the limit is whole");
-    assert_eq!(e.stdout.len(), LIMIT);
+    assert!(e.truncated.is_none(), "a tool result of one share is whole");
+    assert_eq!(e.stdout.len(), SHARE);
 
     let dir = tempfile::tempdir().unwrap();
     let buf = pool();
-    let f = read_into(&buf, &write(dir.path(), "full", &"f".repeat(LIMIT), 100));
-    assert!(!buf.is_demoted(&f), "a file of the limit is held");
-    assert_eq!(buf.bytes_of(&f), Some(LIMIT));
-    let s = buf.store_file("@memory:full:filtered".into(), "s".repeat(LIMIT));
+    let f = read_into(&buf, &write(dir.path(), "full", &"f".repeat(SHARE), 100));
+    assert!(!buf.is_demoted(&f), "a file of one share is held");
+    assert_eq!(buf.bytes_of(&f), Some(SHARE));
+    let s = buf.store_file("@memory:full:filtered".into(), "s".repeat(SHARE));
     assert!(
         buf.get(&s).unwrap().truncated.is_none(),
-        "a snapshot of the limit is whole"
+        "a snapshot of one share is whole"
     );
     buf.assert_accounting();
 
@@ -403,19 +576,20 @@ fn the_budget_edge_holds_for_every_store_kind() {
     let p = write(dir.path(), "grows", "small\n", 100);
     let g = read_into(&buf, &p);
     cmd(&buf, "x", 500_000);
-    write(dir.path(), "grows", &"g".repeat(LIMIT), 90);
+    write(dir.path(), "grows", &"g".repeat(SHARE), 90);
     assert_eq!(read_into(&buf, &p), g);
     assert!(
         !buf.is_demoted(&g),
-        "growth by a path read to the limit stays resident"
+        "growth by a path read to one share stays resident"
     );
-    assert_eq!(buf.total_bytes(), LIMIT);
+    assert_eq!(buf.total_bytes(), 500_000 + SHARE);
     buf.assert_accounting();
 
     let buf = pool();
     let p = write(dir.path(), "refresh", &"r".repeat(10_000), 100);
     let r = read_into(&buf, &p);
-    cmd(&buf, "y", LIMIT - 300_000);
+    cmd(&buf, "y", 500_000);
+    cmd(&buf, "z", LIMIT - 800_000);
     write(dir.path(), "refresh", &"R".repeat(300_000), 90);
     assert_eq!(buf.get(&r).unwrap().stdout.len(), 300_000);
     assert!(
@@ -426,68 +600,112 @@ fn the_budget_edge_holds_for_every_store_kind() {
     buf.assert_accounting();
 }
 
-/// Ruling 3 for a whole file: bigger than the limit, its handle holds no text from birth and
-/// displaces nothing; every read takes the file from disk.
+/// F6: the entry cap is applied before the byte budget. At two entries, a third store evicts the
+/// oldest entry (a command) and then fits, so the file is not demoted.
+#[test]
+fn the_entry_cap_evicts_before_any_file_is_demoted() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = OutputBuffer::with_byte_limit(2, LIMIT);
+    let a = cmd(&buf, "a", 500_000);
+    let f = read_into(&buf, &write(dir.path(), "f", &numbered("f", 500_000), 100));
+    cmd(&buf, "b", 100_000);
+    buf.assert_accounting();
+    assert_eq!(
+        buf.bytes_of(&a),
+        None,
+        "the entry cap took the oldest entry"
+    );
+    assert!(!buf.is_demoted(&f), "after which the store fit");
+}
+
+/// F7: an entry holding no bytes is not evicted to make room: it frees nothing.
+#[test]
+fn an_empty_entry_is_not_evicted_to_make_room() {
+    let buf = pool();
+    let empty = buf.store("e".into(), String::new(), String::new(), 0);
+    let a = buf.store("a".into(), "a".repeat(SHARE), String::new(), 0);
+    buf.store("b".into(), "b".repeat(SHARE), String::new(), 0);
+    buf.store("c".into(), "c".into(), String::new(), 0);
+    buf.assert_accounting();
+    assert_eq!(buf.bytes_of(&a), None);
+    assert_eq!(buf.bytes_of(&empty), Some(0), "the empty entry stays");
+}
+
+/// Ruling 3 for a whole file: bigger than one entry's share, its handle holds no text from birth
+/// and displaces nothing; every read takes the file from disk.
 #[test]
 fn an_oversized_file_keeps_no_text_and_displaces_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let buf = pool();
-    let keep = cmd(&buf, "k", 900_000);
+    let keep = cmd(&buf, "k", 500_000);
     let text = numbered("big", 1_500_000);
     let p = write(dir.path(), "big", &text, 100);
     let f = read_into(&buf, &p);
     buf.assert_accounting();
     assert!(buf.is_demoted(&f));
     assert_eq!(buf.bytes_of(&f), Some(0));
-    assert_eq!(buf.bytes_of(&keep), Some(900_000), "nothing was displaced");
+    assert_eq!(buf.bytes_of(&keep), Some(500_000), "nothing was displaced");
 
     assert_eq!(buf.get(&f).unwrap().stdout, text);
     assert_eq!(read_into(&buf, &p), f, "one file, one handle");
     assert!(buf.is_demoted(&f));
-    assert_eq!(buf.total_bytes(), 900_000);
+    assert_eq!(buf.total_bytes(), 500_000);
     buf.assert_accounting();
 }
 
-/// The counter follows every in-place change of a file's text: growth by a path read (which
-/// makes room, here by evicting the command, as no other file is left to demote), shrinking,
-/// a refresh by a read that fits, and one that does not fit the room left, which demotes the
-/// entry and displaces nothing.
+/// The counter follows every in-place change of a file's text: growth by a path read that fits,
+/// growth that does not fit (demoted, no command evicted), shrinking back in, a refresh by a
+/// read that fits, and one that does not fit the room left, which demotes the entry and
+/// displaces nothing.
 #[test]
 fn in_place_changes_of_a_file_keep_the_accounting() {
     let dir = tempfile::tempdir().unwrap();
     let buf = pool();
     let p = write(dir.path(), "f", &numbered("v1", 100_000), 100);
     let f = read_into(&buf, &p);
-    let c = cmd(&buf, "c", 800_000);
+    let c = cmd(&buf, "c", 500_000);
     buf.assert_accounting();
 
     write(dir.path(), "f", &numbered("v2", 400_000), 90);
     assert_eq!(read_into(&buf, &p), f);
     buf.assert_accounting();
     assert_eq!(buf.bytes_of(&f), Some(400_000));
-    assert_eq!(buf.bytes_of(&c), None, "room was made for the growth");
-    assert_eq!(buf.total_bytes(), 400_000);
+    assert_eq!(buf.total_bytes(), 900_000);
 
-    write(dir.path(), "f", &numbered("v3", 10_000), 80);
+    let c2 = cmd(&buf, "c2", 100_000);
+    write(dir.path(), "f", &numbered("v3", 500_000), 80);
     assert_eq!(read_into(&buf, &p), f);
     buf.assert_accounting();
-    assert_eq!(buf.total_bytes(), 10_000);
+    assert!(buf.is_demoted(&f), "growth that does not fit is demoted");
+    assert_eq!(
+        buf.bytes_of(&c),
+        Some(500_000),
+        "no command was evicted for it"
+    );
+    assert_eq!(buf.bytes_of(&c2), Some(100_000));
+    assert_eq!(buf.total_bytes(), 600_000);
 
-    let v4 = numbered("v4", 50_000);
-    write(dir.path(), "f", &v4, 70);
-    assert_eq!(buf.get(&f).unwrap().stdout, v4);
+    write(dir.path(), "f", &numbered("v4", 10_000), 70);
+    assert_eq!(read_into(&buf, &p), f);
     buf.assert_accounting();
-    assert!(!buf.is_demoted(&f), "a refresh that fits stays resident");
-    assert_eq!(buf.total_bytes(), 50_000);
+    assert!(!buf.is_demoted(&f));
+    assert_eq!(buf.total_bytes(), 610_000);
 
-    let c2 = cmd(&buf, "c2", 900_000);
-    let v5 = numbered("v5", 300_000);
+    let v5 = numbered("v5", 50_000);
     write(dir.path(), "f", &v5, 60);
     assert_eq!(buf.get(&f).unwrap().stdout, v5);
     buf.assert_accounting();
+    assert!(!buf.is_demoted(&f), "a refresh that fits stays resident");
+    assert_eq!(buf.total_bytes(), 650_000);
+
+    let c3 = cmd(&buf, "c3", 390_000);
+    let v6 = numbered("v6", 300_000);
+    write(dir.path(), "f", &v6, 50);
+    assert_eq!(buf.get(&f).unwrap().stdout, v6);
+    buf.assert_accounting();
     assert!(buf.is_demoted(&f), "the refresh did not fit the room left");
-    assert_eq!(buf.bytes_of(&c2), Some(900_000), "a read displaces nothing");
-    assert_eq!(buf.total_bytes(), 900_000);
+    assert_eq!(buf.bytes_of(&c3), Some(390_000), "a read displaces nothing");
+    assert_eq!(buf.total_bytes(), 990_000);
 }
 
 /// A setting can lower the limit and never raise it past 128 MiB; below the floor it is raised
@@ -513,7 +731,7 @@ fn the_byte_limit_clamps_at_128_mib_and_lowers() {
         MIN_POOL_BYTES
     );
 
-    let out = numbered("o", 1_500_000);
+    let out = numbered("o", 700_000);
     let two = OutputBuffer::with_byte_limit(50, 2 * LIMIT);
     let id = two.store("o".into(), out.clone(), String::new(), 0);
     assert!(
@@ -525,6 +743,16 @@ fn the_byte_limit_clamps_at_128_mib_and_lowers() {
     assert!(one.get(&id).unwrap().truncated.is_some(), "cut under 1 MiB");
 }
 
+/// F8: the server builds its pool at the full limit. Through the function `from_parts` calls,
+/// so a server pool built at another limit reds here.
+#[test]
+fn the_servers_pool_has_the_full_limit() {
+    assert_eq!(
+        crate::server::server_output_buffer().max_bytes(),
+        MAX_POOL_BYTES
+    );
+}
+
 /// An oversized tool result is cut in the line space its readers number
 /// (`line_addressable_text`), so line N of the prefix is line N of the whole result, and the
 /// same result stored again is the same handle.
@@ -533,7 +761,7 @@ fn an_oversized_tool_result_keeps_the_line_numbers_its_readers_use() {
     let buf = pool();
     let rows: Vec<String> = (0..60_000).map(|i| format!("row {i:06}\nsecond")).collect();
     let json = serde_json::json!({ "rows": rows }).to_string();
-    assert!(json.len() > LIMIT);
+    assert!(json.len() > SHARE);
     let id = buf.store_tool("probe", json.clone());
     buf.assert_accounting();
     let e = buf.get(&id).unwrap();
@@ -549,12 +777,51 @@ fn an_oversized_tool_result_keeps_the_line_numbers_its_readers_use() {
         e.stdout,
         "readers number the stored prefix as it is"
     );
-    assert!(buf.bytes_of(&id).unwrap() <= LIMIT);
+    assert!(buf.bytes_of(&id).unwrap() <= SHARE);
     assert_eq!(
         buf.store_tool("probe", json),
         id,
         "dedup by the whole result"
     );
+}
+
+/// Fix 6: the decision to cut is made on the LINE form, the one that is stored. A result whose
+/// compact JSON is over the share but whose line form fits is stored whole, final `}` line
+/// included (it was cut, losing that line: 600002 of 600003 kept).
+#[test]
+fn a_tool_result_whose_line_form_fits_is_stored_whole() {
+    let buf = pool();
+    let json = serde_json::json!({ "v": "\n".repeat(300_000) }).to_string();
+    assert!(json.len() > SHARE);
+    let id = buf.store_tool("probe", json.clone());
+    buf.assert_accounting();
+    let e = buf.get(&id).unwrap();
+    assert!(e.truncated.is_none(), "the line form fits: nothing is cut");
+    assert_eq!(e.stdout, line_addressable_text(&id, json));
+    assert_eq!(e.stdout.lines().last(), Some("}"));
+}
+
+/// Fix 5 (review probe RP3): an oversized snapshot is a marked prefix, and the same view stored
+/// twice is one handle: it dedups by the hash of the whole view, not by the stored prefix.
+#[test]
+fn an_oversized_snapshot_is_cut_and_dedups() {
+    let buf = pool();
+    let view = numbered("m", 1_500_000);
+    let first = buf.store_file("@memory:t:filtered".into(), view.clone());
+    let second = buf.store_file("@memory:t:filtered".into(), view.clone());
+    buf.assert_accounting();
+    assert_eq!(first, second, "one view, one handle");
+    assert_eq!(buf.entry_count(), 1);
+    let e = buf.get(&first).unwrap();
+    let t = e
+        .truncated
+        .expect("an oversized snapshot is recorded as cut");
+    assert_eq!(t.total_lines, crate::util::text::count_lines(&view));
+    assert!(
+        !buf.is_demoted(&first),
+        "a snapshot has no disk copy to fall back on"
+    );
+    assert!(buf.bytes_of(&first).unwrap() > SHARE - 1_000);
 }
 
 /// A line longer than the room is dropped whole, never split; and re-cutting a capture that was

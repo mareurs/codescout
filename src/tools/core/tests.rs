@@ -4180,6 +4180,38 @@ async fn an_oversized_result_is_buffered_as_a_marked_prefix_and_the_envelope_say
                 .is_some_and(|s| s.contains(&counts) && s.contains(id)))),
         "the envelope must say what was kept and dropped: {text:.800}"
     );
-    assert!(ctx.output_buffer.bytes_of(id).unwrap() <= limit);
+    assert!(ctx.output_buffer.bytes_of(id).unwrap() <= limit / 2);
     ctx.output_buffer.assert_accounting();
+
+    // Fix 2 (review probe RPT): the envelope of a handle that keeps lines, not JSON, names no
+    // `json_path` route and counts the bytes it holds, and a `json_path` read of it is refused
+    // naming the cut and a line route that works.
+    let hint = parsed["hint"].as_str().unwrap();
+    assert!(
+        !hint.contains("json_path=") && hint.contains("start_line="),
+        "the hint must name only routes the handle accepts: {hint}"
+    );
+    assert_eq!(
+        parsed["buffered_bytes"],
+        serde_json::json!(ctx.output_buffer.bytes_of(id).unwrap()),
+        "buffered_bytes counts what the handle holds: {text:.600}"
+    );
+    let err = crate::tools::read_file::ReadFile
+        .call(
+            serde_json::json!({ "path": id, "json_path": "$.rows" }),
+            &ctx,
+        )
+        .await
+        .unwrap_err();
+    let rec = err.downcast_ref::<RecoverableError>().expect("recoverable");
+    let guidance = rec
+        .guidance
+        .as_ref()
+        .map(|g| g.text().to_string())
+        .unwrap_or_default();
+    assert!(
+        guidance.contains("start_line=") && guidance.contains(&counts),
+        "the refusal names the line route and the cut: {} / {guidance}",
+        rec.message
+    );
 }

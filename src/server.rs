@@ -444,11 +444,7 @@ impl CodeScoutServer {
                 tools.extend(crate::librarian::adapters_for(lib_ctx));
             }
         }
-        // 50 handles and at most `MAX_POOL_BYTES` (128 MiB) of text; a lower byte limit goes here.
-        let output_buffer = Arc::new(crate::tools::output_buffer::OutputBuffer::with_byte_limit(
-            50,
-            crate::tools::output_buffer::MAX_POOL_BYTES,
-        ));
+        let output_buffer = Arc::new(server_output_buffer());
         let section_coverage = Arc::new(std::sync::Mutex::new(
             crate::tools::section_coverage::SectionCoverage::new(),
         ));
@@ -1644,6 +1640,19 @@ impl CodeScoutServer {
 fn tool_skips_server_timeout(name: &str, arguments: &Value) -> bool {
     matches!(name, "index" | "index_library" | "run_command")
         || (name == "librarian" && arguments["action"] == "reindex")
+}
+
+/// The server's one buffer pool: 50 handles and [`MAX_POOL_BYTES`] of text. A setting that
+/// lowers the byte limit would be read here (beside [`ServerEnv`]'s other knobs) and passed as
+/// the second argument; `OutputBuffer::with_byte_limit` clamps it to [1 MiB, 128 MiB] and logs
+/// the clamp.
+///
+/// [`MAX_POOL_BYTES`]: crate::tools::output_buffer::MAX_POOL_BYTES
+pub(crate) fn server_output_buffer() -> crate::tools::output_buffer::OutputBuffer {
+    crate::tools::output_buffer::OutputBuffer::with_byte_limit(
+        50,
+        crate::tools::output_buffer::MAX_POOL_BYTES,
+    )
 }
 
 /// Whether to register the embedded librarian tool surface for this session.

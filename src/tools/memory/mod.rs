@@ -760,8 +760,18 @@ fn apply_sections_filter(
     // though the topic's content usually is — `heading=` addressing silently
     // does nothing here. The hint must name only what the buffer actually
     // supports, or it advertises a capability this handle doesn't have.
-    let hint = format!("use {file_id:?} — start_line/end_line to browse the full content");
-    let head = json!({ "file_id": file_id, "total_lines": total_lines, "hint": hint });
+    // A view larger than one entry's share of the pool is kept as a marked prefix of it:
+    // `total_lines` counts the whole view, and the notice says how many of them the handle holds.
+    let output_cut = output_buffer.truncation_notices_in(&file_id);
+    let hint = if output_cut.is_empty() {
+        format!("use {file_id:?} — start_line/end_line to browse the full content")
+    } else {
+        format!("use {file_id:?} — start_line/end_line to browse the part the handle kept")
+    };
+    let mut head = json!({ "file_id": file_id, "total_lines": total_lines, "hint": hint });
+    if !output_cut.is_empty() {
+        head["output_truncated"] = json!(output_cut);
+    }
 
     // The `file_id` arm is WIDER than the inline candidate it replaces (file_id, total_lines and
     // hint), so it is measured the same way. Measured 2026-10-07 before this: a missing name of

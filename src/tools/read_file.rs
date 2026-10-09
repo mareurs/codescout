@@ -307,7 +307,10 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     let raw = ctx.output_buffer.get_stream(path).ok_or_else(|| {
         RecoverableError::with_hint(
             format!("buffer reference not found: '{}'", path),
-            "Buffer refs expire when the session resets. Re-run the command to get a fresh ref.",
+            format!(
+                "{} Re-run the command to get a fresh ref.",
+                crate::tools::output_buffer::REF_GONE
+            ),
         )
     })?;
 
@@ -382,10 +385,24 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     // before `line_addressable_text` below. See that function's doc comment.
     if path.starts_with("@tool_") {
         if let Some(jp) = input["json_path"].as_str() {
-            let text: String = serde_json::from_str::<serde_json::Value>(&raw)
-                .ok()
-                .and_then(|v| serde_json::to_string_pretty(&v).ok())
-                .unwrap_or_else(|| raw.clone());
+            // A result larger than one handle may hold is kept as its lines, not JSON, and may be
+            // cut (`OutputBuffer::store_tool`). Parsing that text failed with "Ensure the file
+            // contains valid JSON", which names no route (review probe RPT).
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                return Err(RecoverableError::with_hint(
+                    format!(
+                        "json_path cannot read '{path}': it does not hold JSON. A result larger \
+                         than the pool lets one handle hold is kept as its lines, and may be cut."
+                    ),
+                    format!(
+                        "Read it by line range, read_file(\"{path}\", start_line=N, end_line=M), \
+                         or search it, run_command(\"grep PATTERN {path}\").{}",
+                        notice.as_ref().map(|n| format!(" {n}")).unwrap_or_default()
+                    ),
+                )
+                .into());
+            };
+            let text: String = serde_json::to_string_pretty(&value).unwrap_or_else(|_| raw.clone());
             // A pure function of the stored text and `jp`: the same value is numbered the same
             // way on every read, which is what lets a `next` resume where the last page ended.
             let (content, type_name, count) =

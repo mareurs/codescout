@@ -1794,18 +1794,33 @@ pub trait Tool: Send + Sync {
                 COMPACT_SUMMARY_HARD_MAX_BYTES,
             );
 
-            let jp = self.json_path_hint(&val);
-            let hint = format!(
-                "read_file(\"{ref_id}\", json_path=\"{jp}\") to extract a specific field, \
-                 or read_file(\"{ref_id}\", start_line=N, end_line=M) to browse sections"
-            );
+            // A result larger than one handle may hold is kept as its lines, not JSON, and may be
+            // cut (`OutputBuffer::store_tool`): its hint names only routes that work on lines, and
+            // `buffered_bytes` counts what the handle holds (review probe RPT: following a
+            // `json_path` hint on such a handle failed and named no route).
+            let as_lines = json_len > ctx.output_buffer.entry_cap();
+            let hint = if as_lines {
+                format!(
+                    "read_file(\"{ref_id}\", start_line=N, end_line=M) to browse it, or \
+                     run_command(\"grep PATTERN {ref_id}\") to search it. The result was larger \
+                     than one handle may hold, so the handle keeps its lines, not JSON: json_path \
+                     cannot read it"
+                )
+            } else {
+                let jp = self.json_path_hint(&val);
+                format!(
+                    "read_file(\"{ref_id}\", json_path=\"{jp}\") to extract a specific field, \
+                     or read_file(\"{ref_id}\", start_line=N, end_line=M) to browse sections"
+                )
+            };
+            let buffered_bytes = ctx.output_buffer.bytes_of(&ref_id).unwrap_or(json_len);
             let mut buffered = serde_json::json!({
                 "output_id": ref_id,
                 "summary": summary,
                 "hint": hint,
-                "buffered_bytes": json_len,
+                "buffered_bytes": buffered_bytes,
             });
-            // A result bigger than the pool's byte limit is kept as a marked prefix; the
+            // A result bigger than one entry's share of the pool is kept as a marked prefix; the
             // notice says how many lines were kept and how many dropped.
             let output_cut = ctx.output_buffer.truncation_notices_in(&ref_id);
             if !output_cut.is_empty() {
