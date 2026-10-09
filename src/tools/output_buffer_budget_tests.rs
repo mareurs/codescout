@@ -327,6 +327,41 @@ fn a_refresh_that_does_not_fit_reports_once() {
     buf.assert_accounting();
 }
 
+/// A refresh by a read keeps the new text only in the room left: it demotes no OTHER file to
+/// make room (a store may; a read displaces nothing).
+#[test]
+fn a_refresh_by_a_read_demotes_no_other_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let g = read_into(&buf, &write(dir.path(), "g", &numbered("g", 300_000), 100));
+    let p = write(dir.path(), "f", &numbered("v1", 100_000), 100);
+    let f = read_into(&buf, &p);
+    cmd(&buf, "x", 500_000);
+    let v2 = numbered("v2", 400_000);
+    write(dir.path(), "f", &v2, 50);
+    assert_eq!(buf.get(&f).unwrap().stdout, v2);
+    buf.assert_accounting();
+    assert!(buf.is_demoted(&f), "the new text did not fit the room left");
+    assert!(!buf.is_demoted(&g), "and no other file was demoted for it");
+}
+
+/// A store records the hash of the text it stored, so the same text stored again is not taken
+/// for a change and marks no second refresh.
+#[test]
+fn a_store_records_the_hash_of_what_it_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let p = write(dir.path(), "f", &numbered("v1", 100_000), 100);
+    let f = read_into(&buf, &p);
+    write(dir.path(), "f", &numbered("v2", 100_000), 50);
+    assert_eq!(read_into(&buf, &p), f);
+    let (_, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(refreshed, "the store changed the text");
+    assert_eq!(read_into(&buf, &p), f);
+    let (_, again) = buf.get_with_refresh_flag(&f).unwrap();
+    assert!(!again, "the same text stored again is no change");
+}
+
 /// A path read of an unchanged demoted file marks no refresh: nothing a holder saw changed.
 #[test]
 fn an_unchanged_path_read_of_a_demoted_file_marks_no_refresh() {
@@ -555,16 +590,28 @@ fn the_budget_edge_holds_for_every_store_kind() {
     assert_eq!(e.stderr.len(), SHARE);
 
     let buf = pool();
-    let id = buf.store_tool("t", "t".repeat(SHARE));
+    // JSON of exactly one share: held as given, compact. One byte of slack in the gate and its
+    // line form (pretty-printed, larger) would be cut instead.
+    let json = format!(r#"{{"v":"{}"}}"#, "t".repeat(SHARE - r#"{"v":""}"#.len()));
+    assert_eq!(json.len(), SHARE);
+    let id = buf.store_tool("t", json.clone());
     let e = buf.get(&id).unwrap();
     assert!(e.truncated.is_none(), "a tool result of one share is whole");
-    assert_eq!(e.stdout.len(), SHARE);
+    assert_eq!(e.stdout, json, "and kept as JSON");
 
     let dir = tempfile::tempdir().unwrap();
     let buf = pool();
     let f = read_into(&buf, &write(dir.path(), "full", &"f".repeat(SHARE), 100));
     assert!(!buf.is_demoted(&f), "a file of one share is held");
     assert_eq!(buf.bytes_of(&f), Some(SHARE));
+    let over = read_into(
+        &buf,
+        &write(dir.path(), "over", &"o".repeat(SHARE + 1), 100),
+    );
+    assert!(
+        buf.is_demoted(&over),
+        "a file one byte over is demoted at birth"
+    );
     let s = buf.store_file("@memory:full:filtered".into(), "s".repeat(SHARE));
     assert!(
         buf.get(&s).unwrap().truncated.is_none(),

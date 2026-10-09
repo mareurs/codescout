@@ -628,10 +628,10 @@ impl OutputBuffer {
     }
 
     /// Replace the text of the whole-file entry `id` with `content`: the one place an existing
-    /// entry's text changes size. The text is kept only if it is within one entry's share (`cap`)
-    /// and fits the room left: a store (`displace`) may demote OLDER files for it; a read's refresh
-    /// from disk displaces nothing. Neither evicts any entry. Text that is not kept leaves the
-    /// entry demoted and is handed back to the caller.
+    /// entry's text changes size. The text is kept only if it is within one entry's share (half of
+    /// `max`) and fits the room left: a store (`displace`) may demote OTHER files for it; a read's
+    /// refresh from disk displaces nothing. Neither evicts any entry. Text that is not kept leaves
+    /// the entry demoted and is handed back to the caller.
     fn retain_file_text_locked(
         inner: &mut BufferInner,
         max: usize,
