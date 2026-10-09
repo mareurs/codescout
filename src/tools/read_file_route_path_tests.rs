@@ -382,6 +382,7 @@ fn grep_o_route_is_one_argument_that_names_the_file() {
         .map(|s| s.to_string())
         .collect();
     names.push("-r".to_string());
+    names.push("~".to_string());
     names.push("-dash and space".to_string());
     for name in names {
         std::fs::write(dir.path().join(&name), "xx needle-1,yy\n").unwrap();

@@ -935,7 +935,7 @@ mod tests {
 
     /// Names a path can carry that break a route written raw: a space, `"`, `'`, `\`, `$`, a backtick,
     /// glob and operator characters, a leading `-`, a tab, a line break, and non-ASCII text.
-    const AWKWARD: [&str; 16] = [
+    const AWKWARD: [&str; 17] = [
         "sp ace",
         "q\"uote",
         "it's",
@@ -947,6 +947,7 @@ mod tests {
         "semi;amp&pipe|gt>lt<",
         "-dash",
         "~tilde",
+        "~",
         "tab\there",
         "#hash !bang %pct =eq",
         "a\"b\\c 'd' $e `f` ü",
@@ -1013,6 +1014,37 @@ mod tests {
                     "{shell}: {name:?} quoted as {quoted} is not one word equal to the name"
                 );
             }
+        }
+    }
+    /// The set of characters `shell_quote` leaves bare is the one place a widening is silent: a name
+    /// made only of the added character reads back right when the shell has no use for it, and
+    /// wrongly when it does. So every printable ASCII character is read back, alone, doubled and
+    /// inside a word, by one shell process per shell.
+    #[test]
+    fn shell_quote_reads_back_every_printable_ascii_character_alone_and_inside_a_word() {
+        let mut names = Vec::new();
+        for b in (0x20u8..0x7f).chain([b'\t', 0x1b]) {
+            let c = b as char;
+            names.push(c.to_string());
+            names.push(format!("{c}{c}"));
+            names.push(format!("x{c}y"));
+        }
+        let script: String = names
+            .iter()
+            .map(|n| {
+                format!(
+                    "set -- {}; printf '%s\\n' \"$#:$1\"\n",
+                    shell_quote(n).unwrap()
+                )
+            })
+            .collect();
+        let want: String = names.iter().map(|n| format!("1:{n}\n")).collect();
+        for (shell, out) in run_in_shells(&script) {
+            let got = String::from_utf8(out).unwrap();
+            for (g, w) in got.lines().zip(want.lines()) {
+                assert_eq!(g, w, "{shell}");
+            }
+            assert_eq!(got, want, "{shell}");
         }
     }
 
