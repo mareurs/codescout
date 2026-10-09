@@ -1109,23 +1109,128 @@ fn find_toml_key_line(content: &str, key: &str) -> Option<u64> {
 /// `(key, 1-indexed line)` for each, UNCAPPED. `summarize_yaml` truncates the
 /// result for display; `extract_yaml_key` uses the full list so key resolution
 /// isn't limited by the display cap (the false-"not found" bug).
+///
+/// The keys of every document of a multi-document file are listed, in file order (a key repeated
+/// across documents appears once per document); the key text is unquoted (see [`yaml_key_of_line`]).
 fn yaml_top_level_keys(content: &str) -> Vec<(String, usize)> {
-    let mut keys = Vec::new();
-    for (idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') || trimmed.is_empty() || trimmed == "---" || trimmed == "..." {
-            continue;
-        }
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            if let Some(colon_pos) = trimmed.find(':') {
-                let key = trimmed[..colon_pos].trim().to_string();
-                if !key.is_empty() && !key.starts_with('-') {
-                    keys.push((key, idx + 1));
+    content
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| yaml_key_of_line(line).map(|key| (key, idx + 1)))
+        .collect()
+}
+
+/// Whether `line` is a YAML document marker: `---` (start) or `...` (end) at column 0, alone on
+/// its line or followed by white space (`--- !tag`, `--- # note`). An indented one is text inside
+/// a block scalar, and `----`, `---x` and `...x` are plain scalars.
+fn is_yaml_doc_marker(line: &str) -> bool {
+    ["---", "..."].iter().any(|marker| {
+        line.strip_prefix(marker)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+    })
+}
+
+/// The 1-based lines of `content` that are document markers (see [`is_yaml_doc_marker`]).
+fn yaml_marker_lines(content: &str) -> Vec<usize> {
+    content
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| is_yaml_doc_marker(line))
+        .map(|(idx, _)| idx + 1)
+        .collect()
+}
+
+/// The 1-based last line of the section of `keys[pos]`: the line before the next top-level key,
+/// or the end of the file for the last one, but never past the line before the next document
+/// marker (`markers`, from [`yaml_marker_lines`]). Blank and comment lines before that next key
+/// or marker are IN the section: the scan is line-based and cannot tell a comment that belongs
+/// to the key above from one that introduces the key below.
+fn yaml_section_end(
+    keys: &[(String, usize)],
+    pos: usize,
+    markers: &[usize],
+    line_count: usize,
+) -> usize {
+    let line = keys[pos].1;
+    let by_key = keys
+        .get(pos + 1)
+        .map_or(line_count, |(_, next)| next.saturating_sub(1));
+    match markers.get(markers.partition_point(|&m| m <= line)) {
+        Some(&marker) => by_key.min(marker - 1),
+        None => by_key,
+    }
+}
+
+/// The text before the closing quote of a quoted key at the start of `line`, unquoted, and what
+/// follows the closing quote. `None` when the quote does not close on the line.
+///
+/// A single-quoted key reads `''` as one `'`. A double-quoted one reads `\"` and `\\`; any other
+/// escape (`\t`, `é`) is kept as written, backslash included: a documented limit, because
+/// this scan has no use for the rest of YAML's escapes.
+fn yaml_quoted_key(line: &str) -> Option<(String, &str)> {
+    let mut chars = line.char_indices();
+    let (_, quote) = chars.next()?;
+    let mut key = String::new();
+    while let Some((i, c)) = chars.next() {
+        match (quote, c) {
+            ('"', '\\') => {
+                let (_, escaped) = chars.next()?;
+                if !matches!(escaped, '"' | '\\') {
+                    key.push('\\');
                 }
+                key.push(escaped);
             }
+            ('"', '"') => return Some((key, &line[i + 1..])),
+            ('\'', '\'') if line[i + 1..].starts_with('\'') => {
+                chars.next();
+                key.push('\'');
+            }
+            ('\'', '\'') => return Some((key, &line[i + 1..])),
+            (_, c) => key.push(c),
         }
     }
-    keys
+    None
+}
+
+/// The top-level key a YAML line introduces, or `None` when it introduces none. The scan is
+/// line-based, so the rules are:
+///
+/// - the line starts at column 0 (an indented line belongs to the key above it);
+/// - it does not start with `#` (a comment), `{` or `[` (a flow collection: `{x: 1}` is not the
+///   key `{x`), or `-` (a sequence entry, `- a: 1`; the scan tests only that first byte, so the
+///   valid key `-x: 1` is left out too, as it always was), and it is not a document marker;
+/// - a quoted key (`"a": 1`, `'b:c': 2`) is its text without the quotes, when the colon follows
+///   the closing quote;
+/// - a plain key ends at the first `:` that is followed by a space, a tab or the end of the line,
+///   so `a:b` is a plain scalar and `a:b: 1` is the key `a:b`.
+///
+/// Not told apart, because the line is all that is read: the lines of a multi-line flow
+/// collection or of a multi-line quoted key, whose continuation lines at column 0 can look like
+/// keys.
+fn yaml_key_of_line(line: &str) -> Option<String> {
+    let first = line.chars().next()?;
+    if first.is_whitespace() || matches!(first, '#' | '{' | '[' | '-') || is_yaml_doc_marker(line) {
+        return None;
+    }
+    let key = if matches!(first, '"' | '\'') {
+        let (key, rest) = yaml_quoted_key(line)?;
+        let after = rest.trim_start().strip_prefix(':')?;
+        if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
+            return None;
+        }
+        key
+    } else {
+        let mut from = 0;
+        loop {
+            let at = from + line[from..].find(':')?;
+            let after = &line[at + 1..];
+            if after.is_empty() || after.starts_with(char::is_whitespace) {
+                break line[..at].trim_end().to_string();
+            }
+            from = at + 1;
+        }
+    };
+    (!key.is_empty()).then_some(key)
 }
 
 pub fn summarize_yaml(content: &str) -> Value {
@@ -1140,12 +1245,10 @@ pub fn summarize_yaml(content: &str) -> Value {
     }
 
     // Compute end_line for each section
+    let markers = yaml_marker_lines(content);
     let mut result_sections: Vec<Value> = Vec::new();
     for (i, (key, line)) in sections.iter().enumerate() {
-        let end_line = sections
-            .get(i + 1)
-            .map(|(_, next)| next - 1)
-            .unwrap_or(line_count);
+        let end_line = yaml_section_end(&sections, i, &markers, line_count);
         result_sections.push(serde_json::json!({
             "key": key,
             "line": line,
@@ -1625,6 +1728,40 @@ fn toml_table_items(src: &str, table: &DeTable<'_>, out: &mut Vec<TomlItem>) {
     }
 }
 
+/// How many bytes of key NAMES a "key not found" hint lists before it says how many it left out:
+/// a quarter of the inline byte budget. Measured 2026-10-09 through `read_file` on a 5,000-key
+/// file with a missing key: the whole list was 55,024 B of hint, in an error body that
+/// `route_tool_error` renders whole (nothing below `call_content` clips or buffers an error), six
+/// times the budget of 9,000 B that every other response is held to.
+// cap-class: RESULT_CAP file_summary.key_hint_names — probed
+const KEY_HINT_NAMES_BYTE_BUDGET: usize = crate::tools::INLINE_BYTE_BUDGET / 4;
+
+/// The key names a "not found" hint offers, in the order given: all of them while they fit
+/// [`KEY_HINT_NAMES_BYTE_BUDGET`], else the first ones that do followed by `… (+N more not
+/// shown)`, so a list that was cut says so and how much of it. The list stops at the first name
+/// that does not fit (a name too long to fit alone included), and every name from there on is
+/// counted in the N.
+fn offered_names(names: &[String]) -> String {
+    let mut used = 0;
+    let mut shown = 0;
+    for name in names {
+        let cost = name.len() + ", ".len();
+        if used + cost > KEY_HINT_NAMES_BYTE_BUDGET {
+            break;
+        }
+        used += cost;
+        shown += 1;
+    }
+    let mut out = names[..shown].join(", ");
+    if shown < names.len() {
+        if shown > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format!("… (+{} more not shown)", names.len() - shown));
+    }
+    out
+}
+
 /// The keys of `table` in the order the file writes them, whatever order the map type keeps,
 /// each as it is typed back into `toml_key` (see [`toml_key_name`]).
 fn toml_keys_in_file_order(table: &DeTable<'_>) -> Vec<String> {
@@ -1669,35 +1806,81 @@ fn toml_key_name(segment: &str) -> String {
     out
 }
 
+/// Whether `key` can be a dotted key PATH at all, which is what the probe in
+/// [`toml_key_segments`] assumes and cannot check: parsing `<key> = 0` reads a key that holds a
+/// line break or a header as the DOCUMENT it then is. `"[a]\nb"` is the table `a` with the pair
+/// `b`, `"# x\nz"` is a comment and then `z`, and either resolved to a real key.
+///
+/// So a key is not a path when it holds a line break (`\n`, `\r`) anywhere, or, outside a quoted
+/// segment, `=`, `#`, `[` or `]`. A quoted segment (`"a=b"`, `'p#q'`) may hold any of those but a
+/// line break: a basic string ends at the first `"` that no backslash escapes, a literal one at
+/// the first `'`.
+///
+/// Only the line feed is load-bearing today: the parser itself fails on, or does not end in the
+/// appended `0` for, every key without one that has an `=`, `#`, `[` or `]` outside quotes or a
+/// bare `\r` (`sweep_of_short_keys_shows_only_line_breaks_reach_the_probe`). Those are refused
+/// here anyway, so the claim that such a key names nothing does not rest on the parser's
+/// treatment of it.
+fn toml_key_is_a_path(key: &str) -> bool {
+    if key.contains(['\n', '\r']) {
+        return false;
+    }
+    let mut quote: Option<char> = None;
+    let mut chars = key.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            // The character after a backslash in a basic string is escaped: `\"` does not end it.
+            (Some('"'), '\\') => {
+                chars.next();
+            }
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '=' | '#' | '[' | ']') => return false,
+            (None, _) => {}
+        }
+    }
+    true
+}
+
 /// The segments of a `toml_key`, read by TOML's own key grammar, so a quoted segment
 /// (`a."b.c"`, `target.'cfg(unix)'.dependencies`) is one segment whatever it holds and
 /// whitespace around a dot is ignored. The grammar is asked of the parser itself, by parsing
 /// `<key> = 0` and walking the nested single-entry tables back down to the `0`.
 ///
-/// A key that is not TOML key grammar (a bare name with a space, such as `my key`, which
-/// the file may only have as `"my key"`) is split at every `.`, as it always was.
+/// A key that is not TOML key grammar is split at every `.`, as it always was: a bare name with a
+/// space, such as `my key`, which the file may only have as `"my key"`, and a key that is not a
+/// path at all (see [`toml_key_is_a_path`]: a line break, or a header, a comment or a value
+/// outside quotes). The latter is never given to the parser, so it cannot resolve through the
+/// document it would make.
 fn toml_key_segments(key: &str) -> Vec<String> {
+    toml_key_is_a_path(key)
+        .then(|| toml_probe_segments(key))
+        .flatten()
+        .unwrap_or_else(|| key.split('.').map(str::to_string).collect())
+}
+
+/// The segments `key` has as TOML key grammar, asked of the parser by parsing `<key> = 0`, or
+/// `None` when that document is not a single path ending in the `0` it appended.
+fn toml_probe_segments(key: &str) -> Option<Vec<String>> {
     let probe = format!("{key} = 0");
-    if let Ok(parsed) = DeTable::parse(&probe) {
-        let mut path = Vec::new();
-        let mut table = parsed.get_ref();
-        while table.len() == 1 {
-            let Some((k, v)) = table.iter().next() else {
-                break;
-            };
-            path.push(k.get_ref().to_string());
-            match v.get_ref() {
-                DeValue::Table(inner) => table = inner,
-                // The `0` this function appended, and nothing a key could have smuggled in
-                // (`x = 5 #`): it is the last byte of the probe.
-                DeValue::Integer(_) if v.span() == (probe.len() - 1..probe.len()) => {
-                    return path;
-                }
-                _ => break,
+    let parsed = DeTable::parse(&probe).ok()?;
+    let mut path = Vec::new();
+    let mut table = parsed.get_ref();
+    while table.len() == 1 {
+        let (k, v) = table.iter().next()?;
+        path.push(k.get_ref().to_string());
+        match v.get_ref() {
+            DeValue::Table(inner) => table = inner,
+            // The `0` this function appended, and nothing a key could have smuggled in
+            // (`x = 5 #`): it is the last byte of the probe.
+            DeValue::Integer(_) if v.span() == (probe.len() - 1..probe.len()) => {
+                return Some(path);
             }
+            _ => return None,
         }
     }
-    key.split('.').map(str::to_string).collect()
+    None
 }
 
 /// A line that may sit INSIDE a run of one key's lines: blank, or a comment.
@@ -1773,13 +1956,21 @@ fn toml_source_lines(
 ///   another section written between two of its children), the text carries only the key's own
 ///   lines, in file order, and `line_range` is the span from the first to the last of them
 ///   (1-based, inclusive). It is never the file's range.
+///   KNOWN LIMIT, from that rule and not a defect to patch: such a text can read as a different
+///   table than the file does, because a line that was under a header further up now follows
+///   another one. `[a.b.c]\nx = 1\n[a]\nb.d = 2\n` with `a.b` answers `[a.b.c]\nx = 1\nb.d = 2`
+///   (`line_range` 1-4): in the file `b.d` is `a.b.d`, parsed back from the answer it is
+///   `a.b.c.b.d`. 2 of 162,498 generated cases did this. Only the key's own lines are returned
+///   (ruling 4), so nothing here repairs it.
 /// - The text is the file's lines joined with `\n`, so a CRLF file loses its `\r`, including
 ///   inside a multi-line string. TOML lets a parser normalise a newline there; the value parsed
 ///   back from the text differs from the file's by exactly that (`\r\n` is `\n`).
 ///
 /// A header-written key lists the other sections of the file as `siblings` (in file order, each
-/// header once); any other key lists none. The list has no count cap, as the YAML one has none:
-/// `read_file` drops it by width, marked `siblings_omitted`, when it does not fit beside the value.
+/// header once), without its own headers and without those of its ancestors (`a.b` does not list
+/// the `[a]` it is in); any other key lists none. The list has no count cap, as the YAML one has
+/// none: `read_file` drops it by width, marked `siblings_omitted`, when it does not fit beside the
+/// value.
 pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
     let parsed = DeTable::parse(content).map_err(|e| {
         RecoverableError::with_hint(
@@ -1799,6 +1990,9 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     type Entry<'t, 'i> = (&'t Spanned<DeString<'i>>, &'t Spanned<DeValue<'i>>);
     let mut target: Option<Entry<'_, '_>> = None;
     let mut enclosing: Option<Entry<'_, '_>> = None;
+    // The headers of the tables the path runs through (`[a]` for `a.b`): the key's ancestors,
+    // which are the tables it is in and not other sections of the file.
+    let mut ancestor_headers: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let typed_back = |upto: usize| {
         segments[..upto]
             .iter()
@@ -1811,6 +2005,9 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
         if let Some((_, value)) = target {
             match value.get_ref() {
                 DeValue::Table(table) => {
+                    if toml_opens(content, value.span().start, b"[") {
+                        ancestor_headers.insert(value.span().start);
+                    }
                     if enclosing.is_none() && toml_opens(content, value.span().start, b"{") {
                         enclosing = target;
                     }
@@ -1828,7 +2025,7 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
             .iter()
             .find(|(k, _)| &**k.get_ref() == segment.as_str());
         if target.is_none() {
-            let available = toml_keys_in_file_order(scope).join(", ");
+            let available = offered_names(&toml_keys_in_file_order(scope));
             return Err(not_found(if depth == 0 {
                 format!("Available top-level keys: {available}")
             } else {
@@ -1885,7 +2082,10 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
         let mut seen = std::collections::HashSet::new();
         for r in headers {
             let header = &content[r.clone()];
-            if !own_headers.contains(&r.start) && seen.insert(header) {
+            if !own_headers.contains(&r.start)
+                && !ancestor_headers.contains(&r.start)
+                && seen.insert(header)
+            {
                 siblings.push(header.to_string());
             }
         }
@@ -1901,6 +2101,28 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     })
 }
 
+/// The text of a top-level YAML `key` as it is WRITTEN in `content`, and the lines it was taken
+/// from. Only a TOP-LEVEL key resolves (no YAML deserializer is a dependency here, so a nested
+/// path is refused rather than answered with a part); the rules for what a top-level key is are
+/// those of [`yaml_key_of_line`]: a quoted key is named WITHOUT its quotes, a plain `a:b` is no key,
+/// and a flow collection (`{x: 1}`) or a comment is none either.
+///
+/// - The value is ONE run of the file's lines, from the key's line to the line before the next
+///   top-level key (or the end of the file), so `line_range` is exactly the lines of the text.
+/// - Blank and comment lines before that next key are IN the value, trailing ones included: the
+///   scan is line-based and cannot tell a comment that belongs to this key from one that introduces
+///   the next. (A value followed by one blank line is therefore one line longer than `str::lines`
+///   counts it.)
+/// - The span stops before a document marker (`---`, `...`, see [`is_yaml_doc_marker`]) and never
+///   includes it.
+/// - A key that occurs in more than one document of a multi-document file is answered from its
+///   FIRST occurrence, i.e. from the first document. A key that occurs in a later document alone
+///   still resolves, from that document.
+/// - `siblings` lists every other top-level key of the file, of every document, in file order.
+///
+/// Not handled, because the line is all that is read: a quoted key that runs over several lines,
+/// the continuation lines of a multi-line flow collection that start at column 0, and a key that
+/// starts with `-` (`-x: 1`; see [`yaml_key_of_line`]).
 pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
     // Resolve against the FULL (uncapped) top-level key scan, not
     // summarize_yaml's 30-key display cap — fixes false "not found" for keys
@@ -1915,14 +2137,10 @@ pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, Recov
             "No top-level keys found in file",
         ));
     }
-    let line_count = content.lines().count();
+    let lines: Vec<&str> = content.lines().collect();
     if let Some(pos) = keys.iter().position(|(k, _)| k == key) {
         let (_, line) = keys[pos];
-        let end_line = keys
-            .get(pos + 1)
-            .map(|(_, next)| next - 1)
-            .unwrap_or(line_count);
-        let lines: Vec<&str> = content.lines().collect();
+        let end_line = yaml_section_end(&keys, pos, &yaml_marker_lines(content), lines.len());
         let start = (line - 1).min(lines.len());
         let end = end_line.min(lines.len());
         let section_content = lines[start..end].join("\n");
@@ -1943,7 +2161,7 @@ pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     let available: Vec<String> = keys.into_iter().map(|(k, _)| k).collect();
     Err(RecoverableError::with_hint(
         format!("key '{}' not found in YAML", key),
-        format!("Available keys: {}", available.join(", ")),
+        format!("Available keys: {}", offered_names(&available)),
     ))
 }
 
@@ -1981,6 +2199,139 @@ mod toml_key_pieces {
             (crlf.line_of(1), crlf.line_of(2), crlf.line_of(3)),
             (1, 1, 2)
         );
+    }
+
+    #[test]
+    fn offered_names_cut_at_the_byte_budget_and_say_how_many_they_left_out() {
+        let names = |n: usize, width: usize| -> Vec<String> {
+            (0..n).map(|i| format!("{i:0width$}")).collect()
+        };
+        // Each 8-byte name costs 10 bytes with its separator: 225 of them fill the budget of
+        // 2,250 exactly, and a name that brings the total to the budget is shown.
+        assert_eq!(KEY_HINT_NAMES_BYTE_BUDGET, 2250);
+        let fits = names(225, 8);
+        assert_eq!(offered_names(&fits), fits.join(", "));
+        // One more is the first left out, and it is counted.
+        let over = names(226, 8);
+        assert_eq!(
+            offered_names(&over),
+            format!("{}, … (+1 more not shown)", fits.join(", "))
+        );
+        // Many more: the count is how many, not "some".
+        let many = names(1000, 8);
+        assert!(offered_names(&many).ends_with(", … (+775 more not shown)"));
+        // Nothing to offer, and one name: no marker, no separator.
+        assert_eq!(offered_names(&[]), "");
+        assert_eq!(offered_names(&["a".to_string()]), "a");
+        // A first name too long to fit alone: nothing shown, and the count says all of them.
+        let long = vec!["x".repeat(3000), "b".to_string()];
+        assert_eq!(offered_names(&long), "… (+2 more not shown)");
+        // The list stops at the first name that does not fit; a short one after it is not shown.
+        let mut mixed = names(100, 8);
+        mixed.push("y".repeat(2000));
+        mixed.push("z".to_string());
+        assert_eq!(
+            offered_names(&mixed),
+            format!("{}, … (+2 more not shown)", names(100, 8).join(", "))
+        );
+    }
+
+    #[test]
+    fn sweep_of_short_keys_shows_only_line_breaks_reach_the_probe() {
+        // Every key of up to five characters over an alphabet of the characters in question
+        // (a lone `\r` among them, but no `\n`): the probe never resolves one that
+        // `toml_key_is_a_path` refuses, so the refusal of `=`, `#`, `[`, `]` outside quotes and of
+        // a bare `\r` restates the parser (TOML has no bare carriage return). The `\n` IS
+        // load-bearing, asserted below. Not vacuous: keys the probe does resolve are counted, and
+        // so are the refused.
+        let alphabet = [
+            'a', '.', '=', '#', '[', ']', ' ', '"', '\'', '0', '{', '}', ',', '\\', '\r',
+        ];
+        let (mut refused, mut resolved) = (0usize, 0usize);
+        let mut key = String::new();
+        let mut sweep = vec![String::new()];
+        for _ in 0..5 {
+            let mut next = Vec::new();
+            for prefix in &sweep {
+                for c in alphabet {
+                    key.clear();
+                    key.push_str(prefix);
+                    key.push(c);
+                    next.push(key.clone());
+                }
+            }
+            for k in &next {
+                if toml_key_is_a_path(k) {
+                    resolved += usize::from(toml_probe_segments(k).is_some());
+                } else {
+                    refused += 1;
+                    assert!(
+                        toml_probe_segments(k).is_none(),
+                        "{k:?} is refused as a path but the probe resolves it"
+                    );
+                }
+            }
+            sweep = next;
+        }
+        assert!(refused > 100_000, "fixture: only {refused} refused");
+        assert!(resolved > 100, "fixture: only {resolved} resolved");
+        // The line break IS load-bearing: these resolve through the probe and are refused.
+        for k in ["[a]\nb", "# x\nz", "\na.b"] {
+            assert!(toml_probe_segments(k).is_some(), "{k:?}");
+            assert!(!toml_key_is_a_path(k), "{k:?}");
+        }
+    }
+
+    #[test]
+    fn a_key_is_a_path_unless_it_has_a_line_break_or_an_unquoted_header_comment_or_value() {
+        // The predicate's own contract, character by character. It is observable here and not
+        // through `toml_key_segments`, where the parser refuses most of these keys anyway.
+        for path in [
+            "a",
+            "a.b",
+            "a . b",
+            "my key",
+            "a.\"b.c\"",
+            "target.'cfg(unix)'.dependencies",
+            // Quoted segments may hold any of `=`, `#`, `[`, `]`.
+            "\"a=b\"",
+            "\"#\"",
+            "'[x]'",
+            "a.\"b#\".c",
+            "'p]q'",
+            // A `\"` does not end a basic string; a literal string has no escape.
+            "\"q\\\"=\"",
+            "'a\\'",
+            "\"x\\\\\"",
+        ] {
+            assert!(toml_key_is_a_path(path), "{path:?}");
+        }
+        for not_path in [
+            "a=b",
+            "a = 1",
+            "a #",
+            "# x",
+            "[a]",
+            "a]",
+            "a.[b]",
+            "\"a\"=1",
+            "\"x\"#",
+            "'x'[",
+            "'x']",
+            // After the escaped backslash the string is closed.
+            "\"q\\\\\"=",
+            // A literal string ends at the next `'`, backslash or not.
+            "'a\\'=",
+            // A line break, anywhere, quoted or not.
+            "a\nb",
+            "a\rb",
+            "\"a\nb\"",
+            "\"a\\\nb\"",
+            "\n",
+            "\r",
+        ] {
+            assert!(!toml_key_is_a_path(not_path), "{not_path:?}");
+        }
     }
 
     #[test]

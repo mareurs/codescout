@@ -2461,6 +2461,233 @@ async fn the_text_of_a_toml_key_read_places_the_value_in_its_file() {
         "{t:.400}"
     );
 }
+/// The placement line of a `toml_key` read claims lines "belong to other keys" only when the value
+/// really left some of its span out. A YAML key's value runs to the next top-level key, blank lines
+/// and comments included (so a key followed by a blank line is `n` lines of the file but `n - 1`
+/// to `str::lines`, which drops a final empty line); it is one run, so it never claims that. A TOML
+/// key claims it exactly when its runs are not contiguous. Through the real `call_content`.
+#[tokio::test]
+async fn the_placement_line_claims_other_keys_only_for_lines_really_left_out() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, body: &str| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, body).unwrap();
+        p.to_str().unwrap().to_string()
+    };
+    let placement = |input: Value| {
+        let ctx = &ctx;
+        async move {
+            let t = crate::tools::hint_probe::primary_text(
+                &ReadFile.call_content(input, ctx).await.unwrap(),
+            );
+            let lines: Vec<String> = t
+                .lines()
+                .filter(|l| l.starts_with("  file lines") || l.contains("belong to other keys"))
+                .map(str::to_string)
+                .collect();
+            (lines, t)
+        }
+    };
+    const CLAIM: &str = "belong to other keys";
+
+    // YAML with blank separators: the first, a middle and the last key.
+    let blanks = write("blanks.yaml", "a: 1\n\nb:\n  - x\n  - y\n\nc: 3\n");
+    for (key, want) in [
+        ("a", Vec::<&str>::new()),
+        ("b", vec!["  file lines 3-6"]),
+        ("c", vec!["  file lines 7-7"]),
+    ] {
+        let (lines, t) = placement(json!({ "path": blanks, "toml_key": key })).await;
+        assert_eq!(lines, want, "{key}: {t}");
+        assert!(!t.contains(CLAIM), "{key}: {t}");
+    }
+
+    // Comments and blank lines between keys: all of them are in the value of the key above.
+    let comments = write("comments.yaml", "a: 1\n# about b\nb: 2\n# tail\n\nc: 3\n");
+    for (key, want) in [
+        ("a", Vec::<&str>::new()),
+        ("b", vec!["  file lines 3-5"]),
+        ("c", vec!["  file lines 6-6"]),
+    ] {
+        let (lines, t) = placement(json!({ "path": comments, "toml_key": key })).await;
+        assert_eq!(lines, want, "{key}: {t}");
+    }
+
+    // A value that ends the file, with and without the final newline, and with blank lines.
+    for (name, body, key, want) in [
+        ("e1.yaml", "x: 0\na: 1", "a", "  file lines 2-2"),
+        ("e2.yaml", "x: 0\na: 1\n", "a", "  file lines 2-2"),
+        ("e3.yaml", "x: 0\na: 1\n\n", "a", "  file lines 2-3"),
+        ("e4.yaml", "x: 0\na: 1\n\n\n", "a", "  file lines 2-4"),
+    ] {
+        let (lines, t) = placement(json!({ "path": write(name, body), "toml_key": key })).await;
+        assert_eq!(lines, [want], "{name}: {t}");
+    }
+    let (lines, t) = placement(json!({ "path": write("e5.yaml", "a: 1"), "toml_key": "a" })).await;
+    assert!(lines.is_empty(), "{t}");
+    let (lines, t) =
+        placement(json!({ "path": write("e6.yaml", "a: 1\n\n"), "toml_key": "a" })).await;
+    assert!(lines.is_empty(), "{t}");
+
+    // A YAML value over one page, ending in blank lines: every page is silent about other keys
+    // (the paged JSON carries `total_lines` from `str::lines`, which is one short of the span).
+    let rows: String = (0..400)
+        .map(|i| format!("  - item {i:04} {}\n", "p".repeat(40)))
+        .collect();
+    let big = write("big.yaml", &format!("pre: 1\nk:\n{rows}\n\nnext: 1\n"));
+    let mut input = json!({ "path": big, "toml_key": "k" });
+    let mut pages = 0;
+    loop {
+        let (lines, t) = placement(input.clone()).await;
+        assert_eq!(
+            lines,
+            [format!("  file lines 2-{}", 2 + 400 + 2)],
+            "{t:.300}"
+        );
+        pages += 1;
+        let v = ReadFile.call(input.clone(), &ctx).await.unwrap();
+        let Some(n) = next_value_input(&v) else { break };
+        input = n;
+    }
+    assert!(pages > 1, "fixture: not paged");
+
+    // TOML contiguous: silent about other keys, with and without the final newline.
+    for (name, body) in [
+        ("c1.toml", "x = 0\n[k]\nv = 1"),
+        ("c2.toml", "x = 0\n[k]\nv = 1\n"),
+    ] {
+        let (lines, t) = placement(json!({ "path": write(name, body), "toml_key": "k" })).await;
+        assert_eq!(lines, ["  file lines 2-3"], "{name}: {t}");
+    }
+    // TOML not contiguous: it claims, naming the span and how many of its lines are the value,
+    // at the end of the file with and without the final newline, and when the span starts at 1.
+    for (name, body, want) in [
+        (
+            "n1.toml",
+            "x = 1\nk.a = 1\nz = 2\nk.b = 2",
+            "  file lines 2-4; 2 of them are this value (the other lines of the span belong to other keys)",
+        ),
+        (
+            "n2.toml",
+            "x = 1\nk.a = 1\nz = 2\nk.b = 2\n",
+            "  file lines 2-4; 2 of them are this value (the other lines of the span belong to other keys)",
+        ),
+        (
+            "n3.toml",
+            "k.a = 1\nz = 2\ny = 3\nk.b = 2\n",
+            "  file lines 1-4; 2 of them are this value (the other lines of the span belong to other keys)",
+        ),
+    ] {
+        let (lines, t) = placement(json!({ "path": write(name, body), "toml_key": "k" })).await;
+        assert_eq!(lines, [want], "{name}: {t}");
+    }
+}
+/// A missing key in a file of thousands of keys: the hint that names the keys it could have been is
+/// held to a quarter of the inline byte budget and says how many names it left out. Measured
+/// 2026-10-09 through `call_content` BEFORE the cap: 5,000 keys gave a 55,024 B hint (a 55,098 B
+/// error body, rendered whole by `route_tool_error`) for TOML tables, TOML scalars and YAML alike.
+/// The names are built by this test (`key_00000` ..), so the count of shown plus omitted is checked
+/// against a number the extractor did not produce.
+#[tokio::test]
+async fn a_missing_key_in_a_huge_file_gets_a_capped_hint() {
+    let ctx = ctx().await;
+    let dir = tempfile::tempdir().unwrap();
+    const KEYS: usize = 5000;
+    let nested = format!(
+        "[t]\n{}",
+        (0..KEYS)
+            .map(|i| format!("key_{i:05} = {i}\n"))
+            .collect::<String>()
+    );
+    for (label, ext, key, prefix, body) in [
+        (
+            "toml tables",
+            "toml",
+            "nope",
+            "Available top-level keys: ",
+            (0..KEYS)
+                .map(|i| format!("[key_{i:05}]\nv = {i}\n"))
+                .collect::<String>(),
+        ),
+        (
+            "toml scalars",
+            "toml",
+            "nope",
+            "Available top-level keys: ",
+            (0..KEYS)
+                .map(|i| format!("key_{i:05} = {i}\n"))
+                .collect::<String>(),
+        ),
+        (
+            "toml nested",
+            "toml",
+            "t.nope",
+            "Available keys in 't': ",
+            nested,
+        ),
+        (
+            "yaml",
+            "yaml",
+            "nope",
+            "Available keys: ",
+            (0..KEYS)
+                .map(|i| format!("key_{i:05}: {i}\n"))
+                .collect::<String>(),
+        ),
+    ] {
+        let p = dir.path().join(format!("many.{ext}"));
+        std::fs::write(&p, &body).unwrap();
+        let path = p.to_str().unwrap();
+        let err = ReadFile
+            .call_content(json!({ "path": path, "toml_key": key }), &ctx)
+            .await
+            .expect_err(label);
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("{label}: not a recoverable error: {err}"));
+        let hint = rec.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+        let names = hint
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("{label}: {hint:.200}"));
+        // The whole error body is far under the inline budget, not 55 KB.
+        let wire = serde_json::to_string_pretty(&json!({
+            "ok": false, "error": rec.message, "hint": hint,
+        }))
+        .unwrap();
+        assert!(
+            wire.len() < crate::tools::INLINE_BYTE_BUDGET / 2,
+            "{label}: the error body is {} B",
+            wire.len()
+        );
+        // It says how many it left out, and shown + left out is the number of keys.
+        assert!(hint.contains("more not shown"), "{label}: {hint:.300}");
+        let mut parts: Vec<&str> = names.split(", ").collect();
+        let marker = parts.pop().unwrap();
+        let omitted: usize = marker
+            .strip_prefix("… (+")
+            .and_then(|m| m.strip_suffix(" more not shown)"))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{label}: marker {marker:?}"));
+        assert_eq!(parts.len() + omitted, KEYS, "{label}");
+        // What it shows is the first keys of the file, in file order, and each resolves.
+        assert!(parts.len() > 100, "{label}: only {} shown", parts.len());
+        for (i, name) in parts.iter().enumerate() {
+            assert_eq!(*name, format!("key_{i:05}"), "{label}");
+        }
+        let last = parts[parts.len() - 1];
+        let want = if ext == "toml" && key == "t.nope" {
+            format!("t.{last}")
+        } else {
+            last.to_string()
+        };
+        let v = ReadFile
+            .call(json!({ "path": path, "toml_key": want }), &ctx)
+            .await
+            .unwrap();
+        assert!(v["content"].as_str().unwrap().contains(last), "{label}");
+    }
+}
 
 /// The `next` of a page of a real file's value quotes the caller's `json_path` (or `toml_key`)
 /// WHOLE, as a route that runs as written, while that leaves the page
