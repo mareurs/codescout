@@ -10005,6 +10005,14 @@ async fn check_adversarial_table(
             }
         }
     }
+    // A floor on the rows EVALUATED (`report` gets one line per row that was not skipped): a loop
+    // that visited none of them would otherwise pass.
+    assert!(
+        report.len() >= 70,
+        "only {} of {} rows were evaluated: the table moved or the loop is empty",
+        report.len(),
+        table.len()
+    );
     assert!(
         failures.is_empty(),
         "{}\n\nall:\n{}",
@@ -10193,10 +10201,12 @@ fn next_query_in_hint(query: &str, hint: &str) -> Option<String> {
 async fn follow_every_hint(
     ctx: &ToolContext,
     query: &str,
-) -> (Vec<String>, Vec<String>, Vec<usize>) {
+) -> (Vec<String>, Vec<String>, Vec<usize>, Vec<usize>) {
+    let stated = regex::Regex::new(r"which has (\d+) lines").expect("static pattern");
     let mut all = Vec::new();
     let mut ran = Vec::new();
     let mut sizes = Vec::new();
+    let mut totals = Vec::new();
     let mut q = query.to_string();
     for _ in 0..1_000 {
         let (text, parsed) = buffer_query(ctx, q.clone()).await;
@@ -10216,19 +10226,46 @@ async fn follow_every_hint(
             .map(str::to_string)
             .collect();
         let hint = parsed["hint"].as_str().unwrap_or_default();
-        let next = next_query_in_hint(&q, hint);
+        // Every page after the first is the answer to a hint, and a hint that points at an empty
+        // page is a wrong hint: the walk may not end on one. (It used to assert only that an
+        // empty page names no further route, which an empty LAST page satisfies.)
         assert!(
-            !page.is_empty() || next.is_none(),
-            "`{q}` printed nothing and still names a route: {hint}"
+            !page.is_empty() || ran.len() == 1,
+            "`{q}` printed nothing: the hint before it named a page past the end"
         );
+        if let Some(c) = stated.captures(hint) {
+            totals.push(c[1].parse().expect("digits"));
+        }
+        let next = next_query_in_hint(&q, hint);
         sizes.push(page.len());
         all.extend(page);
         match next {
             Some(n) => q = n,
-            None => return (all, ran, sizes),
+            None => return (all, ran, sizes, totals),
         }
     }
     panic!("`{query}`: no end after 1,000 pages")
+}
+
+/// The line count `sh` gives the stream behind `handle` (`grep -c ''` over the same bytes the
+/// query reads), the number a hint's `which has N lines` has to equal.
+fn sh_line_count(
+    dir: &std::path::Path,
+    handle: &str,
+    subs: &[(String, std::path::PathBuf)],
+) -> usize {
+    shell_truth(dir, &format!("grep -c '' {handle}"), subs)
+        .trim()
+        .parse()
+        .expect("a count")
+}
+
+/// Every `which has N lines` a walk met says `n`, and the walk met at least `at_least` of them.
+fn assert_stated_totals(totals: &[usize], n: usize, at_least: usize) {
+    assert!(
+        totals.len() >= at_least && totals.iter().all(|&t| t == n),
+        "the stream has {n} lines; the hints said {totals:?}"
+    );
 }
 
 /// `got` equals `want`, line for line; the failure names the first difference instead of dumping
@@ -10269,9 +10306,10 @@ async fn a_full_plain_slice_window_names_the_next_one_and_the_hints_reach_the_la
     );
 
     // Followed from `cat`: all 3,000 lines, each once, in 30 pages, and the last page is silent.
-    let (all, ran, _) = follow_every_hint(&ctx, &format!("cat {id}")).await;
+    let (all, ran, _, totals) = follow_every_hint(&ctx, &format!("cat {id}")).await;
     let full: Vec<String> = (1..=3000).map(|i| i.to_string()).collect();
     assert_same_lines(&all, &full, "cat, then the hints");
+    assert_stated_totals(&totals, 3000, 20);
     assert_eq!(ran.len(), 30, "{ran:?}");
     assert_eq!(ran[29], format!("sed -n '2901,3000p' {id}"));
 }
@@ -10361,7 +10399,8 @@ async fn the_hints_alone_reach_the_last_line_once_when_pages_are_cut_by_bytes() 
     let id = ctx
         .output_buffer
         .store("gen".into(), text, String::new(), 0);
-    let (all, ran, sizes) = follow_every_hint(&ctx, &format!("cat {id}")).await;
+    let (all, ran, sizes, totals) = follow_every_hint(&ctx, &format!("cat {id}")).await;
+    assert_stated_totals(&totals, 1200, 1);
     assert!(
         sizes.contains(&100) && sizes.iter().any(|&n| n < 100 && n > 30),
         "the premise needs whole 100-line pages and byte-cut ones: {sizes:?}"
@@ -10373,18 +10412,26 @@ async fn the_hints_alone_reach_the_last_line_once_when_pages_are_cut_by_bytes() 
 #[tokio::test]
 async fn a_full_window_of_the_err_stream_pages_that_stream() {
     let (_dir, ctx) = project_ctx().await;
-    let id = ctx
-        .output_buffer
-        .store("cmd".into(), "x\n".into(), seq_lines(750), 0);
+    // Wide enough that `cat` of the stream is cut (800 short lines would fit whole: one page, no walk).
+    let rows: Vec<String> = (1..=800)
+        .map(|i| format!("{i} {}", "e".repeat(40)))
+        .collect();
+    let err: String = rows.iter().map(|l| format!("{l}\n")).collect();
+    let id = ctx.output_buffer.store("cmd".into(), "x\n".into(), err, 0);
     let (page, hint, _) = lines_and_hint(&ctx, format!("sed -n '101,200p' {id}.err")).await;
     assert_eq!(page.len(), 100);
     assert!(
         hint.contains(&format!("Next page: sed -n '201,300p' {id}.err.")),
         "the next window is on the stream that was read: {hint:?}"
     );
-    let (all, _, _) = follow_every_hint(&ctx, &format!("cat {id}.err")).await;
-    let full: Vec<String> = (1..=750).map(|i| i.to_string()).collect();
-    assert_same_lines(&all, &full, "cat of the err stream, then the hints");
+    let (all, ran, sizes, totals) = follow_every_hint(&ctx, &format!("cat {id}.err")).await;
+    assert!(sizes.len() > 4, "the premise needs pages: {sizes:?}");
+    assert_same_lines(
+        &all,
+        &rows,
+        &format!("{} pages of the err stream", ran.len()),
+    );
+    assert_stated_totals(&totals, 800, 3);
 }
 
 #[cfg(unix)]
@@ -10394,8 +10441,13 @@ async fn a_tool_ref_counts_its_lines_as_the_sed_that_reads_it_does() {
     // must count that text: counted as the stored compact JSON (one line) no window ever has a
     // line left, and counted with `\n` expanded (as `read_file` does) a last window names a next
     // one that prints nothing.
+    //
+    // The pretty text is a MULTIPLE OF 100 lines (724 rows of 4 lines and 4 more: 2,900), so the
+    // last window is a FULL page that ends at the last line. A fixture that ends mid-window (the
+    // 2,804 lines of 700 rows did) has no full page near the end for a miscount to hint at, and
+    // the `\n`-expanded count (each row's `"x\ny"` is two lines to `read_file`) survived it.
     let (dir, ctx) = project_ctx().await;
-    let rows: Vec<Value> = (0..700).map(|i| json!({ "i": i, "s": "x\ny" })).collect();
+    let rows: Vec<Value> = (0..724).map(|i| json!({ "i": i, "s": "x\ny" })).collect();
     let blob = serde_json::to_string(&json!({ "rows": rows })).unwrap();
     let t = ctx.output_buffer.store_tool("probe", blob.clone());
     let pretty =
@@ -10403,13 +10455,17 @@ async fn a_tool_ref_counts_its_lines_as_the_sed_that_reads_it_does() {
     let path = dir.path().join("tool.json");
     std::fs::write(&path, &pretty).unwrap();
     let want: Vec<String> = pretty.lines().map(str::to_string).collect();
-    assert!(want.len() > 2_000, "the premise needs many windows");
+    assert_eq!(want.len(), 2_900, "the premise: a multiple of 100 lines");
+    let subs = [(t.clone(), path)];
+    assert_eq!(sh_line_count(dir.path(), &t, &subs), 2_900);
 
-    let (all, ran, _) = follow_every_hint(&ctx, &format!("cat {t}")).await;
+    let (all, ran, _, totals) = follow_every_hint(&ctx, &format!("cat {t}")).await;
     assert_same_lines(&all, &want, &format!("{} pages", ran.len()));
+    assert_eq!(ran.len(), 29, "29 pages of 100 lines");
+    assert_stated_totals(&totals, 2_900, 20);
     // The oracle: the real `sh` over the pretty text prints the same lines.
     // (The pretty text has no final newline, so `cat` prints none either.)
-    let truth = shell_truth(dir.path(), &format!("cat {t}"), &[(t.clone(), path)]);
+    let truth = shell_truth(dir.path(), &format!("cat {t}"), &subs);
     assert!(
         all.join("\n") == truth,
         "the walk differs from what `cat` prints"
@@ -10418,10 +10474,32 @@ async fn a_tool_ref_counts_its_lines_as_the_sed_that_reads_it_does() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn a_tool_ref_that_is_not_json_is_counted_as_stored() {
+    // `resolve_refs` pretty-prints a `@tool_*` ref only when it parses as JSON; any other text is
+    // handed to the shell as it is stored. The count has the same fallback: a text that failed to
+    // parse and was counted as nothing would never have a line left.
+    let (dir, ctx) = project_ctx().await;
+    let full: Vec<String> = (1..=500)
+        .map(|i| format!("row{i} {}", "t".repeat(40)))
+        .collect();
+    let text: String = full.iter().map(|l| format!("{l}\n")).collect();
+    let t = ctx.output_buffer.store_tool("probe", text.clone());
+    assert!(serde_json::from_str::<Value>(&text).is_err(), "the premise");
+    let path = dir.path().join("plain.txt");
+    std::fs::write(&path, &text).unwrap();
+    assert_eq!(sh_line_count(dir.path(), &t, &[(t.clone(), path)]), 500);
+    let (all, ran, sizes, totals) = follow_every_hint(&ctx, &format!("cat {t}")).await;
+    assert!(sizes.len() > 4, "the premise needs pages: {sizes:?}");
+    assert_same_lines(&all, &full, &format!("{} pages", ran.len()));
+    assert_stated_totals(&totals, 500, 2);
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn a_file_ref_full_window_names_the_next_one() {
     let (dir, ctx) = project_ctx().await;
     let path = dir.path().join("big.txt");
-    let full: Vec<String> = (1..=450)
+    let full: Vec<String> = (1..=500)
         .map(|i| format!("row{i} {}", "f".repeat(40)))
         .collect();
     let text: String = full.iter().map(|l| format!("{l}\n")).collect();
@@ -10430,9 +10508,10 @@ async fn a_file_ref_full_window_names_the_next_one() {
         .output_buffer
         .store_file(path.to_string_lossy().to_string(), text);
     assert!(id.starts_with("@file_"), "{id}");
-    let (all, ran, sizes) = follow_every_hint(&ctx, &format!("cat {id}")).await;
+    let (all, ran, sizes, totals) = follow_every_hint(&ctx, &format!("cat {id}")).await;
     assert!(sizes.len() > 4, "the premise needs pages: {sizes:?}");
     assert_same_lines(&all, &full, &format!("{} pages", ran.len()));
+    assert_stated_totals(&totals, 500, 2);
 }
 
 #[cfg(unix)]
@@ -10442,7 +10521,7 @@ async fn a_background_log_full_window_names_the_next_one() {
     let started = RunCommand
         .call(
             json!({
-                "command": "seq -f 'row%g_gggggggggggggggggggggggggggggggggggggggg' 1 450",
+                "command": "seq -f 'row%g_gggggggggggggggggggggggggggggggggggggggg' 1 500",
                 "run_in_background": true,
                 "timeout_secs": 10
             }),
@@ -10454,19 +10533,22 @@ async fn a_background_log_full_window_names_the_next_one() {
     let mut done = false;
     for _ in 0..100 {
         let (_, parsed) = buffer_query(&ctx, format!("grep -c '' {bg}")).await;
-        if parsed["stdout"].as_str().unwrap_or_default().trim() == "450" {
+        if parsed["stdout"].as_str().unwrap_or_default().trim() == "500" {
             done = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    assert!(done, "the background job never wrote 450 lines");
-    let (all, ran, sizes) = follow_every_hint(&ctx, &format!("cat {bg}")).await;
+    assert!(done, "the background job never wrote 500 lines");
+    let (all, ran, sizes, totals) = follow_every_hint(&ctx, &format!("cat {bg}")).await;
     assert!(sizes.len() > 4, "the premise needs pages: {sizes:?}");
-    let full: Vec<String> = (1..=450)
+    // 500 lines, a multiple of the page: the last window is a full page that ends at the last line,
+    // so a count that is too high by half a page hints at an empty page and the walk fails.
+    let full: Vec<String> = (1..=500)
         .map(|i| format!("row{i}_{}", "g".repeat(40)))
         .collect();
     assert_same_lines(&all, &full, &format!("{} pages", ran.len()));
+    assert_stated_totals(&totals, 500, 2);
 }
 
 #[cfg(unix)]
@@ -10516,6 +10598,58 @@ async fn a_full_plain_slice_window_that_fits_only_without_its_hint_is_cut_not_re
     }
     assert!(seen_full, "the premise: some width fits whole");
     assert!(seen_cut, "the premise: some width is cut");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_full_plain_slice_window_stays_inside_the_limit_at_every_byte_near_the_edge() {
+    // `..._is_cut_not_rebuffered` steps the width of every line, so its sizes are 100 B apart. This
+    // one steps the LAST line of the window one byte at a time across the edge where the response
+    // (stdout and hint) crosses the inline limit: whole below it, cut above it, and at no byte
+    // re-buffered or over the limit, with the next page starting right after the last line shown.
+    let (_dir, ctx) = project_ctx().await;
+    let (mut whole, mut cut) = (0, 0);
+    for last in 200..=800usize {
+        let mut stored: String = (0..99)
+            .map(|i| format!("p{i:03} {}\n", "q".repeat(85)))
+            .collect();
+        stored.push_str(&format!("last {}\n", "z".repeat(last)));
+        stored.push_str(&"tail\n".repeat(50));
+        let id = ctx
+            .output_buffer
+            .store("cmd".into(), stored, String::new(), 0);
+        let query = format!("sed -n '1,100p' {id}");
+        let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+        assert!(
+            handles_named(&text).is_subset(&handles_named(&query)),
+            "last line {last} B: re-buffered: {text:.200}"
+        );
+        assert!(
+            !crate::tools::exceeds_inline_limit(&text),
+            "last line {last} B: {} B",
+            text.len()
+        );
+        let hint = parsed["hint"].as_str().unwrap_or_default();
+        let shown = parsed["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .lines()
+            .count();
+        assert_eq!(
+            next_query_in_hint(&query, hint),
+            Some(format!("sed -n '{},{}p' {id}", shown + 1, shown + 100)),
+            "last line {last} B: {hint}"
+        );
+        if parsed.get("truncated").is_some() {
+            cut += 1;
+        } else {
+            whole += 1;
+        }
+    }
+    assert!(
+        whole > 0 && cut > 0,
+        "the sweep must cross the edge: {whole} whole, {cut} cut"
+    );
 }
 
 // ---- the own-stderr remedy of a buffer query reaches EVERY stage of its pipeline ----
@@ -10655,7 +10789,10 @@ async fn the_own_stderr_route_reads_the_stream_that_was_cut_whatever_the_shape_o
         );
 
         // Through the tool: the marker of the cut stderr names that route, and running it, as
-        // the marker states it, returns those bytes without making a second handle.
+        // the marker states it, returns those bytes. Claimed only for a result under the inline
+        // limit, as here (<= ~9 KB): the route holds `>/dev/null`, which makes it a query that is
+        // not buffer-only, so a larger answer would be buffered under a handle of its own (the
+        // stream stays reachable through it).
         let (text, parsed) = buffer_query(&ctx, query.clone()).await;
         let stderr = parsed["stderr"]
             .as_str()
@@ -10689,9 +10826,13 @@ async fn the_own_stderr_route_reads_the_stream_that_was_cut_whatever_the_shape_o
 #[tokio::test]
 async fn the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the_marker_accepts() {
     // The 80-query adversarial table, every shape one pipeline by `is_one_pipeline` (the ones the
-    // marker offers a route for): the wrapped route, run by `sh`, prints what `cut -c1-4000` makes
-    // of the stream that query writes to stderr. Most rows write none (then both are empty, which
-    // proves the wrapped text is valid `sh` for the shape); the ones that do (`>&2`,
+    // marker offers a route for; that predicate is the only production code this test calls, the
+    // rest is `sh`): the wrapped route, run by `sh`, prints what `cut -c1-4000` makes of the stream
+    // that query writes to stderr. Most rows write none to the stream the route reads, so
+    // "both empty" says little: it holds for a wrapped text that is VALID `sh` and, equally, for one
+    // that is not (`{ echo hi } 2>&1 >/dev/null | cut` prints a syntax error on the OUTER shell's
+    // stderr and nothing on stdout). So the outer shell's stderr is asserted empty for every route,
+    // which only valid text satisfies; and the rows that DO write to the stream (`>&2`,
     // `tee /dev/stderr`, `1>&2 | cat`) make it a byte comparison.
     let (dir, ctx) = project_ctx().await;
     let a_out: String = (1..=3000).map(|i| format!("{i} a'b\"c#d|e;f\n")).collect();
@@ -10745,10 +10886,12 @@ async fn the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the
         }
         wrapped_rows += 1;
         nonempty += usize::from(!own.is_empty());
-        let wrapped = shell_truth(
-            dir.path(),
-            &format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000"),
-            &subs,
+        let route = format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000");
+        let wrapped = shell_truth(dir.path(), &route, &subs);
+        let outer = shell_stderr(dir.path(), &route, &subs);
+        assert!(
+            outer.is_empty(),
+            "{template:?}: the wrapped route is not valid sh here: {outer:.200}"
         );
         assert!(
             same_stream(&wrapped, &cut_4000(&own)),
@@ -10771,17 +10914,26 @@ async fn the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the
 #[cfg(unix)]
 #[tokio::test]
 async fn a_shape_the_wrap_cannot_take_gets_the_narrow_advice_not_a_route() {
-    // A list, a comment, a heredoc, `$(…)`: wrapped, the `; }` would close the wrong thing or be
-    // swallowed. The marker says to narrow the query, and names no route.
+    // A list, a comment, a heredoc: wrapped, the `; }` would close the wrong thing or be swallowed.
+    // The marker says to narrow the query, and names no route. (`$(…)` is refused by the same
+    // predicate, `can_wrap_query`'s unit test says so, but no marker reaches it: a word that starts
+    // with `$` reads as a path, so such a query is not a buffer query and its stderr is not cut.)
     let (_dir, ctx) = project_ctx().await;
     let a = ctx
         .output_buffer
         .store("seq".into(), seq_lines(10), String::new(), 0);
+    let big = ctx.output_buffer.store(
+        "gen".into(),
+        format!("{}\n", "e".repeat(3_000)),
+        String::new(),
+        0,
+    );
     let noisy = "printf '%3000s\\n' | tr ' ' e >&2";
     for query in [
         format!("grep -c 1 {a}; {noisy}"),
         format!("grep -c 1 {a} && {noisy}"),
         format!("{noisy} # {a}"),
+        format!("cat {big} >&2 <<EOF\nx\nEOF"),
     ] {
         let (text, parsed) = buffer_query(&ctx, query.clone()).await;
         let stderr = parsed["stderr"].as_str().unwrap_or_default();

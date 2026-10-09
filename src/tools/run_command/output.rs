@@ -539,7 +539,7 @@ fn bound_buffer_stderr(
     own: bool,
 ) -> (String, usize, usize) {
     let (by_lines, shown, total) = crate::tools::command_summary::truncate_lines(stderr, max_lines);
-    let remedy = if own && can_wrap_query(query, OWN_STDERR_STAGE) {
+    let remedy = if own && can_wrap_query(query) {
         // WRAPPED, not appended: a redirection applies to the LAST command of a pipeline only, so
         // `a | b >&2 | c 2>&1 >/dev/null | cut` read `c`'s stderr and left `b`'s on the terminal. A
         // brace group gives every stage the same stderr, and `{ q; } 2>&1 >/dev/null` is right for
@@ -621,17 +621,21 @@ fn can_append_stage(query: &str, stage: &str) -> bool {
         && crate::util::path_security::detect_il3_violation(&format!("{query} {stage}")).is_none()
 }
 
-/// Whether `query` wrapped in a brace group and followed by `stage` (`{ query; } stage`) gives
-/// `stage` ALL of the query's stderr AND would be run. [`can_append_stage`] asks the same of a stage
-/// that reads stdout, where "last command" is right: a pipeline's stdout IS its last command's. A
-/// pipeline's stderr is every stage's, and only a group can redirect them together. The wrapping
-/// needs no model of how many stages there are, and the same two questions guard it: the query is
-/// one pipeline (so the `; }` closes it and nothing else), and the IL3 gate does not refuse the
-/// joined command.
-fn can_wrap_query(query: &str, stage: &str) -> bool {
+/// Whether `query` can be wrapped in a brace group, `{ query; } 2>&1 >/dev/null | cut -c1-4000`, to
+/// read ALL of its stderr. [`can_append_stage`] asks the same of a stage that reads stdout, where
+/// "last command" is right: a pipeline's stdout IS its last command's. A pipeline's stderr is every
+/// stage's, and only a group can redirect them together. The wrapping needs no model of how many
+/// stages there are; it needs the query to be one pipeline, so that the `; }` closes it and nothing
+/// else.
+///
+/// No IL-3 question is asked, unlike [`can_append_stage`], and that is on purpose: the query already
+/// passed the gate when it ran, and the wrap adds only `} 2>&1 >/dev/null | cut -c1-4000`, whose last
+/// stage `cut` is a field selector the gate never counts as a trimmer. (The group also hides an
+/// unbounded producer from the gate's segment scan, so a verdict on the wrapped text would say
+/// nothing the query's own run had not already said.) If the stage ever becomes a trimmer, this is
+/// the place that needs the question back.
+fn can_wrap_query(query: &str) -> bool {
     crate::util::path_security::is_one_pipeline(query)
-        && crate::util::path_security::detect_il3_violation(&format!("{{ {query}; }} {stage}"))
-            .is_none()
 }
 
 /// The stage a non-slice query appends to read a window of a wide line.
@@ -729,8 +733,9 @@ fn full_page_hint(query: &str, lines: usize) -> Option<String> {
 /// trailing pager reads the query's own output, whose length is stored nowhere, and has to say
 /// "may print more".
 ///
-/// Only the hint's own page width counts: a caller's `sed -n '101,150p'` is a window of the
-/// caller's choosing, and answering it with a next page would be advice nobody asked for.
+/// Only a window of the hint's own page width counts. A caller's own `sed -n '1,100p'` has that
+/// width too and gets the hint; a caller's `sed -n '101,150p'` is a window of their choosing, and
+/// answering it with a next page would be advice nobody asked for.
 fn next_window_hint(
     query: &str,
     lines: usize,
@@ -1950,7 +1955,9 @@ mod tests {
     /// Why the room for a cut `stdout` need not price a full window's hint (it does anyway, as a
     /// guard): the gate measures `{exit_code, stdout, hint}` and the cut skeleton holds those plus
     /// `truncated`, `stdout_shown` and `stdout_total`, so a window the gate calls too big is cut
-    /// whenever the full hint is no longer than the widest cut hint plus those three keys.
+    /// whenever the full hint is no longer than the widest cut hint plus those three keys. The cut
+    /// hint is built with the inputs `room_for(false)` gives it for an uncut full window: no stderr
+    /// note and no clipped-line sentence (either would only add slack).
     #[test]
     fn a_full_window_hint_never_outgrows_the_keys_a_cut_response_adds() {
         for handle in [
@@ -1965,7 +1972,7 @@ mod tests {
                 let full = next_window_hint(&query, 100, |_| Some(total)).expect("a line is left");
                 let widest_cut = [99usize, 100]
                     .into_iter()
-                    .map(|shown| truncation_hint(&query, shown, 100, ", stderr 20/20", true, true))
+                    .map(|shown| truncation_hint(&query, shown, 100, "", false, true))
                     .max_by_key(String::len)
                     .unwrap();
                 let gate = json!({ "exit_code": 0, "stdout": "", "hint": full }).to_string();
@@ -1988,30 +1995,25 @@ mod tests {
         }
     }
 
-    /// The route an own-stderr marker advises is judged by the gate as the caller will type it, the
-    /// brace group included: `{ q; } stage`. The group hides an unbounded producer from the gate's
-    /// segment scan (measured: `git log | cat - @X | head -3` is refused joined and accepted
-    /// wrapped), so a verdict on the JOINED text is a verdict on text nobody runs.
+    /// What `can_wrap_query` decides: the query is one pipeline, so `{ query; }` closes it and
+    /// nothing else. A list, a comment, a heredoc and a `$(…)` are not. (It asks the IL-3 gate
+    /// nothing; see its doc comment for why that is sound for the `| cut` stage.)
     #[test]
-    fn can_wrap_query_asks_the_gate_about_the_text_it_advises() {
-        assert!(can_wrap_query(
-            "grep -c a @cmd_abc12345 | cat",
-            OWN_STDERR_STAGE
-        ));
-        assert!(!can_wrap_query(
-            "grep -c a @cmd_abc12345; cat @cmd_abc12345",
-            OWN_STDERR_STAGE
-        ));
-        let (q, stage) = ("git log | cat - @cmd_abc12345", "| head -3");
-        assert!(
-            crate::util::path_security::detect_il3_violation(&format!("{q} {stage}")).is_some(),
-            "the premise: refused joined"
-        );
-        assert_eq!(
-            can_wrap_query(q, stage),
-            crate::util::path_security::detect_il3_violation(&format!("{{ {q}; }} {stage}"))
-                .is_none()
-        );
+    fn can_wrap_query_decides_whether_the_query_is_one_pipeline() {
+        for (q, want) in [
+            ("grep -c a @cmd_abc12345", true),
+            ("grep -c a @cmd_abc12345 | cat", true),
+            ("cat @cmd_abc12345 >&2 | tr a b | cat", true),
+            ("! cat @cmd_abc12345 >&2", true),
+            ("grep -c a @cmd_abc12345; cat @cmd_abc12345", false),
+            ("grep -c a @cmd_abc12345 && cat @cmd_abc12345", false),
+            ("grep -c a @cmd_abc12345 # note", false),
+            ("cat @cmd_abc12345 <<EOF\nx\nEOF", false),
+            ("echo $(cat @cmd_abc12345)", false),
+            ("grep -c a @cmd_abc12345\n", false),
+        ] {
+            assert_eq!(can_wrap_query(q), want, "{q:?}");
+        }
     }
 
     /// A non-slice query is paged by appending to it, numbered from 1, and never by a `sed` on the
