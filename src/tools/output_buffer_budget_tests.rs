@@ -174,7 +174,9 @@ fn demotion_takes_the_least_recently_used_file_first() {
 }
 
 /// Fix 1 (review probe RP2): a path read of an unchanged demoted file must not evict a command
-/// to hold text that is already on disk. The file stays demoted and both commands survive.
+/// to hold text that is already on disk. The file stays demoted and both commands survive. And
+/// (review F3) a file that cannot fit even with every other file demoted demotes none of them:
+/// the small resident file `g` keeps its text.
 #[test]
 fn a_path_read_of_a_demoted_file_never_evicts_a_command() {
     let dir = tempfile::tempdir().unwrap();
@@ -183,12 +185,16 @@ fn a_path_read_of_a_demoted_file_never_evicts_a_command() {
     let f = read_into(&buf, &p);
     let (c1, c2) = squeeze(&buf, "c");
     assert!(buf.is_demoted(&f));
+    let g = read_into(&buf, &write(dir.path(), "g", &numbered("g", 40_000), 100));
+    assert!(!buf.is_demoted(&g));
 
     assert_eq!(read_into(&buf, &p), f);
     buf.assert_accounting();
     assert!(buf.is_demoted(&f), "no room without evicting a command");
     assert_eq!(buf.bytes_of(&c1), Some(500_000), "the command survives");
     assert_eq!(buf.bytes_of(&c2), Some(500_000));
+    assert!(!buf.is_demoted(&g), "the other file stays resident");
+    assert_eq!(buf.bytes_of(&g), Some(40_000));
 }
 
 /// Fix 1 (review probe RP1): a NEW file read into a pool full of commands is minted demoted;
@@ -899,4 +905,306 @@ fn a_cut_keeps_whole_lines_and_counts_the_whole_capture() {
         .filter(|l| l.starts_with(TRUNCATION_SENTINEL_PREFIX))
         .count();
     assert_eq!(markers, 1);
+}
+
+/// A disk hook that holds the FIRST pass of a read at the disk until released, and lets every
+/// later pass through. Returns the hook, the signal that the first pass arrived, and the release.
+#[allow(clippy::type_complexity)]
+fn hold_first_pass() -> (
+    Arc<dyn Fn() + Send + Sync>,
+    mpsc::Receiver<()>,
+    mpsc::Sender<()>,
+) {
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let entered_tx = std::sync::Mutex::new(entered_tx);
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let hook = Arc::new(move || {
+        if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let _ = entered_tx.lock().unwrap().send(());
+            let _ = release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(30));
+        }
+    });
+    (hook, entered_rx, release_tx)
+}
+
+/// Review F1: after reading the disk, `resolve` applies what it read only if the entry's WHOLE
+/// state (stamp, demoted, hash) is as it saw it, not merely still present. A handle read that saw
+/// the entry demoted is held at the disk; a path read makes the entry resident with v1; the file
+/// is rewritten to v2 under the SAME mtime; the held read goes on. Applied, it would record v2's
+/// hash on an entry that holds v1, so the next path read of v2 would compare equal and store
+/// nothing, and the handle would serve v1 for good.
+#[test]
+fn a_read_held_at_the_disk_applies_nothing_once_a_path_read_changed_the_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v1 = numbered("v1", 400_000);
+    let p = write(dir.path(), "f", &v1, 100);
+    let f = read_into(&buf, &p);
+    read_into(&buf, &write(dir.path(), "g", &numbered("g", 400_000), 100));
+    read_into(&buf, &write(dir.path(), "h", &numbered("h", 400_000), 100));
+    assert!(buf.is_demoted(&f), "f was the least recently used file");
+
+    let (hook, entered, release) = hold_first_pass();
+    buf.set_disk_hook(Some(hook));
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read reached the disk");
+    assert_eq!(read_into(&buf, &p), f);
+    assert!(!buf.is_demoted(&f), "the path read made f resident with v1");
+    let mtime = filetime::FileTime::from_last_modification_time(&std::fs::metadata(&p).unwrap());
+    let v2 = numbered("v2", 400_000);
+    std::fs::write(&p, &v2).unwrap();
+    filetime::set_file_mtime(&p, mtime).unwrap();
+    release.send(()).unwrap();
+    assert!(reader.join().unwrap().is_some(), "the handle stays live");
+    buf.set_disk_hook(None);
+
+    assert_eq!(read_into(&buf, &p), f);
+    assert_eq!(
+        buf.get(&f).unwrap().stdout,
+        v2,
+        "after a path read of v2 the handle serves v2"
+    );
+    buf.assert_accounting();
+}
+
+/// Review F2(a): parallel reads of a demoted file whose mtime is in the FUTURE. Each read stamps
+/// the entry with the clock, so every read moved the stamp under the others, and each of them
+/// started over with nothing changed on disk (probe: 8 reads made 36 disk passes, 1+2+...+8).
+/// A read whose text has the hash the entry holds, where only the stamp moved forward, applies.
+/// All eight readers see the entry before any applies (a barrier at the disk), so the bound is
+/// exact: each read reads the file ONCE, 8 passes in all.
+#[test]
+fn parallel_reads_of_a_future_mtime_file_read_it_once_each() {
+    const READERS: usize = 8;
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let text = numbered("big", 600_000);
+    let p = dir.path().join("big");
+    std::fs::write(&p, &text).unwrap();
+    let future = SystemTime::now() + Duration::from_secs(3600);
+    filetime::set_file_mtime(&p, filetime::FileTime::from_system_time(future)).unwrap();
+    let f = read_into(&buf, &p);
+    assert!(buf.is_demoted(&f), "bigger than one entry's share");
+    // The stamp is the clock at the store. Let the clock pass it, so the first read to apply
+    // moves the stamp under the others.
+    let stamp = buf.inner.lock().unwrap().entries[&f].timestamp;
+    while now_ms() <= stamp {
+        std::thread::yield_now();
+    }
+
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let barrier = Arc::new(std::sync::Barrier::new(READERS));
+    {
+        let passes = passes.clone();
+        buf.set_disk_hook(Some(Arc::new(move || {
+            if passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < READERS {
+                barrier.wait();
+            }
+        })));
+    }
+    let readers: Vec<_> = (0..READERS)
+        .map(|_| {
+            let buf = buf.clone();
+            let f = f.clone();
+            std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+        })
+        .collect();
+    for r in readers {
+        assert_eq!(r.join().unwrap().as_deref(), Some(text.as_str()));
+    }
+    buf.set_disk_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        READERS,
+        "each read reads the file once"
+    );
+    buf.assert_accounting();
+}
+
+/// Review F2(b): a read that loses the race on every pass (the entry changes while it reads the
+/// disk) stops after `RESOLVE_READS` disk reads and serves the text it read last, WITHOUT storing
+/// it (probe: a writer every ~9 ms against 4 readers made one call take 100 passes). Here a hook
+/// stores v{n} by a path read and rewrites the file to w{n} on each of the first ten passes.
+#[test]
+fn a_read_that_keeps_losing_the_race_stops_at_the_cap_and_stores_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let p = write(dir.path(), "f", &numbered("v0", 100_000), 1_000);
+    let f = read_into(&buf, &p);
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let v = |n: usize| numbered(&format!("v{n}"), 100_000 + n);
+    let w = |n: usize| numbered(&format!("w{n}"), 110_000 + n);
+    {
+        let passes = passes.clone();
+        let buf2 = buf.clone();
+        let dir = dir.path().to_path_buf();
+        let p = p.clone();
+        buf.set_disk_hook(Some(Arc::new(move || {
+            let n = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            if n > 10 {
+                return;
+            }
+            let vn = write(&dir, "f", &v(n), 1_000 - 2 * n as u64);
+            buf2.store_file_read(&vn.to_string_lossy(), &v(n), file_mtime_ms(&p));
+            write(&dir, "f", &w(n), 1_000 - 2 * n as u64 - 1);
+        })));
+    }
+    let served = buf.get(&f).unwrap().stdout;
+    buf.set_disk_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        RESOLVE_READS,
+        "the read stops at the cap"
+    );
+    assert_eq!(served, w(RESOLVE_READS), "it serves the text it read last");
+    assert_eq!(
+        buf.bytes_of(&f),
+        Some(v(RESOLVE_READS).len()),
+        "and stores none of it: the entry keeps the path read's text"
+    );
+    assert_eq!(
+        buf.get(&f).unwrap().stdout,
+        w(RESOLVE_READS),
+        "the next read follows the file"
+    );
+    buf.assert_accounting();
+}
+
+/// Review F3: a new file that cannot fit even with every other file demoted demotes nothing. The
+/// pool holds two commands and a small resident file; the new file is minted demoted and the
+/// small file keeps its text (it was demoted for nothing, and each later read of it cost a full
+/// disk read and hash).
+#[test]
+fn a_file_that_cannot_fit_demotes_no_other_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let (c1, c2) = squeeze(&buf, "c");
+    let g = read_into(&buf, &write(dir.path(), "g", &numbered("g", 40_000), 100));
+    assert!(!buf.is_demoted(&g));
+    let f = read_into(&buf, &write(dir.path(), "f", &numbered("f", 300_000), 100));
+    buf.assert_accounting();
+    assert!(buf.is_demoted(&f), "no room even with g demoted");
+    assert!(!buf.is_demoted(&g), "so g keeps its text");
+    assert_eq!(buf.bytes_of(&g), Some(40_000));
+    assert_eq!(buf.bytes_of(&c1), Some(500_000));
+    assert_eq!(buf.bytes_of(&c2), Some(500_000));
+}
+
+/// Review F4: a path read of a file bigger than one entry's share copies none of its text: it
+/// can never be kept, so the copy (made under the pool's lock) was waste. A file that fits, read
+/// back into its demoted entry, is copied once, so the counter is live.
+#[test]
+fn a_path_read_of_an_oversized_file_copies_no_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let p = write(dir.path(), "big", &numbered("big", 1_500_000), 100);
+    let f = read_into(&buf, &p);
+    assert!(buf.is_demoted(&f));
+    assert_eq!(read_into(&buf, &p), f, "unchanged");
+    write(dir.path(), "big", &numbered("bog", 1_400_000), 90);
+    assert_eq!(read_into(&buf, &p), f, "changed");
+    assert!(buf.is_demoted(&f));
+    assert_eq!(
+        buf.retained_copies(),
+        0,
+        "no copy of text that cannot be kept"
+    );
+    buf.assert_accounting();
+
+    let q = write(dir.path(), "small", &numbered("s", 100_000), 100);
+    let s = read_into(&buf, &q);
+    OutputBuffer::demote_locked(&mut buf.inner.lock().unwrap(), &s);
+    assert!(buf.is_demoted(&s));
+    assert_eq!(read_into(&buf, &q), s);
+    assert!(!buf.is_demoted(&s), "the text returned to its entry");
+    assert_eq!(buf.retained_copies(), 1, "copied once");
+    buf.assert_accounting();
+}
+
+/// Review F6(a): an entry that finds no room (only accounting drift or a caller bug can do that)
+/// keeps no text, and BOTH streams record the cut, so a `.err` read is never silently empty.
+#[test]
+fn an_entry_stored_without_its_text_records_both_cuts() {
+    let buf = pool();
+    let entry = BufferEntry {
+        command: "x".into(),
+        stdout: "o\n".repeat(LIMIT),
+        stderr: "e\n".repeat(3),
+        exit_code: 1,
+        timestamp: 0,
+        source_path: None,
+        content_hash: None,
+        truncated: None,
+        stderr_truncated: None,
+        text_hash: None,
+        demoted: false,
+    };
+    let kept = {
+        let mut inner = buf.inner.lock().unwrap();
+        OutputBuffer::admit_locked(&mut inner, LIMIT, "@cmd_00000001".into(), entry)
+    };
+    buf.assert_accounting();
+    let none = Truncation {
+        kept_lines: 0,
+        total_lines: LIMIT,
+    };
+    assert_eq!(kept, Some(none), "admit returns the record it kept");
+    assert_eq!(buf.stored_truncation("@cmd_00000001"), Some(none));
+    let notice = buf
+        .truncation_notice("@cmd_00000001.err")
+        .expect("the .err cut is recorded");
+    assert!(notice.contains("0 of 3 lines kept"), "{notice}");
+}
+
+/// Review F6(b), pinned rather than changed: the `call_content` envelope says `json_path` cannot
+/// read a result whose compact JSON is over one entry's share. That is true of both shapes such a
+/// result can be stored in. Pretty-printing only adds bytes, so a line form that fits the share
+/// must have shrunk by collapsing `\n` escapes into raw newlines, which no JSON string may hold;
+/// one with no `\n` escapes is at least as long as the compact form and is cut.
+#[test]
+fn a_tool_result_over_the_share_is_never_stored_as_json() {
+    let buf = pool();
+    let cases = [
+        serde_json::json!({ "v": "\n".repeat(300_000) }),
+        serde_json::json!({ "v": "x".repeat(SHARE) }),
+        serde_json::json!("x".repeat(SHARE)),
+        serde_json::json!({ "rows": (0..70_000).map(|i| format!("r{i}")).collect::<Vec<_>>() }),
+    ];
+    for v in cases {
+        let json = v.to_string();
+        assert!(json.len() > SHARE);
+        let id = buf.store_tool("probe", json);
+        let held = buf.get(&id).unwrap().stdout;
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&held).is_err(),
+            "{id} holds JSON, so json_path could read it: {:.80}",
+            held
+        );
+    }
+}
+
+/// Review F6(c): a store hands its caller the cut it KEPT, from its own lock hold. Looked up
+/// afterwards, the record was gone once another store evicted the handle, and the tee capture
+/// then reported no cut for a handle that was cut.
+#[test]
+fn a_store_returns_the_cut_it_kept_even_once_the_handle_is_gone() {
+    let buf = OutputBuffer::with_byte_limit(1, LIMIT);
+    let (id, kept) =
+        buf.store_truncated_kept("x".into(), numbered("x", LIMIT), String::new(), 0, None);
+    let t = kept.expect("the store cut an entry over its share");
+    assert_eq!(buf.stored_truncation(&id), Some(t));
+    buf.store("y".into(), "y\n".into(), String::new(), 0);
+    assert_eq!(buf.bytes_of(&id), None, "the count cap evicted it");
+    assert!(t.kept_lines < t.total_lines, "{t:?}");
 }

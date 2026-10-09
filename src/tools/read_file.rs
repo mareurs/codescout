@@ -307,10 +307,7 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
     let raw = ctx.output_buffer.get_stream(path).ok_or_else(|| {
         RecoverableError::with_hint(
             format!("buffer reference not found: '{}'", path),
-            format!(
-                "{} Re-run the command to get a fresh ref.",
-                crate::tools::output_buffer::REF_GONE
-            ),
+            crate::tools::output_buffer::ref_gone_hint(path),
         )
     })?;
 

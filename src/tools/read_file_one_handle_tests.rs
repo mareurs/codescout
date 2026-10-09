@@ -1185,3 +1185,60 @@ async fn twelve_range_reads_of_large_files_stay_within_the_byte_limit() {
     );
     buf.assert_accounting();
 }
+
+/// The guidance of a "buffer reference not found" refusal of a `read_file` of `handle`.
+async fn ref_gone_guidance(ctx: &crate::tools::ToolContext, handle: &str) -> String {
+    let err = ReadFile
+        .call(json!({ "path": handle }), ctx)
+        .await
+        .unwrap_err();
+    let rec = err.downcast_ref::<RecoverableError>().expect("recoverable");
+    assert!(
+        rec.message.starts_with("buffer reference not found"),
+        "{}",
+        rec.message
+    );
+    rec.guidance
+        .as_ref()
+        .map(|g| g.text().to_string())
+        .unwrap_or_default()
+}
+
+/// Review F5: a `@file_*` handle whose file was deleted is dropped by its next read. The refusal
+/// names that cause and the way back, reading the file again, where it named only the session
+/// and the byte limit and said to re-run a command.
+#[tokio::test]
+async fn a_deleted_files_handle_is_refused_naming_the_cause_and_a_read_route() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
+    let ctx = ctx_sharing(Agent::new(None).await.unwrap(), buf.clone());
+    let p = dir.path().join("gone.txt");
+    std::fs::write(&p, "one\ntwo\n").unwrap();
+    let handle = buf.store_file_read(
+        &p.to_string_lossy(),
+        "one\ntwo\n",
+        crate::tools::output_buffer::file_mtime_ms(&p),
+    );
+    std::fs::remove_file(&p).unwrap();
+    let g = ref_gone_guidance(&ctx, &handle).await;
+    assert!(g.contains("its file is deleted"), "the cause: {g}");
+    assert!(
+        g.contains("Read the file again with read_file") && !g.contains("Re-run the command"),
+        "the route: {g}"
+    );
+    assert!(buf.handles().is_empty(), "the handle was dropped");
+}
+
+/// Review F5: the handle-count cap drops the least recently used handle whatever its bytes; the
+/// refusal names that cause, and for a command's handle the route is to re-run it.
+#[tokio::test]
+async fn a_handle_dropped_by_the_count_cap_is_refused_naming_the_cap() {
+    let buf = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(2));
+    let ctx = ctx_sharing(Agent::new(None).await.unwrap(), buf.clone());
+    let first = buf.store("a".into(), "a\n".into(), String::new(), 0);
+    buf.store("b".into(), "b\n".into(), String::new(), 0);
+    buf.store("c".into(), "c\n".into(), String::new(), 0);
+    let g = ref_gone_guidance(&ctx, &first).await;
+    assert!(g.contains("maximum number of handles"), "the cause: {g}");
+    assert!(g.contains("Re-run the command"), "the route: {g}");
+}
