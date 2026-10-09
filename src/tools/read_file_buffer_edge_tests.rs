@@ -628,15 +628,15 @@ async fn a_json_path_or_toml_key_read_of_a_real_file_keeps_one_handle() {
     assert!(paged > 0, "no read took the paged arm");
 }
 
-/// `siblings` of a `toml_key` read is capped in count upstream but not in width. A read whose
-/// page would be over the limit with about 12 KB of sibling names beside it drops them,
+/// `siblings` of a `toml_key` read has no cap, in count or in width. A read whose
+/// page would be over the limit with about 16 KB of sibling names beside it drops them,
 /// marked `siblings_omitted`, so the page is not buffered again under `@tool_*`.
 #[tokio::test]
 async fn a_toml_key_read_with_many_siblings_drops_them_from_the_page() {
     let ctx = ctx().await;
     let dir = tempfile::tempdir().unwrap();
-    // Siblings are capped in count upstream (about 30), not in width: 40 tables with 400-byte
-    // names put about 12 KB of them beside the value.
+    // Siblings are not capped, in count or in width: 40 tables with 400-byte
+    // names put about 16 KB of them beside the value.
     let siblings: String = (0..40)
         .map(|i| format!("[key_{i:04}{}]\nx = 1\n", "n".repeat(400)))
         .collect();
@@ -669,7 +669,7 @@ async fn a_toml_key_read_whose_siblings_fit_alone_but_not_beside_the_page_drops_
     // Over the limit alone, so the read is paged, where `siblings` is droppable.
     let value = "a".repeat(12_000);
     let mut in_window = 0;
-    for w in 250..=400 {
+    for w in 200..=300 {
         let siblings: String = (0..40)
             .map(|i| format!("[s{i:02}{}]\nx = 1\n", "n".repeat(w)))
             .collect();

@@ -1966,16 +1966,18 @@ fn toml_key_of_a_table_lists_the_other_sections_as_siblings() {
 }
 
 #[test]
-fn toml_key_siblings_are_in_file_order_capped_and_never_the_keys_own_headers() {
-    // `[z]` is written first and sorts last; 40 more sections follow `[k]`.
+fn toml_key_siblings_are_in_file_order_uncapped_and_never_the_keys_own_headers() {
+    // `[z]` is written first and sorts last; 40 more sections follow `[k]`. The list is not cut
+    // at a count (`read_file` drops it by width, marked): every other header is in it, once.
     let mut content = String::from("[z]\nx = 1\n[k]\nv = 1\n[k.sub]\nw = 1\n");
     for i in 0..40 {
         content.push_str(&format!("[s{i:02}]\nx = 1\n"));
     }
     let r = extract_toml_key(&content, "k").unwrap();
-    assert_eq!(r.siblings.len(), 30);
+    assert_eq!(r.siblings.len(), 41);
     assert_eq!(r.siblings[0], "[z]");
     assert_eq!(r.siblings[1], "[s00]");
+    assert_eq!(r.siblings[40], "[s39]");
     assert!(
         !r.siblings.iter().any(|s| s == "[k]" || s == "[k.sub]"),
         "{:?}",

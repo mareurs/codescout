@@ -1686,10 +1686,6 @@ fn toml_source_lines(
     Some((text, (first, last)))
 }
 
-/// The most sections [`extract_toml_key`] lists as `siblings` (the cap the section summary
-/// puts on its own list, which this list used to be taken from).
-const TOML_KEY_SIBLINGS_CAP: usize = 30;
-
 /// The text of a TOML `key` as it is WRITTEN in `content`, and the lines it was taken from.
 ///
 /// `key` is a dotted path (`a.b`, split at every `.`: a quoted key that contains a dot cannot be
@@ -1710,7 +1706,8 @@ const TOML_KEY_SIBLINGS_CAP: usize = 30;
 ///   (1-based, inclusive). It is never the file's range.
 ///
 /// A header-written key lists the other sections of the file as `siblings` (in file order, each
-/// header once, at most [`TOML_KEY_SIBLINGS_CAP`]); any other key lists none.
+/// header once); any other key lists none. The list has no count cap, as the YAML one has none:
+/// `read_file` drops it by width, marked `siblings_omitted`, when it does not fit beside the value.
 pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, RecoverableError> {
     let parsed = DeTable::parse(content).map_err(|e| {
         RecoverableError::with_hint(
@@ -1794,13 +1791,11 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
             })
             .collect();
         headers.sort_by_key(|r| r.start);
+        let mut seen = std::collections::HashSet::new();
         for r in headers {
-            if siblings.len() >= TOML_KEY_SIBLINGS_CAP {
-                break;
-            }
-            let header = content[r.clone()].to_string();
-            if !own_headers.contains(&r.start) && !siblings.contains(&header) {
-                siblings.push(header);
+            let header = &content[r.clone()];
+            if !own_headers.contains(&r.start) && seen.insert(header) {
+                siblings.push(header.to_string());
             }
         }
     }
