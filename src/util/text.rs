@@ -695,6 +695,39 @@ pub(crate) fn json_escaped_len(s: &str) -> usize {
         })
         .sum()
 }
+/// `s` as a JSON string literal, quotes included: the form a path (or a key) takes inside a
+/// `read_file("…", …)` route, which a caller copies and parses as JSON arguments. A `"` or `\` in a
+/// raw path ends the string early or starts an escape; this writes them `\"` and `\\`, and a
+/// control character as `\n`, `\u0001`, and so on. Non-ASCII text stays as it is.
+///
+/// The escaping is `serde_json`'s, the same as [`json_escaped_len`] counts, and a string always
+/// serializes, so there is no error to hide behind a raw fallback.
+pub(crate) fn json_quote(s: &str) -> String {
+    serde_json::to_string(s).expect("a str serializes as a JSON string")
+}
+
+/// `s` as ONE POSIX shell word, or `None` when no one-line command can carry it.
+///
+/// A word of only `[A-Za-z0-9_@%+=:,./-]` is left as it is. Anything else is single-quoted, with
+/// each `'` written `'\''`: inside single quotes the shell reads every byte as itself, so a space,
+/// `"`, `\`, `$`, a backtick, `*`, `~` and non-ASCII text arrive intact, in `dash` as in `bash`.
+/// Only POSIX `sh` syntax is used. A line break, a carriage return or a NUL is refused: a
+/// command with one is not one line, and a tool that must name a route names none instead of a
+/// broken one. The quoted word is meant for an ARGUMENT position; a leading `-` is the caller's
+/// to guard (`./` before the word), because it is the command's option parser that reads it.
+pub(crate) fn shell_quote(s: &str) -> Option<String> {
+    if s.contains(['\n', '\r', '\0']) {
+        return None;
+    }
+    if s.is_empty() {
+        return Some("''".to_string());
+    }
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+    if s.chars().all(plain) {
+        return Some(s.to_string());
+    }
+    Some(format!("'{}'", s.replace('\'', r"'\''")))
+}
 
 /// Shared walk behind the two budgeted extractors — they differ only in what a
 /// line is charged.
@@ -898,6 +931,157 @@ mod tests {
     fn truncate_short_unchanged() {
         assert_eq!(truncate("hello", 10), "hello");
     }
+    // -- json_quote / shell_quote: a path inside a route a caller copies and runs --
+
+    /// Names a path can carry that break a route written raw: a space, `"`, `'`, `\`, `$`, a backtick,
+    /// glob and operator characters, a leading `-`, a tab, a line break, and non-ASCII text.
+    const AWKWARD: [&str; 19] = [
+        "sp ace",
+        "q\"uote",
+        "it's",
+        "back\\slash",
+        "dollar $HOME $(echo pwned) ${x}",
+        "back`tick`",
+        "ünï€😀 日本",
+        "glob *?[a]",
+        "semi;amp&pipe|gt>lt<",
+        "-dash",
+        "~tilde",
+        "~",
+        "tab\there",
+        "#hash !bang %pct =eq",
+        "a\"b\\c 'd' $e `f` ü",
+        "''",
+        "{a,b}",
+        "x{1..3}y",
+        "line\nbreak",
+    ];
+
+    #[test]
+    fn json_quote_parses_back_to_the_exact_name_with_a_real_json_parser() {
+        for name in AWKWARD {
+            let q = json_quote(name);
+            assert!(
+                q.starts_with('"') && q.ends_with('"') && !q.contains('\n'),
+                "{name:?}: not one quoted line: {q}"
+            );
+            let back: String = serde_json::from_str(&q)
+                .unwrap_or_else(|e| panic!("{name:?}: {q} is not a JSON string: {e}"));
+            assert_eq!(back, name, "{name:?} did not round-trip through {q}");
+        }
+        // Exact bytes for the two characters that end a string or start an escape: the parser
+        // above would accept a lenient reading of either, so pin them.
+        assert_eq!(json_quote("a\"b\\c"), r#""a\"b\\c""#);
+        assert_eq!(json_quote("x\ny"), r#""x\ny""#);
+    }
+
+    /// Run `script` under `sh -c` (and under `dash` when this machine has it: Ubuntu CI's
+    /// `/bin/sh` is dash, and a quoting that only `bash` reads right would pass here and fail
+    /// there). Returns `(shell, stdout)` per shell that ran.
+    #[cfg(unix)]
+    fn run_in_shells(script: &str) -> Vec<(&'static str, Vec<u8>)> {
+        let mut ran = Vec::new();
+        for shell in ["sh", "dash"] {
+            let out = match std::process::Command::new(shell)
+                .arg("-c")
+                .arg(script)
+                .output()
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("shell {shell} not run: {e}");
+                    continue;
+                }
+            };
+            assert!(
+                out.status.success(),
+                "{shell} -c {script:?} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            ran.push((shell, out.stdout));
+        }
+        assert!(!ran.is_empty(), "no POSIX shell ran");
+        ran
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn shell_quote_makes_one_word_that_the_shell_reads_back_byte_for_byte() {
+        for name in AWKWARD.into_iter().filter(|n| !n.contains('\n')) {
+            let quoted = shell_quote(name).unwrap_or_else(|| panic!("{name:?} refused"));
+            // `$#` is the number of words, `$1` the first: one word, equal to the name.
+            let script = format!("set -- {quoted}; printf '%s' \"$#:$1\"");
+            for (shell, out) in run_in_shells(&script) {
+                assert_eq!(
+                    out,
+                    format!("1:{name}").into_bytes(),
+                    "{shell}: {name:?} quoted as {quoted} is not one word equal to the name"
+                );
+            }
+        }
+    }
+    /// The set of characters `shell_quote` leaves bare is the one place a widening is silent: a name
+    /// made only of the added character reads back right when the shell has no use for it, and
+    /// wrongly when it does. So every printable ASCII character is read back, alone, doubled and
+    /// inside a word, by one shell process per shell.
+    #[test]
+    #[cfg(unix)]
+    fn shell_quote_reads_back_every_printable_ascii_character_alone_and_inside_a_word() {
+        let mut names = Vec::new();
+        for b in (0x20u8..0x7f).chain([b'\t', 0x1b]) {
+            let c = b as char;
+            names.push(c.to_string());
+            names.push(format!("{c}{c}"));
+            names.push(format!("x{c}y"));
+        }
+        let script: String = names
+            .iter()
+            .map(|n| {
+                format!(
+                    "set -- {}; printf '%s\\n' \"$#:$1\"\n",
+                    shell_quote(n).unwrap()
+                )
+            })
+            .collect();
+        let want: String = names.iter().map(|n| format!("1:{n}\n")).collect();
+        for (shell, out) in run_in_shells(&script) {
+            let got = String::from_utf8(out).unwrap();
+            for (g, w) in got.lines().zip(want.lines()) {
+                assert_eq!(g, w, "{shell}");
+            }
+            assert_eq!(got, want, "{shell}");
+        }
+    }
+
+    #[test]
+    fn shell_quote_names_no_word_for_a_line_break_a_carriage_return_or_a_nul() {
+        for name in ["a\nb", "\n", "a\r", "a\0b", "trailing\n"] {
+            assert_eq!(shell_quote(name), None, "{name:?}");
+        }
+        // Control: a tab is one line and is quoted, not refused.
+        assert!(shell_quote("a\tb").is_some());
+    }
+
+    #[test]
+    fn shell_quote_leaves_a_plain_word_and_a_buffer_ref_as_they_are() {
+        for plain in [
+            "@cmd_0123abcd",
+            "@cmd_0123abcd.err",
+            "@file_89abcdef",
+            "src/util/text.rs",
+            "/tmp/a-b_c.d/e+f=g,h:i%j@k",
+        ] {
+            assert_eq!(shell_quote(plain).as_deref(), Some(plain), "{plain}");
+        }
+        assert_eq!(shell_quote("").as_deref(), Some("''"));
+        assert_eq!(shell_quote("a b").as_deref(), Some("'a b'"));
+        assert_eq!(shell_quote("it's").as_deref(), Some(r"'it'\''s'"));
+        assert_eq!(shell_quote("$x").as_deref(), Some("'$x'"));
+        // Brace expansion (`{a,b}`, `{1..3}`) happens in bash and zsh, so a brace is never bare.
+        assert_eq!(shell_quote("{a,b}").as_deref(), Some("'{a,b}'"));
+        assert_eq!(shell_quote("x{1..3}y").as_deref(), Some("'x{1..3}y'"));
+    }
+
     // -- elide_middle_escaped: the unit is serialized bytes, and the marker tells the truth --
 
     #[test]

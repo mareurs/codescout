@@ -339,12 +339,14 @@ fn read_from_buffer(path: &str, input: &Value, ctx: &ToolContext) -> Result<Valu
         if !file_accepts_value_nav(&source.to_string_lossy(), nav) {
             return None;
         }
-        let source = source.display();
+        let source = source.display().to_string();
         Some(if value.len() <= INPUT_ECHO_CLIP {
             let literal = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
+            // The file's path sits inside a JSON string in the call, as the key beside it does.
+            let source_literal = crate::util::text::json_quote(&source);
             format!(
                 "{path} holds the real file {source}. Read the value on the file's path: \
-                 read_file(\"{source}\", {nav}={literal})."
+                 read_file({source_literal}, {nav}={literal})."
             )
         } else {
             format!(
@@ -709,11 +711,70 @@ fn json_path_line_hint(path: &str) -> String {
 /// ref or a real file), with `searched` saying what a `grep -o` of `target` searches: all of
 /// it, as stored or as written, never only this value.
 fn value_line_hint(target: &str, searched: &str) -> String {
-    format!(
-        "A single line of this value is wider than the inline budget, so it is shown truncated. \
-         run_command(\"grep -o 'PATTERN[^,]*' {target}\") prints just the matching part; it \
-         searches {searched}, not only this value."
-    )
+    const WIDE: &str =
+        "A single line of this value is wider than the inline budget, so it is shown truncated.";
+    match grep_o_route(target) {
+        Some(route) => format!(
+            "{WIDE} {route} prints just the matching part; it searches {searched}, not only this \
+             value."
+        ),
+        // A name with a line break in it cannot be one shell word on one line: no route, not a
+        // broken one.
+        None => format!(
+            "{WIDE} No shell route is offered for it: the name of {target:?} cannot be written \
+             in a one-line command."
+        ),
+    }
+}
+
+/// `run_command("grep -o 'PATTERN[^,]*' <target>")`, the route that prints only the part of a wide
+/// line that matters, with `target` (a buffer ref or a real file's path) written as ONE shell word
+/// and the whole command as a JSON string, as a caller reads and pastes it. A path with a space, a
+/// quote, `$` or a backslash in it is therefore one argument that names the file. `None` when the
+/// name holds a line break, which no one-line command can carry
+/// ([`crate::util::text::shell_quote`]): the caller then names no route. A name that starts with
+/// `-` gets a `./`, or `grep` reads it as an option. A buffer ref is already one plain word, so
+/// its route is the one it always was.
+fn grep_o_route(target: &str) -> Option<String> {
+    let word = crate::util::text::shell_quote(target)?;
+    let word = if target.starts_with('-') {
+        format!("./{word}")
+    } else {
+        word
+    };
+    let word = hide_handle_tokens(target, word);
+    let command = format!("grep -o 'PATTERN[^,]*' {word}");
+    Some(format!(
+        "run_command({})",
+        crate::util::text::json_quote(&command)
+    ))
+}
+
+/// `word` (a shell word for the name `target`) with every handle-shaped token in it broken by an
+/// empty `''` between the `@` and the kind, unless `target` IS a handle.
+///
+/// `run_command` swaps `@cmd_xxxxxxxx` (and `@file_`, `@tool_`, `@bg_`, plus an optional `.err`)
+/// for the buffer's content BEFORE the shell parses the command, so no quoting hides a token that
+/// sits inside a file name: `'x @cmd_deadbeef y.json'` is refused or rewritten before `sh` sees
+/// it. `@''cmd_deadbeef` is the same word to the shell (the `''` is empty) and no token to the
+/// resolver. `@ack_` is listed too, as the resolver's own comment says it is a legal file name.
+///
+/// The pattern is a copy of `REF_RE` in `OutputBuffer::resolve_refs` (`src/tools/output_buffer.rs`)
+/// widened by `ack`; that file is not edited here, so a change to the handle shape there must be
+/// repeated in this pattern. A `target` that is wholly a handle is the one case the resolver is
+/// meant to see, and is left alone.
+fn hide_handle_tokens(target: &str, word: String) -> String {
+    static TOKEN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let token = TOKEN.get_or_init(|| {
+        regex::Regex::new(r"@((?:cmd|file|tool|bg|ack)_[0-9a-f]{8})").expect("valid regex")
+    });
+    let is_handle = token.find(target).is_some_and(|m| {
+        m.start() == 0 && m.end() == target.strip_suffix(".err").unwrap_or(target).len()
+    });
+    if is_handle {
+        return word;
+    }
+    token.replace_all(&word, "@''$1").into_owned()
 }
 
 /// How a page of a value extracted by `nav` (`json_path` or `toml_key`) continues: on the same
@@ -721,31 +782,35 @@ fn value_line_hint(target: &str, searched: &str) -> String {
 /// with the same `nav` value and the value's own line numbers.
 ///
 /// [`ValueContinuation::route`] quotes the caller's `nav` value WHOLE, as a JSON string literal
-/// so a bracketed key's quotes and backslashes survive, and runs as written.
-/// [`ValueContinuation::prose`] says the same in words with the numbers and no value at all, for
-/// a value too long to quote while the page keeps [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room (the
-/// choice is [`price_continuation`]'s). Neither ever carries a placeholder: a copied placeholder
-/// fails (`path segment '<your json_path: …' not found`).
+/// so a bracketed key's quotes and backslashes survive, and runs as written. The `target` is
+/// quoted the same way: a real file's path with a `"`, a `\` or a line break in it would end the
+/// string early or break the call. [`ValueContinuation::prose`] says the same in words with the
+/// numbers and no value at all, for a value too long to quote while the page keeps
+/// [`JSON_PATH_ROUTE_ROOM_FLOOR`] of room (the choice is [`price_continuation`]'s). Neither ever
+/// carries a placeholder: a copied placeholder fails (`path segment '<your json_path: …' not
+/// found`). The prose is words, not a call, so it names the target as it is.
 struct ValueContinuation<'a> {
     target: &'a str,
     nav: &'static str,
+    /// `target` as a JSON string literal, quotes included.
+    target_literal: String,
     literal: String,
 }
 
 impl<'a> ValueContinuation<'a> {
     fn new(target: &'a str, nav: &'static str, value: &str) -> Self {
-        let literal = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
         Self {
             target,
             nav,
-            literal,
+            target_literal: crate::util::text::json_quote(target),
+            literal: crate::util::text::json_quote(value),
         }
     }
 
     fn route(&self, s: usize, e: usize) -> String {
         format!(
-            "read_file(\"{}\", {}={}, start_line={s}, end_line={e})",
-            self.target, self.nav, self.literal
+            "read_file({}, {}={}, start_line={s}, end_line={e})",
+            self.target_literal, self.nav, self.literal
         )
     }
 
@@ -912,19 +977,25 @@ fn line_hint(path: &str, field: Option<&str>) -> String {
     // `grep -o` prints only the part of the line that matched. Plain `grep` returns the whole
     // line, which is the thing that was too wide; `[^,]*` ends the match at the next comma,
     // which bounds a hit inside JSON or CSV. The `PATTERN` placeholder is the caller's to fill.
-    let grep = format!("run_command(\"grep -o 'PATTERN[^,]*' {path}\")");
+    // Built by the one builder every `grep -o` route shares, so a name that is not a plain word
+    // is quoted there, and a name no one-line command can carry yields no route.
+    let grep = grep_o_route(path);
     if path.starts_with("@tool_") {
         let field_route = match field {
             Some(jp) => format!(
-                " — address the field instead of the line: read_file(\"{path}\", \
-                 json_path=\"{jp}\") reads this payload's largest field"
+                " — address the field instead of the line: read_file({}, \
+                 json_path={}) reads this payload's largest field",
+                crate::util::text::json_quote(path),
+                crate::util::text::json_quote(jp)
             ),
             None => String::new(),
         };
+        let route = grep.map_or_else(String::new, |g| {
+            format!(" {g} prints just the matching part of the line.")
+        });
         format!(
             "A single line here is wider than the inline budget, so it is shown truncated. \
-             On a @tool_* ref that is usually a JSON-escaped payload on one line{field_route}. \
-             {grep} prints just the matching part of the line."
+             On a @tool_* ref that is usually a JSON-escaped payload on one line{field_route}.{route}"
         )
     } else {
         // Every caller passes a buffer ref: `read_from_buffer` the ref it was asked to read,
@@ -932,10 +1003,15 @@ fn line_hint(path: &str, field: Option<&str>) -> String {
         // the file's one `@file_*` handle. So this is a `@cmd_*` /
         // `@file_*` ref, and `json_path` is refused on those ("only supported on @tool_*
         // refs"). The branch used to advise it anyway.
+        let route = grep.map_or_else(String::new, |g| {
+            format!(
+                " Print just the part you need: {g} (replace PATTERN; `[^,]*` ends the match at \
+                 the next comma)."
+            )
+        });
         format!(
             "A single line here is wider than the inline budget, so it is shown truncated. \
-             Fields cannot be addressed on this kind of ref. Print just the part you need: \
-             {grep} (replace PATTERN; `[^,]*` ends the match at the next comma)."
+             Fields cannot be addressed on this kind of ref.{route}"
         )
     }
 }
@@ -1446,6 +1522,9 @@ fn read_with_line_range(
         ""
     };
     let orig_start = start as usize;
+    // The path sits inside a JSON string in the call, as `next` is read and pasted: a `"` or a `\`
+    // in it, written raw, ends the string early.
+    let path_literal = crate::util::text::json_quote(path);
     // The page sized with every other key counted at its widest: `shown_lines` ends at most
     // at `end` and `next` resumes at most at `end + 1`. The over-wide-line hint names the
     // file's handle, where `grep -o` reaches the line. `coverage` is decided beside it by
@@ -1459,7 +1538,7 @@ fn read_with_line_range(
         "line_truncated": true,
         "hint": over_budget_line_hint(&file_id),
         "next": format!(
-            "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
+            "read_file({path_literal}, start_line={}, end_line={end}{force_arg})",
             end.saturating_add(1)
         ),
     });
@@ -1481,7 +1560,7 @@ fn read_with_line_range(
     }
     if !complete {
         result["next"] = json!(format!(
-            "read_file(\"{path}\", start_line={}, end_line={end}{force_arg})",
+            "read_file({path_literal}, start_line={}, end_line={end}{force_arg})",
             orig_end + 1
         ));
     }
@@ -5571,3 +5650,7 @@ mod buffer_edge_tests;
 #[cfg(test)]
 #[path = "read_file_one_handle_tests.rs"]
 mod one_handle_tests;
+
+#[cfg(test)]
+#[path = "read_file_route_path_tests.rs"]
+mod route_path_tests;

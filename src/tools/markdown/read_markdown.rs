@@ -678,8 +678,9 @@ fn read_markdown_line_range(
         // under `@tool_*` beside this `file_id`. `shown_lines` ends at most at `end` and `next`
         // resumes at most at `end + 1`.
         let orig_start = start as usize;
+        let path_literal = crate::util::text::json_quote(path);
         let next_at = |line: u64| -> String {
-            format!("read_file(\"{path}\", start_line={line}, end_line={end})")
+            format!("read_file({path_literal}, start_line={line}, end_line={end})")
         };
         let hint = crate::tools::read_file::over_budget_line_hint(&file_id);
         let base = |shown_end: u64, next: Option<String>, truncated: bool, chunk: String| {
