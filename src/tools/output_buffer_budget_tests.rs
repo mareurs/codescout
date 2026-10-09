@@ -1297,3 +1297,22 @@ fn a_stamp_only_apply_never_moves_the_stamp_back() {
     );
     buf.assert_accounting();
 }
+
+/// Review F3, the edge: a new file that fits EXACTLY once every other file is demoted is kept,
+/// and the other file is demoted for it. Two commands hold 1,000,000 bytes and a resident file
+/// 40,000; a new file of the 48,576 bytes left after the commands fills the 1 MiB limit exactly.
+#[test]
+fn a_file_that_fits_exactly_with_every_other_file_demoted_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let (c1, c2) = squeeze(&buf, "c");
+    let g = read_into(&buf, &write(dir.path(), "g", &numbered("g", 40_000), 100));
+    let room = LIMIT - 1_000_000;
+    let f = read_into(&buf, &write(dir.path(), "f", &numbered("f", room), 100));
+    buf.assert_accounting();
+    assert!(!buf.is_demoted(&f), "f fits once g is demoted");
+    assert!(buf.is_demoted(&g));
+    assert_eq!(buf.total_bytes(), LIMIT);
+    assert_eq!(buf.bytes_of(&c1), Some(500_000));
+    assert_eq!(buf.bytes_of(&c2), Some(500_000));
+}
