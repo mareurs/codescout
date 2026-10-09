@@ -1437,3 +1437,41 @@ fn a_read_never_restores_an_entry_demoted_while_it_read_the_disk() {
     assert_eq!(buf.total_bytes(), before, "a read never grows the pool");
     buf.assert_accounting();
 }
+
+/// Review F2: a read stopped at the cap reports the text it serves as a change when that text is
+/// not the one the entry describes, even though nothing recorded a change: here every pass loses
+/// to a path read that only restamps the entry (same text), and the file then changes to w{n}.
+#[test]
+fn a_read_stopped_at_the_cap_reports_new_text_as_a_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v0 = numbered("v0", 100_000);
+    let p = write(dir.path(), "f", &v0, 1_000);
+    let f = read_into(&buf, &p);
+    let w = |n: usize| numbered(&format!("w{n}"), 110_000 + n);
+    {
+        let buf2 = buf.clone();
+        let dir = dir.path().to_path_buf();
+        let p = p.clone();
+        let v0 = v0.clone();
+        let passes = std::sync::atomic::AtomicUsize::new(0);
+        buf.set_disk_hook(Some(Arc::new(move || {
+            let n = passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64 + 1;
+            if n > 10 {
+                return;
+            }
+            write(&dir, "f", &v0, 1_000 - 2 * n);
+            buf2.store_file_read(&p.to_string_lossy(), &v0, file_mtime_ms(&p));
+            write(&dir, "f", &w(n as usize), 1_000 - 2 * n - 1);
+        })));
+    }
+    let (e, refreshed) = buf.get_with_refresh_flag(&f).unwrap();
+    buf.set_disk_hook(None);
+    assert_eq!(e.stdout, w(RESOLVE_READS));
+    assert!(
+        refreshed,
+        "the holder is served text the entry does not describe: a change"
+    );
+    assert_eq!(buf.bytes_of(&f), Some(v0.len()), "nothing was stored");
+    buf.assert_accounting();
+}
