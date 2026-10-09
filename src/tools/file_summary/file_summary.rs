@@ -1657,14 +1657,20 @@ fn toml_source_lines(
     let mut runs: Vec<(usize, usize)> = Vec::new();
     for (start, end) in spans {
         let end = end.min(lines.len());
+        // TOML puts at most one pair or header on a line, so the items are sorted AND disjoint:
+        // `start` lies below the last run's end only if `toml` hands back a span that breaks
+        // that, and `lines.get` then declines the join rather than slicing backwards.
+        debug_assert!(
+            runs.last().is_none_or(|run| start > run.1),
+            "items share a line"
+        );
         match runs.last_mut() {
             Some(run)
-                if start <= run.1 + 1
-                    || lines[run.1..start - 1]
-                        .iter()
-                        .all(|l| is_blank_or_comment(l)) =>
+                if lines
+                    .get(run.1..start - 1)
+                    .is_some_and(|gap| gap.iter().all(|l| is_blank_or_comment(l))) =>
             {
-                run.1 = run.1.max(end)
+                run.1 = end
             }
             _ => runs.push((start, end)),
         }

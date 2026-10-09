@@ -1995,6 +1995,64 @@ fn toml_key_dotted_pairs_and_a_header_below_them_are_one_key() {
     assert_eq!(range, (2, 6));
 }
 
+#[test]
+fn toml_key_of_every_key_of_this_repos_manifest_and_lockfile_is_lines_of_the_file() {
+    // A corpus the fixtures above cannot be: real files, every top-level key and every key one
+    // level down. The oracle is the file itself: the text starts at `line_range.0`, ends at
+    // `line_range.1`, and is made of lines the file has, in order. (The extractor also asserts,
+    // in a test build, that no two items of the file share a line.)
+    for (name, content) in [
+        ("Cargo.toml", include_str!("../../../Cargo.toml")),
+        ("Cargo.lock", include_str!("../../../Cargo.lock")),
+    ] {
+        let file: Vec<&str> = content.lines().collect();
+        let table: toml::Table = content.parse().unwrap();
+        let mut keys: Vec<String> = Vec::new();
+        for (k, v) in &table {
+            keys.push(k.clone());
+            if let toml::Value::Table(inner) = v {
+                keys.extend(inner.keys().map(|ik| format!("{k}.{ik}")));
+            }
+        }
+        let want_keys = if name == "Cargo.toml" { 10 } else { 2 };
+        assert!(
+            keys.len() >= want_keys,
+            "{name}: fixture: only {} keys",
+            keys.len()
+        );
+        for key in keys {
+            if key.contains(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+            {
+                continue; // a quoted key, which `toml_key` cannot name
+            }
+            let (text, (first, last)) = toml_key(content, &key);
+            let got: Vec<&str> = text.lines().collect();
+            assert!(!got.is_empty(), "{name} {key}: empty");
+            assert!(
+                1 <= first && first <= last && last <= file.len(),
+                "{name} {key}"
+            );
+            assert_eq!(got[0], file[first - 1], "{name} {key}: first line");
+            assert_eq!(
+                got[got.len() - 1],
+                file[last - 1],
+                "{name} {key}: last line"
+            );
+            let mut at = first - 1;
+            for line in &got {
+                while file[at] != *line {
+                    at += 1;
+                    assert!(
+                        at < last,
+                        "{name} {key}: {line:?} is not a line of the file in order"
+                    );
+                }
+                at += 1;
+            }
+        }
+    }
+}
+
 // ---- YAML: the same four shapes, measured --------------------------------------------------
 
 #[test]
