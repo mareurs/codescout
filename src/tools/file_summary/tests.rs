@@ -2053,6 +2053,32 @@ fn toml_key_of_every_key_of_this_repos_manifest_and_lockfile_is_lines_of_the_fil
     }
 }
 
+#[test]
+fn line_index_names_the_line_of_a_byte_and_reads_a_span_as_half_open() {
+    // Lines start at bytes 0, 3, 6 (an empty line) and 7.
+    let ix = LineIndex::new("ab\ncd\n\nef");
+    assert_eq!(ix.line_of(0), 1);
+    assert_eq!(ix.line_of(2), 1, "the newline belongs to the line it ends");
+    assert_eq!(ix.line_of(3), 2, "the first byte of a line is on that line");
+    assert_eq!(ix.line_of(6), 3);
+    assert_eq!(ix.line_of(7), 4);
+    // `end` is exclusive: a span that ends with a newline ends on the line the newline ends.
+    assert_eq!(ix.lines_of(0, 3), (1, 1));
+    assert_eq!(ix.lines_of(0, 4), (1, 2));
+    assert_eq!(
+        ix.lines_of(3, 3),
+        (2, 2),
+        "an empty span is the line of its start"
+    );
+    assert_eq!(ix.lines_of(7, 9), (4, 4));
+    // CRLF: the `\r` is on the line it ends, and the next line starts after the `\n`.
+    let crlf = LineIndex::new("a\r\nb");
+    assert_eq!(
+        (crlf.line_of(1), crlf.line_of(2), crlf.line_of(3)),
+        (1, 1, 2)
+    );
+}
+
 // ---- YAML: the same four shapes, measured --------------------------------------------------
 
 #[test]

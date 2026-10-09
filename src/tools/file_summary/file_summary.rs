@@ -1524,25 +1524,26 @@ pub(crate) fn cut_array_middle(
 
 /// Byte offsets at which the lines of a text start, to name the 1-based line a byte lies on.
 /// A line ends at `\n`, so a CRLF file counts exactly the lines `str::lines` yields.
-struct LineIndex {
+/// (`pub(crate)`, with its methods, for the unit test of the half-open span rule.)
+pub(crate) struct LineIndex {
     starts: Vec<usize>,
 }
 
 impl LineIndex {
-    fn new(text: &str) -> Self {
+    pub(crate) fn new(text: &str) -> Self {
         let mut starts = vec![0];
         starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
         Self { starts }
     }
 
     /// The 1-based line byte `offset` lies on.
-    fn line_of(&self, offset: usize) -> usize {
+    pub(crate) fn line_of(&self, offset: usize) -> usize {
         self.starts.partition_point(|&s| s <= offset)
     }
 
     /// The 1-based first and last line of the byte span `start..end` (`end` exclusive; an empty
     /// span is the line of `start`).
-    fn lines_of(&self, start: usize, end: usize) -> (usize, usize) {
+    pub(crate) fn lines_of(&self, start: usize, end: usize) -> (usize, usize) {
         (
             self.line_of(start),
             self.line_of(end.saturating_sub(1).max(start)),
