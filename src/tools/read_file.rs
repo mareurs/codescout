@@ -742,11 +742,39 @@ fn grep_o_route(target: &str) -> Option<String> {
     } else {
         word
     };
+    let word = hide_handle_tokens(target, word);
     let command = format!("grep -o 'PATTERN[^,]*' {word}");
     Some(format!(
         "run_command({})",
         crate::util::text::json_quote(&command)
     ))
+}
+
+/// `word` (a shell word for the name `target`) with every handle-shaped token in it broken by an
+/// empty `''` between the `@` and the kind, unless `target` IS a handle.
+///
+/// `run_command` swaps `@cmd_xxxxxxxx` (and `@file_`, `@tool_`, `@bg_`, plus an optional `.err`)
+/// for the buffer's content BEFORE the shell parses the command, so no quoting hides a token that
+/// sits inside a file name: `'x @cmd_deadbeef y.json'` is refused or rewritten before `sh` sees
+/// it. `@''cmd_deadbeef` is the same word to the shell (the `''` is empty) and no token to the
+/// resolver. `@ack_` is listed too, as the resolver's own comment says it is a legal file name.
+///
+/// The pattern is a copy of `REF_RE` in `OutputBuffer::resolve_refs` (`src/tools/output_buffer.rs`)
+/// widened by `ack`; that file is not edited here, so a change to the handle shape there must be
+/// repeated in this pattern. A `target` that is wholly a handle is the one case the resolver is
+/// meant to see, and is left alone.
+fn hide_handle_tokens(target: &str, word: String) -> String {
+    static TOKEN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let token = TOKEN.get_or_init(|| {
+        regex::Regex::new(r"@((?:cmd|file|tool|bg|ack)_[0-9a-f]{8})").expect("valid regex")
+    });
+    let is_handle = token.find(target).is_some_and(|m| {
+        m.start() == 0 && m.end() == target.strip_suffix(".err").unwrap_or(target).len()
+    });
+    if is_handle {
+        return word;
+    }
+    token.replace_all(&word, "@''$1").into_owned()
 }
 
 /// How a page of a value extracted by `nav` (`json_path` or `toml_key`) continues: on the same

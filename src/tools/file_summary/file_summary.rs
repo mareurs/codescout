@@ -1307,7 +1307,10 @@ pub(crate) fn bound_summary(
         })
         .collect();
     if !wide.is_empty() {
-        let remedy = format!("the rest: read_file(path=\"{file_id}\", start_line=N, end_line=M)");
+        let remedy = format!(
+            "the rest: read_file(path={}, start_line=N, end_line=M)",
+            crate::util::text::json_quote(file_id)
+        );
         let with_share = |base: &Value, share: usize| -> Value {
             let mut cut = base.clone();
             for (key, original) in &wide {
@@ -1422,7 +1425,8 @@ pub(crate) fn bound_summary(
         minimal.insert("summary_omitted".to_string(), Value::Bool(true));
         notes.push(format!(
             "summary: {original_bytes} bytes omitted entirely (too wide to cut); read the file in \
-             ranges with read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+             ranges with read_file(path={}, start_line=N, end_line=M).",
+            crate::util::text::json_quote(file_id)
         ));
         return (Value::Object(minimal), notes);
     }
@@ -1508,14 +1512,15 @@ pub(crate) fn cut_array_middle(
     } else {
         format!("{}.{key}", parent.trim_start_matches('/'))
     };
+    let file_id_literal = crate::util::text::json_quote(file_id);
     Some(match (from, to) {
         (Some(f), Some(t)) => format!(
             "{label}: {omitted} of {grand_total} entries omitted (lines {f}-{t}); read them with \
-             read_file(path=\"{file_id}\", start_line={f}, end_line={t})."
+             read_file(path={file_id_literal}, start_line={f}, end_line={t})."
         ),
         _ => format!(
             "{label}: {omitted} of {grand_total} entries omitted; read the file in ranges with \
-             read_file(path=\"{file_id}\", start_line=N, end_line=M)."
+             read_file(path={file_id_literal}, start_line=N, end_line=M)."
         ),
     })
 }

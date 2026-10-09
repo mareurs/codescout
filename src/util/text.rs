@@ -935,7 +935,7 @@ mod tests {
 
     /// Names a path can carry that break a route written raw: a space, `"`, `'`, `\`, `$`, a backtick,
     /// glob and operator characters, a leading `-`, a tab, a line break, and non-ASCII text.
-    const AWKWARD: [&str; 17] = [
+    const AWKWARD: [&str; 19] = [
         "sp ace",
         "q\"uote",
         "it's",
@@ -952,6 +952,8 @@ mod tests {
         "#hash !bang %pct =eq",
         "a\"b\\c 'd' $e `f` ü",
         "''",
+        "{a,b}",
+        "x{1..3}y",
         "line\nbreak",
     ];
 
@@ -976,6 +978,7 @@ mod tests {
     /// Run `script` under `sh -c` (and under `dash` when this machine has it: Ubuntu CI's
     /// `/bin/sh` is dash, and a quoting that only `bash` reads right would pass here and fail
     /// there). Returns `(shell, stdout)` per shell that ran.
+    #[cfg(unix)]
     fn run_in_shells(script: &str) -> Vec<(&'static str, Vec<u8>)> {
         let mut ran = Vec::new();
         for shell in ["sh", "dash"] {
@@ -1002,6 +1005,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn shell_quote_makes_one_word_that_the_shell_reads_back_byte_for_byte() {
         for name in AWKWARD.into_iter().filter(|n| !n.contains('\n')) {
             let quoted = shell_quote(name).unwrap_or_else(|| panic!("{name:?} refused"));
@@ -1021,6 +1025,7 @@ mod tests {
     /// wrongly when it does. So every printable ASCII character is read back, alone, doubled and
     /// inside a word, by one shell process per shell.
     #[test]
+    #[cfg(unix)]
     fn shell_quote_reads_back_every_printable_ascii_character_alone_and_inside_a_word() {
         let mut names = Vec::new();
         for b in (0x20u8..0x7f).chain([b'\t', 0x1b]) {
@@ -1072,6 +1077,9 @@ mod tests {
         assert_eq!(shell_quote("a b").as_deref(), Some("'a b'"));
         assert_eq!(shell_quote("it's").as_deref(), Some(r"'it'\''s'"));
         assert_eq!(shell_quote("$x").as_deref(), Some("'$x'"));
+        // Brace expansion (`{a,b}`, `{1..3}`) happens in bash and zsh, so a brace is never bare.
+        assert_eq!(shell_quote("{a,b}").as_deref(), Some("'{a,b}'"));
+        assert_eq!(shell_quote("x{1..3}y").as_deref(), Some("'x{1..3}y'"));
     }
 
     // -- elide_middle_escaped: the unit is serialized bytes, and the marker tells the truth --
