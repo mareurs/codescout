@@ -148,3 +148,24 @@ that can place the work in repo history. Measured 2026-08-31: two events recordi
 cross-host schema migration were written with both fields empty, leaving a wall-clock
 timestamp as the sole locator. Pass `head_commit` explicitly on any event whose task will not
 produce a commit.
+
+## After `merge_worktree` the files still carry the worktree's ids (measured 2026-10-09)
+
+`merge_worktree` reseats and folds the CATALOG rows. It does not rewrite files. A bug file or ADR that
+was written from the worktree keeps a frontmatter `id:` hashed from the worktree path, and `doctor`
+then reports `frontmatter_id_mismatch` for it. Measured: one ADR and four new bug files. After the
+merge, run `librarian(action="doctor", fix="repair_frontmatter_id")` as a dry run first. It lists every
+mismatch under the root, so check that the list holds only your files. Then apply with `confirm=true`
+and commit the one-line `id:` changes. A catalog row can also stay behind its file
+(`row_behind_file`): `librarian(action="reindex")` reconciles it.
+
+## `git checkout <rev> -- <path>` is not a staging command to the stage recorder
+
+The recorder claims a `(blob, path)` pair for the session only on `git add`, `git rm --cached` or
+`git commit`. `git checkout <rev> -- <path>` stages the file but stamps it `-` (unattributed), and
+re-adding the same bytes does not repair it. If a peer is also dirty on that path in the main
+checkout, the pathspec guard and `scripts/commit-mine.sh` then refuse the commit. To drop one file's
+change from a branch, make that commit with plumbing: verify `git diff-tree -r --name-status HEAD
+$(git write-tree)` lists only that file and the blob equals the target rev's, then `git commit-tree`
+and `git update-ref <branch> <new> <old>`. Do not use `CODESCOUT_INDEX_ACK`: its trailer names the
+peer as co-author of text that is yours.
