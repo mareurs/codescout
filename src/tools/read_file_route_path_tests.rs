@@ -76,12 +76,14 @@ fn rows() -> Vec<String> {
         .map(|i| format!("row {i:04} {}", "v".repeat(40)))
         .collect()
 }
+/// The arguments of a parsed call: `(key, value)` in order, the key `None` for the positional one.
+type Args = Vec<(Option<String>, Value)>;
 
 /// One call as written in a route: `name(<arg>, key=<arg>, …)`, every argument a JSON value (a
 /// string, an integer, `true`). The first argument may be positional. Parsed with a real JSON
 /// parser, the way a caller who pastes the route would have it read. Returns the name, the
 /// arguments in order, and the text after the closing parenthesis.
-fn parse_call(text: &str) -> (String, Vec<(Option<String>, Value)>, &str) {
+fn parse_call(text: &str) -> (String, Args, &str) {
     let open = text
         .find('(')
         .unwrap_or_else(|| panic!("not a call: {text:.200}"));
@@ -135,14 +137,14 @@ fn parse_call(text: &str) -> (String, Vec<(Option<String>, Value)>, &str) {
 
 /// The call that starts at `prefix` (`"read_file("`) in a hint or an error: a route named inside
 /// a sentence.
-fn call_in<'a>(text: &'a str, prefix: &str) -> Option<(Vec<(Option<String>, Value)>, &'a str)> {
+fn call_in<'a>(text: &'a str, prefix: &str) -> Option<(Args, &'a str)> {
     let at = text.find(prefix)?;
     let (_, args, rest) = parse_call(&text[at..]);
     Some((args, rest))
 }
 
 /// The arguments of a parsed `read_file` call as the tool's input: the positional one is `path`.
-fn input_of(args: Vec<(Option<String>, Value)>) -> Value {
+fn input_of(args: Args) -> Value {
     let mut m = serde_json::Map::new();
     for (k, v) in args {
         m.insert(k.unwrap_or_else(|| "path".into()), v);
