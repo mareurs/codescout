@@ -84,31 +84,56 @@ the last place where one real file had a second handle, and `store_file_excerpt`
 
 **Added 2026-10-09. The pool has a hard byte budget.** `BufferInner.total_bytes` counts `stdout` plus
 `stderr` of every entry and is changed only by four helpers (`admit_locked`, `remove_locked`,
-`demote_locked`, `retain_file_text_locked`), all under the pool's one lock. The rulings:
+`demote_locked`, `retain_file_text_locked`), all under the pool's one lock, with saturating arithmetic.
+The ceiling is checked, not debug-asserted: if evicting everything evictable leaves no room, the counter is
+logged and recounted from the entries, and an entry that still finds none keeps no text and records the cut.
+The rulings (the first round, then the review round of the same day):
 
 - **The ceiling is 128 MiB (`MAX_POOL_BYTES`), default and maximum. Chosen, not measured.**
-  `OutputBuffer::with_byte_limit` can only lower it: it clamps to [1 MiB, 128 MiB]. The 1 MiB floor
-  (`MIN_POOL_BYTES`, also chosen) is above twice the inline limit, so the stores that are inline-sized by
-  construction (the tee capture, a compacted test run) are never cut. The server passes 128 MiB.
+  `OutputBuffer::with_byte_limit` can only lower it: it clamps to [1 MiB, 128 MiB] and logs a
+  `tracing::warn!` when it clamps. The 1 MiB floor (`MIN_POOL_BYTES`, also chosen) is kept. The server
+  builds its pool in `server::server_output_buffer`, which is where a setting would be read.
+- **One entry holds at most HALF the limit (`entry_cap`), ruling R-A.** An entry of the whole limit left
+  no other handle holding text, and the next small store evicted it: review probe S2 kept 1,048,574 B of
+  `seq 1 300000` at 1 MiB, a following `seq 1 5000` evicted it, and the caller then got "buffer reference
+  not found ... Buffer refs expire when the session resets", the wrong cause. That refusal (`REF_GONE`, at
+  every buffer-not-found site) now also names the pool dropping handles to stay under its byte limit, and
+  the route: re-run the command.
 - **Eviction order.** A store that would pass the limit first DEMOTES least-recently-used whole-file
-  `@file_*` entries: the text is dropped and the id, path and stamp stay. Only if that is not enough are
-  least-recently-used `@cmd_*`, `@tool_*` and snapshot entries evicted, whose text exists nowhere else.
-  The 50-entry cap stays. A read of a demoted handle takes the text from disk and does not put it back,
-  so a read never grows the pool. A path read of the file (a store) takes the text back when it fits.
-  A resident entry refreshed by a read keeps the new text only if it fits in the room left; otherwise it
-  is demoted. A read displaces no other entry.
-- **An entry bigger than the whole limit is never stored as is.** A `@cmd_*`, `@tool_*` or snapshot
-  entry is stored as a marked prefix of WHOLE lines that fits the limit, with the existing `Truncation`
-  and `truncation_marker`, so line N of the handle is line N of the output for every kept line and every
-  later read carries `buffer_truncated`. A `@tool_*` is cut in its line-addressable form, the line space
-  its readers number. `stderr` is cut on its own record (`stderr_truncated`, read through `.err`) and
-  keeps at most half the limit when both streams are over. The responses that can mint such an entry,
-  `run_command`'s summary and `call_content`'s `@tool_*` envelope, carry `output_truncated` with the
-  kept and omitted line counts. A whole file bigger than the limit is minted demoted: its handle holds no
-  text and every read takes it from disk.
+  `@file_*` entries: the text is dropped and the id, path, stamp and text hash stay. Only for a store whose
+  text exists nowhere else are least-recently-used `@cmd_*`, `@tool_*` and snapshot entries then evicted.
+  **The text of a whole file never evicts anything** (review probes RP1, RP2, S1): a path read of a new or
+  demoted file keeps its text only if it fits after demoting other files, and is otherwise minted or kept
+  demoted. The 50-entry cap stays and is applied first. A read of a demoted handle takes the text from disk
+  and does not put it back, so a read never grows the pool. A resident entry refreshed by a read keeps the
+  new text only if it fits the room left; otherwise it is demoted. A read displaces no other entry.
+- **The disk is touched with the pool unlocked.** A read of a file-backed handle takes the path, stamp and
+  state under the lock, stats, reads and hashes the file without it, and applies the result under the lock
+  only if the entry is unchanged, else starts over (review probe RP8: a 300 MB demoted file held the lock
+  8.9 s in a debug build and blocked another thread's 2-byte store 9.8 s). Every `@file_*` entry carries the
+  SHA-256 of its whole text, computed outside the lock, so demotion hashes nothing.
+- **An entry bigger than its share is never stored as is.** A `@cmd_*` or snapshot entry is stored as a
+  marked prefix of WHOLE lines that fits the share, with the existing `Truncation` and `truncation_marker`,
+  so line N of the handle is line N of the output for every kept line and every later read carries
+  `buffer_truncated`. One line longer than the share keeps NOTHING (review probe RP4a: a 2 MB single line
+  gave 0 of 1 lines kept); the ruling allows it, because part of a line would make the count false.
+  `stderr` is cut on its own record (`stderr_truncated`, read through `.err`) and keeps at least half the
+  share when both streams are over. A `@tool_*` too large to hold as JSON is stored in its line-addressable
+  form, the line space its readers number: whole when that form fits the share (it used to be cut, losing
+  the final `}`), else as a marked prefix. Its envelope names only line and `grep` routes and counts the
+  bytes held, and a `json_path` read of it is refused naming the cut and the line route (review probe RPT).
+  A snapshot dedups by the hash of the whole view, so a cut view read twice is one handle (probe RP3), and
+  the `memory` response says the view is cut. The responses that can mint a cut entry (`run_command`'s
+  summary, its tee capture, `call_content`'s envelope, `memory`) carry `output_truncated` with the kept and
+  omitted line counts; the tee capture reports the handle's own record, since the capture keeps the line
+  that empties its budget however long and the pool can cut it again. A whole file bigger than the share is
+  minted demoted.
+- **Reads that report a cut.** `read_file`, `run_command` and now the `grep` tool (review probe RPG) carry
+  `buffer_truncated` on a cut handle. `truncation_notice` no longer goes through `get()`: it does not bump
+  the entry to most recently used and does not refresh a file. A bare handle named in a `run_command` now
+  also carries that handle's `.err` cut notice.
 - **R3 and the stamp rules are unchanged.** A demoted entry keeps its one handle, its stamp, the
-  stale-write rule and the once-only refresh notice. It holds the SHA-256 of the text it last served, so
-  a read can tell a changed file from an unchanged one without a copy of the old text.
+  stale-write rule and the once-only refresh notice; its change test is the text hash.
 
 ## Alternatives considered
 
@@ -134,14 +159,16 @@ the last place where one real file had a second handle, and `store_file_excerpt`
   Decision): the same case scaled to a 1 MiB pool (twelve ~205 KB files, 2.4 MB) keeps at most 1 MiB
   (`twelve_range_reads_of_large_files_stay_within_the_byte_limit`).
 - Harder, **the budget's own costs** (2026-10-09, by code reading and the unit tests, not measured live):
-  one entry of the full limit leaves nothing else holding text; while `@cmd_*` and `@tool_*` fill the
-  pool, every whole file is demoted by the next store, even one just read, because demotion comes before
-  any eviction; each read of a demoted handle reads and hashes the whole file. A demoted entry also sees a
-  write that left the mtime at or below its stamp, which a resident entry does not. A cut `@tool_*` is not
-  JSON, so `json_path` cannot read it, and its envelope's `hint` and `buffered_bytes` still describe the
-  whole result. `run_command` still holds a command's whole output in memory before the pool sees it
-  (`wait_with_output`), and a whole-file `read_file` still has no size limit: the budget bounds what the
-  pool RETAINS, not what a call reads.
+  two entries of half the limit fill the pool; while `@cmd_*` and `@tool_*` fill the pool, every whole file
+  is demoted by the next store, even one just read, because demotion comes before any eviction, and a
+  file read into a full pool is minted demoted; each read of a demoted handle reads and hashes the whole
+  file (outside the lock). A `@tool_*` too large for JSON cannot be read by `json_path`. `run_command`
+  still holds a command's whole output in memory before the pool sees it (`wait_with_output`), and a
+  whole-file `read_file` still has no size limit: the budget bounds what the pool RETAINS, not what a call
+  reads.
+- Known limit, **a same-mtime rewrite is noticed only by a demoted entry** (review probe RP7): a resident
+  entry compares mtimes and serves the text it holds (v1), a demoted one reads and hashes the file and
+  serves v2 with a refresh notice. The two kinds of entry can therefore answer differently for one file.
 - Harder, **line numbers move**: a range or section handle now follows the file, as a whole-file handle
   already did. After an edit above the range, a line number a holder noted earlier names other text.
 - Harder, **the refresh notice reaches only `run_command`**. A `read_file` of the handle does not report it.
@@ -168,8 +195,8 @@ the last place where one real file had a second handle, and `store_file_excerpt`
 ## Revisit when
 
 - Done 2026-10-09: a byte budget on the pool (see Decision). Reopen it if 128 MiB proves wrong (no
-  measurement backs it), if one full-size entry flushing the pool hurts, or if re-reading demoted files
-  from disk becomes a cost worth a cache.
+  measurement backs it), if the half-limit share per entry proves too small or too large, or if
+  re-reading demoted files from disk becomes a cost worth a cache.
 - Done 2026-10-08: `read_file` with `json_path` or `toml_key` on a real file pages the value on the file's own
   path (see Decision). Reopen it if the per-page re-parse becomes a problem; a cache would need an owner for
   its staleness.
@@ -227,13 +254,22 @@ A third round, on branch `fix/buffer-pool-byte-budget` (2026-10-09), added the b
 | `267d318e` | `1c006d08245fdaa27bccee38880bc8d08a7cf9dc` | a hard byte budget on the buffer pool |
 | `46135fc2` | `971162b1564208bcf2c0463978f766f536bee236` | tests that kill the survivors of its mutation run |
 | `bf1d104a` | `d3649bdf6ff717881904c2589efded0e1dce753f` | `MAX_POOL_BYTES` classified as a probed result cap (`output_buffer.pool_bytes`) |
+| `e4f3f78f` | `975e3cc7b0c578f157a3f4e2f9875103c120940a` | the review round: R-A, R-B and eleven review findings |
+| `0718021b` | `d4781948592629813679032f6429276cf64f45a6` | tests that kill the four survivors of the review round's mutation run |
 
-Mutation runs through `scripts/mutation-probe.sh`, one mutant at a time: the first run of 23 mutants left 5
-survivors (one equivalent edge, three edges with no case at exactly the limit, one assertion monotone under
-shrinking); after the repair, 25 of 25 mutants were killed, each run with a `test result:` line. The
-mutants cover the demote-before-evict order, the LRU direction, every `total_bytes` update, the clamp,
-the prefix size and its marker reserve, every `<=` at the budget edge, the read path of a demoted entry,
-its change hash, stderr's half-limit room, the `.err` notice, and both response fields.
+Mutation runs through `scripts/mutation-probe.sh`, one mutant at a time, each verdict with a `test result:`
+line. First round: 23 mutants left 5 survivors (one equivalent edge, three edges with no case at exactly
+the limit, one assertion monotone under shrinking); after the repair 25 of 25 were killed. Two blind
+reviews then found mutants that survived the whole `tools::` suite, among them a `<= max + 1` pool edge
+(no case stored one byte past a full pool), four hash mutants, the server's pool built at the floor, and an
+oversized snapshot whose record was dropped or stored empty. The review round re-ran 53 mutants (the earlier
+set adapted to the new code, reconstructions of the reviewers' mutants from their descriptions, and one per
+fix): 49 were killed and 4 survived (a tool result of exactly one share that was plain text, so its line
+form was itself; a read's refresh that may demote other files; a file one byte over the share; a store hit
+that does not record its hash). After `0718021b` all four were killed. Every `<=` at the limit edge and at
+the share edge is killed, including `<= max + 1`. Two pieces of code no test reaches: the recount on
+accounting drift and the no-text fallback in `admit_locked` (only drift or a caller bug can reach them),
+and the clamp's `tracing::warn!`.
 
 ## Evidence
 
