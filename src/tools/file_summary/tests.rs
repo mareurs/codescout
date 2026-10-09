@@ -1893,6 +1893,39 @@ fn toml_key_array_of_inline_tables_spanning_lines_is_one_value() {
 }
 
 #[test]
+fn toml_key_multi_line_inline_table_keeps_its_opening_and_closing_lines() {
+    // TOML 1.1 lets an inline table span lines: the lines that hold only `i = {` and `}` are the
+    // key's, though no pair inside it starts on them.
+    let content = "i = {\n  a = 1,\n  b = 2,\n}\nz = 1\n";
+    let (text, range) = toml_key(content, "i");
+    assert_eq!(text, "i = {\n  a = 1,\n  b = 2,\n}");
+    assert_eq!(range, (1, 4));
+}
+
+#[test]
+fn toml_key_empty_array_and_empty_inline_table_are_their_source_line() {
+    // An empty array holds no table: it must not be taken for an array of tables with no lines.
+    let content = "e = []\nt = {}\nz = 1\n";
+    assert_eq!(toml_key(content, "e"), ("e = []".to_string(), (1, 1)));
+    assert_eq!(toml_key(content, "t"), ("t = {}".to_string(), (2, 2)));
+}
+
+#[test]
+fn toml_key_through_a_value_that_is_not_a_table_is_refused_naming_it() {
+    let err = toml_refusal("[package]\nname = \"foo\"\n", "package.name.x");
+    assert_eq!(err.message, "key 'package.name.x' not found in TOML");
+    let hint = err.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+    assert_eq!(
+        hint,
+        "'package.name' is not a table, it is a value of type string"
+    );
+    // An array of tables is addressed whole (`k`), not by an element's field.
+    let err = toml_refusal("[[k]]\nn = 1\n[[k]]\nn = 2\n", "k.n");
+    let hint = err.guidance.as_ref().map(|g| g.text()).unwrap_or("");
+    assert_eq!(hint, "'k' is not a table, it is a value of type array");
+}
+
+#[test]
 fn toml_key_that_is_missing_still_names_its_scope() {
     let err = toml_refusal("[package]\nname = \"foo\"\n\n[dep]\nx = 1\n", "nope");
     assert_eq!(err.message, "key 'nope' not found in TOML");
