@@ -67,12 +67,24 @@ fn the_verify_callers_hint_reads_back_to_the_symbol_and_the_path() {
     }
 }
 
+/// The overview hint's scan-the-whole-tree call carries the directory as the JSON string literal of
+/// its `path` argument. Fed a `&str` that is not a directory, so it runs on every platform.
+#[test]
+fn the_full_tree_call_reads_back_to_the_directory_glob() {
+    for dir in HAZARDS {
+        let call = super::list_overview::full_tree_call(dir);
+        let (glob, rest) = json_string_after(&call, "symbols(path=");
+        assert_eq!(glob, format!("{dir}/**/*"), "{call}");
+        assert_eq!(rest, ")", "{call}");
+    }
+}
+
 #[cfg(unix)]
 mod unix_only {
     use super::*;
     use crate::agent::Agent;
     use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
-    use crate::tools::symbol::EditCode;
+    use crate::tools::symbol::{EditCode, Symbols};
     use crate::tools::{Tool, ToolContext};
     use serde_json::json;
     use std::sync::Arc;
@@ -175,6 +187,62 @@ mod unix_only {
                 .as_str()
                 .unwrap_or_else(|| panic!("rename in {name:?} gave no hint: {renamed}"));
             assert_hint_names(hint, &rel, &format!("rename in {name:?}"));
+        }
+    }
+    /// A directory-overview hint offers `symbols(path=<dir>/**/*)` to scan the whole tree, in both
+    /// of the modes that print it (31-80 files with subdirectories, and more than 80). The call
+    /// reads back to the directory the caller named, whatever its name holds. The tool is run for
+    /// real: the directories are legal Linux names, and no language server is involved.
+    #[tokio::test]
+    async fn the_scan_the_full_tree_call_of_an_overview_reads_back_to_the_directory() {
+        for name in NAMES {
+            let dir_name = name.trim_end_matches(".rs");
+            for (files_per_subdir, mode) in [(20usize, "class_overview"), (50, "directory_map")] {
+                let dir = tempfile::tempdir().unwrap();
+                std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+                for sub in ["a", "b"] {
+                    let d = dir.path().join(dir_name).join(sub);
+                    std::fs::create_dir_all(&d).unwrap();
+                    for i in 0..files_per_subdir {
+                        std::fs::write(d.join(format!("f{i}.rs")), format!("pub struct S{i};\n"))
+                            .unwrap();
+                    }
+                }
+                let ctx = ToolContext {
+                    agent: Agent::new(Some(dir.path().to_path_buf())).await.unwrap(),
+                    lsp: crate::lsp::LspManager::new_arc(),
+                    output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(50)),
+                    progress: None,
+                    peer: None,
+                    section_coverage: Arc::new(std::sync::Mutex::new(
+                        crate::tools::section_coverage::SectionCoverage::new(),
+                    )),
+                    guide_hints_emitted: Arc::new(parking_lot::Mutex::new(Default::default())),
+                    workspace_override: None,
+                };
+
+                let result = Symbols
+                    .call(json!({ "path": dir_name }), &ctx)
+                    .await
+                    .unwrap_or_else(|e| panic!("{dir_name:?} {mode}: {e}"));
+                assert_eq!(result["mode"], mode, "{dir_name:?}: {result}");
+                let hint = result["hint"].as_str().unwrap();
+                // The first call in the hint is the placeholder `symbols(path="<subdir>")`.
+                let after_placeholder = hint
+                    .split_once("symbols(path=\"<subdir>\")")
+                    .unwrap_or_else(|| panic!("{dir_name:?} {mode}: {hint}"))
+                    .1;
+                let (glob, rest) = json_string_after(after_placeholder, "symbols(path=");
+                assert_eq!(
+                    glob,
+                    format!("{dir_name}/**/*"),
+                    "{dir_name:?} {mode}: {hint}"
+                );
+                assert!(
+                    rest.starts_with(") to scan the full tree"),
+                    "{dir_name:?} {mode}: {hint}"
+                );
+            }
         }
     }
 }

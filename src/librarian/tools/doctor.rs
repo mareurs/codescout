@@ -1443,8 +1443,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
     if let Some(c) = candidates.first() {
         hint_parts.push(format!(
-            "possible repo move detected ({} -> {}). Run doctor(fix=\"rehome\", old_root=\"{}\", new_root=\"{}\") to migrate.",
-            c.old_root, c.new_root, c.old_root, c.new_root
+            "possible repo move detected ({} -> {}). Run {} to migrate.",
+            c.old_root,
+            c.new_root,
+            rehome_call(&c.old_root, &c.new_root)
         ));
     }
     if let Some(n) = declared_roots_health
@@ -1634,6 +1636,28 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }))
 }
 
+/// `doctor(fix="rehome", old_root=<old>, new_root=<new>)`, the call a move-candidate hint tells the
+/// caller to run. Both roots are paths the catalog holds, so each is written as a JSON string
+/// literal ([`crate::util::text::json_quote`]): a `"` or `\` in a directory name written between
+/// two raw quotes ends the literal early or starts an escape.
+fn rehome_call(old_root: &str, new_root: &str) -> String {
+    format!(
+        "doctor(fix=\"rehome\", old_root={}, new_root={})",
+        crate::util::text::json_quote(old_root),
+        crate::util::text::json_quote(new_root)
+    )
+}
+
+/// The remedy for a root an ACTIVE worktree registration covers: the two `merge_worktree` calls
+/// (merge, or discard with `abandon=true`) and the fix to retry. `root` is the path the caller gave,
+/// written as a JSON string literal in both calls.
+fn merge_worktree_remedy(root: &str, retry: &str) -> String {
+    let root = crate::util::text::json_quote(root);
+    format!(
+        "merge it first via librarian(action=\"merge_worktree\", root={root}), or if the worktree is being discarded, librarian(action=\"merge_worktree\", root={root}, abandon=true) — then retry {retry}"
+    )
+}
+
 /// Validate a `prune_missing` request without touching the catalog beyond a
 /// read-only registration check. Returns the validated dead-root path, or a
 /// `RecoverableError` for an unsupported fix, a missing/relative root, a root
@@ -1674,9 +1698,7 @@ fn validate_prune_request<'a>(
             format!(
                 "root '{root}' is covered by an ACTIVE worktree registration — pruning would delete the catalog's only record of an unmerged worktree's history"
             ),
-            format!(
-                "merge it first via librarian(action=\"merge_worktree\", root=\"{root}\"), or if the worktree is being discarded, librarian(action=\"merge_worktree\", root=\"{root}\", abandon=true) — then retry prune_missing"
-            ),
+            merge_worktree_remedy(root, "prune_missing"),
         ));
     }
     Ok(root_path)
@@ -1728,9 +1750,7 @@ fn validate_rehome_request<'a>(
             format!(
                 "old_root '{old}' is covered by an ACTIVE worktree registration — rehoming would orphan the catalog's only record of an unmerged worktree's history"
             ),
-            format!(
-                "merge it first via librarian(action=\"merge_worktree\", root=\"{old}\"), or if the worktree is being discarded, librarian(action=\"merge_worktree\", root=\"{old}\", abandon=true) — then retry rehome"
-            ),
+            merge_worktree_remedy(old, "rehome"),
         ));
     }
     Ok((op.to_path_buf(), np.to_path_buf()))
@@ -16570,6 +16590,153 @@ mod tests {
                 .contains("rehome"),
             "hint must mention doctor(fix=\"rehome\", ...) when a candidate is found"
         );
+    }
+    /// Directory names a raw `root="…"` cannot carry: `"`, `\`, `'`, a space, a tab, non-ASCII.
+    #[cfg(unix)]
+    const ROUTE_ROOT_NAMES: [&str; 6] = [
+        "q\"uote",
+        "back\\slash",
+        "sp ace it's",
+        "tab\there",
+        "e\\\"\\\\\"",
+        "a\"b\\c 'd' ünï 日本",
+    ];
+
+    /// The two builders take a `&str` that is not a directory, so this runs on every platform: the
+    /// roots read back from their JSON string literals, in every place a root is written.
+    #[test]
+    fn the_rehome_and_merge_worktree_calls_read_back_to_their_roots() {
+        for (old, new) in [
+            ("/gone/plain", "/here/plain"),
+            ("/gone/q\"uote", "/here/back\\slash"),
+            ("/gone/it's a dir", "/here/tab\there"),
+            ("C:\\gone\\\"x\"", "/here/ünï€😀 日本"),
+        ] {
+            let call = rehome_call(old, new);
+            let (got_old, rest) = crate::util::text::json_string_after(&call, "old_root=");
+            assert_eq!(got_old, old, "{call}");
+            let (got_new, rest) = crate::util::text::json_string_after(rest, ", new_root=");
+            assert_eq!(got_new, new, "{call}");
+            assert_eq!(rest, ")", "{call}");
+
+            let remedy = merge_worktree_remedy(old, "prune_missing");
+            let (first, rest) = crate::util::text::json_string_after(&remedy, "root=");
+            assert_eq!(first, old, "{remedy}");
+            let (second, rest) = crate::util::text::json_string_after(rest, "root=");
+            assert_eq!(second, old, "{remedy}");
+            assert!(rest.starts_with(", abandon=true) "), "{remedy}");
+            assert!(remedy.ends_with("then retry prune_missing"), "{remedy}");
+        }
+    }
+
+    /// `prune_missing` and `rehome` refuse a root an ACTIVE worktree registration covers, and the
+    /// remedy they print names that root in two `merge_worktree` calls. The root is the caller's
+    /// own string, so the calls read back to it exactly (no forward-slash rewrite).
+    #[cfg(unix)]
+    #[test]
+    fn the_refusal_of_a_covered_root_prints_merge_worktree_calls_that_read_back_to_it() {
+        for name in ROUTE_ROOT_NAMES {
+            let cat = Catalog::open_in_memory().unwrap();
+            let root = format!("/cs_route_probe_dead_root/{name}");
+            assert!(!std::path::Path::new(&root).exists());
+            let root_str =
+                crate::util::fs::RepoPath::from_path(std::path::Path::new(&root)).to_string();
+            reg::upsert_active(&cat, &root_str, &root_str, None, 1000).unwrap();
+            let live = std::env::temp_dir();
+            let live = live.to_str().unwrap();
+
+            let prune = validate_prune_request("prune_missing", Some(&root), &cat.conn)
+                .expect_err("a covered root must be refused");
+            let rehome = validate_rehome_request(Some(&root), Some(live), &cat.conn)
+                .expect_err("a covered old_root must be refused");
+            for (what, err, retry) in [
+                ("prune_missing", prune, "prune_missing"),
+                ("rehome", rehome, "rehome"),
+            ] {
+                let hint = err
+                    .downcast_ref::<LibrarianRecoverableError>()
+                    .and_then(|e| e.hint.clone())
+                    .unwrap_or_else(|| panic!("{what} {name:?}: no hint: {err:#}"));
+                let (first, rest) = crate::util::text::json_string_after(&hint, "root=");
+                assert_eq!(first, root, "{what} {name:?}: {hint}");
+                let (second, rest) = crate::util::text::json_string_after(rest, "root=");
+                assert_eq!(second, root, "{what} {name:?}: {hint}");
+                assert!(
+                    rest.starts_with(", abandon=true) "),
+                    "{what} {name:?}: {hint}"
+                );
+                assert!(
+                    hint.ends_with(&format!("then retry {retry}")),
+                    "{what} {name:?}: {hint}"
+                );
+            }
+        }
+    }
+
+    /// The move-candidate hint of the catalog health block names `doctor(fix="rehome", old_root=…,
+    /// new_root=…)`. Both roots read back to the roots the same block reports as structured
+    /// fields. The active project is a real git repo in a directory with an awkward name.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_move_candidate_hint_reads_back_to_the_roots_it_reports() {
+        // No backslash: the catalog holds git roots in forward-slash form (`to_forward_slash`), so
+        // `Repository::open` is handed `back/slash` for a repo in `back\slash` and finds no repo, so
+        // no candidate is offered whatever the hint's quoting. The backslash is covered above.
+        for name in ROUTE_ROOT_NAMES.iter().filter(|n| !n.contains('\\')) {
+            let dir = tempfile::tempdir().unwrap();
+            let new_root_path = dir.path().join(name);
+            std::fs::create_dir_all(&new_root_path).unwrap();
+            let repo = git2::Repository::init(&new_root_path).unwrap();
+            let mut config = repo.config().unwrap();
+            config.set_str("user.name", "Test").unwrap();
+            config.set_str("user.email", "test@test.com").unwrap();
+            std::fs::write(new_root_path.join("a.txt"), "hello").unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(std::path::Path::new("a.txt")).unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = repo.signature().unwrap();
+            let h1 = repo
+                .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap()
+                .to_string();
+
+            let cat = Catalog::open_in_memory().unwrap();
+            let old_root = format!("/gone/{name}");
+            seed_commit(&cat, &h1, &old_root);
+            let current_project =
+                std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+                    abs_path: new_root_path.clone(),
+                    git_root: new_root_path.clone(),
+                    main_root: None,
+                    umbrella: None,
+                });
+            let ctx = TestToolContextBuilder::new(cat)
+                .with_current_project(current_project)
+                .build();
+
+            let out = call(&ctx, json!({})).await.unwrap();
+            let detail = &out["catalog_health"]["move_candidates_detail"][0];
+            let hint = out["catalog_health"]["hint"].as_str().unwrap();
+            let (old, rest) =
+                crate::util::text::json_string_after(hint, "Run doctor(fix=\"rehome\", old_root=");
+            let (new, rest) = crate::util::text::json_string_after(rest, ", new_root=");
+            assert_eq!(
+                &old,
+                detail["old_root"].as_str().unwrap(),
+                "{name:?}: {hint}"
+            );
+            assert_eq!(
+                &new,
+                detail["new_root"].as_str().unwrap(),
+                "{name:?}: {hint}"
+            );
+            assert!(rest.starts_with(") to migrate."), "{name:?}: {hint}");
+            assert!(
+                old.contains(&name.replace('\\', "/")) || old.contains(name),
+                "{name:?}: {old:?}"
+            );
+        }
     }
 
     #[test]

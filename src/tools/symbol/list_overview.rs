@@ -690,9 +690,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
                 .collect();
             let hint = format!(
                 "Found {total_files} files across {} directories — showing top-level classes (AST). \
-                 Drill down with symbols('<subdir>') for full symbols, or \
-                 symbols('{rel_path}/**/*') to scan the full tree.",
-                subdir_counts.len()
+                 Drill down with symbols(path=\"<subdir>\") for full symbols, or \
+                 {} to scan the full tree.",
+                subdir_counts.len(),
+                full_tree_call(rel_path)
             );
             return Ok(json!({
                 "directory": rel_path,
@@ -726,9 +727,10 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
 
         let hint = format!(
             "Found {total_files} files across {} directories — too large for symbol overview. \
-             Drill down with symbols('<subdir>') or use \
-             symbols('{rel_path}/**/*') to scan the full tree with file cap.",
-            subdir_counts.len()
+             Drill down with symbols(path=\"<subdir>\") or use \
+             {} to scan the full tree with file cap.",
+            subdir_counts.len(),
+            full_tree_call(rel_path)
         );
 
         let mut result = json!({
@@ -752,6 +754,19 @@ pub(super) async fn list_overview(input: Value, ctx: &ToolContext) -> anyhow::Re
         )
         .into())
     }
+}
+
+/// `symbols(path=<rel_path>/**/*)`, the call a directory-overview hint offers to scan the whole
+/// tree. The symbols tool takes the glob in its named `path` argument, and the call is text a
+/// caller copies and runs, so the glob is written as a JSON string literal
+/// ([`crate::util::text::json_quote`]) like every other route. The single-quoted positional form
+/// this replaces was not a call that parses, and a `'` in the directory's name ended it early.
+/// A `*`, `?` or `[` in the name is still a glob character: quoting cannot change that.
+pub(super) fn full_tree_call(rel_path: &str) -> String {
+    format!(
+        "symbols(path={})",
+        crate::util::text::json_quote(&format!("{rel_path}/**/*"))
+    )
 }
 
 /// Attach each symbol's own docstring (matched by `symbol_name`) as a `docs`
