@@ -56,10 +56,13 @@ pub(super) fn make_search_symbols_hint(shown: usize, by_file: &[(String, usize)]
         .first()
         .map(|(f, _)| f.as_str())
         .unwrap_or("path/to/file.rs");
+    // A real file's path, written as the JSON string literal a caller pastes: a `"` or `\` in the
+    // name would otherwise end the literal early or start an escape.
+    let top_file = crate::util::text::json_quote(top_file);
     format!(
         "Showing {shown} of total. To narrow down:\n\
          \u{2022} paginate:       add offset={shown}, limit=50\n\
-         \u{2022} filter by file: add path=\"{top_file}\"\n\
+         \u{2022} filter by file: add path={top_file}\n\
          \u{2022} filter by kind: add kind=\"function\" (also: class, struct, interface, type, enum, module, constant)"
     )
 }

@@ -470,12 +470,16 @@ pub fn validate_write_path(
         // See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
         WritePathDecision::OutsideRoot { resolved } => {
             let dir = resolved.parent().unwrap_or(resolved.as_path());
+            // The directory is text a caller pastes into the call, so it is a JSON string
+            // literal: a `"` or `\` in a directory name (or a Windows separator) would otherwise
+            // end the literal early or start an escape.
+            let dir_literal = crate::util::text::json_quote(&dir.display().to_string());
             bail!(
                 "write denied: '{}' is outside the project root. \
-                 Call approve_write(path=\"{}\") first to grant write access for this \
+                 Call approve_write(path={}) first to grant write access for this \
                  session.",
                 raw,
-                dir.display()
+                dir_literal
             )
         }
         WritePathDecision::Denied(msg) => bail!("{msg}"),
@@ -6148,6 +6152,44 @@ EOF"#;
             "approve_write takes a named `path`; a positional call shape sends the reader \
              into a second error: {msg}"
         );
+    }
+
+    /// The directory the denial tells the caller to approve is written into `approve_write(path=…)`,
+    /// a call the caller copies and runs. A `"` or `\` in a directory's name written between two
+    /// raw quotes ends the literal early or starts an escape, so the call stops being the one it
+    /// claims to be: the message must read back, with a real JSON parser, to the directory.
+    ///
+    /// Unix-only: the names hold `"` and `\`, which NTFS forbids. The directory need not exist, so
+    /// the test builds no file.
+    #[cfg(unix)]
+    #[test]
+    fn the_approve_write_call_of_a_denial_reads_back_to_the_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = PathSecurityConfig::default();
+        for dir_name in [
+            "sp ace",
+            "q\"uote",
+            "back\\slash",
+            "it's",
+            "tab\there",
+            "a\"b\\c 'd' $e ü",
+            "e\\\"\\\\\"",
+        ] {
+            let raw = format!("/var/ce_denial_route/{dir_name}/x.rs");
+            let msg = validate_write_path(&raw, tmp.path(), &cfg, &[])
+                .expect_err("a path outside the project root must be denied")
+                .to_string();
+
+            let (dir, rest) = crate::util::text::json_string_after(&msg, "approve_write(path=");
+            assert!(
+                dir.ends_with(&format!("/ce_denial_route/{dir_name}")),
+                "{dir_name:?}: the call names {dir:?}, not the directory: {msg}"
+            );
+            assert!(
+                rest.starts_with(") first to grant write access"),
+                "{dir_name:?}: {msg}"
+            );
+        }
     }
 
     /// The hard denials share the `write_scope_denied` family with the approvable case, so

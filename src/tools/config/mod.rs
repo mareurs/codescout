@@ -790,12 +790,15 @@ fn pin_notice_enabled_from(raw: Option<&str>) -> bool {
 /// project (`activate_replaces_previous_project`), so an agent that does not know
 /// activation is server-global has no way to infer that it just clobbered a peer.
 fn workspace_pin_contrast(prefix: &str, project_root: &str, home: &str) -> String {
+    // Both paths are directories a caller copies into a call, so each is a JSON string literal.
+    let project_root = crate::util::text::json_quote(project_root);
+    let activate_home = crate::tools::guards::activate_call(home);
     format!(
         "{prefix} — activating is server-global: it replaced the active project for \
          every session on this server, not just yours. If other agents are working \
-         concurrently, do not activate — pass workspace=\"{project_root}\" on each call \
+         concurrently, do not activate — pass workspace={project_root} on each call \
          instead, which scopes only your own calls. If you are the only agent here, \
-         remember to workspace(action='activate', path=\"{home}\") when done."
+         remember to {activate_home} when done."
     )
 }
 
@@ -1062,8 +1065,10 @@ async fn build_activation_response(
                 )
             } else {
                 format!(
-                    "Browsing {} (read-only). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
-                    project_name, project_root_str, home_str,
+                    "Browsing {} (read-only). CWD: {} — remember to {} when done.",
+                    project_name,
+                    project_root_str,
+                    crate::tools::guards::activate_call(&home_str),
                 )
             }
         }
@@ -1080,8 +1085,9 @@ async fn build_activation_response(
                 )
             } else {
                 format!(
-                    "Switched project (read-write). CWD: {} — remember to workspace(action='activate', path=\"{}\") when done.",
-                    project_root_str, home_str,
+                    "Switched project (read-write). CWD: {} — remember to {} when done.",
+                    project_root_str,
+                    crate::tools::guards::activate_call(&home_str),
                 )
             }
         }
@@ -1405,3 +1411,6 @@ fn format_project_status(result: &Value) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod route_path_tests;

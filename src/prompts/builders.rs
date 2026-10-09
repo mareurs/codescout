@@ -759,11 +759,13 @@ pub(crate) fn build_per_project_prompt(
     prompt.push_str("Explore ONLY your project root. Do NOT explore sibling projects.\n\n");
     prompt.push_str(&format!(
         "### Step 1: Map the Codebase Structure\n\n\
-         - `tree(\"{root}\")` — top-level structure\n\
+         - `tree({root})` — top-level structure\n\
          - `tree` on each subdirectory\n\
          - `read_file` on the build config\n\
          - `read_file(\"README.md\")` if present\n\n",
-        root = crate::util::fs::to_forward_slash(&project.relative_root)
+        root = crate::util::text::json_quote(&crate::util::fs::to_forward_slash(
+            &project.relative_root
+        ))
     ));
     prompt.push_str(
         "### Step 2: Full Symbol Survey\n\n\
@@ -962,8 +964,11 @@ Step 2: Spawn {} subagents IN PARALLEL — one per project:",
         );
 
         for (id, path) in project_prompts {
+            // `path` carries the project's id (`onboarding-project-<id>.md`), which a workspace
+            // file names: a JSON string literal, so a `"` or `\` in an id still parses.
             instructions.push_str(&format!(
-                "\n  - {id}: read_file(\"{path}\") and follow all instructions",
+                "\n  - {id}: read_file({}) and follow all instructions",
+                crate::util::text::json_quote(path),
             ));
         }
 
@@ -991,8 +996,11 @@ Step 2: Explore each project one at a time:",
         );
 
         for (id, path) in project_prompts {
+            // `path` carries the project's id (`onboarding-project-<id>.md`), which a workspace
+            // file names: a JSON string literal, so a `"` or `\` in an id still parses.
             instructions.push_str(&format!(
-                "\n  - {id}: read_file(\"{path}\") and follow all instructions",
+                "\n  - {id}: read_file({}) and follow all instructions",
+                crate::util::text::json_quote(path),
             ));
         }
 
@@ -1003,5 +1011,93 @@ Step 3: Read the synthesis prompt and write workspace memories:\n\
         ));
 
         instructions
+    }
+}
+
+#[cfg(test)]
+mod route_path_tests {
+    use super::build_workspace_instructions;
+    use crate::util::text::json_string_after;
+
+    /// What a project id can hold that a raw `read_file("…")` cannot carry. The prompt file of a
+    /// project is `.codescout/tmp/onboarding-project-<id>.md`, so the id is in the path. Not files:
+    /// the builder takes the paths as `&str`.
+    const IDS: [&str; 9] = [
+        "plain",
+        "sp ace",
+        "q\"uote",
+        "it's",
+        "back\\slash",
+        "tab\there",
+        "ünï€😀 日本",
+        "a\"b\\c 'd' $e `f` ü",
+        "e\\\"\\\\\"",
+    ];
+
+    /// Each project's prompt is named as a `read_file(<path>)` call that reads back to the path,
+    /// in the instructions for a client that spawns subagents and in the ones for a client that
+    /// does not: the two build the line at two sites.
+    #[test]
+    fn the_prompt_file_of_each_project_reads_back_to_its_path() {
+        let project_prompts: Vec<(String, String)> = IDS
+            .iter()
+            .map(|id| {
+                (
+                    id.to_string(),
+                    format!(".codescout/tmp/onboarding-project-{id}.md"),
+                )
+            })
+            .collect();
+        for subagent_capable in [true, false] {
+            let text = build_workspace_instructions(
+                ".codescout/tmp/onboarding-prompt.md",
+                &project_prompts,
+                ".codescout/tmp/onboarding-workspace-synthesis.md",
+                subagent_capable,
+            );
+            for (id, path) in &project_prompts {
+                let marker = format!("  - {id}: read_file(");
+                let (got, rest) = json_string_after(&text, &marker);
+                assert_eq!(
+                    &got, path,
+                    "subagent_capable={subagent_capable} {id:?}: {text}"
+                );
+                assert!(
+                    rest.starts_with(") and follow all instructions"),
+                    "subagent_capable={subagent_capable} {id:?}: {text}"
+                );
+            }
+        }
+    }
+
+    /// The first step of a project's prompt tells the subagent to `tree(<root>)`. The root is the
+    /// project's directory relative to the workspace, written in forward-slash form (the
+    /// convention of `to_forward_slash`, which turns a `\` into a `/`) and as a JSON string
+    /// literal, so a `"` or a `'` in a directory name still parses. Fed a `&str`, no directory.
+    #[test]
+    fn the_tree_call_of_a_project_prompt_reads_back_to_its_root() {
+        for root in [
+            "plain/sub",
+            "sp ace/it's",
+            "q\"uote/dir",
+            "back\\slash\\dir",
+            "tab\there",
+            "ünï€😀 日本/x",
+            "a\"b\\c 'd' $e `f` ü",
+        ] {
+            let project = crate::workspace::DiscoveredProject {
+                id: "p".to_string(),
+                relative_root: std::path::PathBuf::from(root),
+                languages: vec!["rust".to_string()],
+                manifest: None,
+            };
+            let text = super::build_per_project_prompt(&project, &[]);
+            let (got, rest) = json_string_after(&text, "- `tree(");
+            assert_eq!(got, root.replace('\\', "/"), "{root:?}");
+            assert!(
+                rest.starts_with(")` — top-level structure"),
+                "{root:?}: {rest:.80}"
+            );
+        }
     }
 }
