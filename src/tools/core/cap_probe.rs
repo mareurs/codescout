@@ -1156,6 +1156,24 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
+        // misses a key in files of 5,000 keys (TOML tables, TOML scalars, a TOML table's
+        // children, YAML) against `KEY_HINT_NAMES_BYTE_BUDGET` 2,250, through
+        // `ReadFile.call_content`, and asserts the error body is under half the inline budget,
+        // that the names shown plus the N of `(+N more not shown)` are the 5,000 the test wrote,
+        // that the names shown are the first keys of the file in order, and that the last one
+        // shown resolves. Measured before the cap: a 55,024 B hint, in an error body
+        // `route_tool_error` renders whole. Marker written by production in
+        // `file_summary::offered_names`.
+        // MUTATION (2026-10-09): see the cap's mutants in the commit that added this row.
+        id: "file_summary.key_hint_names",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more not shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_missing_key_in_a_huge_file_gets_a_capped_hint",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
         // test seeds 250 lines against a 90-LINE budget (`BUFFER_QUERY_INLINE_CAP` 100
         // minus 10 lines already taken by stderr). The sibling BYTE budget was checked

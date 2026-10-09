@@ -1904,10 +1904,19 @@ pub(super) fn format_read_file(val: &Value) -> String {
 /// value's line numbers are not the file's, nor that lines of the span were left out because
 /// they belong to other keys). Empty for every other read, and for a value that is the file's
 /// own lines from line 1 on. Placed under the header, like the notices above.
+///
+/// Whether lines were left out is told by FORMAT, not by counting the text against the span. A
+/// YAML value is ONE run, from its key to the line before the next key, so it leaves nothing out;
+/// but it keeps the blank lines before that next key, and `str::lines` (which the JSON's
+/// `total_lines` and the inline count both use) drops a final empty line: a key followed by one
+/// blank line is two lines of the file and one to `lines()`, so a count claimed a line "belongs to
+/// another key" when it is the value's own. A TOML value is the key's own lines and can leave
+/// some out; its text always ends on the last line of an item, never on an empty one, so
+/// `lines()` counts it exactly.
 fn key_read_head(val: &Value) -> String {
-    if !matches!(val["format"].as_str(), Some("toml" | "yaml")) {
+    let Some(format @ ("toml" | "yaml")) = val["format"].as_str() else {
         return String::new();
-    }
+    };
     let (Some(first), Some(last)) = (val["line_range"][0].as_u64(), val["line_range"][1].as_u64())
     else {
         return String::new();
@@ -1919,7 +1928,7 @@ fn key_read_head(val: &Value) -> String {
     });
     let span = last.saturating_sub(first) + 1;
     let mut out = String::new();
-    if span > shown_in_value {
+    if format == "toml" && span > shown_in_value {
         out.push_str(&format!(
             "  file lines {first}-{last}; {shown_in_value} of them are this value (the other lines of the span belong to other keys)\n"
         ));

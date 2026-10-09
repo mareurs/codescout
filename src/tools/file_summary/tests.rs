@@ -2025,6 +2025,144 @@ fn toml_key_that_is_not_key_grammar_is_split_at_every_dot() {
         ("[\"a b\"]\nx = 1".to_string(), (1, 2))
     );
 }
+#[test]
+fn toml_key_that_would_parse_as_a_header_or_a_comment_names_nothing() {
+    // Each of these made `<key> = 0` a document that resolves to a REAL key: a header line inside
+    // the key defines a table, and a comment line or a blank one before the key is skipped. A key
+    // is a dotted path, not a document, so none of them names what it resolves to.
+    let content = "[a]\nb = 1\n\n[package]\nname = \"n\"\n\nz = 2\n";
+    for key in [
+        "[a]\nb",
+        "[package]\nname",
+        "\na.b",
+        "\n\npackage.name",
+        "# x\nz",
+        "a.b\n",
+        "a\r\n.b",
+        "[a].b",
+        "a.[b]",
+        "a].b",
+        "a = 1",
+        "a=1",
+        "a #",
+        "a.b # c",
+        "a.b #\n",
+    ] {
+        assert_eq!(
+            toml_refusal(content, key).message,
+            format!("key '{key}' not found in TOML"),
+            "{key:?}"
+        );
+    }
+}
+
+#[test]
+fn toml_key_with_a_rejected_character_inside_a_quoted_segment_still_resolves() {
+    // `=`, `#`, `[` and `]` are refused only OUTSIDE quotes: a quoted segment may hold any of
+    // them, and a `\"` inside a basic string does not end it.
+    let content = "[\"a=b\"]\nx = 1\n[\"#\"]\ny = 2\n[\"[b]\"]\nz = 3\n['p#q']\nw = 4\n[\"q\\\"[x\"]\nv = 5\n";
+    for (key, want) in [
+        ("\"a=b\"", "[\"a=b\"]\nx = 1"),
+        ("\"#\"", "[\"#\"]\ny = 2"),
+        ("\"[b]\"", "[\"[b]\"]\nz = 3"),
+        ("'p#q'", "['p#q']\nw = 4"),
+        ("\"q\\\"[x\"", "[\"q\\\"[x\"]\nv = 5"),
+        ("\"a=b\".x", "x = 1"),
+    ] {
+        assert_eq!(toml_key(content, key).0, want, "{key}");
+    }
+    // A raw key typed without quotes is split at the dots, as any other non-grammar key is, and
+    // so reaches the key that has such a character in its name.
+    assert_eq!(toml_key(content, "a=b").0, "[\"a=b\"]\nx = 1");
+    assert_eq!(toml_key(content, "p#q").0, "['p#q']\nw = 4");
+}
+
+#[test]
+fn toml_key_plain_dotted_paths_still_use_the_grammar_after_the_rejections() {
+    let content = "[package]\nname = \"n\"\n[dependencies]\nserde = \"1\"\n[features]\nf = []\n[a.\"b.c\"]\nx = 1\n[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n";
+    for (key, want) in [
+        ("dependencies", "[dependencies]\nserde = \"1\""),
+        ("package.name", "name = \"n\""),
+        ("features", "[features]\nf = []"),
+        ("a.\"b.c\"", "[a.\"b.c\"]\nx = 1"),
+        ("a . \"b.c\"", "[a.\"b.c\"]\nx = 1"),
+        (
+            "target.'cfg(unix)'.dependencies",
+            "[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"",
+        ),
+    ] {
+        assert_eq!(toml_key(content, key).0, want, "{key}");
+    }
+}
+
+#[test]
+fn toml_key_text_never_ends_on_an_empty_line() {
+    // `read_file`'s placement line counts a TOML value with `str::lines`, which drops a final
+    // empty line. That is exact only because a TOML answer ends on the last line of an item,
+    // never on a blank or comment line after it; this pins that for the shapes that could.
+    let cases: [(&str, &str); 9] = [
+        ("t = 1\n\n\n", "t"),
+        ("[a]\nx = 1\n\n# tail\n\n\n[b]\ny = 1\n\n", "a"),
+        ("s = \"\"\"\nl\n\"\"\"\n\n\nz = 1\n", "s"),
+        ("[[k]]\nn = 1\n\n[[k]]\nn = 2\n\n\n", "k"),
+        ("k.a = 1\n\nz = 2\n\nk.b = 2\n\n\n", "k"),
+        ("[a]\n\n\n", "a"),
+        ("arr = [\n  1,\n]\n\n", "arr"),
+        ("t = 1\r\n\r\n\r\n", "t"),
+        ("[a] # c\n# d\n\n", "a"),
+    ];
+    for (content, key) in cases {
+        let (text, _) = toml_key(content, key);
+        assert!(!text.ends_with('\n'), "{key} in {content:?}: {text:?}");
+        assert_eq!(
+            text.lines().count(),
+            text.split('\n').count(),
+            "{key} in {content:?}"
+        );
+    }
+}
+
+#[test]
+fn toml_key_a_non_contiguous_answer_can_reparse_into_another_table_known_limit() {
+    // A KNOWN LIMIT, not a defect to fix (ruling 4: the text carries only the key's own lines,
+    // in file order). `b.d = 2` belongs to `[a]` in the file, so it is `a.b.d`, a child of `a.b`;
+    // written straight after `[a.b.c]` in the answer it reads as `a.b.c.b.d`. The line_range is
+    // the span, longer than the text. 2 of 162,498 generated cases did this.
+    let content = "[a.b.c]\nx = 1\n[a]\nb.d = 2\n";
+    let (text, range) = toml_key(content, "a.b");
+    assert_eq!(text, "[a.b.c]\nx = 1\nb.d = 2");
+    assert_eq!(range, (1, 4));
+    let original: toml::Table = content.parse().unwrap();
+    assert_eq!(original["a"]["b"]["d"].as_integer(), Some(2));
+    let back: toml::Table = text.parse().unwrap();
+    assert!(back["a"]["b"].get("d").is_none(), "{back:?}");
+    assert_eq!(back["a"]["b"]["c"]["b"]["d"].as_integer(), Some(2));
+}
+
+#[test]
+fn toml_key_siblings_never_include_the_headers_of_the_keys_ancestors() {
+    // `a.b` lists the other sections of the file, and `[a]` is the table it is in.
+    let r = extract_toml_key("[a]\nx = 1\n[a.b]\ny = 2\n[c]\nz = 3\n", "a.b").unwrap();
+    assert_eq!(r.siblings, ["[c]"]);
+    // Every ancestor, not only the parent; the key's own children are its own, not siblings.
+    let content = "[a]\n[a.b]\n[a.b.c]\n[a.b.c.d]\n[e]\n";
+    let r = extract_toml_key(content, "a.b.c").unwrap();
+    assert_eq!(r.siblings, ["[e]"]);
+    let r = extract_toml_key(content, "a.b").unwrap();
+    assert_eq!(r.siblings, ["[e]"]);
+    // A sibling of the same parent stays a sibling.
+    let r = extract_toml_key("[a]\n[a.b]\n[a.c]\n", "a.b").unwrap();
+    assert_eq!(r.siblings, ["[a.c]"]);
+    // The parent written AFTER the child is still not a sibling; a parent that is only implied
+    // has no header to list.
+    let r = extract_toml_key("[a.b]\ny = 2\n[a]\nx = 1\n[c]\n", "a.b").unwrap();
+    assert_eq!(r.siblings, ["[c]"]);
+    let r = extract_toml_key("[a.b]\ny = 2\n[c]\n", "a.b").unwrap();
+    assert_eq!(r.siblings, ["[c]"]);
+    // A top-level key has no ancestor to drop.
+    let r = extract_toml_key("[a]\n[b]\n", "a").unwrap();
+    assert_eq!(r.siblings, ["[b]"]);
+}
 
 #[test]
 fn toml_key_names_in_a_hint_are_quoted_exactly_when_they_cannot_be_bare() {
@@ -2296,6 +2434,215 @@ fn yaml_key_nested_path_is_refused_not_answered_with_a_part() {
     // YAML resolves top-level keys only: a nested path must refuse, never return a child
     // without its parent.
     assert!(extract_yaml_key("a:\n  b: 1\n", "a.b").is_err());
+}
+/// `(text, (first, last))` of `extract_yaml_key(content, key)`, failing the test on a refusal.
+fn yaml_key(content: &str, key: &str) -> (String, (usize, usize)) {
+    let r = extract_yaml_key(content, key)
+        .unwrap_or_else(|e| panic!("yaml key {key} on {content:?} was refused: {}", e.message));
+    (r.content, r.line_range)
+}
+
+/// Whether `extract_yaml_key(content, key)` refuses.
+fn yaml_refuses(content: &str, key: &str) -> bool {
+    extract_yaml_key(content, key).is_err()
+}
+/// The hint of the refusal of `extract_yaml_key(content, key)`, failing the test when it answers.
+fn yaml_refusal_hint(content: &str, key: &str) -> String {
+    match extract_yaml_key(content, key) {
+        Err(e) => e
+            .guidance
+            .as_ref()
+            .map(|g| g.text().to_string())
+            .unwrap_or_default(),
+        Ok(r) => panic!("yaml key {key} on {content:?} answered {:?}", r.content),
+    }
+}
+
+#[test]
+fn yaml_key_span_stops_before_a_document_marker() {
+    // A key repeated across documents: the FIRST occurrence answers, and its span does not run
+    // on into the `---` line that opens the next document.
+    assert_eq!(
+        yaml_key("k: 1\n---\nk: 2\n", "k"),
+        ("k: 1".to_string(), (1, 1))
+    );
+    // The marker ends the span of the key above it, and the key below it starts its own.
+    assert_eq!(
+        yaml_key("a: 1\n---\nb: 2\n", "a"),
+        ("a: 1".to_string(), (1, 1))
+    );
+    assert_eq!(
+        yaml_key("a: 1\n---\nb: 2\n", "b"),
+        ("b: 2".to_string(), (3, 3))
+    );
+    // Blank lines before the marker stay in the value (they sit before the next key, by design).
+    assert_eq!(
+        yaml_key("a: 1\n\n---\nb: 2\n", "a"),
+        ("a: 1\n".to_string(), (1, 2))
+    );
+    // The end-of-document marker `...` ends it as well.
+    assert_eq!(
+        yaml_key("a: 1\n...\nb: 2\n", "a"),
+        ("a: 1".to_string(), (1, 1))
+    );
+    // A marker may carry a tag or a comment after it.
+    assert_eq!(
+        yaml_key("a: 1\n--- # next\nb: 2\n", "a"),
+        ("a: 1".to_string(), (1, 1))
+    );
+    assert_eq!(
+        yaml_key("a: 1\n--- !t\nb: 2\n", "a"),
+        ("a: 1".to_string(), (1, 1))
+    );
+    // The last key of the first document, with later documents after it.
+    assert_eq!(
+        yaml_key("x: 0\nk:\n  - a\n---\nk: 2\nz: 3\n", "k"),
+        ("k:\n  - a".to_string(), (2, 3))
+    );
+}
+
+#[test]
+fn yaml_key_dashes_that_are_not_a_document_marker_stay_in_the_value() {
+    // An indented `---` is block-scalar text, not a marker; `----`, `...x` and `---x` are not
+    // markers either (a marker is `---` or `...` alone on its line, or followed by white space).
+    assert_eq!(
+        yaml_key("a: |\n  ---\n  text\nz: 1\n", "a"),
+        ("a: |\n  ---\n  text".to_string(), (1, 3))
+    );
+    assert_eq!(
+        yaml_key("a:\n  - x\n----\n...x\n---x\nz: 1\n", "a"),
+        ("a:\n  - x\n----\n...x\n---x".to_string(), (1, 5))
+    );
+}
+
+#[test]
+fn yaml_summary_sections_end_before_a_document_marker_too() {
+    let s = summarize_yaml("a: 1\n\n---\nb: 2\n");
+    let sections = s["sections"].as_array().unwrap();
+    assert_eq!(sections[0]["key"], "a");
+    assert_eq!(sections[0]["end_line"], 2);
+    assert_eq!(sections[1]["key"], "b");
+    assert_eq!(sections[1]["line"], 4);
+    assert_eq!(sections[1]["end_line"], 4);
+}
+
+#[test]
+fn yaml_key_a_key_unique_to_a_later_document_still_resolves() {
+    // Only a key REPEATED across documents is answered from the first one; a key that occurs in
+    // a later document alone is still reachable (a multi-document file is not cut at `---`).
+    assert_eq!(
+        yaml_key("a: 1\n---\nb: 2\nc: 3\n", "c"),
+        ("c: 3".to_string(), (4, 4))
+    );
+}
+
+#[test]
+fn yaml_key_flow_collections_and_comments_are_no_top_level_key() {
+    // `{x: 1}` was taken for the key `{x`; `[x: 1]` for `[x`.
+    for content in [
+        "{x: 1}\na: 2\n",
+        "[x: 1]\na: 2\n",
+        "# c: 1\na: 2\n",
+        "- x: 1\na: 2\n",
+    ] {
+        assert_eq!(yaml_key(content, "a").0, "a: 2", "{content:?}");
+        for bogus in ["{x", "[x", "# c", "#", "- x", "-"] {
+            assert!(yaml_refuses(content, bogus), "{bogus:?} in {content:?}");
+        }
+        // The hint offers the one real key and not the fragment.
+        assert_eq!(
+            yaml_refusal_hint(content, "nope"),
+            "Available keys: a",
+            "{content:?}"
+        );
+    }
+    // A file with nothing but a flow map has no top-level key to offer.
+    assert_eq!(
+        yaml_refusal_hint("{x: 1}\n", "x"),
+        "No top-level keys found in file"
+    );
+}
+
+#[test]
+fn yaml_key_a_key_that_starts_with_a_dash_is_a_documented_limit() {
+    // `-x: 1` is a valid mapping key (a dash NOT followed by a space is not a sequence entry),
+    // but the scan has always refused a line that starts with `-`, since `- x: 1` is a sequence
+    // entry and the two are told apart only by the byte after the dash. Pinned as the limit
+    // it is, not as the right answer.
+    assert!(yaml_refuses("-x: 1\na: 2\n", "-x"));
+    assert_eq!(yaml_key("-x: 1\na: 2\n", "a").0, "a: 2");
+}
+
+#[test]
+fn yaml_key_a_colon_without_a_space_after_it_does_not_end_the_key() {
+    // `a:b` is one plain scalar, not a key `a` with the value `b`.
+    let content = "a:b\nc: 1\n";
+    assert!(yaml_refuses(content, "a"));
+    assert!(yaml_refuses(content, "a:b"));
+    assert_eq!(yaml_key(content, "c").0, "c: 1");
+    // A colon inside a key is part of it when it is not followed by a space.
+    assert_eq!(yaml_key("a:b: 1\nc: 2\n", "a:b").0, "a:b: 1");
+    assert!(yaml_refuses("a:b: 1\nc: 2\n", "a"));
+    // The colon that ends a key is followed by a space, a tab, or the end of the line.
+    assert_eq!(yaml_key("a:\nc: 2\n", "a").0, "a:");
+    assert_eq!(yaml_key("a:\t1\nc: 2\n", "a").0, "a:\t1");
+    assert_eq!(yaml_key("time: 12:30\nc: 2\n", "time").0, "time: 12:30");
+    assert_eq!(yaml_key("a:   \nc: 2\n", "a").0, "a:   ");
+    // A url as a scalar line is no key.
+    assert!(yaml_refuses("http://x.y/z\nc: 2\n", "http"));
+}
+
+#[test]
+fn yaml_key_a_quoted_key_is_named_without_its_quotes() {
+    let content = "\"a\": 1\n'b': 2\n\"b:c\": 3\n'it''s': 4\n\"q\\\"x\": 5\n\"s\" : 6\nz: 7\n";
+    assert_eq!(yaml_key(content, "a"), ("\"a\": 1".to_string(), (1, 1)));
+    assert_eq!(yaml_key(content, "b"), ("'b': 2".to_string(), (2, 2)));
+    assert_eq!(yaml_key(content, "b:c"), ("\"b:c\": 3".to_string(), (3, 3)));
+    assert_eq!(yaml_key(content, "it's").1, (4, 4));
+    assert_eq!(yaml_key(content, "q\"x").1, (5, 5));
+    assert_eq!(yaml_key(content, "s").1, (6, 6));
+    // The quoted spelling is not a name of its own, and neither is the half before the colon.
+    for bogus in ["\"a\"", "'b'", "\"b", "'it", "\"s\""] {
+        assert!(yaml_refuses(content, bogus), "{bogus:?}");
+    }
+    // The siblings and the hint list them unquoted too.
+    let r = extract_yaml_key(content, "a").unwrap();
+    assert_eq!(r.siblings, ["b", "b:c", "it's", "q\"x", "s", "z"]);
+    assert_eq!(
+        yaml_refusal_hint(content, "nope"),
+        "Available keys: a, b, b:c, it's, q\"x, s, z"
+    );
+    // The summary names them the same way.
+    let s = summarize_yaml(content);
+    assert_eq!(s["sections"][0]["key"], "a");
+    assert_eq!(s["sections"][2]["key"], "b:c");
+}
+
+#[test]
+fn yaml_key_a_quoted_line_that_is_not_a_key_is_none() {
+    // No closing quote on the line (a quoted key that runs over lines is a documented limit), or
+    // no colon after it: not a key.
+    for content in [
+        "\"abc: 1\nz: 2\n",
+        "'abc: 1\nz: 2\n",
+        "\"just a string\"\nz: 2\n",
+        "\"a\":b\nz: 2\n",
+        "\"a\" b: 1\nz: 2\n",
+    ] {
+        assert_eq!(
+            yaml_refusal_hint(content, "nope"),
+            "Available keys: z",
+            "{content:?}"
+        );
+    }
+}
+
+#[test]
+fn yaml_key_a_double_quoted_escape_other_than_quote_and_backslash_is_kept_as_written() {
+    // A documented limit: `"a\tb"` is listed with its backslash-t as written, not as a tab.
+    let r = extract_yaml_key("\"a\\tb\": 1\n\"c\\\\d\": 2\n", "a\\tb").unwrap();
+    assert_eq!(r.content, "\"a\\tb\": 1");
+    assert_eq!(yaml_key("\"a\\tb\": 1\n\"c\\\\d\": 2\n", "c\\d").1, (2, 2));
 }
 
 #[test]
