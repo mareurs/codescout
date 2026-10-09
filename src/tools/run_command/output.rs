@@ -539,13 +539,18 @@ fn bound_buffer_stderr(
     own: bool,
 ) -> (String, usize, usize) {
     let (by_lines, shown, total) = crate::tools::command_summary::truncate_lines(stderr, max_lines);
-    let remedy = if own && can_append_stage(query, OWN_STDERR_STAGE) {
+    let remedy = if own && can_wrap_query(query, OWN_STDERR_STAGE) {
+        // WRAPPED, not appended: a redirection applies to the LAST command of a pipeline only, so
+        // `a | b >&2 | c 2>&1 >/dev/null | cut` read `c`'s stderr and left `b`'s on the terminal. A
+        // brace group gives every stage the same stderr, and `{ q; } 2>&1 >/dev/null` is right for
+        // every one-pipeline shape, a single command included.
         format!(
-            "this is the query's own stderr and is stored nowhere: rerun the query with \
-             `{OWN_STDERR_STAGE}` appended to read a window of it"
+            "this is the query's own stderr and is stored nowhere: rerun the whole query as \
+             `{{ QUERY; }} {OWN_STDERR_STAGE}` to read a window of it"
         )
     } else if own {
-        // A list hands an appended stage the LAST command's stderr only.
+        // A list hands the stage the LAST command's stderr only, and a shape the splitter does not
+        // model (`$(…)`, a comment, a heredoc) may swallow it or run it as a second line.
         "this is the query's own stderr and is stored nowhere: narrow the query so it prints \
          less of it"
             .to_string()
@@ -579,18 +584,31 @@ fn bound_buffer_stderr(
 /// `sed -n '2,3000p' @cmd_X 2>&1` gets the appended-pager route, which works. Only that hint's
 /// prose ("not a slice") is inexact there, and that is accepted rather than modelled.
 fn plain_slice_first_line(command: &str) -> Option<usize> {
+    plain_slice_window(command).map(|(first, _)| first)
+}
+
+/// The window a PLAIN SLICE prints, in the queried stream's own numbering: `(1, None)` for
+/// `cat <ref>`, `(A, Some(B))` for `sed -n 'A,Bp' <ref>`. `None` for every other command, by
+/// [`plain_slice_first_line`]'s rule (the whole command, nothing after the ref).
+fn plain_slice_window(command: &str) -> Option<(usize, Option<usize>)> {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let caps = RE
         .get_or_init(|| {
             regex::Regex::new(
-                r#"^\s*(?:cat|sed\s+-n\s+(?:'(\d+),\d+p'|"(\d+),\d+p"|(\d+),\d+p))\s+@(?:cmd|file|tool|bg)_[A-Za-z0-9_]+(?:\.err)?\s*$"#,
+                r#"^\s*(?:cat|sed\s+-n\s+(?:'(\d+),(\d+)p'|"(\d+),(\d+)p"|(\d+),(\d+)p))\s+@(?:cmd|file|tool|bg)_[A-Za-z0-9_]+(?:\.err)?\s*$"#,
             )
             .expect("static pattern")
         })
         .captures(command)?;
-    match caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3)) {
-        Some(a) => a.as_str().parse::<usize>().ok().map(|a| a.max(1)),
-        None => Some(1),
+    match [(1, 2), (3, 4), (5, 6)]
+        .into_iter()
+        .find_map(|(a, b)| Some((caps.get(a)?, caps.get(b)?)))
+    {
+        Some((a, b)) => Some((
+            a.as_str().parse::<usize>().ok()?.max(1),
+            Some(b.as_str().parse::<usize>().ok()?),
+        )),
+        None => Some((1, None)),
     }
 }
 
@@ -603,10 +621,24 @@ fn can_append_stage(query: &str, stage: &str) -> bool {
         && crate::util::path_security::detect_il3_violation(&format!("{query} {stage}")).is_none()
 }
 
+/// Whether `query` wrapped in a brace group and followed by `stage` (`{ query; } stage`) gives
+/// `stage` ALL of the query's stderr AND would be run. [`can_append_stage`] asks the same of a stage
+/// that reads stdout, where "last command" is right: a pipeline's stdout IS its last command's. A
+/// pipeline's stderr is every stage's, and only a group can redirect them together. The wrapping
+/// needs no model of how many stages there are, and the same two questions guard it: the query is
+/// one pipeline (so the `; }` closes it and nothing else), and the IL3 gate does not refuse the
+/// joined command.
+fn can_wrap_query(query: &str, stage: &str) -> bool {
+    crate::util::path_security::is_one_pipeline(query)
+        && crate::util::path_security::detect_il3_violation(&format!("{{ {query}; }} {stage}"))
+            .is_none()
+}
+
 /// The stage a non-slice query appends to read a window of a wide line.
 const WIDE_LINE_STAGE: &str = "| cut -c1-4000";
 
-/// The stage a query appends to read a window of its own stderr, which no buffer holds.
+/// The stage that follows the query's brace group to read a window of its own stderr, which no
+/// buffer holds: see [`can_wrap_query`].
 const OWN_STDERR_STAGE: &str = "2>&1 >/dev/null | cut -c1-4000";
 
 /// How to read a window of a line wider than the response budget. These routes work on a wide
@@ -683,6 +715,81 @@ fn full_page_hint(query: &str, lines: usize) -> Option<String> {
             b + BUFFER_QUERY_INLINE_CAP
         )
     })
+}
+
+/// The hint on a PLAIN SLICE that was NOT cut, when the stream it reads has more: a window of
+/// exactly one page (`sed -n 'A,Bp' <ref>` with `B - A + 1` equal to [`BUFFER_QUERY_INLINE_CAP`],
+/// the window every hint names) that filled it and ends before the last line of the stream.
+/// Without this the page the hint itself advised fits whole as 100 short lines, carries no hint,
+/// and a reader following hints alone stops at line 200 of a longer buffer.
+///
+/// The same rule [`full_page_hint`] applies to a trailing pager, with one more fact: a plain slice
+/// reads a stream the buffer holds, so its length is known (`stream_lines`, asked of the queried
+/// stream only once the window is a full page) and the last window names no further one. A
+/// trailing pager reads the query's own output, whose length is stored nowhere, and has to say
+/// "may print more".
+///
+/// Only the hint's own page width counts: a caller's `sed -n '101,150p'` is a window of the
+/// caller's choosing, and answering it with a next page would be advice nobody asked for.
+fn next_window_hint(
+    query: &str,
+    lines: usize,
+    stream_lines: impl FnOnce(&str) -> Option<usize>,
+) -> Option<String> {
+    use crate::tools::command_summary::BUFFER_QUERY_INLINE_CAP;
+    let (a, Some(b)) = plain_slice_window(query)? else {
+        return None;
+    };
+    let stream = queried_stream(query)?;
+    if b < a || b - a + 1 != BUFFER_QUERY_INLINE_CAP || lines != BUFFER_QUERY_INLINE_CAP {
+        return None;
+    }
+    let total = stream_lines(stream)?;
+    (b < total).then(|| {
+        format!(
+            "This page is lines {a} to {b} of {stream}, which has {total} lines. \
+             Next page: sed -n '{},{}p' {stream}. \
+             Or grep 'keyword' {stream} for targeted search.",
+            b + 1,
+            b + BUFFER_QUERY_INLINE_CAP
+        )
+    })
+}
+
+/// The number of lines `sed` and `cat` see in the stream a buffer query names (`stream`: the
+/// handle, with its `.err` suffix when the query had one), counted on the text `run_command` hands
+/// the shell. That is the stored stream, except a `@tool_*` ref, which the shell reads
+/// pretty-printed when it holds JSON (`OutputBuffer::resolve_refs`): counted as stored it is one
+/// line, and counted as `read_file` numbers it (`\n` expanded) it has lines the shell never sees.
+/// A `@bg_*` log is the file on disk, read now. `None` when the handle no longer resolves.
+fn stream_line_count(ctx: &ToolContext, stream: &str) -> Option<usize> {
+    use crate::tools::command_summary::count_lines;
+    let base = stream.strip_suffix(".err").unwrap_or(stream);
+    let text = if base.starts_with("@bg_") {
+        let log = ctx.output_buffer.get_background_log(base)?;
+        String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned()
+    } else {
+        let entry = ctx.output_buffer.get(base)?;
+        if stream.ends_with(".err") {
+            entry.stderr
+        } else if base.starts_with("@tool_") {
+            serde_json::from_str::<Value>(&entry.stdout)
+                .ok()
+                .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                .unwrap_or(entry.stdout)
+        } else {
+            entry.stdout
+        }
+    };
+    Some(count_lines(&text))
+}
+
+/// The hint a buffer query that was NOT cut carries when its window filled a page and there may be
+/// more: a trailing pager's ([`full_page_hint`]) or a plain slice's ([`next_window_hint`]). The two
+/// shapes cannot both match one command.
+fn full_window_hint(ctx: &ToolContext, query: &str, lines: usize) -> Option<String> {
+    full_page_hint(query, lines)
+        .or_else(|| next_window_hint(query, lines, |stream| stream_line_count(ctx, stream)))
 }
 
 /// The hint on a capped buffer query: the next page and, when the first line was clipped, the
@@ -1237,11 +1344,12 @@ pub(crate) async fn handle_successful_output_with(
             gate_keys.insert("stderr_total".into(), json!(total));
         }
     }
-    // A buffer query that fits whole but filled a hint's own 100-line pager window carries the
-    // route to the next window. Measured here, with the other late keys, so a page that fits only
-    // without it is cut instead of re-buffered.
+    // A buffer query that fits whole but filled a hint's own 100-line window carries the route to
+    // the next window: a trailing pager's, or a plain slice's while its stream has a line left.
+    // Measured here, with the other late keys, so a page that fits only without it is cut instead
+    // of re-buffered.
     let full_page = buffer_only
-        .then(|| full_page_hint(original_command, count_lines(&raw_stdout)))
+        .then(|| full_window_hint(ctx, original_command, count_lines(&raw_stdout)))
         .flatten();
     if let Some(h) = &full_page {
         gate_keys.insert("hint".into(), json!(h));
@@ -1308,6 +1416,11 @@ pub(crate) async fn handle_successful_output_with(
                         )
                     })
                     .max_by_key(String::len)
+                    // The hint of a window that fits whole is not shorter than every cut hint:
+                    // price it too.
+                    .into_iter()
+                    .chain(full_page.clone())
+                    .max_by_key(String::len)
                     .unwrap_or_default();
                 let mut skeleton = json!({
                     "exit_code": exit_code,
@@ -1369,9 +1482,9 @@ pub(crate) async fn handle_successful_output_with(
                     clipped_wide,
                     cut_by_bytes,
                 ));
-            } else if let Some(h) = full_page_hint(original_command, stdout_total) {
-                // Not cut after all, but a full pager window: the route to the next one. The room
-                // above was measured with the cut hint, which holds this sentence and more.
+            } else if let Some(h) = &full_page {
+                // Not cut after all, but a full page window: the route to the next one. Its room
+                // is priced above (`room_for` counts it among the widest hints).
                 result["hint"] = json!(h);
             }
             result
