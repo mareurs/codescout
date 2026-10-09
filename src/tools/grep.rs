@@ -989,10 +989,7 @@ async fn grep_in_buffer(input: &Value, ctx: &ToolContext) -> Result<Value> {
     let raw = ctx.output_buffer.get_stream(raw_path).ok_or_else(|| {
         RecoverableError::with_hint(
             format!("buffer reference not found: '{raw_path}'"),
-            format!(
-                "{} Re-run the command to get a fresh ref.",
-                crate::tools::output_buffer::REF_GONE
-            ),
+            crate::tools::output_buffer::ref_gone_hint(raw_path),
         )
     })?;
 

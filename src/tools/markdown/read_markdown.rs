@@ -21,10 +21,7 @@ async fn resolve_markdown_source(
         let buf = ctx.output_buffer.get(path).ok_or_else(|| {
             RecoverableError::with_hint(
                 format!("buffer reference not found: '{}'", path),
-                format!(
-                    "{} Re-run read_file on the file to get a fresh ref.",
-                    crate::tools::output_buffer::REF_GONE
-                ),
+                crate::tools::output_buffer::ref_gone_hint(path),
             )
         })?;
         let resolved = buf

@@ -1277,7 +1277,7 @@ pub(crate) async fn handle_successful_output_with(
             } else {
                 (content, None)
             };
-            let ref_id = ctx.output_buffer.store_truncated(
+            let (ref_id, held) = ctx.output_buffer.store_truncated_kept(
                 original_command.to_string(),
                 stored,
                 String::new(), // unfiltered capture is stdout-only
@@ -1287,12 +1287,14 @@ pub(crate) async fn handle_successful_output_with(
             // The capture is not inline-sized: `take_while` keeps the line that empties the
             // budget, however long, so the pool can cut it again. What the response reports is
             // the HANDLE's own record, and a cut the pool made is announced (review probe: a
-            // 1.5 MB single line reported 1 buffered line while the handle kept 0 of 1).
-            let held = ctx.output_buffer.stored_truncation(&ref_id);
-            let pool_cut = if held == truncation {
-                Vec::new()
-            } else {
-                ctx.output_buffer.truncation_notices_in(&ref_id)
+            // 1.5 MB single line reported 1 buffered line while the handle kept 0 of 1). The
+            // record comes from the store's own lock hold: looked up afterwards, it was lost
+            // when another store evicted the handle in between.
+            let pool_cut = match held {
+                Some(t) if held != truncation => {
+                    vec![crate::tools::output_buffer::cut_notice(&ref_id, t)]
+                }
+                _ => Vec::new(),
             };
             Some((ref_id, held, line_count, pool_cut))
         })

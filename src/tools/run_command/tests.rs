@@ -10322,6 +10322,37 @@ async fn a_tee_capture_the_pool_cuts_reports_the_handle_it_kept() {
     );
 }
 
+/// Review F6(c): a tee capture cut only by its own budget, which the pool keeps as it was given,
+/// announces no pool cut. `output_truncated` names a cut the POOL made, and there is none.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_tee_capture_the_pool_keeps_as_given_announces_no_pool_cut() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 20000 | grep zzz" }), &ctx)
+        .await
+        .unwrap();
+    let tee = result["unfiltered_output"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no tee capture: {result}"))
+        .to_string();
+    assert!(
+        result.get("unfiltered_truncated").is_some(),
+        "the capture's own budget cut it: {result}"
+    );
+    let held = ctx
+        .output_buffer
+        .stored_truncation(&tee)
+        .expect("the handle records the capture's own cut");
+    assert_eq!(result["unfiltered_buffered_lines"], json!(held.kept_lines));
+    assert!(
+        result
+            .get("output_truncated")
+            .is_none_or(|v| !v.to_string().contains(&tee)),
+        "no pool cut is announced for {tee}: {result}"
+    );
+}
+
 /// R-A: a handle the pool dropped to stay under its byte limit is refused with that cause named,
 /// not only "the session reset" (review probe S2: an output of the whole limit was evicted by the
 /// next small one, and the refusal named the wrong cause).
