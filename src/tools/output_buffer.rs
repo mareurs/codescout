@@ -233,19 +233,17 @@ fn marked_prefix(text: &str, room: usize, total_lines: usize) -> (String, Trunca
 }
 
 /// The streams of a `@cmd_*` entry cut to fit `max` bytes together, with the record of each
-/// cut; untouched when they fit. Otherwise `stderr` keeps what `stdout` leaves, but at least
-/// half the limit when it needs it, and `stdout` keeps the rest. Each cut is a marked prefix
-/// ([`marked_prefix`]). `truncated` is the record `stdout` already carries: a capture cut
-/// before it was stored keeps counting the lines of the whole capture.
+/// cut. `stderr`'s room is what `stdout` leaves, but at least half the limit; `stdout`'s room is
+/// what `stderr` then holds. A stream is cut only past its room, so streams that fit together
+/// are never cut. Each cut is a marked prefix ([`marked_prefix`]). `truncated` is the record
+/// `stdout` already carries: a capture cut before it was stored keeps counting the lines of the
+/// whole capture.
 fn fit_streams(
     max: usize,
     stdout: String,
     stderr: String,
     truncated: Option<Truncation>,
 ) -> (String, String, Option<Truncation>, Option<Truncation>) {
-    if stdout.len() + stderr.len() <= max {
-        return (stdout, stderr, truncated, None);
-    }
     let stderr_room = max.saturating_sub(stdout.len()).max(max / 2);
     let (stderr, stderr_truncated) = if stderr.len() > stderr_room {
         let (cut, t) = marked_prefix(

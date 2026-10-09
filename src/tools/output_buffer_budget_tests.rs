@@ -322,7 +322,11 @@ fn an_oversized_stderr_is_cut_and_its_err_handle_says_so() {
     buf.assert_accounting();
     let e = buf.get(&both).unwrap();
     assert!(e.truncated.is_some() && e.stderr_truncated.is_some());
-    assert!(e.stderr.len() <= LIMIT / 2, "{}", e.stderr.len());
+    assert!(
+        e.stderr.len() <= LIMIT / 2 && e.stderr.len() > LIMIT / 2 - 1_000,
+        "stderr keeps half the limit, no more and not much less: {}",
+        e.stderr.len()
+    );
     let held = buf.bytes_of(&both).unwrap();
     assert!(held <= LIMIT && held > LIMIT - 2_000, "{held}");
     assert_eq!(buf.truncation_notices_in(&both).len(), 2);
@@ -359,6 +363,66 @@ fn the_budget_edge_admits_an_entry_of_exactly_the_limit() {
         "one byte over is cut"
     );
     assert!(buf.bytes_of(&d).unwrap() <= LIMIT);
+}
+
+/// The same inclusive edge for every store kind and for an in-place change: a `stderr`, a tool
+/// result, a whole file and a snapshot of exactly the limit are held whole, a file that grows by
+/// a path read to exactly the limit stays resident, and a refresh that exactly fills the room left
+/// stays resident.
+#[test]
+fn the_budget_edge_holds_for_every_store_kind() {
+    let buf = pool();
+    let id = buf.store("e".into(), String::new(), "e".repeat(LIMIT), 1);
+    let e = buf.get(&id).unwrap();
+    assert!(
+        e.stderr_truncated.is_none(),
+        "a stderr of the limit is whole"
+    );
+    assert_eq!(e.stderr.len(), LIMIT);
+
+    let buf = pool();
+    let id = buf.store_tool("t", "t".repeat(LIMIT));
+    let e = buf.get(&id).unwrap();
+    assert!(e.truncated.is_none(), "a tool result of the limit is whole");
+    assert_eq!(e.stdout.len(), LIMIT);
+
+    let dir = tempfile::tempdir().unwrap();
+    let buf = pool();
+    let f = read_into(&buf, &write(dir.path(), "full", &"f".repeat(LIMIT), 100));
+    assert!(!buf.is_demoted(&f), "a file of the limit is held");
+    assert_eq!(buf.bytes_of(&f), Some(LIMIT));
+    let s = buf.store_file("@memory:full:filtered".into(), "s".repeat(LIMIT));
+    assert!(
+        buf.get(&s).unwrap().truncated.is_none(),
+        "a snapshot of the limit is whole"
+    );
+    buf.assert_accounting();
+
+    let buf = pool();
+    let p = write(dir.path(), "grows", "small\n", 100);
+    let g = read_into(&buf, &p);
+    cmd(&buf, "x", 500_000);
+    write(dir.path(), "grows", &"g".repeat(LIMIT), 90);
+    assert_eq!(read_into(&buf, &p), g);
+    assert!(
+        !buf.is_demoted(&g),
+        "growth by a path read to the limit stays resident"
+    );
+    assert_eq!(buf.total_bytes(), LIMIT);
+    buf.assert_accounting();
+
+    let buf = pool();
+    let p = write(dir.path(), "refresh", &"r".repeat(10_000), 100);
+    let r = read_into(&buf, &p);
+    cmd(&buf, "y", LIMIT - 300_000);
+    write(dir.path(), "refresh", &"R".repeat(300_000), 90);
+    assert_eq!(buf.get(&r).unwrap().stdout.len(), 300_000);
+    assert!(
+        !buf.is_demoted(&r),
+        "a refresh that exactly fills the room left stays resident"
+    );
+    assert_eq!(buf.total_bytes(), LIMIT);
+    buf.assert_accounting();
 }
 
 /// Ruling 3 for a whole file: bigger than the limit, its handle holds no text from birth and
