@@ -1148,9 +1148,10 @@ fn read_json_path_nav(
 /// limit and no range was asked for, else a page of the value with `total_lines`, `shown_lines`,
 /// `complete` and a `next` of `read_file("<path>", <nav>=…, start_line=N, end_line=M)`.
 ///
-/// The line numbers are the VALUE's own. It is not in general a run of the file's lines (a JSON
-/// value is re-serialized, a string value unescaped, and a TOML key resolved through the full
-/// parse is re-serialized), so it has no numbers in the file to state them in. A range beside
+/// The line numbers are the VALUE's own, counted from 1. They are not in general the file's
+/// (a JSON value is re-serialized and a string value unescaped; a TOML key is a run of the file's
+/// lines, but not one that starts at the file's line 1, and its `line_range` says where it came
+/// from), so a number of the value is not a line of the file. A range beside
 /// `nav` slices those lines, as it does beside `json_path` on a `@tool_*` ref.
 ///
 /// The value is a pure function of the file's bytes and the key, and it is recomputed from the
