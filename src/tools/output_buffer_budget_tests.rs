@@ -1738,3 +1738,32 @@ fn after_a_read_stopped_at_the_cap_the_next_read_tells_the_same_text_again_known
     assert!(!third, "but only twice");
     buf.assert_accounting();
 }
+
+/// Review F-C, the residency half: a pass that only stat'ed the file, while the entry was demoted
+/// (same text, now held nowhere in the pool), must start over and read the disk. Finished with the
+/// entry as it is, it would serve the demoted entry's empty text.
+#[test]
+fn a_stat_only_pass_over_an_entry_demoted_meanwhile_reads_the_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let v1 = numbered("v1", 40_000);
+    let p = write(dir.path(), "f", &v1, 100);
+    let f = read_into(&buf, &p);
+    assert!(!buf.is_demoted(&f));
+    let (hold, entered, release) = hold_first_pass();
+    buf.set_read_done_hook(Some(hold));
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the pass stat'ed the file");
+    OutputBuffer::demote_locked(&mut buf.inner.lock().unwrap(), &f);
+    release.send(()).unwrap();
+    assert_eq!(reader.join().unwrap().as_deref(), Some(v1.as_str()));
+    buf.set_read_done_hook(None);
+    assert!(buf.is_demoted(&f));
+    buf.assert_accounting();
+}
