@@ -1242,3 +1242,52 @@ async fn a_handle_dropped_by_the_count_cap_is_refused_naming_the_cap() {
     assert!(g.contains("maximum number of handles"), "the cause: {g}");
     assert!(g.contains("Re-run the command"), "the route: {g}");
 }
+
+/// Review F5, every other site that refuses a gone handle: `grep` on the handle, a heading read
+/// of it (the markdown path), and a `run_command` that names it. Each gives a `@file_*` handle
+/// the read route, not "re-run the command".
+#[tokio::test]
+async fn every_site_routes_a_gone_file_handle_to_reading_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(50));
+    let ctx = ctx_sharing(Agent::new(None).await.unwrap(), buf.clone());
+    let p = dir.path().join("gone.md");
+    std::fs::write(&p, "# T\n\n## A\n\none\n").unwrap();
+    let handle = buf.store_file_read(
+        &p.to_string_lossy(),
+        "# T\n\n## A\n\none\n",
+        crate::tools::output_buffer::file_mtime_ms(&p),
+    );
+    std::fs::remove_file(&p).unwrap();
+    let route = "Read the file again with read_file";
+    let guidance_of = |err: anyhow::Error| {
+        let rec = err.downcast_ref::<RecoverableError>().expect("recoverable");
+        assert!(
+            rec.message.contains("buffer reference not found"),
+            "{}",
+            rec.message
+        );
+        rec.guidance
+            .as_ref()
+            .map(|g| g.text().to_string())
+            .unwrap_or_default()
+    };
+
+    let grep = crate::tools::grep::Grep
+        .call(json!({ "pattern": "one", "path": handle }), &ctx)
+        .await
+        .unwrap_err();
+    let g = guidance_of(grep);
+    assert!(g.contains(route), "grep: {g}");
+
+    let section = ReadFile
+        .call(json!({ "path": handle, "heading": "## A" }), &ctx)
+        .await
+        .unwrap_err();
+    let g = guidance_of(section);
+    assert!(g.contains(route), "heading read: {g}");
+
+    let cmd = buf.resolve_refs(&format!("cat {handle}")).unwrap_err();
+    let g = guidance_of(cmd);
+    assert!(g.contains(route), "run_command: {g}");
+}
