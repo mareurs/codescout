@@ -2535,6 +2535,27 @@ fn yaml_summary_sections_end_before_a_document_marker_too() {
 }
 
 #[test]
+fn yaml_key_blank_and_comment_lines_before_the_next_key_are_in_the_value_by_design() {
+    // The scan is line-based: a comment above `b` may belong to `a` or introduce `b`, and
+    // it cannot tell which, so everything up to the next key is the value of the key above.
+    let content = "a: 1\n# about b\n\nb: 2\n# tail\n\n";
+    assert_eq!(
+        yaml_key(content, "a"),
+        ("a: 1\n# about b\n".to_string(), (1, 3))
+    );
+    assert_eq!(
+        yaml_key(content, "b"),
+        ("b: 2\n# tail\n".to_string(), (4, 6))
+    );
+    // The value's `line_range` is the lines of its text, blank ones included.
+    let r = extract_yaml_key(content, "a").unwrap();
+    assert_eq!(
+        r.content.split('\n').count(),
+        r.line_range.1 - r.line_range.0 + 1
+    );
+}
+
+#[test]
 fn yaml_key_a_key_unique_to_a_later_document_still_resolves() {
     // Only a key REPEATED across documents is answered from the first one; a key that occurs in
     // a later document alone is still reachable (a multi-document file is not cut at `---`).

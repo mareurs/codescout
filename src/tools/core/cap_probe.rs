@@ -1165,7 +1165,11 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // shown resolves. Measured before the cap: a 55,024 B hint, in an error body
         // `route_tool_error` renders whole. Marker written by production in
         // `file_summary::offered_names`.
-        // MUTATION (2026-10-09): see the cap's mutants in the commit that added this row.
+        // MUTATION (2026-10-09): the budget compared with `>=`, the cost counted without its
+        // separator, and the budget at a half (the unit test of the boundary or the cited test
+        // turns red); the cap lifted by 100, the marker text without `not shown`, the count of
+        // omitted names replaced by the count of all of them, and `offered_names` left out of the
+        // TOML or the YAML hint (the cited test turns red).
         id: "file_summary.key_hint_names",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("more not shown"),
