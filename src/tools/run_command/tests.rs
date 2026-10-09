@@ -10716,8 +10716,20 @@ async fn the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the
         (a.clone(), pa),
     ];
     let (mut wrapped_rows, mut nonempty) = (0, 0);
+    // Each row as it is, and with its last command's stdout sent to stderr (`>&2`): the second
+    // puts the row's own output in the stream the route reads, so most rows stop being empty.
+    let mut queries: Vec<(String, String)> = Vec::new();
     for (template, _) in adversarial_table() {
         let query = template.replace("{A}", &a).replace("{E}", &e);
+        queries.push((template.to_string(), query.clone()));
+        queries.push((format!("{template} >&2"), format!("{query} >&2")));
+    }
+    for (template, query) in queries {
+        // Two writers on one stream (`tee /dev/stderr` and the added `>&2`) interleave in no fixed
+        // order, so no byte comparison of the stream is possible.
+        if template.contains("/dev/stderr") && template.ends_with(" >&2") {
+            continue;
+        }
         if !crate::util::path_security::is_one_pipeline(&query)
             || query.starts_with("rg")
             || query.starts_with("shuf")
@@ -10745,12 +10757,13 @@ async fn the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the
             cut_4000(&own).len()
         );
     }
+    eprintln!("{wrapped_rows} rows compared, {nonempty} write to stderr");
     assert!(
-        wrapped_rows >= 40,
+        wrapped_rows >= 75,
         "only {wrapped_rows} rows were compared: the table moved"
     );
     assert!(
-        nonempty >= 3,
+        nonempty >= 30,
         "only {nonempty} rows write to stderr: the comparison proves too little"
     );
 }

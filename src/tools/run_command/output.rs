@@ -1877,6 +1877,143 @@ mod tests {
         }
     }
 
+    /// `plain_slice_window` reads the END of the range too, in every quote form, and nothing but a
+    /// whole `cat` or ranged `sed` of one ref is a window.
+    #[test]
+    fn a_plain_slice_window_has_both_ends_in_every_quote_form() {
+        for (command, want) in [
+            ("cat @cmd_abc12345", Some((1, None))),
+            ("sed -n '101,200p' @cmd_abc12345", Some((101, Some(200)))),
+            (
+                r#"sed -n "101,200p" @cmd_abc12345.err"#,
+                Some((101, Some(200))),
+            ),
+            ("sed -n 101,200p @tool_abc12345", Some((101, Some(200)))),
+            ("sed -n '5,3p' @file_abc12345", Some((5, Some(3)))),
+            ("grep x @cmd_abc12345 | sed -n '101,200p'", None),
+            ("sed -n '101,200p' @cmd_abc12345 2>&1", None),
+        ] {
+            assert_eq!(plain_slice_window(command), want, "{command}");
+        }
+    }
+
+    /// The next-window hint of a plain slice: a full page (exactly 100 lines, from a window of
+    /// exactly 100) with a line left in the stream. The stream is asked only for such a window.
+    #[test]
+    fn next_window_hint_wants_a_full_page_and_a_line_left() {
+        use std::cell::Cell;
+        let ask = |query: &str, lines: usize, total: usize| {
+            let asked = Cell::new(false);
+            let hint = next_window_hint(query, lines, |_| {
+                asked.set(true);
+                Some(total)
+            });
+            (hint, asked.get())
+        };
+        let q = "sed -n '101,200p' @cmd_abc12345";
+
+        // A full page with a line left names the next window, on the stream that was queried.
+        let (hint, asked) = ask(q, 100, 201);
+        assert!(asked);
+        let hint = hint.expect("a line is left");
+        assert!(
+            hint.contains("Next page: sed -n '201,300p' @cmd_abc12345."),
+            "{hint}"
+        );
+        // The same page at the end of the stream, and short of it.
+        assert!(ask(q, 100, 200).0.is_none());
+        assert!(ask(q, 100, 199).0.is_none());
+        // A page that did not print 100 lines is the end, whatever the stream is said to hold, and a
+        // stream count that disagrees with the page is not believed in the other direction either.
+        assert!(ask(q, 99, 5_000).0.is_none());
+        assert!(ask(q, 101, 5_000).0.is_none());
+        // Only the hint's own window width asks the stream at all.
+        for other in [
+            "sed -n '101,199p' @cmd_abc12345",
+            "sed -n '101,201p' @cmd_abc12345",
+            "sed -n '101,100p' @cmd_abc12345",
+            "cat @cmd_abc12345",
+            "grep x @cmd_abc12345 | sed -n '101,200p'",
+        ] {
+            let (hint, asked) = ask(other, 100, 5_000);
+            assert!(hint.is_none() && !asked, "{other}");
+        }
+        // The `.err` suffix and the quote forms keep the stream.
+        let (hint, _) = ask(r#"sed -n "1,100p" @cmd_abc12345.err"#, 100, 150);
+        let hint = hint.expect("a line is left");
+        assert!(
+            hint.contains("Next page: sed -n '101,200p' @cmd_abc12345.err."),
+            "{hint}"
+        );
+    }
+
+    /// Why the room for a cut `stdout` need not price a full window's hint (it does anyway, as a
+    /// guard): the gate measures `{exit_code, stdout, hint}` and the cut skeleton holds those plus
+    /// `truncated`, `stdout_shown` and `stdout_total`, so a window the gate calls too big is cut
+    /// whenever the full hint is no longer than the widest cut hint plus those three keys.
+    #[test]
+    fn a_full_window_hint_never_outgrows_the_keys_a_cut_response_adds() {
+        for handle in [
+            "@cmd_0bf0a111",
+            "@cmd_0bf0a111.err",
+            "@tool_0bf0a111",
+            "@file_0bf0a111",
+            "@bg_00000034",
+        ] {
+            for (a, total) in [(1usize, 101usize), (100_001, 9_999_999)] {
+                let query = format!("sed -n '{a},{}p' {handle}", a + 99);
+                let full = next_window_hint(&query, 100, |_| Some(total)).expect("a line is left");
+                let widest_cut = [99usize, 100]
+                    .into_iter()
+                    .map(|shown| truncation_hint(&query, shown, 100, ", stderr 20/20", true, true))
+                    .max_by_key(String::len)
+                    .unwrap();
+                let gate = json!({ "exit_code": 0, "stdout": "", "hint": full }).to_string();
+                let skeleton = json!({
+                    "exit_code": 0,
+                    "truncated": true,
+                    "stdout_shown": 100,
+                    "stdout_total": 100,
+                    "stdout": "",
+                    "hint": widest_cut,
+                })
+                .to_string();
+                assert!(
+                    gate.len() <= skeleton.len(),
+                    "{query}: the full hint ({} B) outgrew the cut skeleton by {} B",
+                    full.len(),
+                    gate.len() - skeleton.len()
+                );
+            }
+        }
+    }
+
+    /// The route an own-stderr marker advises is judged by the gate as the caller will type it, the
+    /// brace group included: `{ q; } stage`. The group hides an unbounded producer from the gate's
+    /// segment scan (measured: `git log | cat - @X | head -3` is refused joined and accepted
+    /// wrapped), so a verdict on the JOINED text is a verdict on text nobody runs.
+    #[test]
+    fn can_wrap_query_asks_the_gate_about_the_text_it_advises() {
+        assert!(can_wrap_query(
+            "grep -c a @cmd_abc12345 | cat",
+            OWN_STDERR_STAGE
+        ));
+        assert!(!can_wrap_query(
+            "grep -c a @cmd_abc12345; cat @cmd_abc12345",
+            OWN_STDERR_STAGE
+        ));
+        let (q, stage) = ("git log | cat - @cmd_abc12345", "| head -3");
+        assert!(
+            crate::util::path_security::detect_il3_violation(&format!("{q} {stage}")).is_some(),
+            "the premise: refused joined"
+        );
+        assert_eq!(
+            can_wrap_query(q, stage),
+            crate::util::path_security::detect_il3_violation(&format!("{{ {q}; }} {stage}"))
+                .is_none()
+        );
+    }
+
     /// A non-slice query is paged by appending to it, numbered from 1, and never by a `sed` on the
     /// handle; one that already ends in a pager has that pager REPLACED, numbered from what was shown;
     /// the hint never echoes the query.
