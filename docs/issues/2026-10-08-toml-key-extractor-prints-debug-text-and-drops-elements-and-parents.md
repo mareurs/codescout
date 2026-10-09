@@ -46,12 +46,18 @@ codescout on `experiments`. Linux. The same output on the baseline before the va
 
 ## Root cause
 
-Unknown — under investigation. The first read of `extract_toml_key` points at the serializer fallback for
-case 1; cases 2 to 4 have not been traced.
+Four independent defects in `extract_toml_key` (`src/tools/file_summary/file_summary.rs`), none of them touched by the 2026-10-08 value-paging change. Read at the bytes of the base `918b3d51` and reproduced as failing tests before any edit:
+
+1. **Scalar.** The full-parse path ended in `toml::to_string_pretty(current).unwrap_or_else(|_| format!("{current:?}"))`. A TOML document must be a table, so the serializer refuses a bare scalar and the fallback printed the `Debug` of the `toml::Value`: `String("t")`. A multi-line string came back as one line of escaped text.
+2. **Array of tables.** The fast path took the section list of `summarize_toml` (header lines found by their text) and `.find(..)` the first header equal to `[k]` or `[[k]]`. For `[[k]]` repeated that is element one, and its `end_line` was the line before the next header, so the sub-tables of that one element went too.
+3. **Child without its parent.** Observed output for `toml_key=a` on `[a.b]`: `[b]\ny = 2\n`. The fast path found no header `[a]`, so the full-parse path re-serialised table `a`; the serializer is rooted at `a`, so the header it prints for the child is relative to it (inferred from the output; the output is verified).
+4. **`line_range`.** The full-parse path set `line_range: (1, content.lines().count())` unconditionally: it held no line information at all.
 
 ## Evidence
 
-The four calls above.
+The four calls above, reproduced as unit tests on the base code (red), then green on the fix. Output on the base: `String("t")`; `[[k]]\nname = \"a\"\n`; `[b]\ny = 2\n`; the whole file as `line_range`.
+
+**YAML (`extract_yaml_key`) does not have these four defects**, measured with a test for each shape, all green on the base: a scalar is its source line (`t: t`, range `(1,1)`); a sequence of maps under a key returns every element; `line_range` is the span of the returned lines (the text is a slice of the file from the key's line to the line before the next top-level key, so trailing blank and comment lines up to the next key are inside it, by design); a nested path (`a.b`) is refused, not answered with a child. Remaining limits, not defects of this bug: top-level keys only (a documented feature gap), a quoted key keeps its quotes in the name it matches, and the key scan is line-based. No YAML change was made.
 
 ## Hypotheses tried
 
@@ -59,11 +65,32 @@ None yet.
 
 ## Fix
 
-Not started.
+Branch `fix/toml-key-source-lines` (from `918b3d51`; the SHA and patch-id are for whoever lands it).
+
+The result is built from the key's SOURCE lines, as the user ruled, not from the parsed value. `toml` 1.1 is already a dependency and its `toml::de::DeTable::parse` returns every key and value with a byte span (no new dependency). Public API only: the flags that say what kind of table a value is (`is_inline`, `is_implicit`, `is_array_of_tables`) are `pub(crate)` in `toml`, so the kind is read from the byte a table's span starts at: `[` is a header (a std header or an `[[array]]` element), `{` an inline table, anything else a table only implied by a dotted key or a deeper header.
+
+- A key resolves by a segment-wise walk of the spanned tree (exact comparison of each segment, so `a` never matches `ab`). Every item below it is collected: a header (`[a.b]`, `[[k]]`, brackets included) or a pair (key start to value end, so a multi-line string, array or inline table is whole).
+- Items become file lines; two runs join when only blank and comment lines lie between them. The text is the key's own lines in file order, joined with `\n` (CRLF loses its `\r`, as in every other extractor of the module). `line_range` is the first and last of those lines. When the lines are not contiguous (a dotted group with another key between, a table with a foreign section between two children) the text carries only the key's lines and `line_range` is the span: longer than the text. This rule is in the doc comment of `extract_toml_key` and pinned by tests.
+- `[[k]]` returns every element with its header and the tables written below it; `[a.b]` for `toml_key=a` returns `[a.b]`; `a` with children returns its own lines and each child under its full header, even when a child is written before the parent.
+- `siblings` are the other headers of the file (file order, once each, at most 30), only for a header-written key; `heading_text` and `breadcrumb` are the key's segments. The section-summary fast path is gone.
+- A missing nested key now lists the keys of the level that lacks it (`Available keys in 'package': name`); the top-level refusal is unchanged (`Available top-level keys: ...`, now in file order). A path through a value that is not a table is refused naming it.
+- `src/tools/read_file.rs`: only the doc comment of `value_of_a_real_file`, which said a TOML key is re-serialized.
+
+Known limits, not fixed: a quoted key that contains a `.` cannot be named (the key is split at every `.`); a key under an array of tables (`k.name`) is refused, address `k`; an inline-table member (`i.a`) answers with the line(s) of the whole pair. YAML: see Evidence.
 
 ## Tests added
 
-N/A — not fixed.
+`src/tools/file_summary/tests.rs` (red on the base for the four cases of the record, then green):
+
+- The four cases: `toml_key_scalar_is_its_source_line_not_rust_debug_text`, `toml_key_array_of_tables_returns_every_element_in_order_with_headers`, `toml_key_child_table_keeps_its_full_header`, `toml_key_dotted_group_reports_its_span_and_carries_only_its_lines`.
+- Shapes: `toml_key_multi_line_string_keeps_its_real_lines`, `..._array_of_tables_with_a_foreign_table_between_elements_carries_only_its_lines`, `..._array_of_tables_takes_the_sub_tables_of_each_element`, `..._with_child_tables_returns_its_own_lines_and_the_children_with_full_headers`, `..._header_defined_later_than_its_children_still_leads_with_its_header`, `..._dotted_group_with_a_foreign_key_between_skips_that_line`, `..._dotted_group_with_only_blank_and_comment_lines_between_keeps_them`, `..._dotted_group_inside_a_table_is_reached_by_its_full_path`, `..._dotted_pairs_and_a_header_below_them_are_one_key`, `..._range_is_the_keys_lines_in_a_file_it_does_not_start_in`, `..._prefix_of_another_key_matches_only_itself`, `..._quoted_keys_are_addressed_by_their_text`, `..._table_keeps_comments_and_blank_lines_inside_it_not_around_it`, `..._header_with_a_trailing_comment_is_kept_whole`, `..._empty_table_is_its_header_alone`, `..._crlf_file_has_the_right_lines_and_no_carriage_returns`, `..._inline_table_is_its_source_line`, `..._multi_line_inline_table_keeps_its_opening_and_closing_lines`, `..._empty_array_and_empty_inline_table_are_their_source_line`, `..._array_spanning_lines_keeps_every_line`, `..._array_of_inline_tables_spanning_lines_is_one_value`, `..._that_is_missing_still_names_its_scope`, `..._through_a_value_that_is_not_a_table_is_refused_naming_it`, `..._that_does_not_parse_is_refused_with_the_parse_error`, `..._of_a_table_lists_the_other_sections_as_siblings`, `..._siblings_are_in_file_order_capped_and_never_the_keys_own_headers`.
+- A real-file corpus: `toml_key_of_every_key_of_this_repos_manifest_and_lockfile_is_lines_of_the_file` (every key and every key one level down of this repo's `Cargo.toml` and `Cargo.lock`, against the file's own lines; it found `features.e2e-java = []` when the empty-array guard was mutated away).
+- `line_index_names_the_line_of_a_byte_and_reads_a_span_as_half_open`.
+- YAML, measured on the same four shapes (no change needed): `yaml_key_scalar_is_its_source_line`, `yaml_key_sequence_of_maps_returns_every_element`, `yaml_key_line_range_is_the_span_of_the_returned_lines`, `yaml_key_nested_path_is_refused_not_answered_with_a_part`.
+
+`src/tools/read_file_buffer_edge_tests.rs`: new `a_toml_key_value_over_one_page_pages_the_files_own_lines` (a 600-row multi-line string, 300 `[[k]]` elements and a table with 200 children, each paged to its end; the oracle is built from the rows, not from the extractor, and every page carries the `line_range` of the file). The fixture check of `a_value_of_a_real_file_is_paged_on_its_path_and_mints_no_handle` asserted that a dotted group is RE-SERIALIZED; it now asserts it is a run of the file's own lines below line 1 (the property the test is about, that the value's numbers are its own, is unchanged).
+
+Mutation (`scripts/mutation-probe.sh`, isolated, one mutant at a time; the first batch ran on the bytes of `ab9bd1f2`, and the mutants that touch the run joiner or the line index were re-run after the joiner refactor and the index test, on the final bytes): killed: array-of-tables loop stopped after the first element; run start +1/-1 line and end +1/-1 line, and `line_range` first +1/-1 and last +1/-1 (eight mutants); the child-table header push removed; the array-element header push removed; prefix match (`starts_with`) in place of equality; the `{` branch of the table kinds disabled; empty-array guard removed; the run joiner's gap check made always true; the blank/comment test cut to one of its two halves (both ways); the item sort removed; the sibling sort removed; the sibling cap `>=` to `>`; the own-header exclusion removed; the sibling dedup removed; `depth == 0` to `depth == 1`; the key sort removed; `line_of` `<=` to `<`. Survivors found and handled: `start <= run.1 + 1` and `run.1.max(end)` in the run joiner were semantically inert (TOML puts one pair or header on a line, so items are disjoint and sorted, and an adjacent item is an empty gap) and were rewritten to state the invariant (a `debug_assert!` plus `lines.get(..)` declining a join), which the corpus test now exercises on real files; `end.saturating_sub(1)` in `LineIndex::lines_of` survived because no span `toml` returns ends on a newline, so it got a unit test on the index and is then killed.
 
 ## Workarounds
 
