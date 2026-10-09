@@ -1795,8 +1795,45 @@ pub(super) fn format_read_file(val: &Value) -> String {
     // the notice reports.
     insert_below_header(
         format_read_file_body(val),
-        &crate::tools::format::truncation_head(val),
+        &format!(
+            "{}{}",
+            crate::tools::format::truncation_head(val),
+            key_read_head(val)
+        ),
     )
+}
+
+/// Where a TOML or YAML `toml_key` value sits in its file, for the text form (the JSON carries
+/// `line_range` and `siblings_omitted`; the text did not, so a reader could not tell that the
+/// value's line numbers are not the file's, nor that lines of the span were left out because
+/// they belong to other keys). Empty for every other read, and for a value that is the file's
+/// own lines from line 1 on. Placed under the header, like the notices above.
+fn key_read_head(val: &Value) -> String {
+    if !matches!(val["format"].as_str(), Some("toml" | "yaml")) {
+        return String::new();
+    }
+    let (Some(first), Some(last)) = (val["line_range"][0].as_u64(), val["line_range"][1].as_u64())
+    else {
+        return String::new();
+    };
+    let shown_in_value = val["total_lines"].as_u64().unwrap_or_else(|| {
+        val["content"]
+            .as_str()
+            .map_or(0, |c| c.lines().count() as u64)
+    });
+    let span = last.saturating_sub(first) + 1;
+    let mut out = String::new();
+    if span > shown_in_value {
+        out.push_str(&format!(
+            "  file lines {first}-{last}; {shown_in_value} of them are this value (the other lines of the span belong to other keys)\n"
+        ));
+    } else if first != 1 {
+        out.push_str(&format!("  file lines {first}-{last}\n"));
+    }
+    if val["siblings_omitted"].as_bool() == Some(true) {
+        out.push_str("  sibling sections not listed (too many to show)\n");
+    }
+    out
 }
 
 /// How many lines a page SHOWS: the span its `shown_lines` names, for the `[N of M lines shown]`

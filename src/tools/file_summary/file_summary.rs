@@ -1524,26 +1524,25 @@ pub(crate) fn cut_array_middle(
 
 /// Byte offsets at which the lines of a text start, to name the 1-based line a byte lies on.
 /// A line ends at `\n`, so a CRLF file counts exactly the lines `str::lines` yields.
-/// (`pub(crate)`, with its methods, for the unit test of the half-open span rule.)
-pub(crate) struct LineIndex {
+struct LineIndex {
     starts: Vec<usize>,
 }
 
 impl LineIndex {
-    pub(crate) fn new(text: &str) -> Self {
+    fn new(text: &str) -> Self {
         let mut starts = vec![0];
         starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
         Self { starts }
     }
 
     /// The 1-based line byte `offset` lies on.
-    pub(crate) fn line_of(&self, offset: usize) -> usize {
+    fn line_of(&self, offset: usize) -> usize {
         self.starts.partition_point(|&s| s <= offset)
     }
 
     /// The 1-based first and last line of the byte span `start..end` (`end` exclusive; an empty
     /// span is the line of `start`).
-    pub(crate) fn lines_of(&self, start: usize, end: usize) -> (usize, usize) {
+    fn lines_of(&self, start: usize, end: usize) -> (usize, usize) {
         (
             self.line_of(start),
             self.line_of(end.saturating_sub(1).max(start)),
@@ -1576,11 +1575,7 @@ fn toml_entry_items(
     value: &Spanned<DeValue<'_>>,
     out: &mut Vec<TomlItem>,
 ) {
-    let opens = |at: usize, what: &[u8]| {
-        src.as_bytes()
-            .get(at..)
-            .is_some_and(|b| b.starts_with(what))
-    };
+    let opens = |at: usize, what: &[u8]| toml_opens(src, at, what);
     match value.get_ref() {
         DeValue::Table(table) => {
             let span = value.span();
@@ -1625,14 +1620,79 @@ fn toml_table_items(src: &str, table: &DeTable<'_>, out: &mut Vec<TomlItem>) {
     }
 }
 
-/// The keys of `table` in the order the file writes them, whatever order the map type keeps.
+/// The keys of `table` in the order the file writes them, whatever order the map type keeps,
+/// each as it is typed back into `toml_key` (see [`toml_key_name`]).
 fn toml_keys_in_file_order(table: &DeTable<'_>) -> Vec<String> {
     let mut keys: Vec<(usize, String)> = table
         .iter()
-        .map(|(k, _)| (k.span().start, k.get_ref().to_string()))
+        .map(|(k, _)| (k.span().start, toml_key_name(k.get_ref())))
         .collect();
     keys.sort();
     keys.into_iter().map(|(_, k)| k).collect()
+}
+
+/// Whether `src` has `what` at byte `at`.
+fn toml_opens(src: &str, at: usize, what: &[u8]) -> bool {
+    src.as_bytes()
+        .get(at..)
+        .is_some_and(|b| b.starts_with(what))
+}
+
+/// One key segment as it is typed back into `toml_key`: bare when it can be, else a quoted
+/// basic string (`"b.c"`), which [`toml_key_segments`] reads back as the one segment it is.
+fn toml_key_name(segment: &str) -> String {
+    let bare = !segment.is_empty()
+        && segment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if bare {
+        return segment.to_string();
+    }
+    let mut out = String::from('"');
+    for c in segment.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The segments of a `toml_key`, read by TOML's own key grammar, so a quoted segment
+/// (`a."b.c"`, `target.'cfg(unix)'.dependencies`) is one segment whatever it holds and
+/// whitespace around a dot is ignored. The grammar is asked of the parser itself, by parsing
+/// `<key> = 0` and walking the nested single-entry tables back down to the `0`.
+///
+/// A key that is not TOML key grammar (a bare name with a space, such as `my key`, which
+/// the file may only have as `"my key"`) is split at every `.`, as it always was.
+fn toml_key_segments(key: &str) -> Vec<String> {
+    let probe = format!("{key} = 0");
+    if let Ok(parsed) = DeTable::parse(&probe) {
+        let mut path = Vec::new();
+        let mut table = parsed.get_ref();
+        while table.len() == 1 {
+            let Some((k, v)) = table.iter().next() else {
+                break;
+            };
+            path.push(k.get_ref().to_string());
+            match v.get_ref() {
+                DeValue::Table(inner) => table = inner,
+                // The `0` this function appended, and nothing a key could have smuggled in
+                // (`x = 5 #`): it is the last byte of the probe.
+                DeValue::Integer(_) if v.span() == (probe.len() - 1..probe.len()) => {
+                    return path;
+                }
+                _ => break,
+            }
+        }
+    }
+    key.split('.').map(str::to_string).collect()
 }
 
 /// A line that may sit INSIDE a run of one key's lines: blank, or a comment.
@@ -1658,20 +1718,21 @@ fn toml_source_lines(
     let mut runs: Vec<(usize, usize)> = Vec::new();
     for (start, end) in spans {
         let end = end.min(lines.len());
-        // TOML puts at most one pair or header on a line, so the items are sorted AND disjoint:
-        // `start` lies below the last run's end only if `toml` hands back a span that breaks
-        // that, and `lines.get` then declines the join rather than slicing backwards.
-        debug_assert!(
-            runs.last().is_none_or(|run| start > run.1),
-            "items share a line"
-        );
+        // A span that starts inside the last run (`start <= run.1`: overlapping or nested) joins
+        // it, and the run ends at the longer of the two; one that starts after it joins when only
+        // blank and comment lines lie between (none, when it is adjacent). `extract_toml_key`
+        // hands this no overlapping items today (a key inside an inline table is answered with its
+        // whole pair), and assuming that was a defect once: the members of an inline table share
+        // the lines of the pair that holds them. So the joiner assumes neither order nor
+        // disjointness.
         match runs.last_mut() {
             Some(run)
-                if lines
-                    .get(run.1..start - 1)
-                    .is_some_and(|gap| gap.iter().all(|l| is_blank_or_comment(l))) =>
+                if start <= run.1
+                    || lines[run.1..start - 1]
+                        .iter()
+                        .all(|l| is_blank_or_comment(l)) =>
             {
-                run.1 = end
+                run.1 = run.1.max(end)
             }
             _ => runs.push((start, end)),
         }
@@ -1688,11 +1749,14 @@ fn toml_source_lines(
 
 /// The text of a TOML `key` as it is WRITTEN in `content`, and the lines it was taken from.
 ///
-/// `key` is a dotted path (`a.b`, split at every `.`: a quoted key that contains a dot cannot be
-/// named). What it means follows the file, not a re-serialisation of the parsed value:
+/// `key` is a dotted path read by TOML's own key grammar: `a.b`, `a."b.c"` (a quoted segment may
+/// hold a dot) and `target.'cfg(unix)'.dependencies` all name what they say; a key that is not
+/// that grammar (a bare name with a space) is split at every `.`. What it means follows the file,
+/// not a re-serialisation of the parsed value:
 ///
 /// - A pair (`t = "t"`, `k.x = 1`, an inline table, a multi-line string or array) is its source
-///   line or lines. A dotted group (`k.x = 1`, `k.y = 2`) is all the pairs of that key.
+///   line or lines. A dotted group (`k.x = 1`, `k.y = 2`) is all the pairs of that key. A key
+///   inside an inline table has no lines of its own: it is the WHOLE pair that holds the table.
 /// - A table written as a header is its header and its pairs, with every table below it
 ///   (`[a.b]`, `[a.c]`) under its FULL header: `toml_key=a` on `[a.b]` alone is `[a.b]` and its
 ///   pairs, not `[b]`. A table below it written before it in the file is part of it too.
@@ -1704,6 +1768,9 @@ fn toml_source_lines(
 ///   another section written between two of its children), the text carries only the key's own
 ///   lines, in file order, and `line_range` is the span from the first to the last of them
 ///   (1-based, inclusive). It is never the file's range.
+/// - The text is the file's lines joined with `\n`, so a CRLF file loses its `\r`, including
+///   inside a multi-line string. TOML lets a parser normalise a newline there; the value parsed
+///   back from the text differs from the file's by exactly that (`\r\n` is `\n`).
 ///
 /// A header-written key lists the other sections of the file as `siblings` (in file order, each
 /// header once); any other key lists none. The list has no count cap, as the YAML one has none:
@@ -1715,19 +1782,35 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
             "File could not be parsed as TOML",
         )
     })?;
-    let segments: Vec<&str> = key.split('.').collect();
+    let segments = toml_key_segments(key);
     let not_found = |hint: String| {
         RecoverableError::with_hint(format!("key '{}' not found in TOML", key), hint)
     };
 
-    // Resolve the path against the parse, a segment at a time.
+    // Resolve the path against the parse, a segment at a time. `enclosing` is the pair of the
+    // outermost inline table the path runs through: a member of an inline table has no lines of
+    // its own, so the answer is that whole pair.
     let mut scope: &DeTable<'_> = parsed.get_ref();
-    let mut target: Option<(&Spanned<DeString<'_>>, &Spanned<DeValue<'_>>)> = None;
+    type Entry<'t, 'i> = (&'t Spanned<DeString<'i>>, &'t Spanned<DeValue<'i>>);
+    let mut target: Option<Entry<'_, '_>> = None;
+    let mut enclosing: Option<Entry<'_, '_>> = None;
+    let typed_back = |upto: usize| {
+        segments[..upto]
+            .iter()
+            .map(|s| toml_key_name(s))
+            .collect::<Vec<_>>()
+            .join(".")
+    };
     for (depth, segment) in segments.iter().enumerate() {
-        let prefix = segments[..depth].join(".");
+        let prefix = typed_back(depth);
         if let Some((_, value)) = target {
             match value.get_ref() {
-                DeValue::Table(table) => scope = table,
+                DeValue::Table(table) => {
+                    if enclosing.is_none() && toml_opens(content, value.span().start, b"{") {
+                        enclosing = target;
+                    }
+                    scope = table;
+                }
                 other => {
                     return Err(not_found(format!(
                         "'{prefix}' is not a table, it is a value of type {}",
@@ -1736,7 +1819,9 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
                 }
             }
         }
-        target = scope.iter().find(|(k, _)| &**k.get_ref() == *segment);
+        target = scope
+            .iter()
+            .find(|(k, _)| &**k.get_ref() == segment.as_str());
         if target.is_none() {
             let available = toml_keys_in_file_order(scope).join(", ");
             return Err(not_found(if depth == 0 {
@@ -1750,8 +1835,9 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
         return Err(not_found(String::new()));
     };
 
+    let (items_key, items_value) = enclosing.unwrap_or((target_key, target_value));
     let mut items = Vec::new();
-    toml_entry_items(content, target_key, target_value, &mut items);
+    toml_entry_items(content, items_key, items_value, &mut items);
     let index = LineIndex::new(content);
     let spans: Vec<(usize, usize)> = items
         .iter()
@@ -1803,8 +1889,8 @@ pub fn extract_toml_key(content: &str, key: &str) -> Result<SectionResult, Recov
     Ok(SectionResult {
         content: text,
         line_range,
-        heading_text: segments.join("."),
-        breadcrumb: segments.iter().map(|s| s.to_string()).collect(),
+        heading_text: typed_back(segments.len()),
+        breadcrumb: segments.clone(),
         siblings,
         format: "toml".to_string(),
     })
@@ -1854,4 +1940,69 @@ pub fn extract_yaml_key(content: &str, key: &str) -> Result<SectionResult, Recov
         format!("key '{}' not found in YAML", key),
         format!("Available keys: {}", available.join(", ")),
     ))
+}
+
+/// Unit tests of the two private pieces of `extract_toml_key` that no file-level case reaches
+/// (they are here, not in `tests.rs`, so the types stay private to this module).
+#[cfg(test)]
+mod toml_key_pieces {
+    use super::*;
+
+    #[test]
+    fn line_index_names_the_line_of_a_byte_and_reads_a_span_as_half_open() {
+        // Lines start at bytes 0, 3, 6 (an empty line) and 7.
+        let ix = LineIndex::new("ab\ncd\n\nef");
+        assert_eq!(ix.line_of(0), 1);
+        assert_eq!(ix.line_of(2), 1, "the newline belongs to the line it ends");
+        assert_eq!(ix.line_of(3), 2, "the first byte of a line is on that line");
+        assert_eq!(ix.line_of(6), 3);
+        assert_eq!(ix.line_of(7), 4);
+        // `end` is exclusive: a span that ends with a newline ends on the line the newline ends.
+        assert_eq!(ix.lines_of(0, 3), (1, 1));
+        assert_eq!(ix.lines_of(0, 4), (1, 2));
+        // A span that starts ON a newline starts on the line that newline ends. No span `toml`
+        // returns does (a key starts at its first byte), so this pins the index itself: the
+        // mutant `line_of(start + 1)` is equivalent in production.
+        assert_eq!(ix.lines_of(2, 3), (1, 1));
+        assert_eq!(
+            ix.lines_of(3, 3),
+            (2, 2),
+            "an empty span is the line of its start"
+        );
+        assert_eq!(ix.lines_of(7, 9), (4, 4));
+        // CRLF: the `\r` is on the line it ends, and the next line starts after the `\n`.
+        let crlf = LineIndex::new("a\r\nb");
+        assert_eq!(
+            (crlf.line_of(1), crlf.line_of(2), crlf.line_of(3)),
+            (1, 1, 2)
+        );
+    }
+
+    #[test]
+    fn the_joiner_merges_overlapping_nested_and_blank_separated_spans_only() {
+        let lines = ["a", "", "# c", "d", "e", "f"];
+        let join = |spans: Vec<(usize, usize)>| toml_source_lines(&lines, spans).unwrap();
+        // Overlapping, and one inside another: the run ends where the longest ends. (No span
+        // `toml` returns for a file overlaps, but the joiner must not depend on that.)
+        assert_eq!(
+            join(vec![(1, 4), (2, 2)]),
+            ("a\n\n# c\nd".to_string(), (1, 4))
+        );
+        assert_eq!(
+            join(vec![(1, 2), (2, 4)]),
+            ("a\n\n# c\nd".to_string(), (1, 4))
+        );
+        // Adjacent, and separated by blank and comment lines only: one run, the gap kept.
+        assert_eq!(join(vec![(1, 1), (2, 2)]), ("a\n".to_string(), (1, 2)));
+        assert_eq!(
+            join(vec![(1, 1), (4, 4)]),
+            ("a\n\n# c\nd".to_string(), (1, 4))
+        );
+        // Separated by another key's line: two runs, the foreign line left out.
+        assert_eq!(join(vec![(1, 1), (5, 5)]), ("a\ne".to_string(), (1, 5)));
+        assert_eq!(join(vec![(4, 4), (6, 6)]), ("d\nf".to_string(), (4, 6)));
+        // Out of order in, in order out; nothing in, nothing out.
+        assert_eq!(join(vec![(5, 5), (4, 4)]), ("d\ne".to_string(), (4, 5)));
+        assert!(toml_source_lines(&lines, Vec::new()).is_none());
+    }
 }
