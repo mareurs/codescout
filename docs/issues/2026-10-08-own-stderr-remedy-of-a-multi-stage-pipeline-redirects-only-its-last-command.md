@@ -10,7 +10,7 @@ tags:
 opened: 2026-10-08
 owner: marius
 related:
-- docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
+- docs/issues/archive/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
 severity: low
 ---
 
@@ -70,4 +70,4 @@ a test.
 
 ## References
 
-- `docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`
+- `docs/issues/archive/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`

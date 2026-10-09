@@ -168,7 +168,7 @@ hint pages the wrong stream.
 Nothing owed on this defect. Remaining work is in Still open and in the ADR (Revisit when): a byte budget for the
 buffer pool, paging a `json_path`/`toml_key` value of a real file on its own path, and `peer knowledge`. The
 related `run_command` hint bug is filed separately
-(`docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`).
+(`docs/issues/archive/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`).
 
 ## References
 

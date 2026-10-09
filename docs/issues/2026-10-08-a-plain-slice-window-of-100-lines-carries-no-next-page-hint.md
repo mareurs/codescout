@@ -10,7 +10,7 @@ tags:
 opened: 2026-10-08
 owner: marius
 related:
-- docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
+- docs/issues/archive/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
 severity: low
 ---
 
@@ -68,4 +68,4 @@ Read the buffer with `read_file("@X", start_line=N, end_line=M)`.
 
 ## References
 
-- `docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`
+- `docs/issues/archive/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md`

@@ -1,5 +1,5 @@
 ---
-id: '1b544eac8264477f'
+id: 12f2a3d92682a4b4
 kind: bug
 status: fixed
 title: 'BUG: the cut-off hint of a run_command over a buffer pages the source stream, not the command''s own output'
@@ -12,7 +12,6 @@ owner: marius
 related:
 - docs/adrs/2026-10-08-a-read-keeps-the-handle-it-reads-and-one-real-file-has-one-handle.md
 severity: low
-unverified: 'Not landed on experiments and not probed on a rebuilt binary: every claim above comes from in-process tests through RunCommand::call_content and from reviewers. The hint tests were run under dash (1,166 targeted tests, 0 failed) but not on macOS or Windows. Mutation counts were reported by the fixing agents and reviewers.'
 ---
 
 # BUG: the cut-off hint of a `run_command` over a buffer pages the source stream, not the command's own output
@@ -108,11 +107,21 @@ end_line=M)` for a plain slice of the source.
 
 ## Resume
 
-After landing: probe the live tools (`grep -n "" @cmd_X` over a 3,000-line buffer, then
-follow its hint), clear the `unverified` caveat and archive this file. Remaining, filed separately: the
-own-stderr remedy on a multi-stage pipeline, a plain-slice window of exactly 100 lines that carries no
-next-page hint, and unescaped paths in routes. Not fixed and out of scope: `shuf`-style random output cannot
-be re-run into the same lines; a `sed 's/a/x/'` query makes a new handle.
+Landed on `experiments` at `a868f87a` by fast-forward, so the series keeps its SHAs. Nothing is pushed.
+
+Verified live on the rebuilt release binary (2026-10-09, built after the landing):
+
+1. `run_command("seq 1 3000")` gave a buffer. `grep -n "" @cmd_…` returned `1:1` … `100:100`, `truncated: true`,
+   `stdout_shown: 100`, `stdout_total: 3000`, **no `output_id`**, and the hint: "This output is not a slice of
+   @cmd_…, and the rest of it is stored nowhere. Next page: append `| sed -n '101,200p'` to this query."
+2. Following that hint exactly (`grep -n "" @cmd_… | sed -n '101,200p'`) returned `101:101` … `200:200`, and its
+   hint named `201,300p` and said the page is of "the query before its last stage".
+
+Filed separately and still open: the own-stderr remedy on a multi-stage pipeline, a plain-slice window of exactly
+100 lines that carries no next-page hint, unescaped paths in routes. Not fixed and out of scope: `shuf`-style
+random output cannot be re-run into the same lines; a `sed 's/a/x/'` query makes a new handle.
+
+Not covered: macOS and Windows (the hint tests ran under dash, 1,166 targeted tests, 0 failed).
 
 ## References
 

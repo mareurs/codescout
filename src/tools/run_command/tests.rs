@@ -9155,7 +9155,7 @@ async fn a_shape_over_the_limit_by_buffer_notices_keeps_its_status() {
 
 // ---- the cut-off hint of a NON-SLICE buffer query pages the query's own output ----
 //
-// BUG docs/issues/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
+// BUG docs/issues/archive/2026-10-08-the-cut-off-hint-of-a-run-command-over-a-buffer-pages-the-source-not-its-own-output.md
 // `grep -n "" @cmd_X` over `seq 1 3000` was cut at line 100 and advised
 // `Next page: sed -n '101,200p' @cmd_X`, which prints source lines `101`.. without the `N:` prefix,
 // and for a filtering grep prints lines that never matched. The query's own output is stored
