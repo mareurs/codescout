@@ -226,6 +226,7 @@ A third round, on branch `fix/buffer-pool-byte-budget` (2026-10-09), added the b
 |---|---|---|
 | `267d318e` | `1c006d08245fdaa27bccee38880bc8d08a7cf9dc` | a hard byte budget on the buffer pool |
 | `46135fc2` | `971162b1564208bcf2c0463978f766f536bee236` | tests that kill the survivors of its mutation run |
+| `bf1d104a` | `d3649bdf6ff717881904c2589efded0e1dce753f` | `MAX_POOL_BYTES` classified as a probed result cap (`output_buffer.pool_bytes`) |
 
 Mutation runs through `scripts/mutation-probe.sh`, one mutant at a time: the first run of 23 mutants left 5
 survivors (one equivalent edge, three edges with no case at exactly the limit, one assertion monotone under
