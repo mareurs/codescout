@@ -1316,3 +1316,48 @@ fn a_file_that_fits_exactly_with_every_other_file_demoted_is_kept() {
     assert_eq!(buf.bytes_of(&c1), Some(500_000));
     assert_eq!(buf.bytes_of(&c2), Some(500_000));
 }
+
+/// Review F2: a change that moved the stamp BACK (a path read of the same text after the file was
+/// restored to an older mtime, `cp -p`, `touch -d`) is no change on disk either. A read held at
+/// the disk across it applies the text it read without a second disk read, and keeps the stamp
+/// that path read set.
+#[test]
+fn a_stamp_moved_back_by_the_same_text_costs_no_second_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let buf = Arc::new(pool());
+    let text = numbered("big", 600_000);
+    let p = write(dir.path(), "big", &text, 90);
+    let f = read_into(&buf, &p);
+    assert!(buf.is_demoted(&f), "bigger than one entry's share");
+
+    let passes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (hold, entered, release) = hold_first_pass();
+    {
+        let passes = passes.clone();
+        buf.set_disk_hook(Some(Arc::new(move || {
+            passes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            hold();
+        })));
+    }
+    let reader = {
+        let buf = buf.clone();
+        let f = f.clone();
+        std::thread::spawn(move || buf.get(&f).map(|e| e.stdout))
+    };
+    entered
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read reached the disk");
+    let older = file_mtime_ms(&write(dir.path(), "big", &text, 100)).unwrap();
+    assert_eq!(read_into(&buf, &p), f);
+    assert_eq!(buf.inner.lock().unwrap().entries[&f].timestamp, older);
+    release.send(()).unwrap();
+    assert_eq!(reader.join().unwrap().as_deref(), Some(text.as_str()));
+    buf.set_disk_hook(None);
+    assert_eq!(
+        passes.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the held read applied without reading the file again"
+    );
+    assert_eq!(buf.inner.lock().unwrap().entries[&f].timestamp, older);
+    buf.assert_accounting();
+}

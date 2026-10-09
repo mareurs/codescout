@@ -1059,14 +1059,15 @@ impl OutputBuffer {
     /// over. Before this, a read of a 300 MB demoted file held the one lock for 8.9 s and every
     /// other call on the pool waited (review probe RP8, debug build).
     ///
-    /// Two bounds on starting over (review F2). A change that only moved the stamp FORWARD, when
-    /// the text just read has the hash the entry holds, is no change on disk, and the read
-    /// applies: another read of the same text stamped it (every read of a file whose mtime is in
+    /// Two bounds on starting over (review F2). A change that only moved the stamp, when the text
+    /// just read has the hash the entry holds, is no change on disk, and the read applies: another
+    /// read (or a path read) of the same text stamped it (every read of a file whose mtime is in
     /// the future stamps it with the clock, so 8 parallel reads made 36 disk passes). The stamp
-    /// that other read set is kept. And a read reads the file at most [`RESOLVE_READS`] times: if
-    /// the entry changed under the last of them, the text it read is served WITHOUT being stored,
-    /// and reported as a change when it differs from what the entry holds. A pass that reads
-    /// nothing (it only stat'ed the file) is not counted.
+    /// that other read set is kept, in either direction: it was taken before a read of this same
+    /// text, and this read changes nothing. And a read reads the file at most [`RESOLVE_READS`]
+    /// times: if the entry changed under the last of them, the text it read is served WITHOUT
+    /// being stored, and reported as a change when it differs from what the entry holds. A pass
+    /// that reads nothing (it only stat'ed the file) is not counted.
     ///
     /// A demoted whole-file entry ([`BufferEntry::demoted`]) is read from disk on EVERY read and
     /// the text is served without being put back, so a read can never take the pool past its
@@ -1112,9 +1113,9 @@ impl OutputBuffer {
             let inner = &mut *guard;
             // Gone from the pool while the disk was read.
             let current = file_state(inner.entries.get(canonical)?);
-            // Only the stamp moved, forward, and what was just read is the text the entry
+            // Only the stamp moved (either way), and what was just read is the text the entry
             // describes: nothing changed on disk, so starting over would only repeat the read.
-            let stamp_only = current.0 > seen.0
+            let stamp_only = current.0 != seen.0
                 && current.1 == seen.1
                 && current.2 == seen.2
                 && read
@@ -1145,7 +1146,7 @@ impl OutputBuffer {
             let entry = inner.entries.get_mut(canonical)?;
             let changed = entry.text_hash.as_deref() != Some(hash.as_str());
             entry.text_hash = Some(hash);
-            // A stamp another read of this same text moved forward is kept.
+            // A stamp another read of this same text set is kept.
             if let Some(observed) = stale_at.filter(|_| !stamp_only) {
                 entry.timestamp = capped_stamp(Some(observed), now_ms());
             }
