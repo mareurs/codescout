@@ -190,6 +190,7 @@ pub fn truncation_marker(t: Truncation) -> String {
 ///
 /// Before it the pool capped entries, not bytes: twelve 5 MB files read by range kept 62.9 MB,
 /// and 50 large files could fill memory (ADR 2026-10-08, *Consequences*).
+// cap-class: RESULT_CAP output_buffer.pool_bytes — probed
 pub(crate) const MAX_POOL_BYTES: usize = 128 * 1024 * 1024;
 
 /// The lowest byte limit a setting can give the pool: 1 MiB. Chosen, not measured. It holds

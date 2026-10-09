@@ -8,6 +8,7 @@ use super::*;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+// cap-class: NOT_A_CAP — test-only alias of MIN_POOL_BYTES that sizes the pools these tests build; it bounds no runtime path
 const LIMIT: usize = MIN_POOL_BYTES;
 
 fn pool() -> OutputBuffer {
