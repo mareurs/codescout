@@ -524,7 +524,8 @@ fn queried_stream(command: &str) -> Option<&str> {
 /// `BUFFER_STDERR_BYTE_BUDGET` JSON-ESCAPED bytes, marker included, the latter by eliding the
 /// MIDDLE. Returns `(text, lines_shown, lines_total)` like `truncate_lines`; `lines_total` counts
 /// the stream, so a wide single line reads `1/1` and the marker, which travels with the data, is
-/// what says it was cut.
+/// what says it was cut. A cut by the LINE cap alone carries one too, after the last line kept,
+/// holding the same remedy; a stream that fits whole carries none.
 ///
 /// Escaped, not raw: a control character is 1 byte here and 6 in the response, so a raw cut of
 /// 2,000 B of `\x01` serialized to ~12 KB and the response was re-buffered under `@tool_*`.
@@ -567,7 +568,28 @@ fn bound_buffer_stderr(
         "stderr",
         &remedy,
     );
-    (bounded, shown, total)
+    // Cut by the byte budget: the marker in the middle holds the remedy, and its `of N bytes` counts
+    // the whole stream, so it covers a line cut as well. Cut by nothing: silent, as it always was.
+    if shown == total || bounded != by_lines {
+        return (bounded, shown, total);
+    }
+    // Cut by the LINE cap alone. The twenty lines fit the byte budget, so the cut above never ran,
+    // and the counters (`stderr_shown`, `stderr_total`) were all the caller had: for the query's
+    // own stderr, which is stored nowhere, no route to line 21 existed in the response. Measured
+    // 2026-10-09: `cat @A >&2` over 3,000 short lines answered 20 lines and no marker. The same
+    // remedy follows the lines, in the same `\n--- stderr: .. ---` frame, inside the budget: the
+    // text the marker leaves room for is cut by bytes if it must be, and that cut's marker then
+    // stands in for this one.
+    let marker = format!("\n--- stderr: {shown} of {total} lines shown; {remedy} ---");
+    let room =
+        BUFFER_STDERR_BYTE_BUDGET.saturating_sub(crate::util::text::json_escaped_len(&marker));
+    let body =
+        crate::util::text::elide_middle_escaped(&by_lines, stderr.len(), room, "stderr", &remedy);
+    if body == by_lines {
+        (format!("{body}{marker}"), shown, total)
+    } else {
+        (body, shown, total)
+    }
 }
 
 /// The line a PLAIN SLICE of the queried stream starts at, in that stream's own numbering: `1` for
@@ -767,26 +789,67 @@ fn next_window_hint(
 /// pretty-printed when it holds JSON (`OutputBuffer::resolve_refs`): counted as stored it is one
 /// line, and counted as `read_file` numbers it (`\n` expanded) it has lines the shell never sees.
 /// A `@bg_*` log is the file on disk, read now. `None` when the handle no longer resolves.
+///
+/// COST, MEASURED 2026-10-09 (release build, a 54.9 MB stream of 7,000,000 short lines, 20 pages
+/// of exactly 100 lines each through `RunCommand::call_content`, against 20 pages of 99 lines,
+/// which do not ask): the count added 91 ms per page on a `@cmd_*` buffer (284.8 -> 376.1 ms
+/// median) and 136 ms on a `@bg_*` log (234.8 -> 371.2 ms). Pieces timed alone: `str::lines().count()`
+/// 86 ms, the clone `OutputBuffer::get` makes 7 ms, `fs::read` 15 ms, the lossy UTF-8 copy 35 ms.
+/// So the cost was the counting, then the copies. After: a byte count ([`count_newline_lines`]) and
+/// a log read in chunks and never held whole, measured the same way, add 29 ms per page on a
+/// `@cmd_*` buffer (278.2 -> 306.8 ms median) and 23 ms on a `@bg_*` log (236.2 -> 259.2 ms). The
+/// clone of a stored entry stays (7 ms; a pool accessor was not worth a change to its file).
+/// Not measured: a `@tool_*` ref, whose JSON is parsed and pretty-printed to count.
 fn stream_line_count(ctx: &ToolContext, stream: &str) -> Option<usize> {
-    use crate::tools::command_summary::count_lines;
     let base = stream.strip_suffix(".err").unwrap_or(stream);
-    let text = if base.starts_with("@bg_") {
+    if base.starts_with("@bg_") {
         let log = ctx.output_buffer.get_background_log(base)?;
-        String::from_utf8_lossy(&std::fs::read(log).ok()?).into_owned()
+        return count_file_lines(&log, FILE_COUNT_CHUNK);
+    }
+    let entry = ctx.output_buffer.get(base)?;
+    if stream.ends_with(".err") {
+        Some(count_newline_lines(entry.stderr.as_bytes()))
+    } else if base.starts_with("@tool_") {
+        let pretty = serde_json::from_str::<Value>(&entry.stdout)
+            .ok()
+            .and_then(|v| serde_json::to_string_pretty(&v).ok());
+        Some(count_newline_lines(
+            pretty.as_deref().unwrap_or(&entry.stdout).as_bytes(),
+        ))
     } else {
-        let entry = ctx.output_buffer.get(base)?;
-        if stream.ends_with(".err") {
-            entry.stderr
-        } else if base.starts_with("@tool_") {
-            serde_json::from_str::<Value>(&entry.stdout)
-                .ok()
-                .and_then(|v| serde_json::to_string_pretty(&v).ok())
-                .unwrap_or(entry.stdout)
-        } else {
-            entry.stdout
+        Some(count_newline_lines(entry.stdout.as_bytes()))
+    }
+}
+
+/// The bytes `count_file_lines` reads at a time.
+const FILE_COUNT_CHUNK: usize = 1 << 20;
+
+/// The lines `sed -n '$='` counts in `bytes`: each `\n`, plus one for a last line that has none.
+/// Equal to `count_lines` (`str::lines().count()`) on any UTF-8 text, and on the lossy decode of
+/// any bytes: a `\n` is one ASCII byte that no multi-byte sequence holds, and the lossy decode
+/// keeps it. Over bytes because the count of a 55 MB stream is the hot part of a 100-line page
+/// (see [`stream_line_count`]).
+fn count_newline_lines(bytes: &[u8]) -> usize {
+    let newlines = bytes.iter().filter(|&&b| b == b'\n').count();
+    newlines + usize::from(bytes.last().is_some_and(|&b| b != b'\n'))
+}
+
+/// [`count_newline_lines`] of the file at `path`, read `chunk` bytes at a time so a large log is
+/// never held whole. `None` when it cannot be read.
+fn count_file_lines(path: &std::path::Path, chunk: usize) -> Option<usize> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; chunk.max(1)];
+    let (mut newlines, mut last) = (0usize, None);
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
         }
-    };
-    Some(count_lines(&text))
+        newlines += buf[..n].iter().filter(|&&b| b == b'\n').count();
+        last = Some(buf[n - 1]);
+    }
+    Some(newlines + usize::from(last.is_some_and(|b| b != b'\n')))
 }
 
 /// The hint a buffer query that was NOT cut carries when its window filled a page and there may be
@@ -2343,6 +2406,114 @@ mod tests {
             escaped + 20 > BUFFER_STDERR_BYTE_BUDGET,
             "{escaped} B of {BUFFER_STDERR_BYTE_BUDGET}: the cut kept far less than fits"
         );
+    }
+
+    /// A stderr cut by the LINE cap alone carries the remedy its source can deliver, in the same
+    /// frame as the byte cut's; one that fits whole carries nothing.
+    #[test]
+    fn a_line_cut_stderr_carries_the_remedy_its_source_can_deliver() {
+        let text: String = (1..=30).map(|i| format!("{i}\n")).collect();
+        let (own, shown, total) = bound_buffer_stderr(&text, 20, "cat @cmd_0bf0a111 >&2", true);
+        assert_eq!((shown, total), (20, 30));
+        assert!(own.starts_with("1\n2\n"), "{own:.0}");
+        assert!(
+            own.contains("\n--- stderr: 20 of 30 lines shown; "),
+            "{own:.200}"
+        );
+        assert!(own.ends_with(" ---"), "{own:.0}");
+        assert!(own.contains("{ QUERY; } 2>&1 >/dev/null | cut -c1-4000"));
+
+        // A shape the wrap cannot take: advice, not a route.
+        let (list, ..) = bound_buffer_stderr(&text, 20, "echo 1; cat @cmd_0bf0a111 >&2", true);
+        assert!(list.contains("narrow the query"), "{list:.0}");
+        assert!(!list.contains("QUERY"), "{list:.0}");
+
+        let (stored, ..) = bound_buffer_stderr(&text, 20, "grep -c a @cmd_0bf0a111", false);
+        assert!(
+            stored.contains("20 of 30 lines shown; all of it: @cmd_0bf0a111.err ---"),
+            "{stored:.0}"
+        );
+
+        // Whole, at the edge and below: the text itself.
+        let twenty: String = (1..=20).map(|i| format!("{i}\n")).collect();
+        let (whole, shown, total) = bound_buffer_stderr(&twenty, 20, "cat @cmd_0bf0a111 >&2", true);
+        assert_eq!((whole.as_str(), shown, total), (twenty.as_str(), 20, 20));
+    }
+
+    /// `count_newline_lines` is what `str::lines().count()` and `sed -n '$='` say, over the shapes
+    /// a stream ends in.
+    #[test]
+    fn count_newline_lines_is_the_line_count_sed_and_str_lines_give() {
+        for text in [
+            "",
+            "a",
+            "a\n",
+            "\n",
+            "\n\n",
+            "a\n\n",
+            "a\nb",
+            "a\nb\n",
+            "\n\na",
+            "a\r\nb\r\n",
+            "a\rb",
+            "é\nü",
+        ] {
+            assert_eq!(
+                count_newline_lines(text.as_bytes()),
+                crate::tools::command_summary::count_lines(text),
+                "{text:?}"
+            );
+        }
+        // The shell's own count, on real bytes.
+        #[cfg(unix)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            for text in ["a", "a\n", "\n", "a\n\nb", "a\nb\n", "x\ny\nz"] {
+                let path = dir.path().join("t.txt");
+                std::fs::write(&path, text).unwrap();
+                let out = std::process::Command::new("sed")
+                    .args(["-n", "$="])
+                    .arg(&path)
+                    .output()
+                    .unwrap();
+                let sed: usize = String::from_utf8(out.stdout)
+                    .unwrap()
+                    .trim()
+                    .parse()
+                    .unwrap_or(0);
+                assert_eq!(count_newline_lines(text.as_bytes()), sed, "{text:?}");
+            }
+        }
+    }
+
+    /// A file is counted the same whatever the chunk it is read in: a newline that ends a chunk, a
+    /// last line that starts in one and ends in the next, a last line with no newline in a chunk
+    /// of its own, and bytes that are not UTF-8 (counted as the lossy decode counts them).
+    #[test]
+    fn count_file_lines_does_not_depend_on_the_chunk_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log");
+        let cases: [&[u8]; 6] = [
+            b"",
+            b"a",
+            b"a\n",
+            b"ab\ncd\n\nef",
+            b"a\xff\nb\xc3\n\xe2\x82",
+            b"\n\n\n\n\n\n\n\n\n\n",
+        ];
+        for bytes in cases {
+            std::fs::write(&path, bytes).unwrap();
+            let want = crate::tools::command_summary::count_lines(&String::from_utf8_lossy(bytes));
+            assert_eq!(count_newline_lines(bytes), want, "{bytes:?}");
+            for chunk in [0usize, 1, 2, 3, 4, 5, 7, 1 << 20] {
+                assert_eq!(
+                    count_file_lines(&path, chunk),
+                    Some(want),
+                    "{bytes:?} in chunks of {chunk}"
+                );
+            }
+        }
+        assert_eq!(count_file_lines(&dir.path().join("missing"), 4), None);
     }
 
     /// The `--list` command is built from the `--` of the segment that runs `cargo test`, and
