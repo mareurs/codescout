@@ -664,6 +664,18 @@ pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
 // Tool access controls
 // ---------------------------------------------------------------------------
 
+/// `workspace(action='activate', path=<root>, read_only=false)` as a call a caller can paste. `path` is
+/// written as a JSON string literal ([`crate::util::text::json_quote`]), not between two raw quotes, so a
+/// `"`, `'` or `\` in a directory name reads back as the path it names; `read_only` is an argument
+/// assignment with a JSON boolean, which is how the tool takes it. The refusals used to print
+/// `path='<root>', read_only: false`: single quotes JSON does not have, and a colon that is not a call.
+fn activate_writable_call(root: &str) -> String {
+    format!(
+        "workspace(action='activate', path={}, read_only=false)",
+        crate::util::text::json_quote(root)
+    )
+}
+
 /// Check if a tool is allowed by the current security configuration.
 /// Returns Ok(()) if allowed, or an error message explaining how to enable it.
 ///
@@ -710,20 +722,20 @@ pub fn check_tool_access(
                      read-only. To write somewhere else without disturbing it, pass \
                      workspace='<absolute path of the project you meant>' on this call — every \
                      mutating tool takes it, and it resolves the project per-call. To lift the \
-                     block here instead, call workspace(action='activate', path='{}', \
-                     read_only: false) — but that is process-wide: activation replaces the \
+                     block here instead, call {} \
+                     — but that is process-wide: activation replaces the \
                      default for every caller sharing this process, so if a subagent or another \
                      caller on this session activated it read-only, re-activating flips it under \
                      them mid-task.",
                     root.display(),
-                    root.display()
+                    activate_writable_call(&root.display().to_string())
                 ),
                 Some(WriteBlock {
                     root,
                     cause: WriteBlockCause::ConfiguredOff,
                 }) => bail!(
                     "File writes are disabled for {} by security.file_write_enabled = false in \
-                     its .codescout/project.toml. Re-activating with read_only: false will NOT \
+                     its .codescout/project.toml. Re-activating with read_only=false will NOT \
                      clear this — and neither will editing the file and retrying: the config is \
                      cached for the life of this process. Edit it, then restart the MCP server \
                      (`/mcp`) to pick the change up.",
@@ -732,7 +744,7 @@ pub fn check_tool_access(
                 // No project root was available to the config builder, so say
                 // only what is known rather than asserting a cause.
                 None => bail!(
-                    "File writes are disabled for this project. To write somewhere else without changing anything process-wide, pass workspace='<absolute path of the project you meant>' on this call — every mutating tool takes it. If this project was activated in read-only mode, call workspace(action='activate', read_only: false) to enable writes — but that is process-wide and affects every caller sharing this process. If you didn't expect this, a subagent may have changed the active project — call workspace(action='status') to check."
+                    "File writes are disabled for this project. To write somewhere else without changing anything process-wide, pass workspace='<absolute path of the project you meant>' on this call — every mutating tool takes it. If this project was activated in read-only mode, call workspace(action='activate', path=<the project's path>, read_only=false) to enable writes — but that is process-wide and affects every caller sharing this process. If you didn't expect this, a subagent may have changed the active project — call workspace(action='status') to check."
                 ),
             }
         }
@@ -3078,7 +3090,7 @@ mod tests {
             "must name the project that actually answered: {err}"
         );
         assert!(
-            err.contains("read_only: false"),
+            err.contains("read_only=false"),
             "must carry the remedy that works for this cause: {err}"
         );
         assert!(
@@ -3115,7 +3127,7 @@ mod tests {
             .find("workspace=")
             .unwrap_or_else(|| panic!("must name the per-call pin parameter: {err}"));
         let reactivate = err
-            .find("read_only: false")
+            .find("read_only=false")
             .unwrap_or_else(|| panic!("must still carry the re-activation remedy: {err}"));
         assert!(
             pin < reactivate,
@@ -3125,6 +3137,97 @@ mod tests {
         assert!(
             err.contains("every caller"),
             "must say WHY re-activation is the second choice, not merely that it is: {err}"
+        );
+    }
+
+    /// The remedy a read-only refusal prescribes is a call, so it must read back as one: `path` is a JSON
+    /// string literal that parses to the root for any directory name, and `read_only` is an argument
+    /// assignment, not the colon the text used to print. The root is read back with a real JSON parser,
+    /// not looked for as a substring (a raw root contains itself).
+    #[test]
+    fn the_reactivation_call_of_a_read_only_refusal_reads_back_to_the_root() {
+        for name in [
+            "plain",
+            "sp ace",
+            "q\"uote",
+            "it's",
+            "back\\slash",
+            "tab\there",
+            "ünï-cödé",
+            "{a,b}",
+            "$HOME `x`",
+        ] {
+            let root = format!("/work/{name}");
+            let config = PathSecurityConfig {
+                file_write_enabled: false,
+                write_block: Some(WriteBlock {
+                    root: PathBuf::from(&root),
+                    cause: WriteBlockCause::ActivatedReadOnly,
+                }),
+                ..PathSecurityConfig::default()
+            };
+            let err = check_tool_access("edit_file", true, &config)
+                .expect_err("writes are off, this must refuse")
+                .to_string();
+            let (path, rest) =
+                crate::util::text::json_string_after(&err, "workspace(action='activate', path=");
+            assert_eq!(path, root, "{err}");
+            assert!(
+                rest.starts_with(", read_only=false) — but that is process-wide"),
+                "{name:?}: {rest:.80}"
+            );
+            assert!(!err.contains("read_only: false"), "{name:?}: {err}");
+        }
+    }
+
+    /// The two other refusals name the same argument, spelled the way a call spells it: the config-off
+    /// one in prose, the unattributed one as a call with a placeholder, since no root is known to it.
+    #[test]
+    fn the_other_refusals_spell_the_activation_argument_as_a_call_does() {
+        let configured_off = PathSecurityConfig {
+            file_write_enabled: false,
+            write_block: Some(WriteBlock {
+                root: PathBuf::from("/work/locked"),
+                cause: WriteBlockCause::ConfiguredOff,
+            }),
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("create_file", true, &configured_off)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+        assert!(
+            err.contains("Re-activating with read_only=false will NOT clear this"),
+            "{err}"
+        );
+        assert!(!err.contains("read_only: false"), "{err}");
+
+        let unattributed = PathSecurityConfig {
+            file_write_enabled: false,
+            ..PathSecurityConfig::default()
+        };
+        let err = check_tool_access("create_file", true, &unattributed)
+            .expect_err("writes are off, this must refuse")
+            .to_string();
+        assert!(
+            err.contains(
+                "workspace(action='activate', path=<the project's path>, read_only=false)"
+            ),
+            "{err}"
+        );
+        assert!(!err.contains("read_only: false"), "{err}");
+    }
+
+    /// The call the refusal prescribes names `path` and `read_only`: they must be arguments the
+    /// `workspace` tool really takes, with the types the call gives them (a string literal and a
+    /// boolean).
+    #[test]
+    fn the_arguments_the_reactivation_call_names_are_the_workspace_tools_own() {
+        use crate::tools::Tool;
+        let schema = crate::tools::config::Workspace.input_schema();
+        assert_eq!(schema["properties"]["path"]["type"], "string", "{schema}");
+        assert_eq!(
+            schema["properties"]["read_only"]["type"], "boolean",
+            "{schema}"
         );
     }
 
