@@ -286,7 +286,7 @@ impl Tool for Artifact {
                 },
                 "entry_id": {
                     "type": "string",
-                    "description": "update_entry: the id of the entry to patch (e.g. 'T-7'), or its `key` for a row that has no `id`. Unknown ids are refused with the list of ids that do exist — never a silent no-op."
+                    "description": "update_entry: the id of the entry to patch (e.g. 'T-7'), or the `key` of a row with no `id`. An unknown one is refused with the list that exists, never a silent no-op."
                 },
                 "fields": {
                     "type": "object",

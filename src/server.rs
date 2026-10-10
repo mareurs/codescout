@@ -5474,8 +5474,20 @@ mod tests {
     /// two explicit `force` switches, their size thresholds, and the separate
     /// overwrite requirement. Removing that guidance would hide how to acknowledge
     /// an intentional reduction; both tools now refuse instead of silently writing.
+    ///
+    /// **Ratcheted UP 2026-10-10, 57_491 → 57_607 (+116), for the librarian param-honored
+    /// sweep's labels and `update_entry`'s `key` addressing.** Measured, not estimated:
+    /// `tool_surface_report_lengths` at the tip `f2b30bf7` reports TOTAL 57_491 (headroom 0)
+    /// with `doc` schema 17_989 and `librarian` schema 8_371; with the change, TOTAL 57_607,
+    /// `doc` 18_017 (+28) and `librarian` 8_459 (+88). **Those two rows are the only ones
+    /// that move, and 28 + 88 = 116.** What the bytes buy: `doc`'s +28 names the `key` that
+    /// addresses a row with no `id` (`entry_id`); `librarian`'s +88 is the
+    /// `<action>/<action>:` labels on `write`, `root`, `old_root`, `new_root`, `confirm` and
+    /// `limit`, which put 9 more action/key pairs under the sweep (30 → 39) and clear five of
+    /// the thirteen keys it could not read. The first draft was +239; the rewrites that only
+    /// restated a description were cut before measuring.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_491;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_607;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
