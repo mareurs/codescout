@@ -136,10 +136,10 @@ Landed on `experiments` at `377b685b` by fast-forward from `918b3d51`, so the se
 Verified live on the rebuilt release binary (2026-10-10, built after the landing), on this repository's `Cargo.toml`: `toml_key="package.name"` returned the source line `name = "codescout"` with the placement line `file lines 24-24`; `toml_key="profile.release"` returned its real source lines, comments kept, as `file lines 243-256`.
 
 Known limits, not fixed:
-- A key under an array of tables (`k.name`) is refused; address `k`.
+- A key under an array of tables (`k.name`) is refused with `'k' is not a table, it is a value of type array`; address `k` (probed 2026-10-10).
 - CRLF is normalised to LF in the text, so a multi-line string loses its `\r`.
-- When the key's lines are not contiguous, the text carries only those lines, and the text can parse as a different table than the key names.
-- YAML: a multi-line quoted key is not recognised; an escape other than `\"` and `\\` in a quoted key is kept as written; the generic text header says `3 lines` for a 4-line YAML span.
+- When the key's lines are not contiguous, the text carries only those lines and the placement line says so (probed 2026-10-10: `t.d` over `d.e = 1`, `other = 2`, `d.f = 3` gave `d.e = 1` and `d.f = 3` under `file lines 8-10; 2 of them are this value (the other lines of the span belong to other keys)`). The text has no table header, so read alone it names a key of the root table.
+- YAML, probed on the release binary on 2026-10-10: a double-quoted key that continues on a second line is not recognised as a key, so its lines fall into the span of the key above it. In a double-quoted key `\"`, `\\` and `\uXXXX` are decoded, while `\t`, `\n`, `\x41` and `\/` are kept as written. Trailing blank lines and the comment above the next key fall inside a span. Only top-level keys can be named: `nested.inner` is refused with `Available keys: top, block, last, nested`.
 - Not run: `dash`, macOS, Windows.
 
 ## References

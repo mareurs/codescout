@@ -212,8 +212,8 @@ Verified live on the rebuilt release binary (2026-10-10, built after the landing
 Not covered: the Windows and macOS lanes (the file-name tests are `cfg(unix)`; `scripts/build-windows.sh check --lib --tests` type-checks them for Windows and passes), and `dash` (not installed here).
 
 Known limits, not fixed:
-- `grep` prints every file through `to_forward_slash`, so a file named `back\slash.rs` appears as `back/slash.rs` in its hints.
-- The `project_id="{id}"` sites in `src/prompts/builders.rs` write a project id raw. An id is not a file path, and none holds a quote or a backslash today.
+- `grep` prints every file through `to_forward_slash`, so a file named `back\slash.txt` appears as `back/slash.txt` in its results and hints (probed 2026-10-10).
+- The `project_id="{id}"` sites in `src/prompts/builders.rs` write a project id raw. An id is not a file path; whether an id can hold a quote or a backslash was not checked.
 
 ## References
 
