@@ -23,7 +23,7 @@ Accepted — active. Decided 2026-10-07 by the operator after a live probe of th
 that `read_file` of a buffer gave a new handle on every call. It extends
 `docs/adrs/2026-10-05-a-result-keeps-the-one-handle-its-tool-gave-it.md` from "one handle per result" to
 "one handle per thing that was read". Amended 2026-10-09: the pool that holds those handles has a hard byte
-budget (see Decision, *Added 2026-10-09*).
+budget (see Decision, *Added 2026-10-09*), and the read path of that pool settles concurrent changes by one rule (see Decision, *Added 2026-10-10*).
 
 ## Context
 
@@ -109,9 +109,27 @@ The rulings (the first round, then the review round of the same day):
   new text only if it fits the room left; otherwise it is demoted. A read displaces no other entry.
 - **The disk is touched with the pool unlocked.** A read of a file-backed handle takes the path, stamp and
   state under the lock, stats, reads and hashes the file without it, and applies the result under the lock
-  only if the entry is unchanged, else starts over (review probe RP8: a 300 MB demoted file held the lock
-  8.9 s in a debug build and blocked another thread's 2-byte store 9.8 s). Every `@file_*` entry carries the
-  SHA-256 of its whole text, computed outside the lock, so demotion hashes nothing.
+  only if the entry is still settled (next bullet), else starts over (review probe RP8: a 300 MB demoted
+  file held the lock 8.9 s in a debug build and blocked another thread's 2-byte store 9.8 s). Every
+  `@file_*` entry carries the SHA-256 of its whole text, computed outside the lock, so demotion hashes
+  nothing.
+- **Added 2026-10-10. A read applies only to a settled entry.** The entry's state is the triple (stamp,
+  demoted, hash) taken under the lock before the disk is read. The read applies when the triple is
+  unchanged, and also when the entry changed only to describe the text just read: the same demoted state
+  and that text's hash (`ab4eb46b`), or the same text and residency with a stamp that only moved, forward
+  or back (`88526ea4`, `c982c85e`: 50 restamps took 51 disk passes, now 1). An equal stamp stays excluded,
+  because there the read must still re-stamp. A read that saw a RESIDENT entry never applies to an entry
+  demoted meanwhile: it would put text back and grow the pool through a read. `resolve` reads a file at
+  most `RESOLVE_READS` (3) times; after that it serves the text it read without storing it (8 parallel
+  reads of a future-mtime file took 36 disk passes, now 8). A pass that only stat'ed the file does not
+  count toward that cap. The once-only refresh notice is consumed only when the served text is the entry's
+  own; a read stopped at the cap that serves older text reports the change and leaves the notice (F-A).
+- **Added 2026-10-10. Smaller rules of the same review.** A whole file that cannot fit even with every
+  other file demoted demotes nothing (F3). A path read of a file over one entry's share copies no text under
+  the lock: it demotes the entry (F4). The tee capture takes its cut record from the store's own lock hold
+  (`store_truncated_kept`). `REF_GONE` names the 50-handle cap, a deleted or unreadable file, and the
+  memory-view handles among those the byte limit drops; `ref_gone_hint` routes a `@file_*` handle to reading
+  the file again. The `buffer reference not found` prefix is unchanged (F5, F-E).
 - **An entry bigger than its share is never stored as is.** A `@cmd_*` or snapshot entry is stored as a
   marked prefix of WHOLE lines that fits the share, with the existing `Truncation` and `truncation_marker`,
   so line N of the handle is line N of the output for every kept line and every later read carries
@@ -169,6 +187,9 @@ The rulings (the first round, then the review round of the same day):
 - Known limit, **a same-mtime rewrite is noticed only by a demoted entry** (review probe RP7): a resident
   entry compares mtimes and serves the text it holds (v1), a demoted one reads and hashes the file and
   serves v2 with a refresh notice. The two kinds of entry can therefore answer differently for one file.
+- Known limit, **told twice at the cap** (F-B, pinned by a test): after a read was stopped at
+  `RESOLVE_READS` and served text it did not store, the next read of the handle reports the same text as a
+  change a second time.
 - Harder, **line numbers move**: a range or section handle now follows the file, as a whole-file handle
   already did. After an edit above the range, a line number a holder noted earlier names other text.
 - Harder, **the refresh notice reaches only `run_command`**. A `read_file` of the handle does not report it.
@@ -257,6 +278,30 @@ A third round, on branch `fix/buffer-pool-byte-budget` (2026-10-09), added the b
 | `e4f3f78f` | `975e3cc7b0c578f157a3f4e2f9875103c120940a` | the review round: R-A, R-B and eleven review findings |
 | `0718021b` | `d4781948592629813679032f6429276cf64f45a6` | tests that kill the four survivors of the review round's mutation run |
 
+A fourth round, on branch `fix/pool-review-leftovers` (2026-10-09 and 2026-10-10), settled the pool's read path
+after two blind reviews (findings F1 to F6 of the first, F-A to F-E of the second). Patch-ids:
+
+| SHA | patch-id | Change |
+|---|---|---|
+| `7fdc4237` | `010a59ed0aca5bef7926f60ca194d91916e29cb8` | bounded re-reads in `resolve`, no futile demotion, no copy of unkeepable text, honest refusal text |
+| `20ec2b32` | `3db4517e74f89664cd6c6c5059d59269ae8d3017` | test: a read of new text after a stamp-only change starts over |
+| `34eefa6c` | `1e159d3c2608287b98eb57b59d110fc6d29c659f` | test: a stamp-only apply never moves the stamp back |
+| `071443d5` | `abb9265652ef84c9790de9dc1a42694a2b63f832` | test: a file that fits exactly with every other file demoted is kept |
+| `8ea521e7` | `9e7db8a1806f217e0d274670deacd5300f487623` | test: every site routes a gone file handle to reading the file |
+| `767e0f87` | `fa48a46d21cd038ba06a69c49d7889a9c3dde577` | test: a tee capture the pool keeps as given announces no pool cut |
+| `88526ea4` | `aa9e63cea959915fd006fc77ad04f6c2ca6dd907` | a stamp moved back by the same text is no change on disk either |
+| `ab4eb46b` | `f1892a049a6b251b10fcd901dd7a41c07d1d0461` | a read applies when the entry changed only to describe what it read |
+| `6dccfb62` | `488047fc367fd7303cd67069b21c0782e2c415b8` | test: a read stopped at the cap reports new text as a change |
+| `c982c85e` | `df70c7d177f75b41a15ee8cceb4b015ad0d4514c` | the cap keeps a notice it did not serve; stat-only passes finish (F-A, F-C, F-D, F-E) |
+| `0646802d` | `e1170a326d867e1a8a621754945265544b1e5228` | test: a stat-only pass over an entry demoted meanwhile reads the disk |
+
+That round landed on `experiments` at `377b685b` by fast-forward. Survivors it killed: the mutant
+`!contains_key` of the whole-state re-check (F1, `7fdc4237`); dropping the stamp-forward restriction and
+dropping `current.1 == seen.1`, which is NOT safe and now reds a test (`88526ea4`, `ab4eb46b`); and the
+review's mutants M05, M09 and M23 (`c982c85e`). Dropping `current.2 == seen.2` is safe, because an entry
+whose hash changed to exactly the hash of the text just read describes that text, so the rule was restated
+rather than the mutant killed.
+
 Mutation runs through `scripts/mutation-probe.sh`, one mutant at a time, each verdict with a `test result:`
 line. First round: 23 mutants left 5 survivors (one equivalent edge, three edges with no case at exactly
 the limit, one assertion monotone under shrinking); after the repair 25 of 25 were killed. Two blind
@@ -294,3 +339,12 @@ edit; a line count that included the cut marker. Mutation counts were reported b
 last round killed 25 of 25. The final review applied 20 new mutants: 13 were caught, 4 were killed by new
 tests or a new hook, and 3 are equivalent by a named invariant. Confidence: high on R1 and R3, medium on the
 retention cost, which the operator accepted knowing it has no upper bound.
+
+A live probe on the release binary rebuilt after the landing at `377b685b` (2026-10-10): `seq 1 12000000`
+(about 92 MB) was stored as a marked prefix, 8,527,461 of 12,000,000 lines kept, about 64 MiB, the half of the
+128 MiB limit, and the response carried `output_truncated`. `sed` and `grep` on that handle kept line N as
+line N, carried the cut marker and the notice, and `grep` for a number past the cut answered "0 matches"
+with the warning. A 3,000-line handle stored before it still resolved. `cat @cmd_deadbeef` was refused with
+text that names the 50-handle cap, the byte limit and deleted `@file_*` files. Not probed live: demotion of
+`@file_*` entries under pressure, the retry bound of `resolve` (it needs a concurrent writer), and the cut
+`@tool_*` envelope.
