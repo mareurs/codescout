@@ -3156,6 +3156,10 @@ mod tests {
             "ünï-cödé",
             "{a,b}",
             "$HOME `x`",
+            "bell\u{7}",
+            "line\nbreak",
+            "cr\rhere",
+            "zero\u{200b}width",
         ] {
             let root = format!("/work/{name}");
             let config = PathSecurityConfig {
