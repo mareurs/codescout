@@ -8,8 +8,9 @@ its sections real sessions actually engage. This probe measures that.
 WHAT EACH PREDICATE LITERALLY COUNTS
 ------------------------------------
 injection
-    One occurrence of the OPENING auto-injection marker
-        <!-- auto-injected get_guide('TOPIC') — first call this session ... -->
+    One occurrence of an OPENING auto-injection marker, in either emitted form:
+        <!-- auto-injected get_guide('TOPIC') — first call this session ... -->   (whole topic)
+        <!-- auto-injected get_guide('TOPIC') § <heading> — first call this session ... -->   (one section)
     inside a `tool_result` block on a `type:"user"` line. Per the 2026-08-27 parsing
     contract (docs/evals/data/2026-08-27-guide-injection/rubric-BRIEF.md § 2), which
     documents three traps this honours:
@@ -18,6 +19,10 @@ injection
         and appear in transcripts that merely READ that source -> only real topic names;
       * a marker in assistant `text` or a user's typed message is a DISCUSSION mention,
         not a delivery -> only markers inside a tool_result count.
+
+    Each opening is one injection, so a session that was served a whole-topic block and section
+    blocks of the same topic counts every delivery. The preamble line (`... preamble — no section
+    declares ...`) is a third emitted form and is NOT counted: it delivers no section.
 
 section-attributable activity
     A `tool_use` block on an `assistant` line, at a LATER line index in the same
@@ -319,9 +324,41 @@ def mechanism_tools_registry_problems(live: set[str]) -> list[str]:
 
 
 
-def opening_marker(topic: str) -> str:
-    """The opening form only. The closing form is preceded by 'end ' (trap 1)."""
-    return f"auto-injected get_guide('{topic}') — first call"
+def opening_prefix(topic: str) -> str:
+    """The part of an OPENING marker that both emitted forms share (fast-reject needle).
+
+    `src/tools/core/guide_emit.rs` writes two opening lines for a delivered guide:
+      * whole topic (`guide_block`, :113):
+            `auto-injected get_guide('T') — first call this session ...`
+      * one section (`guide_blocks_for`, :283):
+            `auto-injected get_guide('T') § <heading> — first call this session ...`
+    """
+    return f"auto-injected get_guide('{topic}')"
+
+
+def opening_pattern(topic: str) -> "re.Pattern[str]":
+    """Match the OPENING form of BOTH injection shapes, and neither closing form (trap 1).
+
+    docs/issues/2026-10-06-the-guide-use-probe-opening-marker-cannot-see-section-grain-injections.md:
+    the probe once searched only for the whole-topic wording, so a topic that declares sections
+    (`librarian`) read as having no injections after section-grain serving began.
+
+    Three properties are load-bearing:
+      * ` — first call` is REQUIRED. The closing forms (`<!-- end auto-injected get_guide('T') -->`
+        and `... § <heading> -->`) never carry it, and neither does the preamble line
+        (`... preamble — no section declares ...`), which is deliberately not an injection here.
+      * the optional heading part may not cross `-->` or `<!--`. `scan_transcript` joins a
+        list-shaped tool_result with a space, so a section CLOSING marker can share a line with the
+        next block's opening; without this bound the match would run from the closing marker into
+        a different topic's opening and count it for this one.
+      * a heading may itself contain ` — ` (e.g. `docs/trackers/ — Backing Store ...`), so the heading
+        part is lazy and stops at the first ` — first call` it can reach, never at an earlier dash.
+    """
+    heading = r"(?: § (?:(?!-->|<!--)[^\n])*?)?"
+    return re.compile(re.escape(opening_prefix(topic)) + heading + " — first call")
+
+
+
 
 
 # --- section signatures ------------------------------------------------------------
@@ -540,13 +577,14 @@ def blocks(msg) -> list:
 
 def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
     """Return per-session record, or None if the topic was never injected here."""
-    marker = opening_marker(topic)
+    marker = opening_pattern(topic)
     try:
         raw = path.read_bytes()
     except OSError:
         return None
-    # Fast reject: only fully parse transcripts that mention the opening form at all.
-    if marker.encode() not in raw:
+    # Fast reject: only fully parse transcripts that mention an opening form at all. Both forms
+    # share the prefix and the ` — first call` wording; `marker` does the exact match below.
+    if opening_prefix(topic).encode() not in raw or " — first call".encode() not in raw:
         return None
 
     injections: list[dict] = []
@@ -580,7 +618,7 @@ def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
                         )
                     )
                 elif isinstance(b, dict) and b.get("type") == "text":
-                    if marker in (b.get("text") or ""):
+                    if marker.search(b.get("text") or ""):
                         discussion_mentions += 1  # trap 3
         elif typ == "user":
             for b in blocks(msg):
@@ -599,10 +637,10 @@ def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
                         if isinstance(content, list)
                         else ""
                     )
-                    n = text.count(marker)
+                    n = len(marker.findall(text))  # one injection per opening, whichever form (whole or section)
                     for _ in range(n):
                         injections.append({"line": idx})
-                elif b.get("type") == "text" and marker in (b.get("text") or ""):
+                elif b.get("type") == "text" and marker.search(b.get("text") or ""):
                     discussion_mentions += 1  # trap 3
 
     if not injections:
