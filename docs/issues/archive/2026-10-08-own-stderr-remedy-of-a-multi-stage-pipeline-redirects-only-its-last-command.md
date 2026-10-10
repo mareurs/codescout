@@ -1,12 +1,13 @@
 ---
-id: 8031bda216e96ddd
+id: 884313ced110c1b2
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the own-stderr remedy of a buffer query tells a multi-stage pipeline to append a redirection that only reaches its last command'
 tags:
 - cluster/unclassified
 - run_command
 - progressive-disclosure
+closed: 2026-10-10
 opened: 2026-10-08
 owner: marius
 related:
@@ -58,6 +59,19 @@ Executed under the real `sh` (`the_own_stderr_route_reads_the_stream_that_was_cu
 - `bound_buffer_stderr` now says: rerun the whole query as `{ QUERY; } 2>&1 >/dev/null | cut -c1-4000`. `can_wrap_query` offers it when the query is one pipeline (so the `; }` closes it and nothing else). It asks the IL-3 gate nothing (dropped in the review round, `385c6112`): the query already passed the gate when it ran, the wrap adds only `} 2>&1 >/dev/null | cut -c1-4000`, and `cut` is a field selector the gate never counts as a trimmer. Measured: the group also hides an unbounded producer from the gate's segment scan, so a verdict on the wrapped text would say nothing. Otherwise the marker says to narrow the query, as before.
 - A brace group gives every stage the same stderr, so the wrapping needs no model of how many stages there are.
 
+## Fix provenance
+
+- **SHA:** `065caed69ae1dabbb9313120791b97d69f10bae7` (`experiments`)
+- **patch-id:** `94bfd591721705aaec87976d84b57b13fb2cbf5d`
+
+That commit also carries the fix of the plain-slice record. The follow-ups that touch this fix, in landing order:
+
+| SHA | patch-id | What |
+|---|---|---|
+| `d4eee5312cee3f28c35ad05c3b9a24460e07e516` | `a187fb6dd3ec6c71dac84efdf1c78ca5d59785da` | test: pins for the survivors of the first mutation round |
+| `385c61121bbae345720a69786688f8690dcc17e4` | `44094b1f36d4fb8511850749bf688bf46a813534` | `can_wrap_query` asks only what it decides; tests that catch the hazards their comments name |
+| `400081b0e894ae346bc2d4e03b7bc0ad93a6857b` | `84714e39beab171e6bcaac8cbb3cd958bc1147f7` | fix: an own stderr cut only by the line cap carries the route to the rest |
+
 ## Tests added
 
 All in `src/tools/run_command/tests.rs` unless marked `output.rs`. Every route is EXECUTED and its bytes compared with the stream that was cut.
@@ -72,7 +86,7 @@ All in `src/tools/run_command/tests.rs` unless marked `output.rs`. Every route i
 Mutation rounds (`./scripts/mutation-probe.sh`, one mutant at a time, the `tools::run_command` suite, 345 tests): KILLED: dropping the pipeline test from `can_wrap_query`, the marker not naming the group, the stage keeping stdout, the route missing its `;` (valid-sh check), the checker visiting no row. SURVIVED: deciding with `can_append_stage` instead of `can_wrap_query` in `bound_buffer_stderr`. Equivalent for every query that can reach the marker: the stage is `| cut`, which the gate never refuses, so the two differ only for a query the gate refused before it ran. No query was found that separates them (`cargo test | head -3` is refused both ways).
 
 Known limits, not fixed here:
-- The own-stderr remedy lives in the byte-cut branch of `bound_buffer_stderr` (`src/tools/run_command/output.rs:535`, the `elide_middle_escaped` call after `:542`). A stderr cut only by the 20-line cap carries `stderr_shown`/`stderr_total` and NO remedy: `cat @A >&2` over 3,000 lines gives `stderr_shown 20` / `stderr_total 3000` with no marker.
+- Fixed in `400081b0`: a stderr cut only by the 20-line cap used to carry `stderr_shown`/`stderr_total` and NO remedy (`cat @A >&2` over 3,000 lines gave `stderr_shown 20` / `stderr_total 3000` with no marker). It now carries `--- stderr: 20 of 3000 lines shown; …` and the wrapped route. Verified live 2026-10-10.
 - The wrapped route holds `>/dev/null`, so it is not a buffer-only query, and an answer over the inline limit is buffered under a new handle (found by a reviewer with `cat @A >&2` over 3,000 lines). The stream stays reachable.
 
 ## Workarounds
@@ -81,8 +95,11 @@ Narrow the query so it prints less to stderr.
 
 ## Resume
 
-`bound_buffer_stderr` and `can_append_stage` in `src/tools/run_command/output.rs`. Execute the chosen route in
-a test.
+Landed on `experiments` at `377b685b` by fast-forward from `918b3d51`, so the series keeps its SHAs. Nothing is pushed.
+
+Verified live on the rebuilt release binary (2026-10-10, built after the landing): `cat @cmd_… >&2` over a 3,000-line buffer gave `stderr_shown 20` / `stderr_total 3000` and the marker `--- stderr: 20 of 3000 lines shown; … ---` with the route `{ QUERY; } 2>&1 >/dev/null | cut -c1-4000`.
+
+Not covered: `dash` (not installed here), macOS and Windows.
 
 ## References
 

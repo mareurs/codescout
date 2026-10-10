@@ -10398,7 +10398,7 @@ async fn a_dropped_handle_is_refused_naming_the_byte_limit_and_the_route() {
 
 // ---- a PLAIN SLICE window of 100 lines that ends before the buffer's last line names the next one ----
 //
-// BUG docs/issues/2026-10-08-a-plain-slice-window-of-100-lines-carries-no-next-page-hint.md
+// BUG docs/issues/archive/2026-10-08-a-plain-slice-window-of-100-lines-carries-no-next-page-hint.md
 // `cat <ref>` over 3,000 short lines is cut at 100 and names `sed -n '101,200p' <ref>`. That page
 // prints exactly 100 lines, which fit whole, so it was not cut and carried no hint: a reader
 // following the hints alone stopped at line 200. A trailing pager had the rule already
@@ -10878,7 +10878,7 @@ async fn a_full_plain_slice_window_stays_inside_the_limit_at_every_byte_near_the
 
 // ---- the own-stderr remedy of a buffer query reaches EVERY stage of its pipeline ----
 //
-// BUG docs/issues/2026-10-08-own-stderr-remedy-of-a-multi-stage-pipeline-redirects-only-its-last-command.md
+// BUG docs/issues/archive/2026-10-08-own-stderr-remedy-of-a-multi-stage-pipeline-redirects-only-its-last-command.md
 // The marker on a cut query-own stderr said to append `2>&1 >/dev/null | cut -c1-4000`. A redirection
 // applies to the LAST command of a pipeline: for `cat @X | tr -d '\n' >&2 | cat` the appended form
 // read the last `cat`'s stderr (nothing) and left the `tr`'s on the terminal; a stage that itself

@@ -1,12 +1,13 @@
 ---
-id: eaf249fc805ad33a
+id: deea53044c4e6357
 kind: bug
-status: open
+status: fixed
 title: 'BUG: toml_key prints Rust debug text for a scalar and returns only the first element, the child without its parent, and the whole file as line_range'
 tags:
 - cluster/unclassified
 - read_file
 - toml_key
+closed: 2026-10-10
 opened: 2026-10-08
 owner: marius
 related:
@@ -65,7 +66,7 @@ None yet.
 
 ## Fix
 
-Branch `fix/toml-key-source-lines` (from `918b3d51`; the SHA and patch-id are for whoever lands it).
+Branch `fix/toml-key-source-lines` (from `918b3d51`).
 
 The result is built from the key's SOURCE lines, as the user ruled, not from the parsed value. `toml` 1.1 is already a dependency and its `toml::de::DeTable::parse` returns every key and value with a byte span (no new dependency). Public API only: the flags that say what kind of table a value is (`is_inline`, `is_implicit`, `is_array_of_tables`) are `pub(crate)` in `toml`, so the kind is read from the byte a table's span starts at: `[` is a header (a std header or an `[[array]]` element), `{` an inline table, anything else a table only implied by a dotted key or a deeper header.
 
@@ -85,6 +86,26 @@ The result is built from the key's SOURCE lines, as the user ruled, not from the
 - `LineIndex` is private again; its test and one of the joiner live in a `#[cfg(test)]` module of `file_summary.rs`.
 
 Known limits, not fixed: a key under an array of tables (`k.name`) is refused, address `k`; `extract_yaml_key` oddities are listed in Evidence.
+
+## Fix provenance
+
+- **SHA:** `1bd0e7aa187c47113cfc265f53aec622195c4164` (`experiments`)
+- **patch-id:** `2928522350f4988894b1d67cfa70fda44702c263`
+
+That is the first commit of a series. The rest, in landing order, with their patch-ids:
+
+| SHA | patch-id | What |
+|---|---|---|
+| `ab9bd1f2874d69e6f53b2fd755073844d7e27b9f` | `cfdb089ac7e4b10e159ae3f8f862396fa33e0333` | test: a multi-line inline table, an empty array, a path through a non-table |
+| `3981f6a138b5d721edb5f1790c58f47c61a036b7` | `a1a999a3ad9d8f7ddb46da8d2a9f546349512045` | refactor: the joiner (undone in round 2, see Fix) |
+| `22db5bbec38a4c8400b1d1cd7ec2a374aa7f0281` | `daf79fa945482e168b6bbfea3f259b1dfb949a02` | test: the half-open span rule of the line index |
+| `26b4126785c066c8f2cc5aae56c40f6b607c9d14` | `c98b5024211116c88b9c63ad14cac6f55fd8c6b1` | fix: siblings carry no count cap |
+| `0e181c12302302a1df3a5c79dcc75506713ed595` | `870f94dbf4f6aeb2e1745530bd407e092f1b5e24` | fix: a member of an inline table answers with the whole pair, quoted keys are named, the value's place in its file is said |
+| `cfe3519244a5161189a337fff4de68b570889c93` | `fe347c545a742afd78400b4e915fd997cd8e48dd` | test: a key that is not TOML key grammar splits at every dot |
+| `99727b49eedc4d24f4f7a38c860668c646f80a8d` | `575cb6248dfe734cdfa6743a18ff292a5f964005` | test: no other form of read grows the placement line |
+| `8f990d5e548917bfd03bce5fdf0d1503009b3473` | `c36297af100a1d8c366ad6c8a6461ebc5aa25e0c` | fix: the placement line, non-grammar toml keys, YAML key rules, parent siblings, the hint cap |
+| `87bb9565afc5c49203b06468e7fc8596f1a93b34` | `acdec154138ca957c34a2a42f396619e5e88f7ba` | refactor: the probe split out of `toml_key_segments` |
+| `0af2f3fd171fa9aabbcb8c11abe07e5ba292abac` | `db05d9699f434ef3b6a8e2474433b97a089a51e7` | test: `toml_key_is_a_path` pinned character by character |
 
 ## Tests added
 
@@ -110,8 +131,16 @@ Read the file by line range, or use `grep` for the key.
 
 ## Resume
 
-Read `extract_toml_key` and `extract_yaml_key`. Decide what a key means for an array of tables and for a
-parent table, then pin each case with a test.
+Landed on `experiments` at `377b685b` by fast-forward from `918b3d51`, so the series keeps its SHAs. Nothing is pushed.
+
+Verified live on the rebuilt release binary (2026-10-10, built after the landing), on this repository's `Cargo.toml`: `toml_key="package.name"` returned the source line `name = "codescout"` with the placement line `file lines 24-24`; `toml_key="profile.release"` returned its real source lines, comments kept, as `file lines 243-256`.
+
+Known limits, not fixed:
+- A key under an array of tables (`k.name`) is refused; address `k`.
+- CRLF is normalised to LF in the text, so a multi-line string loses its `\r`.
+- When the key's lines are not contiguous, the text carries only those lines, and the text can parse as a different table than the key names.
+- YAML: a multi-line quoted key is not recognised; an escape other than `\"` and `\\` in a quoted key is kept as written; the generic text header says `3 lines` for a 4-line YAML span.
+- Not run: `dash`, macOS, Windows.
 
 ## References
 

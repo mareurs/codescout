@@ -1,12 +1,13 @@
 ---
-id: d64d81d07ba58b6b
+id: 7cd64ee946b97010
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a plain-slice window of exactly 100 lines carries no next-page hint, so following the hints stops at line 200'
 tags:
 - cluster/unclassified
 - run_command
 - progressive-disclosure
+closed: 2026-10-10
 opened: 2026-10-08
 owner: marius
 related:
@@ -57,6 +58,19 @@ Fixed in `065caed6` (code and tests) and `d4eee531` (the tests that pin the muta
 - A plain slice reads a stream the buffer holds, so its length is KNOWN and the last window names no further one (a trailing pager's `full_page_hint` has to say "may print more"). `stream_line_count` counts the stream as the shell sees it: `.err` is the stderr, a `@tool_*` ref is the pretty-printed JSON (`OutputBuffer::resolve_refs` writes it so), a `@bg_*` ref is the log on disk, `@cmd_*` and `@file_*` are the stored stdout. The stream is asked only once the window is a full page.
 - `full_window_hint` joins the two rules. The inline gate counts the hint (`gate_keys`), so a page that fits only without it is cut, not re-buffered, and the room for a cut stdout prices it among the widest hints.
 
+## Fix provenance
+
+- **SHA:** `065caed69ae1dabbb9313120791b97d69f10bae7` (`experiments`)
+- **patch-id:** `94bfd591721705aaec87976d84b57b13fb2cbf5d`
+
+That commit also carries the fix of the own-stderr record. The follow-ups that touch this fix, in landing order:
+
+| SHA | patch-id | What |
+|---|---|---|
+| `d4eee5312cee3f28c35ad05c3b9a24460e07e516` | `a187fb6dd3ec6c71dac84efdf1c78ca5d59785da` | test: pins for the survivors of the first mutation round |
+| `385c61121bbae345720a69786688f8690dcc17e4` | `44094b1f36d4fb8511850749bf688bf46a813534` | test: tests that catch the hazards their comments name; `can_wrap_query` asks only what it decides |
+| `400081b0e894ae346bc2d4e03b7bc0ad93a6857b` | `84714e39beab171e6bcaac8cbb3cd958bc1147f7` | fix: `stream_line_count` counts bytes, so a full page no longer pays for a line count of the whole stream |
+
 ## Tests added
 
 All in `src/tools/run_command/tests.rs` unless marked `output.rs`. Every one follows ONLY the hints, and runs the route a hint names. `follow_every_hint` fails when the walk meets an empty page after the first (a hint that pointed past the end) and collects every `which has N lines` a hint states, which each ref-kind test compares with the `sh` line count. Fixtures sit on a 100-line boundary so a count that is too high hints at an empty page (the first round's fixtures ended mid-window, and a `\n`-expanded `@tool_*` count and a `@bg_*` count + 50 survived them; the review round caught that).
@@ -71,7 +85,7 @@ All in `src/tools/run_command/tests.rs` unless marked `output.rs`. Every one fol
 
 Mutation rounds (`./scripts/mutation-probe.sh`, one mutant at a time, the `tools::run_command` suite, 345 tests): `<` to `<=` on the last line, the window width off by one, the reversed-range guard, the `lines` guard, the start and the end of the next window, the `.err` stream, the `@tool_*` pretty rule, the `\n`-expanded `@tool_*` count, a non-JSON `@tool_*` counted as nothing, the `@bg_*` branch, `@bg_*` count + 50, the unquoted-pair of the slice regex, dropping the hint from the gate, dropping the hint from the fit arm, dropping the whole rule, a wrong stated total, the full hint padded by 100 B: all KILLED. SURVIVED: dropping the hint from the room that prices a cut stdout, and from the arm that returns an uncut page after the summary gate. Both are unreachable at today's wording: the cut skeleton holds three keys the gate's measure does not (`truncated`, `stdout_shown`, `stdout_total`), so a window the gate calls too big is always cut. `a_full_window_hint_never_outgrows_the_keys_a_cut_response_adds` pins that margin and reds when the full hint is padded by 100 B (with or without the room-pricing chain); without the chain the width sweep and the byte sweep red too, which is what the chain is for.
 
-Known limit, not fixed here: `stream_line_count` (`src/tools/run_command/output.rs:770`) clones the whole buffer entry and counts it on every full page (inferred from the code, not measured).
+Known limit, not fixed here: the count of a `@tool_*` ref parses and pretty-prints its JSON, and was not measured. `stream_line_count` was fixed in `400081b0`: the byte count adds 29 ms per full page on a `@cmd_*` buffer of 54.9 MB, measured and recorded in its doc comment; the clone of a stored entry (7 ms) stays.
 
 ## Workarounds
 
@@ -79,7 +93,11 @@ Read the buffer with `read_file("@X", start_line=N, end_line=M)`.
 
 ## Resume
 
-`capped_hint` and `full_page_hint` in `src/tools/run_command/output.rs`.
+Landed on `experiments` at `377b685b` by fast-forward from `918b3d51`, so the series keeps its SHAs. Nothing is pushed.
+
+Verified live on the rebuilt release binary (2026-10-10, built after the landing): over a 3,000-line `@cmd_*` buffer, `sed -n '101,200p' @cmd_…` printed lines 101 to 200 and its hint now names `Next page: sed -n '201,300p'`. Before the fix it printed no hint.
+
+Not covered: the `@tool_*` count under load, `dash` (not installed here), macOS and Windows.
 
 ## References
 

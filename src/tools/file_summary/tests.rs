@@ -1651,9 +1651,9 @@ fn extract_yaml_key_past_summary_cap() {
     );
 }
 // ---------------------------------------------------------------------------------------------
-// `toml_key` returns the key's SOURCE lines (docs/issues/2026-10-08-toml-key-extractor-prints-
-// debug-text-and-drops-elements-and-parents.md). Each case below is the exact input of that
-// record or a shape the same rule has to hold on.
+// `toml_key` returns the key's SOURCE lines
+// (docs/issues/archive/2026-10-08-toml-key-extractor-prints-debug-text-and-drops-elements-and-parents.md).
+// Each case below is the exact input of that record or a shape the same rule has to hold on.
 // ---------------------------------------------------------------------------------------------
 
 /// `(text, (first, last))` of `extract_toml_key(content, key)`, failing the test on a refusal.

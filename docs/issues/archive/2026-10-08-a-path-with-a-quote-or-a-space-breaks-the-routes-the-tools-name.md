@@ -1,12 +1,13 @@
 ---
-id: 0d796d9cbcd2d7bd
+id: 7f06fabbc480a468
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a path with a quote or a space breaks the routes read_file and run_command name'
 tags:
 - cluster/unclassified
 - read_file
 - progressive-disclosure
+closed: 2026-10-10
 opened: 2026-10-08
 owner: marius
 related:
@@ -139,6 +140,25 @@ notes, handle tokens, platform gating of the tests), `8dc54e95` (a test case); b
 - `src/tools/file_summary/file_summary.rs`: the four cut notes write the file id with `json_quote`.
 - Buffer refs are plain words, so their routes are byte-identical to before.
 
+## Fix provenance
+
+- **SHA:** `4e69200e293644d253e0bd469ea9471eac8fb095` (`experiments`)
+- **patch-id:** `2ee01ecff7b5326b0407bf8958c09729bab2cb66`
+
+That is the first commit of a series. The rest, in landing order, with their patch-ids:
+
+| SHA | patch-id | What |
+|---|---|---|
+| `5744620dc03cfedb3ccded059e31175232e1692f` | `f8b663fd85d9af0ca3a307f7414ba55c1a8bb723` | test: every printable ASCII character through `shell_quote` |
+| `923a1dd332cea916fe8333b7fc4ce1632c6f1c4c` | `61b0a03fc43289b8124ae6c9425f8dff65c0fd10` | test: the escapes of a path outweigh the range-page skeleton's slack |
+| `ea64a51464e2357c3803c0bdb3bfae0e3d7162d7` | `8026cd6407aab94940b23988695b8ed741aa3a98` | fix: the file-summary cut notes quote the real path; handle tokens broken in `grep -o` routes |
+| `8dc54e95ceb2bebf0497e59fe4f68ec051ae1f13` | `2ba73cad2d0de5d7fbaa2d3dc08323302a324e67` | test: a handle at the end of a longer name is not that handle |
+| `5f8c56a8952dd72faf3efdaa1a16e9e8a95912be` | `0e6971f48ca9f87d5326d98755f52af7286f2e58` | test: the handle-token regex is built once (clippy) |
+| `6fb4e25f7b76962da3fcaf024704a3e4edcf8fbb` | `d0586876adf07f69d81f8163c510a2eca7fbe19d` | fix: the other tools' paths: `grep` and `symbols` overflow hints, `edit_code` references call, `workspace` activate and pin calls, worktree notices, `approve_write`, the onboarding `read_file` of a project prompt; `activate_call` is the one builder of the activate call |
+| `1780c38d9b25ea0919eb9f662c0c7ce8bda4dcc9` | `961eb3b3bf6ebf147119fa4debfa45b5e5fd0c0c` | fix: the roots the doctor prints (`rehome`, `merge_worktree`), the symbols overview's `symbols(path="<dir>/**/*")` call, the per-project onboarding `tree("<root>")` |
+
+The last two came from a sweep for the same defect in every builder that writes a real path into text a caller copies. `6fb4e25f` also gates the test `every_spelling_of_one_path_names_its_one_handle` with `cfg(unix)`: it called `std::os::unix::fs::symlink` and broke the Windows lib-test build (found with `scripts/build-windows.sh check --lib --tests`).
+
 ## Tests added
 
 In `src/tools/read_file_route_path_tests.rs` (module `read_file::route_path_tests`) and `src/util/text.rs`.
@@ -185,8 +205,15 @@ Copy the route by hand and quote the path.
 
 ## Resume
 
-`read_with_line_range`, `value_of_a_file`, `line_hint` and the clamp hint in `src/tools/read_file.rs`.
-Execute each route in a test with a path that has a space and a quote.
+Landed on `experiments` at `377b685b` by fast-forward from `918b3d51`, so the series keeps its SHAs. Nothing is pushed.
+
+Verified live on the rebuilt release binary (2026-10-10, built after the landing): `read_file` of a file named `q"uo te.json` prints its `Next:` route with the path as `q\"uo te.json`, a JSON string literal that reads back as the file name.
+
+Not covered: the Windows and macOS lanes (the file-name tests are `cfg(unix)`; `scripts/build-windows.sh check --lib --tests` type-checks them for Windows and passes), and `dash` (not installed here).
+
+Known limits, not fixed:
+- `grep` prints every file through `to_forward_slash`, so a file named `back\slash.rs` appears as `back/slash.rs` in its hints.
+- The `project_id="{id}"` sites in `src/prompts/builders.rs` write a project id raw. An id is not a file path, and none holds a quote or a backslash today.
 
 ## References
 
