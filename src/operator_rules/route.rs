@@ -9,9 +9,10 @@ use serde_json::Value;
 /// Ledger key for a delivered `triggered` rule.
 ///
 /// Spec § 5. `GuideLedger` stores opaque `String` keys, so a third namespace
-/// needs no on-disk format change. Guide keys are `<topic>` and
-/// `<topic>#<heading>`; the `op:` prefix keeps this disjoint from both, and
-/// `op_keys_collide_with_no_guide_key` asserts it rather than trusting it.
+/// needs no on-disk format change. Guide keys are `<topic>`, `<topic>#<heading>`,
+/// `<topic>#<preamble>` and `<topic>#<pointer>`; the `op:` prefix keeps this disjoint from
+/// all of them, and `op_keys_collide_with_no_guide_key` asserts it for the statically
+/// known ones rather than trusting it.
 pub fn ledger_key(id: &str) -> String {
     format!("op:{id}")
 }

@@ -14,11 +14,12 @@
 //! *"no registered prefix is a prefix of another"*. **That gate is wrong**, and
 //! enumerating the real write sites before writing it is what caught it.
 //!
-//! Production has **six** ledger writers, not two:
+//! Production has **seven** ledger writers, not two:
 //!
 //! | site | key written | engine |
 //! |---|---|---|
 //! | `guide_emit::guide_blocks_for` (non-declaring) | `<topic>` | `guide-sections` |
+//! | `guide_emit::guide_blocks_for` (non-declaring, body over the auto-inject bound) | `<topic>#<pointer>` | `guide-sections` |
 //! | `guide_emit::guide_blocks_for` (fallback) | `<topic>#<preamble>` | `guide-sections` |
 //! | `guide_emit::guide_blocks_for` (matched) | `<topic>#<heading>` | `guide-sections` |
 //! | `tools::guide` (explicit fetch) | `<topic>` | `guide-sections`, **pull** |
@@ -175,7 +176,7 @@ fn owns_session_opener_key(key: &str) -> bool {
 }
 
 /// Any key naming a compiled-in guide topic, whole (`<topic>`) or sliced
-/// (`<topic>#<heading>`, `<topic>#<preamble>`).
+/// (`<topic>#<heading>`, `<topic>#<preamble>`, `<topic>#<pointer>`).
 ///
 /// Deliberately checks membership in `GUIDE_TOPICS` rather than merely "has no
 /// `op:` prefix": a negative predicate would claim every future engine's

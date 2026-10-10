@@ -6886,19 +6886,18 @@ mod tests {
         let registered: std::collections::HashSet<&str> =
             server.tools.iter().map(|t| t.name()).collect();
 
-        // Each exemption is tied to the TYPE that owns the name, so renaming the type's
+        // The exemption is tied to the TYPE that owns the name, so renaming the type's
         // name without updating the arm reds here rather than leaving a free-floating string.
-        //  * `activate_project`: `ActivateProject` is dispatched to by `Workspace`
-        //    (`action="activate"`), never registered on its own. The arm is dead for the
-        //    wire surface — filed as a follow-up, not deleted here.
         //  * `__probe_description_cap__`: registered only under `CODESCOUT_PROBE=1`.
-        let exempt = [
-            crate::tools::config::ActivateProject.name(),
-            crate::tools::probe::ProbeTool.name(),
-        ];
+        //
+        // `activate_project` used to be a second exemption: `ActivateProject` is dispatched
+        // to by `Workspace` (`action="activate"`) and never registered on its own, so its arm
+        // was dead for the wire surface. The arm is gone, and putting the name back reds
+        // below, because no registered tool produces it.
+        let exempt = [crate::tools::probe::ProbeTool.name()];
         assert_eq!(
             exempt,
-            ["activate_project", "__probe_description_cap__"],
+            ["__probe_description_cap__"],
             "an exemption's owning type no longer carries the name the arm lists"
         );
 
@@ -6909,7 +6908,7 @@ mod tests {
         .unwrap();
         let arm = pinnable_arm_names(&src);
         assert!(
-            arm.len() >= 5,
+            arm.len() >= 4,
             "control: parsed only {} names from `Tool::pinnable`'s arm ({arm:?}); an empty \
          parse would make this test pass over nothing",
             arm.len()
@@ -14223,7 +14222,9 @@ mod guide_hint_tests {
     ///
     /// The two topic sources disagree for any librarian call touching
     /// `docs/trackers/` or `docs/issues/`: `names_tracker_path` sends it to
-    /// `tracker-conventions` (which declares nothing, so it ships WHOLE), while
+    /// `tracker-conventions` (which declares nothing, so it takes the whole-topic path:
+    /// a one-line pointer while its body is over `MAX_AUTO_INJECT_GUIDE_BYTES`, as it
+    /// is today), while
     /// the call's shape is declared by a `librarian.md` section. Before the
     /// fallthrough only the first source was ever consulted, so once
     /// `tracker-conventions` was spent such calls delivered **nothing at all**

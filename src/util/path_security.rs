@@ -1612,7 +1612,7 @@ fn grep_is_counting(stage: &str) -> bool {
 /// docs/issues/archive/2026-09-24-source-gate-is-bypassed-by-a-keyword-or-group-prefix.md
 ///
 /// **A closed wrapper list, and the limit is stated rather than hidden:** a wrapper not named
-/// here (`ionice`, a shell function) still reads as its own name and falls to bounded — the
+/// here (`parallel`, a shell function) still reads as its own name and falls to bounded — the
 /// module's documented false-negative direction, one unbuffered pipe, never a refusal of
 /// something legitimate. `command` is on the list although `command -v cargo` is a one-line
 /// lookup, so that one spelling is over-refused. The CALLER must slice the token list at this

@@ -1413,11 +1413,7 @@ pub trait Tool: Send + Sync {
     fn pinnable(&self) -> bool {
         !matches!(
             self.name(),
-            "workspace"
-                | "activate_project"
-                | "onboarding"
-                | "get_guide"
-                | "__probe_description_cap__"
+            "workspace" | "onboarding" | "get_guide" | "__probe_description_cap__"
         )
     }
 
