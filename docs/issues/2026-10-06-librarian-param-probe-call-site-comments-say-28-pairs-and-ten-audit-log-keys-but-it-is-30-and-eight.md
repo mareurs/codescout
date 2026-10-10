@@ -1,13 +1,14 @@
 ---
 id: '52c6091a2e9a955d'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the librarian param-probe call site''s comments say 28 pairs and ten audit_log keys, but the sweep covers 30 and the schema has eight'
 tags:
 - librarian
 - param-probe
 - doc-drift
 - cluster/doc-contradicted-by-code
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -79,6 +80,15 @@ None needed.
 ## Resume
 
 Do this edit together with the `audit_log` follow-up: that change moves the floor again.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `f1f56b05` (`experiments`)
+- **patch-id:** `60987f4eaafa81d80eb292ae448adfff19676e8d`
+
+The two comments in `src/librarian/tools/librarian.rs` were rewritten from measurement. The floor comment said 28 pairs and the pinned-skip comment said ten `audit_log:` keys. Re-measured on 2026-10-10: the sweep covered 30 pairs at the time and the schema has eight `audit_log:`-labelled properties (lines 113 to 118, 120 and 122), not ten. The keys fix in the same commit then moved the sweep to 39 pairs, so the floor is now 39, read from the assertion's own `covered 39` message with the floor raised past it. The floor's margin was 2 (28 against 30) and is now 0, which is what the comment says a floor is for. The comment text now states the history (28 on 2026-09-09, 30 before the re-labelling, 39 now) and why `audit_log` is pinned as unprobed.
 
 ## References
 

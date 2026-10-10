@@ -1,18 +1,20 @@
 ---
 id: '9473cc074ff7e799'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the librarian param-honored sweep never probes the audit_log action or five prose-labelled keys, so thirteen schema keys are unguarded'
 tags:
 - librarian
 - param-probe
 - test-coverage
 - cluster/guard-narrower-than-its-name
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
 - docs/issues/archive/2026-09-24-residual-param-probe-reports-skipped-keys.md
 severity: low
+unverified: STANDING — the generic param-honored sweep cannot probe `audit_log`, because every librarian call writes an audit row and so any two responses differ; the eight keys are guarded by a dedicated unit test and pinned as unprobed in the sweep.
 ---
 
 # BUG: the librarian param-honored sweep never probes the `audit_log` action or five prose-labelled keys, so thirteen schema keys are unguarded
@@ -81,6 +83,24 @@ None needed. Read the pin when a `librarian` key is added or renamed.
 ## Resume
 
 Pick the `audit_log` action first. It holds eight of the thirteen keys.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `f1f56b05` (`experiments`)
+- **patch-id:** `60987f4eaafa81d80eb292ae448adfff19676e8d`
+- **SHA:** `a3a317c0` (`experiments`)
+- **patch-id:** `47bd6bdc828e47c06279ba7edcddb89db54ca34a`
+
+The question this bug left open, whether any of the thirteen keys is actually dropped, was checked on 2026-10-10 by passing an ill-typed value to each. The answer splits.
+
+- **The five prose-labelled keys are honored.** `legibility_scan:write`, `link_scan:write`, `doctor:root`, `doctor:old_root`, `doctor:new_root`, `doctor:confirm` and `merge_worktree:root` each returned `invalid type: sequence` from typed deserialization. They were only unreadable to the sweep, because their descriptions put prose before the first colon. They now carry `<action>/<action>:` labels, and so does `limit` (for the four actions that read it). The sweep covers 39 action/key pairs, up from 30, and the floor is 39.
+- **The eight `audit_log` keys were NOT honored.** `audit_log::call` read each with `args.get(k).and_then(Value::as_*)`, and a wrong-typed value became "absent". `export="true"` ran a query in place of an export, and `prune_before_ms="123"` ran a query that read like a pruning dry run (IC-15). `reject_ill_typed_args` now refuses a present, non-null argument of the wrong type, by name, with a corrected call. Null still means absent.
+
+**`audit_log` is deliberately still not in the generic sweep.** Every librarian call writes an audit row, so any two `audit_log` responses differ in `table_total`, and the sweep's base-versus-probe comparison is true whether or not the key was read. With the action added, the eight keys stayed green with the validation removed, which is a pass that cannot fail. The eight keys are pinned as unprobed, with that reason in the comment, and are guarded instead by `audit_log::tests::a_wrong_typed_argument_is_refused_by_name_and_never_read_as_absent` (ten wrong-typed cases, each checked for the key's name and a corrected call) and `well_typed_and_null_arguments_still_run` (the twin). Mutation checks, each applied and restored byte-identical: removing the validation call fails the first test; weakening the `limit` rule to "is a number" fails its `limit = -1` case.
+
+`a3a317c0` trims the description additions to the labels alone and ratchets the tool-surface budget 57_491 to 57_607 (+116, measured). The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
 
 ## References
 

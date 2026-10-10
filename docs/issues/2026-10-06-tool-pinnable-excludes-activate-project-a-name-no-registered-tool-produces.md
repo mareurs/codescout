@@ -1,13 +1,14 @@
 ---
 id: d3684a0f0e798b39
 kind: bug
-status: open
+status: fixed
 title: 'BUG: Tool::pinnable excludes activate_project, a name no registered tool produces'
 tags:
 - tools
 - workspace-pin
 - dead-code
 - cluster/declared-not-wired
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -89,6 +90,17 @@ None needed. The arm is harmless.
 ## Resume
 
 Delete the arm and the exemption in one change.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `4b852a17` (`experiments`)
+- **patch-id:** `6a35aba028198ee4b2c6c17af4c65174e803a5ad`
+
+The `"activate_project"` arm is removed from `Tool::pinnable` (`src/tools/core/types.rs`). It was dead: `pinnable()` is called in `src/server.rs` only on the registered tools, at the `list_tools` schema injection (two sites) and in tests, and `ActivateProject` is dispatched to by `Workspace` (`action="activate"`) and never registered on its own. The test that pins the arm's names against the registered tools (`src/server.rs`) lost its `activate_project` exemption, so its exempt list is now only `__probe_description_cap__`, and its control threshold for the parsed arm length moved from 5 to 4, because one name left the arm. `rustfmt` re-wrapped the `matches!` after the removal.
+
+Not mutation-checked: putting the name back into the arm should red the exemption test, as its new comment says, but that was not run. The behaviour claim rests on the call-site reading above. The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
 
 ## References
 

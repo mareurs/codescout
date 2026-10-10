@@ -1,13 +1,14 @@
 ---
 id: '699b03cc445776d3'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: doc update_entry cannot address rows keyed by key, and its Known ids hint prints an empty list for them'
 tags:
 - librarian
 - update_entry
 - augmentation
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -83,6 +84,28 @@ Rewrite the whole array through `doc(action="augment", merge=true)` with `params
 ## Resume
 
 Choose between the declared key and the extra `id`. The hint fix is independent and small.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `f0e0e030` (`experiments`)
+- **patch-id:** `1e631131889dbc383e450a89a59cab1ddd4b39ae`
+- **SHA:** `a3a317c0` (`experiments`)
+- **patch-id:** `47bd6bdc828e47c06279ba7edcddb89db54ca34a`
+
+`update_entry` now addresses a row by its `id`, or by its `key` when the row has no `id`. The rules, in `locate_entry` (`src/librarian/catalog/augmentation.rs`):
+
+- A row that has an `id` is addressed by that `id` only, and its `key` is an ordinary field. A duplicate `id` still patches the first match, as before.
+- A `key` match is taken only on a row with no `id`, and only when it is unique.
+- A value that is one row's `id` and also another row's `key`, or the `key` of two rows, is refused by name as ambiguous. Nothing is written.
+- A field patch may not rewrite the `key` that is a row's only address.
+- The unknown-entry hint lists what IS addressable (`Known ids`, `Known keys`, or `Known ids and keys`), capped at twelve with the remainder counted, and counts rows that carry neither handle.
+- `append_entry` id allocation is untouched, and a `key` never becomes citable: the snapshot and heading notes, which reason about citable `PREFIX-N` ids, say nothing for a `key`-addressed row.
+
+Tests, all in `augmentation.rs`: `update_entry_addresses_a_row_that_has_a_key_and_no_id`, `..._both_by_its_id_only`, `..._refuses_to_guess_between_an_id_and_a_key_or_between_two_keys`, `..._unknown_key_lists_the_addressable_keys_and_not_an_empty_list`, `..._keeps_the_id_only_behaviour_byte_for_byte`, `..._refuses_to_rewrite_the_key_that_is_a_rows_only_address` and `..._says_nothing_about_citable_headings_for_a_row_addressed_by_key`. Mutation checks, each applied and restored byte-identical: disabling `key` addressing and making an ambiguous match pick the `id` row, applied together, fail four of them, among them the first and the ambiguity test. The `entry_id` description in the `doc` schema names the `key` form (`a3a317c0` trims it to +28 characters). The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
+
+Not done: the live legibility tracker was retagged on 2026-10-06 with a whole-array merge, because this action could not address its rows. Nothing was changed there; a future retag can use this action.
 
 ## References
 

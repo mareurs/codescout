@@ -1,13 +1,14 @@
 ---
 id: d5f1945653f935aa
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the path_security docstring calls ionice an unlisted wrapper, but the wrapper list names it'
 tags:
 - path-security
 - doc-drift
 - il3
 - cluster/doc-contradicted-by-code
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -75,6 +76,17 @@ None needed.
 ## Resume
 
 One-line comment edit.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `4b852a17` (`experiments`)
+- **patch-id:** `6a35aba028198ee4b2c6c17af4c65174e803a5ad`
+
+The docstring above the wrapper-stripping code in `src/util/path_security.rs` said a wrapper "not named here (`ionice`, a shell function)" falls to bounded. Read 2026-10-10: `ionice` IS on the closed wrapper list (the option table near line 1673 and the `matches!` list near line 1702), and `parallel` is on neither. The docstring now names `parallel` as the example of an unlisted wrapper. A comment-only change.
+
+Not tested: the docstring's behaviour claim that an unlisted wrapper "reads as its own name and falls to bounded" was left as it was written; this change checked only which names are listed. The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
 
 ## References
 

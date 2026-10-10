@@ -1,13 +1,14 @@
 ---
 id: '18eb26aefcd6ca4c'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the topic-pointer ledger key is missing from the ledger-key docs, and a test comment still says tracker-conventions ships whole'
 tags:
 - guides
 - doc-drift
 - guide-ledger
 - cluster/doc-contradicted-by-code
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -72,6 +73,15 @@ None needed. Read `guide_emit.rs:133-141` for the real key shapes.
 ## Resume
 
 Three comment edits. No behaviour changes.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `4b852a17` (`experiments`)
+- **patch-id:** `6a35aba028198ee4b2c6c17af4c65174e803a5ad`
+
+The `<topic>#<pointer>` ledger key (written by `whole_topic_blocks` in `src/tools/core/guide_emit.rs` when a non-declaring guide is over the auto-inject bound) is now named where the key tables live. `src/engines/mod.rs`: the writer table gains a `<topic>#<pointer>` row and the count reads seven writers instead of six, and the `owns_guide_key` comment lists the key. `src/prompts/guide_index.rs`: the `all_static_keys` comment now says the two keys synthesized at call time are `<topic>#<preamble>` and `<topic>#<pointer>`, and cites their writers by function name, not by a line number. `src/operator_rules/route.rs`: the `ledger_key` comment lists all four guide key forms and says `op_keys_collide_with_no_guide_key` asserts only the statically known ones. `src/server.rs`: the test comment that said `tracker-conventions` "ships WHOLE" now says it takes the whole-topic path and sends a one-line pointer while its body is over `MAX_AUTO_INJECT_GUIDE_BYTES`. Comment-only. The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
 
 ## References
 

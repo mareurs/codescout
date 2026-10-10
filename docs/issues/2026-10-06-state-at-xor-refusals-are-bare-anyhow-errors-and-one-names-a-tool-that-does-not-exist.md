@@ -1,13 +1,14 @@
 ---
 id: '1909a70685af6e29'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the commit-or-timestamp refusals in state_at and workspace_state_at are bare anyhow errors with no hint, and one names a tool that does not exist'
 tags:
 - librarian
 - error-handling
 - state_at
 - cluster/unclassified
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -82,6 +83,17 @@ None needed. Supply exactly one cutoff.
 ## Resume
 
 The two xor sites are the whole request. The `librarian_reindex` name is a one-word change in the same file.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `78520297` (`experiments`)
+- **patch-id:** `372624bd0d9d0bfa6e3af0b27d7e5d5578cf8c55`
+
+The three bare `anyhow!` refusals are now `crate::tools::RecoverableError` with a hint that carries a corrected call, and the refusal conditions are unchanged. The exactly-one-of-`commit`-or-`timestamp` refusal in `state_at` names `doc(action="state_at", ...)`, and the same refusal in `workspace_state_at` names `librarian(action="workspace_state_at", ...)`, each showing both ways to supply the one cutoff. The unindexed-commit refusal no longer names `librarian_reindex`, which was only a test name and never a tool; it names `librarian(action="reindex")` and offers `timestamp` as the cutoff that needs no index. The librarian tools already use the host `RecoverableError` in many places, and the adapter's `bridge_recoverable_error` passes it through unchanged. The third `anyhow!` in the report (`commit {hash} has no authored_at timestamp`) is a stored-data fault, not a caller error, and was left as it is.
+
+Tests: `an_unindexed_commit_is_recoverable_and_names_the_real_reindex_action`, `requires_exactly_one_of_commit_timestamp` (now both the "both" and "neither" cases, asserting the message, the action named and both example arguments) and `the_xor_refusal_is_recoverable_and_routes_to_this_action`. They assert on the error text and the hint, not on `is_err()`. Mutation check, applied and restored byte-identical: putting `librarian_reindex` back into the hint fails the unindexed-commit test with the exact message. The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
 
 ## References
 

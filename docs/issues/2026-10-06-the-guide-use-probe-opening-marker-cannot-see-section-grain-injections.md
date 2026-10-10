@@ -1,13 +1,14 @@
 ---
 id: '9cf119d200328dfb'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the guide-use probe''s opening marker matches only the whole-topic injection, so section-grain injections of `librarian` are never counted'
 tags:
 - probe
 - guides
 - instrument
 - cluster/selector-narrower-than-its-population
+closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
@@ -101,6 +102,21 @@ None for the probe. Read `librarian` coverage from the injection text itself.
 ## Resume
 
 Decide whether to key by `(topic, heading)` now. Then change `opening_marker` and add the two fixtures.
+
+## Fix provenance (2026-10-10)
+
+This section supersedes `## Fix`, `## Tests added` and `## Resume` above, which describe the state before the fix.
+
+- **SHA:** `400aab75` (`experiments`)
+- **patch-id:** `238ab8d35c3b4675f2faadf48bdb5b5180f128e0`
+
+`scripts/probe_guide_section_use.py` now matches both injection forms. `opening_marker` is replaced by `opening_prefix` (the shared fast-reject needle) and `opening_pattern`, a regex: `auto-injected get_guide('<topic>')`, then an optional ` § <heading>`, then ` — first call`. The heading part cannot cross `-->` or `<!--`, and it is lazy, so a heading that itself contains ` — ` still matches. It matches neither closing form, and it skips the preamble line and the pointer line, because neither contains ` — first call`. Counting rule: every opening counts once, whichever form.
+
+Tests: `tests/test_probe_guide_opening_marker.py` (12 tests; re-run on 2026-10-10 by the author of this note: 12 passed). The fixtures are rendered at run time from the real Rust format strings in `guide_emit.rs`, so a change to the emitter wording fails loudly. Mutation checks reported by the fork that wrote the fix: reverting the fix fails 6 of 12; removing the `-->`/`<!--` bound fails exactly the closing-marker test; dropping the required ` — first call` fails 8 of 12 (its first closing-marker test did not bite under that mutation, so a decoy opening of another topic was added).
+
+Effect on the 4,019 local transcripts (fork's measurement): `librarian` 38 sessions and 130 injections before, 643 and 4546 after, so the earlier "37 sessions" figure was this blindness; `tracker-conventions`, `workspace-state` and `symbol-navigation` are unchanged (0 transcripts differ). The full gate ran green on the merged tree (lean 4471, default 6744, Python 1010 passed, 0 failed).
+
+Not fixed, and not part of this bug: the CLI still cannot report `librarian`. It exits 2 with "no SECTION_SIGNATURES rule matches any section", the guard from `3ff543cad7b4fb22`, which waits on three design decisions.
 
 ## References
 
