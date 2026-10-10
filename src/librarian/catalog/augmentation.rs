@@ -293,6 +293,68 @@ pub struct UpdateEntryOutcome {
 /// from someone else's blocked gate.
 type EntryUpdateColumns = (String, Option<String>, Option<String>, Option<String>);
 
+/// The handle a row is addressed by in `update_entry`: its `id`, else its `key`, with a flag
+/// that is `true` for the `key` case. A row that has both is addressed by `id` only, so its
+/// `key` is an ordinary field there. `None` for a row that carries neither.
+///
+/// Collections whose rows carry `key` and no `id` exist — the legibility backlog's
+/// `candidates` are `CandidateRow { key, .. }` — and before this the action could not reach
+/// any of them. `id` stays the citable handle: `append_entry` allocates it and `link_scan`
+/// binds it. A `key` is only an address and never becomes citable.
+/// docs/issues/2026-10-06-update-entry-cannot-address-rows-keyed-by-key-and-prints-an-empty-known-ids-list.md
+fn entry_handle(e: &Value) -> Option<(&str, bool)> {
+    if let Some(id) = e.get("id").and_then(Value::as_str) {
+        return Some((id, false));
+    }
+    e.get("key").and_then(Value::as_str).map(|key| (key, true))
+}
+
+/// What `entry_id` names in an entry array.
+enum EntryMatch {
+    /// Exactly one row; `by_key` says whether it was reached through its `key`.
+    One {
+        position: usize,
+        by_key: bool,
+    },
+    /// More than one candidate: never guessed, refused by name. The text says which.
+    Ambiguous(String),
+    None,
+}
+
+/// Find the row `entry_id` addresses.
+///
+/// An `id` match keeps the original behaviour exactly: the first row with that `id` (so a
+/// collection that already has duplicate ids behaves as before). A `key` match is only
+/// taken on a row with no `id`, and only when it is unique. The two kinds never mix
+/// silently: a value that is one row's `id` and also another row's `key` is ambiguous, and so
+/// is a `key` shared by two rows.
+fn locate_entry(arr: &[Value], entry_id: &str) -> EntryMatch {
+    let id_hit = arr
+        .iter()
+        .position(|e| e.get("id").and_then(Value::as_str) == Some(entry_id));
+    let key_hits: Vec<usize> = arr
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| matches!(entry_handle(e), Some((h, true)) if h == entry_id))
+        .map(|(i, _)| i)
+        .collect();
+    match (id_hit, key_hits.len()) {
+        (Some(position), 0) => EntryMatch::One {
+            position,
+            by_key: false,
+        },
+        (Some(_), n) => EntryMatch::Ambiguous(format!(
+            "it is the `id` of one row and the `key` of {n} other row(s)"
+        )),
+        (None, 1) => EntryMatch::One {
+            position: key_hits[0],
+            by_key: true,
+        },
+        (None, 0) => EntryMatch::None,
+        (None, n) => EntryMatch::Ambiguous(format!("it is the `key` of {n} rows")),
+    }
+}
+
 /// Patch the fields of ONE entry in `params.<entry_collection>`, leaving every
 /// other row untouched.
 ///
@@ -306,6 +368,9 @@ type EntryUpdateColumns = (String, Option<String>, Option<String>, Option<String
 /// key, matching the params merge-patch semantics callers already know. `id` is
 /// rejected — entry ids key `entry_cite` rows (`<slug>:<local>`), so re-keying a
 /// row through a field patch would strand every citation of it.
+///
+/// A row is addressed by its `id`, or by its `key` when it has no `id` (see
+/// [`locate_entry`]); a patch may not rewrite the `key` that is a row's only address.
 ///
 /// Runs in a single `IMMEDIATE` transaction, like `append_entry`.
 /// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
@@ -388,31 +453,76 @@ pub fn update_entry(
         )));
     };
     let entries_total = arr.len();
-    let position = arr
-        .iter()
-        .position(|e| e.get("id").and_then(|v| v.as_str()) == Some(entry_id));
+    // Addressing: a row's `id`, else its `key`. See `locate_entry` for the rules and why the
+    // two never mix silently.
+    let (position, by_key) = match locate_entry(arr, entry_id) {
+        EntryMatch::One { position, by_key } => (Some(position), by_key),
+        EntryMatch::Ambiguous(detail) => {
+            return Err(LibrarianRecoverableError::with_hint(
+                format!(
+                    "update_entry: `{entry_id}` is ambiguous in `{entry_collection}`: {detail}"
+                ),
+                "update_entry will not guess between rows. It cannot add an `id` either, so give \
+                 the rows distinct addresses by rewriting the collection through \
+                 doc(action=\"augment\", merge=true) with the full array, then retry."
+                    .to_string(),
+            ));
+        }
+        EntryMatch::None => (None, false),
+    };
 
     let Some(position) = position else {
         // Name what IS there. A bare "not found" makes the caller re-read the
         // whole collection just to discover it typed the id — which is the
-        // read-then-write this path exists to remove.
+        // read-then-write this path exists to remove. A row is shown by the handle
+        // `locate_entry` would accept for it: its `id`, else its `key`.
         const KNOWN_IDS_SHOWN: usize = 12;
-        let known: Vec<&str> = arr
+        let handles: Vec<(&str, bool)> = arr.iter().filter_map(entry_handle).collect();
+        let known: Vec<&str> = handles
             .iter()
-            .filter_map(|e| e.get("id").and_then(|v| v.as_str()))
+            .map(|(h, _)| *h)
             .take(KNOWN_IDS_SHOWN)
             .collect();
-        let elided = entries_total.saturating_sub(known.len());
-        let suffix = if elided > 0 {
+        let shown_keys = handles
+            .iter()
+            .take(KNOWN_IDS_SHOWN)
+            .filter(|(_, is_key)| *is_key)
+            .count();
+        let label = match (shown_keys, known.len()) {
+            (0, _) => "Known ids",
+            (k, n) if k == n => "Known keys",
+            _ => "Known ids and keys",
+        };
+        let elided = handles.len().saturating_sub(known.len());
+        let mut suffix = if elided > 0 {
             format!(" (+{elided} more)")
         } else {
             String::new()
         };
+        let unaddressable = entries_total.saturating_sub(handles.len());
+        if unaddressable > 0 {
+            suffix.push_str(&format!(
+                " ({unaddressable} row(s) carry neither an `id` nor a `key` and cannot be addressed)"
+            ));
+        }
         return Err(LibrarianRecoverableError::with_hint(
             format!("update_entry: no entry `{entry_id}` in `{entry_collection}`"),
-            format!("Known ids: {}{}", known.join(", "), suffix),
+            format!("{label}: {}{}", known.join(", "), suffix),
         ));
     };
+
+    // A row addressed by `key` has no other handle, so a patch that rewrites `key` would
+    // re-address it. Unlike `id`, a `key` keys no `entry_cite` rows, so nothing is stranded;
+    // it is refused because the caller's next `entry_id` would silently stop matching.
+    if by_key && patch.contains_key("key") {
+        return Err(LibrarianRecoverableError::with_hint(
+            format!("update_entry: `key` cannot be changed through a field patch on `{entry_id}`"),
+            "This row has no `id`, so its `key` is its only address in the collection. To \
+             re-address it, rewrite the collection through doc(action=\"augment\", \
+             merge=true) with the full array."
+                .to_string(),
+        ));
+    }
 
     let Some(obj) = params[entry_collection][position].as_object_mut() else {
         return Err(LibrarianRecoverableError::new(format!(
@@ -492,13 +602,21 @@ pub fn update_entry(
     // it every time, because the rendered row cannot change and the note never sees which
     // fields moved.
     // docs/issues/archive/2026-09-13-snapshot-stale-tests-row-presence-and-reports-a-content-claim.md
+    // Both notes below reason about CITABLE entry ids (`PREFIX-N` headings and rows). A row
+    // addressed by `key` has no such id and `link_scan` never binds its `key`, so neither note
+    // has a premise to check: say nothing rather than parse a `key` as if it were an id.
     let snapshot_stale = match snapshot_row {
         SnapshotRow::Rewritten | SnapshotRow::AlreadyCurrent => None,
+        SnapshotRow::Undetermined if by_key => None,
         SnapshotRow::Undetermined => {
             snapshot_stale_note(cat, artifact_id, entry_id, &claimed_indices)
         }
     };
-    let undefined_in_body = undefined_in_body_note(cat, artifact_id, entry_id);
+    let undefined_in_body = if by_key {
+        None
+    } else {
+        undefined_in_body_note(cat, artifact_id, entry_id)
+    };
 
     Ok(UpdateEntryOutcome {
         entry_id: entry_id.to_string(),
@@ -3400,6 +3518,315 @@ mod tests {
         let row = get(&cat, "art1").unwrap().unwrap();
         let params: Value = serde_json::from_str(&row.params).unwrap();
         assert_eq!(params["tasks"].as_array().unwrap().len(), 3);
+    }
+
+    /// Seeds an artifact whose `candidates` collection holds rows that carry `key` and NO
+    /// `id` — the shape of the legibility backlog (`CandidateRow { key, .. }`).
+    fn seed_key_rows(cat: &Catalog, id: &str, rows: &str) {
+        art_upsert(cat, &sample_art(id)).unwrap();
+        let mut a = aug(id);
+        a.entry_collection = Some("candidates".into());
+        a.params = format!(r#"{{"candidates":{rows}}}"#);
+        upsert(cat, &a).unwrap();
+    }
+
+    /// `(message, hint)` of a refused `update_entry`. Asserting on the parts and not on
+    /// `to_string()`, which folds the hint into the message and so cannot tell which of the two
+    /// carried a given word.
+    fn refusal_parts(e: anyhow::Error) -> (String, String) {
+        let r = e
+            .downcast_ref::<LibrarianRecoverableError>()
+            .unwrap_or_else(|| panic!("expected a LibrarianRecoverableError, got: {e}"));
+        (r.message.clone(), r.hint.clone().unwrap_or_default())
+    }
+
+    fn candidates_of(cat: &Catalog, id: &str) -> Vec<Value> {
+        let row = get(cat, id).unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        params["candidates"].as_array().unwrap().clone()
+    }
+
+    const KEY_ROWS: &str = r#"[
+        {"key":"src/a.rs::f","status":"open","tier":1},
+        {"key":"src/b.rs::g","status":"open","tier":2},
+        {"key":"tests/c.rs::all","status":"open","tier":2}
+    ]"#;
+
+    /// The case this bug was filed on: the legibility backlog's rows carry `key` and no `id`,
+    /// so `update_entry` answered `no entry ...` for a row that exists.
+    /// docs/issues/2026-10-06-update-entry-cannot-address-rows-keyed-by-key-and-prints-an-empty-known-ids-list.md
+    #[test]
+    fn update_entry_addresses_a_row_that_has_a_key_and_no_id() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_key_rows(&cat, "art1", KEY_ROWS);
+
+        let out = update_entry(
+            &mut cat,
+            "art1",
+            "candidates",
+            "src/b.rs::g",
+            json!({"status":"closed","closed_reason":"refactored"}),
+        )
+        .unwrap();
+
+        assert_eq!(out.entry_id, "src/b.rs::g");
+        assert_eq!(
+            out.entries_total, 3,
+            "an update never changes the row count"
+        );
+        let mut changed = out.changed_fields.clone();
+        changed.sort();
+        assert_eq!(
+            changed,
+            vec!["closed_reason".to_string(), "status".to_string()]
+        );
+        let rows = candidates_of(&cat, "art1");
+        assert_eq!(rows[1]["status"], "closed");
+        assert_eq!(rows[1]["closed_reason"], "refactored");
+        assert_eq!(rows[1]["key"], "src/b.rs::g", "the address is untouched");
+        assert_eq!(rows[1]["tier"], 2, "a field outside the patch survives");
+        for i in [0, 2] {
+            assert_eq!(
+                rows[i]["status"], "open",
+                "row {i} is not the addressed one"
+            );
+            assert!(rows[i].get("closed_reason").is_none(), "row {i} untouched");
+        }
+    }
+
+    /// A row with both an `id` and a `key` is addressed by its `id` only; its `key` is an
+    /// ordinary field there. Otherwise one row would answer to two names.
+    #[test]
+    fn update_entry_addresses_a_row_that_has_both_by_its_id_only() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_key_rows(
+            &cat,
+            "art1",
+            r#"[{"id":"T-1","key":"k1","status":"open"},{"key":"k2","status":"open"}]"#,
+        );
+
+        update_entry(
+            &mut cat,
+            "art1",
+            "candidates",
+            "T-1",
+            json!({"status":"done"}),
+        )
+        .unwrap();
+        let rows = candidates_of(&cat, "art1");
+        assert_eq!(rows[0]["status"], "done");
+        assert_eq!(rows[1]["status"], "open");
+
+        let (msg, hint) = refusal_parts(
+            update_entry(&mut cat, "art1", "candidates", "k1", json!({"status":"x"})).unwrap_err(),
+        );
+        assert!(
+            msg.contains("no entry `k1`"),
+            "a row that has an id is not addressed by its key; got: {msg}"
+        );
+        assert_eq!(hint, "Known ids and keys: T-1, k2");
+
+        // `key` is not the address of that row, so patching it is allowed.
+        update_entry(&mut cat, "art1", "candidates", "T-1", json!({"key":"k1b"})).unwrap();
+        assert_eq!(candidates_of(&cat, "art1")[0]["key"], "k1b");
+    }
+
+    /// Never guess. A value that is one row's `id` and another row's `key`, or the `key` of two
+    /// rows, names more than one row, so the call is refused and nothing is written.
+    #[test]
+    fn update_entry_refuses_to_guess_between_an_id_and_a_key_or_between_two_keys() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_key_rows(
+            &cat,
+            "art1",
+            r#"[{"id":"X-1","status":"open"},{"key":"X-1","status":"open"}]"#,
+        );
+        let before = candidates_of(&cat, "art1");
+        let (msg, hint) = refusal_parts(
+            update_entry(&mut cat, "art1", "candidates", "X-1", json!({"status":"d"})).unwrap_err(),
+        );
+        assert!(
+            msg.contains("`X-1` is ambiguous in `candidates`")
+                && msg.contains("the `id` of one row and the `key` of 1 other row(s)"),
+            "got: {msg}"
+        );
+        assert!(hint.contains("will not guess"), "got: {hint}");
+        assert_eq!(
+            candidates_of(&cat, "art1"),
+            before,
+            "a refusal writes nothing"
+        );
+
+        seed_key_rows(
+            &cat,
+            "art2",
+            r#"[{"key":"dup","status":"open"},{"key":"dup","status":"open"},{"key":"solo","status":"open"}]"#,
+        );
+        let before = candidates_of(&cat, "art2");
+        let (msg, _) = refusal_parts(
+            update_entry(&mut cat, "art2", "candidates", "dup", json!({"status":"d"})).unwrap_err(),
+        );
+        assert!(msg.contains("it is the `key` of 2 rows"), "got: {msg}");
+        assert_eq!(
+            candidates_of(&cat, "art2"),
+            before,
+            "a refusal writes nothing"
+        );
+        // The unique key beside the duplicates is still addressable.
+        update_entry(
+            &mut cat,
+            "art2",
+            "candidates",
+            "solo",
+            json!({"status":"d"}),
+        )
+        .unwrap();
+        assert_eq!(candidates_of(&cat, "art2")[2]["status"], "d");
+    }
+
+    /// The hint used to print `Known ids:` followed by nothing for rows without an `id`, with
+    /// the whole collection counted as `(+N more)`. It must list what IS addressable.
+    #[test]
+    fn update_entry_unknown_key_lists_the_addressable_keys_and_not_an_empty_list() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let rows: Vec<String> = (0..14).map(|i| format!(r#"{{"key":"k{i:02}"}}"#)).collect();
+        seed_key_rows(&cat, "art1", &format!("[{}]", rows.join(",")));
+
+        let (msg, hint) = refusal_parts(
+            update_entry(&mut cat, "art1", "candidates", "nope", json!({"s":1})).unwrap_err(),
+        );
+        assert_eq!(msg, "update_entry: no entry `nope` in `candidates`");
+        let shown: Vec<String> = (0..12).map(|i| format!("k{i:02}")).collect();
+        assert_eq!(hint, format!("Known keys: {} (+2 more)", shown.join(", ")));
+
+        // Rows with neither handle are counted, not folded into "more".
+        seed_key_rows(&cat, "art2", r#"[{"key":"a"},{"note":"x"}]"#);
+        let (_, hint) = refusal_parts(
+            update_entry(&mut cat, "art2", "candidates", "nope", json!({"s":1})).unwrap_err(),
+        );
+        assert_eq!(
+            hint,
+            "Known keys: a (1 row(s) carry neither an `id` nor a `key` and cannot be addressed)"
+        );
+    }
+
+    /// The legacy path is unchanged: an id-only collection prints the same `Known ids:` list,
+    /// capped at twelve with the same `(+N more)`, and a duplicate id still patches the first.
+    #[test]
+    fn update_entry_keeps_the_id_only_behaviour_byte_for_byte() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_task_list(&cat, "art1");
+        let (_, hint) = refusal_parts(
+            update_entry(&mut cat, "art1", "tasks", "T-9", json!({"status":"done"})).unwrap_err(),
+        );
+        assert_eq!(hint, "Known ids: T-1, T-2, T-3");
+
+        let rows: Vec<String> = (1..=15).map(|i| format!(r#"{{"id":"T-{i}"}}"#)).collect();
+        art_upsert(&cat, &sample_art("art2")).unwrap();
+        let mut a = aug("art2");
+        a.entry_collection = Some("tasks".into());
+        a.params = format!(r#"{{"tasks":[{}]}}"#, rows.join(","));
+        upsert(&cat, &a).unwrap();
+        let (_, hint) = refusal_parts(
+            update_entry(&mut cat, "art2", "tasks", "T-99", json!({"status":"done"})).unwrap_err(),
+        );
+        let shown: Vec<String> = (1..=12).map(|i| format!("T-{i}")).collect();
+        assert_eq!(hint, format!("Known ids: {} (+3 more)", shown.join(", ")));
+
+        art_upsert(&cat, &sample_art("art3")).unwrap();
+        let mut a = aug("art3");
+        a.entry_collection = Some("tasks".into());
+        a.params = r#"{"tasks":[{"id":"T-1","n":1},{"id":"T-1","n":2}]}"#.to_string();
+        upsert(&cat, &a).unwrap();
+        update_entry(&mut cat, "art3", "tasks", "T-1", json!({"status":"done"})).unwrap();
+        let row = get(&cat, "art3").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(
+            params["tasks"][0]["status"], "done",
+            "the first match is patched"
+        );
+        assert!(
+            params["tasks"][1].get("status").is_none(),
+            "the duplicate is not"
+        );
+    }
+
+    /// A `key` is the only address of a row that has no `id`, so a patch that rewrites it would
+    /// re-address the row. Refused, and nothing is written.
+    #[test]
+    fn update_entry_refuses_to_rewrite_the_key_that_is_a_rows_only_address() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        seed_key_rows(&cat, "art1", KEY_ROWS);
+        let before = candidates_of(&cat, "art1");
+
+        let (msg, hint) = refusal_parts(
+            update_entry(
+                &mut cat,
+                "art1",
+                "candidates",
+                "src/a.rs::f",
+                json!({"key":"src/a.rs::renamed","status":"closed"}),
+            )
+            .unwrap_err(),
+        );
+        assert!(
+            msg.contains("`key` cannot be changed through a field patch on `src/a.rs::f`"),
+            "got: {msg}"
+        );
+        assert!(hint.contains("only address"), "got: {hint}");
+        assert_eq!(
+            candidates_of(&cat, "art1"),
+            before,
+            "a refusal writes nothing"
+        );
+    }
+
+    /// The two body advisories reason about CITABLE ids. A `key` that merely LOOKS like one
+    /// (`F-8`) must not be parsed as one. The id-addressed twin proves the note does fire for a
+    /// real entry in the same file, so the silence below is the skip and not an empty body.
+    #[test]
+    fn update_entry_says_nothing_about_citable_headings_for_a_row_addressed_by_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tracker.md");
+        std::fs::write(&path, "# Tracker\n\n## F-1 — one\nprose\n").unwrap();
+
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let mut art = sample_art("art1");
+        art.abs_path = path.clone();
+        art_upsert(&cat, &art).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("candidates".to_string());
+        a.params = r#"{"candidates":[{"id":"F-9","status":"open"},{"key":"F-8","status":"open"}]}"#
+            .to_string();
+        upsert(&cat, &a).unwrap();
+
+        let twin = update_entry(
+            &mut cat,
+            "art1",
+            "candidates",
+            "F-9",
+            json!({"status":"done"}),
+        )
+        .unwrap();
+        assert!(
+            twin.undefined_in_body.is_some(),
+            "control: F-9 is an id with no `## F-9 —` heading, so the advisory fires"
+        );
+
+        let out = update_entry(
+            &mut cat,
+            "art1",
+            "candidates",
+            "F-8",
+            json!({"status":"done"}),
+        )
+        .unwrap();
+        assert!(
+            out.undefined_in_body.is_none(),
+            "a key is not an entry id: {:?}",
+            out.undefined_in_body
+        );
+        assert!(out.snapshot_stale.is_none());
     }
 
     /// An empty patch passes every other guard and completes having touched
