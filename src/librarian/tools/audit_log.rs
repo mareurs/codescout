@@ -50,7 +50,103 @@ fn project_root(ctx: &ToolContext) -> Option<std::path::PathBuf> {
         .map(|cp| cp.main_root.clone().unwrap_or_else(|| cp.git_root.clone()))
 }
 
+/// The JSON type each `audit_log` argument must have when it is present and not null.
+///
+/// `call` reads every argument with `args.get(k).and_then(Value::as_*)`, and each of those
+/// returns `None` for the wrong type. A wrong-typed filter therefore read as ABSENT: the
+/// call ran as an unfiltered query, `export="true"` ran a query instead of an export, and
+/// `prune_before_ms="123"` ran a query that read like a pruning dry run (IC-15: accepted at
+/// the boundary, dropped downstream). The other librarian actions deserialize into a typed
+/// struct and refuse such a value, so the param-honored sweep in `librarian.rs` can see
+/// them; this table gives `audit_log` the same refusal. Null stays "absent", as before.
+const ARG_TYPES: &[(&str, ArgType)] = &[
+    ("tbl", ArgType::Str),
+    ("row_id", ArgType::Str),
+    ("actor", ArgType::Str),
+    ("op", ArgType::Str),
+    ("since", ArgType::Int),
+    ("until", ArgType::Int),
+    ("prune_before_ms", ArgType::Int),
+    ("limit", ArgType::Count),
+    ("confirm", ArgType::Bool),
+    ("export", ArgType::Bool),
+];
+
+#[derive(Clone, Copy)]
+enum ArgType {
+    Str,
+    Int,
+    /// A non-negative integer: `limit` is read with `as_u64`.
+    Count,
+    Bool,
+}
+
+impl ArgType {
+    fn accepts(self, v: &Value) -> bool {
+        match self {
+            ArgType::Str => v.is_string(),
+            ArgType::Int => v.as_i64().is_some(),
+            ArgType::Count => v.as_u64().is_some(),
+            ArgType::Bool => v.is_boolean(),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            ArgType::Str => "a string",
+            ArgType::Int => "an integer",
+            ArgType::Count => "a non-negative integer",
+            ArgType::Bool => "a boolean",
+        }
+    }
+
+    fn example(self) -> &'static str {
+        match self {
+            ArgType::Str => "\"artifact\"",
+            ArgType::Int => "1790000000000",
+            ArgType::Count => "50",
+            ArgType::Bool => "true",
+        }
+    }
+}
+
+fn json_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
+}
+
+/// Refuse a present, non-null argument of the wrong type, naming the key and giving a
+/// corrected call. See [`ARG_TYPES`].
+fn reject_ill_typed_args(args: &Value) -> Result<()> {
+    for (key, want) in ARG_TYPES {
+        let Some(v) = args.get(*key) else { continue };
+        if v.is_null() || want.accepts(v) {
+            continue;
+        }
+        return Err(LibrarianRecoverableError::with_hint(
+            format!(
+                "audit_log: '{key}' must be {}, got {}",
+                want.name(),
+                json_type_name(v)
+            ),
+            format!(
+                "e.g. librarian(action=\"audit_log\", {key}={}). A wrong-typed value used to be \
+                 ignored, which ran a different query than the one asked for.",
+                want.example()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    reject_ill_typed_args(&args)?;
     // Export mode: append every unexported row to this host's committed shard
     // and advance the watermark. Not combinable with filters, nor with
     // prune_before_ms — neither can silently absorb the other's args: a
@@ -712,5 +808,69 @@ mod tests {
             .downcast_ref::<LibrarianRecoverableError>()
             .expect("must be a RecoverableError, not a silent discard");
         assert!(re.to_string().contains("tbl"), "{re}");
+    }
+
+    /// Every typed argument refuses a wrong-typed value by name, with a corrected call in the
+    /// hint, instead of reading it as absent. Before this, `export="true"` ran a query in
+    /// place of an export and `prune_before_ms="123"` ran a query that read like a pruning
+    /// dry run — IC-15, found by adding `audit_log` to the librarian param-honored sweep.
+    #[tokio::test]
+    async fn a_wrong_typed_argument_is_refused_by_name_and_never_read_as_absent() {
+        let (ctx, _tmp) = mk_ctx();
+        let cases: &[(&str, Value, &str)] = &[
+            ("tbl", json!(["artifact"]), "a string"),
+            ("row_id", json!(7), "a string"),
+            ("actor", json!({"a": 1}), "a string"),
+            ("op", json!(true), "a string"),
+            ("since", json!("123"), "an integer"),
+            ("until", json!(1.5), "an integer"),
+            ("prune_before_ms", json!("123"), "an integer"),
+            ("limit", json!(-1), "a non-negative integer"),
+            ("confirm", json!("true"), "a boolean"),
+            ("export", json!("true"), "a boolean"),
+        ];
+        for (key, bad, want) in cases {
+            let mut args = json!({"action": "audit_log"});
+            args[*key] = bad.clone();
+            let err = call(&ctx, args)
+                .await
+                .expect_err(&format!("'{key}' = {bad} must be refused, not ignored"));
+            let re = err
+                .downcast_ref::<LibrarianRecoverableError>()
+                .unwrap_or_else(|| panic!("'{key}': must be a RecoverableError, got {err:#}"));
+            assert!(
+                re.message.contains(&format!("'{key}' must be {want}")),
+                "'{key}': {}",
+                re.message
+            );
+            let hint = re.hint.as_deref().unwrap_or_default();
+            assert!(
+                hint.contains(&format!("audit_log\", {key}=")),
+                "'{key}': the hint must carry a corrected call, got: {hint}"
+            );
+        }
+    }
+
+    /// The other direction, so the refusal above is not satisfied by refusing everything:
+    /// well-typed values run as before, and `null` still means "absent".
+    #[tokio::test]
+    async fn well_typed_and_null_arguments_still_run() {
+        let (ctx, _tmp) = mk_ctx();
+        call(
+            &ctx,
+            json!({"action": "audit_log", "tbl": null, "row_id": null, "actor": null,
+                   "op": null, "since": null, "until": null, "limit": null,
+                   "confirm": null, "export": null}),
+        )
+        .await
+        .expect("null arguments are absent, as before");
+        let v = call(
+            &ctx,
+            json!({"action": "audit_log", "tbl": "artifact", "op": "insert", "since": 0,
+                   "until": 4_000_000_000_000_i64, "limit": 5}),
+        )
+        .await
+        .expect("well-typed filters run");
+        assert!(v["entries"].is_array(), "{v}");
     }
 }

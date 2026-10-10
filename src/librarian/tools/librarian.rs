@@ -100,14 +100,14 @@ impl Tool for Librarian {
                 "emit_tracker": { "type": "boolean", "default": true, "description": "audit_doc_refs: create/update an audit_issues tracker artifact with results" },
                 "tracker_id": { "type": "string", "description": "audit_doc_refs: existing tracker id to update (creates new if omitted)" },
                 "fail_on": { "type": "string", "default": "never", "description": "audit_doc_refs: exit_code 1 when findings reach this severity (high | med | low | never)" },
-                "write": { "type": "boolean", "description": "legibility_scan (default true): reconcile the backlog tracker (false = dry-run JSON only). link_scan (default false): materialize/prune cites edges (false = report only)." },
+                "write": { "type": "boolean", "description": "legibility_scan/link_scan: legibility_scan defaults to true (reconcile the backlog tracker; false = dry-run JSON only). link_scan defaults to false (materialize/prune cites edges; false = report only)." },
                 "offset": { "type": "integer", "description": "doctor: skip this many abs_path_outside_managed_roots rows before the window (default 0); ordered by abs_path, so pages are stable and disjoint." },
                 "findings_offset": { "type": "integer", "description": "link_scan: skip N findings per array (default 0); page with findings_limit until counts.truncated is false." },
                 "findings_limit": { "type": "integer", "description": "link_scan: findings per array (default 50)." },
                 "fix": { "type": "string", "enum": ["prune_missing", "reseat_worktree", "rehome", "repair_frontmatter_id", "mint_slugs", "export_augmentations"], "description": "doctor: opt-in repair; omit for a read-only scan. Each fix WRITES, is scoped (root= or the active project), and is a DRY RUN until confirm=true; the root/new_root params say what each requires. prune_missing drops artifact+commits rows under a dead/renamed root. reseat_worktree auto-reseats no-collision worktree-scoped catalog rows to their main-repo path; collisions are reported for manual doc(action=\"graft\"). rehome migrates a moved repo's rows from old_root to new_root, preserving ids/history. repair_frontmatter_id rewrites every frontmatter_id_mismatch file's `id:` to its catalog row's id, for every artifact under one root; a file with NO frontmatter id is left alone rather than stamped. mint_slugs backfills artifact.slug where NULL. export_augmentations exports each augmentation's shape (never its params) to a committed sidecar and stamps `expects_augmentation:` to name it, so another machine's reindex re-attaches it; it can only export rows THIS catalog holds." },
-                "root": { "type": "string", "description": "doctor fix=prune_missing: absolute path of the dead/renamed repo root to prune (refused if the path still exists on disk). OMIT root to run BATCH mode: dry-run lists every dead root (whole-subtree-gone) with row counts; pass confirm=true to prune them all. fix=rehome: use `old_root` instead; root is accepted as a back-compat alias. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
-                "old_root": { "type": "string", "description": "For fix=rehome: absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface." },
-                "new_root": { "type": "string", "description": "For fix=rehome: absolute path the repo now lives at." },
+                "root": { "type": "string", "description": "doctor/merge_worktree: with doctor fix=prune_missing, the absolute path of the dead/renamed repo root to prune (refused if the path still exists on disk). OMIT root to run BATCH mode: dry-run lists every dead root (whole-subtree-gone) with row counts; pass confirm=true to prune them all. fix=rehome: use `old_root` instead; root is accepted as a back-compat alias. merge_worktree: the worktree root to merge/abandon (must have an active registration)." },
+                "old_root": { "type": "string", "description": "doctor: with fix=rehome, the absolute path the repo USED TO live at (must no longer exist on disk). Preferred alias of root — use this name, it's the one the doctor hints and error text surface." },
+                "new_root": { "type": "string", "description": "doctor: with fix=rehome, the absolute path the repo now lives at." },
                 "dry_run": { "type": "boolean", "description": "merge_worktree: compute and return the full merge report without writing anything." },
                 "abandon": { "type": "boolean", "description": "merge_worktree: delete all of the worktree's shadow rows and mark its registration abandoned, instead of merging." },
                 "tbl": { "type": "string", "description": "audit_log: filter to one audited table name (e.g. 'artifact', 'commits')." },
@@ -116,9 +116,9 @@ impl Tool for Librarian {
                 "op": { "type": "string", "enum": ["insert", "update", "delete"], "description": "audit_log: filter to one operation kind." },
                 "since": { "type": "integer", "format": "int64", "description": "audit_log: only rows at_ms >= this epoch-ms UTC timestamp." },
                 "until": { "type": "integer", "format": "int64", "description": "audit_log: only rows at_ms <= this epoch-ms UTC timestamp." },
-                "limit": { "type": "integer", "description": "legibility_scan: cap candidates returned/written. link_scan: cap ARTIFACTS walked (default 10000) — findings use findings_limit. doctor: abs_path_outside_managed_roots window size (default 10); raise it to reach rows the report counts but elides, pair with offset to page. audit_log: max rows returned, newest first (default 50, max 500)." },
+                "limit": { "type": "integer", "description": "legibility_scan/link_scan/doctor/audit_log: a cap whose meaning differs per action. legibility_scan: cap candidates returned/written. link_scan: cap ARTIFACTS walked (default 10000) — findings use findings_limit. doctor: abs_path_outside_managed_roots window size (default 10); raise it to reach rows the report counts but elides, pair with offset to page. audit_log: max rows returned, newest first (default 50, max 500)." },
                 "prune_before_ms": { "type": "integer", "format": "int64", "description": "audit_log: delete audit rows with at_ms strictly less than this epoch-ms UTC cutoff. Dry-run by default (returns would_delete); pass confirm=true to apply — the apply always leaves one self-describing marker row explaining the resulting seq gap." },
-                "confirm": { "type": "boolean", "description": "doctor fix=prune_missing batch mode / fix=rehome / audit_log prune_before_ms: pass true to apply; omitted/false = dry-run." },
+                "confirm": { "type": "boolean", "description": "doctor/audit_log: pass true to apply doctor fix=prune_missing batch mode, doctor fix=rehome, or audit_log prune_before_ms; omitted/false = dry-run." },
                 "export": { "type": "boolean", "description": "audit_log: export unexported rows to this host's shard." }
             }
         })
@@ -238,34 +238,35 @@ mod tests {
             "librarian",
             &Librarian.input_schema(),
             &spec,
-            // Floor is **action/key pairs**, not keys, and measured not chosen: 28 pairs,
-            // read 2026-09-09 from `sweep`'s own `checked`. Was 15, a figure derived when
-            // `sweep` probed only a shared key's first action — see
+            // Floor is **action/key pairs**, not keys, and measured not chosen: 39 pairs, read
+            // 2026-10-10 from the sweep's own coverage line (with the floor raised past it the
+            // assertion reports `covered 39`). Was 30 before five prose-labelled keys were
+            // re-labelled (`write`, `root`, `old_root`, `new_root`, `confirm`) and `limit` was
+            // labelled for all four actions that read it; 28 on 2026-09-09, and 15 before
+            // that, a figure derived when `sweep` probed only a shared key's first action — see
             // `crate::tools::param_probe::assert_all_honored` for why the margin between
             // floor and count is the number of labels that can go missing in silence.
-            28,
-            // Pinned from `sweep`'s own `unlabelled`, read 2026-10-05: THIRTEEN keys are not
-            // probed at all, and this list is that debt made visible rather than a pass.
-            // Ten are labelled `audit_log:` but `audit_log` is not in `spec.actions` above, so
-            // the whole action is unswept; `write` opens `legibility_scan (default true): …`,
-            // `root`/`confirm` open `doctor fix=…`, and `old_root`/`new_root` open
-            // `For fix=rehome:` — each reads as a label naming no action. Clearing an entry
-            // means relabelling the key to a bare `<action>:` (or adding the action to
-            // `spec.actions` with a `required` arm), which then moves `floor` too.
+            39,
+            // Pinned from `sweep`'s own `unlabelled`, read 2026-10-10: EIGHT keys are not probed,
+            // all labelled `audit_log:` while `audit_log` is NOT in `spec.actions`, on purpose.
+            // This generic sweep decides "honored" by whether a call's outcome changes when the
+            // key is ill-typed, and every librarian call writes an audit row, so an `audit_log`
+            // response (`table_total`, `entries`) differs between ANY two calls: the comparison
+            // is true whether or not the key was read. Adding the action turned the eight keys
+            // green with the argument validation removed, which is a pass that cannot fail. The
+            // keys are covered instead by
+            // `audit_log::tests::a_wrong_typed_argument_is_refused_by_name_and_never_read_as_absent`,
+            // which fails when the validation is removed. (`confirm` and `limit` are also
+            // labelled `audit_log` and are swept through their other actions.)
             &[
                 "actor",
-                "confirm",
                 "export",
-                "new_root",
-                "old_root",
                 "op",
                 "prune_before_ms",
-                "root",
                 "row_id",
                 "since",
                 "tbl",
                 "until",
-                "write",
             ],
             |args| async move { Librarian.call(&mk_ctx(), args).await },
         )
