@@ -301,7 +301,7 @@ type EntryUpdateColumns = (String, Option<String>, Option<String>, Option<String
 /// `candidates` are `CandidateRow { key, .. }` — and before this the action could not reach
 /// any of them. `id` stays the citable handle: `append_entry` allocates it and `link_scan`
 /// binds it. A `key` is only an address and never becomes citable.
-/// docs/issues/2026-10-06-update-entry-cannot-address-rows-keyed-by-key-and-prints-an-empty-known-ids-list.md
+/// docs/issues/archive/2026-10-06-update-entry-cannot-address-rows-keyed-by-key-and-prints-an-empty-known-ids-list.md
 fn entry_handle(e: &Value) -> Option<(&str, bool)> {
     if let Some(id) = e.get("id").and_then(Value::as_str) {
         return Some((id, false));
@@ -3554,7 +3554,7 @@ mod tests {
 
     /// The case this bug was filed on: the legibility backlog's rows carry `key` and no `id`,
     /// so `update_entry` answered `no entry ...` for a row that exists.
-    /// docs/issues/2026-10-06-update-entry-cannot-address-rows-keyed-by-key-and-prints-an-empty-known-ids-list.md
+    /// docs/issues/archive/2026-10-06-update-entry-cannot-address-rows-keyed-by-key-and-prints-an-empty-known-ids-list.md
     #[test]
     fn update_entry_addresses_a_row_that_has_a_key_and_no_id() {
         let mut cat = Catalog::open_in_memory().unwrap();

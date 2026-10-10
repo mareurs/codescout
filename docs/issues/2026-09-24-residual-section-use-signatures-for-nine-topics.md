@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
 severity: low
-unverified: 'PARTIAL FIX (34d39567): a missing guide file is now refused apart from ''no rules matched''. NOT done: signature authoring for the nine other topics. It is blocked on three design decisions and, for four topics, on evidence that does not exist; see ## Partial fix, Update 2026-10-06.'
+unverified: 'PARTIAL FIX (34d39567): a missing guide file is now refused apart from ''no rules matched''. NOT done: signature authoring for the nine other topics. It is blocked on two design decisions (the probe''s tool scope, and a (topic, heading) key) and, for four topics, on evidence that does not exist; see ## Partial fix, Update 2026-10-06. The marker-form decision was built on 2026-10-10.'
 ---
 
 ## Summary
@@ -48,9 +48,9 @@ What is NOT covered: authoring `SECTION_SIGNATURES` for the other nine topics, s
 - `scan_transcript` (`scripts/probe_guide_section_use.py:541-616`) counts only `doc`, `librarian` and `artifact` calls. Its docstring marks that limit as load-bearing, because a self-trigger once scored all six sections at 100%. Seven topics cannot be expressed in that scope: `error-handling`, `iron-laws-detail`, `progressive-disclosure`, `project-activation-bootstrap`, `symbol-navigation`, `untrusted-content` and `workspace-state`.
 - `SECTION_SIGNATURES` is keyed by heading alone. Headings collide across the ten guides: `Related` appears in four, and `(preamble)` in all ten. Per-topic rules need a `(topic, heading)` key.
 - Four topics were never injected in 3,487 transcripts: `error-handling`, `iron-laws-detail`, `librarian-runtime` and `untrusted-content`. No positive control can exist for them.
-- The probe cannot see section-grain injections of `librarian`. That is filed as `9cf119d200328dfb`.
+- The probe cannot see section-grain injections of `librarian`. That is filed as `15d81831913d045e`, and fixed and archived on 2026-10-10 (see the archived record).
 
-Decisions needed before anyone authors: widen the tool scope per topic, or declare those seven topics out of scope; key by `(topic, heading)`; and match the `§ <heading>` marker form. After those, `librarian` is the only topic with a feasible population.
+Decisions needed before anyone authors: widen the tool scope per topic, or declare those seven topics out of scope; and key by `(topic, heading)`. The third decision, matching the `§ <heading>` marker form, was made and built on 2026-10-10. After those, `librarian` is the only topic with a feasible population.
 
 ## Resume
 

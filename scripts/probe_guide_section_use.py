@@ -339,7 +339,7 @@ def opening_prefix(topic: str) -> str:
 def opening_pattern(topic: str) -> "re.Pattern[str]":
     """Match the OPENING form of BOTH injection shapes, and neither closing form (trap 1).
 
-    docs/issues/2026-10-06-the-guide-use-probe-opening-marker-cannot-see-section-grain-injections.md:
+    docs/issues/archive/2026-10-06-the-guide-use-probe-opening-marker-cannot-see-section-grain-injections.md:
     the probe once searched only for the whole-topic wording, so a topic that declares sections
     (`librarian`) read as having no injections after section-grain serving began.
 

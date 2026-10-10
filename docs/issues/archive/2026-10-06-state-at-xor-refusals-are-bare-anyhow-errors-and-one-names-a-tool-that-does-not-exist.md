@@ -1,5 +1,5 @@
 ---
-id: '1909a70685af6e29'
+id: d6b67f83ff51c3f4
 kind: bug
 status: fixed
 title: 'BUG: the commit-or-timestamp refusals in state_at and workspace_state_at are bare anyhow errors with no hint, and one names a tool that does not exist'

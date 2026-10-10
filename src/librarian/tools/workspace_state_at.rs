@@ -341,7 +341,7 @@ mod tests {
     /// The xor refusal is input-driven, so it must be a recoverable error that routes to THIS
     /// action. `is_err()` cannot tell a `RecoverableError` from a bare `anyhow!`, which reaches
     /// the wire as a fatal `isError: true` with no corrected call.
-    /// docs/issues/2026-10-06-state-at-xor-refusals-are-bare-anyhow-errors-and-one-names-a-tool-that-does-not-exist.md
+    /// docs/issues/archive/2026-10-06-state-at-xor-refusals-are-bare-anyhow-errors-and-one-names-a-tool-that-does-not-exist.md
     #[tokio::test]
     async fn the_xor_refusal_is_recoverable_and_routes_to_this_action() {
         let tmp = TempDir::new().unwrap();

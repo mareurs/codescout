@@ -327,7 +327,7 @@ mod tests {
     /// The `(message, hint)` a refused call carries. Both refusals under test are input-driven,
     /// so they must arrive as `crate::tools::RecoverableError`: a bare `anyhow!` reaches the wire
     /// as a fatal `isError: true` with no corrected call, and `is_err()` cannot tell the two apart.
-    /// docs/issues/2026-10-06-state-at-xor-refusals-are-bare-anyhow-errors-and-one-names-a-tool-that-does-not-exist.md
+    /// docs/issues/archive/2026-10-06-state-at-xor-refusals-are-bare-anyhow-errors-and-one-names-a-tool-that-does-not-exist.md
     fn refusal(e: anyhow::Error) -> (String, String) {
         let r = e
             .downcast_ref::<crate::tools::RecoverableError>()

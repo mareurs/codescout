@@ -1,5 +1,5 @@
 ---
-id: '5cbaa87d92772a51'
+id: 99ee5baef19fcf65
 kind: bug
 status: fixed
 title: 'RESIDUAL: Make CI invoke the plugin repo''s tests/run-all.sh runner so skill-colocated tests actually run; add a test for the self-identification half'
@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-02-greedy-name-regex-reads-a-former-session-name-as-the-current-one.md
 severity: low
-unverified: No CI run was opened after the test and the duplicate-line removal landed, so green in CI is not observed; the local suite passes (11 of 11 for this skill).
+unverified: 'CLEARED 2026-10-10. Was: no CI run was opened after the test and the duplicate-line removal landed. Observed: the suite ran in CI on main (run 37589227541, 2026-10-07) and passed, 11 of 11. The workflow as a whole is red for unrelated suites, and has been since 2026-09-28; see the Observed in CI paragraph.'
 ---
 
 ## Summary
@@ -56,7 +56,9 @@ Step 1 of `SKILL.md` now reads its two roots from `CS_PEERS_PROC` and `CS_PEERS_
 
 Re-run 2026-10-06 in the fork's worktree: `reaching-peer-sessions.test.sh` 11 passed, 0 failed. The fork also mutation-checked it against the real skill (restoring the `comm` rule fails cases 8 and 10; silencing the warning fails case 9). The merge into `main` was checked on 2026-10-07: the patch-id appears among the last 30 commits of `main`.
 
-Not verified: a CI run. The only workflow change is the removed duplicate line, and nobody opened a run, so "green in CI" is not observed.
+**Observed in CI, 2026-10-10.** The `claude-plugins` workflow `cross-platform hooks` ran on `main` after the merge (run 37589227541, 2026-10-07, head `bcb1d3a`). Its job `full hook + skill suite (linux)` executed this fix's suite: `reaching-peer-sessions.test.sh` printed `-- 11 passed, 0 failed`, with the four new self-identification cases among them, and `test-pre-edit-dirty-check.sh` printed `13 passed, 0 failed`. So the runner now reaches the skill-colocated test in CI, which is what this bug asked for.
+
+The job as a whole is red, for suites this bug does not touch: `fixture discovery: range bcb1d3a2..bcb1d3a2 touches no <plugin>/.claude-plugin/plugin.json`, and `run-all effort discovery: 3 passed, 5 failed`. Every one of the last ten runs of that workflow on `main` has conclusion `failure`, the oldest 2026-09-28, so the red predates this merge. It is not filed here.
 
 ## Resume
 

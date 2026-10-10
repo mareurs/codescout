@@ -1,5 +1,5 @@
 ---
-id: '52c6091a2e9a955d'
+id: 33d96954a8a2a24a
 kind: bug
 status: fixed
 title: 'BUG: the librarian param-probe call site''s comments say 28 pairs and ten audit_log keys, but the sweep covers 30 and the schema has eight'
@@ -93,5 +93,5 @@ The two comments in `src/librarian/tools/librarian.rs` were rewritten from measu
 ## References
 
 - `docs/issues/archive/2026-09-24-residual-param-probe-reports-skipped-keys.md`, Resume bullets 2 and 4.
-- Sibling: `docs/issues/2026-10-06-librarian-param-honored-sweep-leaves-audit-log-and-five-prose-labelled-keys-unprobed.md`.
+- Sibling: `docs/issues/archive/2026-10-06-librarian-param-honored-sweep-leaves-audit-log-and-five-prose-labelled-keys-unprobed.md`.
 - Cluster `IC-11`: the prose was true or plausible when written and the code moved. The class names a capability the code gained, so the fit is loose: here the code gained pairs and the comment kept the old count.

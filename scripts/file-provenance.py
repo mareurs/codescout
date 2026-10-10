@@ -914,7 +914,7 @@ def scan_with_evidence(root: Path) -> tuple[
         fallback = file_session_id(f)
         # Calls this transcript itself records as REFUSED. Their write targets are not writes:
         # a request and an accomplished act are the same token in a tool_use block, and only
-        # the result tells them apart (docs/issues/2026-09-13-file-provenance-conflates-touched-
+        # the result tells them apart (docs/issues/archive/2026-09-13-file-provenance-conflates-touched-
         # once-with-bytes-at-risk.md). Narrows the FALSE-POSITIVE direction only -- a call with
         # no result on record, and every shell call, still counts.
         refused = refused_call_ids(f)
@@ -1045,7 +1045,7 @@ def absorbed_writes(rel: str, root: Path, floor: str | None,
     the commit's own second: an edit and the commit that took it, one second apart or less.
     That write is history, not co-ownership, but the path is dirty (someone else's bytes are
     in it), so the CLEAN verdict cannot discount it and per-path git state cannot tell the two
-    apart (docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md,
+    apart (docs/issues/archive/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md,
     instance 2: a session whose create was committed at bc933c01 was named as a live co-writer
     of a file the asker had since added 99 lines to).
 
@@ -1150,7 +1150,7 @@ def main(argv: list[str]) -> int:
         # UNKNOWN branch used to compute only for itself. Counted BEFORE the absorbed writes
         # below are discounted: those are in the window, just already in HEAD.
         hidden = len(records) - len(in_window) - len(undated)
-        # Instance 2 of docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-
+        # Instance 2 of docs/issues/archive/2026-09-13-file-provenance-conflates-touched-once-with-bytes-
         # at-risk.md: on a DIRTY path, a write committed by the path's last commit still lands
         # in the window when it was made in that commit's own second (git's resolution). Only the
         # DEFAULT window has such a floor; --since and --all name their own.
@@ -1249,7 +1249,7 @@ def main(argv: list[str]) -> int:
         # right now -- that is the claim a reader acts on (fmt-mine refuses, a commit waits for
         # an answer). A path git reports CLEAN holds no uncommitted bytes from anyone, so a
         # session's write to it is history already absorbed into HEAD and the claim is false
-        # (docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md).
+        # (docs/issues/archive/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md).
         # This is the FALSE-POSITIVE direction only: UNKNOWN is still never rendered as "not
         # mine", MINE is untouched, and a dirty or untracked path keeps its transcript verdict.
         # `CLEAN` is a NEW first-column token; scripts/fmt-mine.sh partitions on that column.

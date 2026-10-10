@@ -1,5 +1,5 @@
 ---
-id: '18eb26aefcd6ca4c'
+id: 00c24f4ef12c4e6b
 kind: bug
 status: fixed
 title: 'BUG: the topic-pointer ledger key is missing from the ledger-key docs, and a test comment still says tracker-conventions ships whole'

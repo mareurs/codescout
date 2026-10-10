@@ -1,5 +1,5 @@
 ---
-id: '9473cc074ff7e799'
+id: da1fd0fd414e3e94
 kind: bug
 status: fixed
 title: 'BUG: the librarian param-honored sweep never probes the audit_log action or five prose-labelled keys, so thirteen schema keys are unguarded'

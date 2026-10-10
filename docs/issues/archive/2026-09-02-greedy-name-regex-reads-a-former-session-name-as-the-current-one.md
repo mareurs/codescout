@@ -8,7 +8,7 @@ owners:
 tags:
 - cluster/addressing-without-an-escape-hatch
 closed: 2026-09-03
-unverified: 'TRACKED 5cbaa87d92772a51 — The regression test covers the name read only. The self-identification half of the same commit is verified by hand, not by test (still true 2026-10-06; tracked by the residual named here). The CI half was overtaken: tests/run-all.sh is now run by a `full-suite` job in claude-plugins'' .github/workflows/cross-platform-hooks.yml (claude-plugins:502365e, claude-plugins:8a95728; read, not confirmed against a CI run).'
+unverified: 'RESOLVED 2026-10-10. Was: TRACKED 5cbaa87d92772a51, because the self-identification half of the fix was verified by hand and not by test, and the CI half had not been confirmed against a run. Both are done: the self-identification test landed (claude-plugins:ffe67e5) and CI executed it on main (run 37589227541, 2026-10-07: reaching-peer-sessions.test.sh, 11 passed, 0 failed). See docs/issues/archive/2026-09-24-residual-plugin-ci-runs-run-all-sh.md.'
 ---
 
 ## Summary

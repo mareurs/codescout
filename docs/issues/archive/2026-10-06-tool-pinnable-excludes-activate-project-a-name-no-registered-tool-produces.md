@@ -1,5 +1,5 @@
 ---
-id: d3684a0f0e798b39
+id: c390168053875e2d
 kind: bug
 status: fixed
 title: 'BUG: Tool::pinnable excludes activate_project, a name no registered tool produces'

@@ -1,5 +1,5 @@
 ---
-id: '9cf119d200328dfb'
+id: 15d81831913d045e
 kind: bug
 status: fixed
 title: 'BUG: the guide-use probe''s opening marker matches only the whole-topic injection, so section-grain injections of `librarian` are never counted'

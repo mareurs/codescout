@@ -1,5 +1,5 @@
 ---
-id: '699b03cc445776d3'
+id: d04d30314e7a7472
 kind: bug
 status: fixed
 title: 'BUG: doc update_entry cannot address rows keyed by key, and its Known ids hint prints an empty list for them'

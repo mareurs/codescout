@@ -1,6 +1,6 @@
 """Regression coverage for scripts/probe_guide_section_use.py's recognition of an injection.
 
-docs/issues/2026-10-06-the-guide-use-probe-opening-marker-cannot-see-section-grain-injections.md:
+docs/issues/archive/2026-10-06-the-guide-use-probe-opening-marker-cannot-see-section-grain-injections.md:
 `opening_marker` searched transcripts for the WHOLE-topic opening line only
 (`auto-injected get_guide('T') — first call`). Once a topic declared sections, `guide_emit.rs`
 began delivering it as one block per section, each opened by

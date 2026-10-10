@@ -347,7 +347,7 @@ hasnt "11 never claims 'formatted N file(s)'" "$OUT" "file(s) written by this se
 
 echo "== 12. CLEAN: git holds no uncommitted bytes, so nothing is at risk and it is formatted =="
 # `CLEAN` is the provenance scan's verdict for a path a peer wrote but git reports clean
-# (docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md). It was
+# (docs/issues/archive/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md). It was
 # SHARED/PEER, a hard stop over a file nobody holds bytes in. A token the partition does not
 # name lands in NEITHER list, so the file would stay unformatted with no word said -- which is
 # what the first assertion pair pins. Its twins are cases 4 and 6: a PEER or SHARED row must

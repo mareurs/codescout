@@ -660,7 +660,7 @@ has "an uncommitted path keeps its full history" "$(run src/never_committed.rs)"
 
 echo
 echo "== a REFUSED write is not a write -- and a CLEAN path has nothing at risk =="
-# docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md
+# docs/issues/archive/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md
 #
 # Two false-POSITIVE causes, one consequence at the point of use (fmt-mine refuses on SHARED):
 #   1. A tool_use block is a REQUEST. A refused edit is the same token as a landed one, and
@@ -842,7 +842,7 @@ eq "a refused write on a CLEAN path is UNKNOWN, not CLEAN" \
 
 echo
 echo "== a DIRTY path: a peer whose write the last commit already took is not a co-writer =="
-# docs/issues/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md, instance 2.
+# docs/issues/archive/2026-09-13-file-provenance-conflates-touched-once-with-bytes-at-risk.md, instance 2.
 # The window floor is the path's last commit time, which git gives to the SECOND. A write that
 # commit took can be inside the window only when it was made in the commit's own second, and the
 # path being DIRTY (someone else's bytes) means the CLEAN verdict cannot discount it. The text
