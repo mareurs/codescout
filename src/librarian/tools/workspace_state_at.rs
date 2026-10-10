@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -90,7 +90,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
 
     if a.commit.is_some() == a.timestamp.is_some() {
-        return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
+        return Err(crate::tools::RecoverableError::with_hint(
+            "supply exactly one of `commit` or `timestamp`",
+            "e.g. librarian(action=\"workspace_state_at\", commit=\"<sha>\") or librarian(action=\"workspace_state_at\", timestamp=<ms epoch>). Pass one cutoff, not both and not neither.",
+        )
+        .into());
     }
 
     let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
@@ -332,6 +336,39 @@ mod tests {
         let c_entry = arts.iter().find(|e| e["id"] == "c").unwrap();
         assert_eq!(b_entry["freshness_at_as_of"], "unknown");
         assert_eq!(c_entry["freshness_now"], "unknown");
+    }
+
+    /// The xor refusal is input-driven, so it must be a recoverable error that routes to THIS
+    /// action. `is_err()` cannot tell a `RecoverableError` from a bare `anyhow!`, which reaches
+    /// the wire as a fatal `isError: true` with no corrected call.
+    /// docs/issues/2026-10-06-state-at-xor-refusals-are-bare-anyhow-errors-and-one-names-a-tool-that-does-not-exist.md
+    #[tokio::test]
+    async fn the_xor_refusal_is_recoverable_and_routes_to_this_action() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+
+        for (case, args) in [
+            ("both", json!({"commit": "abc", "timestamp": 5})),
+            ("neither", json!({})),
+        ] {
+            let e = call(&ctx, args).await.expect_err(case);
+            let r = e
+                .downcast_ref::<crate::tools::RecoverableError>()
+                .unwrap_or_else(|| panic!("{case}: expected a RecoverableError, got: {e}"));
+            assert_eq!(
+                r.message, "supply exactly one of `commit` or `timestamp`",
+                "{case}: the refusal condition and its message are unchanged"
+            );
+            let hint = r.hint().unwrap_or_default();
+            assert!(
+                hint.contains("librarian(action=\"workspace_state_at\""),
+                "{case}: the hint must name THIS action; got: {hint}"
+            );
+            assert!(
+                hint.contains("commit=") && hint.contains("timestamp="),
+                "{case}: the hint must show both ways to supply the one cutoff; got: {hint}"
+            );
+        }
     }
 
     /// Seeding 250 artifacts and querying should return ≤ 200 with hints.more_in_scope ≥ 50.

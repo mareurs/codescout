@@ -43,7 +43,11 @@ pub(crate) fn resolve_cutoff_ts(
             .filter_map(|r| r.ok())
             .collect();
         match rows.len() {
-            0 => Err(anyhow!("commit {hash} not indexed; run librarian_reindex")),
+            0 => Err(crate::tools::RecoverableError::with_hint(
+                format!("commit {hash} not indexed"),
+                "Run librarian(action=\"reindex\") to index recent commits (it backfills the commits table that commit= reads), or pass `timestamp` (ms epoch) instead of `commit`.",
+            )
+            .into()),
             1 => rows[0]
                 .1
                 .ok_or_else(|| anyhow!("commit {hash} has no authored_at timestamp")),
@@ -163,7 +167,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     match (&a.commit, &a.timestamp) {
         (Some(_), Some(_)) | (None, None) => {
-            return Err(anyhow!("supply exactly one of `commit` or `timestamp`"));
+            return Err(crate::tools::RecoverableError::with_hint(
+                "supply exactly one of `commit` or `timestamp`",
+                "e.g. doc(action=\"state_at\", id=\"<16-hex>\", commit=\"<sha>\") or doc(action=\"state_at\", id=\"<16-hex>\", timestamp=<ms epoch>). Pass one cutoff, not both and not neither.",
+            )
+            .into());
         }
         _ => {}
     }
@@ -316,23 +324,72 @@ mod tests {
         assert_eq!(chain[0], "other");
     }
 
+    /// The `(message, hint)` a refused call carries. Both refusals under test are input-driven,
+    /// so they must arrive as `crate::tools::RecoverableError`: a bare `anyhow!` reaches the wire
+    /// as a fatal `isError: true` with no corrected call, and `is_err()` cannot tell the two apart.
+    /// docs/issues/2026-10-06-state-at-xor-refusals-are-bare-anyhow-errors-and-one-names-a-tool-that-does-not-exist.md
+    fn refusal(e: anyhow::Error) -> (String, String) {
+        let r = e
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("expected a RecoverableError, got a bare error: {e}"));
+        (r.message.clone(), r.hint().unwrap_or_default().to_string())
+    }
+
+    #[tokio::test]
+    async fn an_unindexed_commit_is_recoverable_and_names_the_real_reindex_action() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        seed(&ctx, "e1");
+
+        let (msg, hint) = refusal(
+            call(&ctx, json!({"artifact_id": "e1", "commit": "0000000"}))
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(msg, "commit 0000000 not indexed");
+        assert!(
+            hint.contains("librarian(action=\"reindex\")"),
+            "the hint must name the real reindex action; got: {hint}"
+        );
+        assert!(
+            !msg.contains("librarian_reindex") && !hint.contains("librarian_reindex"),
+            "`librarian_reindex` is not a tool; got msg: {msg}, hint: {hint}"
+        );
+        assert!(
+            hint.contains("timestamp"),
+            "the hint must offer the cutoff that needs no index; got: {hint}"
+        );
+    }
+
     #[tokio::test]
     async fn requires_exactly_one_of_commit_timestamp() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
         seed(&ctx, "c1");
 
-        // Both supplied → error
-        let err = call(
-            &ctx,
-            json!({"artifact_id": "c1", "commit": "abc", "timestamp": 5}),
-        )
-        .await;
-        assert!(err.is_err(), "both commit+timestamp should error");
-
-        // Neither supplied → error
-        let err = call(&ctx, json!({"artifact_id": "c1"})).await;
-        assert!(err.is_err(), "neither commit nor timestamp should error");
+        // Both supplied, then neither supplied: the same refusal, and each must be a
+        // recoverable one that carries a corrected call.
+        for (case, args) in [
+            (
+                "both",
+                json!({"artifact_id": "c1", "commit": "abc", "timestamp": 5}),
+            ),
+            ("neither", json!({"artifact_id": "c1"})),
+        ] {
+            let (msg, hint) = refusal(call(&ctx, args).await.expect_err(case));
+            assert_eq!(
+                msg, "supply exactly one of `commit` or `timestamp`",
+                "{case}: the refusal condition and its message are unchanged"
+            );
+            assert!(
+                hint.contains("doc(action=\"state_at\""),
+                "{case}: the hint must name THIS action; got: {hint}"
+            );
+            assert!(
+                hint.contains("commit=") && hint.contains("timestamp="),
+                "{case}: the hint must show both ways to supply the one cutoff; got: {hint}"
+            );
+        }
     }
 
     #[tokio::test]
