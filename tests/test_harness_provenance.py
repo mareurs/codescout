@@ -65,6 +65,58 @@ def verdicts(result):
             if line.split() and line.split()[0] in ("MINE", "PEER", "SHARED", "UNKNOWN", "CLEAN")}
 
 
+def test_native_claude_fork_only_prefix_cannot_claim_own_dirty_file(checkout):
+    root, env = checkout
+    env["CLAUDE_CODE_SESSION_ID"] = "fork-root"
+    history(Path(env["FILE_PROVENANCE_ROOTS"]) / "fork-root.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "fork-root",
+         "timestamp": "2026-10-11T07:45:37.860Z"},
+        claude_call(inp={"file_path": str(root / "own.rs")}, call="copied-native-call",
+                    sid="fork-root", cwd=root, timestamp="2026-10-11T07:36:15.141Z"),
+        claude_result(call="copied-native-call"),
+    ])
+    result = invoke(root, env, "own.rs")
+    assert verdicts(result) == {"own.rs": "UNKNOWN"}
+    assert "written by THIS session" not in result.stdout
+
+
+@pytest.mark.parametrize("pin_kind", ["absent", "current"])
+def test_inherited_gap_does_not_trust_startup_cwd(checkout, tmp_path, pin_kind):
+    root, env = checkout
+    env["CLAUDE_CODE_SESSION_ID"] = "root-1"
+    add_writes(root, env, "claude-code", "root-1", ["own.rs"])
+    other = tmp_path / "other-checkout"
+    other.mkdir()
+    inp = {"path": str(root / "own.rs"), "content": "fn modified(){}"}
+    if pin_kind == "current":
+        inp["workspace"] = str(root)
+    history(Path(env["FILE_PROVENANCE_ROOTS"]) / "fork-root.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "fork-root",
+         "timestamp": "2026-10-11T07:45:37Z"},
+        claude_call("mcp__codescout__create_file", inp=inp, call="copied-native-call",
+                    sid="fork-root", cwd=other, timestamp="2026-10-11T07:36:15Z"),
+    ])
+    result = invoke(root, env, "own.rs")
+    assert verdicts(result) == {"own.rs": "UNKNOWN"}, result.stdout
+
+
+def test_malformed_enqueue_after_valid_boundary_cannot_clear_write(checkout):
+    root, env = checkout
+    env["CLAUDE_CODE_SESSION_ID"] = "root-1"
+    history(Path(env["FILE_PROVENANCE_ROOTS"]) / "root-1.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "2026-10-11T07:45:37Z"},
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "invalid"},
+        claude_call(inp={"file_path": str(root / "own.rs")}, call="copied-native-call",
+                    cwd=root, timestamp="2026-10-11T07:50:00Z"),
+        claude_result(call="copied-native-call"),
+    ])
+    result = invoke(root, env, "own.rs")
+    assert verdicts(result) == {"own.rs": "UNKNOWN"}, result.stdout
+
+
+
 @pytest.mark.parametrize("harness,identity", [("claude-code", "CLAUDE_CODE_SESSION_ID"), ("codex", "CODEX_SESSION_ID")])
 def test_mixed_native_ownership_and_same_id_cross_host(checkout, harness, identity):
     root, env = checkout

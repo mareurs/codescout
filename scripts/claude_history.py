@@ -1,4 +1,5 @@
 """Decode Claude records and discover every configured profile conservatively."""
+from datetime import datetime
 import json
 from pathlib import Path
 import re
@@ -82,10 +83,22 @@ def _session(path: Path, rec: dict) -> str:
     return value if isinstance(value, str) and value.strip() else fallback
 
 
+def _timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        result = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return result if result.tzinfo is not None else None
+
+
+
 def read_claude_history(path: Path) -> HistoryBatch:
     operations, gaps, calls, results = [], [], [], {}
     is_child = path.parent.name == "subagents"
     agent = path.stem.removeprefix("agent-") if is_child else None
+    enqueues = {}
     try:
         with path.open(encoding="utf-8") as stream:
             for line_number, line in enumerate(stream, 1):
@@ -98,6 +111,15 @@ def read_claude_history(path: Path) -> HistoryBatch:
                 if not isinstance(rec, dict):
                     gaps.append(CoverageGap(locator, "unsupported Claude record", None))
                     continue
+                if (not is_child and rec.get("type") == "queue-operation"
+                        and rec.get("operation") == "enqueue"):
+                    principal = principal_key("claude-code", _session(path, rec))
+                    queued = _timestamp(rec.get("timestamp"))
+                    if principal not in enqueues:
+                        enqueues[principal] = queued
+                    elif enqueues[principal] is not None:
+                        if queued is None or queued < enqueues[principal]:
+                            enqueues[principal] = queued
                 content = (rec.get("message") or {}).get("content") if isinstance(rec.get("message"), dict) else None
                 if not isinstance(content, list):
                     continue
@@ -115,8 +137,8 @@ def read_claude_history(path: Path) -> HistoryBatch:
                         continue
                     sid = _session(path, rec)
                     call = block.get("id") if isinstance(block.get("id"), str) else None
-                    # Producer-scoped event IDs survive copied logs. A line locator is only the
-                    # fallback for old call-less fixtures, never an input-equality heuristic.
+                    # Event IDs deduplicate within one native root. A fork can rewrite
+                    # sessionId on copied calls; the root enqueue boundary is checked below.
                     event = call or rec.get("uuid")
                     producer = agent or "root"
                     source = f"claude-code:{sid}/{producer}/{event}" if isinstance(event, str) else f"{locator}:{block_index}"
@@ -126,6 +148,18 @@ def read_claude_history(path: Path) -> HistoryBatch:
         gaps.append(CoverageGap(str(path), "unreadable Claude history source", None))
     seen = {}
     for source, call, principal, agent_id, timestamp, cwd, name, inp in calls:
+        if principal in enqueues:
+            queued = enqueues[principal]
+            called = _timestamp(timestamp)
+            if queued is None or called is None or called < queued:
+                # Native 2.1.296 forks copy calls with their old timestamps but a new
+                # sessionId. This is an uncertainty boundary, not proof of an original
+                # owner. Retain a gap even if no original transcript is discoverable.
+                pin = inp.get("workspace") if name.startswith("mcp__codescout__") else None
+                workspace = Path(pin) if isinstance(pin, str) and Path(pin).is_absolute() else None
+                gaps.append(CoverageGap(
+                    source, "Claude inherited history has an unverified native root enqueue boundary", workspace))
+                continue
         outputs = results.get(call, []) if call else []
         atomic = name not in _NON_ATOMIC
         refused = any(result_refused(output) for output in outputs)

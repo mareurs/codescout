@@ -47,6 +47,27 @@ def run_fmt(root, env, *args):
     return subprocess.run(["bash", str(FMT), *args], cwd=root, env=env, text=True, capture_output=True)
 
 
+def test_native_claude_fork_prefix_cannot_authorize_formatter_writes(project):
+    from test_harness_history import history
+
+    root, env = project
+    env["CLAUDE_CODE_SESSION_ID"] = "fork-root"
+    path = add_writes(root, env, "claude-code", "fork-root",
+                      ["src/own.rs", "src/peer.rs"], timestamp="2026-10-11T07:36:15.141Z")
+    copied_rows = [json.loads(line) for line in path.read_text().splitlines()]
+    history(path, [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "fork-root",
+         "timestamp": "2026-10-11T07:45:37.860Z"},
+        *copied_rows,
+    ])
+    before = snapshot(root)
+    result = run_fmt(root, env)
+    assert snapshot(root) == before
+    assert result.returncode == 1
+    assert "UNKNOWN" in result.stderr
+
+
+
 def snapshot(root):
     return {str(p.relative_to(root)): p.read_bytes() for p in (root / "src").glob("*.rs")}
 

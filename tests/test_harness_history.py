@@ -168,6 +168,120 @@ def test_claude_same_call_id_in_two_children_is_not_same_producer(claude, tmp_pa
     b = history(tmp_path / "root-1/subagents/agent-b.jsonl", [claude_call()])
     assert claude.read_claude_history(a).operations[0].source_id != claude.read_claude_history(b).operations[0].source_id
 
+
+def test_native_claude_fork_prefix_is_not_authored_by_the_new_root(claude, tmp_path):
+    # Native 2.1.296 copies the old UUID/call/timestamp, rewrites sessionId,
+    # and logs the new root's enqueue after the copied calls' timestamps.
+    old = claude_call(
+        "mcp__codescout__create_file",
+        {"path": str(tmp_path / "old.rs"), "content": "fn old() {}", "workspace": str(tmp_path)},
+        call="native-copied-call", sid="fork-root", cwd=tmp_path,
+        timestamp="2026-10-11T07:36:15.141Z",
+    )
+    old["uuid"] = "native-copied-record-uuid"
+    new = claude_call(
+        "mcp__codescout__create_file",
+        {"path": str(tmp_path / "new.rs"), "content": "fn new() {}", "workspace": str(tmp_path)},
+        call="native-new-call", sid="fork-root", cwd=tmp_path,
+        timestamp="2026-10-11T07:45:45.000Z",
+    )
+    path = history(tmp_path / "fork-root.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue",
+         "sessionId": "fork-root", "timestamp": "2026-10-11T07:45:37.860Z"},
+        old, new,
+    ])
+    batch = claude.read_claude_history(path)
+    assert [(op.call_id, op.principal) for op in batch.operations] == [
+        ("native-new-call", "claude-code:fork-root"),
+    ]
+    assert batch.gaps
+    assert all(gap.workspace == tmp_path for gap in batch.gaps)
+
+
+def test_claude_resume_uses_earliest_enqueue_for_the_same_root(claude, tmp_path):
+    path = history(tmp_path / "root-1.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "2026-10-11T07:26:04.990Z"},
+        claude_call(cwd=tmp_path, timestamp="2026-10-11T07:36:15.141Z"),
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "2026-10-11T07:45:37.860Z"},
+    ])
+    batch = claude.read_claude_history(path)
+    assert [(op.call_id, op.principal) for op in batch.operations] == [
+        ("call-1", "claude-code:root-1"),
+    ]
+    assert not batch.gaps
+
+
+@pytest.mark.parametrize("timestamp,expected_calls", [
+    ("2026-10-11T09:00:00+02:00", []),
+    ("2026-10-11T06:00:00-02:00", ["call-1"]),
+    ("2026-10-11T07:45:37Z", ["call-1"]),
+])
+def test_claude_enqueue_boundary_compares_instants_not_timestamp_strings(
+        claude, tmp_path, timestamp, expected_calls):
+    path = history(tmp_path / "root-1.jsonl", [
+        claude_call(cwd=tmp_path, timestamp=timestamp),
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "2026-10-11T07:45:37Z"},
+    ])
+    batch = claude.read_claude_history(path)
+    assert [op.call_id for op in batch.operations] == expected_calls
+    assert bool(batch.gaps) == (not expected_calls)
+
+
+@pytest.mark.parametrize("timestamp", [None, "invalid", "2026-10-11T07:45:37"])
+def test_unusable_native_enqueue_boundary_cannot_claim_authorship(claude, tmp_path, timestamp):
+    path = history(tmp_path / "root-1.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": timestamp},
+        claude_call(cwd=tmp_path, timestamp="2026-10-11T07:50:00Z"),
+    ])
+    batch = claude.read_claude_history(path)
+    assert not batch.operations
+    assert batch.gaps
+
+
+def test_native_enqueue_requires_a_dated_call_to_establish_authorship(claude, tmp_path):
+    path = history(tmp_path / "root-1.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "2026-10-11T07:45:37Z"},
+        claude_call(cwd=tmp_path, timestamp=None),
+    ])
+    batch = claude.read_claude_history(path)
+    assert not batch.operations
+    assert batch.gaps
+
+
+@pytest.mark.parametrize("session,operation", [("other-root", "enqueue"), ("root-1", "dequeue")])
+def test_foreign_or_non_enqueue_metadata_does_not_rewrite_a_root_boundary(
+        claude, tmp_path, session, operation):
+    path = history(tmp_path / "root-1.jsonl", [
+        {"type": "queue-operation", "operation": operation, "sessionId": session,
+         "timestamp": "2026-10-11T07:45:37Z"},
+        claude_call(cwd=tmp_path, timestamp="2026-10-11T07:36:15Z"),
+    ])
+    batch = claude.read_claude_history(path)
+    assert [(op.call_id, op.principal) for op in batch.operations] == [
+        ("call-1", "claude-code:root-1"),
+    ]
+    assert not batch.gaps
+
+
+def test_child_enqueue_is_not_a_root_lifetime_boundary(claude, tmp_path):
+    path = history(tmp_path / "root-1/subagents/agent-a.jsonl", [
+        {"type": "queue-operation", "operation": "enqueue", "sessionId": "root-1",
+         "timestamp": "2026-10-11T07:45:37Z"},
+        claude_call(cwd=tmp_path, timestamp="2026-10-11T07:36:15Z"),
+    ])
+    batch = claude.read_claude_history(path)
+    assert [(op.call_id, op.principal, op.agent_id) for op in batch.operations] == [
+        ("call-1", "claude-code:root-1", "a"),
+    ]
+    assert not batch.gaps
+
+
+
 def codex_meta(root, sid="root-1", thread="root-1", **patch):
     return {"timestamp": "2026-10-10T12:00:00Z", "ordinal": 0, "type": "session_meta",
             "payload": {"session_id": sid, "id": thread, "cwd": str(root),
