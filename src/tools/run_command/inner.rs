@@ -86,6 +86,7 @@ async fn spawn_background_command(
     let log_stderr = log_file.try_clone()?;
 
     let mut cmd = crate::platform::shell_command_configured(resolved_command);
+    crate::tools::invocation_context::apply_to_shell(&mut cmd)?;
     let mut child = cmd
         .current_dir(work_dir)
         .stdin(std::process::Stdio::null())
@@ -508,6 +509,7 @@ pub(crate) async fn run_command_inner(
         // stdin=null) comes from the shared platform builder; foreground only
         // adds piped stdio + kill_on_drop.
         let mut cmd = crate::platform::shell_command_configured(&effective_command);
+        crate::tools::invocation_context::apply_to_shell(&mut cmd)?;
         cmd.current_dir(&work_dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -578,6 +580,7 @@ pub(crate) async fn run_command_inner(
         let err_guard = TmpfileGuard(err_path.to_string_lossy().into_owned());
 
         let mut cmd = crate::platform::shell_command_configured(&effective_command);
+        crate::tools::invocation_context::apply_to_shell(&mut cmd)?;
         cmd.current_dir(&work_dir)
             .stdout(std::process::Stdio::from(out_file))
             .stderr(std::process::Stdio::from(err_file))

@@ -16,6 +16,7 @@ pub mod file_group;
 pub mod file_summary;
 pub(crate) mod format;
 pub mod grep;
+pub(crate) mod invocation_context;
 pub mod library;
 pub mod libtest_compact;
 pub mod markdown;

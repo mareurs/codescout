@@ -1513,6 +1513,14 @@ impl CodeScoutServer {
             || tool.call_content(input, &ctx),
         );
 
+        let tool_call_fut = crate::tools::invocation_context::scope(
+            crate::tools::invocation_context::NativeInvocation::from_meta(
+                req.meta.as_ref().map(|m| &m.0),
+                ctx.client_identity().as_ref(),
+            ),
+            tool_call_fut,
+        );
+
         let result = Self::race_against_cancel(
             tool_call_fut,
             cancel_token,
@@ -11881,6 +11889,8 @@ mod guide_hint_tests {
             "the wire-level _meta tool_use_id must reach the tool_calls row through call_tool's fold"
         );
     }
+
+    include!("server/native_context_tests.rs");
 
     /// `tool_calls.deliveries_json` through the production funnel
     /// (`call_tool_inner`), for the same reason as the test above: a

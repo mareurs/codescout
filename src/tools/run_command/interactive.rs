@@ -75,6 +75,7 @@ pub(crate) async fn run_command_interactive(
     // Interactive overrides the builder's default stdin (NUL on Windows) with a
     // real pipe, since it drives the child's stdin.
     let mut cmd = crate::platform::shell_command_configured(command);
+    crate::tools::invocation_context::apply_to_shell(&mut cmd)?;
     let mut child = cmd
         .current_dir(&work_dir)
         .stdin(std::process::Stdio::piped())
