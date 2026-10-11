@@ -177,7 +177,7 @@ P=$(newproj); deformed "$P"
 run "$P" "$MINE_STUB" -- --check
 # NOTE: --check is passed through `run`'s trailing args; the script reads \$1.
 OUT=$(cd "$P" && FMT_MINE_PROVENANCE="$MINE_STUB" CLAUDE_CODE_SESSION_ID=test-sid "$TOOL" --check 2>&1); RC=$?
-eq "--check exits 0" "$RC" "0"
+eq "--check reports differences with exit 1" "$RC" "1"
 has "--check names the file" "$OUT" "src/lib.rs"
 eq "--check wrote NOTHING" "$(grep -c 'pub fn f(  )' "$P/src/lib.rs")" "1"
 
@@ -328,6 +328,7 @@ cat > "$WORK/fakebin/rustfmt" <<FAKE
 #!/usr/bin/env bash
 for a in "\$@"; do
     [ "\$a" = "--version" ] && exec "$REAL_RUSTFMT" --version
+    [ "\$a" = "--emit" ] && exec "$REAL_RUSTFMT" "\$@"
 done
 for a in "\$@"; do
     if [ "\$a" = "--check" ]; then

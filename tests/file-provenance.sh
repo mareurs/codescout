@@ -27,6 +27,10 @@
 # whatever this machine's real logs happen to contain today.
 set -u
 
+# This legacy matrix supplies only Claude histories; never consult live Codex profiles.
+export FILE_PROVENANCE_CODEX_ROOTS_JSON='[]'
+unset CODEX_SESSION_ID CODEX_THREAD_ID CODESCOUT_CONTEXT_FILE
+
 SRC="$(cd "$(dirname "$0")/../scripts" && pwd)"
 TOOL="$SRC/file-provenance.py"
 PASS=0
@@ -395,6 +399,8 @@ c.execute("CREATE TABLE artifact (id TEXT PRIMARY KEY, abs_path TEXT)")
 c.execute("INSERT INTO artifact VALUES (?,?)", ("deadbeef00000001", os.path.join(root, "docs/tracked.md")))
 c.commit()
 CATALOG_SEED
+# Keep the catalog fixture attached while the accumulating transcript refers to it.
+export FILE_PROVENANCE_CATALOG="$CAT"
 runc() { REPO_ROOT="$T/repo" FILE_PROVENANCE_ROOTS="$ROOTS" FILE_PROVENANCE_CATALOG="$CAT"          CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1; }
 
 tool_use "$A" mcp__codescout__artifact '{"action":"update","id":"deadbeef00000001","patch":{"body":"x"}}'  # legacy: retired tool name, still present in older transcripts
@@ -415,6 +421,18 @@ tool_use "$A" mcp__codescout__artifact '{"action":"update","id":"fffffffffffffff
 out="$(runc --all docs/tracked.md)"
 has "an unresolvable id does not break the run" "$out" "THIS session"
 has "and the resolvable ones still answer" "$out" "SHARED"
+has "an unresolvable write target reports coverage uncertainty" "$out" "coverage gap"
+# This case deliberately introduced an unresolved write. Remove that fixture before
+# unrelated later cases: its workspace-wide uncertainty is real, not absent authorship.
+python3 - "$A" <<'REMOVE_GHOST_FIXTURE'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+rows = [json.loads(line) for line in path.read_text().splitlines()]
+rows = [r for r in rows if not any(b.get("input", {}).get("id") == "ffffffffffffffff"
+                                   for b in r.get("message", {}).get("content", []))]
+path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+REMOVE_GHOST_FIXTURE
 
 echo
 echo "== doc() is that SAME tool renamed, and the rename made every librarian write invisible =="
@@ -880,7 +898,7 @@ call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_filed.rs)" "$OK_CS"
 dirty src/ab_filed.rs
 out="$(run src/ab_filed.rs)"
 eq    "a dirty path whose peer bytes are already committed is MINE, not SHARED" "$(verdict_of "$out")" "MINE"
-hasnt "and the committed peer is not named as a writer" "$out" "written by $PEER"
+hasnt "and the committed peer is not named as a writer" "$out" "written by claude-code:$PEER"
 has   "and the output says why it was set aside" "$out" "already in HEAD"
 has   "while this session is still named" "$out" "THIS session"
 
@@ -889,7 +907,7 @@ call_at "$B" mcp__codescout__create_file "$(create_in src/ab_only.rs "$LONG")" "
 dirty src/ab_only.rs
 out="$(run src/ab_only.rs)"
 eq    "with only the committed peer on record, a dirty path is UNKNOWN, not PEER" "$(verdict_of "$out")" "UNKNOWN"
-hasnt "and the committed peer is not named" "$out" "written by $PEER"
+hasnt "and the committed peer is not named" "$out" "written by claude-code:$PEER"
 has   "and the output says why it was set aside" "$out" "already in HEAD"
 has   "and does not read as 'nobody owns it'" "$out" "WHO holds the uncommitted bytes is not recorded"
 
@@ -900,7 +918,7 @@ call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_live.rs)" "$OK_CS" 
 printf '%s\n' "$LONG2" >> "$T/repo/src/ab_live.rs"
 out="$(run src/ab_live.rs)"
 eq  "TWIN: a boundary write whose text is NOT in HEAD is still SHARED" "$(verdict_of "$out")" "SHARED"
-has "TWIN: and the peer is named" "$out" "written by $PEER"
+has "TWIN: and the peer is named" "$out" "written by claude-code:$PEER"
 
 # --- 3. TWIN: a shell write carries no text, so it cannot be shown to be committed ---------
 seed_at src/ab_bash.rs "$LONG"
@@ -909,7 +927,7 @@ call_result "$A" mcp__codescout__edit_file "$(edit_in src/ab_bash.rs)" "$OK_CS" 
 dirty src/ab_bash.rs
 out="$(run src/ab_bash.rs)"
 eq  "TWIN: a boundary Bash write is still SHARED" "$(verdict_of "$out")" "SHARED"
-has "TWIN: and the peer is named" "$out" "written by $PEER"
+has "TWIN: and the peer is named" "$out" "written by claude-code:$PEER"
 
 # --- 4. TWIN: a short string proves nothing by occurring in a file --------------------------
 seed_at src/ab_short.rs "let value = compute();"
@@ -946,13 +964,13 @@ has "TWIN: and still named" "$out" "THIS session"
 # --- 8. TWIN: --all names its own floor, so there is no boundary to resolve -----------------
 out="$(run --all src/ab_only.rs)"
 eq  "TWIN: --all on the committed-peer path names the peer again (PEER)" "$(verdict_of "$out")" "PEER"
-has "TWIN: and names it" "$out" "written by $PEER"
+has "TWIN: and names it" "$out" "written by claude-code:$PEER"
 
 # --- 9. TWIN: --since is the caller's own floor, not git's second-resolution one -------------
 out="$(run --since "$COMMIT_ISO" src/ab_only.rs)"
 eq  "TWIN: --since at the commit's second names the peer (PEER); it is not git's floor" \
     "$(verdict_of "$out")" "PEER"
-has "TWIN: and names it" "$out" "written by $PEER"
+has "TWIN: and names it" "$out" "written by claude-code:$PEER"
 
 echo
 echo "== a sessionId is an ADDRESS, not just evidence -- the registry join =="
@@ -1507,7 +1525,7 @@ spec = importlib.util.spec_from_file_location("fp", tool)
 fp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fp)
 print("\n".join(sorted(p for p, ws in fp.scan(Path(root)).items()
-                       if any(w.startswith(prefix) for w, _ in ws))))
+                       if any(w.partition(":")[2].startswith(prefix) for w, _ in ws))))
 PY
 }
 

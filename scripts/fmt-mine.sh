@@ -1,335 +1,174 @@
 #!/usr/bin/env bash
-# fmt-mine.sh — format only the Rust this session wrote, and refuse the rest.
-#
-# WHY THIS EXISTS
-#
-# `CLAUDE.md` § *Development Commands* opened the four-command gate with bare
-# `cargo fmt`. `cargo fmt` takes no pathspec, no `--staged` and no "only my files"
-# mode: its blast radius is every `.rs` in the workspace, which on a shared
-# checkout is strictly wider than the set of files the running session authored.
-# So the documented gate, FOLLOWED EXACTLY, rewrites other sessions' uncommitted
-# work every time anyone runs it, and there is nothing in the documented form to
-# defeat.
-#
-# Measured 2026-09-09: 7 hunks rewritten in a peer's UNTRACKED
-# `src/agent/build_check.rs`, where `git checkout` could not have restored it and
-# the only copy of the pre-write bytes was the `--check` diff the same command
-# happened to print. Cost that time was an interruption, not lost work. That is a
-# property of the instance — the same write against a file with an editor buffer
-# open is last-writer-wins with no git copy behind it.
-# `docs/issues/archive/2026-09-09-the-documented-gates-first-command-rewrites-every-peers-uncommitted-rust.md`
-#
-# WHY THIS SHAPE RATHER THAN A CHECK YOU REMEMBER TO RUN
-#
-# The cheap fix is `cargo fmt -- --check && cargo fmt`, and it is genuinely
-# better than nothing. It is also a policy: it works only when the person typing
-# the gate remembers to type it that way, and the incident above happened to a
-# session that HAD read the warning, HAD run `--check` first, and then chained
-# the whole gate with `;` so the check gated nothing. `CLAUDE.md` § *Observer
-# Blindness* position 3 asks for the correct path to end in a safe state instead.
-# This is that: run it as gate step 1 and there is no wrong way to type it.
-#
-# THE TWO-STAGE COST, WHICH IS THE REASON IT IS AFFORDABLE
-#
-# Stage 1 is `cargo fmt -- --check`, which the gate pays for anyway. On a tree
-# where nothing needs reformatting — the overwhelmingly common case — this script
-# exits there, having spent nothing extra. Only when something WOULD be rewritten
-# does it pay for stage 2, the transcript scan, which costs several seconds and
-# does not cache. Same cheap-question-first design as `scripts/attribute-red.py`,
-# for the same reason.
-#
-# WHAT IT REFUSES TO GUESS
-#
-# `UNKNOWN` from the provenance scan is never read as "safe to format". Absence
-# is a statement about coverage — a Bash write the heuristics miss is
-# indistinguishable from no write at all — and reading it as "nobody owns this"
-# is the precise substitution the tool's own docstring forbids in the other
-# direction. `SHARED` is refused too: a file this session AND a peer have written
-# still carries the peer's bytes.
-#
-# Usage:
-#   scripts/fmt-mine.sh            format my files, refuse on anyone else's
-#   scripts/fmt-mine.sh --check    report only, write nothing
-#
-# Exit: 0 nothing to do, or my files formatted.
-#       1 refused — files needing format belong to a peer, or are unattributable.
-#       2 the scan itself could not run (no session id, `cargo fmt` failed).
-
+# Format proven own/CLEAN paths; --check is read-only and needs no identity.
+# --exclusive-checkout authorizes a matching root by operator declaration.
+# Exit 0: clean/formatted; 1: differences/refusal; 2: context/tool/usage error.
 set -euo pipefail
 
-CHECK_ONLY=0
-[ "${1:-}" = "--check" ] && CHECK_ONLY=1
+main() {
+    local CHECK_ONLY=0 CONTEXT="" EXCLUSIVE="" arg
+    while [ "$#" -gt 0 ]; do
+        arg="$1"; shift
+        case "$arg" in
+            --check) [ "$CHECK_ONLY" -eq 0 ] || { echo "fmt-mine: repeated --check" >&2; return 2; }; CHECK_ONLY=1 ;;
+            --context|--exclusive-checkout)
+                [ "$#" -gt 0 ] && [ -n "$1" ] || { echo "fmt-mine: $arg requires an absolute path" >&2; return 2; }
+                if [ "$arg" = "--context" ]; then
+                    [ -z "$CONTEXT" ] || return 2
+                    CONTEXT="$1"
+                else
+                    [ -z "$EXCLUSIVE" ] || return 2
+                    EXCLUSIVE="$1"
+                fi
+                shift ;;
+            *) echo "fmt-mine: unknown argument $arg" >&2; return 2 ;;
+        esac
+    done
+    [ "$CHECK_ONLY" -eq 0 ] || [ -z "$EXCLUSIVE" ] || {
+        echo "fmt-mine: --check conflicts with --exclusive-checkout" >&2; return 2;
+    }
+    local ROOT SCRIPT_DIR PATHS PROVENANCE
+    ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "fmt-mine: not inside a git repository" >&2; return 2; }
+    cd "$ROOT"
+    ROOT=$(pwd -P)
+    SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+    PATHS="$SCRIPT_DIR/fmt_paths.py"
+    PROVENANCE="${FMT_MINE_PROVENANCE:-$ROOT/scripts/file-provenance.py}"
+    if [ -n "$EXCLUSIVE" ]; then
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); raise SystemExit(0 if p.is_absolute() and p.resolve(strict=True)==pathlib.Path(sys.argv[2]) else 2)' "$EXCLUSIVE" "$ROOT" || {
+            echo "fmt-mine: exclusive declaration must match the actual Git root" >&2; return 2;
+        }
+    fi
 
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
-    echo "fmt-mine: not inside a git repository" >&2
-    exit 2
+    local CHECK_OUT CHECK_RC PATH_LIST
+    CHECK_RC=0
+    CHECK_OUT=$(cargo fmt -- --check 2>&1) || CHECK_RC=$?
+    [ "$CHECK_RC" -ne 0 ] || return 0
+    if [ "$CHECK_RC" -ne 1 ]; then
+        echo "fmt-mine: cargo formatting check failed (exit $CHECK_RC)" >&2
+        printf '%s\n' "$CHECK_OUT" >&2
+        return 2
+    fi
+    PATH_LIST=$(printf '%s\n' "$CHECK_OUT" | python3 "$PATHS" diff "$ROOT") || {
+        printf '%s\n' "$CHECK_OUT" >&2; return 2;
+    }
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+        printf '%s\n' "$CHECK_OUT"
+        return 1
+    fi
+    local -a WOULD_CHANGE=() ALLOWED=() REFUSED=() FORMAT_ARGS=() CONTEXT_ARGS=()
+    mapfile -t WOULD_CHANGE <<< "$PATH_LIST"
+    [ -z "$CONTEXT" ] || CONTEXT_ARGS=(--context "$CONTEXT")
+    local RESOLUTION RESOLVE_RC=0 STATE PROV="" PROV_RC=0 ALLOW_LIST REFUSE_LIST NOT_MINE_ROWS=""
+    RESOLUTION=$(python3 "$SCRIPT_DIR/session_context.py" --workspace "$ROOT" "${CONTEXT_ARGS[@]}") || RESOLVE_RC=$?
+    STATE=$(printf '%s' "$RESOLUTION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])') || return 2
+    if [ "$RESOLVE_RC" -ne 0 ] && { [ -z "$EXCLUSIVE" ] || [ "$STATE" != "missing" ]; }; then
+        echo "fmt-mine: session context has no referent or is unusable ($STATE)." >&2
+        printf '%s\n' "$RESOLUTION" >&2
+        echo '  Use --context <absolute file>, or an operator-established --exclusive-checkout <absolute Git root>.' >&2
+        echo '  cargo fmt requires the same deliberate ownership decision on a shared checkout.' >&2
+        return 2
+    fi
+    if [ -n "$EXCLUSIVE" ]; then
+        ALLOWED=("${WOULD_CHANGE[@]}")
+        echo "fmt-mine: operator-declared exclusive authorization for $ROOT" >&2
+    else
+        CONTEXT_SNAPSHOT=$(mktemp "${TMPDIR:-/tmp}/codescout-context.XXXXXX") || return 2
+        trap 'rm -f -- "${CONTEXT_SNAPSHOT:-}"' EXIT
+        printf '%s' "$RESOLUTION" | python3 -c 'import json,sys; json.dump(json.load(sys.stdin)["context"],sys.stdout)' > "$CONTEXT_SNAPSHOT" || return 2
+        export CODESCOUT_CONTEXT_FILE="$CONTEXT_SNAPSHOT"
+        PROV=$(REPO_ROOT="$ROOT" "$PROVENANCE" "${WOULD_CHANGE[@]}" 2>&1) || PROV_RC=$?
+        if [ "$PROV_RC" -gt 1 ]; then
+            echo "fmt-mine: attribution could not RUN (exit $PROV_RC); nothing written." >&2
+            printf '%s\n' "$PROV" >&2
+            return 2
+        fi
+        ALLOW_LIST=$(printf '%s\n' "$PROV" | python3 "$PATHS" allow "$ROOT" "${WOULD_CHANGE[@]}") || return 2
+        REFUSE_LIST=$(printf '%s\n' "$PROV" | python3 "$PATHS" refuse "$ROOT" "${WOULD_CHANGE[@]}") || return 2
+        [ -z "$ALLOW_LIST" ] || mapfile -t ALLOWED <<< "$ALLOW_LIST"
+        [ -z "$REFUSE_LIST" ] || mapfile -t REFUSED <<< "$REFUSE_LIST"
+        NOT_MINE_ROWS=$(printf '%s\n' "$PROV" | awk '
+            $1=="MINE"||$1=="CLEAN" { drop=1; next }
+            $1=="SHARED"||$1=="PEER"||$1=="UNKNOWN" { drop=0 }
+            !drop')
+        if printf '%s\n' "$PROV" | awk '$1=="CLEAN"{found=1} END{exit !found}'; then
+            echo "fmt-mine: CLEAN paths have no uncommitted bytes and may be formatted." >&2
+        fi
+    fi
+    if [ "${#ALLOWED[@]}" -eq 0 ]; then
+        [ "${#REFUSED[@]}" -eq 0 ] || refuse_not_mine
+        return 1
+    fi
+    for arg in "${ALLOWED[@]}"; do FORMAT_ARGS+=("./$arg"); done
+
+    # Enumerate ALL descendants, including clean outside modules, before any write.
+    local EMIT_OUT EMIT_RC=0 REACH_OUT REACH_RC=0 REACH_LIST collateral="" path
+    EMIT_OUT=$(rustfmt --emit stdout --edition 2021 "${FORMAT_ARGS[@]}" 2>&1) || EMIT_RC=$?
+    if [ "$EMIT_RC" -ne 0 ]; then
+        echo "fmt-mine: could not enumerate formatter reach; nothing written." >&2
+        printf '%s\n' "$EMIT_OUT" >&2
+        return 2
+    fi
+    printf '%s\n' "$EMIT_OUT" | python3 "$PATHS" emit "$ROOT" "${ALLOWED[@]}" >/dev/null || return 2
+    if [ "${#REFUSED[@]}" -gt 0 ]; then
+        REACH_OUT=$(rustfmt --check --edition 2021 "${FORMAT_ARGS[@]}" 2>&1) || REACH_RC=$?
+        if [ "$REACH_RC" -ne 0 ] && [ "$REACH_RC" -ne 1 ]; then
+            echo "fmt-mine: could not determine descendant differences; nothing written." >&2
+            return 2
+        fi
+        if [ "$REACH_RC" -eq 1 ]; then
+            REACH_LIST=$(printf '%s\n' "$REACH_OUT" | python3 "$PATHS" diff "$ROOT") || return 2
+            while IFS= read -r path; do
+                for arg in "${REFUSED[@]}"; do
+                    [ "$path" != "$arg" ] || collateral+="$path"$'\n'
+                done
+            done <<< "$REACH_LIST"
+        fi
+        if [ -n "$collateral" ]; then
+            echo 'fmt-mine: REFUSED — rustfmt descends into every declared mod, including files this session does not own; nothing written.' >&2
+            printf '%s' "$collateral" >&2
+            refuse_not_mine
+            return 1
+        fi
+    fi
+
+    local FMT_PASSES=0 FMT_DIRTY="" FMT_RC=0
+    while [ "$FMT_PASSES" -lt 3 ]; do
+        rustfmt --edition 2021 "${FORMAT_ARGS[@]}" || return 2
+        FMT_PASSES=$((FMT_PASSES + 1))
+        FMT_RC=0
+        FMT_DIRTY=$(rustfmt --check --edition 2021 "${FORMAT_ARGS[@]}" 2>&1) || FMT_RC=$?
+        [ "$FMT_RC" -ne 0 ] || break
+        [ "$FMT_RC" -eq 1 ] || { printf '%s\n' "$FMT_DIRTY" >&2; return 2; }
+        printf '%s\n' "$FMT_DIRTY" | python3 "$PATHS" diff "$ROOT" >/dev/null || return 2
+    done
+    if [ "$FMT_RC" -ne 0 ]; then
+        echo "fmt-mine: NOT a fixed point after $FMT_PASSES rustfmt pass(es)." >&2
+        printf '%s\n' "$FMT_DIRTY" >&2
+        return 1
+    fi
+    if [ -n "$EXCLUSIVE" ]; then
+        echo "fmt-mine: formatted ${#ALLOWED[@]} file(s) with operator-declared authorization (fixed point after $FMT_PASSES pass(es))."
+    else
+        echo "fmt-mine: formatted ${#ALLOWED[@]} file(s) written by this session (fixed point after $FMT_PASSES pass(es))."
+    fi
+    if [ "${#REFUSED[@]}" -gt 0 ]; then refuse_not_mine; return 1; fi
 }
-cd "$ROOT"
 
-# Overridable so the test suite can stub attribution without a live transcript
-# corpus. Same escape `file-provenance.py` gives its own tests via
-# FILE_PROVENANCE_*_ROOTS, and for the same reason: a suite that can only run
-# against this machine's real profiles is a suite that runs nowhere else.
-PROVENANCE="${FMT_MINE_PROVENANCE:-$ROOT/scripts/file-provenance.py}"
-
-# ---------------------------------------------------------------- stage 1
-# `cargo fmt -- --check` exits 0 when nothing would change and 1 when something
-# would. Any other code is a real failure (unparseable file, missing toolchain)
-# and must not be read as "clean" — that would hand back a green with no scan.
-set +e
-CHECK_OUT=$(cargo fmt -- --check 2>&1)
-CHECK_RC=$?
-set -e
-
-if [ "$CHECK_RC" -eq 0 ]; then
-    exit 0
-fi
-if [ "$CHECK_RC" -ne 1 ]; then
-    echo "fmt-mine: \`cargo fmt -- --check\` failed (exit $CHECK_RC), not a formatting diff:" >&2
-    printf '%s\n' "$CHECK_OUT" >&2
-    exit 2
-fi
-
-# rustfmt prints `Diff in <absolute path>:<line>:` for every file it would touch.
-WOULD_CHANGE=$(printf '%s\n' "$CHECK_OUT" \
-    | sed -n 's|^Diff in \(.*\):[0-9][0-9]*:$|\1|p' \
-    | sed "s|^$ROOT/||" \
-    | sort -u)
-
-if [ -z "$WOULD_CHANGE" ]; then
-    echo "fmt-mine: \`--check\` reported diffs but named no files — refusing to guess." >&2
-    printf '%s\n' "$CHECK_OUT" >&2
-    exit 2
-fi
-
-# ---------------------------------------------------------------- stage 2
-if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
-    # Fail CLOSED and say why. With no session id the provenance scan cannot
-    # answer "is this mine", and its verdict for every attributable file
-    # degrades to PEER — which would look like a confident refusal rather than
-    # an unanswerable question.
-    echo "fmt-mine: CLAUDE_CODE_SESSION_ID is not set, so 'mine' has no referent." >&2
-    echo "  Files that need formatting:" >&2
-    printf '    %s\n' $WOULD_CHANGE >&2
-    echo "  If this checkout is yours alone, \`cargo fmt\` is safe and is what you want." >&2
-    echo "  If it is shared, ask each owner — scripts/peer-sessions.sh lists them." >&2
-    exit 2
-fi
-
-# shellcheck disable=SC2086
-set +e
-PROV=$("$PROVENANCE" $WOULD_CHANGE 2>&1)
-PROV_RC=$?
-set -e
-# `file-provenance.py` returns `1 if unknown == len(paths) else 0` — exit 1 means the
-# scan RAN and attributed nothing, which is a verdict, not a failure. Only >1 (a usage
-# error, a missing interpreter) is the scan itself failing. Treating any non-zero as
-# failure was this script's third remedy-text defect: it refused correctly and told the
-# reader "attribution failed", sending them to debug a scan that had worked perfectly and
-# produced a careful UNKNOWN explanation the guard then threw away. Stage 1 already reads
-# `cargo fmt --check`'s 0/1/other exactly this way; the discipline was applied to cargo
-# and not to the tool right beside it.
-if [ "$PROV_RC" -gt 1 ]; then
-    echo "fmt-mine: attribution could not RUN (exit $PROV_RC); refusing rather than guess." >&2
-    printf '%s\n' "$PROV" >&2
-    exit 2
-fi
-
-# Partitioned with awk on the verdict column, NOT with a sed `s|...|` — the first
-# draft used `s|^\(SHARED\|PEER\|UNKNOWN\)...|` where `|` was both the s/// delimiter
-# and the intended alternation. sed reads an escaped delimiter as a LITERAL, so the
-# pattern matched the string "SHARED|PEER|UNKNOWN" and never fired: NOT_MINE was
-# always empty and every refusal fell through to the wrong branch, reporting "nothing
-# attributable to this session" instead of naming the owner. The guard still failed
-# CLOSED — nothing was written — which is exactly why it survived a passing test of
-# the outcome. Caught by asserting on the MESSAGE, not on the exit code.
-MINE=$(printf '%s\n' "$PROV" | awk '$1=="MINE"{ $1=""; sub(/^ +/,""); print }')
-# `CLEAN` is the provenance scan's verdict for a path a peer wrote but git reports with NO
-# uncommitted bytes: nothing of anyone's is at risk, so formatting it overwrites no one's work.
-# It was SHARED/PEER before, and a hard stop with no --force over a file nobody holds bytes in.
-# A token this partition does not name is silently in NEITHER list, which would leave the file
-# unformatted and unexplained, so it is named here and formatted with this session's own.
-CLEAN=$(printf '%s\n' "$PROV" | awk '$1=="CLEAN"{ $1=""; sub(/^ +/,""); print }')
-if [ -n "$CLEAN" ]; then
-    echo "fmt-mine: git reports these CLEAN (no uncommitted bytes from anyone), so they are formatted with this session's own:" >&2
-    printf '  %s\n' $CLEAN >&2
-    MINE=$(printf '%s\n%s\n' "$MINE" "$CLEAN" | sed '/^$/d')
-fi
-NOT_MINE=$(printf '%s\n' "$PROV" \
-    | awk '$1=="SHARED"||$1=="PEER"||$1=="UNKNOWN"{ $1=""; sub(/^ +/,""); print }')
-
-# The not-mine rows WITH their continuation lines, verdict column intact — unlike
-# $NOT_MINE above, which is a bare path list for feeding a command. A continuation line
-# never matches a verdict in $1, so it inherits the disposition of the row above it.
-NOT_MINE_ROWS=$(printf '%s\n' "$PROV" | awk '
-    $1=="MINE"||$1=="CLEAN" { drop=1; next }
-    $1=="SHARED"||$1=="PEER"||$1=="UNKNOWN" { drop=0 }
-    !drop')
-
-# Called AFTER this session's own files have been dealt with, never instead of them.
-# CLAUDE.md states this script's contract as "formats what scripts/file-provenance.py
-# attributes to you AND refuses the rest" — two actions in one run, not a choice between
-# them. Refusing wholesale on a mixed scan meant one peer holding one unformatted file
-# blocked the gate's mandated step 1 for every other session in the checkout.
 refuse_not_mine() {
     echo "fmt-mine: REFUSED — these need formatting and are not this session's to write:" >&2
-    # The not-mine rows verbatim: they carry the `uds:` socket and the [LIVE] / not-live
-    # marker, which are what make the remedy below performable. MINE rows are filtered OUT
-    # rather than printed and then contradicted — listing a file as `MINE` directly beneath
-    # a header calling it "not this session's to write" was the second half of this
-    # script's own bug file.
     printf '%s\n' "$NOT_MINE_ROWS" >&2
     cat >&2 <<'EOF'
 
-  `cargo fmt` would rewrite them. On a shared checkout that is another session's
-  uncommitted work, and for an UNTRACKED file git holds no copy to restore.
-
-  What to do, and which applies depends on what the scan said above:
-
-    [LIVE] peer      the scan printed the `uds:` socket to reach them — but a
-                     row here does not guarantee they hold anything to format:
-                     `git diff -- <path>` says whose bytes are dirty right now,
-                     before you ask them to act on it.
-    not live         nobody can be asked, and their uncommitted work is abandoned.
-                     `cargo fmt` is then a judgement call a human should make, not
-                     one this script should make for them.
-    UNKNOWN          absence is a statement about COVERAGE, not ownership. A Bash
-                     write this tool's heuristics miss looks identical to no write
-                     at all, so this is "cannot tell", never "nobody owns it".
-    SHARED           this session wrote it AND so did a peer. Their bytes are still
-                     in there.
-
-  There is deliberately no --force. A flag that reformats a peer's file on your
-  say-so re-admits the exact defect this script exists to prevent, under a
-  spelling that reads as deliberate. If you have decided it is safe, run
-  `cargo fmt` yourself — that is the same act, minus the false assurance that a
-  guard sanctioned it.
+  A [LIVE] row includes the Claude contact socket. It does not guarantee they hold anything to format.
+  An unknown contact or a not-live marker does not establish that work is abandoned.
+  UNKNOWN describes COVERAGE: cannot tell who owns these bytes. SHARED retains a peer's writes.
+  There is no --force. An operator who has established exclusive control can use
+  --exclusive-checkout <absolute Git root>; that authorization is operator-declared.
 EOF
-    # Interpolated after the heredoc — which is quoted, so it cannot carry a variable — so
-    # the reader gets a command to paste rather than a shape to derive. `cargo fmt` stays
-    # named above because it is what CLAUDE.md prescribes and it remains available; but it
-    # takes no pathspec and rewrites EVERY `.rs` in the workspace, including files no scan
-    # here has looked at. This form touches only the rows printed above, and the script
-    # already uses exactly it thirty lines below — offering the wide command while the
-    # narrow one was in the file was the third half of this script's own bug file.
-    # shellcheck disable=SC2086
-    printf '\n  The narrow form, which touches only the files listed above:\n\n    rustfmt --edition 2021 %s\n' \
-        "$(printf '%s ' $NOT_MINE)" >&2
+    printf '\n  The narrow form for the listed paths, after coordinating ownership:\n\n    rustfmt --edition 2021' >&2
+    printf ' %q' "${REFUSED[@]}" >&2
+    printf '\n' >&2
 }
 
-if [ -z "$MINE" ]; then
-    if [ -n "$NOT_MINE" ]; then
-        refuse_not_mine
-    else
-        # Both partitions empty against a non-empty $WOULD_CHANGE means the scan returned a
-        # verdict this partition does not name. That is a coverage gap, not a clean tree,
-        # and it gets its own message rather than falling through into the formatter.
-        echo "fmt-mine: nothing attributable to this session needs formatting." >&2
-    fi
-    exit 1
-fi
 
-# `rustfmt <file>` is NOT per-file. It parses the file and descends into every `mod` the
-# file declares, so formatting a module root rewrites its children too. Verified at the
-# bytes on rustfmt 1.9.0-stable: `rustfmt --edition 2021 src/lib.rs` rewrote `src/peer.rs`
-# through a `pub mod peer;` line, and `--skip-children` is not available outside nightly.
-#
-# This was invisible while the guard refused every mixed scan, and the reason is worth
-# stating because it makes the old wholesale refusal look arbitrary when it was not: a
-# peer's child module can only be DAMAGED if it also needs formatting, and a file needing
-# formatting is by construction a row in this same scan — so refusing every scan that had
-# any not-mine row was accidentally sufficient. Doing only this session's half is safe only
-# after asking what this session's half would REACH.
-if [ -n "$NOT_MINE" ]; then
-    set +e
-    # shellcheck disable=SC2086
-    REACH_OUT=$(rustfmt --check --edition 2021 $MINE 2>&1)
-    REACH_RC=$?
-    set -e
-    if [ "$REACH_RC" -gt 1 ]; then
-        # Same discipline as the provenance scan above: 0 and 1 are verdicts, >1 is the
-        # tool failing. Cannot tell what it would reach means cannot write.
-        echo "fmt-mine: could not determine what formatting this session's files would reach" >&2
-        echo "  (\`rustfmt --check\` exited $REACH_RC). Refusing rather than guess; nothing written." >&2
-        printf '%s\n' "$REACH_OUT" >&2
-        exit 2
-    fi
-    REACH=$(printf '%s\n' "$REACH_OUT" \
-        | sed -n 's@^Diff in \(.*\):[0-9][0-9]*:$@\1@p' \
-        | sed "s@^$ROOT/@@" \
-        | sort -u)
-    # `-F -x` so a path is matched whole and literally — a substring or regex match here
-    # would silently pair `src/a.rs` with `src/ab.rs`.
-    COLLATERAL=$(printf '%s\n' "$REACH" \
-        | grep -Fx -f <(printf '%s\n' "$NOT_MINE") || true)
-    if [ -n "$COLLATERAL" ]; then
-        echo "fmt-mine: REFUSED — formatting this session's own files would rewrite files it" >&2
-        echo "  does not own, because \`rustfmt\` descends into every \`mod\` a file declares:" >&2
-        printf '    %s\n' $COLLATERAL >&2
-        echo >&2
-        echo "  Nothing was written, this session's files included — there is no way to format" >&2
-        echo "  a module root without its children. Ask the owner below to format theirs first," >&2
-        echo "  then re-run; this session's half will go through on its own." >&2
-        echo >&2
-        refuse_not_mine
-        exit 1
-    fi
-fi
-
-if [ "$CHECK_ONLY" -eq 1 ]; then
-    # No longer "all attributed to this session" — on a mixed scan it is some of them.
-    echo "fmt-mine: would format (attributed to this session):"
-    printf '  %s\n' $MINE
-    [ -n "$NOT_MINE" ] || exit 0
-    refuse_not_mine
-    exit 1
-fi
-
-# `rustfmt` directly rather than `cargo fmt`, because cargo has no per-file mode
-# and formatting the whole workspace is the thing being avoided. `--edition` is
-# required: rustfmt defaults to 2015 and would silently mangle 2021 syntax.
-# shellcheck disable=SC2086
-#
-# A bounded fixed-point loop, not one pass. rustfmt is NOT idempotent on every input:
-# reproduced on rustfmt 1.9.0-stable, a match arm `Err(e) => { return Some(format!(<over-long
-# literal>, ...)) }` inside a `mod` needs a SECOND pass before `rustfmt --check` is clean
-# (`--check` is itself a formatting pass, which is what re-expands the arm the first pass
-# collapsed). A single pass followed by "formatted" asserted a fixed point it never observed,
-# and the pre-commit `rustfmt --check` hook was what caught it, on a hunk this script had
-# just claimed to have formatted.
-# docs/issues/archive/2026-09-27-fmt-mine-reports-formatted-after-one-rustfmt-pass-that-is-not-a-fixed-point.md
-#
-# The bound is small because a real fixed point arrives on pass 2; a construct still moving on
-# pass 3 is an oscillation, and looping further only hides it. That case is REPORTED and
-# exits non-zero rather than printing `formatted`.
-FMT_MAX_PASSES=3
-FMT_PASSES=0
-FMT_DIRTY=""
-while [ "$FMT_PASSES" -lt "$FMT_MAX_PASSES" ]; do
-    rustfmt --edition 2021 $MINE
-    FMT_PASSES=$((FMT_PASSES + 1))
-    # `if`, so a `--check` diff (rc 1) is a verdict rather than a `set -e` abort. rc > 1 is
-    # rustfmt failing outright, and reads as "still dirty" here, which is the safe direction:
-    # it can only withhold the word `formatted`, never grant it.
-    if FMT_DIRTY=$(rustfmt --check --edition 2021 $MINE 2>&1); then
-        FMT_DIRTY=""
-        break
-    fi
-done
-if [ -n "$FMT_DIRTY" ]; then
-    echo "fmt-mine: NOT a fixed point after $FMT_PASSES rustfmt pass(es) — refusing to report \"formatted\"." >&2
-    echo "  \`rustfmt --check\` still wants to change:" >&2
-    printf '%s\n' "$FMT_DIRTY" | sed -n 's@^Diff in \(.*\):[0-9][0-9]*:$@    \1@p' | sort -u >&2
-    echo "  rustfmt is oscillating on a construct in the file(s) above; formatting again will not settle it." >&2
-    exit 1
-fi
-echo "fmt-mine: formatted $(printf '%s\n' "$MINE" | wc -l) file(s) written by this session (fixed point after $FMT_PASSES pass(es))."
-
-# The refusal comes AFTER the write, not instead of it. Exit stays 1: this session's half
-# is done, the gate is still blocked, and the reader's remaining action is the one named
-# above — ask the owner. Reporting 0 here would let a caller chaining on success proceed
-# past unformatted files it does not own.
-if [ -n "$NOT_MINE" ]; then
-    refuse_not_mine
-    exit 1
-fi
+main "$@"

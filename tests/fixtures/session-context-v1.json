@@ -1,0 +1,96 @@
+{
+  "contract_version": 1,
+  "origin": "synthetic contract cases; native captures catalogued separately",
+  "cases": [
+    {
+      "name": "claude-code-root",
+      "harness": "claude-code",
+      "input": {
+        "session_id": "same:root",
+        "cwd": "${WORKSPACE}"
+      },
+      "harness_version": "fixture-version",
+      "expected": {
+        "state": "available",
+        "context": {
+          "schema_version": 1,
+          "harness": "claude-code",
+          "session_id": "same:root",
+          "agent_id": null,
+          "workspace": "${WORKSPACE}",
+          "source": "native-hook",
+          "harness_version": "fixture-version"
+        },
+        "reason": ""
+      }
+    },
+    {
+      "name": "claude-code-child:1",
+      "harness": "claude-code",
+      "input": {
+        "session_id": "same:root",
+        "cwd": "${WORKSPACE}",
+        "agent_id": "child:1"
+      },
+      "harness_version": "fixture-version",
+      "expected": {
+        "state": "available",
+        "context": {
+          "schema_version": 1,
+          "harness": "claude-code",
+          "session_id": "same:root",
+          "agent_id": "child:1",
+          "workspace": "${WORKSPACE}",
+          "source": "native-hook",
+          "harness_version": "fixture-version"
+        },
+        "reason": ""
+      }
+    },
+    {
+      "name": "codex-root",
+      "harness": "codex",
+      "input": {
+        "session_id": "same:root",
+        "cwd": "${WORKSPACE}"
+      },
+      "harness_version": "fixture-version",
+      "expected": {
+        "state": "available",
+        "context": {
+          "schema_version": 1,
+          "harness": "codex",
+          "session_id": "same:root",
+          "agent_id": null,
+          "workspace": "${WORKSPACE}",
+          "source": "native-hook",
+          "harness_version": "fixture-version"
+        },
+        "reason": ""
+      }
+    },
+    {
+      "name": "codex-child:1",
+      "harness": "codex",
+      "input": {
+        "session_id": "same:root",
+        "cwd": "${WORKSPACE}",
+        "agent_id": "child:1"
+      },
+      "harness_version": "fixture-version",
+      "expected": {
+        "state": "available",
+        "context": {
+          "schema_version": 1,
+          "harness": "codex",
+          "session_id": "same:root",
+          "agent_id": "child:1",
+          "workspace": "${WORKSPACE}",
+          "source": "native-hook",
+          "harness_version": "fixture-version"
+        },
+        "reason": ""
+      }
+    }
+  ]
+}

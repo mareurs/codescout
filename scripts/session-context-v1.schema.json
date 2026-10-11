@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Codescout session context v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "harness",
+    "session_id",
+    "agent_id",
+    "workspace",
+    "source",
+    "harness_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "harness": {
+      "enum": [
+        "claude-code",
+        "codex",
+        "manual"
+      ]
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute canonical checkout root; consumer verifies checkout equality."
+    },
+    "source": {
+      "enum": [
+        "native-hook",
+        "native-env",
+        "explicit"
+      ]
+    },
+    "harness_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    }
+  }
+}

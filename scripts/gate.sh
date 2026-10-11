@@ -43,25 +43,62 @@
 
 set -u
 
-if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
-    cat >&2 <<'EOF'
-gate.sh: CLAUDE_CODE_SESSION_ID is unset. Step 1, `fmt-mine.sh`, needs it to tell your
-files from a peer's, and outside a Claude session you are almost certainly the only writer
-to this checkout, which is the case the shared `target/` is already correct for. Run the
-light Python lane and four Rust commands directly:
+CHECK_ONLY=0
+CONTEXT=""
+EXCLUSIVE=""
+while [ "$#" -gt 0 ]; do
+    arg="$1"; shift
+    case "$arg" in
+        --check) [ "$CHECK_ONLY" -eq 0 ] || { echo "gate.sh: repeated --check" >&2; exit 2; }; CHECK_ONLY=1 ;;
+        --context|--exclusive-checkout)
+            [ "$#" -gt 0 ] && [ -n "$1" ] || { echo "gate.sh: $arg requires an absolute path" >&2; exit 2; }
+            case "$1" in /*) ;; *) echo "gate.sh: $arg requires an absolute path" >&2; exit 2 ;; esac
+            if [ "$arg" = "--context" ]; then
+                [ -z "$CONTEXT" ] || exit 2; CONTEXT="$1"
+            else
+                [ -z "$EXCLUSIVE" ] || exit 2; EXCLUSIVE="$1"
+            fi
+            shift ;;
+        *) echo "gate.sh: unknown argument $arg" >&2; exit 2 ;;
+    esac
+done
+[ "$CHECK_ONLY" -eq 0 ] || [ -z "$EXCLUSIVE" ] || { echo "gate.sh: conflicting formatter modes" >&2; exit 2; }
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "gate.sh: not inside a Git checkout" >&2; exit 2; }
+cd "$ROOT" || exit 2
+ROOT=$(pwd -P)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+if [ -n "$EXCLUSIVE" ]; then
+    python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); raise SystemExit(0 if p.is_absolute() and p.resolve(strict=True)==pathlib.Path(sys.argv[2]) else 2)' "$EXCLUSIVE" "$ROOT" || {
+        echo "gate.sh: exclusive declaration must match the actual Git root" >&2; exit 2;
+    }
+fi
 
-  python3 ./scripts/python-tests.py --lane light ; \
-  ./scripts/fmt-mine.sh ; \
-  cargo clippy --workspace --all-targets --features local-embed -- -D warnings ; \
-  cargo test --workspace --no-default-features ; \
-  cargo test --workspace
-
-Install Python prerequisites with `python3 -m pip install -r requirements-python-light.txt`.
-Chain them with `;` and read all five exit codes. Never `&&`: `cargo test` builds THEN
-runs, so a failing lean lane has already overwritten target/debug/codescout by the time
-anything can fail, and `&&` would then skip the default lane that repairs it.
-EOF
-    exit 2
+CONTEXT_SNAPSHOT=""
+trap 'rm -f -- "${CONTEXT_SNAPSHOT:-}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+CONTEXT_BLOCKED=0
+FMT_ARGS=()
+if [ "$CHECK_ONLY" -eq 1 ]; then
+    FMT_ARGS=(--check)
+else
+    CONTEXT_ARGS=()
+    [ -z "$CONTEXT" ] || CONTEXT_ARGS=(--context "$CONTEXT")
+    RESOLVE_RC=0
+    RESOLUTION=$(python3 "$SCRIPT_DIR/session_context.py" --workspace "$ROOT" "${CONTEXT_ARGS[@]}") || RESOLVE_RC=$?
+    STATE=$(printf '%s' "$RESOLUTION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])') || STATE=unsupported
+    if [ "$RESOLVE_RC" -eq 0 ] && [ "$STATE" = available ]; then
+        CONTEXT_SNAPSHOT=$(mktemp /tmp/codescout-gate-context.XXXXXX) || exit 2
+        printf '%s' "$RESOLUTION" | python3 -c 'import json,sys; json.dump(json.load(sys.stdin)["context"],sys.stdout)' > "$CONTEXT_SNAPSHOT" || exit 2
+        export CODESCOUT_CONTEXT_FILE="$CONTEXT_SNAPSHOT"
+    elif [ -n "$EXCLUSIVE" ] && [ "$STATE" = missing ]; then
+        : # The formatter will report operator-declared exclusive authorization.
+    else
+        CONTEXT_BLOCKED=1
+        echo "gate.sh: formatting context blocked ($STATE); remaining verification lanes will run." >&2
+        printf '%s\n' "$RESOLUTION" >&2
+    fi
+    [ -z "$EXCLUSIVE" ] || FMT_ARGS=(--exclusive-checkout "$EXCLUSIVE")
 fi
 
 # The pool is outside the repo on purpose: nothing there needs gitignoring, a peer's
@@ -110,8 +147,18 @@ PYTHON_LIGHT=$?
 
 # `;` throughout, never `&&` — see the heredoc above. The default lane does two jobs,
 # reporting AND rebuilding, and only the first should ever be short-circuited.
-./scripts/fmt-mine.sh
-FMT=$?
+if [ "$CONTEXT_BLOCKED" -eq 1 ]; then
+    FMT=2
+    FMT_STATE=context-blocked
+else
+    ./scripts/fmt-mine.sh "${FMT_ARGS[@]}"
+    FMT=$?
+    if [ "$FMT" -eq 0 ]; then FMT_STATE=passed
+    elif [ "$FMT" -eq 1 ] && [ "$CHECK_ONLY" -eq 1 ]; then FMT_STATE=differences
+    elif [ "$FMT" -eq 1 ]; then FMT_STATE=ownership-refused
+    else FMT_STATE=tool-error
+    fi
+fi
 cargo clippy --workspace --all-targets --features local-embed -- -D warnings
 CLIPPY=$?
 cargo test --workspace --no-default-features
@@ -123,7 +170,7 @@ echo
 echo "gate.sh: tree size $(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1) at $CARGO_TARGET_DIR"
 [ -n "${SLOT_FD:-}" ] && echo "gate.sh: pool total $(du -sh "$GATE_POOL" 2>/dev/null | cut -f1) at $GATE_POOL"
 echo "PYTHON LIGHT EXIT -> PYTHON_LIGHT=$PYTHON_LIGHT"
-echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT"
+echo "GATE EXITS -> FMT=$FMT CLIPPY=$CLIPPY LEAN=$LEAN DEFAULT=$DEFAULT FMT_STATE=$FMT_STATE"
 
 # What a green run here does NOT cover. Printed every time because this output is what a
 # session reads when it decides "green". Pinned by gate_script_prints_what_green_does_not_cover
@@ -136,21 +183,8 @@ if [ "$CODESCOUT_SKIP_ONNX_TESTS" = 1 ]; then
     echo "  - the two local ONNX weight tests, which print 'ok' while skipped: CI's local-embed job runs them"
 fi
 
-# FMT is the one ambiguous code, and the ambiguity is routine rather than rare on a shared
-# checkout — so it is named here rather than left for the reader to infer from a bare 1.
 if [ "$FMT" -ne 0 ]; then
-    cat >&2 <<'EOF'
-
-gate.sh: FMT is non-zero, which on a shared checkout is AMBIGUOUS and is usually not your
-failure. `fmt-mine.sh` exits non-zero in two unrelated cases:
-
-  * your own Rust needed formatting — act on it; or
-  * it REFUSED a peer's unformatted file, which is the guard working. There is no
-    --force, and `cargo fmt` would rewrite their uncommitted work.
-
-Read its output above: it names the owner's sessionId and the socket to ask them on. The
-other three codes are unaffected either way.
-EOF
+    echo "gate.sh: formatting outcome $FMT_STATE (exit $FMT); read its diagnostics above. Other lanes still ran." >&2
 fi
 
 # Exit non-zero if ANY lane failed. The five codes above are the real report — this

@@ -12,6 +12,8 @@ tags:
 
 # Gate ordering — why the four commands run in that order
 
+Read-only verification uses `./scripts/gate.sh --check` without identity. Authored mode resolves a harness-neutral root context; an unavailable context reports a blocked formatter and still runs all other lanes under the lease. Default remains last after earlier failures. Options, numeric outcomes and evidence limits are in [harness-neutral-session-context.md](harness-neutral-session-context.md).
+
 **Audience:** anyone about to change the pre-commit gate, shorten it, reorder it, or argue that one
 of its commands is redundant. The gate itself lives in [`CLAUDE.md`](../../CLAUDE.md) §
 *Development Commands* and stays there deliberately — a 2026-08-30 ruling in
@@ -29,7 +31,7 @@ which command they justify.
 > 2026-09-09 and is deliberately not replaced with a fresh one: a symbol name survives every
 > edit above it, and a line number is a positional reference that decays exactly like the
 > commit SHAs and orphaned refs this corpus keeps tripping over.
-> It scopes to the run beginning ``**Run `./scripts/fmt-mine.sh``` and ending `before completing any task.**`,
+> It scopes to the run beginning ``**Run `./scripts/gate.sh``` and ending `before completing any task.**`,
 > then asserts the four backtick-delimited commands appear in ascending byte order *within that
 > slice*. Its own panic message reads: *"if it moved, move this test with it — do not delete it."*
 > Two traps it is shaped around: `cargo test --workspace` is a **prefix** of the lean form, so a

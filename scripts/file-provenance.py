@@ -87,6 +87,14 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Standalone script also supports the established import-by-filename scan API.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from claude_history import discover_claude_histories, read_claude_history
+from provenance_records import CoverageGap, HistoryBatch, Operation, ProvenanceScan
+from codex_history import discover_codex_histories, read_codex_history
+from typing import Iterable
+from session_context import principal_key, resolve_context
+
 # Tool calls whose input names a write TARGET. Read tools are deliberately absent:
 # including one would make every reader an author.
 CS_WRITE_TOOLS = {
@@ -512,6 +520,11 @@ def address_lines(sid: str, live: dict[str, list[dict]], indent: str) -> tuple[s
                    f"profile {r['profile']}, cwd {r['cwd']}")
         out.append(f'{indent}  ask it: SendMessage to="uds:{r["socket"]}"')
     return ("  [LIVE]", out)
+def owner_contact(sid: str, live: dict[str, list[dict]], indent: str) -> tuple[str, list[str]]:
+    if not sid.startswith("claude-code:"):
+        return ("  [contact unknown; liveness unknown]", [])
+    return address_lines(sid, live, indent)
+
 
 
 def normalize(p: str, root: Path, base: Path | None = None) -> str | None:
@@ -535,11 +548,29 @@ def normalize(p: str, root: Path, base: Path | None = None) -> str | None:
     return os.path.normpath(p)
 
 
+def patch_write_targets(patch: str) -> list[str]:
+    """Extract native patch headers, preserving literal filenames and move operands."""
+    if not isinstance(patch, str):
+        return []
+    lines = patch.splitlines()
+    if not lines or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
+        return []
+    paths = []
+    for line in lines[1:-1]:
+        match = re.fullmatch(r"\*\*\* (?:Add|Update|Delete) File: (.+)", line)
+        move = re.fullmatch(r"\*\*\* Move to: (.+)", line)
+        if match or move:
+            paths.append((match or move).group(1))
+    return list(dict.fromkeys(paths))
+
+
 def write_targets(name: str, inp: dict, root: Path):
     """Paths this ONE tool call wrote. Empty for every read-only call."""
     if not isinstance(inp, dict):
         return
-    if name in CS_WRITE_TOOLS:
+    if name == "apply_patch":
+        yield from patch_write_targets(inp.get("patch"))
+    elif name in CS_WRITE_TOOLS:
         for key in ("path", "file_path"):
             if isinstance(inp.get(key), str):
                 yield inp[key]
@@ -799,47 +830,33 @@ def record_session(rec: dict, fallback: str) -> str:
     return rec.get("sessionId") or rec.get("session_id") or fallback
 
 
-def session_activations(files: list[Path]) -> dict[str, dict]:
-    """Per session: did its OWN transcript activate a tree other than its checkout root, and
-    when did any of its SUBAGENTS first activate one (ISO timestamp; "" if a record carried
-    none, which sorts first and so taints everything after the start)?
-
-    codescout's active project belongs to the MCP server, which a session SHARES with its
-    subagents (docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-
-    subagent-can-flip-it.md). So an activation in one transcript moves the tree for the
-    others, and no single file holds the whole timeline — `scan()` needs these facts first.
-    """
+def operation_activations(operations: list[Operation]) -> dict[str, dict]:
+    """Track shared-server activation uncertainty using normalized operations."""
     facts: dict[str, dict] = {}
-    for f in files:
-        is_sub = f.parent.name == "subagents"
-        fallback = file_session_id(f)
-        root_of: Path | None = None
-        for rec, blocks in tool_records(f):
-            if root_of is None and isinstance(rec.get("cwd"), str):
-                root_of = checkout_root(rec["cwd"])
-            for b in blocks:
-                # `activated_tree` returns `None` for a call that is NOT an activation, but only
-                # when it is given no active tree: handed one, it returns that tree unchanged,
-                # which this loop would read as an activation of it. So ask once with None to
-                # decide WHETHER this is an activation, then again with the checkout root to
-                # decide WHERE it points: a relative PATH activation (`.`, `crates/x`) names a
-                # tree under that root, and `target.resolve()` below would otherwise read it from
-                # wherever this script is started. An id comes back as UNKNOWN_TREE, a path under
-                # the script's cwd that never equals the root, so `resolve()` reads it as a move
-                # without a special case: an explicit `is UNKNOWN_TREE` clause here was inert, no
-                # input distinguishing it from the comparison, and was deleted.
-                if activated_tree(b.get("name"), b.get("input"), None) is None:
-                    continue
-                target = activated_tree(b.get("name"), b.get("input"), root_of)
-                fs = facts.setdefault(record_session(rec, fallback),
-                                      {"parent_activated": False, "sub_activated_at": None})
-                if is_sub:
-                    ts = rec.get("timestamp") or ""
-                    if fs["sub_activated_at"] is None or ts < fs["sub_activated_at"]:
-                        fs["sub_activated_at"] = ts
-                elif root_of is None or target.resolve() != root_of.resolve():
-                    fs["parent_activated"] = True
+    roots: dict[tuple[str | None, str | None], Path | None] = {}
+    for op in operations:
+        stream = (op.principal, op.agent_id)
+        if roots.get(stream) is None and op.cwd is not None:
+            roots[stream] = checkout_root(str(op.cwd))
+        root_of = roots.get(stream)
+        if activated_tree(op.name, op.input, None) is None:
+            continue
+        target = activated_tree(op.name, op.input, root_of)
+        fs = facts.setdefault(op.principal,
+                              {"parent_activated": False, "sub_activated_at": None})
+        if op.is_child:
+            ts = op.timestamp or ""
+            if fs["sub_activated_at"] is None or ts < fs["sub_activated_at"]:
+                fs["sub_activated_at"] = ts
+        elif root_of is None or target.resolve() != root_of.resolve():
+            fs["parent_activated"] = True
     return facts
+
+
+def session_activations(files: list[Path]) -> dict[str, dict]:
+    """Compatibility entry point for activation facts from Claude histories."""
+    return operation_activations([op for path in files
+                                  for op in read_claude_history(path).operations])
 
 
 
@@ -883,85 +900,98 @@ def write_texts(name: str, inp: dict) -> list[str] | None:
         return None
     return found
 
+def merge_history_batches(batches: Iterable[HistoryBatch]) -> HistoryBatch:
+    """Deduplicate original native events, retaining every incompatible replay as a gap."""
+    operations, gaps, seen = [], [], {}
+    for batch in batches:
+        gaps.extend(batch.gaps)
+        for op in batch.operations:
+            previous = seen.get(op.source_id)
+            if previous is None:
+                seen[op.source_id] = op
+                operations.append(op)
+            elif previous != op:
+                gaps.append(CoverageGap(op.source_id, "conflicting original-event replay", op.cwd))
+    return HistoryBatch(operations, gaps)
+
+
+def scan_provenance(root: Path, environ: dict[str, str]) -> ProvenanceScan:
+    """One policy consumes both hosts' normalized history and explicit coverage gaps."""
+    claude_files, claude_gaps = discover_claude_histories(root, environ)
+    codex_files, codex_gaps = discover_codex_histories(root, environ)
+    batch = merge_history_batches([
+        HistoryBatch([], claude_gaps + codex_gaps),
+        *(read_claude_history(path) for path in claude_files),
+        *(read_codex_history(path) for path in codex_files),
+    ])
+    owners, evidence, gaps = {}, {}, list(batch.gaps)
+    operations = sorted(batch.operations, key=lambda op: op.timestamp or "")
+    facts = operation_activations(operations)
+    no_facts = {"parent_activated": False, "sub_activated_at": None}
+    active_by_stream = {}
+    for op in operations:
+        who, when = op.principal, op.timestamp
+        stream = (who, op.agent_id)
+        active = active_by_stream.get(stream)
+        if active is None and op.cwd is not None:
+            active = checkout_root(str(op.cwd))
+        fs = facts.get(who, no_facts)
+        sub_at = fs["sub_activated_at"]
+        unknowable = (fs["parent_activated"] or sub_at is not None) if op.is_child else (
+            sub_at is not None and (when is None or when >= sub_at))
+        base = write_base(op.name, op.input, active, op.cwd)
+        relative_cs = op.name.startswith("mcp__codescout__")
+        pin = op.input.get("workspace")
+        pinned = isinstance(pin, str) and Path(pin).is_absolute()
+        targets = [] if op.atomic and op.outcome == "no-write-refused" else list(
+            write_targets(op.name, op.input, root))
+        capable = (op.name in CS_WRITE_TOOLS or op.name in NATIVE_WRITE_TOOLS
+                   or op.name == "apply_patch"
+                   or op.name in ("mcp__codescout__doc",
+                               "mcp__codescout__artifact",          # legacy -> doc
+                               "mcp__codescout__artifact_augment")  # legacy -> doc
+                   and (op.input.get("action") in ARTIFACT_WRITE_ACTIONS or op.name.endswith("_augment")))
+        if capable and not targets and op.outcome != "no-write-refused":
+            gaps.append(CoverageGap(op.source_id, "write target is not recoverable", base if base is not UNKNOWN_TREE else None))
+        texts = write_texts(op.name, op.input) if len(targets) == 1 else None
+        for raw in targets:
+            if ((unknowable and not pinned) or base is UNKNOWN_TREE) and relative_cs and not Path(raw).is_absolute():
+                gaps.append(CoverageGap(op.source_id, "relative write has ambiguous shared MCP workspace", None))
+                continue
+            rel = normalize(raw, root, base)
+            if rel:
+                if who is None:
+                    gaps.append(CoverageGap(op.source_id, "native writer identity is unresolved", root, (rel,)))
+                    continue
+                owners.setdefault(rel, []).append((who, when))
+                key = (rel, who, when)
+                if texts is None or evidence.get(key, []) is None:
+                    evidence[key] = None
+                else:
+                    evidence.setdefault(key, []).extend(texts)
+        active_by_stream[stream] = activated_tree(op.name, op.input, active)
+    return ProvenanceScan(owners, evidence, gaps)
+
+
+def relevant_gaps(scan: ProvenanceScan, rel: str, root: Path) -> list[CoverageGap]:
+    """Unknown workspace can affect any path; known unrelated workspaces cannot."""
+    result = []
+    for gap in scan.gaps:
+        if gap.paths is not None:
+            if not any(normalize(path, root, gap.workspace) == rel for path in gap.paths):
+                continue
+        elif gap.workspace is not None and checkout_root(str(gap.workspace)).resolve() != root.resolve():
+            continue
+        result.append(gap)
+    return result
+
+
 def scan_with_evidence(root: Path) -> tuple[
         dict[str, list[tuple[str, str | None]]],
         dict[tuple[str, str, str | None], list[str] | None]]:
-    """(owners, evidence). `owners`: path (repo-relative) -> [(session id, ISO timestamp or None), ...].
-
-    `evidence` maps (path, session id, timestamp) -> the text those writes put on disk, or None
-    when ANY write behind that key has no knowable text (`write_texts`), or reaches several
-    paths at once. None is sticky: one opaque write poisons the key, so it can only ever be
-    counted, never discounted. Consumed by `absorbed_writes`.
-
-    Timestamps are kept rather than filtered here: a record with no timestamp
-    cannot be placed in or out of any window, and dropping it would convert a
-    substrate gap into a clean exoneration.
-
-    A RELATIVE codescout write names a file in whichever tree was active. That is known from
-    the session's own transcript until a subagent could have moved it, so such a write is
-    credited to NEITHER tree when (a) it comes from a subagent of a session that activated a
-    non-root tree, or whose subagents activated one, or (b) it comes from the parent at or
-    after its subagents' first activation. Crediting it to a guessed tree is the worse error:
-    fmt-mine acts on this answer. Absolute paths and native tools are unaffected.
-    """
-    owners: dict[str, list[tuple[str, str | None]]] = {}
-    evidence: dict[tuple[str, str, str | None], list[str] | None] = {}
-    files = transcript_files(root)
-    facts = session_activations(files)
-    no_facts = {"parent_activated": False, "sub_activated_at": None}
-    for f in files:
-        is_sub = f.parent.name == "subagents"
-        fallback = file_session_id(f)
-        # Calls this transcript itself records as REFUSED. Their write targets are not writes:
-        # a request and an accomplished act are the same token in a tool_use block, and only
-        # the result tells them apart (docs/issues/archive/2026-09-13-file-provenance-conflates-touched-
-        # once-with-bytes-at-risk.md). Narrows the FALSE-POSITIVE direction only -- a call with
-        # no result on record, and every shell call, still counts.
-        refused = refused_call_ids(f)
-        # The tree a RELATIVE codescout path names: the checkout root of the session's cwd
-        # until a `workspace(action="activate")` moves it. None until a record carries `cwd`,
-        # which keeps cwd-less fixtures on the old "relative means this checkout" reading.
-        # Blind spot: an MCP server restart silently resets the active project to the cwd,
-        # and the transcript does not record it.
-        active: Path | None = None
-        for rec, blocks in tool_records(f):
-            who = record_session(rec, fallback)
-            when = rec.get("timestamp")
-            cwd = Path(rec["cwd"]) if isinstance(rec.get("cwd"), str) else None
-            if active is None and cwd is not None:
-                active = checkout_root(str(cwd))
-            fs = facts.get(who, no_facts)
-            sub_at = fs["sub_activated_at"]
-            if is_sub:
-                unknowable = fs["parent_activated"] or sub_at is not None
-            else:
-                unknowable = sub_at is not None and (when is None or when >= sub_at)
-            for b in blocks:
-                name, inp = b.get("name"), b.get("input")
-                base = write_base(name, inp, active, cwd)
-                relative_cs = isinstance(name, str) and name.startswith("mcp__codescout__")
-                # The base is UNKNOWN_TREE after an id activation, unless this call pins an
-                # absolute `workspace=`, which write_base reads in preference to the active tree.
-                tree_unknown = base is UNKNOWN_TREE
-                # A refused all-or-nothing call wrote nothing. Activation tracking below is
-                # deliberately unchanged: this narrows WRITES only.
-                targets = [] if (b.get("id") in refused and name not in _NON_ATOMIC_NAMES) \
-                    else list(write_targets(name, inp, root))
-                # The text is only attributable to a path when the call reached exactly one.
-                texts = write_texts(name, inp) if len(targets) == 1 else None
-                for raw in targets:
-                    if (unknowable or tree_unknown) and relative_cs and not Path(raw).is_absolute():
-                        continue
-                    rel = normalize(raw, root, base)
-                    if rel:
-                        owners.setdefault(rel, []).append((who, when))
-                        key = (rel, who, when)
-                        if texts is None or evidence.get(key, []) is None:
-                            evidence[key] = None
-                        else:
-                            evidence.setdefault(key, []).extend(texts)
-                active = activated_tree(name, inp, active)
-    return owners, evidence
+    """Compatibility two-value API; use scan_provenance for coverage information."""
+    result = scan_provenance(root, os.environ)
+    return result.owners, result.evidence
 
 
 def scan(root: Path) -> dict[str, list[tuple[str, str | None]]]:
@@ -1095,13 +1125,25 @@ def absorbed_writes(rel: str, root: Path, floor: str | None,
 
 
 
+def short_principal(principal: str) -> str:
+    """Qualify the native id before abbreviating it; never abbreviate the host name."""
+    harness, _, native = principal.partition(":")
+    return f"{harness}:{native[:8]}"
+
+
 def main(argv: list[str]) -> int:
     since = None
     unbounded = False
     paths = []
+    context_path = None
     i = 0
     while i < len(argv):
         a = argv[i]
+        if a == "--context":
+            if context_path is not None or i + 1 >= len(argv):
+                print("context usage: --context <absolute-json-path>", file=sys.stderr)
+                return 2
+            context_path = Path(argv[i + 1]); i += 2; continue
         if a == "--since" and i + 1 < len(argv):
             since = argv[i + 1]; i += 2; continue
         if a == "--all":
@@ -1115,17 +1157,24 @@ def main(argv: list[str]) -> int:
         return 2
 
     root = repo_root()
-    me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    owners, evidence = scan_with_evidence(root)
+    resolution = resolve_context(root, os.environ, context_path)
+    if resolution.state != "available":
+        print(f"context {resolution.state}: {json.dumps(resolution.reason)}", file=sys.stderr)
+        return 2
+    me = principal_key(resolution.context.harness, resolution.context.session_id)
+    scan_result = scan_provenance(root, os.environ)
+    owners, evidence = scan_result.owners, scan_result.evidence
     # Resolved ONCE per invocation, deliberately: a snapshot the whole run shares is
     # honest about being an instant, where a per-path re-read would silently mix two.
-    live, unreadable = live_sessions()
+    native_live, unreadable = live_sessions()
+    live = {principal_key("claude-code", sid): rows for sid, rows in native_live.items()}
     named_sids: set[str] = set()
 
     unknown = 0
     for arg in paths:
         rel = normalize(arg, root) or arg
         records = owners.get(rel, [])
+        gaps = relevant_gaps(scan_result, rel, root)
 
         # The window. Default is "since this path was last committed", because the
         # question is about the UNCOMMITTED delta -- a months-old file legitimately has
@@ -1167,7 +1216,7 @@ def main(argv: list[str]) -> int:
         who_set = set(in_window) | set(undated)
         absorbed_note = (
             f"          ({len(absorbed_sids)} session(s) "
-            f"[{', '.join(sorted(s[:8] for s in absorbed_sids))}] wrote this path in the last "
+            f"[{', '.join(sorted(short_principal(s) for s in absorbed_sids))}] wrote this path in the last "
             f"commit's own second, and the text they wrote is already in HEAD with no further "
             f"copy in the worktree: they hold no uncommitted bytes here, so they are not named)"
         ) if absorbed_sids else None
@@ -1175,6 +1224,8 @@ def main(argv: list[str]) -> int:
         if not who_set:
             unknown += 1
             print(f"UNKNOWN   {rel}")
+            for gap in gaps:
+                print(f"          coverage gap: {json.dumps(gap.reason)}")
             # The window, printed here for the same reason `hidden` was lifted above the
             # branch: this is the one verdict whose entire meaning IS the window, and the
             # only one that was not naming it. `if floor` is the correct guard unchanged --
@@ -1240,7 +1291,7 @@ def main(argv: list[str]) -> int:
         # (see worktree_is_dirty): None -- untracked, or git cannot say -- never licenses
         # anything, so it falls through to the transcript verdict unchanged.
         dirty = (worktree_is_dirty(rel, root)
-                 if hidden_peer or not (mine and not peers) else None)
+                 if gaps or hidden_peer or not (mine and not peers) else None)
         if hidden_peer and dirty:
             verdict = "SHARED"
         else:
@@ -1255,7 +1306,12 @@ def main(argv: list[str]) -> int:
         # `CLEAN` is a NEW first-column token; scripts/fmt-mine.sh partitions on that column.
         if verdict in ("SHARED", "PEER") and dirty is False:
             verdict = "CLEAN"
+        if gaps and dirty is not False and verdict != "SHARED":
+            verdict = "UNKNOWN"
+            unknown += 1
         print(f"{verdict:9} {rel}")
+        for gap in gaps:
+            print(f"          coverage gap: {json.dumps(gap.reason)}")
         if floor:
             print(f"          window: writes at or after {floor}")
         if absorbed_note:
@@ -1273,15 +1329,16 @@ def main(argv: list[str]) -> int:
                   "co-ownership of the working tree — there is nobody to ask about it.")
             writers = sorted(who_set)
             print("          recorded writer(s), committed history: "
-                  + ", ".join(w[:8] + (" (THIS session)" if w == me else "") for w in writers))
+                  + ", ".join(short_principal(w) + (" (THIS session)" if w == me else "") for w in writers))
             continue
         if mine:
-            print(f"          written by THIS session ({me[:8]})")
+            print(f"          written by THIS session ({short_principal(me)})")
         for w in peers:
             mark = "  [undated — could not be placed in the window]" if (
                 w in undated and w not in in_window) else ""
-            named_sids.add(w)
-            suffix, extra = address_lines(w, live, " " * 21)
+            if w.startswith("claude-code:"):
+                named_sids.add(w)
+            suffix, extra = owner_contact(w, live, " " * 21)
             print(f"          written by {w}{mark}{suffix}")
             for line in extra:
                 print(line)

@@ -55,6 +55,9 @@ trap cleanup EXIT
 
 POOL="$WORK/pool"
 mkdir -p "$WORK/repo/scripts" "$WORK/bin" "$WORK/home"
+git -C "$WORK/repo" init -q
+cp "$(dirname "$GATE")/session_context.py" "$(dirname "$GATE")/session-context-v1.schema.json" "$WORK/repo/scripts/"
+printf "# Fixture Python lane.\n" > "$WORK/repo/scripts/python-tests.py"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$WORK/repo/scripts/fmt-mine.sh"
 chmod +x "$WORK/repo/scripts/fmt-mine.sh"
 
@@ -64,7 +67,7 @@ cat > "$WORK/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 tag="${GATE_TEST_TAG:?}"; w="${GATE_TEST_WORK:?}"
 echo "${CARGO_TARGET_DIR:-<unset>}" >> "$w/seen-$tag"
-if [ -e "$w/hold-$tag" ] && [ ! -e "$w/started-$tag" ]; then
+if [ -e "$w/hold-$tag" ] && [ ! -e "$w/started-$tag" ] && { [ "${GATE_TEST_HOLD_DEFAULT:-0}" != 1 ] || [ "$*" = "test --workspace" ]; }; then
     echo $$ > "$w/worker-$tag.pid"
     # The stub's parent IS the gate's bash. `$!` in the suite is only a wrapper subshell.
     echo "$PPID" > "$w/gate-$tag.pid"
@@ -79,9 +82,15 @@ chmod +x "$WORK/bin/cargo"
 # FUNCTION is a wrapper subshell, so case D kills the pid the stub records instead.
 run_gate() {
     local tag="$1" sid="$2"; shift 2
-    ( echo "$BASHPID" > "$WORK/gatepid-$tag"; cd "$WORK/repo" && exec env -u CARGO_TARGET_DIR HOME="$WORK/home" \
-        PATH="$WORK/bin:$PATH" CLAUDE_CODE_SESSION_ID="$sid" CODESCOUT_GATE_POOL="$POOL" \
-        GATE_TEST_TAG="$tag" GATE_TEST_WORK="$WORK" "$@" bash "$GATE" ) \
+    local session_env=(CLAUDE_CODE_SESSION_ID="$sid") mode=()
+    case "$sid" in
+        codex:*) session_env=(CODEX_SESSION_ID="${sid#codex:}") ;;
+        "") session_env=(); mode=(--check) ;;
+    esac
+    ( echo "$BASHPID" > "$WORK/gatepid-$tag"; cd "$WORK/repo" && exec env -u CARGO_TARGET_DIR \
+        -u CLAUDE_CODE_SESSION_ID -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+        HOME="$WORK/home" PATH="$WORK/bin:$PATH" "${session_env[@]}" CODESCOUT_GATE_POOL="$POOL" \
+        GATE_TEST_TAG="$tag" GATE_TEST_WORK="$WORK" "$@" bash "$GATE" "${mode[@]}" ) \
         > "$WORK/out-$tag" 2>&1
 }
 first_seen() { head -1 "$WORK/seen-$1" 2>/dev/null; }
@@ -115,15 +124,25 @@ eq "two sessions left ONE tree behind, not two" "$(slot_dirs)" "1"
 
 echo "C. a concurrent run never shares a held slot"
 : > "$WORK/hold-c"
-run_gate c sid-c & PC=$!; PIDS+=("$PC")
+run_gate c "" GATE_TEST_HOLD_DEFAULT=1 & PC=$!; PIDS+=("$PC")
 if wait_for "$WORK/started-c"; then
-    run_gate d sid-d
-    eq "a run started while slot-0 is held leases slot-1" "$(first_seen d)" "$POOL/slot-1"
+    : > "$WORK/hold-d"
+    run_gate d codex:sid-d GATE_TEST_HOLD_DEFAULT=1 & PD=$!; PIDS+=("$PD")
+    if wait_for "$WORK/started-d"; then
+        eq "a Codex run started during a no-identity check leases slot-1" "$(first_seen d)" "$POOL/slot-1"
+        flock -n "$POOL/slot-0.lock" true; eq "check-only lease stays held during DEFAULT" "$?" "1"
+        flock -n "$POOL/slot-1.lock" true; eq "Codex lease stays held during DEFAULT" "$?" "1"
+    else
+        no "Codex holder reached DEFAULT" "$(cat "$WORK/out-d")"
+    fi
+    rm -f "$WORK/hold-d"; wait "$PD" 2>/dev/null
+    flock -n "$POOL/slot-1.lock" true; eq "Codex lease releases after DEFAULT" "$?" "0"
 else
     no "holder reached its lanes" "run c never started a cargo lane: $(cat "$WORK/out-c")"
 fi
 rm -f "$WORK/hold-c"; wait "$PC" 2>/dev/null
 eq "the holder kept slot-0 throughout" "$(sort -u "$WORK/seen-c")" "$POOL/slot-0"
+flock -n "$POOL/slot-0.lock" true; eq "check-only lease releases after DEFAULT" "$?" "0"
 
 echo "D. SIGKILLing a gate while its cargo still runs does NOT free the slot"
 : > "$WORK/hold-e"
