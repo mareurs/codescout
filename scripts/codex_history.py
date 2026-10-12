@@ -150,8 +150,39 @@ def _decode_call(payload: dict, cwd: Path | None):
     return None, "unsupported Codex tool or orchestration wrapper"
 
 
+def _native_mcp_operation(payload, timestamp, sid, thread, agent, is_child, cwd):
+    """Recover the observed paginated inner call without claiming wrapper completeness."""
+    item = payload.get("item")
+    if not isinstance(item, dict) or payload.get("thread_id") != thread:
+        return None, "unsupported or conflicting native Codex MCP thread"
+    call, server, tool, inp = item.get("id"), item.get("server"), item.get("tool"), item.get("arguments")
+    if not isinstance(call, str) or not call.strip():
+        return None, "missing native Codex MCP call id"
+    if server != "codescout" or not isinstance(tool, str) or tool not in KNOWN_CODE_SCOUT_NAMES:
+        return None, "unsupported native Codex MCP tool; write effects are not recoverable"
+    if not isinstance(inp, dict) or item.get("status") not in ("completed", "failed"):
+        return None, "unsupported native Codex MCP arguments or status"
+    result, error = item.get("result"), item.get("error")
+    if result is not None and (not isinstance(result, dict) or not isinstance(result.get("content"), list)):
+        return None, "unsupported native Codex MCP result"
+    atomic = tool != "run_command"
+    if result is None:
+        outcome = "partial-error" if error is not None or item["status"] == "failed" else "missing-result"
+    else:
+        content = result["content"]
+        if any(not isinstance(block, dict) for block in content):
+            return None, "unsupported native Codex MCP content"
+        refused = result_refused({"content": content})
+        failed = (result.get("isError") is True or error is not None or item["status"] == "failed"
+                  or any(_output_failed(block.get("text")) for block in content))
+        outcome = ("no-write-refused" if atomic else "partial-error") if refused else (
+            "partial-error" if failed else "possible-write")
+    op = Operation(f"codex:{sid}/{thread}/{call}", call, principal_key("codex", sid), agent,
+                   timestamp, cwd, "mcp__codescout__" + tool, inp, outcome, atomic, is_child, None)
+    return op, ""
+
 def read_codex_history(path: Path) -> HistoryBatch:
-    rows, gaps, operations = [], [], []
+    rows, gaps, operations, native_operations = [], [], [], []
     try:
         with path.open(encoding="utf-8") as stream:
             for number, line in enumerate(stream, 1):
@@ -184,7 +215,8 @@ def read_codex_history(path: Path) -> HistoryBatch:
     if thread != sid and not is_child:
         return HistoryBatch([], gaps + [CoverageGap(str(path), "unverified Codex child/root relationship", cwd)])
     if is_child and (thread == sid or not isinstance(spawn.get("parent_thread_id"), str)
-                     or meta.get("parent_thread_id") not in (None, spawn.get("parent_thread_id"))):
+                     or meta.get("parent_thread_id") not in (None, spawn.get("parent_thread_id"))
+                     or meta.get("forked_from_id") not in (None, spawn.get("parent_thread_id"))):
         return HistoryBatch([], gaps + [CoverageGap(str(path), "conflicting Codex child metadata", cwd)])
     boundary = meta.get("subagent_history_start_ordinal") if is_child else None
     paginated = meta.get("history_mode", "legacy") == "paginated"
@@ -199,7 +231,9 @@ def read_codex_history(path: Path) -> HistoryBatch:
             return HistoryBatch([], gaps)
     if is_child and max((n for n in ordinals if type(n) is int), default=-1) < boundary - 1:
         return HistoryBatch([], gaps + [CoverageGap(str(path), "incomplete Codex inherited prefix", cwd)])
-    if meta.get("forked_from_id") is not None:
+    # Native children copy a parent under the child-specific boundary above. A
+    # new-root fork instead needs its independently recorded fork cutoff.
+    if not is_child and meta.get("forked_from_id") is not None:
         fork_boundary = meta.get("forked_from_ordinal_exclusive")
         if (not isinstance(meta["forked_from_id"], str) or not meta["forked_from_id"]
                 or type(fork_boundary) is not int or fork_boundary < 0 or not paginated
@@ -226,7 +260,25 @@ def read_codex_history(path: Path) -> HistoryBatch:
             else:
                 gaps.append(CoverageGap(locator, "unsupported Codex turn cwd", cwd))
             continue
-        if kind in ("event_msg", "compacted", "world_state", "world_state_item"):
+        if kind == "event_msg":
+            if isinstance(payload, dict) and payload.get("type") == "item_completed":
+                item = payload.get("item")
+                item_type = item.get("type") if isinstance(item, dict) else None
+                if paginated and item_type == "McpToolCall":
+                    timestamp = row.get("timestamp") if isinstance(row.get("timestamp"), str) else None
+                    op, reason = _native_mcp_operation(payload, timestamp, sid, thread, agent, is_child, cwd)
+                    if op is not None:
+                        native_operations.append(op)
+                    if reason:
+                        gaps.append(CoverageGap(locator, reason, cwd))
+                elif item_type not in ("UserMessage", "FunctionCallOutput", "HookPrompt", "AgentMessage",
+                                       "Plan", "Reasoning", "CollabAgentToolCall", "SubAgentActivity",
+                                       "WebSearch", "ImageView", "EnteredReviewMode", "ExitedReviewMode",
+                                       "ContextCompaction"):
+                    gaps.append(CoverageGap(locator, "unsupported native Codex completed item", cwd))
+            continue
+        if kind in ("compacted", "world_state", "world_state_item", "token_usage_record",
+                    "inter_agent_communication_metadata"):
             continue
         if kind != "response_item" or not isinstance(payload, dict):
             gaps.append(CoverageGap(locator, "unsupported Codex rollout envelope", cwd))
@@ -270,4 +322,11 @@ def read_codex_history(path: Path) -> HistoryBatch:
             operations.append(op)
         elif previous != op:
             gaps.append(CoverageGap(original, "conflicting Codex call replay", call_cwd))
+    for op in native_operations:
+        previous = seen.get(op.source_id)
+        if previous is None:
+            seen[op.source_id] = op
+            operations.append(op)
+        elif previous != op:
+            gaps.append(CoverageGap(op.source_id, "conflicting native Codex MCP replay", op.cwd))
     return HistoryBatch(operations, gaps)
