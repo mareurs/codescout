@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 192
+entry_high_water_F: 194
 entry_high_water_W: 150
 ---
 
@@ -65,6 +65,8 @@ entry_high_water_W: 150
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
+| F-193 | 2026-10-13 | high | persistence-ordering | promoted-to-bug-tracker | **Backfill's durable progress claim uses chunk metadata and a cursor ahead of unwritten vectors** — observed retry skips and an unwritten checkpoint in private SQLite tests. |
 | F-192 | 2026-10-13 | med | shell-parity | promoted-to-bug-tracker | **The own-stderr wrapper assumed shell parity that dash disproved** — literal dash output and an actual-marker regression expose the unsafe brace wrapper. |
 | F-189 | 2026-10-01 | med | plan-drift | open | **An open issue and an open PR both described `--scope` as outstanding while local `experiments` had already shipped it, unpushed** - found only by grepping local HEAD; the PR conflicts in `doctor.rs` and collides on `W-146`. |
 | F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
@@ -17418,6 +17420,54 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 **Rests on:** Literal shell subprocess output, the observed regression RED→GREEN, and Unix production shell selection.
 
 **Fix idea / Pointer:** `docs/issues/archive/2026-10-13-the-stderr-marker-route-reads-nothing-under-dash-when-the-last-command-is-a-subshell-with-a-redirect.md`.
+
+## F-193 — Backfill's durable progress claim uses chunk metadata and a cursor ahead of unwritten vectors
+
+**Valid:** dated 2026-10-13
+
+**Observed:** 2026-10-13, Albert R-01 recovery work.
+
+**When:** Turning the external failed-backfill/retry report into private SQLite regression tests.
+
+**Expected:** The backfill doc promised that its cursor advances only after durable vector writes; retry should repair the remaining missing vectors.
+
+**Got:** The original retry test failed with artifacts=0 despite two persisted chunks without vectors. After selecting vectorless chunks, two further RED fixtures independently showed a saved cursor hiding a missing vector and a page checkpoint naming an unwritten vector below the final-flush threshold. A populated old-dimension index also reported successful zero work instead of checking model compatibility.
+
+**Probable cause:** Chunk existence was used as vector completion, a persisted cursor was treated as durable completion, and dimension validation was reached only after selecting a batch.
+
+**Workaround:** Repair selection reads vector coverage; each page flushes before checkpointing; historical cursor positions cannot conceal holes; dimension compatibility is checked before selection. Shared dimension migration requires explicit catalog-wide scope. Review observed that re-chunking changed disk content deleted a healthy vector, and a checkpoint-before-write mutation survived 58 tests. Repair now reads stored chunks and heading context directly; three preservation regressions were observed RED before that change, and a vector-persistence failure regression checks the checkpoint ordering. The persisted-row review killed all nine applied faults with zero survivors or inconclusive runs; its restored 62-test suite passed. A final compatibility scout also found the uncommitted preflight refused remote embedders whose dimensions are deferred; F-194 records three observed RED tests and the probe correction. The revised focused suite passes 65 tests. Final applied-mutation review killed all fourteen faults on the final revision, with zero survivors or inconclusive runs; the restored 65-test suite passes. The full ordered gate completed with exit 0, including workspace, integration, and documentation tests. The first gate's reader-doc check found a completed private staging snapshot. That snapshot was retained byte-for-byte with a `.md.snapshot` suffix; source and gate behavior were unchanged.
+
+**Severity:** high — the externally measured upgrade can leave semantic retrieval broken while retry returns success.
+
+**Status:** promoted-to-bug-tracker
+
+**Rests on:** The private observed RED/GREEN SQLite tests in `.codescout/resident-private/albert-r01-backfill-retry-20261013/`, and the source bodies read on 2026-10-13. External corpus counts remain Albert's measurements.
+
+**Fix idea / Pointer:** `docs/issues/archive/2026-10-13-backfill-retry-skips-existing-chunks-without-vectors.md`. Verified source on experiments: SHA `62177b8cc6ebce0d667cc7c48c37d755356bc388`, stable patch-id `a917aff453617da7e34630e24b6ab144b9bcaf8f`. `gate-final.log` and `review3-report.json` retain the final proof.
+
+## F-194 — Remote embedder dimensions are unknown until the first response
+
+**Valid:** dated 2026-10-14
+
+**Observed:** 2026-10-14, final compatibility scout for Albert R-01 before committing.
+
+**When:** Checking the new preflight against real embedder construction rather than only deterministic fixed-dimension fixtures.
+
+**Expected:** The preflight can determine compatibility before selecting or changing catalog state.
+
+**Got:** `RemoteEmbedder::dimensions` returns zero until its first successful embedding; the factory and librarian bootstrap do not warm it. The reviewed patch rejected zero as an unconfigured embedder. Three added regressions were observed RED (nine existing backfill tests passed, three failed): compatible deferred dimensions, deferred 768-to-384 migration, and failed/empty probes preserving catalog state.
+
+**Probable cause:** The trait's dimensionality description was treated as an eager value despite the remote implementation's explicit unknown-until-first-response contract.
+
+**Workaround:** For unknown dimensions only, obtain one short document embedding outside the catalog mutex and before any catalog writes. Use the response length, reject empty or failed responses, and exclude the probe from stored-vector counts. Known dimensions retain their existing path.
+
+**Severity:** med — the uncommitted recovery patch would refuse remote backfill, although local-model recovery passed.
+
+**Status:** fixed-verified
+
+**Rests on:** The remote/factory/bootstrap symbols read on 2026-10-14 and `.codescout/resident-private/albert-r01-backfill-retry-20261013/deferred-dimensions-red.log`.
+
+**Fix idea / Pointer:** `docs/issues/archive/2026-10-13-backfill-retry-skips-existing-chunks-without-vectors.md`. The revised indexer suite and its independent restored run both pass 65 tests. Five applied probe-path faults and the nine earlier recovery faults were all caught on the final revision: fourteen killed, zero survived, zero inconclusive (`review3-report.json`, `review3-P*.log`, `review3-M*.log`). The full ordered gate passed with exit 0 (`gate-final.log`). Verified source on experiments: SHA `62177b8cc6ebce0d667cc7c48c37d755356bc388`, stable patch-id `a917aff453617da7e34630e24b6ab144b9bcaf8f`.
 
 ## Template for new entries
 
