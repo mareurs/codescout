@@ -10883,9 +10883,9 @@ async fn a_full_plain_slice_window_stays_inside_the_limit_at_every_byte_near_the
 // applies to the LAST command of a pipeline: for `cat @X | tr -d '\n' >&2 | cat` the appended form
 // read the last `cat`'s stderr (nothing) and left the `tr`'s on the terminal; a stage that itself
 // ends in `>&2` swallowed it (`>&2 2>&1 >/dev/null` leaves fd 1 on the old stderr). The marker now
-// names the query inside a subshell, `( QUERY; ) 2>&1 >/dev/null | cut -c1-4000`: dash loses
-// redirected subshell output inside the brace form. These tests run the recovery route under
-// the real `sh` and compare bytes with the stream that was cut.
+// names the query inside a subshell, `( QUERY; ) 2>&1 >/dev/null | cut -c1-4000`: when `QUERY` is
+// one redirected subshell, dash drops its redirects inside the brace form. These tests run the
+// recovery route under the real `sh` and compare bytes with the stream that was cut.
 
 /// What `query` writes to STDERR when run by `sh` over real files: [`shell_truth`]'s twin.
 fn shell_stderr(

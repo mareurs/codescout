@@ -543,8 +543,9 @@ fn bound_buffer_stderr(
     let remedy = if own && can_wrap_query(query) {
         // WRAPPED, not appended: a redirection applies to the LAST command of a pipeline only, so
         // `a | b >&2 | c 2>&1 >/dev/null | cut` read `c`'s stderr and left `b`'s on the terminal. A
-        // subshell gives every stage the same stderr. Use `( q; )`, because dash loses the
-        // output of a redirected tail subshell in the brace form `{ (cmd) >&2; }`.
+        // subshell gives every stage the same stderr. Use `( q; )`, not `{ q; }`: when `q` is one
+        // redirected subshell, dash puts the group's redirects on that subshell node in place of
+        // its own, so `{ (cmd) >&2; } 2>&1 >/dev/null` loses the `>&2`. `( q; )` adds a new node.
         format!(
             "this is the query's own stderr and is stored nowhere: rerun the whole query as \
              `( QUERY; ) {OWN_STDERR_STAGE}` to read a window of it"

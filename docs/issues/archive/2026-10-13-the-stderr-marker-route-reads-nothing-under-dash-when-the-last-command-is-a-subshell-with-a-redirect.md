@@ -18,7 +18,7 @@ unverified: 'CLEARED 2026-10-13. Was: the verified fix remained uncommitted with
 
 ## Summary
 
-`run_command` tells the caller, when a query's own stderr was cut, to read the rest with `{ QUERY; } 2>&1 >/dev/null | cut -c1-4000`. Production runs every command with `sh -c`. Under dash, if `QUERY` ends in a subshell that carries a redirect, such as `(grep -n "" F) >&2`, that route prints nothing, while the stream holds 63786 B. The test `the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the_marker_accepts` asserts exactly this and fails under dash. It passes on a machine whose `sh` is bash, so the failure was invisible locally.
+`run_command` tells the caller, when a query's own stderr was cut, to read the rest with `{ QUERY; } 2>&1 >/dev/null | cut -c1-4000`. Production runs every command with `sh -c`. Under dash, if `QUERY` is a lone subshell that carries a redirect, such as `(grep -n "" F) >&2`, that route prints nothing, while the stream holds 63786 B. The test `the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the_marker_accepts` asserts exactly this and fails under dash. It passes on a machine whose `sh` is bash, so the failure was invisible locally.
 
 Found 2026-10-13 while answering an external audit report (CI-01). The report listed the public CI as red; this is the single test behind the Linux failures.
 
@@ -53,7 +53,7 @@ Trigger narrowed by hand, 2026-10-13, `{ Q; } 2>&1 >/dev/null | wc -c`:
 | `(echo hi); echo yo >&2` | 3 | 3 |
 | `(echo hi >&2) >&2` | 3 | 3 |
 
-Without the parentheses, `{ grep -n "" F >&2; } 2>&1 >/dev/null | wc -c` prints 12 under both. The trigger is a subshell that is the last command of the brace group and has its stdout redirected to fd 2.
+Without the parentheses, `{ grep -n "" F >&2; } 2>&1 >/dev/null | wc -c` prints 12 under both. The trigger is a subshell that is the sole command of the brace group and carries its own redirect. (Corrected 2026-10-14: this sentence first said "last command", but a subshell that is last and not sole is unaffected. See Root cause.)
 
 ## Environment
 
@@ -67,7 +67,22 @@ Established:
 - Before the fix, the marker recommended the brace-group route (`OWN_STDERR_STAGE` in `src/tools/run_command/output.rs`).
 - Under dash that route loses the stream for the shape above (table).
 
-Not established: why dash drops it. A guess, unverified: the redirect on a subshell that is the group's last command is resolved against different descriptors than in bash. Nobody has read dash's source for this.
+Established 2026-10-14, which replaces the earlier "not established": dash's parser discards the subshell's own redirects. In dash 0.5.12-2 `src/parser.c`, `command()`, `case TBEGIN` returns the inner list node itself (`n1 = list(0)`). After the closing `}`, the `if (redir)` block wraps `n1` in a new `NREDIR` node only when `n1->type != NSUBSHELL`. Otherwise it runs `n1->nredir.redirect = redir`. So when the sole command of a redirected brace group is a subshell, the group's redirects replace the subshell's own list. `{ (cmd) >&2; } 2>&1 >/dev/null` runs as `(cmd) 2>&1 >/dev/null`, and the bytes go to `/dev/null`. `case TLP` allocates a new `NSUBSHELL` node with `redirect = NULL`, so `( QUERY; ) <redirects>` never replaces a list that `QUERY` wrote.
+
+Measured 2026-10-14 with a dash binary that reports no version (behavior consistent with the 0.5.12-2 source) and this machine's bash. Each probe writes to named files: `E` is the subshell's own target and `O` is the group's target.
+
+| Q | bash | dash |
+|---|---|---|
+| `{ (echo hi) >E; } >O` | E | **O** |
+| `{ (echo hi) >&2; } 2>E` | E | **stdout** |
+| `{ (echo hi) >&2; } 2>E >O; :` (group not the shell's last command) | E | **O** |
+| `{ :; (echo hi) >E; } >O` (subshell last, not sole) | E | E |
+| `{ (echo hi) >E && :; } >O` | E | E |
+| `{ { (echo hi) >E; }; } >O` (plain inner braces collapse to the subshell node) | E | **O** |
+| `( (echo hi) >E; ) >O` | E | E |
+| `( { (echo hi) >E; } ) >O` | E | E |
+
+The third row shows that the no-fork exit path is not the cause. The fourth row shows that "last command" was too broad.
 
 Why no local run caught it: the machine's `sh` is bash, and the test's own comment says it expects `sh` to differ for syntax (`|&`, `<(`) but treats the remaining rows as shell-independent.
 
