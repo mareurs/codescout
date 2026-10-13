@@ -1,24 +1,13 @@
-//! `codescout backfill-chunks` — give every artifact with no chunk rows a
-//! chunked, embedded representation.
+//! `codescout backfill-chunks` — repair missing chunk metadata and vectors.
 //!
-//! **Why this exists as a separate command rather than a reindex flag.** The
-//! artifacts it targets are exactly the ones `librarian(action="reindex")`
-//! DECLINES to process: their content is stamped as seen while unembedded, so
-//! `content_unchanged` is true and the embed is skipped on every later run
-//! (`docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
-//! A backfill routed through the ordinary walk inherits that gate and reports
-//! success having done nothing.
+//! Pages the catalog without a filesystem walk or the indexer's content-hash gate.
+//! Retry selects missing vector coverage, including chunks left by failed writes,
+//! and preserves vectors that are already present. Each page is flushed before its
+//! progress marker advances; legacy cursors cannot hide incomplete coverage.
 //!
-//! **Why CLI and not an MCP action.** [`backfill_chunk_vectors`] holds the
-//! catalog lock for the whole run, and the run is thousands of remote embedding
-//! round-trips. In the long-lived MCP server that would block every other tool
-//! call — including other sessions sharing this catalog — for minutes. A
-//! one-shot process has no such neighbours, so the lock is uncontended by
-//! construction rather than by care.
-//!
-//! It EMPTIES the hole; it does not close it. The stamp/gate ordering is
-//! untouched, which is why `reindex`'s `vectorless` count stays the thing to
-//! watch afterwards.
+//! A model-dimension change is explicit and backed up. It requires `--all` because
+//! the sqlite-vec table is shared across every project in the catalog.
+//! The catalog lock is released across embedding awaits.
 //!
 //! [`backfill_chunk_vectors`]: crate::librarian::indexer::backfill_chunk_vectors
 
@@ -33,9 +22,8 @@ pub struct BackfillChunksArgs {
     #[command(flatten)]
     pub common: CommonOpts,
 
-    /// Vectors to accumulate before flushing to the catalog. The resume cursor
-    /// advances only after a flush, so this is also the most work an interrupted
-    /// run can lose.
+    /// Artifacts per catalog page. Each nonempty page's vectors are flushed
+    /// before its progress marker advances; retry skips already-persisted vectors.
     #[arg(long, default_value_t = 100)]
     pub batch: usize,
 

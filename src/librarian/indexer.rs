@@ -162,11 +162,11 @@ pub fn first_h1(body: &str) -> Option<String> {
 ///
 /// Shared by both enqueue sites in [`index_repo_sync`] — the changed-content
 /// path and the forced-re-embed path through the unchanged-row early return —
-/// and by [`backfill_chunk_vectors`]. Keeping it in one place is what stops
-/// those three from drifting apart.
+/// and by [`backfill_chunk_vectors`] when no stored chunks exist. Input composition
+/// is shared with persisted-chunk repair through [`embed_queue_from_chunks`].
 ///
 /// `grain` decides how many vectors this artifact costs — see [`ChunkGrain`],
-/// which is `Artifact` unless the project opted in. It is an explicit parameter
+/// whose default is `Chunk`. It is an explicit parameter
 /// at every call site, with no defaulting overload, for the same reason
 /// [`crate::librarian::catalog::chunk::build_chunks`]'s `line_offset` is: a
 /// caller that forgets it silently writes the wrong thing, and the version of
@@ -206,7 +206,17 @@ pub(crate) fn embed_queue_items(
     // Built once per artifact, not per chunk: a ledger has hundreds of chunks and
     // one heading table.
     let titles = crate::librarian::entry_token::entry_titles_by_token(body);
-    Ok(stored
+    Ok(embed_queue_from_chunks(id, title, stored, &titles))
+}
+/// Compose embedding inputs from stored rows and their entry-title context.
+/// Ordinary indexing supplies the current body; repair supplies persisted chunks.
+fn embed_queue_from_chunks(
+    id: &str,
+    title: Option<String>,
+    stored: Vec<crate::librarian::catalog::chunk::ChunkRow>,
+    titles: &std::collections::HashMap<String, String>,
+) -> Vec<EmbedQueueItem> {
+    stored
         .into_iter()
         .filter(|r| !r.content.trim().is_empty())
         .map(|r| {
@@ -250,8 +260,9 @@ pub(crate) fn embed_queue_items(
                 file_sha256: None,
             }
         })
-        .collect())
+        .collect()
 }
+
 /// Stamp every queued chunk with the artifact hash the walk computed.
 ///
 /// Exists so the two production call sites in [`index_repo_sync`] cannot
@@ -912,8 +923,6 @@ pub fn write_embeddings_v2_with(
     embeddings: &[(String, Vec<f32>)],
     allow_dim_migration: bool,
 ) -> Result<()> {
-    use rusqlite::OptionalExtension;
-
     if embeddings.is_empty() {
         return Ok(());
     }
@@ -938,6 +947,25 @@ pub fn write_embeddings_v2_with(
         }
     }
 
+    ensure_artifact_vec_v2_dim(cat, batch_dim, allow_dim_migration)?;
+
+    for (chunk_id, vec) in embeddings {
+        let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+        cat.conn.execute(
+            "DELETE FROM artifact_vec_v2 WHERE id = ?1",
+            rusqlite::params![chunk_id],
+        )?;
+        cat.conn.execute(
+            "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
+            rusqlite::params![chunk_id, blob],
+        )?;
+    }
+    Ok(())
+}
+/// Validate the searched table before selecting work or writing a vector batch.
+/// An opted-in rebuild is backed up and invalidates vectors across every project.
+fn ensure_artifact_vec_v2_dim(cat: &Catalog, dim: usize, allow_dim_migration: bool) -> Result<()> {
+    use rusqlite::OptionalExtension;
     let existing_blob_len: Option<i64> = cat
         .conn
         .query_row(
@@ -952,7 +980,7 @@ pub fn write_embeddings_v2_with(
         None => vec0_table_dim(&cat.conn, "artifact_vec_v2")?,
     };
     if let Some(existing_dim) = existing_dim {
-        if batch_dim != existing_dim {
+        if dim != existing_dim {
             if !allow_dim_migration {
                 anyhow::bail!(
                     "embedding dim mismatch vs artifact_vec_v2: batch={}, existing={}. \
@@ -963,30 +991,19 @@ pub fn write_embeddings_v2_with(
                      repo) — this destroys existing chunk vectors for EVERY project \
                      sharing this catalog (artifact_chunk rows are untouched; re-running \
                      backfill-chunks regenerates their vectors).",
-                    batch_dim,
+                    dim,
                     existing_dim
                 );
             }
             tracing::warn!(
-                "{ARTIFACT_VEC_MIGRATE_ENV}=1: rebuilding artifact_vec_v2 {existing_dim}->{batch_dim} \
+                "{ARTIFACT_VEC_MIGRATE_ENV}=1: rebuilding artifact_vec_v2 {existing_dim}->{dim} \
                  — this deletes chunk vectors for every project sharing this catalog; \
                  re-run backfill-chunks to regenerate them"
             );
-            rebuild_artifact_vec_v2_at_dim(&cat.conn, batch_dim)?;
+            rebuild_artifact_vec_v2_at_dim(&cat.conn, dim)?;
         }
     }
 
-    for (chunk_id, vec) in embeddings {
-        let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
-        cat.conn.execute(
-            "DELETE FROM artifact_vec_v2 WHERE id = ?1",
-            rusqlite::params![chunk_id],
-        )?;
-        cat.conn.execute(
-            "INSERT INTO artifact_vec_v2 (id, embedding) VALUES (?1, ?2)",
-            rusqlite::params![chunk_id, blob],
-        )?;
-    }
     Ok(())
 }
 
@@ -1115,60 +1132,49 @@ pub struct BackfillReport {
 /// `catalog_meta` key holding the resume cursor, as `"<updated_at>|<id>"`.
 const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
 
-/// Give every artifact that has **no chunk rows** a chunked, embedded
-/// representation, without going through [`index_repo_sync`] at all.
+/// Repair artifacts with missing chunk metadata or missing sqlite-vec vectors,
+/// without a filesystem walk or the ordinary indexer's content-hash gate.
 ///
-/// **Why it bypasses the indexer rather than calling it.** The artifacts this
-/// exists for are exactly the ones the indexer *declines to process*: their
-/// content is stamped as seen, so `content_unchanged` is true and the embed is
-/// skipped — an absorbing state
-/// (`docs/issues/archive/2026-09-02-indexer-stamps-content-seen-before-it-embeds.md`).
-/// A backfill routed through the normal walk would inherit that gate and report
-/// success having done nothing. This one consults `content_unchanged` NOWHERE.
+/// Existing chunks are repaired from persisted content and title context without
+/// re-chunking changed files or changing their grain. Healthy vectors are kept.
+/// Durable vector rows are the resume checkpoint:
+/// each invocation re-selects incomplete coverage rather than trusting a legacy cursor
+/// that may have advanced before its vectors were written. A page's progress marker is
+/// recorded only after all of that page's pending vectors are durable.
 ///
-/// **What it does not fix.** The stamp/gate ordering is untouched, so this
-/// empties the hole without closing it: a later run can dig a new one. That is
-/// what `IndexReport::vectorless` is for, and it is why Task 11's *swap* stays
-/// blocked while this half does not — filling a hole is safe; renaming the table
-/// out from under a still-broken writer is not.
+/// The catalog mutex is released across every embedding await. `batch` bounds the
+/// number of artifacts in a page; every nonempty page is flushed before checkpointing.
 ///
-/// **Resumable**, because a full corpus is ~90k chunks of remote round-trips and
-/// an interrupted run must not start over. The cursor is `(updated_at, id)` —
-/// `updated_at` alone is not unique, and a cursor that is not a total order
-/// silently skips every artifact sharing a timestamp with the last one written.
-/// It advances only after a batch is durably written.
+/// `root_prefix` is the optional path LIKE pattern, already suffixed with `%`.
+/// `None` explicitly walks the whole catalog. A backed-up dimension change requires
+/// that catalog-wide scope because `artifact_vec_v2` is shared across projects.
 ///
-/// Takes the `Mutex` rather than a `&Catalog` so the lock can be RELEASED across
-/// each embedding await. Holding it for the whole run would work in the one-shot
-/// CLI and would be wrong anywhere else, and a signature that only works in one
-/// caller is a trap for the second one.
-///
-/// `batch` is the flush size; 100 matches [`index_repo`]'s own flush.
-///
-/// `root_prefix` scopes the walk to artifacts whose `abs_path` matches it (pass the value
-/// already suffixed with `%`, as the `vectorless` query does). `None` walks the whole catalog.
-///
-/// **The scope parameter exists because its absence was a defect, not for symmetry.** One
-/// catalog serves every project on a host, and this function had no way to be told which one
-/// the caller meant — its page query carried no `abs_path` predicate at all. Meanwhile the
-/// `vectorless` counter that sends people here IS root-scoped (`WHERE a.abs_path LIKE ?1`), so
-/// the number you act on and the population you touch were different by construction. Measured
-/// 2026-09-07: invoked to repair the 10 artifacts reported for one project, it processed 2807
-/// across every repo on the host — 61,613 chunks, ~7.4 GB, ~11 minutes against a shared
-/// embedder, with nothing before or during the run naming a scope.
-/// `docs/issues/archive/2026-09-07-backfill-chunks-walks-the-whole-catalog-not-the-project.md`
-///
-/// **The resume cursor is keyed by scope**, so an interrupted project-scoped run cannot make a
-/// later catalog-wide run resume past rows it never examined. A *completed* run clears its own
-/// cursor, so this only bites in the interrupted case — which is the case the cursor exists for,
-/// and the one where a shared key would be silent.
+/// The migration opt-in is read once at this entry point and passed as data to the
+/// implementation, so tests exercise the same recovery path without changing global env.
 pub async fn backfill_chunk_vectors(
     catalog: &parking_lot::Mutex<Catalog>,
     svc: &crate::librarian::embedding::EmbeddingService,
     batch: usize,
     root_prefix: Option<&str>,
 ) -> Result<BackfillReport> {
-    use crate::librarian::catalog::gc::{get_meta, set_meta};
+    let raw = std::env::var(ARTIFACT_VEC_MIGRATE_ENV).ok();
+    backfill_chunk_vectors_with(
+        catalog,
+        svc,
+        batch,
+        root_prefix,
+        migrate_opt_in(raw.as_deref()),
+    )
+    .await
+}
+async fn backfill_chunk_vectors_with(
+    catalog: &parking_lot::Mutex<Catalog>,
+    svc: &crate::librarian::embedding::EmbeddingService,
+    batch: usize,
+    root_prefix: Option<&str>,
+    allow_dim_migration: bool,
+) -> Result<BackfillReport> {
+    use crate::librarian::catalog::gc::set_meta;
 
     let flush = batch.max(1);
     let mut report = BackfillReport::default();
@@ -1180,16 +1186,38 @@ pub async fn backfill_chunk_vectors(
         None => BACKFILL_CURSOR.to_string(),
     };
 
-    let (mut cur_updated, mut cur_id) = {
-        let cat = catalog.lock();
-        match get_meta(&cat.conn, &cursor_key)? {
-            Some(s) => match s.split_once('|') {
-                Some((u, i)) => (u.parse::<i64>().unwrap_or(i64::MIN), i.to_string()),
-                None => (i64::MIN, String::new()),
-            },
-            None => (i64::MIN, String::new()),
-        }
+    // Remote embedders learn their dimensions from their first response.
+    // Probe outside the catalog lock and before any catalog write; the probe
+    // is compatibility information, never a persisted or reported vector.
+    let expected_dim = match svc.embedder.dimensions() {
+        0 => svc
+            .embed_artifact(None, "codescout backfill dimension probe")
+            .await?
+            .len(),
+        known => known,
     };
+    if expected_dim == 0 {
+        anyhow::bail!("embedding dim is 0 — configure an embedder before backfilling");
+    }
+    {
+        let cat = catalog.lock();
+        if allow_dim_migration
+            && root_prefix.is_some()
+            && vec0_table_dim(&cat.conn, "artifact_vec_v2")?.is_some_and(|dim| dim != expected_dim)
+        {
+            anyhow::bail!(
+                "artifact_vec_v2 is shared across projects: dimension migration requires \
+                 backfill-chunks --all with {ARTIFACT_VEC_MIGRATE_ENV}=1. \
+                 No vectors have been changed."
+            );
+        }
+        ensure_artifact_vec_v2_dim(&cat, expected_dim, allow_dim_migration)?;
+        // Older runs could checkpoint chunk metadata before vectors were durable.
+        // Re-select from persisted vector coverage instead of trusting that cursor.
+        // Completed chunks are excluded, so retry does not repeat completed embedding.
+        set_meta(&cat.conn, &cursor_key, "")?;
+    }
+    let (mut cur_updated, mut cur_id) = (i64::MIN, String::new());
 
     let mut pending: Vec<(String, Vec<f32>)> = Vec::with_capacity(flush);
 
@@ -1206,9 +1234,12 @@ pub async fn backfill_chunk_vectors(
             let cat = catalog.lock();
             let sql = format!(
                 "SELECT a.id, a.abs_path, a.title, a.updated_at FROM artifact a \
-                 WHERE NOT EXISTS ( \
+                 WHERE (NOT EXISTS ( \
                    SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
-                 ) \
+                 ) OR EXISTS ( \
+                   SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
+                   AND NOT EXISTS (SELECT 1 FROM artifact_vec_v2 v WHERE v.id = c.chunk_id) \
+                 )) \
                  AND (a.updated_at > ?1 OR (a.updated_at = ?1 AND a.id > ?2)){} \
                  ORDER BY a.updated_at, a.id LIMIT ?3",
                 if root_prefix.is_some() {
@@ -1238,30 +1269,52 @@ pub async fn backfill_chunk_vectors(
             cur_updated = updated_at;
             cur_id = id.clone();
 
-            let content = match std::fs::read_to_string(&abs_path) {
-                Ok(c) => c,
-                // Match on the KIND. `Err(_)` folded absence, a non-UTF-8 payload and every
-                // other I/O failure into `missing_file`, whose name asserts the first and
-                // whose named remedy (`reindex` removes rows whose file is gone) can only
-                // clear the first. A present-but-binary file counted as "missing" forever,
-                // re-selected by `NOT EXISTS` on every future run.
-                Err(e) => {
-                    match e.kind() {
-                        std::io::ErrorKind::NotFound => report.missing_file += 1,
-                        std::io::ErrorKind::InvalidData => report.unreadable_encoding += 1,
-                        _ => report.unreadable_other += 1,
-                    }
-                    continue;
-                }
+            let stored = {
+                let cat = catalog.lock();
+                crate::librarian::catalog::chunk::chunks_for(&cat, &id)?
             };
-            // The whole file, frontmatter included — embed_queue_items owns
-            // the split now, so this path and index_repo_sync's cannot land
-            // chunks in two different coordinate spaces.
-            let grain = chunk_grain_for_file(std::path::Path::new(&abs_path), &mut grain_cache);
-            let items = {
+            let mut items = if stored.is_empty() {
+                let content = match std::fs::read_to_string(&abs_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        match e.kind() {
+                            std::io::ErrorKind::NotFound => report.missing_file += 1,
+                            std::io::ErrorKind::InvalidData => report.unreadable_encoding += 1,
+                            _ => report.unreadable_other += 1,
+                        }
+                        continue;
+                    }
+                };
+                // With no stored rows, create them from the whole source file.
+                // Ordinary indexing owns subsequent content or grain changes.
+                let grain = chunk_grain_for_file(std::path::Path::new(&abs_path), &mut grain_cache);
                 let cat = catalog.lock();
                 embed_queue_items(&cat, &id, title, &content, grain)?
+            } else {
+                // Repair persisted content, never re-chunk disk while preserving
+                // healthy vectors: changed entry titles can alter embedding inputs
+                // even when a mid-entry chunk's own bytes remain identical.
+                // Read title context from ALL ordered stored chunks before filtering
+                // missing vectors; the heading-bearing chunk may already be healthy.
+                let stored_body = stored
+                    .iter()
+                    .map(|row| row.content.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let titles = crate::librarian::entry_token::entry_titles_by_token(&stored_body);
+                embed_queue_from_chunks(&id, title, stored, &titles)
             };
+            {
+                let cat = catalog.lock();
+                let mut stmt = cat.conn.prepare(
+                    "SELECT c.chunk_id FROM artifact_chunk c WHERE c.artifact_id = ?1 \
+                     AND NOT EXISTS (SELECT 1 FROM artifact_vec_v2 v WHERE v.id = c.chunk_id)",
+                )?;
+                let missing = stmt
+                    .query_map([&id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<std::collections::HashSet<_>>>()?;
+                items.retain(|item| missing.contains(&item.chunk_id));
+            }
             if items.is_empty() {
                 report.skipped_empty += 1;
                 continue;
@@ -1281,9 +1334,9 @@ pub async fn backfill_chunk_vectors(
 
         // Write, THEN advance the cursor: the other order loses a batch on a
         // crash between the two and calls the range done.
-        if pending.len() >= flush {
+        if !pending.is_empty() {
             let cat = catalog.lock();
-            write_embeddings_v2(&cat, &pending)?;
+            write_embeddings_v2_with(&cat, &pending, false)?;
             report.embedded += pending.len();
             pending.clear();
         }
@@ -1293,11 +1346,6 @@ pub async fn backfill_chunk_vectors(
         }
     }
 
-    if !pending.is_empty() {
-        let cat = catalog.lock();
-        write_embeddings_v2(&cat, &pending)?;
-        report.embedded += pending.len();
-    }
     // A completed run CLEARS the cursor, and this is not tidiness. Left at the
     // end of the corpus, the next run's `updated_at > cursor` predicate would
     // skip any artifact that becomes vectorless later with an earlier timestamp —
@@ -1936,24 +1984,413 @@ kind = "memory"
     /// because `artifact_vec_v2` is declared `FLOAT[768]` and sqlite-vec rejects
     /// anything else at INSERT, which is a loud failure and not a silent one.
     fn backfill_svc() -> crate::librarian::embedding::EmbeddingService {
-        struct OkEmbedder;
+        backfill_svc_at_dim(768)
+    }
+
+    fn backfill_svc_at_dim(dim: usize) -> crate::librarian::embedding::EmbeddingService {
+        struct FixedEmbedder(usize);
         #[async_trait::async_trait]
-        impl codescout_embed::Embedder for OkEmbedder {
+        impl codescout_embed::Embedder for FixedEmbedder {
             fn dimensions(&self) -> usize {
-                768
+                self.0
             }
             async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
                 Ok(texts
                     .iter()
                     .map(|_| {
-                        let mut v = vec![0.0f32; 768];
-                        v[0] = 1.0;
-                        v
+                        let mut vector = vec![0.0; self.0];
+                        vector[0] = 1.0;
+                        vector
                     })
                     .collect())
             }
         }
-        crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(OkEmbedder))
+        crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(FixedEmbedder(dim)))
+    }
+
+    fn backfill_recording_svc(
+        declared_dim: usize,
+        returned_dim: usize,
+        seen: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+    ) -> crate::librarian::embedding::EmbeddingService {
+        struct RecordingEmbedder {
+            declared_dim: usize,
+            returned_dim: usize,
+            seen: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
+        }
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for RecordingEmbedder {
+            fn dimensions(&self) -> usize {
+                self.declared_dim
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                self.seen
+                    .lock()
+                    .extend(texts.iter().map(|text| text.to_string()));
+                Ok(texts
+                    .iter()
+                    .map(|_| {
+                        let mut vector = vec![0.0; self.returned_dim];
+                        vector[0] = 1.0;
+                        vector
+                    })
+                    .collect())
+            }
+        }
+        crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(RecordingEmbedder {
+            declared_dim,
+            returned_dim,
+            seen,
+        }))
+    }
+
+    async fn check_backfill_preserves_stored_chunks_after_disk_change(change: &str) {
+        use crate::librarian::catalog::chunk::chunks_for;
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("recovery.md");
+        let body = format!(
+            "## W-81 — choose a gate by its feedback latency\n\n{}",
+            "aaaa bbbb cccc dddd eeee\n".repeat(120),
+        );
+        std::fs::write(&path, body).unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        let initial = backfill_chunk_vectors_with(&catalog, &backfill_svc(), 100, None, false)
+            .await
+            .unwrap();
+        let (artifact_id, stored, healthy_blob) = {
+            let cat = catalog.lock();
+            let id: String = cat
+                .conn
+                .query_row("SELECT id FROM artifact", [], |r| r.get(0))
+                .unwrap();
+            let stored = chunks_for(&cat, &id).unwrap();
+            assert!(stored.len() > 1, "fixture must have a mid-entry chunk");
+            assert_eq!(initial.embedded, stored.len());
+            assert!(!stored.last().unwrap().content.trim_start().starts_with('#'));
+            cat.conn
+                .execute(
+                    "DELETE FROM artifact_vec_v2 WHERE id = ?1",
+                    [&stored.last().unwrap().chunk_id],
+                )
+                .unwrap();
+            let mut sentinel = vec![0.0f32; 768];
+            sentinel[1] = 1.0;
+            write_embeddings_v2_with(&cat, &[(stored[0].chunk_id.clone(), sentinel)], false)
+                .unwrap();
+            let blob: Vec<u8> = cat
+                .conn
+                .query_row(
+                    "SELECT embedding FROM artifact_vec_v2 WHERE id = ?1",
+                    [&stored[0].chunk_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            (id, stored, blob)
+        };
+        match change {
+            "content" => std::fs::write(
+                &path,
+                "## W-81 — an unrelated replacement title\n\nreplacement content\n",
+            )
+            .unwrap(),
+            "grain" => {
+                std::fs::create_dir(root.path().join(".codescout")).unwrap();
+                std::fs::write(
+                    root.path().join(".codescout/project.toml"),
+                    "[librarian]\nchunk_grain = false\n",
+                )
+                .unwrap();
+            }
+            "absent" => std::fs::remove_file(&path).unwrap(),
+            _ => panic!("unknown fixture change"),
+        }
+        let seen = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let retry = backfill_chunk_vectors_with(
+            &catalog,
+            &backfill_recording_svc(768, 768, seen.clone()),
+            100,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let cat = catalog.lock();
+        assert_eq!(
+            chunks_for(&cat, &artifact_id).unwrap(),
+            stored,
+            "backfill repairs persisted rows instead of re-chunking disk ({change})"
+        );
+        let after: Vec<u8> = cat
+            .conn
+            .query_row(
+                "SELECT embedding FROM artifact_vec_v2 WHERE id = ?1",
+                [&stored[0].chunk_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            after, healthy_blob,
+            "healthy vector must remain byte-identical ({change})"
+        );
+        assert_eq!(retry.artifacts, 1);
+        assert_eq!(
+            retry.embedded, 1,
+            "only the missing stored chunk needs embedding ({change})"
+        );
+        assert_eq!(retry.missing_file, 0, "stored content needs no source file");
+        let missing: i64 = cat.conn.query_row(
+            "SELECT COUNT(*) FROM artifact_chunk c WHERE NOT EXISTS (SELECT 1 FROM artifact_vec_v2 v WHERE v.id = c.chunk_id)",
+            [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(missing, 0);
+        let observed = seen.lock();
+        assert_eq!(observed.len(), 1);
+        let expected_suffix = format!(
+            "W-81 — choose a gate by its feedback latency\n\n{}",
+            stored.last().unwrap().content,
+        );
+        assert!(
+            observed[0].ends_with(&expected_suffix),
+            "repair must embed the stored entry title and content: {:?}",
+            observed[0]
+        );
+    }
+
+    #[tokio::test]
+    async fn backfill_preserves_stored_chunks_after_content_changes() {
+        check_backfill_preserves_stored_chunks_after_disk_change("content").await;
+    }
+
+    #[tokio::test]
+    async fn backfill_preserves_stored_chunks_after_grain_changes() {
+        check_backfill_preserves_stored_chunks_after_disk_change("grain").await;
+    }
+
+    #[tokio::test]
+    async fn backfill_preserves_stored_chunks_when_the_source_file_is_absent() {
+        check_backfill_preserves_stored_chunks_after_disk_change("absent").await;
+    }
+
+    #[tokio::test]
+    async fn backfill_probes_deferred_dimensions_and_counts_only_persisted_vectors() {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("remote.md"), "# Remote\n\nstored body\n").unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            true,
+            false,
+            false,
+        )
+        .unwrap();
+        let seen = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let report = backfill_chunk_vectors_with(
+            &catalog,
+            &backfill_recording_svc(0, 768, seen.clone()),
+            100,
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.artifacts, 1);
+        assert_eq!(
+            report.embedded, 1,
+            "the dimension probe is not a stored vector"
+        );
+        let observed = seen.lock();
+        assert_eq!(
+            observed.len(),
+            2,
+            "one preflight probe, then one stored chunk"
+        );
+        assert!(!observed[0].trim().is_empty());
+        assert!(!observed[0].contains("stored body"));
+        assert!(observed[1].contains("stored body"));
+        let vectors: i64 = catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(vectors, 1);
+    }
+
+    #[tokio::test]
+    async fn backfill_failed_or_empty_dimension_probe_preserves_catalog_state() {
+        struct ProbeEmbedder {
+            empty: bool,
+            attempts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        }
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for ProbeEmbedder {
+            fn dimensions(&self) -> usize {
+                0
+            }
+            async fn embed(&self, _texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                self.attempts
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if self.empty {
+                    Ok(vec![Vec::new()])
+                } else {
+                    anyhow::bail!("remote probe unavailable")
+                }
+            }
+        }
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("preserve.md"), "# Preserve\n\nbody\n").unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            true,
+            false,
+            false,
+        )
+        .unwrap();
+        let (id, chunks, vector_before) = {
+            let cat = catalog.lock();
+            let id: String = cat
+                .conn
+                .query_row("SELECT id FROM artifact", [], |row| row.get(0))
+                .unwrap();
+            let chunks = crate::librarian::catalog::chunk::chunks_for(&cat, &id).unwrap();
+            write_embeddings_v2_with(&cat, &[(chunks[0].chunk_id.clone(), vec![0.5; 768])], false)
+                .unwrap();
+            crate::librarian::catalog::gc::set_meta(&cat.conn, BACKFILL_CURSOR, "19|sentinel")
+                .unwrap();
+            let vector: Vec<u8> = cat
+                .conn
+                .query_row("SELECT embedding FROM artifact_vec_v2", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            (id, chunks, vector)
+        };
+        for empty in [false, true] {
+            let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let svc = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
+                ProbeEmbedder {
+                    empty,
+                    attempts: attempts.clone(),
+                },
+            ));
+            let error = backfill_chunk_vectors_with(&catalog, &svc, 100, None, true)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                attempts.load(std::sync::atomic::Ordering::Relaxed),
+                1,
+                "unknown dimensions must be probed before being rejected"
+            );
+            assert!(
+                error.to_string().contains(if empty {
+                    "embedding dim is 0"
+                } else {
+                    "remote probe unavailable"
+                }),
+                "{error:#}"
+            );
+            let cat = catalog.lock();
+            assert_eq!(
+                crate::librarian::catalog::chunk::chunks_for(&cat, &id).unwrap(),
+                chunks
+            );
+            let vector_after: Vec<u8> = cat
+                .conn
+                .query_row("SELECT embedding FROM artifact_vec_v2", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(vector_after, vector_before);
+            assert_eq!(
+                vec0_table_dim(&cat.conn, "artifact_vec_v2").unwrap(),
+                Some(768)
+            );
+            assert_eq!(
+                crate::librarian::catalog::gc::get_meta(&cat.conn, BACKFILL_CURSOR)
+                    .unwrap()
+                    .as_deref(),
+                Some("19|sentinel")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn backfill_probes_deferred_dimensions_before_catalog_wide_migration() {
+        check_backfill_dimension_failure_then_opted_in_retry(true, true).await;
+    }
+
+    #[tokio::test]
+    async fn backfill_cursor_does_not_advance_when_vector_persistence_fails() {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("write-failure.md"),
+            "# Write failure\n\nbody\n",
+        )
+        .unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        let seen = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let err = backfill_chunk_vectors_with(
+            &catalog,
+            &backfill_recording_svc(768, 767, seen.clone()),
+            100,
+            None,
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("embedding dim mismatch"),
+            "{err:#}"
+        );
+        assert_eq!(
+            seen.lock().len(),
+            1,
+            "embedding completed before persistence failed"
+        );
+        {
+            let cat = catalog.lock();
+            let vectors: i64 = cat
+                .conn
+                .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(vectors, 0);
+            let cursor =
+                crate::librarian::catalog::gc::get_meta(&cat.conn, BACKFILL_CURSOR).unwrap();
+            assert!(
+                cursor.as_deref().unwrap_or("").is_empty(),
+                "failed vector persistence must not checkpoint the artifact: {cursor:?}"
+            );
+        }
+        let retry = backfill_chunk_vectors_with(&catalog, &backfill_svc(), 100, None, false)
+            .await
+            .unwrap();
+        assert_eq!(retry.embedded, 1);
     }
 
     fn md_rules() -> Vec<CompiledRule> {
@@ -2051,6 +2488,502 @@ kind = "memory"
             "an ordinary run no longer declines — the ORDERING defect is closed, so \
          a new artifact can no longer fall in"
         );
+    }
+
+    #[tokio::test]
+    async fn backfill_retry_recovers_chunks_left_by_an_embedding_failure() {
+        use crate::librarian::artifact_store::{ArtifactVectorStore, SqliteVecArtifactStore};
+
+        struct FailingEmbedder;
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for FailingEmbedder {
+            fn dimensions(&self) -> usize {
+                768
+            }
+            async fn embed(&self, _texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                anyhow::bail!("fixture embedding failed");
+            }
+        }
+
+        let catalog =
+            std::sync::Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap()));
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("recovery.md");
+        std::fs::write(&path, "# Recovery\n\nalpha\n\n## Second\n\nbeta\n").unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let failing = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
+            FailingEmbedder,
+        ));
+        let error = backfill_chunk_vectors(&catalog, &failing, 100, None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("fixture embedding failed"));
+        {
+            let cat = catalog.lock();
+            let chunks: i64 = cat
+                .conn
+                .query_row("SELECT COUNT(*) FROM artifact_chunk", [], |row| row.get(0))
+                .unwrap();
+            let vectors: i64 = cat
+                .conn
+                .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(chunks, 2, "the failed embed left both chunk rows");
+            assert_eq!(vectors, 0, "neither chunk was durably embedded");
+        }
+
+        let retry = backfill_chunk_vectors(&catalog, &backfill_svc(), 100, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            retry.artifacts, 1,
+            "existing chunks must not hide a failed embed"
+        );
+        assert_eq!(retry.embedded, 2, "both missing vectors must be repaired");
+        let mut query = vec![0.0; 768];
+        query[0] = 1.0;
+        let hits = SqliteVecArtifactStore::new(catalog.clone())
+            .knn(None, &query, 10)
+            .await
+            .unwrap();
+        assert_eq!(
+            hits.len(),
+            2,
+            "a successful retry must restore actual search"
+        );
+        let cat = catalog.lock();
+        for (chunk_id, _) in hits {
+            let found: String = cat.conn.query_row(
+                "SELECT a.abs_path FROM artifact a JOIN artifact_chunk c ON c.artifact_id = a.id WHERE c.chunk_id = ?1",
+                [chunk_id], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(found, path.to_string_lossy());
+        }
+    }
+
+    #[tokio::test]
+    async fn backfill_retry_repairs_vectors_before_a_legacy_cursor_without_reembedding_healthy_chunks(
+    ) {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("recovery.md"),
+            "# Recovery\n\nalpha\n\n## Second\n\nbeta\n",
+        )
+        .unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        let first = backfill_chunk_vectors_with(&catalog, &backfill_svc(), 100, None, false)
+            .await
+            .unwrap();
+        assert_eq!(first.embedded, 2);
+        let (healthy_id, healthy_blob, chunks_before) =
+            {
+                let cat = catalog.lock();
+                let ids: Vec<String> = cat
+                    .conn
+                    .prepare("SELECT chunk_id FROM artifact_chunk ORDER BY chunk_ix")
+                    .unwrap()
+                    .query_map([], |row| row.get(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<_>>()
+                    .unwrap();
+                cat.conn
+                    .execute("DELETE FROM artifact_vec_v2 WHERE id = ?1", [&ids[0]])
+                    .unwrap();
+                let mut sentinel = vec![0.0f32; 768];
+                sentinel[1] = 1.0;
+                write_embeddings_v2_with(&cat, &[(ids[1].clone(), sentinel)], false).unwrap();
+                let blob: Vec<u8> = cat
+                    .conn
+                    .query_row(
+                        "SELECT embedding FROM artifact_vec_v2 WHERE id = ?1",
+                        [&ids[1]],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let (updated, artifact_id): (i64, String) = cat.conn.query_row(
+                "SELECT updated_at, id FROM artifact ORDER BY updated_at DESC, id DESC LIMIT 1", [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+                crate::librarian::catalog::gc::set_meta(
+                    &cat.conn,
+                    BACKFILL_CURSOR,
+                    &format!("{updated}|{artifact_id}"),
+                )
+                .unwrap();
+                let chunks: Vec<(String, String, String)> = cat.conn.prepare(
+                "SELECT chunk_id, artifact_id, content FROM artifact_chunk ORDER BY chunk_ix",
+            ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+                .collect::<rusqlite::Result<_>>().unwrap();
+                (ids[1].clone(), blob, chunks)
+            };
+        let retry = backfill_chunk_vectors_with(&catalog, &backfill_svc(), 100, None, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            retry.artifacts, 1,
+            "a legacy cursor must not conceal missing vectors"
+        );
+        assert_eq!(retry.embedded, 1, "repair only the missing chunk");
+        let cat = catalog.lock();
+        let healthy_after: Vec<u8> = cat
+            .conn
+            .query_row(
+                "SELECT embedding FROM artifact_vec_v2 WHERE id = ?1",
+                [healthy_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            healthy_after, healthy_blob,
+            "a healthy vector must remain byte-identical"
+        );
+        let chunks_after: Vec<(String, String, String)> = cat
+            .conn
+            .prepare("SELECT chunk_id, artifact_id, content FROM artifact_chunk ORDER BY chunk_ix")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            chunks_after, chunks_before,
+            "recovery preserves IDs and chunk contents"
+        );
+        let missing: i64 = cat.conn.query_row(
+            "SELECT COUNT(*) FROM artifact_chunk c WHERE NOT EXISTS (SELECT 1 FROM artifact_vec_v2 v WHERE v.id = c.chunk_id)",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(missing, 0);
+    }
+
+    #[tokio::test]
+    async fn backfill_cursor_never_passes_vectors_waiting_for_the_final_flush() {
+        use crate::librarian::catalog::gc::get_meta;
+        struct FailSecondEmbedder(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for FailSecondEmbedder {
+            fn dimensions(&self) -> usize {
+                768
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+                    anyhow::bail!("second page embedding failed");
+                }
+                Ok(texts
+                    .iter()
+                    .map(|_| {
+                        let mut vector = vec![0.0; 768];
+                        vector[0] = 1.0;
+                        vector
+                    })
+                    .collect())
+            }
+        }
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        std::fs::write(root.path().join("b.md"), "# B\n\nbravo\n").unwrap();
+        std::fs::write(root.path().join("absent.md"), "# Missing\n\nbody\n").unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        std::fs::remove_file(root.path().join("absent.md")).unwrap();
+        {
+            let cat = catalog.lock();
+            cat.conn
+                .execute("UPDATE artifact SET updated_at = 1", [])
+                .unwrap();
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET updated_at = 0 WHERE abs_path = ?1",
+                    [root.path().join("absent.md").to_string_lossy().into_owned()],
+                )
+                .unwrap();
+        }
+        // Three artifacts with page size two: the first page has one real document
+        // and one missing file, so its one vector sits below the flush threshold.
+        let svc = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
+            FailSecondEmbedder(std::sync::atomic::AtomicUsize::new(0)),
+        ));
+        let error = backfill_chunk_vectors_with(&catalog, &svc, 2, None, false)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("second page embedding failed"));
+        {
+            let cat = catalog.lock();
+            let cursor = get_meta(&cat.conn, BACKFILL_CURSOR)
+                .unwrap()
+                .unwrap_or_default();
+            assert!(
+                !cursor.is_empty(),
+                "the first durable page has a checkpoint"
+            );
+            let id = cursor.split_once('|').unwrap().1;
+            let vectors: i64 = cat.conn.query_row(
+                    "SELECT COUNT(*) FROM artifact_chunk c JOIN artifact_vec_v2 v ON v.id = c.chunk_id WHERE c.artifact_id = ?1",
+                    [id], |row| row.get(0),
+                ).unwrap();
+            assert_eq!(
+                vectors, 1,
+                "a checkpoint must never name an unwritten vector"
+            );
+        }
+        let retry = backfill_chunk_vectors_with(&catalog, &backfill_svc(), 2, None, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            retry.embedded, 1,
+            "the completed first page must not be repeated"
+        );
+        let vectors: i64 = catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(vectors, 2);
+    }
+
+    async fn check_backfill_dimension_failure_then_opted_in_retry(
+        seed_vectors: bool,
+        deferred_dimensions: bool,
+    ) {
+        use crate::librarian::artifact_store::{ArtifactVectorStore, SqliteVecArtifactStore};
+        let scratch = tempfile::tempdir().unwrap();
+        let project = scratch.path().join("projects");
+        std::fs::create_dir_all(project.join("a")).unwrap();
+        std::fs::create_dir_all(project.join("b")).unwrap();
+        let a_path = project.join("a/a.md");
+        let b_path = project.join("b/b.md");
+        std::fs::write(&a_path, "# A\n\nalpha\n").unwrap();
+        std::fs::write(&b_path, "# B\n\nbravo\n").unwrap();
+        let catalog = std::sync::Arc::new(parking_lot::Mutex::new(
+            Catalog::open(&scratch.path().join("catalog.db")).unwrap(),
+        ));
+        let (artifacts_before, chunks_before) = {
+            let cat = catalog.lock();
+            index_repo_sync(
+                &cat,
+                &md_rules(),
+                &project,
+                &globset::GlobSet::empty(),
+                true,
+                false,
+                false,
+            )
+            .unwrap();
+            let mut statement = cat.conn.prepare(
+                    "SELECT id, abs_path, status, title, created_at, updated_at FROM artifact ORDER BY id",
+                ).unwrap();
+            let artifacts: Vec<(String, String, String, Option<String>, i64, i64)> = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let chunks: Vec<(String, String, String)> = cat
+                .conn
+                .prepare(
+                    "SELECT chunk_id, artifact_id, content FROM artifact_chunk ORDER BY chunk_id",
+                )
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(artifacts.len(), 2);
+            assert_eq!(chunks.len(), 2);
+            if seed_vectors {
+                for (chunk_id, _, _) in &chunks {
+                    let mut vector = vec![0.0f32; 768];
+                    vector[0] = 1.0;
+                    write_embeddings_v2_with(&cat, &[(chunk_id.clone(), vector)], false).unwrap();
+                }
+            }
+            (artifacts, chunks)
+        };
+        let svc = if deferred_dimensions {
+            backfill_recording_svc(
+                0,
+                384,
+                std::sync::Arc::new(parking_lot::Mutex::new(Vec::new())),
+            )
+        } else {
+            backfill_svc_at_dim(384)
+        };
+        let error = backfill_chunk_vectors_with(&catalog, &svc, 100, None, false)
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("embedding dim mismatch"),
+            "{error:#}"
+        );
+        {
+            let cat = catalog.lock();
+            assert_eq!(
+                vec0_table_dim(&cat.conn, "artifact_vec_v2").unwrap(),
+                Some(768)
+            );
+            let vectors: i64 = cat
+                .conn
+                .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(
+                vectors,
+                if seed_vectors { 2 } else { 0 },
+                "no opt-in means no vector destruction"
+            );
+        }
+        let prefix = format!("{}%", project.join("a").display());
+        let scoped_error = backfill_chunk_vectors_with(&catalog, &svc, 100, Some(&prefix), true)
+            .await
+            .unwrap_err();
+        assert!(
+            scoped_error.to_string().contains("--all"),
+            "a shared dimension change must require explicit catalog scope: {scoped_error:#}"
+        );
+
+        let retry = backfill_chunk_vectors_with(&catalog, &svc, 100, None, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            retry.artifacts, 2,
+            "both projects need recovery after a shared-table rebuild"
+        );
+        assert_eq!(
+            retry.embedded, 2,
+            "retry must not report success over an empty index"
+        );
+        {
+            let cat = catalog.lock();
+            assert_eq!(
+                vec0_table_dim(&cat.conn, "artifact_vec_v2").unwrap(),
+                Some(384)
+            );
+            let artifacts_after: Vec<(String, String, String, Option<String>, i64, i64)> = cat.conn.prepare(
+                    "SELECT id, abs_path, status, title, created_at, updated_at FROM artifact ORDER BY id",
+                ).unwrap().query_map([], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)))
+                    .unwrap().collect::<rusqlite::Result<_>>().unwrap();
+            assert_eq!(
+                artifacts_after, artifacts_before,
+                "ordinary artifact metadata must survive"
+            );
+            let chunks_after: Vec<(String, String, String)> = cat
+                .conn
+                .prepare(
+                    "SELECT chunk_id, artifact_id, content FROM artifact_chunk ORDER BY chunk_id",
+                )
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert_eq!(
+                chunks_after, chunks_before,
+                "chunk IDs and text must survive"
+            );
+        }
+        let mut query = vec![0.0; 384];
+        query[0] = 1.0;
+        let hits = SqliteVecArtifactStore::new(catalog.clone())
+            .knn(None, &query, 10)
+            .await
+            .unwrap();
+        let found: std::collections::HashSet<String> = {
+            let cat = catalog.lock();
+            hits.into_iter().map(|(id,_)| cat.conn.query_row(
+                    "SELECT a.abs_path FROM artifact a JOIN artifact_chunk c ON c.artifact_id = a.id WHERE c.chunk_id = ?1",
+                    [id], |row| row.get(0),
+                ).unwrap()).collect()
+        };
+        assert_eq!(
+            found,
+            [
+                a_path.to_string_lossy().into_owned(),
+                b_path.to_string_lossy().into_owned()
+            ]
+            .into_iter()
+            .collect(),
+            "search must work for both projects"
+        );
+        let backups: Vec<_> = std::fs::read_dir(scratch.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(".pre-vec-v2-dim-bak.")
+            })
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "the destructive dimension change must be backed up"
+        );
+        let backup = Catalog::open(&backups[0]).unwrap();
+        assert_eq!(
+            vec0_table_dim(&backup.conn, "artifact_vec_v2").unwrap(),
+            Some(768)
+        );
+        let count: i64 = backup
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count,
+            if seed_vectors { 2 } else { 0 },
+            "backup precedes the shared-table drop"
+        );
+        let again = backfill_chunk_vectors_with(&catalog, &svc, 100, None, false)
+            .await
+            .unwrap();
+        assert_eq!(again.artifacts, 0);
+        assert_eq!(again.embedded, 0);
+    }
+
+    #[tokio::test]
+    async fn backfill_dimension_retry_recovers_existing_chunks_in_every_project() {
+        check_backfill_dimension_failure_then_opted_in_retry(false, false).await;
+    }
+
+    #[tokio::test]
+    async fn backfill_model_change_detects_an_already_populated_old_dimension() {
+        check_backfill_dimension_failure_then_opted_in_retry(true, false).await;
     }
 
     /// The backfill's per-file resolver, guarded in the direction that

@@ -333,9 +333,11 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 /// `embed_queue_items` rebuilds its title table from the CURRENT body on every
 /// call and returns an item for EVERY stored chunk, and both production callers
 /// embed every item they are handed. `index_repo_sync` gates per ARTIFACT on the
-/// file's `sha256`, which any rename changes, and `backfill_chunk_vectors` selects
-/// only artifacts with no chunk rows at all. So a reused row's vector is
-/// overwritten with freshly-titled text whatever this key matched on.
+/// file's `sha256`, which any rename changes. Backfill calls `embed_queue_items`
+/// only for artifacts with no stored chunks. Its partial-vector repair path reads
+/// persisted chunks and their stored title context directly, without re-chunking.
+/// So a reused row from this writer is overwritten with freshly-titled text
+/// whatever this key matched on.
 ///
 /// **So do not filter that queue against chunks that already hold a vector.** It
 /// is the obvious cost optimisation, and it is precisely the change that would
