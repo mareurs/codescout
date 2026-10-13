@@ -53,7 +53,9 @@ None. The cause is the missing runner; there is nothing to hypothesise.
 
 ## Fix
 
-Not done. One direction, not chosen: add a job of its own at the END of `.github/workflows/ci.yml` that runs `bash tests/attribute-red.sh`, following the pattern of `push-guard-tests`. Whether the suite needs a configured git identity on the runner was not checked. Adding a CI job is a CI change and was left for a decision.
+Implemented 2026-10-14 in `4f5b16e4` (`experiments`): the job `attribute-red-tests` at the END of `.github/workflows/ci.yml` runs `bash tests/attribute-red.sh`, with its own comment, following `gate-slot-tests`. The job configures no git identity: `env -i PATH=... HOME=<empty dir> GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null bash tests/attribute-red.sh` passed every case (45 of 45) on 2026-10-14. That is a local simulation of the runner, not a CI run.
+
+Not done: `scripts/gate.sh` still does not run the suite. Adding it there is a separate decision, because the gate's own tests are the ones other sessions wait on.
 
 ## Tests added
 
@@ -65,7 +67,7 @@ Run `bash tests/attribute-red.sh` by hand before changing `scripts/attribute-red
 
 ## Resume
 
-Add the job to `.github/workflows/ci.yml` (end of file), push, and read the first CI result before closing. Archive once that job is green.
+Push `experiments`, read the first result of the `attribute-red-tests` job, and close this bug only when it is green. Then archive it with the fix SHA `4f5b16e4730592c662d5b9e484bbc33b35971120` and patch-id `bb101f16a080b6ba3f57381953117d7d57f92fca`.
 
 ## References
 

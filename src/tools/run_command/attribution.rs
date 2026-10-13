@@ -279,7 +279,7 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
 /// last line of stderr, never as silence: silence is what the engine says for "nothing to
 /// attribute", and the two must not read the same. A timeout is a different case and stays
 /// silent (`wip_author_diagnostic_with`).
-/// docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+/// docs/issues/archive/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
 fn engine_outcome(
     success: bool,
     code: Option<i32>,
@@ -695,7 +695,7 @@ mod tests {
     /// The engine exits 0 for every outcome it chooses (nothing dirty, nothing named, a notice
     /// of its own). A non-zero exit is therefore never a verdict about the red: it is an
     /// uncaught exception, and its traceback used to go to `Stdio::null()`.
-    /// docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+    /// docs/issues/archive/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
     #[test]
     fn a_crashed_helper_is_a_tooling_notice_and_never_silence() {
         let stderr =

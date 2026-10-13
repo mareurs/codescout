@@ -333,7 +333,7 @@ has "a missing dependency is a TOOLING failure" "$out" "NOT evidence"
 
 # The same failure WITHOUT --explain, and read from stdout only: that is the one stream the
 # Rust caller keeps, so a notice that needs the flag, or goes to stderr, never reaches a red.
-# docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+# docs/issues/archive/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
 out="$(printf 'x' | REPO_ROOT="$T/repo" python3 "$bad/attribute-red.py" 2>/dev/null)"
 has "the import failure reaches stdout without --explain" "$out" "NOT evidence"
 has "the notice names the cause" "$out" "file-provenance.py"

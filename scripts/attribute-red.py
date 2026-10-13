@@ -190,7 +190,7 @@ def main(argv: list[str]) -> int:
         # STDOUT, and not only under --explain: this is a tooling failure, and a red that
         # carries no author line must not be readable as "nothing to attribute". Stdout is
         # the one stream the Rust caller keeps (it discards stderr).
-        # docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+        # docs/issues/archive/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
         print("[codescout] red attribution is unavailable: file-provenance.py could not be "
               f"imported ({why}). This is a tooling failure, NOT evidence that the red is "
               "nobody's.")

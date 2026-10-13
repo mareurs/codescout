@@ -60,7 +60,12 @@ None.
 
 ## Fix
 
-Not done. Two changes: in `claude-plugins`, replace `codescout_edit_markdown` in `EDIT_TOOLS`, in the refusal text and in `codescout-mode.test.mjs`, then run that repository's own tests. Locally, drop the two names from `contrib/pi/mcp.json`. The `claude-plugins` change belongs in that repository's own commit.
+Done 2026-10-14, in two places, none yet pushed or released:
+
+- `claude-plugins:f17afad96f0585e0cb80a40c413d6a0b4e2d5101` (patch-id `a84e2afad3c1448893261965966c8d0ee5e5225e`), on the branch `effort-routing-r1` of that repository. `codescout-mode.ts` now requires `codescout_edit_code` and `codescout_edit_file` only, and its refusal names those two. `codescout-mode.test.mjs` uses the post-collapse tool set and asserts that the block arms and that the refusal names no markdown tool: red before (native `edit` stayed active), green after under `node` 26. The same commit drops `codescout_read_markdown` from `SKILL_READ_TOOLS` in `harnesses/pi/extensions/codescout-companion.ts`, and both retired names from the `directTools` examples in `harnesses/pi/README.md`.
+- The local gitignored `contrib/pi/mcp.json` no longer lists `read_markdown` and `edit_markdown`; the file still parses and `grep` finds neither name.
+
+The companion hooks in the `claude-plugins` working tree do not match the retired names as live tools: `worktree-write-guard.test.sh` names `edit_markdown` on purpose, as a stale-name sentinel. The `il4-deny-hook.sh` and `pre-tool-guard.sh` files in the 1.12.2 plugin cache were not read.
 
 ## Tests added
 
@@ -72,7 +77,7 @@ Edit the local `mcp.json` by hand.
 
 ## Resume
 
-In `claude-plugins`, change the three lines above and run `codescout-mode.test.mjs` there. Then read `il4-deny-hook.sh` and `pre-tool-guard.sh` for the same names.
+The commit is on `effort-routing-r1`, another work stream's branch, because that is the branch checked out in `claude-plugins`. Move it to the branch that ships (`git cherry-pick f17afad` there), push it, and check that the installed extension is the symlink to the repository copy. Then archive this bug with the SHA and patch-id above.
 
 ## References
 

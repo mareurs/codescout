@@ -11,7 +11,7 @@ topic: authorship attribution at a red
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'TRACKED 7badc94a57797d7d — a helper failure is still silent by design: attribute-red.py prints its import failure only under --explain and the Rust caller still discards stderr. Full gate 2026-10-14: the first run was red on two tests outside this change (prompts::tests::reader_docs_contain_no_retired_call_forms, 46 hits, every one under the untracked .codescout/resident-private/codex-pilot-fix-20261013/commit-snapshot/; server::guide_hint_tests::native_context_wire_reaches_interactive_shell, open bug 098fca009ecbdd78). The second run, after only comment re-pointing, passed every lane: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. Why the reader-docs hits did not recur was not established. The fix''s own tests passed in both gate lanes, including the closure test and the empty-directory import test. Not run through a built binary against a real red.'
+unverified: 'CLEARED 2026-10-14. Was: a helper failure was still silent by design (attribute-red.py printed its import failure only under --explain and the Rust caller discarded stderr). Fixed in 4f5b16e4; the follow-up bug is archived as 84a755ff078acfa0. Not run through a built binary against a real red; the closure test and the empty-directory import test passed in both gate lanes on 2026-10-14.'
 ---
 
 # BUG: the embedded red-attribution helper ships 2 of its 6 modules, so in production the import fails and a red's author line disappears silently
@@ -100,7 +100,7 @@ Run `scripts/file-provenance.py` from the repository directly, where all sibling
 
 ## Resume
 
-Complete. Fixed in `3fb612b9`, public on `origin/experiments`. Making a helper failure visible (step 4 of the original plan) is tracked in `docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md`. Related: `docs/issues/archive/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md`, fixed in the same change.
+Complete. Fixed in `3fb612b9`, public on `origin/experiments`. Making a helper failure visible (step 4 of the original plan) was done afterwards in `4f5b16e4`; see `docs/issues/archive/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md`. Related: `docs/issues/archive/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md`, fixed in the same change.
 
 ## References
 

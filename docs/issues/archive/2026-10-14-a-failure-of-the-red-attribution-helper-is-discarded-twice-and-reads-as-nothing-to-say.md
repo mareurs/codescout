@@ -1,17 +1,18 @@
 ---
-id: '7badc94a57797d7d'
+id: 84a755ff078acfa0
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a failure of the red-attribution helper is discarded twice, so the author line vanishes with no trace and reads as "nothing to say"'
 owners:
 - marius
 tags:
 - cluster/unclassified
 topic: authorship attribution at a red
-closed: ''
+closed: 2026-10-14
 opened: 2026-10-14
 owner: marius
 severity: medium
+unverified: 'STANDING — a helper that TIMES OUT still ends silent, by design: a test pins it, because a scan that ran out of time is not a verdict. The failure notices are proved by unit tests on engine_outcome and by tests/attribute-red.sh, not through a built binary against a real red. Gate 2026-10-14: FMT=0 CLIPPY=0 LEAN=0; DEFAULT failed only native_context_wire_reaches_interactive_shell, the open bug 098fca009ecbdd78.'
 ---
 
 # BUG: a failure of the red-attribution helper is discarded twice, so the author line vanishes with no trace and reads as "nothing to say"
@@ -53,11 +54,25 @@ None.
 
 ## Fix
 
-Not done. One direction, not chosen: have the helper print a one-line tooling-failure notice to stdout (not only under `--explain`) when the import fails, and have the caller keep stderr. That changes what a red looks like to every user, so the wording and the opt-out need a decision first.
+Done 2026-10-14.
+
+- `scripts/attribute-red.py`: `_load_provenance` returns `(module, reason)` instead of swallowing the exception. When the import fails, `main` prints `[codescout] red attribution is unavailable: file-provenance.py could not be imported (<exception>). This is a tooling failure, NOT evidence that the red is nobody's.` to STDOUT on every run, not only under `--explain`.
+- `src/tools/run_command/attribution.rs`: the helper's stderr is piped, not nulled. The new `engine_outcome` turns a non-zero exit (an uncaught exception, or a signal) into the same kind of notice, with the last stderr line as the cause. A zero exit keeps its old behaviour: empty stdout is silence, text is text. A timeout is still silence.
+- The test `the_materialized_engine_imports_in_an_empty_directory` read stderr only, and the notice now lives on stdout, so it could no longer fail. It reads both streams.
+
+The wording was a decision the bug named. The text above is the choice made, and it keeps the rule that silence never reads as "nobody wrote it".
+
+## Fix provenance
+
+- **SHA:** `4f5b16e4730592c662d5b9e484bbc33b35971120` (`experiments`; the same commit adds the CI job for `tests/attribute-red.sh`)
+- **patch-id:** `bb101f16a080b6ba3f57381953117d7d57f92fca` (`git show 4f5b16e4 | git patch-id --stable`)
 
 ## Tests added
 
-None.
+- `tests/attribute-red.sh`: `the import failure reaches stdout without --explain` and `the notice names the cause`. Red before the change (empty output), 45 of 45 after.
+- `tools::run_command::attribution::tests::a_crashed_helper_is_a_tooling_notice_and_never_silence`, `a_helper_killed_by_a_signal_is_a_tooling_notice` and `a_clean_exit_keeps_its_stdout_and_its_silence`. Red before the change (they did not compile: `engine_outcome` did not exist), green after.
+
+Measured 2026-10-14: `cargo test --lib tools::run_command::attribution` 14 passed.
 
 ## Workarounds
 
@@ -65,7 +80,7 @@ Run `scripts/attribute-red.py --explain` by hand when a red should have named an
 
 ## Resume
 
-Decide the wording of a tooling-failure line, then add a test that runs the materialized helper with a sibling removed and requires that line. Keep the "never 'nobody wrote it'" rule.
+Complete. No next action.
 
 ## References
 
