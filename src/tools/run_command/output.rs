@@ -543,11 +543,11 @@ fn bound_buffer_stderr(
     let remedy = if own && can_wrap_query(query) {
         // WRAPPED, not appended: a redirection applies to the LAST command of a pipeline only, so
         // `a | b >&2 | c 2>&1 >/dev/null | cut` read `c`'s stderr and left `b`'s on the terminal. A
-        // brace group gives every stage the same stderr, and `{ q; } 2>&1 >/dev/null` is right for
-        // every one-pipeline shape, a single command included.
+        // subshell gives every stage the same stderr. Use `( q; )`, because dash loses the
+        // output of a redirected tail subshell in the brace form `{ (cmd) >&2; }`.
         format!(
             "this is the query's own stderr and is stored nowhere: rerun the whole query as \
-             `{{ QUERY; }} {OWN_STDERR_STAGE}` to read a window of it"
+             `( QUERY; ) {OWN_STDERR_STAGE}` to read a window of it"
         )
     } else if own {
         // A list hands the stage the LAST command's stderr only, and a shape the splitter does not
@@ -643,15 +643,15 @@ fn can_append_stage(query: &str, stage: &str) -> bool {
         && crate::util::path_security::detect_il3_violation(&format!("{query} {stage}")).is_none()
 }
 
-/// Whether `query` can be wrapped in a brace group, `{ query; } 2>&1 >/dev/null | cut -c1-4000`, to
+/// Whether `query` can be wrapped in a subshell, `( query; ) 2>&1 >/dev/null | cut -c1-4000`, to
 /// read ALL of its stderr. [`can_append_stage`] asks the same of a stage that reads stdout, where
 /// "last command" is right: a pipeline's stdout IS its last command's. A pipeline's stderr is every
 /// stage's, and only a group can redirect them together. The wrapping needs no model of how many
-/// stages there are; it needs the query to be one pipeline, so that the `; }` closes it and nothing
+/// stages there are; it needs the query to be one pipeline, so that the `; )` closes it and nothing
 /// else.
 ///
 /// No IL-3 question is asked, unlike [`can_append_stage`], and that is on purpose: the query already
-/// passed the gate when it ran, and the wrap adds only `} 2>&1 >/dev/null | cut -c1-4000`, whose last
+/// passed the gate when it ran, and the wrap adds only `) 2>&1 >/dev/null | cut -c1-4000`, whose last
 /// stage `cut` is a field selector the gate never counts as a trimmer. (The group also hides an
 /// unbounded producer from the gate's segment scan, so a verdict on the wrapped text would say
 /// nothing the query's own run had not already said.) If the stage ever becomes a trimmer, this is
@@ -663,7 +663,7 @@ fn can_wrap_query(query: &str) -> bool {
 /// The stage a non-slice query appends to read a window of a wide line.
 const WIDE_LINE_STAGE: &str = "| cut -c1-4000";
 
-/// The stage that follows the query's brace group to read a window of its own stderr, which no
+/// The stage that follows the query's subshell to read a window of its own stderr, which no
 /// buffer holds: see [`can_wrap_query`].
 const OWN_STDERR_STAGE: &str = "2>&1 >/dev/null | cut -c1-4000";
 
@@ -2082,7 +2082,7 @@ mod tests {
         }
     }
 
-    /// What `can_wrap_query` decides: the query is one pipeline, so `{ query; }` closes it and
+    /// What `can_wrap_query` decides: the query is one pipeline, so `( query; )` closes it and
     /// nothing else. A list, a comment, a heredoc and a `$(…)` are not. (It asks the IL-3 gate
     /// nothing; see its doc comment for why that is sound for the `| cut` stage.)
     #[test]
@@ -2423,7 +2423,7 @@ mod tests {
             "{own:.200}"
         );
         assert!(own.ends_with(" ---"), "{own:.0}");
-        assert!(own.contains("{ QUERY; } 2>&1 >/dev/null | cut -c1-4000"));
+        assert!(own.contains("( QUERY; ) 2>&1 >/dev/null | cut -c1-4000"));
 
         // A shape the wrap cannot take: advice, not a route.
         let (list, ..) = bound_buffer_stderr(&text, 20, "echo 1; cat @cmd_0bf0a111 >&2", true);

@@ -10883,9 +10883,9 @@ async fn a_full_plain_slice_window_stays_inside_the_limit_at_every_byte_near_the
 // applies to the LAST command of a pipeline: for `cat @X | tr -d '\n' >&2 | cat` the appended form
 // read the last `cat`'s stderr (nothing) and left the `tr`'s on the terminal; a stage that itself
 // ends in `>&2` swallowed it (`>&2 2>&1 >/dev/null` leaves fd 1 on the old stderr). The marker now
-// names the query inside a brace group, `{ QUERY; } 2>&1 >/dev/null | cut -c1-4000`. Every test
-// here RUNS the route the marker names under the real `sh` and compares bytes with the stream that
-// was cut.
+// names the query inside a subshell, `( QUERY; ) 2>&1 >/dev/null | cut -c1-4000`: dash loses
+// redirected subshell output inside the brace form. These tests run the recovery route under
+// the real `sh` and compare bytes with the stream that was cut.
 
 /// What `query` writes to STDERR when run by `sh` over real files: [`shell_truth`]'s twin.
 fn shell_stderr(
@@ -10925,14 +10925,14 @@ fn same_stream(a: &str, b: &str) -> bool {
     a.trim_end_matches('\n') == b.trim_end_matches('\n')
 }
 
-/// The route the own-stderr marker names, built by the edit it states: the WHOLE query in place of
-/// `QUERY` in `{ QUERY; } <stage>`, the stage read out of the marker.
+/// The route the own-stderr marker names: substitute the WHOLE query into the actual template,
+/// keeping the wrapper and stage exactly as emitted.
 fn wrapped_route_in(stderr: &str, query: &str) -> Option<String> {
-    let stage = regex::Regex::new(r"`\{ QUERY; \} ([^`]+)`")
+    let template = regex::Regex::new(r"`([^`]*QUERY[^`]*)`")
         .expect("static pattern")
         .captures(stderr)?[1]
         .to_string();
-    Some(format!("{{ {query}; }} {stage}"))
+    Some(template.replacen("QUERY", query, 1))
 }
 
 #[cfg(unix)]
@@ -11002,7 +11002,7 @@ async fn the_own_stderr_route_reads_the_stream_that_was_cut_whatever_the_shape_o
         // The wrapped route, under the same `sh`: exactly the stream that was cut, cut again.
         let wrapped = shell_truth(
             dir.path(),
-            &format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000"),
+            &format!("( {query}; ) 2>&1 >/dev/null | cut -c1-4000"),
             &subs,
         );
         assert!(
@@ -11026,7 +11026,7 @@ async fn the_own_stderr_route_reads_the_stream_that_was_cut_whatever_the_shape_o
             .unwrap_or_else(|| panic!("`{query}`: no route in the marker: {stderr:.0}"));
         assert_eq!(
             route,
-            format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000")
+            format!("( {query}; ) 2>&1 >/dev/null | cut -c1-4000")
         );
         let (t2, p2) = buffer_query(&ctx, route.clone()).await;
         assert!(
@@ -11044,6 +11044,35 @@ async fn the_own_stderr_route_reads_the_stream_that_was_cut_whatever_the_shape_o
         old_wrong >= 8,
         "the premise: the appended route reads the wrong stream for most pipelines"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_own_stderr_recovery_route_preserves_redirected_subshell_output() {
+    let (dir, ctx) = project_ctx().await;
+    for (label, expected, marker) in [
+        ("lines", "payload\n".repeat(30), "20 of 30 lines shown"),
+        ("bytes", format!("{}\n", "x".repeat(3000)), "bytes shown"),
+    ] {
+        let (a, sub) = stored_and_real(dir.path(), &ctx, &expected, &format!("{label}.txt"));
+        let query = format!("(cat {a}) >&2");
+        let (text, parsed) = buffer_query(&ctx, query.clone()).await;
+        let stderr = parsed["stderr"].as_str().expect("the query's own stderr");
+        assert!(stderr.contains(marker), "{label}: {text:.300}");
+        let route = wrapped_route_in(stderr, &query)
+            .unwrap_or_else(|| panic!("{label}: no recovery route: {stderr:.300}"));
+        assert_eq!(
+            shell_truth(dir.path(), &route, &[sub]),
+            expected,
+            "{label}: the emitted route must preserve the subshell's redirected stdout"
+        );
+        let (recovered_text, recovered) = buffer_query(&ctx, route).await;
+        assert_eq!(
+            recovered["stdout"].as_str().unwrap_or_default(),
+            expected,
+            "{label}: the recovery route through run_command: {recovered_text:.300}"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -11110,7 +11139,7 @@ async fn the_wrapped_own_stderr_route_matches_the_cut_stream_for_every_shape_the
         }
         wrapped_rows += 1;
         nonempty += usize::from(!own.is_empty());
-        let route = format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000");
+        let route = format!("( {query}; ) 2>&1 >/dev/null | cut -c1-4000");
         let wrapped = shell_truth(dir.path(), &route, &subs);
         let outer = shell_stderr(dir.path(), &route, &subs);
         assert!(
@@ -11244,7 +11273,7 @@ async fn an_own_stderr_cut_only_by_the_line_cap_names_the_route_to_the_rest() {
         .unwrap_or_else(|| panic!("no route in the marker: {stderr:.0}"));
     assert_eq!(
         route,
-        format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000")
+        format!("( {query}; ) 2>&1 >/dev/null | cut -c1-4000")
     );
     let expected = cut_4000(&shell_stderr(dir.path(), &query, &subs));
     assert_eq!(expected.lines().count(), 3000);
@@ -11328,7 +11357,7 @@ async fn the_route_of_a_line_cut_own_stderr_reads_the_stream_for_every_pipeline_
                 .unwrap_or_else(|| panic!("{what}: `{query}`: no route in {stderr:.0}"));
             assert_eq!(
                 route,
-                format!("{{ {query}; }} 2>&1 >/dev/null | cut -c1-4000")
+                format!("( {query}; ) 2>&1 >/dev/null | cut -c1-4000")
             );
 
             // The route, executed under the real `sh`, prints the stream that was cut ...
