@@ -404,7 +404,7 @@ mod tests {
     /// false. Before 2026-10-13 they skipped on ANY missing diagnostic and printed
     /// "python3 absent?" — a question mark standing where a check belonged. With python3
     /// present, a helper that cannot import its own modules (see
-    /// `docs/issues/2026-10-13-embedded-attribution-helper-ships-two-of-its-six-modules-so-a-red-loses-its-author-silently.md`)
+    /// `docs/issues/archive/2026-10-13-embedded-attribution-helper-ships-two-of-its-six-modules-so-a-red-loses-its-author-silently.md`)
     /// produces exactly that missing diagnostic, so those tests went green while the
     /// feature was dead.
     fn python3_present() -> bool {

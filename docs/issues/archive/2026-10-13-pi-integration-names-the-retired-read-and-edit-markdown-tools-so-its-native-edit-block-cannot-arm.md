@@ -1,5 +1,5 @@
 ---
-id: '3c7c72dd35e2df97'
+id: '5ed57996270880ed'
 kind: bug
 status: fixed
 title: 'BUG: the Pi integration still names the retired read_markdown and edit_markdown, so its native-edit block can never arm and its tool map points at tools that do not exist'
@@ -11,7 +11,7 @@ topic: Pi integration drift after the tool-surface collapse
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. Not observed in a live Pi session. The claude-plugins copy of the extension and the local untracked contrib/pi/mcp.json still name the retired tools.'
+unverified: 'TRACKED 9490a30dbffb0fc9 — the claude-plugins copy of the extension and the local gitignored contrib/pi/mcp.json still name the retired tools. Full gate 2026-10-14: the first run was red on two tests outside this change (prompts::tests::reader_docs_contain_no_retired_call_forms, 46 hits, every one under the untracked .codescout/resident-private/codex-pilot-fix-20261013/commit-snapshot/; server::guide_hint_tests::native_context_wire_reaches_interactive_shell, open bug 098fca009ecbdd78). The second run, after only comment re-pointing, passed every lane: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. Why the reader-docs hits did not recur was not established. The fix''s own test server::tests::pi_integration_references_only_real_tools passed in both gate lanes. Not observed in a live Pi session.'
 ---
 
 # BUG: the Pi integration still names the retired `read_markdown` and `edit_markdown`, so its native-`edit` block can never arm and its tool map points at tools that do not exist
@@ -62,7 +62,7 @@ Lines above, read 2026-10-13. A second copy: `../claude-plugins/codescout-compan
 
 ## Fix
 
-Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
+Implemented 2026-10-13 and committed. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
 
 1. `contrib/pi/codescout-mode.ts`: `EDIT_TOOLS` is now `["codescout_edit_code", "codescout_edit_file"]`, so `hasAll` can be true on a post-collapse binary and the native `edit` block can arm. The two refusal texts name `read_file` / `edit_file` and say they address Markdown by heading.
 2. `contrib/pi/mcp.json.example`: `read_markdown` and `edit_markdown` removed from `directTools`.
@@ -70,6 +70,11 @@ Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experimen
 4. The drift guard, `server::tests::pi_integration_references_only_real_tools`: reads the registered tool names and checks the three files. Its allowlist holds names that are not codescout tools (Pi's `bash`, `edit`, `read`, `write`, `tool_call`; `researcher_research_run`; shell utilities) and codescout parameters (`action`, `heading`, `include_body`).
 
 NOT done: the untracked local `contrib/pi/mcp.json` (git ignores it; its owner must remove the two names by hand), and the copy of the extension in `../claude-plugins/codescout-companion/.pi/extensions/` with its test fixture. That is another repository and needs its own change.
+
+## Fix provenance
+
+- **SHA:** `3fb612b96d5c4ad4fcd192a7c889c4a36c85ea88` (`experiments`; one commit that also fixes the two sibling bugs of 2026-10-13)
+- **patch-id:** `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`, re-observed 2026-10-14)
 
 ## Tests added
 
@@ -83,7 +88,7 @@ Edit the local `~/.pi` copy and `mcp.json` by hand to remove the two names.
 
 ## Resume
 
-Fixed in `3fb612b9`. Remaining: archive once the gate is green; fix the `claude-plugins` copy in its own repository; tell the owner of the local `mcp.json` to drop the two names.
+Complete for this repository. Fixed in `3fb612b9`, public on `origin/experiments`. The `claude-plugins` copy of the extension and the local gitignored `contrib/pi/mcp.json` still name the retired tools; that work is tracked in `docs/issues/2026-10-14-the-claude-plugins-pi-extension-and-the-local-pi-mcp-json-still-name-the-retired-markdown-tools.md`. `contrib/pi/mcp.json` is matched by `.gitignore:137`; it is not merely untracked.
 
 ## References
 

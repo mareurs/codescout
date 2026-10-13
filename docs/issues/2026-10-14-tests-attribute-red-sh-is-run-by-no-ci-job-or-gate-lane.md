@@ -1,0 +1,74 @@
+---
+id: f1e8539dbf3cb90f
+kind: bug
+status: open
+title: 'BUG: tests/attribute-red.sh (43 cases) is run by no CI job and no gate lane, so its suite sat 5 cases red for two days with every gate green'
+owners:
+- marius
+tags:
+- cluster/declared-not-wired
+topic: authorship attribution at a red
+closed: ''
+opened: 2026-10-14
+owner: marius
+severity: medium
+---
+
+# BUG: tests/attribute-red.sh (43 cases) is run by no CI job and no gate lane, so its suite sat 5 cases red for two days with every gate green
+
+## Summary
+
+`tests/attribute-red.sh` is the regression suite for `scripts/attribute-red.py`, the engine that names who wrote a dirty file at a red. Nothing runs it. `.github/workflows/ci.yml` and `scripts/gate.sh` do not mention it, so a defect in the engine cannot fail a build. Found while fixing `docs/issues/archive/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md`.
+
+## Symptom (Effect)
+
+The suite passed 36 and failed 5 at `5ae71b35`. It had been red since `eed25579` (2026-10-11), and every gate in that window was green, because no gate runs it. The 2026-10-13 fix made it pass again, and nothing re-checks that.
+
+## Reproduction
+
+At HEAD, search the tree for a runner:
+
+```
+grep -rn 'attribute-red\.sh' --include='*.yml' --include='*.sh' --include='*.py' --include='*.toml' --include='*.rs' .
+```
+
+The only hit is a code comment, `src/tools/run_command/attribution.rs:532`. Measured 2026-10-14. The `shell-tests` job (`.github/workflows/ci.yml:99-115`) runs `hooks-discrimination.sh`, `file-provenance.sh` and `peer-sessions.sh` only.
+
+## Environment
+
+Linux, `experiments` at `388416f2`. The suite passes by hand in this checkout: `bash tests/attribute-red.sh` gave `passed=43 failed=0` on 2026-10-14. Whether it passes on `ubuntu-latest` is not measured; it needs `python3` and `git`.
+
+## Root cause
+
+The suite was written without a runner and no rule requires one. `ci.yml:73-98` records the same defect for three other suites on 2026-09-01 and names its cost: a suite nothing runs is evidence about one instant. Measured 2026-10-14 by the grep above.
+
+## Evidence
+
+- The fixed bug above, section Tests added: 36 passed / 5 failed at `5ae71b35`; 41 / 41 and then 43 / 43 after `3fb612b9`.
+- `ci.yml:117-121`: `shell-tests` is a known-flaky lane, so new suites get their own job, appended at the end of the file so no existing `ci.yml:<line>` citation shifts.
+
+## Hypotheses tried
+
+None. The cause is the missing runner; there is nothing to hypothesise.
+
+## Fix
+
+Not done. One direction, not chosen: add a job of its own at the END of `.github/workflows/ci.yml` that runs `bash tests/attribute-red.sh`, following the pattern of `push-guard-tests`. Whether the suite needs a configured git identity on the runner was not checked. Adding a CI job is a CI change and was left for a decision.
+
+## Tests added
+
+None. The defect is the missing runner; the suite itself already exists.
+
+## Workarounds
+
+Run `bash tests/attribute-red.sh` by hand before changing `scripts/attribute-red.py`, `scripts/file-provenance.py` or `scripts/session_context.py`.
+
+## Resume
+
+Add the job to `.github/workflows/ci.yml` (end of file), push, and read the first CI result before closing. Archive once that job is green.
+
+## References
+
+- `tests/attribute-red.sh`, `scripts/attribute-red.py`
+- `.github/workflows/ci.yml:73-115`
+- `docs/issues/archive/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md`

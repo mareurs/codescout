@@ -225,7 +225,7 @@ def main(argv: list[str]) -> int:
     # ever marked live. `file-provenance.py`'s own `main()` does exactly these two
     # lines; resolving through `resolve_context` is also what gives a Codex session
     # an identity here at all.
-    # docs/issues/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md
+    # docs/issues/archive/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md
     live = {fp.principal_key("claude-code", sid): rows for sid, rows in native_live.items()}
     resolution = fp.resolve_context(root, os.environ)
     me = (fp.principal_key(resolution.context.harness, resolution.context.session_id)

@@ -1,5 +1,5 @@
 ---
-id: '7ef107df65c84edd'
+id: bf051af0e4dc6bc6
 kind: bug
 status: fixed
 title: 'BUG: attribute-red compares a raw session id with qualified owners, so a session''s own uncommitted write reads as a peer''s'
@@ -11,7 +11,7 @@ topic: authorship attribution at a red
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. tests/attribute-red.sh passes 43/43 by hand but has no runner in CI or the gate, so nothing re-checks it. A Codex session''s own write is not covered.'
+unverified: 'TRACKED f1e8539dbf3cb90f — tests/attribute-red.sh still has no CI or gate runner. Full gate 2026-10-14: the first run was red on two tests outside this change (prompts::tests::reader_docs_contain_no_retired_call_forms, 46 hits, every one under the untracked .codescout/resident-private/codex-pilot-fix-20261013/commit-snapshot/; server::guide_hint_tests::native_context_wire_reaches_interactive_shell, open bug 098fca009ecbdd78). The second run, after only comment re-pointing, passed every lane: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. Why the reader-docs hits did not recur was not established. tests/attribute-red.sh passed 43 of 43 by hand on 2026-10-14. A Codex session''s own write is not covered, because that needs a Codex transcript fixture.'
 ---
 
 # BUG: attribute-red compares a raw session id with qualified owners, so a session's own uncommitted write reads as a peer's
@@ -28,7 +28,7 @@ Predicted from the code, not observed on a real red: when the session that wrote
 
 ## Reproduction
 
-Not yet reproduced end to end. Best lead: seed `owners` with one entry `("claude-code:S", <time after last commit>)` for a dirty path, set `CLAUDE_CODE_SESSION_ID=S`, and call `attribute-red.py --paths <that path>`. By the code the foreign branch runs. This needs the helper to import, so run it from `scripts/` until the sibling-module bug is fixed (`docs/issues/2026-10-13-embedded-attribution-helper-ships-two-of-its-six-modules-so-a-red-loses-its-author-silently.md`).
+Not yet reproduced end to end. Best lead: seed `owners` with one entry `("claude-code:S", <time after last commit>)` for a dirty path, set `CLAUDE_CODE_SESSION_ID=S`, and call `attribute-red.py --paths <that path>`. By the code the foreign branch runs. This needs the helper to import, so run it from `scripts/` until the sibling-module bug is fixed (`docs/issues/archive/2026-10-13-embedded-attribution-helper-ships-two-of-its-six-modules-so-a-red-loses-its-author-silently.md`).
 
 ## Environment
 
@@ -56,7 +56,7 @@ Source lines above. No transcript run.
 
 ## Fix
 
-Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
+Implemented 2026-10-13 and committed. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
 
 In `scripts/attribute-red.py`, stage 3:
 
@@ -65,6 +65,11 @@ In `scripts/attribute-red.py`, stage 3:
 3. The "written by THIS session" line uses `fp.short_principal(me)`.
 
 NOT done, from the original plan: a message for an unresolved identity, and the switch to `scan_provenance` so coverage gaps reach the output. Both are separate changes.
+
+## Fix provenance
+
+- **SHA:** `3fb612b96d5c4ad4fcd192a7c889c4a36c85ea88` (`experiments`; one commit that also fixes the two sibling bugs of 2026-10-13)
+- **patch-id:** `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`, re-observed 2026-10-14)
 
 ## Tests added
 
@@ -85,9 +90,9 @@ Run `scripts/file-provenance.py` directly. It resolves the identity correctly.
 
 ## Resume
 
-Fixed in `3fb612b9`. Remaining: archive once the gate is green.
+Complete. Fixed in `3fb612b9`, public on `origin/experiments`. The missing runner is tracked in `docs/issues/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md`.
 
-Found while fixing, and not fixed here: `tests/attribute-red.sh` has no runner. Verified 2026-10-13 by `grep attribute-red.sh` over the whole tree outside `docs/`: the only hit is a code comment. `.github/workflows/ci.yml` job `shell-tests` runs `hooks-discrimination.sh`, `file-provenance.sh` and `peer-sessions.sh` only, and `scripts/gate.sh` does not run it either. That is how this suite sat 5 cases red from `eed25579` (2026-10-11) with every gate green, and it is the same defect the `shell-tests` comment records for 2026-09-01. Adding `bash tests/attribute-red.sh` to that job is a CI change and was left for a decision.
+Found while fixing, kept here as the record: `tests/attribute-red.sh` has no runner. Verified 2026-10-13 and again 2026-10-14 by a repository grep: the only hit is a code comment. `.github/workflows/ci.yml` job `shell-tests` runs `hooks-discrimination.sh`, `file-provenance.sh` and `peer-sessions.sh` only, and `scripts/gate.sh` does not run it. That is how the suite sat 5 cases red from `eed25579` (2026-10-11) with every gate green.
 
 ## References
 

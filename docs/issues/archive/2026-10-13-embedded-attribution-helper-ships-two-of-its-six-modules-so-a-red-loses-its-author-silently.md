@@ -1,5 +1,5 @@
 ---
-id: '84114310d21d2c1b'
+id: '21c5b1c366478566'
 kind: bug
 status: fixed
 title: 'BUG: the embedded red-attribution helper ships 2 of its 6 modules, so in production the import fails and a red''s author line disappears silently'
@@ -11,7 +11,7 @@ topic: authorship attribution at a red
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. Not run through a built binary against a real red. A helper failure is still silent by design (plan step 4 not done).'
+unverified: 'TRACKED 7badc94a57797d7d — a helper failure is still silent by design: attribute-red.py prints its import failure only under --explain and the Rust caller still discards stderr. Full gate 2026-10-14: the first run was red on two tests outside this change (prompts::tests::reader_docs_contain_no_retired_call_forms, 46 hits, every one under the untracked .codescout/resident-private/codex-pilot-fix-20261013/commit-snapshot/; server::guide_hint_tests::native_context_wire_reaches_interactive_shell, open bug 098fca009ecbdd78). The second run, after only comment re-pointing, passed every lane: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. Why the reader-docs hits did not recur was not established. The fix''s own tests passed in both gate lanes, including the closure test and the empty-directory import test. Not run through a built binary against a real red.'
 ---
 
 # BUG: the embedded red-attribution helper ships 2 of its 6 modules, so in production the import fails and a red's author line disappears silently
@@ -71,7 +71,7 @@ The reproduction output is quoted under Symptom. The imports are at `scripts/fil
 
 ## Fix
 
-Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
+Implemented 2026-10-13 and committed. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
 
 1. `src/tools/run_command/attribution.rs`: the two `include_str!` constants became one list, `EMBEDDED_SCRIPTS`, of all six modules (`attribute-red.py` first, as the entry point). The directory hash covers every name and body, and `materialize_into` writes every entry.
 2. The closure test (`the_materialized_set_is_closed_under_its_own_local_imports`) reads the imports out of the files that were actually written and requires every sibling that exists under `scripts/` to be beside them. It needs no hand-kept list, so a seventh module cannot be forgotten silently.
@@ -79,6 +79,11 @@ Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experimen
 4. `a_red_naming_a_dirty_file_reaches_the_engine` and `the_same_red_at_exit_zero_still_answers` used to skip on any missing hint. They now assert when `python3` is present. Before the fix they printed `skipping: no diagnostic (python3 absent?)` while `python3` was present, so the two real-engine tests were vacuous. After it, `a_red_naming…` runs the real scan (19 s for 11 tests).
 
 NOT done, from the original plan: step 4, making a helper failure visible. `attribute-red.py` still prints its import failure only under `--explain`, and the Rust caller still discards stderr. The closure test is now what guards the import set; the silent-on-failure design is unchanged.
+
+## Fix provenance
+
+- **SHA:** `3fb612b96d5c4ad4fcd192a7c889c4a36c85ea88` (`experiments`; one commit that also fixes the two sibling bugs of 2026-10-13)
+- **patch-id:** `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`, re-observed 2026-10-14)
 
 ## Tests added
 
@@ -95,7 +100,7 @@ Run `scripts/file-provenance.py` from the repository directly, where all sibling
 
 ## Resume
 
-Fixed in `3fb612b9`. Remaining: archive once the gate is green (`docs/issues/archive/`). Related: `docs/issues/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md`, fixed in the same change.
+Complete. Fixed in `3fb612b9`, public on `origin/experiments`. Making a helper failure visible (step 4 of the original plan) is tracked in `docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md`. Related: `docs/issues/archive/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md`, fixed in the same change.
 
 ## References
 

@@ -5851,7 +5851,7 @@ mod tests {
     /// only when EVERY name in `EDIT_TOOLS` is registered, so one dead name left the guard
     /// permanently off, and `AGENTS.md` sent the model to tools that answer with the MCP
     /// unknown-tool error.
-    /// docs/issues/2026-10-13-pi-integration-names-the-retired-read-and-edit-markdown-tools-so-its-native-edit-block-cannot-arm.md
+    /// docs/issues/archive/2026-10-13-pi-integration-names-the-retired-read-and-edit-markdown-tools-so-its-native-edit-block-cannot-arm.md
     ///
     /// Three surfaces, three shapes, one question — is each name a tool the server
     /// registers:
