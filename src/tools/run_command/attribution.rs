@@ -272,6 +272,40 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
     Some(dir.join(EMBEDDED_SCRIPTS[0].0))
 }
 
+/// Turn the engine's finished process into the line a red carries, if any.
+///
+/// The engine exits 0 for every outcome it chooses, so only a non-zero exit — an uncaught
+/// exception, or a signal — is a crash. A crash is reported as a TOOLING failure naming the
+/// last line of stderr, never as silence: silence is what the engine says for "nothing to
+/// attribute", and the two must not read the same. A timeout is a different case and stays
+/// silent (`wip_author_diagnostic_with`).
+/// docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+fn engine_outcome(
+    success: bool,
+    code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Option<String> {
+    if !success {
+        let cause = String::from_utf8_lossy(stderr)
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| l.trim().chars().take(200).collect::<String>())
+            .unwrap_or_else(|| "no stderr".to_string());
+        let how = match code {
+            Some(c) => format!("exited {c}"),
+            None => "was ended by a signal".to_string(),
+        };
+        return Some(format!(
+            "[codescout] red attribution is unavailable: its helper {how} ({cause}). \
+             This is a tooling failure, NOT evidence that the red is nobody's."
+        ));
+    }
+    let text = String::from_utf8_lossy(stdout).trim_end().to_string();
+    (!text.trim().is_empty()).then_some(text)
+}
+
 /// Does this text look like it NAMES a file in a failure?
 ///
 /// A cheap, allocation-free **necessary condition** for `attribute-red.py`'s
@@ -374,7 +408,7 @@ pub(crate) async fn wip_author_diagnostic_with(
         .current_dir(work_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::piped());
 
     let mut child = cmd.spawn().ok()?;
     if let Some(mut stdin) = child.stdin.take() {
@@ -390,8 +424,12 @@ pub(crate) async fn wip_author_diagnostic_with(
         // Timed out or failed. Silent, per the doc above — never "nobody wrote it".
         _ => return None,
     };
-    let text = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
-    (!text.is_empty()).then_some(text)
+    engine_outcome(
+        out.status.success(),
+        out.status.code(),
+        &out.stdout,
+        &out.stderr,
+    )
 }
 
 #[cfg(test)]
@@ -556,10 +594,13 @@ mod tests {
             .output()
             .expect("python3 spawns");
         let stderr = String::from_utf8_lossy(&out.stderr);
+        // The failure notice is on STDOUT (the one stream `run_command` keeps), so a
+        // stderr-only read of it could never fail. Read both.
+        let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            !stderr.contains("could not be imported"),
+            !stdout.contains("could not be imported") && !stderr.contains("could not be imported"),
             "the engine cannot import its own modules from the materialized directory; \
-         stderr: {stderr}"
+               stdout: {stdout} stderr: {stderr}"
         );
     }
 
@@ -647,6 +688,46 @@ mod tests {
         assert!(
             got.is_none(),
             "a scan that ran out of time must say nothing at all; got: {got:?}"
+        );
+    }
+    /// A helper that CRASHED is a tooling failure, and it must not read as "nothing to say".
+    ///
+    /// The engine exits 0 for every outcome it chooses (nothing dirty, nothing named, a notice
+    /// of its own). A non-zero exit is therefore never a verdict about the red: it is an
+    /// uncaught exception, and its traceback used to go to `Stdio::null()`.
+    /// docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+    #[test]
+    fn a_crashed_helper_is_a_tooling_notice_and_never_silence() {
+        let stderr =
+            b"Traceback (most recent call last):\n  File \"x.py\", line 1\nKeyError: 'owners'\n";
+        let got = engine_outcome(false, Some(1), b"", stderr).expect("a crash must say so");
+        assert!(got.contains("tooling failure"), "got: {got}");
+        assert!(got.contains("NOT evidence"), "got: {got}");
+        assert!(
+            got.contains("KeyError: 'owners'"),
+            "must name the cause, got: {got}"
+        );
+        assert!(
+            !got.contains("Traceback"),
+            "only the last stderr line is shown, got: {got}"
+        );
+    }
+
+    /// A crash that left no code (a signal) is still a crash.
+    #[test]
+    fn a_helper_killed_by_a_signal_is_a_tooling_notice() {
+        let got = engine_outcome(false, None, b"", b"").expect("a signal death must say so");
+        assert!(got.contains("signal"), "got: {got}");
+    }
+
+    /// The outcomes the engine chooses stay exactly as they were: empty is silence, text is text.
+    #[test]
+    fn a_clean_exit_keeps_its_stdout_and_its_silence() {
+        assert_eq!(engine_outcome(true, Some(0), b"", b"noise on stderr"), None);
+        assert_eq!(engine_outcome(true, Some(0), b"  \n", b""), None);
+        assert_eq!(
+            engine_outcome(true, Some(0), b"line one\nline two\n\n", b"ignored").as_deref(),
+            Some("line one\nline two")
         );
     }
 

@@ -65,17 +65,20 @@ def _load_provenance():
     Imported rather than shelled out: a subprocess would re-run the 7 s transcript scan
     and re-read every registry, and the two tools must agree about liveness by sharing
     the code rather than by both being careful.
+
+    A failure is returned, not swallowed: `(None, "<why>")`. The caller turns it into a
+    notice on STDOUT, because stdout is the only stream `run_command` keeps.
     """
     path = HERE / "file-provenance.py"
     spec = importlib.util.spec_from_file_location("_fp", path)
     if spec is None or spec.loader is None:
-        return None
+        return None, f"no import spec for {path}"
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
-    except Exception:
-        return None
-    return mod
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    return mod, ""
 
 
 # Where a toolchain names a file in a failure. Deliberately NOT a bare path-shaped-token
@@ -182,12 +185,15 @@ def main(argv: list[str]) -> int:
     if "--paths" in argv:
         explicit = [a for a in argv[argv.index("--paths") + 1:] if not a.startswith("-")]
 
-    fp = _load_provenance()
+    fp, why = _load_provenance()
     if fp is None:
-        if explain:
-            print("attribute-red: file-provenance.py could not be imported; no attribution "
-                  "is possible. This is a tooling failure, NOT evidence that the red is "
-                  "nobody's.", file=sys.stderr)
+        # STDOUT, and not only under --explain: this is a tooling failure, and a red that
+        # carries no author line must not be readable as "nothing to attribute". Stdout is
+        # the one stream the Rust caller keeps (it discards stderr).
+        # docs/issues/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md
+        print("[codescout] red attribution is unavailable: file-provenance.py could not be "
+              f"imported ({why}). This is a tooling failure, NOT evidence that the red is "
+              "nobody's.")
         return 0
 
     root = fp.repo_root()
