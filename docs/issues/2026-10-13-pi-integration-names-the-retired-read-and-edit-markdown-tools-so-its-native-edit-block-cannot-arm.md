@@ -11,7 +11,7 @@ topic: Pi integration drift after the tool-surface collapse
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. Not observed in a live Pi session. The claude-plugins copy of the extension and the local untracked contrib/pi/mcp.json still name the retired tools. Fix SHA and patch-id not yet recorded.'
+unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. Not observed in a live Pi session. The claude-plugins copy of the extension and the local untracked contrib/pi/mcp.json still name the retired tools.'
 ---
 
 # BUG: the Pi integration still names the retired `read_markdown` and `edit_markdown`, so its native-`edit` block can never arm and its tool map points at tools that do not exist
@@ -62,7 +62,7 @@ Lines above, read 2026-10-13. A second copy: `../claude-plugins/codescout-compan
 
 ## Fix
 
-Implemented 2026-10-13 in the working tree. The fix SHA and patch-id are recorded below once the change is committed.
+Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
 
 1. `contrib/pi/codescout-mode.ts`: `EDIT_TOOLS` is now `["codescout_edit_code", "codescout_edit_file"]`, so `hasAll` can be true on a post-collapse binary and the native `edit` block can arm. The two refusal texts name `read_file` / `edit_file` and say they address Markdown by heading.
 2. `contrib/pi/mcp.json.example`: `read_markdown` and `edit_markdown` removed from `directTools`.
@@ -83,7 +83,7 @@ Edit the local `~/.pi` copy and `mcp.json` by hand to remove the two names.
 
 ## Resume
 
-Fixed in the working tree on 2026-10-13. Remaining: record the fix SHA and patch-id after the commit; archive once the gate is green; fix the `claude-plugins` copy in its own repository; tell the owner of the local `mcp.json` to drop the two names.
+Fixed in `3fb612b9`. Remaining: archive once the gate is green; fix the `claude-plugins` copy in its own repository; tell the owner of the local `mcp.json` to drop the two names.
 
 ## References
 

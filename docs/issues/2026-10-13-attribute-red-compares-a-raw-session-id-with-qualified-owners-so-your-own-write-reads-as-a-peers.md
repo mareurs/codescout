@@ -11,7 +11,7 @@ topic: authorship attribution at a red
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. tests/attribute-red.sh passes 43/43 by hand but has no runner in CI or the gate, so nothing re-checks it. A Codex session''s own write is not covered. Fix SHA and patch-id not yet recorded.'
+unverified: 'Gate 2026-10-13: fmt, clippy and the lean lane green; the default lane failed one test, every_ledger_append_entry_recipe_is_one_the_code_accepts, on another session''s untracked docs/trackers/tracker-archiving-session-log.md:118, outside this change. tests/attribute-red.sh passes 43/43 by hand but has no runner in CI or the gate, so nothing re-checks it. A Codex session''s own write is not covered.'
 ---
 
 # BUG: attribute-red compares a raw session id with qualified owners, so a session's own uncommitted write reads as a peer's
@@ -56,7 +56,7 @@ Source lines above. No transcript run.
 
 ## Fix
 
-Implemented 2026-10-13 in the working tree. The fix SHA and patch-id are recorded below once the change is committed.
+Implemented 2026-10-13 in the working tree. Fix commit: `3fb612b9` on `experiments` (experiments only), patch-id `b2b2d7bb9849ea740821942f91193b33d6404b8a` (`git show 3fb612b9 | git patch-id --stable`; one commit that also fixes the two sibling bugs).
 
 In `scripts/attribute-red.py`, stage 3:
 
@@ -85,7 +85,7 @@ Run `scripts/file-provenance.py` directly. It resolves the identity correctly.
 
 ## Resume
 
-Fixed in the working tree on 2026-10-13. Remaining: record the fix SHA and patch-id after the commit, and archive once the gate is green.
+Fixed in `3fb612b9`. Remaining: archive once the gate is green.
 
 Found while fixing, and not fixed here: `tests/attribute-red.sh` has no runner. Verified 2026-10-13 by `grep attribute-red.sh` over the whole tree outside `docs/`: the only hit is a code comment. `.github/workflows/ci.yml` job `shell-tests` runs `hooks-discrimination.sh`, `file-provenance.sh` and `peer-sessions.sh` only, and `scripts/gate.sh` does not run it either. That is how this suite sat 5 cases red from `eed25579` (2026-10-11) with every gate green, and it is the same defect the `shell-tests` comment records for 2026-09-01. Adding `bash tests/attribute-red.sh` to that job is a CI change and was left for a decision.
 
