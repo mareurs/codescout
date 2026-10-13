@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 189
+entry_high_water_F: 192
 entry_high_water_W: 150
 ---
 
@@ -65,6 +65,7 @@ entry_high_water_W: 150
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-192 | 2026-10-13 | med | shell-parity | promoted-to-bug-tracker | **The own-stderr wrapper assumed shell parity that dash disproved** — literal dash output and an actual-marker regression expose the unsafe brace wrapper. |
 | F-189 | 2026-10-01 | med | plan-drift | open | **An open issue and an open PR both described `--scope` as outstanding while local `experiments` had already shipped it, unpushed** - found only by grepping local HEAD; the PR conflicts in `doctor.rs` and collides on `W-146`. |
 | F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
 | F-188 | 2026-09-30 | med | doc-vs-code | open | **A bug file's mechanism claim ("the gate skips a closed wrapper list") was false: the gate never calls `producer_index`, so `env`/`FOO=1`/`time cat` all bypass, and PR #29 it leaned on was unmerged** - measured on the live binary before any code; only the `&` half fixed. |
@@ -17393,6 +17394,30 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 **Status:** validated, one datapoint. This is the one-mutation-per-SITE law from CLAUDE.md § Testing Discipline applied to assertion order within a single test.
 
 **Rests on:** the bytes of `ae45438c`. The verdict measures those bytes, so a rewrite of the test or of `to_tool_args` invalidates it. Mutants were reverted and the worktree removed; only the 6 `cli::doctor` lib tests were run, not the full gate.
+
+## F-192 — The own-stderr wrapper assumed shell parity that dash disproved
+
+**Valid:** dated 2026-10-13
+
+**Observed:** 2026-10-13, Codex pilot dash fix.
+
+**When:** Tracing the production recovery marker after the pilot reproduced CI's empty recovered stream.
+
+**Expected:** `bound_buffer_stderr` claimed the brace wrapper preserved every accepted one-pipeline shape.
+
+**Got:** The isolated literal `(printf 'sample\n') >&2` writes stderr under bash and dash; its brace-wrapped recovery route returns `sample\n` under bash and no bytes under dash. Production `shell_command_configured` invokes `sh`, so this is a product defect. A new actual-marker regression failed under dash with an empty stream versus 30 payload lines before the production edit.
+
+**Probable cause:** The wrapper's documented shell parity was untested for a redirected tail subshell on this bash-backed development host; dash internals remain unverified.
+
+**Workaround:** Emit an outer subshell `( QUERY; )` and execute the emitted template directly in the test. Focused tests pass under both shells; independent review killed all three applied production mutations and restored the exact diff. The fresh full gate passed all lanes after an operator-approved correction to a peer's append recipe; root library results were 4476 lean and 6757 default passed, with no failures. Source fix committed on experiments as `77d8f40e55a4ffe33a828fc0778543dd9cc6d57b`, stable patch-id `3a155423c92d078651c935054d52578718cd03ca`, matching the reviewed patch; the fresh pre-commit full gate passed.
+
+**Severity:** med — the recommended recovery route loses output on dash-backed hosts and reds the CI assertion.
+
+**Status:** promoted-to-bug-tracker
+
+**Rests on:** Literal shell subprocess output, the observed regression RED→GREEN, and Unix production shell selection.
+
+**Fix idea / Pointer:** `docs/issues/archive/2026-10-13-the-stderr-marker-route-reads-nothing-under-dash-when-the-last-command-is-a-subshell-with-a-redirect.md`.
 
 ## Template for new entries
 
