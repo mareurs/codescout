@@ -119,11 +119,27 @@ PY
 }
 
 # run <stdin-text> [argv...] -- the PRODUCTION entry shape: the red arrives on stdin.
+#
+# `env -u` for every variable `session_context.resolve_context` reads besides the one this
+# sets: the engine resolves its own identity through it, so a suite run from inside a
+# Codex session (or with an inherited context file) would otherwise see "conflicting"
+# identity and fail every my-own-write case for a reason that has nothing to do with them.
 run() {
     local text="$1"; shift
-    printf '%s' "$text" | REPO_ROOT="$T/repo" FILE_PROVENANCE_ROOTS="$ROOTS" \
+    printf '%s' "$text" | env -u CODEX_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+        REPO_ROOT="$T/repo" FILE_PROVENANCE_ROOTS="$ROOTS" \
         FILE_PROVENANCE_REGISTRY_ROOTS="$REG" \
         CLAUDE_CODE_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1
+}
+
+# run_as_codex <stdin-text> [argv...] -- the same, from a Codex session whose native id
+# is $ME. No Claude identity is present, which is what a real Codex session looks like.
+run_as_codex() {
+    local text="$1"; shift
+    printf '%s' "$text" | env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODESCOUT_CONTEXT_FILE \
+        REPO_ROOT="$T/repo" FILE_PROVENANCE_ROOTS="$ROOTS" \
+        FILE_PROVENANCE_REGISTRY_ROOTS="$REG" \
+        CODEX_SESSION_ID="$ME" python3 "$TOOL" "$@" 2>&1
 }
 
 G="git -C $T/repo"
@@ -209,6 +225,17 @@ out="$(run "$(printf 'error: bad\n  --> src/other.rs:1:1\n')")"
 has "my own write is named as mine"    "$out" "THIS session"
 has "and says the red is likely mine"  "$out" "likely yours"
 hasnt "and offers no peer to go ask"   "$out" "ask it:"
+
+echo
+echo "== STAGE 3: the HARNESS is part of the identity =="
+# Owners are principals (`claude-code:<id>`), so a Codex session whose native id happens to
+# equal a Claude writer's is a DIFFERENT party, not the same one under another spelling.
+# Identity that ignored the harness would route a Claude peer's uncommitted work to this
+# Codex session as "your own". Ids are unique per host in practice; this pins that the
+# comparison does not rely on it.
+out="$(run_as_codex "$(printf 'error: bad\n  --> src/other.rs:1:1\n')")"
+hasnt "a Codex session is not the Claude session with the same raw id" "$out" "THIS session"
+has "and the Claude writer is named as the other party"               "$out" "claude-code:$ME"
 
 echo
 echo "== STAGE 3: no record is a COVERAGE statement, never an exoneration =="

@@ -216,8 +216,20 @@ def main(argv: list[str]) -> int:
 
     # --- stage 3: 7.0 s, and only now. --------------------------------------------
     owners = fp.scan(root)
-    live, unreadable = fp.live_sessions()
-    me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    native_live, unreadable = fp.live_sessions()
+    # `scan()` returns owners as PRINCIPALS — `claude-code:<id>`, `codex:<id>` — since
+    # eed25579, so the identity compared against them and the liveness map they are
+    # looked up in must be in that same form. This used to hold the raw
+    # `CLAUDE_CODE_SESSION_ID` and raw registry keys: `w != me` was then true for every
+    # owner, a session's own uncommitted write was named as a peer's, and no peer was
+    # ever marked live. `file-provenance.py`'s own `main()` does exactly these two
+    # lines; resolving through `resolve_context` is also what gives a Codex session
+    # an identity here at all.
+    # docs/issues/2026-10-13-attribute-red-compares-a-raw-session-id-with-qualified-owners-so-your-own-write-reads-as-a-peers.md
+    live = {fp.principal_key("claude-code", sid): rows for sid, rows in native_live.items()}
+    resolution = fp.resolve_context(root, os.environ)
+    me = (fp.principal_key(resolution.context.harness, resolution.context.session_id)
+          if resolution.state == "available" else "")
 
     lines, foreign_any = [], False
     for rel in hits:
@@ -248,7 +260,7 @@ def main(argv: list[str]) -> int:
         peers = [w for w in who if w != me]
         if not peers:
             lines.append(f"  {rel}")
-            lines.append(f"      written by THIS session ({me[:8]}) — your own "
+            lines.append(f"      written by THIS session ({fp.short_principal(me)}) — your own "
                          f"uncommitted work, so this red is likely yours.")
             continue
         foreign_any = True
@@ -256,7 +268,7 @@ def main(argv: list[str]) -> int:
         for w in peers:
             mark = "  [undated — could not be placed in the window]" if (
                 w in undated and w not in in_window) else ""
-            suffix, extra = fp.address_lines(w, live, " " * 8)
+            suffix, extra = fp.owner_contact(w, live, " " * 8)
             lines.append(f"      written by {w}{mark}{suffix}")
             lines.extend(extra)
 

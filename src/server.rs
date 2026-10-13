@@ -5842,6 +5842,138 @@ mod tests {
         );
     }
 
+    /// The Pi integration names codescout tools in three tracked files, and until
+    /// 2026-10-13 nothing checked any of them against the tools the server registers.
+    ///
+    /// `read_markdown` and `edit_markdown` were folded into `read_file` / `edit_file` on
+    /// 2026-09-03 with no alias, and `contrib/pi/` kept naming them. The cost was not a
+    /// wrong word in a document: `codescout-mode.ts` arms its block of Pi's native `edit`
+    /// only when EVERY name in `EDIT_TOOLS` is registered, so one dead name left the guard
+    /// permanently off, and `AGENTS.md` sent the model to tools that answer with the MCP
+    /// unknown-tool error.
+    /// docs/issues/2026-10-13-pi-integration-names-the-retired-read-and-edit-markdown-tools-so-its-native-edit-block-cannot-arm.md
+    ///
+    /// Three surfaces, three shapes, one question — is each name a tool the server
+    /// registers:
+    ///
+    /// - `mcp.json.example` — the `directTools` array of the `codescout` server.
+    /// - `codescout-mode.ts` — `"codescout_<tool>"` literals (pi-mcp-adapter's prefixed
+    ///   registration names), and the tool lists inside the refusal `reason:` strings.
+    /// - `AGENTS.md` — backticked snake_case tokens, minus the allowlist of names that are
+    ///   Pi's own or another server's.
+    ///
+    /// The refusal strings are checked as `a/b/c` chains, and only a chain that already holds
+    /// one real tool: prose such as "read/search path" names two non-tools and is not a tool
+    /// list. A chain with one real tool and one dead one is exactly the defect.
+    ///
+    /// An absent file FAILS rather than skips, for the reason the prompt-surface gate gives:
+    /// these are tracked, so absence is a broken checkout.
+    #[tokio::test]
+    async fn pi_integration_references_only_real_tools() {
+        use std::collections::HashSet;
+
+        let (_dir, server) = make_server().await;
+        let real_tools: HashSet<&str> = server.tools.iter().map(|t| t.name()).collect();
+        let pi_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("contrib/pi");
+        let read = |name: &str| {
+            std::fs::read_to_string(pi_dir.join(name)).unwrap_or_else(|e| {
+                panic!(
+                    "cannot read contrib/pi/{name}: {e} — it is TRACKED, so absence is a broken \
+                 checkout; restore it rather than making this test skip"
+                )
+            })
+        };
+        let mut drift = Vec::<String>::new();
+
+        // 1. `directTools` of the codescout server in the shipped example config.
+        let example: serde_json::Value = serde_json::from_str(&read("mcp.json.example"))
+            .expect("mcp.json.example is valid JSON");
+        let direct = example["mcpServers"]["codescout"]["directTools"]
+            .as_array()
+            .expect("mcp.json.example names directTools for the codescout server");
+        assert!(!direct.is_empty(), "directTools must not be empty");
+        for tool in direct {
+            let name = tool.as_str().expect("directTools entries are strings");
+            if !real_tools.contains(name) {
+                drift.push(format!(
+                    "mcp.json.example directTools: `{name}` is not a registered tool"
+                ));
+            }
+        }
+
+        // 2. `codescout-mode.ts`: prefixed registration names, then refusal-string tool lists.
+        let mode = read("codescout-mode.ts");
+        let prefixed = regex::Regex::new(r#""codescout_([a-z][a-z_0-9]*)""#).unwrap();
+        let mut prefixed_seen = 0;
+        for cap in prefixed.captures_iter(&mode) {
+            prefixed_seen += 1;
+            let name = cap.get(1).unwrap().as_str();
+            if !real_tools.contains(name) {
+                drift.push(format!(
+                    "codescout-mode.ts: \"codescout_{name}\" names no registered tool"
+                ));
+            }
+        }
+        assert!(
+            prefixed_seen > 0,
+            "codescout-mode.ts names no \"codescout_<tool>\" literal — the pattern this gate reads \
+         has drifted from the file"
+        );
+        let chain = regex::Regex::new(r"[a-z][a-z_0-9]*(?:/[a-z][a-z_0-9]*)+").unwrap();
+        for line in mode.lines().filter(|l| l.contains("reason")) {
+            for m in chain.find_iter(line) {
+                let names: Vec<&str> = m.as_str().split('/').collect();
+                if names.iter().any(|n| real_tools.contains(n)) {
+                    for n in names.iter().filter(|n| !real_tools.contains(**n)) {
+                        drift.push(format!(
+                            "codescout-mode.ts refusal text lists `{n}` beside real tools, but it \
+                         is not a registered tool"
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 3. `AGENTS.md`: backticked tokens that are neither tools nor on the allowlist.
+        // Names of Pi's own tools, of other servers' tools, of shell utilities the file
+        // explains, and of codescout PARAMETERS it tells the model to pass. Keep sorted.
+        let not_codescout: HashSet<&str> = [
+            "action",
+            "awk",
+            "bash",
+            "cat",
+            "edit",
+            "head",
+            "heading",
+            "include_body",
+            "mcp",
+            "read",
+            "researcher_research_run",
+            "sed",
+            "tail",
+            "tool_call",
+            "write",
+        ]
+        .into_iter()
+        .collect();
+        let backticked = regex::Regex::new(r"`([a-z][a-z_0-9]{2,})`").unwrap();
+        for cap in backticked.captures_iter(&read("AGENTS.md")) {
+            let name = cap.get(1).unwrap().as_str();
+            let bare = name.strip_prefix("codescout_").unwrap_or(name);
+            if !real_tools.contains(bare) && !not_codescout.contains(name) {
+                drift.push(format!(
+                    "AGENTS.md: `{name}` is neither a registered tool nor on this test's allowlist"
+                ));
+            }
+        }
+
+        assert!(
+            drift.is_empty(),
+            "the Pi integration names tools the server does not register:\n  {}",
+            drift.join("\n  ")
+        );
+    }
+
     /// The same drift guard as `prompt_surfaces_reference_only_real_tools`, one directory
     /// over, for the PROBES — which were outside its population until 2026-09-08.
     ///

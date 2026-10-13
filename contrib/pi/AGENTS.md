@@ -7,8 +7,8 @@ Native `read`, `write`, `edit`, and `bash` are hard-blocked for the cases codesc
 ## Reading code
 
 - `symbols` — file/dir symbol overview; add `include_body` for function bodies.
-- `read_file` — non-source files or specific line ranges.
-- `read_markdown` — markdown (heading-addressed).
+- `read_file` — non-source files or specific line ranges. For a `.md` file it returns the
+  heading map; add `heading` to read one section.
 - Native `read` is blocked except for images (jpg/png/gif/webp/bmp) — codescout can't view images.
 
 ## Searching
@@ -23,12 +23,12 @@ Native `read`, `write`, `edit`, and `bash` are hard-blocked for the cases codesc
 ## Editing
 
 - `edit_code` — structural, LSP-aware edits (rename, replace/insert/remove a symbol).
-- `edit_file` — text/import edits by exact string match.
-- `edit_markdown` — markdown edits by heading.
+- `edit_file` — text/import edits by exact string match. For a `.md` file, address a
+  section with `heading` + `action`.
 - `create_file` — create new files (pass `overwrite: true` to replace an existing file).
 - Native `edit` and `write` are hard-blocked.
 - Paths outside the active project need `approve_write` (or the inline `@ack_*` prompt)
-  once per session before `edit_file`/`create_file`/`edit_code`/`edit_markdown` can touch them.
+  once per session before `edit_file`/`create_file`/`edit_code` can touch them.
 
 ## Shell
 

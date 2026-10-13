@@ -93,14 +93,61 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-const ATTRIBUTE_RED_PY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/scripts/attribute-red.py"
-));
-const FILE_PROVENANCE_PY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/scripts/file-provenance.py"
-));
+/// Every script the engine needs, as `(file name, body)`. The FIRST entry is the entry point.
+///
+/// The engine reaches its siblings by import, with its own directory first on `sys.path`,
+/// so a module that is not written beside it is an `ImportError` — which `attribute-red.py`
+/// answers with exit 0 and no stdout, and which `wip_author_diagnostic_with` reads as
+/// "nothing to say". `eed25579` (2026-10-11) added four sibling modules to
+/// `file-provenance.py` while this list held two, and the hint died silently.
+///
+/// `the_materialized_set_is_closed_under_its_own_local_imports` derives the required set
+/// from the imports of what is actually written, so a module added to the engine without
+/// being added here reds a test instead of a user's red.
+const EMBEDDED_SCRIPTS: [(&str, &str); 6] = [
+    (
+        "attribute-red.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/attribute-red.py"
+        )),
+    ),
+    (
+        "file-provenance.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/file-provenance.py"
+        )),
+    ),
+    (
+        "claude_history.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/claude_history.py"
+        )),
+    ),
+    (
+        "codex_history.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/codex_history.py"
+        )),
+    ),
+    (
+        "provenance_records.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/provenance_records.py"
+        )),
+    ),
+    (
+        "session_context.py",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/session_context.py"
+        )),
+    ),
+];
 
 /// Ceiling on stage 3. The scan measured ~7 s on this corpus and grows with it (the bug
 /// file recorded 5.0 s six days earlier), so the budget is generous rather than tight —
@@ -180,7 +227,7 @@ static SCRIPT_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// Keyed by a hash of the contents, so every process built from the same source shares
 /// one directory and a rebuilt binary lands in a different one. `DefaultHasher` is not
 /// stable across Rust releases and does not need to be: an unstable key costs one extra
-/// extraction of 36 KB, never a wrong answer.
+/// extraction of 120 KB, never a wrong answer.
 ///
 /// Each file is written to a unique temporary name and then renamed, which is atomic on
 /// every platform we run on. Two servers extracting concurrently is the normal case here
@@ -202,15 +249,14 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
 
     let mut h = DefaultHasher::new();
-    ATTRIBUTE_RED_PY.hash(&mut h);
-    FILE_PROVENANCE_PY.hash(&mut h);
+    for (name, body) in EMBEDDED_SCRIPTS {
+        name.hash(&mut h);
+        body.hash(&mut h);
+    }
     let dir = base.join(format!("codescout-attribution-{:016x}", h.finish()));
     std::fs::create_dir_all(&dir).ok()?;
 
-    for (name, body) in [
-        ("attribute-red.py", ATTRIBUTE_RED_PY),
-        ("file-provenance.py", FILE_PROVENANCE_PY),
-    ] {
+    for (name, body) in EMBEDDED_SCRIPTS {
         let final_path = dir.join(name);
         if std::fs::read_to_string(&final_path).is_ok_and(|got| got == body) {
             continue; // already materialized by this or another process
@@ -223,7 +269,7 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
             return None;
         }
     }
-    Some(dir.join("attribute-red.py"))
+    Some(dir.join(EMBEDDED_SCRIPTS[0].0))
 }
 
 /// Does this text look like it NAMES a file in a failure?
@@ -352,6 +398,42 @@ pub(crate) async fn wip_author_diagnostic_with(
 mod tests {
     use super::*;
 
+    /// Is a `python3` available to run the engine at all?
+    ///
+    /// The engine tests below may only treat a missing diagnostic as a skip when this is
+    /// false. Before 2026-10-13 they skipped on ANY missing diagnostic and printed
+    /// "python3 absent?" — a question mark standing where a check belonged. With python3
+    /// present, a helper that cannot import its own modules (see
+    /// `docs/issues/2026-10-13-embedded-attribution-helper-ships-two-of-its-six-modules-so-a-red-loses-its-author-silently.md`)
+    /// produces exactly that missing diagnostic, so those tests went green while the
+    /// feature was dead.
+    fn python3_present() -> bool {
+        std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    /// `Some(name)` for each local sibling module that `body` imports and that exists
+    /// under `scripts/` in the repo. Stdlib and third-party names never match a file
+    /// there, so this needs no allowlist.
+    fn local_imports(body: &str, repo_scripts: &Path) -> Vec<String> {
+        body.lines()
+            .filter_map(|line| {
+                let t = line.trim_start();
+                let rest = t
+                    .strip_prefix("from ")
+                    .or_else(|| t.strip_prefix("import "))?;
+                let module: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                (!module.is_empty() && repo_scripts.join(format!("{module}.py")).is_file())
+                    .then_some(module)
+            })
+            .collect()
+    }
+
     /// The embedded copies must BE the files on disk, or the gate that keeps
     /// `scripts/file-provenance.py`'s tool-name lists current
     /// (`provenance_probes_reference_only_real_tool_names`) is checking a surface this
@@ -361,11 +443,9 @@ mod tests {
     #[test]
     fn embedded_scripts_are_the_repo_copies() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        for (rel, embedded) in [
-            ("scripts/attribute-red.py", ATTRIBUTE_RED_PY),
-            ("scripts/file-provenance.py", FILE_PROVENANCE_PY),
-        ] {
-            let disk = std::fs::read_to_string(root.join(rel))
+        for (name, embedded) in EMBEDDED_SCRIPTS {
+            let rel = format!("scripts/{name}");
+            let disk = std::fs::read_to_string(root.join(&rel))
                 .unwrap_or_else(|e| panic!("{rel} must exist: {e}"));
             assert_eq!(disk, embedded, "{rel} embedded copy diverged from disk");
         }
@@ -375,7 +455,7 @@ mod tests {
     /// one without the other yields an `ImportError` that this module renders as silence
     /// — the exact "plausible answer rather than an error" shape the bug is about.
     #[test]
-    fn materialize_writes_both_scripts_beside_each_other() {
+    fn materialize_writes_every_embedded_script_beside_the_entry() {
         // Its OWN empty base. The production directory is keyed by a content hash and so
         // persists across runs -- this assertion passed against files a previous run had
         // left behind, and survived a mutation deleting the write, until the base became
@@ -384,18 +464,16 @@ mod tests {
         let entry = materialize_into(base.path()).expect("materialization must succeed");
         assert!(entry.ends_with("attribute-red.py"));
         let dir = entry.parent().expect("entry has a parent");
-        // The engine imports its sibling by name from its own directory, so a missing
+        // The engine imports its siblings by name from its own directory, so a missing
         // sibling is an ImportError this module renders as silence -- the exact
         // "plausible answer rather than an error" shape the bug is about.
-        assert_eq!(
-            std::fs::read_to_string(dir.join("file-provenance.py")).ok(),
-            Some(FILE_PROVENANCE_PY.to_string()),
-            "the engine's sibling import target must be materialized too"
-        );
-        assert_eq!(
-            std::fs::read_to_string(dir.join("attribute-red.py")).ok(),
-            Some(ATTRIBUTE_RED_PY.to_string()),
-        );
+        for (name, body) in EMBEDDED_SCRIPTS {
+            assert_eq!(
+                std::fs::read_to_string(dir.join(name)).ok(),
+                Some(body.to_string()),
+                "{name} must be materialized beside the entry point"
+            );
+        }
         // No `.tmp` may survive a successful run: a leftover means a rename failed and a
         // reader could see a partial file under the real name.
         let strays: Vec<_> = std::fs::read_dir(dir)
@@ -407,6 +485,81 @@ mod tests {
         assert!(
             strays.is_empty(),
             "stray temp files left behind: {strays:?}"
+        );
+    }
+    /// Every local module the engine imports must be materialized beside it.
+    ///
+    /// The engine reaches its siblings with `sys.path[0]` set to its own directory, so a
+    /// sibling that is not in that directory is an `ImportError` — and `attribute-red.py`
+    /// answers an `ImportError` with exit 0 and no stdout, which `wip_author_diagnostic_with`
+    /// reads as "nothing to say". `eed25579` (2026-10-11) added four such siblings and the
+    /// two-file assertion above stayed green. This reads the imports out of what was
+    /// ACTUALLY written, so a seventh module cannot be forgotten without this reddening.
+    #[test]
+    fn the_materialized_set_is_closed_under_its_own_local_imports() {
+        let base = tempfile::tempdir().expect("tmp");
+        let entry = materialize_into(base.path()).expect("materialization must succeed");
+        let dir = entry.parent().expect("entry has a parent");
+        let repo_scripts = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts");
+
+        let mut missing = Vec::new();
+        for file in std::fs::read_dir(dir)
+            .expect("dir readable")
+            .filter_map(Result::ok)
+        {
+            let name = file.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".py") {
+                continue;
+            }
+            let body = std::fs::read_to_string(file.path()).expect("script readable");
+            for module in local_imports(&body, &repo_scripts) {
+                if !dir.join(format!("{module}.py")).is_file() {
+                    missing.push(format!("{name} imports {module}.py"));
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "the materialized directory lacks modules the engine imports: {missing:?}"
+        );
+    }
+
+    /// The materialized engine must be able to import itself in a directory that holds
+    /// nothing else — the shape production runs in, and the shape no other test runs in.
+    ///
+    /// `tests/attribute-red.sh` runs the engine from `scripts/`, where every sibling exists;
+    /// the two tests that DO go through `materialize` used to skip when the hint was absent.
+    /// This one runs the entry point directly, with no `PYTHONPATH`, and reads the engine's
+    /// own `--explain` account of why it stayed silent: the import-failure sentence is the
+    /// one outcome that must never appear.
+    #[test]
+    fn the_materialized_engine_imports_in_an_empty_directory() {
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let Some(repo) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        let base = tempfile::tempdir().expect("tmp");
+        let entry = materialize_into(base.path()).expect("materialization must succeed");
+        let out = std::process::Command::new("python3")
+            .arg("-B")
+            .arg(&entry)
+            .arg("--explain")
+            .current_dir(repo.path())
+            .env_remove("PYTHONPATH")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("python3 spawns");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("could not be imported"),
+            "the engine cannot import its own modules from the materialized directory; \
+         stderr: {stderr}"
         );
     }
 
@@ -542,10 +695,14 @@ mod tests {
         };
         let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
         let Some(got) = wip_author_diagnostic(101, red, dir.path()).await else {
-            // Not an assert: python3 may be absent, and ceiling 3 says that is silence
-            // rather than a failure. Loud on stderr so a skipped run is never mistaken
-            // for a passing one.
-            eprintln!("skipping: no diagnostic (python3 absent?)");
+            // Absent python3 is the only legitimate silence here (ceiling 3). With python3
+            // present, no diagnostic means the engine is broken — the case 2026-10-13 hid for
+            // two days behind a skip that only asked "python3 absent?".
+            assert!(
+                !python3_present(),
+                "python3 is present but the engine produced no hint for a red naming a dirty file"
+            );
+            eprintln!("skipping: python3 absent");
             return;
         };
         assert!(
@@ -589,7 +746,12 @@ mod tests {
         // worked. Without it an absent python3 yields the same `None` as a deleted gate,
         // and this test would pass while proving nothing.
         if wip_author_diagnostic(101, red, dir.path()).await.is_none() {
-            eprintln!("skipping: no diagnostic at exit 101 either (python3 absent?)");
+            assert!(
+                !python3_present(),
+                "python3 is present but the engine produced no hint at exit 101, so this test \
+             cannot say anything about exit 0"
+            );
+            eprintln!("skipping: python3 absent");
             return;
         }
         let got = wip_author_diagnostic(0, red, dir.path())

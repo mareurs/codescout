@@ -24,7 +24,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // Must match the directTools list in contrib/pi/mcp.json. pi-mcp-adapter's
 // default toolPrefix ("server") means these are the real registered names.
-const EDIT_TOOLS = ["codescout_edit_code", "codescout_edit_file", "codescout_edit_markdown"];
+const EDIT_TOOLS = ["codescout_edit_code", "codescout_edit_file"];
 const WRITE_TOOL = "codescout_create_file";
 const READ_TOOL = "codescout_read_file";
 
@@ -103,7 +103,7 @@ export default function (pi: ExtensionAPI) {
 		if (event.toolName === "edit" && hasAll(EDIT_TOOLS)) {
 			return {
 				block: true,
-				reason: "Use codescout's edit_code/edit_file/edit_markdown instead of native `edit`.",
+				reason: "Use codescout's edit_code/edit_file instead of native `edit` (edit_file edits Markdown by heading).",
 			};
 		}
 		if (event.toolName === "write" && has(WRITE_TOOL)) {
@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
 			if (IMAGE_EXT.test(path)) return undefined;
 			return {
 				block: true,
-				reason: "Use codescout's read_file/read_markdown/symbols instead of native `read` (reserved for images).",
+				reason: "Use codescout's read_file/symbols instead of native `read` (reserved for images). read_file reads Markdown by heading.",
 			};
 		}
 
