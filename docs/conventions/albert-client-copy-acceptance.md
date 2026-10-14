@@ -1,5 +1,5 @@
 ---
-id: eec665e0494885d0
+id: f2f3d190bcbbc4b2
 kind: guide
 status: active
 title: Albert native client acceptance on an isolated CodeScout copy

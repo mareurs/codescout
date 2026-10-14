@@ -1,7 +1,7 @@
 ---
-id: '8ffb0a8b969c5af4'
+id: d3101040c8066968
 kind: plan
-status: active
+status: done
 title: Albert recovery hardening implementation
 owners:
 - marius
@@ -71,7 +71,7 @@ Expected verification: new offline collection tests and scripts/python-tests.py 
 - [x] Check local Claude/Codex/Pi contracts and supported approval settings; create isolated config examples and a native-client acceptance checklist.
 - [x] Request one fresh strong whole-branch review; require applied mutation counts and close observed survivors with RED→GREEN tests.
 - [x] Format owned changes; run ./scripts/gate.sh --check in its mandatory order and read the result.
-- [ ] Verify packet hashes, clean patch application to base223 and exact reconstructed source bytes.
+- [x] Verify packet hashes, clean patch application to base223 and exact reconstructed source bytes.
 - [x] Commit only owned paths, reconcile owned catalog records, fast-forward experiments and restore main activation.
 
 Expected verification: all five gate exit codes zero; targeted/model results recorded with scope; packet checks pass. Native client acceptance on Albert's actual laptop remains explicitly pending unless exercised there.
@@ -87,3 +87,13 @@ Local Linux results do not establish Windows/macOS behavior, every scheduler/pro
 Local client contract/schema/manifest/harness checks are recorded in [native acceptance](../../conventions/albert-client-copy-acceptance.md). Albert's versions, approvals, hooks, wrapper enforcement, live authentication, full corpus relevance and inventory of external/other-profile stores remain operator acceptance. His192-record/146-topic report concerns his candidate; no daily promotion or profile/plugin/configuration update is performed.
 
 Task2 ruling: inert SubscriptionJudge construction plus authentication at complete() is the minimal equivalent of lazy live initialization while retaining _p interfaces; a live auth failure moves to immediately before launch. Deriving the miner ROOT from its checkout prevents wrong-source imports; archived campaigns may still require their separately recorded corpus inputs. No deferred Minor findings.
+
+## Delivery and final integration
+
+Source `c773a2ca5b5225010c06b5784a13470319bc4617` (stable whole-commit patch-id `1e6a43618eb28337de242fcfb31271132a9b0354`) is on experiments. The merged SQLite suite passed27 tests with0 failures; all changed source bytes matched the verified worktree, and the four previously dirty tracked peer files retained their hashes.
+
+The follow-up packet is albert-codescout-followup-2026-10-14.zip, SHA256 `2e0e47485eb4ec0a2d735f22ae122f36a0ff01d85660a66bb4a16bb56ef6358b`. All13 members passed CRC/content checks; all14 source files reconstructed exactly from public base223; shell blocks and embedded procedure Python passed syntax checks. The real WAL copying procedure copied committed WAL data, retained the source header, normalized only the fresh trial, and refused an existing destination without changes.
+
+All six owned bug records are fixed and archived with source provenance. Worktree-born catalog IDs required a separate header repair: only owned files were selected by their exact paths. Twelve declared IDs now match main paths; the two preexisting class files intentionally have no declared ID. Earlier incomplete/quota and shorthand-recipe gate attempts remain failed evidence; the final full ordered gate has five zero exits.
+
+Implementation and packet delivery are complete. Actual native-client sessions, corpus relevance and all-store inventory remain in the separate active operator acceptance plan. The shared checkout's unrelated changes are preserved; no push or installed-profile/daily-data promotion occurred.

@@ -1,5 +1,5 @@
 ---
-id: '7584256bee7a6dbe'
+id: 33f7bff261c424d0
 kind: spec
 status: done
 title: Albert SQLite recovery safeguards and offline acceptance
