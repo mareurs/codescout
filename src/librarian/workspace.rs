@@ -52,6 +52,62 @@ pub fn load(path: &Path) -> Result<WorkspaceConfig> {
     }
     Ok(cfg)
 }
+/// Written to the default path on first start. Comments only: an empty file is a
+/// valid [`WorkspaceConfig`], and the built-in classifier rules need no copy here.
+pub const DEFAULT_WORKSPACE_TOML: &str = r##"# Global librarian workspace config (~/.config/librarian/workspace.toml).
+# Created automatically on first start. An empty file is valid.
+# This is NOT the per-project .codescout/workspace.toml.
+#
+# The built-in classifier rules (specs, plans, ADRs, trackers, ...) need no
+# entry here. Rules you add win over the built-in ones. Example:
+#
+# [[rule]]
+# glob = "**/docs/specs/*.md"
+# kind = "spec"
+#
+# Exclude paths from indexing (a top-level key, before any [[table]]):
+# ignore = ["**/node_modules/**"]
+#
+# Group sub-projects that should be queried together:
+# [[umbrella]]
+# name = "my-umbrella"
+# members = ["/abs/path/one", "/abs/path/two"]
+"##;
+
+/// [`load`], but with `init` and an absent file, first write [`DEFAULT_WORKSPACE_TOML`].
+///
+/// Never overwrites: creation is `create_new`, and losing that race to another
+/// server is success. A creation failure (unwritable location) is not fatal — the
+/// librarian starts on the in-memory default and a warning names the path. An
+/// existing file that does not parse is still an error, and is left untouched.
+pub fn load_or_init(path: &Path, init: bool) -> Result<WorkspaceConfig> {
+    if init && !path.exists() {
+        if let Err(e) = create_default(path) {
+            tracing::warn!(
+                "could not create {}: {e}; starting the librarian with an empty workspace config",
+                path.display()
+            );
+            return Ok(WorkspaceConfig::default());
+        }
+    }
+    load(path)
+}
+
+fn create_default(path: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut f) => f.write_all(DEFAULT_WORKSPACE_TOML.as_bytes()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e),
+    }
+}
 
 /// Compile a list of glob patterns into a [`globset::GlobSet`] for ignore matching.
 /// Returns an empty set if `patterns` is empty (matches nothing).
@@ -68,6 +124,78 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    fn assert_empty(cfg: &WorkspaceConfig) {
+        assert!(cfg.roots.is_empty() && cfg.ignore.is_empty());
+        assert!(cfg.rules.is_empty() && cfg.umbrellas.is_empty());
+    }
+
+    #[test]
+    fn init_creates_the_file_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not-yet/librarian/workspace.toml");
+
+        let cfg = load_or_init(&path, true).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            DEFAULT_WORKSPACE_TOML
+        );
+        assert_empty(&cfg);
+    }
+
+    #[test]
+    fn the_default_text_parses_to_the_default_config() {
+        let cfg: WorkspaceConfig = toml::from_str(DEFAULT_WORKSPACE_TOML).unwrap();
+        assert_empty(&cfg);
+    }
+
+    #[test]
+    fn init_never_overwrites_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.toml");
+        let mine = "[[rule]]\nglob = \"**/docs/x/*.md\"\nkind = \"x\"\n";
+        std::fs::write(&path, mine).unwrap();
+
+        let cfg = load_or_init(&path, true).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine);
+        assert_eq!(cfg.rules.len(), 1);
+    }
+
+    #[test]
+    fn without_init_a_missing_file_is_an_error_and_stays_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.toml");
+
+        assert!(load_or_init(&path, false).is_err());
+        assert!(!path.exists(), "init=false must create nothing");
+    }
+
+    #[test]
+    fn an_unwritable_location_falls_back_to_the_in_memory_default() {
+        // A regular file where a directory is needed: creation fails whatever the
+        // uid, so this holds when the suite runs as root too.
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "x").unwrap();
+        let path = blocker.join("workspace.toml");
+
+        let cfg = load_or_init(&path, true).unwrap();
+
+        assert_empty(&cfg);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_malformed_existing_file_is_still_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.toml");
+        std::fs::write(&path, "not = [valid").unwrap();
+
+        assert!(load_or_init(&path, true).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not = [valid");
+    }
 
     #[test]
     fn loads_minimal_config() {
