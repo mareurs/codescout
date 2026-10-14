@@ -30,6 +30,9 @@ pub enum ArtifactBackend {
     SqliteVec,
 }
 
+/// The env var that outranks every other layer of [`ArtifactBackend::resolve`].
+pub const BACKEND_ENV: &str = "CODESCOUT_ARTIFACT_BACKEND";
+
 impl ArtifactBackend {
     /// Resolve the backend. Layered, highest-priority first:
     /// 1. `CODESCOUT_ARTIFACT_BACKEND=qdrant|sqlite-vec` env var.
@@ -40,10 +43,14 @@ impl ArtifactBackend {
     ///
     /// Mirrors `crate::server::librarian_enabled_at_runtime`.
     pub fn resolve(project_path: Option<&str>) -> Self {
-        if let Ok(v) = std::env::var("CODESCOUT_ARTIFACT_BACKEND") {
-            if let Some(b) = Self::parse(&v) {
-                return b;
-            }
+        Self::resolve_with(std::env::var(BACKEND_ENV).ok().as_deref(), project_path)
+    }
+
+    /// [`Self::resolve`] with the env var's value passed in, so a test can state it
+    /// rather than race on process env (`docs/conventions/test-env-isolation.md`).
+    pub fn resolve_with(env: Option<&str>, project_path: Option<&str>) -> Self {
+        if let Some(b) = env.and_then(Self::parse) {
+            return b;
         }
         if let Some(root) = project_path {
             let cfg = std::path::Path::new(root)

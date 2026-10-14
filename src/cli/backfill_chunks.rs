@@ -69,6 +69,14 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
         Some(format!("{}%", p.abs_path.to_string_lossy()))
     };
 
+    let backend = backfill_backend(
+        args.all,
+        ctx.current_project.as_ref().map(|p| p.abs_path.as_path()),
+        std::env::var(crate::librarian::artifact_store::BACKEND_ENV)
+            .ok()
+            .as_deref(),
+    );
+
     // The lock is released across every embedding await inside, so this does not
     // serialize a long remote run behind a single guard.
     let report = crate::librarian::indexer::backfill_chunk_vectors(
@@ -76,6 +84,7 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
         &svc,
         args.batch,
         root_prefix.as_deref(),
+        backend,
     )
     .await?;
 
@@ -98,4 +107,70 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
         &output,
     )?;
     Ok(())
+}
+
+/// The store this run's search reads, which decides whether a missing `artifact_vec_v2` row
+/// is a gap. A scoped run resolves against its project, as `build_tool_context_with` does;
+/// `--all` has no single project and takes the host setting (env, then build default), as
+/// the CLI reindex does. `env` is `CODESCOUT_ARTIFACT_BACKEND`, read by the caller.
+fn backfill_backend(
+    all: bool,
+    project: Option<&std::path::Path>,
+    env: Option<&str>,
+) -> crate::librarian::artifact_store::ArtifactBackend {
+    let project = if all {
+        None
+    } else {
+        project.map(|p| p.to_string_lossy().into_owned())
+    };
+    crate::librarian::artifact_store::ArtifactBackend::resolve_with(env, project.as_deref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::librarian::artifact_store::ArtifactBackend;
+
+    fn project_with_backend(backend: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout/project.toml"),
+            format!("[librarian]\nvector_backend = \"{backend}\"\n"),
+        )
+        .unwrap();
+        dir
+    }
+
+    /// The gap arm is right only when the backend passed in is the store this run's search
+    /// reads. A scoped run takes its project's setting; `--all` has no single project and
+    /// takes the host's. Two projects with opposite settings, so the case where `--all`
+    /// wrongly reads the current project fails on the lean and the server-stack build alike.
+    /// BUG docs/issues/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
+    #[test]
+    fn a_scoped_run_takes_its_projects_backend_and_all_takes_the_hosts() {
+        let host = if cfg!(feature = "server-stack") {
+            ArtifactBackend::Qdrant
+        } else {
+            ArtifactBackend::SqliteVec
+        };
+        let qdrant = project_with_backend("qdrant");
+        let sqlite = project_with_backend("sqlite-vec");
+
+        assert_eq!(
+            backfill_backend(false, Some(qdrant.path()), None),
+            ArtifactBackend::Qdrant
+        );
+        assert_eq!(
+            backfill_backend(false, Some(sqlite.path()), None),
+            ArtifactBackend::SqliteVec
+        );
+        assert_eq!(backfill_backend(true, Some(qdrant.path()), None), host);
+        assert_eq!(backfill_backend(true, Some(sqlite.path()), None), host);
+        assert_eq!(
+            backfill_backend(false, Some(qdrant.path()), Some("sqlite-vec")),
+            ArtifactBackend::SqliteVec,
+            "the env var outranks project.toml, as in build_tool_context_with"
+        );
+    }
 }
