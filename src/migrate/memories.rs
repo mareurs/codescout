@@ -202,19 +202,19 @@ pub async fn migrate_memories(
 /// the write path only fixes *future* writes; vectors already stored under the
 /// old convention stay where they are, and once queries move to the corrected
 /// convention those rows are stranded — a real mismatch where before there was
-/// a harmless symmetric shift. Anything that changes embedding convention
-/// (query-prefix policy, model, dimension) needs this, which is why it takes no
-/// argument describing *what* changed: it just re-derives every vector from
-/// current config.
+/// a harmless symmetric shift. This re-derives vectors after an embedding
+/// convention or model change only when the store accepts the resulting width.
+/// SQLite dimension changes require `rebuild-memory-vectors`, which replaces
+/// the fixed-width vector table after a verified backup; ordinary upsert refuses them.
 ///
 /// Distinct from [`migrate_memories`], which reads a legacy sqlite db and writes
 /// somewhere else. This reads and writes the same store.
 ///
 /// **Safety properties**, each covered by a test below:
-/// - **In-place, never duplicating.** The `SemanticMemory` is passed back
-///   verbatim, so `point_id` (UUIDv5 over `project_id`/`bucket`/`title`) is
-///   unchanged and the upsert overwrites its own row. Content, anchors and
-///   timestamps are carried through untouched — only the vector changes.
+/// - **Logical metadata retained.** The `SemanticMemory` is passed back
+///   unchanged, and ordinary upsert derives its UUIDv5 from project/bucket/title.
+///   It may serialize raw JSON again and regenerate a stored literal ID. Use
+///   `rebuild-memory-vectors` for exact SQLite row/JSON/ID preservation.
 /// - **Failure is non-destructive.** An embed or upsert error skips that row and
 ///   leaves its existing point intact, so a broken embedder cannot degrade the
 ///   corpus; it just does nothing. Counted in `skipped`.

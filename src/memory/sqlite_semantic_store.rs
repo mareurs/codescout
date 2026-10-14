@@ -68,7 +68,7 @@ impl SqliteVecSemanticMemoryStore {
                 if existing_dim != dim {
                     anyhow::bail!(
                         "sqlite-vec memory index dim mismatch: existing={existing_dim}, batch={dim}. \
-                         The embedding model/dim changed — clear the memory index to rebuild."
+                         The embedding model/dim changed. Stop writers, make a coherent copy, then use codescout rebuild-memory-vectors --help with a fresh backup destination."
                     );
                 }
             }

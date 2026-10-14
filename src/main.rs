@@ -131,40 +131,43 @@ enum Commands {
         idle_timeout: u64,
     },
 
-    /// Migrate legacy sqlite-vec memories at .codescout/embeddings.db into the
-    /// Qdrant `memories` collection. Idempotent — re-running overwrites by
-    /// deterministic point id rather than duplicating.
-    ///
-    /// With --in-place, imports nothing and instead re-embeds the memories
-    /// already in the store from the content it already holds. Use that after any
-    /// change of embedding convention (query-prefix policy, model, dimension):
-    /// fixing the write path only fixes future writes, and vectors stored under
-    /// the old convention are stranded once queries move to the new one.
+    /// Import legacy SQLite memories or re-embed existing memories.
+    /// SQLite dimension changes require rebuild-memory-vectors instead.
     MigrateMemories {
-        /// Project root path (defaults to CWD). Used both to locate the legacy
-        /// db and to derive the project_id namespace in Qdrant.
+        /// Project root path (defaults to CWD).
         #[arg(short, long)]
         project: Option<std::path::PathBuf>,
-
-        /// Explicit path to the legacy embeddings db. Defaults to
-        /// `<project>/.codescout/embeddings.db`.
+        /// Explicit legacy database, default <project>/.codescout/embeddings/project.db.
         #[arg(long)]
         db_path: Option<std::path::PathBuf>,
-
-        /// Read + count without embedding or writing to Qdrant.
+        /// Read/count without writing.
         #[arg(long)]
         dry_run: bool,
-
-        /// Re-derive every memory vector from current embedding config, instead of
-        /// importing from a legacy db. Runs TWO passes, and the second is easy to
-        /// miss: memories already in the store are re-embedded in place (point ids,
-        /// content, anchors and timestamps preserved — only the vector changes), and
-        /// memories on disk with NO point at all are embedded from disk, which the
-        /// store-driven pass cannot see because it enumerates from the store. A
-        /// failed row keeps its existing state, so a misconfigured embedder cannot
-        /// degrade the corpus. Mutually exclusive with --db-path.
+        /// Re-embed stored memories and import missing disk memories.
+        /// Failed rows retain their old state; inspect skipped. This mode uses
+        /// ordinary store upserts and cannot rebuild a SQLite vector table at a
+        /// different dimension. Use rebuild-memory-vectors for that repair.
         #[arg(long, conflicts_with = "db_path")]
         in_place: bool,
+    },
+    /// Rebuild all vectors in one existing SQLite memory database, preserving records.
+    /// Stop writers and use a coherent copy first. Requires a fresh rollback backup.
+    RebuildMemoryVectors {
+        /// Existing *.memories.db file; never resolved from the current profile.
+        #[arg(long)]
+        db: std::path::PathBuf,
+        /// Explicit offline local-dir:<snapshot> model matching the future query profile.
+        #[arg(long)]
+        model: String,
+        /// Required output width, checked against every generated vector.
+        #[arg(long)]
+        dimensions: usize,
+        /// Fresh backup destination. An existing file is never overwritten.
+        #[arg(long)]
+        backup: std::path::PathBuf,
+        /// Validate/count read-only, without loading a model or making a backup.
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Print the codescout git SHA, full SHA, and dirty status baked into this
@@ -412,11 +415,50 @@ async fn main() -> Result<()> {
                     "mode": if in_place { "in-place-reembed" } else { "legacy-import" },
                     "next_step": match (report.dry_run, in_place) {
                         (true, _) => "Re-run without --dry-run to perform the upserts.",
-                        (false, true) => "Every memory vector was re-derived from current embedding config. Check `skipped` — those rows kept their previous vectors and are still on the old convention.",
+                        (false, true) => "Review upserted and skipped: skipped rows retain their previous vectors. SQLite dimension changes require rebuild-memory-vectors on a coherent copy with a fresh backup.",
                         (false, false) => "Verify recall works against the new store, then delete .codescout/embeddings.db when satisfied.",
                     },
                 })
             );
+        }
+        Commands::RebuildMemoryVectors {
+            db,
+            model,
+            dimensions,
+            backup,
+            dry_run,
+        } => {
+            anyhow::ensure!(
+                model.starts_with("local-dir:") && model.len() > "local-dir:".len(),
+                "--model must be an explicit offline local-dir:<snapshot>"
+            );
+            use codescout::migrate::sqlite_memory_vectors::{
+                rebuild_sqlite_memory_vectors, RebuildOptions,
+            };
+            let mut options = RebuildOptions {
+                dimensions,
+                backup,
+                dry_run: true,
+            };
+            // Validate the explicitly chosen existing file before loading any model.
+            let preview = rebuild_sqlite_memory_vectors(&db, None, &options).await?;
+            let report = if dry_run {
+                preview
+            } else {
+                let inner =
+                    codescout_embed::create_embedder_with_config(&model, None, None).await?;
+                let adapter = codescout::retrieval::embedder::CodeEmbedderAdapter::new(
+                    inner,
+                    Some(dimensions),
+                )?;
+                let embedder = codescout::migrate::memories::HttpMigrationEmbedder::new(
+                    std::sync::Arc::new(adapter),
+                    codescout::embed::chunk_size_for_model(&model),
+                );
+                options.dry_run = false;
+                rebuild_sqlite_memory_vectors(&db, Some(&embedder), &options).await?
+            };
+            println!("{}", serde_json::to_string(&report)?);
         }
         Commands::Version => {
             let info = serde_json::json!({

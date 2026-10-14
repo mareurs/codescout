@@ -15,3 +15,4 @@
 //! will remove.
 
 pub mod memories;
+pub mod sqlite_memory_vectors;
