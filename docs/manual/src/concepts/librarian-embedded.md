@@ -1,7 +1,7 @@
 # Librarian (embedded in codescout)
 
 `librarian-mcp` is no longer a standalone MCP server. It is embedded inside
-the codescout binary as an opt-in subsystem behind the `librarian` cargo
+the codescout binary as an optional subsystem behind the `librarian` cargo
 feature, which is on by default in dev builds and off in `--no-default-features`
 production builds.
 
@@ -45,6 +45,23 @@ The env var wins; project.toml is consulted only when the env var is unset.
 
 To opt out globally, set `LIBRARIAN_ENABLED=0` in the codescout MCP server
 launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
+## First run
+
+On first start the server creates `~/.config/librarian/workspace.toml` when it
+is absent, so a new machine reaches a working librarian with no manual file.
+The file holds only comments and is safe to edit. The server never overwrites
+it. If the location is not writable, the server starts on an empty default and
+logs a warning.
+
+Two files share the name `workspace.toml`. This one is global and per user. The
+other is `<project>/.codescout/workspace.toml`, which declares one project's
+sub-projects and umbrellas (`doctor` reads it).
+
+Creation applies only to the default path. If `LIBRARIAN_WORKSPACE` names a
+file that does not exist, nothing is created and the librarian stays disabled:
+its tools are not registered, and the reason is logged. A file that exists but
+does not parse disables it the same way.
+
 ## What you lose with `librarian` off
 
 - The two librarian tools disappear from `tools/list`.
@@ -56,8 +73,8 @@ launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
 
 ## Opting out in production
 
-Production users of codescout-as-MCP without a workspace.toml or a
-configured catalog can opt out via `LIBRARIAN_ENABLED=0` to avoid the
+Production users of codescout-as-MCP who do not use artifact tooling can
+opt out via `LIBRARIAN_ENABLED=0` to avoid the
 token overhead of the librarian tool descriptions. The cargo feature can
 also be compiled out entirely (`--no-default-features`) for a leaner
 production binary.
@@ -109,10 +126,16 @@ kind = "doc"
 
 Built-in defaults already cover common patterns: `CHANGELOG.md`,
 `CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/QUICK-START.md`,
-`docs/concepts/**`, `docs/configuration/**`, `docs/experimental/**`,
-`docs/issues/**` (tracker), `docs/TODO-*.md` (tracker), `docs/review-*.md`
-(memory, dated), `**/prompts/*.md`, `src/**/prompts/*.md`,
-`crates/**/prompts/*.md`. The override file is for project-specific
+`docs/QUICKSTART.md`, `docs/concepts/**`, `docs/configuration/**`,
+`docs/experimental/**`, `docs/manual/**` (doc), `docs/issues/**` (tracker),
+`docs/trackers/**` (tracker), `docs/TODO-*.md` and `docs/TODO/*.md` (tracker),
+`docs/review-*.md` (memory, dated), `docs/research/*.md` (memory, dated),
+`docs/superpowers/specs/*.md` (spec), `docs/superpowers/plans/*.md` (plan),
+`docs/audits/*.md` (audit), `docs/handoffs/*.md` (handoff),
+`docs/runbooks/*.md` (runbook), `docs/adrs/*.md` (adr), `ROADMAP.md`
+(roadmap), `**/prompts/*.md`, `src/**/prompts/*.md`,
+`crates/**/prompts/*.md`. A file's own frontmatter `kind:` outranks every
+rule. The override file is for project-specific
 patterns the defaults can't reasonably guess.
 
 ## Migration from standalone librarian-mcp
