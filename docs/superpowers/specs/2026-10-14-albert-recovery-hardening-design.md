@@ -1,7 +1,7 @@
 ---
 id: '7584256bee7a6dbe'
 kind: spec
-status: active
+status: done
 title: Albert SQLite recovery safeguards and offline acceptance
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - albert-r02
 - sqlite
 - offline-tests
+source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
 ---
 
 # Albert follow-up: SQLite recovery safeguards and offline acceptance

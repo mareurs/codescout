@@ -8,6 +8,7 @@ owners:
 tags:
 - albert-r02
 - implementation
+source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
 ---
 
 # Albert Recovery Hardening Implementation Plan
@@ -71,7 +72,7 @@ Expected verification: new offline collection tests and scripts/python-tests.py 
 - [x] Request one fresh strong whole-branch review; require applied mutation counts and close observed survivors with RED→GREEN tests.
 - [x] Format owned changes; run ./scripts/gate.sh --check in its mandatory order and read the result.
 - [ ] Verify packet hashes, clean patch application to base223 and exact reconstructed source bytes.
-- [ ] Commit only owned paths, reconcile owned catalog records, fast-forward experiments and restore main activation.
+- [x] Commit only owned paths, reconcile owned catalog records, fast-forward experiments and restore main activation.
 
 Expected verification: all five gate exit codes zero; targeted/model results recorded with scope; packet checks pass. Native client acceptance on Albert's actual laptop remains explicitly pending unless exercised there.
 

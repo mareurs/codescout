@@ -10,7 +10,7 @@ tags:
 - albert-r02
 - operator-acceptance
 - memory
-source_commit: 36080b79daed5ba712f14dd75a935b3fd68188f6
+source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
 ---
 
 # Albert R-02 acceptance on isolated copies

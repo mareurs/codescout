@@ -1,17 +1,18 @@
 ---
-id: '239252057ac4af21'
+id: 473fb34c3e2eceba
 kind: bug
-status: taken
+status: fixed
 title: SQLite memory rebuild dry-run accepts WAL despite its strict no-file-change contract
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
 - albert-follow-up
-claimed_by: 01a13475-9d76-7942-81ce-e2a4457bf033
+closed: 2026-10-14
 opened: 2026-10-14
 owner: marius
 severity: medium
+source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
 ---
 
 # BUG: SQLite memory rebuild dry-run accepts WAL despite its strict no-file-change contract
@@ -58,8 +59,15 @@ Use a controlled coherent trial and the follow-up recovery guide; keep all write
 
 ## Resume
 
-Implementation and full gate in progress. See ../superpowers/plans/2026-10-14-albert-recovery-hardening.md.
+Fixed and archived after source `c773a2ca5b5225010c06b5784a13470319bc4617` landed on experiments and the final ordered gate passed. See [the implementation evidence and rulings](../../superpowers/plans/2026-10-14-albert-recovery-hardening.md). Operator native/corpus acceptance is tracked separately.
 
 ## References
 
 Albert's sanitized pachet-fix-codescout-2026-10-14.zip; its candidate remains separate from the supported CLI.
+
+## Fix provenance
+
+- **SHA:** `c773a2ca5b5225010c06b5784a13470319bc4617` (`experiments`)
+- **patch-id:** `1e6a43618eb28337de242fcfb31271132a9b0354`
+
+Verified final ordered gate: FMT0 CLIPPY0 LEAN0 PYTHON_LIGHT0 DEFAULT0, with normal temporary paths and eight test threads. SQLite27pass, ordinary CLI4pass and genuine two-record MiniLM CLI1pass; credential-free Python light1223pass/424subtests. Both review coverage gaps have observed mutation RED and restored GREEN.

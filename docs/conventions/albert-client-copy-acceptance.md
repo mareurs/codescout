@@ -11,6 +11,7 @@ tags:
 - codex
 - claude
 - pi
+source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
 ---
 
 # Albert: client acceptance on an isolated CodeScout copy

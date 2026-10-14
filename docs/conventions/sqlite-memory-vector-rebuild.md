@@ -10,8 +10,9 @@ tags:
 - sqlite-vec
 - albert-r02
 actual_model_verification: genuine CLI plus reopened recall passed on isolated Xenova/all-MiniLM-L6-v2 snapshot 751bff37182d3f1213fa05d7196b954e230abad9; Albert's own snapshot/corpus acceptance still required
-verified_source_commit: 36080b79daed5ba712f14dd75a935b3fd68188f6
-verified_source_patch_id: 892b29741757566939c72750ff52112f20467b89
+source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
+verified_source_commit: c773a2ca5b5225010c06b5784a13470319bc4617
+verified_source_patch_id: 1e6a43618eb28337de242fcfb31271132a9b0354
 ---
 
 # Rebuild SQLite semantic memory vectors on a copy
