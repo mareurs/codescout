@@ -199,6 +199,29 @@ fn should_init_default_workspace(env: &LibrarianEnv) -> bool {
     env.init_default_workspace && env.workspace.is_none()
 }
 
+/// Resolve and load the global workspace config for `env`. `default_path` supplies the
+/// path used when `env.workspace` names none; it is a parameter so a test can aim the
+/// default at a tempdir without touching the process environment.
+fn load_workspace_config(
+    env: &LibrarianEnv,
+    default_path: impl FnOnce() -> Result<std::path::PathBuf>,
+) -> Result<workspace::WorkspaceConfig> {
+    use anyhow::Context as _;
+
+    let cfg_path = match env.workspace.clone() {
+        Some(p) => p,
+        None => default_path()?,
+    };
+    workspace::load_or_init(&cfg_path, should_init_default_workspace(env)).with_context(|| {
+        format!(
+            "Load workspace config from {} (the global librarian file, not \
+             .codescout/workspace.toml). Set LIBRARIAN_WORKSPACE to another path, or \
+             create an empty file there.",
+            cfg_path.display()
+        )
+    })
+}
+
 pub async fn build_tool_context(
     lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
 ) -> Result<tools::ToolContext> {
@@ -209,23 +232,9 @@ pub async fn build_tool_context_with(
     lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
     env: &LibrarianEnv,
 ) -> Result<tools::ToolContext> {
-    use anyhow::Context as _;
     use std::path::PathBuf;
 
-    let cfg_path = match env.workspace.clone() {
-        Some(p) => p,
-        None => workspace::default_config_path()?,
-    };
-    let ws = workspace::load_or_init(&cfg_path, should_init_default_workspace(env)).with_context(
-        || {
-            format!(
-                "Load workspace config from {} (the global librarian file, not \
-             .codescout/workspace.toml). Set LIBRARIAN_WORKSPACE to another path, or \
-             create an empty file there.",
-                cfg_path.display()
-            )
-        },
-    )?;
+    let ws = load_workspace_config(env, workspace::default_config_path)?;
     let db_path = env.db.clone().unwrap_or_else(|| {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -774,6 +783,29 @@ kind = "spec"
             "the hint named a command that no longer exists: {msg}"
         );
         assert!(!missing.exists(), "an explicit path is never created");
+    }
+    #[test]
+    fn the_default_path_is_created_only_when_the_env_asks() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let asked_path = tmp.path().join("asked/librarian/workspace.toml");
+        let asked = LibrarianEnv {
+            init_default_workspace: true,
+            ..Default::default()
+        };
+        load_workspace_config(&asked, || Ok(asked_path.clone())).unwrap();
+        assert!(
+            asked_path.exists(),
+            "the env asked: the default file is created"
+        );
+
+        let quiet_path = tmp.path().join("quiet/workspace.toml");
+        let quiet = LibrarianEnv::default();
+        assert!(load_workspace_config(&quiet, || Ok(quiet_path.clone())).is_err());
+        assert!(
+            !quiet_path.exists(),
+            "LibrarianEnv::default() must never write a file"
+        );
     }
 
     /// `reindex_cli` must never delete artifact rows under the root before its
