@@ -40,7 +40,7 @@ Why the no-chunk arm still matters on Qdrant: `reembed=true` requeues EXISTING c
 
 ## Evidence
 
-Found while designing the fix for `2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md` (session 1e54b0a7).
+Found while designing the fix for `docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md` (session 1e54b0a7).
 
 ## Hypotheses tried
 

@@ -146,7 +146,7 @@ mod tests {
     /// reads. A scoped run takes its project's setting; `--all` has no single project and
     /// takes the host's. Two projects with opposite settings, so the case where `--all`
     /// wrongly reads the current project fails on the lean and the server-stack build alike.
-    /// BUG docs/issues/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
+    /// BUG docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
     #[test]
     fn a_scoped_run_takes_its_projects_backend_and_all_takes_the_hosts() {
         let host = if cfg!(feature = "server-stack") {

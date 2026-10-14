@@ -1,14 +1,14 @@
 ---
-id: '150e28d405754c68'
+id: 271253d651b1ebe2
 kind: bug
-status: open
+status: fixed
 title: 'BUG: backfill''s vector-gap selector reads sqlite-vec coverage on a host that searches Qdrant, so it selects every chunked artifact'
 owners:
 - marius
 tags:
 - cluster/gate-keyed-on-unobservable-event
 topic: backfill-chunks vector-gap selection
-closed: ''
+closed: 2026-10-14
 opened: 2026-10-14
 related: []
 severity: high
@@ -58,11 +58,21 @@ Review of `62177b8c~1..6cf6d6e8` (session 1e54b0a7), finding 1, verified with re
 
 ## Fix
 
-Unknown — under investigation.
+Verified and committed on **experiments**.
+
+- **SHA:** `8c02ad779926ec33f51ab436e81fe7f056a7fc9d`
+- **patch-id:** `00eabb22f09011ada6735a64186700340a27d39b`
+
+`backfill_chunk_vectors` takes the resolved `ArtifactBackend` and applies the vector-gap arm only for `SqliteVec`. The no-chunk arm stays on every backend, because `reembed=true` reaches existing chunk rows only. The CLI resolves the backend in `backfill_backend()` from the same project input as `build_tool_context_with`; `--all` takes the host setting, as the CLI reindex does. `ArtifactBackend::resolve_with` takes the env value as an argument, so the decision is tested without process env.
+
+Known limit: under `--all`, a project whose `project.toml` sets a backend different from the host's is resolved by the host setting. No project in this catalog sets one. Backfill on a Qdrant host still writes its no-chunk vectors to `artifact_vec_v2`; that older defect is `docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md`.
 
 ## Tests added
 
-N/A — not fixed yet.
+- `a_qdrant_process_backfills_only_artifacts_with_no_chunk_rows` (`src/librarian/indexer.rs`): observed RED first, the Qdrant run reported `artifacts: 2` for 1 expected. A `SqliteVec` control run on the same fixture repairs the gap, so the Qdrant result is not vacuous.
+- `a_scoped_run_takes_its_projects_backend_and_all_takes_the_hosts` (`src/cli/backfill_chunks.rs`): two projects with opposite settings, so it discriminates on the lean and the server-stack build.
+
+Applied mutations with `scripts/mutation-probe.sh` in an isolated worktree: gap arm on for every backend (killed by the first test alone), gap arm off for every backend (killed by 13 tests), CLI ignores `--all` and CLI ignores the env var (each killed by the CLI test). The full ordered `./scripts/gate.sh --check` was green on the committed bytes: lean library 4479 passed, default library 6776 passed, 0 failed.
 
 ## Workarounds
 
@@ -70,7 +80,7 @@ On a Qdrant host, do not run `backfill-chunks` for vector gaps; `librarian(actio
 
 ## Resume
 
-Planned fix: pass the resolved `ArtifactBackend` into backfill and apply the gap arm only for `SqliteVec`; other backends keep the pre-`62177b8c` population (no chunk rows).
+Complete. Fixed in `8c02ad77`, patch-id above.
 
 ## References
 

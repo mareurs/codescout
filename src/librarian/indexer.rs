@@ -1240,8 +1240,8 @@ async fn backfill_chunk_vectors_with(
     // A missing `artifact_vec_v2` row is a gap only for a process whose search reads that
     // table. On any other backend `index_repo` leaves it empty, and the arm selected every
     // chunked artifact. A blank chunk is never embedded, so it is never a gap either.
-    // docs/issues/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
-    // docs/issues/2026-10-14-backfill-reselects-whitespace-only-chunks-because-the-selector-and-the-embed-queue-disagree-on-blank.md
+    // docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
+    // docs/issues/archive/2026-10-14-backfill-reselects-whitespace-only-chunks-because-the-selector-and-the-embed-queue-disagree-on-blank.md
     let gap_arm = if backend == crate::librarian::artifact_store::ArtifactBackend::SqliteVec {
         format!(
             " OR EXISTS ( \
@@ -3400,7 +3400,7 @@ kind = "memory"
     /// live catalog as 2,043 of 2,043 for this project, against 10 before `62177b8c`. The
     /// no-chunk arm must survive on Qdrant: `reembed=true` reaches existing chunk rows only,
     /// so creating them is the only way out of the no-chunk state.
-    /// BUG docs/issues/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
+    /// BUG docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
     #[tokio::test]
     async fn a_qdrant_process_backfills_only_artifacts_with_no_chunk_rows() {
         let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
@@ -3468,7 +3468,7 @@ kind = "memory"
     /// `skipped_empty`. The live catalog holds 2,811 such rows (`''` in 2,782 of them).
     /// `\u{3000}\n` is here because SQLite's one-argument `trim()` strips spaces only, so a
     /// filter written with it keeps selecting that row.
-    /// BUG docs/issues/2026-10-14-backfill-reselects-whitespace-only-chunks-because-the-selector-and-the-embed-queue-disagree-on-blank.md
+    /// BUG docs/issues/archive/2026-10-14-backfill-reselects-whitespace-only-chunks-because-the-selector-and-the-embed-queue-disagree-on-blank.md
     #[tokio::test]
     async fn a_blank_chunk_without_a_vector_does_not_reselect_a_complete_artifact() {
         use crate::librarian::catalog::chunk::chunks_for;

@@ -1,14 +1,14 @@
 ---
-id: f4566e7955af8a5e
+id: ccdbec16bfa4817f
 kind: bug
-status: open
+status: fixed
 title: 'BUG: backfill re-selects whitespace-only chunks on every run, because the selector and the embed queue disagree on what is blank'
 owners:
 - marius
 tags:
 - cluster/gate-keyed-on-unobservable-event
 topic: backfill-chunks vector-gap selection
-closed: ''
+closed: 2026-10-14
 opened: 2026-10-14
 related: []
 severity: medium
@@ -53,11 +53,19 @@ N/A — mechanism read from the code and measured.
 
 ## Fix
 
-Unknown — under investigation.
+Verified and committed on **experiments**.
+
+- **SHA:** `8c02ad779926ec33f51ab436e81fe7f056a7fc9d`
+- **patch-id:** `00eabb22f09011ada6735a64186700340a27d39b`
+
+The vector-gap arm skips a chunk whose `trim(c.content, BLANK_CHARS)` is empty. `BLANK_CHARS` (`src/librarian/indexer.rs`) is every character `str::trim` strips, so the selector and `embed_queue_from_chunks` now share one definition of blank. The blank rows themselves are still stored; not storing them is a separate change to `build_chunks`.
 
 ## Tests added
 
-N/A — not fixed yet.
+- `a_blank_chunk_without_a_vector_does_not_reselect_a_complete_artifact`: observed RED first, the second run reported `(artifacts, embedded, skipped_empty) = (2, 1, 1)` for `(1, 1, 0)`. It uses `''` (2,782 of the live rows) and `"\u{3000}\n"`, which SQLite's one-argument `trim()` keeps.
+- `blank_chars_is_every_character_str_trim_strips`: the set equals `{c | c.is_whitespace()}` over all of Unicode.
+
+Applied mutations with `scripts/mutation-probe.sh` in an isolated worktree: one-argument `trim(c.content)` (killed by the first test alone), U+3000 dropped from the set (killed by both tests). The full ordered `./scripts/gate.sh --check` was green on the committed bytes: lean library 4479 passed, default library 6776 passed, 0 failed.
 
 ## Workarounds
 
@@ -65,7 +73,7 @@ None needed for correctness; the cost is wasted visits and a misleading `skipped
 
 ## Resume
 
-Planned fix: one shared character set equal to `char::is_whitespace`, pinned by an exhaustive test, used in the selector's SQL `trim(content, set)`.
+Complete. Fixed in `8c02ad77`, patch-id above.
 
 ## References
 
