@@ -1,7 +1,7 @@
 ---
-id: '51d5386f89771b91'
+id: 9fe44b12aeca0a0c
 kind: spec
-status: active
+status: done
 title: SQLite memory vector rebuild for Albert R-02
 owners:
 - marius
@@ -9,6 +9,7 @@ tags:
 - albert-r02
 - memory
 - sqlite-vec
+source_commit: 36080b79daed5ba712f14dd75a935b3fd68188f6
 ---
 
 # SQLite memory vector rebuild for Albert R-02

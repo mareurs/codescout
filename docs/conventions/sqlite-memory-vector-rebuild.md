@@ -1,5 +1,5 @@
 ---
-id: '8f64e3aee55e5f25'
+id: '16ece9f8bd10ad0d'
 kind: guide
 status: active
 title: Rebuild SQLite semantic memory vectors on a copy
@@ -9,6 +9,9 @@ tags:
 - memory
 - sqlite-vec
 - albert-r02
+actual_model_verification: genuine CLI plus reopened recall passed on isolated Xenova/all-MiniLM-L6-v2 snapshot 751bff37182d3f1213fa05d7196b954e230abad9; Albert's own snapshot/corpus acceptance still required
+verified_source_commit: 36080b79daed5ba712f14dd75a935b3fd68188f6
+verified_source_patch_id: 892b29741757566939c72750ff52112f20467b89
 ---
 
 # Rebuild SQLite semantic memory vectors on a copy
@@ -106,6 +109,8 @@ Use the original compatible query model/profile to test the restored old index. 
 Keep the daily database untouched until the full trial acceptance and the inventory of remaining indexes are complete.
 
 ## Developer verification
+
+Measured on 2026-10-14: the genuine-model test below passed with Xenova/all-MiniLM-L6-v2 revision 751bff37182d3f1213fa05d7196b954e230abad9 (quantized ONNX SHA256 afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1). This covers actual CLI inference and fresh-store recall on two synthetic records, alongside the separate 192-record deterministic reconstruction tests. It does not accept Albert's actual corpus or a different snapshot.
 
 The deterministic tests use real SQLite/vec0 and substitute only document embeddings. They cover 192 literal IDs/raw records, reopened KNN, failure/retry, wrong/non-finite vectors, empty/same-width schemas, missing/orphan vectors, WAL-aware backup, external writers, alternate accepted UUID spellings, publication count/ID refusal, and rollback after actual post-DDL insert/coverage failures.
 

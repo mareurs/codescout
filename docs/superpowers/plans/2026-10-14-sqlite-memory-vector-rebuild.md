@@ -1,7 +1,7 @@
 ---
-id: d1c59cdd1fb53c4e
+id: '59958a4ffc39bd90'
 kind: plan
-status: active
+status: done
 title: Implement SQLite memory vector rebuild
 owners:
 - marius
@@ -9,6 +9,8 @@ tags:
 - albert-r02
 - memory
 - sqlite-vec
+source_commit: 36080b79daed5ba712f14dd75a935b3fd68188f6
+verification: full ordered gate zero; 15 SQLite, 4 ordinary CLI and 1 genuine MiniLM CLI/reopened-recall tests pass; initial mutation gaps closed
 ---
 
 # SQLite Memory Vector Rebuild Implementation Plan

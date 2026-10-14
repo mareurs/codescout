@@ -1,18 +1,19 @@
 ---
-id: '0b302c894f5db611'
+id: '2b65eb20fe8c0fb7'
 kind: bug
-status: taken
+status: fixed
 title: 'BUG: SQLite memory reembedding cannot change the stored vector dimension'
 owners:
 - marius
 tags:
 - cluster/declared-not-wired
 topic: Albert R-02 SQLite memory recovery
-claimed_at: 2026-10-14
-claimed_by: codex:01a13475-9d76-7942-81ce-e2a4457bf033
+closed: 2026-10-14
+fix_patch_id: 892b29741757566939c72750ff52112f20467b89
+fix_sha: 36080b79daed5ba712f14dd75a935b3fd68188f6
 opened: 2026-10-14
 severity: high
-unverified: Actual ONNX inference and Albert's corpus/laptop integrations remain operator acceptance work in docs/superpowers/plans/2026-10-14-albert-r02-copy-acceptance.md; synthetic tests and full ordered gate pass.
+unverified: TRACKED abf1db6dec85edfe — Albert's own snapshot/corpus recall, index inventory and Claude/Codex integrations remain operator acceptance work. Root's genuine MiniLM CLI/model/reopened-recall test passes, along with synthetic reconstruction, failure/retry/rollback and the full ordered gate.
 ---
 
 # BUG: SQLite memory reembedding cannot change the stored vector dimension
@@ -51,9 +52,18 @@ N/A — source trace and controlled reproduction are the initial investigation.
 
 ## Fix
 
-Explicit SQLite-only rebuild command: validate and embed every stored record, verified WAL-aware backup, atomic vector-table publication, exact memory_item preservation and hard failure on incomplete work.
+On experiments: 36080b79daed5ba712f14dd75a935b3fd68188f6; stable patch-id 892b29741757566939c72750ff52112f20467b89.
+
+The explicit SQLite-only rebuild validates and embeds every stored record, takes an exclusive WAL-aware verified backup, and publishes only memory_vec atomically after source consistency checks. Original memory_item SQL values and literal IDs are preserved, including accepted alternate UUID spellings. Any failed/missing vector refuses publication. Ordinary store dimension refusal remains with supported recovery guidance.
+
+## Fix provenance
+
+- **SHA:** `36080b79daed5ba712f14dd75a935b3fd68188f6` (`experiments`)
+- **patch-id:** `892b29741757566939c72750ff52112f20467b89`
 
 ## Tests added
+
+The previously ignored genuine-model test was explicitly run and passed (@bg_0000002f: one passed, zero failed). It executes the actual CLI against a two-record synthetic 768-dimensional database, loads the isolated AllMiniLML6V2Q snapshot, publishes 384-dimensional vectors, preserves raw records and queries a reopened store with the same model. Snapshot: Xenova/all-MiniLM-L6-v2 revision 751bff37182d3f1213fa05d7196b954e230abad9, quantized ONNX SHA256 afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1. Model manifest: /tmp/codescout-r02-model-snapshot.json. The 15 SQLite and four ordinary CLI tests also pass on the merged checkout (@bg_0000002c/@bg_0000002d).
 
 Fifteen real SQLite/sqlite-vec tests pass on restored source (@bg_00000028, 15 passed, zero failed). They cover 192 literal IDs with raw JSON/unknown SQL columns preserved, reopened KNN recall, verified backup and separate-copy old-index rollback, halfway failure/retry, empty/same-width rebuild, missing/orphan repair, malformed rows/schema, wrong/non-finite vectors, invalid inputs, existing/failed backups, uncheckpointed WAL, record/vector-only external writers, actual insertion-error rollback, alternate accepted UUID spellings, incomplete/unique-orphan publication refusal, and characterization of legacy in-place dimension refusal. Four actual CLI tests pass with one real-model test explicitly ignored. Seven initial review mutations produced five killed and two surviving gaps; both gaps now have independently observed failing regressions under the corresponding mutations. Full ordered gate exited zero: PYTHON_LIGHT=0, FMT=0, CLIPPY=0, LEAN=0, DEFAULT=0, FMT_STATE=passed. Gate limits include heavy Python, server-stack, and two skipped ONNX weight tests; the new real-model CLI test is explicitly ignored.
 
@@ -63,7 +73,7 @@ Keep real records and backups; use the new 384 profile only on fresh isolated st
 
 ## Resume
 
-Source implementation, applied mutation review and full ordered gate are verified. Commit/merge to experiments, record exact SHA plus patch-id, reconcile worktree catalog metadata, and archive this source bug. Actual-machine acceptance remains a separate open plan; daily databases are untouched.
+Source fix verified and merged into experiments. Full gate: PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed. Source SHA and patch-id are recorded above. Remaining real-machine acceptance is tracked separately in docs/superpowers/plans/2026-10-14-albert-r02-copy-acceptance.md. No daily database was migrated.
 
 ## References
 

@@ -1,5 +1,5 @@
 ---
-id: c2ea38d667f9a2f8
+id: abf1db6dec85edfe
 kind: plan
 status: active
 title: Albert R-02 acceptance on isolated copies
@@ -10,9 +10,12 @@ tags:
 - albert-r02
 - operator-acceptance
 - memory
+source_commit: 36080b79daed5ba712f14dd75a935b3fd68188f6
 ---
 
 # Albert R-02 acceptance on isolated copies
+
+Root verification is complete: full ordered gate passed; 15 real SQLite tests, four ordinary CLI checks and one actual MiniLM CLI/reopened-recall test passed. Actual-model revision: Xenova/all-MiniLM-L6-v2 751bff37182d3f1213fa05d7196b954e230abad9. The operator checks below remain required for Albert's own snapshot, data and clients.
 
 This tracks the remaining actual-machine work after the SQLite rebuild implementation and synthetic tests pass. It is an operator procedure, not authorization to modify daily databases.
 
