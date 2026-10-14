@@ -81,7 +81,11 @@ pub const DEFAULT_WORKSPACE_TOML: &str = r##"# Global librarian workspace config
 /// librarian starts on the in-memory default and a warning names the path. An
 /// existing file that does not parse is still an error, and is left untouched.
 pub fn load_or_init(path: &Path, init: bool) -> Result<WorkspaceConfig> {
-    if init && !path.exists() {
+    // `try_exists`, not `exists`: `exists()` is false on EACCES too, which would send an
+    // existing-but-unreadable file down the create path and replace the user's config
+    // with an empty one. Only a confirmed absence creates; any other error falls through
+    // to `load`, which reports it.
+    if init && confirmed_absent(path) {
         if let Err(e) = create_default(path) {
             tracing::warn!(
                 "could not create {}: {e}; starting the librarian with an empty workspace config",
@@ -91,6 +95,16 @@ pub fn load_or_init(path: &Path, init: bool) -> Result<WorkspaceConfig> {
         }
     }
     load(path)
+}
+
+/// True when nothing can live at `path`: it is absent, or a parent is not a directory
+/// (creating it will then fail into the in-memory fallback). Any other error — notably
+/// `PermissionDenied`, where the file may well exist — is NOT absence.
+fn confirmed_absent(path: &Path) -> bool {
+    match path.try_exists() {
+        Ok(exists) => !exists,
+        Err(e) => e.kind() == std::io::ErrorKind::NotADirectory,
+    }
 }
 
 fn create_default(path: &Path) -> std::io::Result<()> {
@@ -195,6 +209,34 @@ mod tests {
 
         assert!(load_or_init(&path, true).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "not = [valid");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_existing_file_is_an_error_not_an_empty_default() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("librarian");
+        std::fs::create_dir(&sub).unwrap();
+        let path = sub.join("workspace.toml");
+        let mine = "[[rule]]\nglob = \"**/README.md\"\nkind = \"spec\"\n";
+        std::fs::write(&path, mine).unwrap();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root can still stat through a mode-000 directory, so the setup does not hold
+        // there; restore and skip rather than assert on a world that is not the one tested.
+        let setup_holds = path.try_exists().is_err();
+        let result = load_or_init(&path, true);
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !setup_holds {
+            return;
+        }
+
+        assert!(
+            result.is_err(),
+            "an existing file that cannot be read must not become an empty config"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine);
     }
 
     #[test]

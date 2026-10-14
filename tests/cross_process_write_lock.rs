@@ -145,10 +145,18 @@ async fn contended_edit_response(holder_record: Option<&str>) -> String {
     // is bound to a named local (not a temporary) so the tempdir isn't deleted
     // before the child process is done reading/writing it. See
     // docs/issues/archive/2026-08-18-spawned-binary-test-points-guide-gc-at-real-state-dir.md.
+    //
+    // The librarian's workspace file and catalog are redirected for the same reason: with
+    // `from_env()` the child creates `~/.config/librarian/workspace.toml` when it is
+    // absent, so a contributor's first `cargo test --workspace` would write there.
     let state_dir = tempfile::tempdir().unwrap();
+    let librarian_ws = state_dir.path().join("workspace.toml");
+    std::fs::write(&librarian_ws, "").unwrap();
     let mut child = Command::new(&bin)
         .args(["start", "--project", project.to_str().unwrap()])
         .env("XDG_STATE_HOME", state_dir.path())
+        .env("LIBRARIAN_WORKSPACE", &librarian_ws)
+        .env("LIBRARIAN_DB", state_dir.path().join("catalog.db"))
         .env_remove("CLAUDE_CODE_SESSION_ID")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
