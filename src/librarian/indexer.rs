@@ -1585,6 +1585,29 @@ kind = "memory"
         assert_eq!(r2.unchanged, 3);
         assert_eq!(r2.added, 0);
     }
+    #[test]
+    fn a_frontmatter_kind_beats_a_built_in_rule() {
+        // docs/superpowers/specs/*.md is `spec` by built-in rule; the file's own
+        // frontmatter says `plan`, and the file wins.
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = crate::librarian::classify::default_rules().unwrap();
+        let ignore = globset::GlobSet::empty();
+        let dir = tempfile::tempdir().unwrap();
+        let specs = dir.path().join("docs/superpowers/specs");
+        std::fs::create_dir_all(&specs).unwrap();
+        std::fs::write(specs.join("x.md"), "---\nkind: plan\n---\n# X\n\nbody\n").unwrap();
+
+        index_repo_sync(&cat, &rules, dir.path(), &ignore, false, false, false).unwrap();
+
+        let kind: String = cat
+            .conn
+            .query_row("SELECT kind FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            kind, "plan",
+            "frontmatter `kind:` must outrank a built-in rule"
+        );
+    }
 
     /// A symlink pointing back INSIDE the walk root is a second name for one document
     /// and must not become a second artifact; one pointing OUTSIDE is the only route to
