@@ -34,7 +34,7 @@ Persist a piece of knowledge under a named topic.
 
 **Output:** `"ok"`
 
-**Tips:** Write a memory whenever you learn something non-obvious — a naming convention, an architectural decision, a gotcha you had to debug. Topics with a slash create a sub-directory, which keeps related entries grouped. Calling `write` with an existing topic overwrites it.
+**Tips:** Write a memory whenever you learn something non-obvious — a naming convention, an architectural decision, a gotcha you had to debug. Topics with a slash create a sub-directory, which keeps related entries grouped. Calling `write` with an existing topic replaces it wholesale and preserves the previous bytes under the selected store’s `.history/<normalized-topic>.md/<uuid>.md.bak`. Backups stay outside the topic list and are gitignored. A large shrink requires `force: true`; force still refuses unreadable or invalid UTF-8 old content and backup failures. Cooperating writers serialize; their changes are not merged. Keep history with the store when taking a backup.
 
 ---
 

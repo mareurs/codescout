@@ -1326,6 +1326,42 @@ async fn write_refuses_a_destructive_overwrite() {
 }
 
 #[tokio::test]
+async fn forced_writes_preserve_history_in_the_selected_store_and_refuse_invalid_bytes() {
+    let (_dir, ctx) = test_ctx_with_project().await;
+    for private in [false, true] {
+        let store = ctx
+            .agent
+            .with_project(|p| {
+                Ok(if private {
+                    p.private_memory.clone()
+                } else {
+                    p.memory.clone()
+                })
+            })
+            .await
+            .unwrap();
+        let old = ten_section_memory();
+        store.write("history-test", &old).unwrap();
+        Memory.call(json!({"action":"write","topic":"history-test","content":"pruned","force":true,"private":private}), &ctx)
+            .await.unwrap();
+        let files: Vec<_> = walkdir::WalkDir::new(store.dir().join(".history"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "bak"))
+            .collect();
+        assert_eq!(files.len(), 1, "private={private}");
+        assert_eq!(std::fs::read(files[0].path()).unwrap(), old.as_bytes());
+        let invalid = [0x61, 0xff, 0x62];
+        std::fs::write(store.dir().join("invalid.md"), invalid).unwrap();
+        assert!(Memory.call(json!({"action":"write","topic":"invalid","content":"replacement","force":true,"private":private}), &ctx).await.is_err());
+        assert_eq!(
+            std::fs::read(store.dir().join("invalid.md")).unwrap(),
+            invalid
+        );
+    }
+}
+
+#[tokio::test]
 async fn write_with_force_permits_the_overwrite() {
     let (_dir, ctx) = test_ctx_with_project().await;
     Memory

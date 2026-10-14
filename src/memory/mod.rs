@@ -11,6 +11,7 @@ pub mod guarded;
 pub mod hash;
 pub mod semantic_store;
 pub mod sqlite_semantic_store;
+mod write_transaction;
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -110,35 +111,16 @@ impl MemoryStore {
         Ok(())
     }
 
-    /// Write or overwrite a memory entry.
+    /// Replace a topic wholesale, preserving its predecessor in private history.
     pub fn write(&self, topic: &str, content: &str) -> Result<()> {
-        let path = self.topic_path(topic);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        crate::util::fs::atomic_write(&path, content)?;
-        Ok(())
+        write_transaction::WriteTransaction::begin(self, topic)?.write(content)
     }
 
-    /// Would writing `content` over `topic` destroy more than half of what is
-    /// already there, by bytes **or** by lines? Returns the numbers to show the
-    /// caller, or `None` when the write is safe.
-    ///
-    /// **Non-mutating, and deliberately not wired into [`Self::write`].**
-    /// Wholesale replacement is `write`'s specified behaviour — see the
-    /// `overwrite_replaces_content` test — and `tools/onboarding.rs` depends
-    /// on it to regenerate `onboarding` and `language-patterns`. Policy lives
-    /// with the caller that has a user to warn and a `force` flag to offer,
-    /// exactly as the artifact body-shrink guard sits in
-    /// `librarian/tools/update.rs` rather than in the catalog write primitive.
-    ///
-    /// A new topic, or an existing one below [`SHRINK_GUARD_MIN_BYTES`],
-    /// always returns `None`: the first destroys nothing, and a ratio over a
-    /// handful of bytes is noise.
+    /// Preview the shrink predicate without acquiring a write lease.
+    /// None includes read failures, so this is not a write authorization.
+    /// The guarded write evaluates the predicate from a strict read under its
+    /// transaction lease; raw write intentionally omits shrink policy.
     pub fn shrink_check(&self, topic: &str, content: &str) -> Option<ShrinkReport> {
-        // A read error is not a shrink. Refusing a write because the existing
-        // entry could not be read would turn an unrelated IO fault into a
-        // blocked save, so an unreadable entry declines to object.
         let existing = self.read(topic).ok().flatten()?;
         crate::util::shrink_guard::check(&existing, content)
     }
@@ -175,13 +157,9 @@ impl MemoryStore {
         Ok(topics)
     }
 
-    /// Delete a memory entry.
+    /// Delete a topic under the same lease used by writes.
     pub fn delete(&self, topic: &str) -> Result<()> {
-        let path = self.topic_path(topic);
-        if path.exists() {
-            std::fs::remove_file(path)?;
-        }
-        Ok(())
+        write_transaction::WriteTransaction::begin_delete(self, topic)?.delete()
     }
 
     pub(crate) fn topic_path(&self, topic: &str) -> PathBuf {

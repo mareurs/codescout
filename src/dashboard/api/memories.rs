@@ -186,6 +186,39 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn forced_ui_writes_preserve_history_and_refuse_invalid_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let st = state(&root);
+        let store = MemoryStore::open(root.path()).unwrap();
+        let old = "\u{feff}long memory line\r\n".repeat(80);
+        assert_eq!(
+            write(&st, "history-test", &old, false).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            write(&st, "history-test", "pruned", true).await.0,
+            StatusCode::OK
+        );
+        let files: Vec<_> = walkdir::WalkDir::new(store.dir().join(".history"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "bak"))
+            .collect();
+        assert_eq!(files.len(), 1);
+        assert_eq!(std::fs::read(files[0].path()).unwrap(), old.as_bytes());
+        let invalid = [0x61, 0xff, 0x62];
+        std::fs::write(store.dir().join("invalid.md"), invalid).unwrap();
+        assert_eq!(
+            write(&st, "invalid", "new", true).await.0,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            std::fs::read(store.dir().join("invalid.md")).unwrap(),
+            invalid
+        );
+    }
+
     /// The escape has to exist, or the fix converts "the UI can destroy a memory" into
     /// "the UI cannot legitimately replace one".
     #[tokio::test]

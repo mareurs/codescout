@@ -1,12 +1,11 @@
 //! The protections a memory mutation owes, in one place both callers reach.
 //!
 //! **Why this module exists rather than a method on [`MemoryStore`].** The store's
-//! primitives are deliberately unguarded — `MemoryStore::write`'s own doc comment
-//! records that wholesale replacement is specified behaviour that
-//! `crate::tools::onboarding` depends on, and puts policy with "the caller that has a
-//! user to warn and a `force` flag to offer". That reasoning is sound and is not what
-//! failed. What failed is that there was no *shared* caller-side layer, so the policy
-//! lived inline in one caller and a second caller was added beside it with none:
+//! primitive preserves predecessor bytes and serializes writes, while deliberately
+//! retaining wholesale replacement without shrink policy for onboarding regeneration.
+//! This layer adds caller-facing shrink refusal and anchor updates under the same
+//! transaction lease. It was introduced because the policy previously lived inline
+//! in one caller and a second caller was added beside it with none:
 //!
 //! - `POST /api/memories/{topic}` called `store.write` directly — no shrink guard, so a
 //!   UI edit could truncate a memory to a fraction of its size with no refusal, and no
@@ -75,20 +74,23 @@ pub fn guarded_write(
     content: &str,
     force: bool,
 ) -> Result<Vec<String>, GuardedWriteError> {
+    let transaction = super::write_transaction::WriteTransaction::begin(store, topic)
+        .map_err(GuardedWriteError::Failed)?;
     if !force {
-        if let Some(report) = store.shrink_check(topic, content) {
+        if let Some(report) = transaction
+            .existing()
+            .and_then(|old| crate::util::shrink_guard::check(old, content))
+        {
             return Err(GuardedWriteError::Shrink(Box::new(report)));
         }
     }
-
-    store
-        .write(topic, content)
+    transaction
+        .write(content)
         .map_err(GuardedWriteError::Failed)?;
-
     let mut warnings = Vec::new();
     if let Some(root) = anchor_root {
         if let Err(e) =
-            crate::memory::anchors::update_anchors_on_write(root, store.dir(), topic, content)
+            crate::memory::anchors::update_anchors_on_write(root, transaction.dir(), topic, content)
         {
             tracing::warn!("anchor update failed (non-fatal): {e}");
             warnings.push(format!("anchor update failed: {e}"));
@@ -105,9 +107,9 @@ pub fn guarded_write(
 ///
 /// A missing sidecar is success, not an error: most topics never grow one.
 pub fn guarded_delete(store: &MemoryStore, topic: &str) -> anyhow::Result<()> {
-    store.delete(topic)?;
-
-    let sidecar = crate::memory::anchors::anchor_path_for_topic(store.dir(), topic);
+    let transaction = super::write_transaction::WriteTransaction::begin_delete(store, topic)?;
+    transaction.delete()?;
+    let sidecar = crate::memory::anchors::anchor_path_for_topic(transaction.dir(), topic);
     match std::fs::remove_file(&sidecar) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
