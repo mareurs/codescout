@@ -34,8 +34,6 @@ def clean_profile(root: Path) -> Path:
     return root
 
 
-_boot = tempfile.TemporaryDirectory()
-os.environ["JUDGE_CONFIG_DIR"] = str(clean_profile(Path(_boot.name) / "judge"))
 SPEC = importlib.util.spec_from_file_location("phase2_score_dp1", SCRIPT)
 sc = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = sc
@@ -63,6 +61,8 @@ class Scorer(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         d = Path(self.tmp.name)
+        self.original_profile = sc._p.config_dir
+        sc._p.config_dir = str(clean_profile(d / "judge"))
         self.request = d / "request.json"
         self.request.write_text(json.dumps(
             {"output": [{"type": "tool_use", "input": {"body": "VIOLATE recorded"}}]}))
@@ -74,7 +74,7 @@ class Scorer(unittest.TestCase):
         self.calls = 0
 
     def tearDown(self):
-        sc._p.config_dir = os.environ["JUDGE_CONFIG_DIR"]
+        sc._p.config_dir = self.original_profile
         self.tmp.cleanup()
 
     def run_main(self, *extra, judge=fake_judge, out=True):

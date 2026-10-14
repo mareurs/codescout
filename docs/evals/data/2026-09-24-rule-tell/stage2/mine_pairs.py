@@ -36,7 +36,7 @@ import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = pathlib.Path("/home/marius/work/claude/codescout")
+ROOT = HERE.parents[4]
 PAIR_MIN = 0.35
 SEED = 20260924
 

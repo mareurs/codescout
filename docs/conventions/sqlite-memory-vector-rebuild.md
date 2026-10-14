@@ -60,6 +60,10 @@ os.close(fd)
 with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as src:
     with closing(sqlite3.connect(destination)) as dst:
         src.backup(dst)
+        # sqlite3 backup preserves a WAL header; normalize only this fresh trial.
+        mode = dst.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        if mode.lower() != "delete":
+            raise SystemExit("trial could not become a standalone non-WAL copy")
 with destination.open("rb") as copied:
     os.fsync(copied.fileno())
 print("coherent trial copy prepared")
@@ -68,7 +72,7 @@ PY
 
 ## Validate and rebuild
 
-Dry-run requires the explicit arguments but does not load the snapshot, write the source or create a backup:
+Dry-run requires the explicit arguments but does not load the snapshot, write the source or create a backup. It refuses WAL before opening SQLite: a SQL read-only connection can create or change shared-memory files. Use the coherent non-WAL trial prepared above; normalize only the fresh trial, never a daily source merely to make preview pass:
 
 ```sh
 "$CODESCOUT" rebuild-memory-vectors \
@@ -86,7 +90,7 @@ Run without dry-run only on the prepared trial:
   --backup "$ROLLBACK_DB"
 ```
 
-Success requires exit zero, `vectors_written == records`, `published_dimensions == 384`, and the reported fresh backup. The command validates every vector's finite values/width, exact literal ID coverage, and unchanged raw memory records before commit. An existing backup is refused. A zero-record database succeeds with an empty 384-dimensional table and a verified backup.
+Success requires exit zero, `vectors_written == records`, `published_dimensions == 384`, and the reported fresh backup. The command validates every vector's finite values, nonzero signal and width, exact literal ID coverage, and unchanged raw memory records before commit. Backup paths must differ from the source and its SQLite sidecars, even through parent aliases. It pins source/backup identities, verifies coherent original vector bytes and rechecks the sealed backup before commit, including an empty rebuild. Backend error text is suppressed because it can echo private documents. An existing backup is refused. A zero-record database succeeds with an empty 384-dimensional table and a verified backup.
 
 A failed embedding writes no index changes. A publication failure rolls the original vector table back. Retry starts all embeddings again; there is no partial resume state. If a backup destination was reserved before failure it remains for diagnosis and may be incomplete: use a fresh destination on the next attempt. A concurrent writer causes refusal; retain that writer's changes and stop it before retrying.
 
@@ -98,7 +102,7 @@ Re-run dry-run with a new unused backup filename and reconcile the record count 
 
 Check list/read and meaningful memory recall for known topics, including old anchored memories and multiple buckets. Restart that process and repeat recall. Compare the original and trial `memory_item` values (including IDs, raw JSON and extra columns) and the separately retained topic files. Keep the checks' real results; a healthy count alone is not relevance or whole-corpus acceptance.
 
-Repeat the inventory and procedure for every active SQLite memory index. Test Qdrant, code/catalog stores, Claude Code plugin loading and Codex integration separately. The command itself does not change profiles or install plugins.
+Use [the native client acceptance guide](albert-client-copy-acceptance.md) for the separately verified Codex/Claude/Pi recipes. Repeat the inventory and procedure for every active SQLite memory index. Test Qdrant, code/catalog stores, Claude Code plugin loading and Codex integration separately. The command itself does not change profiles or install plugins.
 
 ## Roll back on a separate closed copy
 

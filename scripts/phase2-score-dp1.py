@@ -188,10 +188,12 @@ class SubscriptionJudge:
     def __init__(self, model: str, config_dir: str, timeout: int = 300) -> None:
         self.model, self.timeout = model, timeout
         self.config_dir = os.path.expanduser(config_dir)
-        if not os.path.exists(os.path.join(self.config_dir, ".credentials.json")):
-            sys.exit(f"no subscription credentials in {self.config_dir}")
 
     def complete(self, prompt: str) -> tuple[str, float]:
+        # Pure imports and validators need no subscription. Authenticate only before
+        # an actual live completion, keeping missing credentials a hard refusal.
+        if not os.path.exists(os.path.join(self.config_dir, ".credentials.json")):
+            sys.exit(f"no subscription credentials in {self.config_dir}")
         env = {k: v for k, v in os.environ.items()
                if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")}
         env["CLAUDE_CONFIG_DIR"] = self.config_dir
@@ -204,7 +206,7 @@ class SubscriptionJudge:
         if p.returncode != 0:
             raise RuntimeError(f"claude -p exit {p.returncode}: {p.stderr.strip()[:200]}")
         out = _json.loads(p.stdout)
-        # This CLI emits a LIST of events; the verdict is the last `type=result` one.
+        # This CLI emits a LIST of events; the verdict is the last type=result one.
         if isinstance(out, list):
             out = next((e for e in reversed(out) if e.get("type") == "result"), {})
         if out.get("is_error") or "result" not in out:

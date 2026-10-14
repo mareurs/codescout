@@ -4,6 +4,9 @@ use anyhow::Result;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+#[path = "sqlite_memory_vectors_safety.rs"]
+mod safety;
+
 #[derive(Debug)]
 pub struct RebuildOptions {
     pub dimensions: usize,
@@ -39,13 +42,14 @@ pub async fn rebuild_sqlite_memory_vectors(
         "backup destination already exists: {}",
         options.backup.display()
     );
-    let db = db
-        .canonicalize()
+    let source_identity = safety::FileIdentity::pin(db)
         .with_context(|| format!("existing memory database {}", db.display()))?;
-    ensure!(
-        db.is_file(),
-        "memory database must be an existing regular file"
-    );
+    let db = db.canonicalize()?;
+    if options.dry_run {
+        safety::require_non_wal_preview(&db)?;
+    } else {
+        safety::validate_backup_path(&db, &options.backup)?;
+    }
     crate::sqlite_vec_ext::register();
     let flags = if options.dry_run {
         OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -53,14 +57,19 @@ pub async fn rebuild_sqlite_memory_vectors(
         OpenFlags::SQLITE_OPEN_READ_WRITE
     };
     let mut conn = Connection::open_with_flags(&db, flags)?;
+    source_identity.check()?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
-    let source_version = data_version(&conn)?;
-    let previous_dimensions = vector_dimensions(&conn)?;
-    let snapshot = read_snapshot(&conn)?;
+    // All original values and the connection's version describe one read snapshot.
+    // Finish this transaction before VACUUM INTO and before awaiting embeddings.
+    let tx = conn.unchecked_transaction()?;
+    let source_version = data_version(&tx)?;
+    let original = read_original_index(&tx)?;
+    tx.commit()?;
+    let snapshot = &original.records;
     let records = snapshot.ids.len();
     let mut report = SqliteVectorRebuildReport {
         records,
-        previous_dimensions,
+        previous_dimensions: original.dimensions,
         requested_dimensions: options.dimensions,
         published_dimensions: None,
         vectors_written: 0,
@@ -71,14 +80,15 @@ pub async fn rebuild_sqlite_memory_vectors(
         return Ok(report);
     }
     let journal: String = conn.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
-    ensure!(!journal.eq_ignore_ascii_case("off"), "journal_mode=OFF cannot guarantee transaction rollback; use a coherent copy with journaling enabled");
+    ensure!(!journal.eq_ignore_ascii_case("off"),
+        "journal_mode=OFF cannot guarantee transaction rollback; use a coherent copy with journaling enabled");
     let embedder = embedder.context("an explicit document embedder is required")?;
     let mut replacements = Vec::with_capacity(records);
     for (id, content) in snapshot.ids.iter().zip(&snapshot.contents) {
-        let vector = embedder
-            .embed(content)
-            .await
-            .with_context(|| format!("embedding memory {id}; original index retained"))?;
+        // A backend error can echo the private document. Expose only its row ID.
+        let vector = embedder.embed(content).await.map_err(|_| {
+            anyhow::anyhow!("embedding memory {id} failed; original index retained")
+        })?;
         ensure!(
             vector.len() == options.dimensions,
             "memory {id}: expected {} dimensions, received {}; original index retained",
@@ -89,17 +99,30 @@ pub async fn rebuild_sqlite_memory_vectors(
             vector.iter().all(|v| v.is_finite()),
             "memory {id}: embedding contains non-finite values; original index retained"
         );
+        ensure!(
+            vector.iter().any(|v| *v != 0.0),
+            "memory {id}: embedding is all zero; original index retained"
+        );
         replacements.push((id.clone(), vector));
     }
-    // A completed backup is required before any index DDL. Failed reserved files
-    // remain for diagnosis: retry always chooses a fresh backup destination.
-    verified_backup(&conn, &options.backup, &snapshot)?;
+    source_identity.check()?;
+    // Backup failure retains the reserved destination for diagnosis; retry uses
+    // a fresh path. The source connection remains pinned to its original file.
+    let backup = verified_backup(&conn, &options.backup, &original)?;
     report.vectors_written = publish_vectors(
         &mut conn,
         source_version,
-        &snapshot,
+        snapshot,
         &replacements,
         options.dimensions,
+        |stage| {
+            source_identity.check()?;
+            backup.identity.check()?;
+            if stage == PublicationStage::BeforeCommit {
+                backup.check(&original)?;
+            }
+            Ok(())
+        },
     )
     .with_context(|| {
         format!(
@@ -118,6 +141,81 @@ struct Snapshot {
     rows: Vec<Vec<rusqlite::types::Value>>,
     ids: Vec<String>,
     contents: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
+struct OriginalIndex {
+    records: Snapshot,
+    dimensions: Option<usize>,
+    vectors: Vec<(String, Vec<u8>)>,
+}
+
+fn read_original_index(conn: &rusqlite::Connection) -> Result<OriginalIndex> {
+    let dimensions = vector_dimensions(conn)?;
+    let records = read_snapshot(conn)?;
+    let vectors = if dimensions.is_some() {
+        let mut stmt =
+            conn.prepare("SELECT point_id, embedding FROM memory_vec ORDER BY point_id")?;
+        let vectors = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        vectors
+    } else {
+        Vec::new()
+    };
+    Ok(OriginalIndex {
+        records,
+        dimensions,
+        vectors,
+    })
+}
+
+struct VerifiedBackup {
+    identity: safety::FileIdentity,
+    fingerprint: [u8; 32],
+}
+
+impl VerifiedBackup {
+    fn check(&self, expected: &OriginalIndex) -> Result<()> {
+        use anyhow::ensure;
+        use rusqlite::{Connection, OpenFlags};
+        self.identity.check()?;
+        let conn =
+            Connection::open_with_flags(self.identity_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let tx = conn.unchecked_transaction()?;
+        ensure!(
+            read_original_index(&tx)? == *expected,
+            "backup memory rows or original vectors changed; original index retained"
+        );
+        tx.commit()?;
+        drop(conn);
+        ensure!(
+            backup_fingerprint(self.identity.file())? == self.fingerprint,
+            "backup contents changed; original index retained"
+        );
+        self.identity.check()
+    }
+
+    fn identity_path(&self) -> &Path {
+        self.identity.path()
+    }
+}
+
+fn backup_fingerprint(file: &std::fs::File) -> Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = file.try_clone()?;
+    file.seek(SeekFrom::Start(0))?;
+    let mut fingerprint = Sha256::new();
+    let mut buffer = [0_u8; 32 * 1024];
+    loop {
+        let n = file.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        fingerprint.update(&buffer[..n]);
+    }
+    Ok(fingerprint.finalize().into())
 }
 
 fn data_version(conn: &rusqlite::Connection) -> Result<i64> {
@@ -210,12 +308,12 @@ fn read_snapshot(conn: &rusqlite::Connection) -> Result<Snapshot> {
 fn verified_backup(
     conn: &rusqlite::Connection,
     destination: &Path,
-    expected: &Snapshot,
-) -> Result<()> {
+    expected: &OriginalIndex,
+) -> Result<VerifiedBackup> {
     use anyhow::{ensure, Context};
     use rusqlite::{Connection, OpenFlags};
     let mut open = std::fs::OpenOptions::new();
-    open.write(true).create_new(true);
+    open.read(true).write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -224,7 +322,7 @@ fn verified_backup(
     let reserved = open
         .open(destination)
         .with_context(|| format!("reserve fresh backup {}", destination.display()))?;
-    drop(reserved);
+    let identity = safety::FileIdentity::reserved(destination, reserved)?;
     let path = destination
         .to_str()
         .context("backup path must be UTF-8 for SQLite VACUUM INTO")?;
@@ -234,15 +332,32 @@ fn verified_backup(
             destination.display()
         )
     })?;
-    std::fs::File::open(destination)?.sync_all()?;
-    let backup = Connection::open_with_flags(destination, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let integrity: String = backup.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    identity.check()?;
+    identity.file().sync_all()?;
+    safety::sync_parent(destination)?;
+    let conn = Connection::open_with_flags(destination, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     ensure!(integrity == "ok", "backup integrity failed: {integrity}");
+    let tx = conn.unchecked_transaction()?;
     ensure!(
-        &read_snapshot(&backup)? == expected,
+        &read_original_index(&tx)? == expected,
         "source changed while preparing backup; original index retained"
     );
-    Ok(())
+    tx.commit()?;
+    drop(conn);
+    identity.check()?;
+    let fingerprint = backup_fingerprint(identity.file())?;
+    Ok(VerifiedBackup {
+        identity,
+        fingerprint,
+    })
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum PublicationStage {
+    AfterDdl,
+    AfterInsert,
+    BeforeCommit,
 }
 
 fn publish_vectors(
@@ -251,6 +366,7 @@ fn publish_vectors(
     expected: &Snapshot,
     replacements: &[(String, Vec<f32>)],
     dimensions: usize,
+    mut check: impl FnMut(PublicationStage) -> Result<()>,
 ) -> Result<usize> {
     use anyhow::{ensure, Context};
     use rusqlite::{params, TransactionBehavior};
@@ -266,12 +382,14 @@ fn publish_vectors(
          CREATE VIRTUAL TABLE memory_vec USING vec0(
              point_id TEXT PRIMARY KEY, embedding FLOAT[{dimensions}]);"
     ))?;
+    check(PublicationStage::AfterDdl)?;
     let mut inserted = 0;
     for (id, vector) in replacements {
         inserted += tx.execute(
             "INSERT INTO memory_vec(point_id, embedding) VALUES (?1, ?2)",
             params![id, crate::sqlite_vec_ext::dense_blob(vector)],
         )?;
+        check(PublicationStage::AfterInsert)?;
     }
     let mut stmt =
         tx.prepare("SELECT point_id, length(embedding) FROM memory_vec ORDER BY point_id")?;
@@ -294,6 +412,8 @@ fn publish_vectors(
         "memory records changed during publication"
     );
     drop(stmt);
+    // This checkpoint runs for an empty database too.
+    check(PublicationStage::BeforeCommit)?;
     tx.commit()?;
     Ok(inserted)
 }
@@ -783,16 +903,18 @@ mod tests {
         let old_rows = f.rows();
         let old_vectors = f.vectors();
         let mut conn = Connection::open(&f.db).unwrap();
-        let snapshot = read_snapshot(&conn).unwrap();
+        let original = read_original_index(&conn).unwrap();
+        let snapshot = &original.records;
         let version = data_version(&conn).unwrap();
         let options = f.options();
-        verified_backup(&conn, &options.backup, &snapshot).unwrap();
+        verified_backup(&conn, &options.backup, &original).unwrap();
         let duplicate = snapshot.ids[0].clone();
         let replacements = vec![
             (duplicate.clone(), vec![0.2; 384]),
             (duplicate, vec![0.3; 384]),
         ];
-        let error = publish_vectors(&mut conn, version, &snapshot, &replacements, 384).unwrap_err();
+        let error = publish_vectors(&mut conn, version, snapshot, &replacements, 384, |_| Ok(()))
+            .unwrap_err();
         assert!(
             error.to_string().contains("UNIQUE") || error.to_string().contains("unique"),
             "{error:#}"
@@ -903,16 +1025,18 @@ mod tests {
             let old_rows = f.rows();
             let old_vectors = f.vectors();
             let mut conn = Connection::open(&f.db).unwrap();
-            let snapshot = read_snapshot(&conn).unwrap();
+            let original = read_original_index(&conn).unwrap();
+            let snapshot = &original.records;
             let version = data_version(&conn).unwrap();
             let options = f.options();
-            verified_backup(&conn, &options.backup, &snapshot).unwrap();
+            verified_backup(&conn, &options.backup, &original).unwrap();
             let mut replacements = vec![(snapshot.ids[0].clone(), vec![0.2; 384])];
             if orphan {
                 replacements.push((uuid::Uuid::from_u128(999).to_string(), vec![0.3; 384]));
             }
             let error =
-                publish_vectors(&mut conn, version, &snapshot, &replacements, 384).unwrap_err();
+                publish_vectors(&mut conn, version, snapshot, &replacements, 384, |_| Ok(()))
+                    .unwrap_err();
             let message = error.to_string();
             assert!(
                 message.contains(if orphan { "missing/orphan" } else { "count" }),
@@ -949,3 +1073,7 @@ mod tests {
         assert_eq!(f.vectors(), old_vectors);
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_memory_vectors_hardening_tests.rs"]
+mod hardening_tests;

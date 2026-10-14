@@ -625,6 +625,7 @@ dependencies = [
  "rmcp",
  "rusqlite",
  "rustls",
+ "same-file",
  "schemars",
  "serde",
  "serde_json",
