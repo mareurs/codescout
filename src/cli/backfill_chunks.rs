@@ -147,7 +147,7 @@ fn backfill_backend(
 /// `reindex` use. Two Qdrant runs are refused because no target is right for them: `--all`
 /// (`project_id` is `None`) has no single collection, and a process with no Qdrant store
 /// (`store` is `None`) has nowhere that search reads. Both used to write `artifact_vec_v2`.
-/// docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
+/// docs/issues/archive/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
 fn backfill_target<'a>(
     backend: crate::librarian::artifact_store::ArtifactBackend,
     project_id: Option<&'a str>,
@@ -226,7 +226,7 @@ mod tests {
     /// `--all` on a store with one collection per project has no single project to file its
     /// vectors under. Before the target existed it wrote them into `artifact_vec_v2`, which
     /// that host's search never reads.
-    /// BUG docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
+    /// BUG docs/issues/archive/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
     #[test]
     fn a_catalog_wide_backfill_on_qdrant_is_refused() {
         let store = InMemoryArtifactStore::default();

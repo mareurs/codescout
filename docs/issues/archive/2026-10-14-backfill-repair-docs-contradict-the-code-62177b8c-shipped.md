@@ -1,14 +1,14 @@
 ---
-id: '288de7d32191d02b'
+id: 42b5078cd3b0ab02
 kind: bug
-status: open
+status: fixed
 title: 'BUG: backfill-repair docs contradict the code that 62177b8c shipped'
 owners:
 - marius
 tags:
 - cluster/doc-contradicted-by-code
 topic: backfill-chunks docs
-closed: ''
+closed: 2026-10-15
 opened: 2026-10-14
 related: []
 severity: low
@@ -55,11 +55,23 @@ N/A.
 
 ## Fix
 
-Unknown — under investigation.
+Verified and committed on **experiments**.
+
+- **SHA:** `934946e95e5f81c5091c80ae95d21c3624133612`
+- **patch-id:** `361950b91e00766a6b4fbf03f5e19a63f0f2f120`
+
+Comment and doc edits only, each checked against the code beside it first:
+
+- `chunk.rs`, `replace_chunks`: the "do not filter" warning stays, and a new paragraph says why backfill's filter is safe. Backfill calls `embed_queue_items` only for an artifact with no stored chunks, so the filter drops nothing there. Its repair arm filters a queue rebuilt from stored rows, not this writer's queue.
+- `rebuild_artifact_vec_v2_at_dim`: `ensure_artifact_vec_v2_dim` is its one caller (a grep for `rebuild_artifact_vec_v2_at_dim(` found one call site, at `indexer.rs:1003`), and both `write_embeddings_v2_with` and the backfill preflight reach it through that function.
+- `BACKFILL_CURSOR`, the entry comment, the "Write, THEN" comment and the end-of-run comment: the marker is cleared at entry and at the end, and nothing reads it. The end-of-run comment now names what makes a run terminate: the in-memory `(cur_updated, cur_id)`.
+- Test comment in `backfill_cursor_never_passes_vectors_waiting_for_the_final_flush`: the first page writes one vector and records its marker because every nonempty page flushes.
+- `BackfillReport`: `missing_file`, `unreadable_encoding` and `unreadable_other` count only artifacts with no chunk rows, because only that arm reads the file. Only `missing_file` was named above. The other two docs had the same flaw, so I qualified all three.
+- `ArtifactBackend::Qdrant`: one collection per project, named by `artifact_collection_name`; the shared `artifacts` collection is superseded.
 
 ## Tests added
 
-N/A — not fixed.
+None: the change is comments only, and a comment assertion would test the source text. The full ordered `./scripts/gate.sh --check` was green on the committed bytes: lean library 4509 passed, default library 6825 passed, 0 failed.
 
 ## Workarounds
 
@@ -67,7 +79,9 @@ Trust the code over these comments.
 
 ## Resume
 
-Open. The `chunk.rs` warning matters most: it describes a real hazard (a reused chunk keeping an old-title vector) that the repair path's filter can now produce until the next reindex.
+Complete. Fixed in `934946e9`, patch-id above.
+
+The hazard the `chunk.rs` warning describes is real and stays documented: a repair that fills one missing vector keeps the other chunks' older vectors, so a reused chunk can keep a vector embedded under an older entry title until a content change or `reembed=true` replaces it.
 
 ## References
 

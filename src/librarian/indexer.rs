@@ -3146,7 +3146,7 @@ kind = "memory"
     /// work in its FIRST refusal. The shared preflight answered before the scope guard ran and
     /// told a scoped caller to set the opt-in and retry; the retry then met the scope guard,
     /// which named `--all`. Two round trips, the first on advice that could not work.
-    /// BUG docs/issues/2026-10-14-backfill-dimension-refusal-tells-a-scoped-run-to-retry-a-command-the-scope-guard-refuses.md
+    /// BUG docs/issues/archive/2026-10-14-backfill-dimension-refusal-tells-a-scoped-run-to-retry-a-command-the-scope-guard-refuses.md
     #[tokio::test]
     async fn a_scoped_dimension_change_names_the_catalog_wide_command_in_its_first_refusal() {
         let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
@@ -3565,7 +3565,7 @@ kind = "memory"
     /// A backfill into a store other than sqlite-vec must write there. It always wrote into
     /// `artifact_vec_v2`, so on a Qdrant host an artifact gained chunk rows, and left the
     /// `vectorless` count, while the collection its search reads stayed empty.
-    /// BUG docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
+    /// BUG docs/issues/archive/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
     #[tokio::test]
     async fn a_store_backfill_writes_its_vectors_to_the_store_and_not_to_artifact_vec_v2() {
         let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());

@@ -65,7 +65,7 @@ Verified and committed on **experiments**.
 
 `backfill_chunk_vectors` takes the resolved `ArtifactBackend` and applies the vector-gap arm only for `SqliteVec`. The no-chunk arm stays on every backend, because `reembed=true` reaches existing chunk rows only. The CLI resolves the backend in `backfill_backend()` from the same project input as `build_tool_context_with`; `--all` takes the host setting, as the CLI reindex does. `ArtifactBackend::resolve_with` takes the env value as an argument, so the decision is tested without process env.
 
-Known limit: under `--all`, a project whose `project.toml` sets a backend different from the host's is resolved by the host setting. No project in this catalog sets one. Backfill on a Qdrant host still writes its no-chunk vectors to `artifact_vec_v2`; that older defect is `docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md`.
+Known limit: under `--all`, a project whose `project.toml` sets a backend different from the host's is resolved by the host setting. No project in this catalog sets one. Backfill on a Qdrant host still writes its no-chunk vectors to `artifact_vec_v2`; that older defect is `docs/issues/archive/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md`, fixed in `934946e95e5f81c5091c80ae95d21c3624133612`.
 
 ## Tests added
 
