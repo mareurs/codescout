@@ -1618,6 +1618,14 @@ kind = "memory"
         // frontmatter says `plan`, and the file wins.
         let cat = Catalog::open_in_memory().unwrap();
         let rules = crate::librarian::classify::default_rules().unwrap();
+        // Anchor: fails loudly if the built-in `spec` rule is ever removed, so the
+        // frontmatter assertion below cannot pass vacuously.
+        assert_eq!(
+            crate::librarian::classify::classify(&rules, "docs/superpowers/specs/x.md")
+                .expect("a built-in rule must claim docs/superpowers/specs")
+                .kind,
+            "spec"
+        );
         let ignore = globset::GlobSet::empty();
         let dir = tempfile::tempdir().unwrap();
         let specs = dir.path().join("docs/superpowers/specs");

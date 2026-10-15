@@ -100,6 +100,16 @@ glob = "**/docs/experimental/**/*.md"
 kind = "doc"
 
 [[rule]]
+glob = "**/docs/trackers/archive/**/*.md"
+kind = "tracker"
+status = "archived"
+
+[[rule]]
+glob = "**/docs/issues/archive/**/*.md"
+kind = "tracker"
+status = "archived"
+
+[[rule]]
 glob = "**/docs/issues/**/*.md"
 kind = "tracker"
 status = "active"
@@ -398,6 +408,26 @@ kind = "spec"
         }
         // Control: a path no rule names stays unclassified.
         assert!(classify(&rules, "docs/misc/notes.md").is_none());
+    }
+    #[test]
+    fn default_rules_mark_the_archive_directories_archived() {
+        // An archive file with no `status:` of its own must not be stamped `active` by the
+        // tracker rules that cover its parent directory (first match wins).
+        let rules = default_rules().unwrap();
+        for path in [
+            "docs/trackers/archive/old.md",
+            "proj/docs/trackers/archive/sub/old.md",
+            "docs/issues/archive/2026-01-01-old.md",
+        ] {
+            let c = classify(&rules, path).unwrap_or_else(|| panic!("{path}: no rule matched"));
+            assert_eq!(c.kind, "tracker", "{path}: kind");
+            assert_eq!(c.status.as_deref(), Some("archived"), "{path}: status");
+        }
+        // Control: the live directories keep `active`.
+        for path in ["docs/trackers/live.md", "docs/issues/2026-01-01-open.md"] {
+            let c = classify(&rules, path).unwrap();
+            assert_eq!(c.status.as_deref(), Some("active"), "{path}: status");
+        }
     }
 
     #[test]

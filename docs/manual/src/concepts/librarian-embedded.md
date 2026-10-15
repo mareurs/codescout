@@ -45,11 +45,14 @@ The env var wins; project.toml is consulted only when the env var is unset.
 
 To opt out globally, set `LIBRARIAN_ENABLED=0` in the codescout MCP server
 launch env (e.g. the `env` block of `.mcp.json` or your shell rc).
+
 ## First run
 
-On first start the server creates `~/.config/librarian/workspace.toml` when it
-is absent, so a new machine reaches a working librarian with no manual file.
-The file holds only comments and is safe to edit. The server never overwrites
+On first start the server creates `librarian/workspace.toml` in your user config
+directory when it is absent, so a new machine reaches a working librarian with
+no manual file. That directory is `~/.config` on Linux,
+`~/Library/Application Support` on macOS and `%APPDATA%` on Windows. The file
+holds only comments and is safe to edit. The server never overwrites
 it. If the location is not writable, the server starts on an empty default and
 logs a warning.
 
@@ -82,7 +85,8 @@ production binary.
 
 All listing tools default to `scope="project"`, returning only artifacts
 under the agent's current sub-project. The current project resolves from
-cwd → nearest `.git` ancestor → workspace root from `~/.config/librarian/workspace.toml`.
+cwd → nearest `.git` ancestor → workspace root from the global `librarian/workspace.toml`
+(in your user config directory).
 
 `librarian_reindex` follows the same default. A force-wipe under
 `scope="project"` only deletes rows whose `rel_path` starts with the
@@ -108,7 +112,7 @@ Read tools surface a `scope` block + `hints` (`more_in_repo`,
 
 Drop a `<project>/.codescout/librarian.toml` to declare classification
 rules for that project's paths without touching the global
-`~/.config/librarian/workspace.toml`. Schema matches the global file's
+`librarian/workspace.toml` in your user config directory. Schema matches the global file's
 `[[rule]]` blocks. Rule precedence is **project > workspace > built-in
 defaults**, first-match-wins.
 

@@ -213,10 +213,16 @@ fn load_workspace_config(
         None => default_path()?,
     };
     workspace::load_or_init(&cfg_path, should_init_default_workspace(env)).with_context(|| {
+        // The remedy depends on the cause: creating a file only helps when none exists.
+        let remedy = if cfg_path.exists() {
+            "That file exists but could not be loaded: fix its content or permissions, \
+             or set LIBRARIAN_WORKSPACE to another path."
+        } else {
+            "Set LIBRARIAN_WORKSPACE to another path, or create an empty file there."
+        };
         format!(
             "Load workspace config from {} (the global librarian file, not \
-             .codescout/workspace.toml). Set LIBRARIAN_WORKSPACE to another path, or \
-             create an empty file there.",
+             .codescout/workspace.toml). {remedy}",
             cfg_path.display()
         )
     })
@@ -779,10 +785,44 @@ kind = "spec"
 
         assert!(msg.contains(&missing.display().to_string()), "{msg}");
         assert!(
+            msg.contains("LIBRARIAN_WORKSPACE") && msg.contains("create an empty file"),
+            "the remedy for a missing file must be named: {msg}"
+        );
+        assert!(
             !msg.contains("import-codescout"),
             "the hint named a command that no longer exists: {msg}"
         );
         assert!(!missing.exists(), "an explicit path is never created");
+    }
+
+    #[test]
+    fn a_malformed_workspace_file_is_not_told_to_be_created() {
+        // The file exists, so "create an empty file there" would be wrong advice: the
+        // remedy is to fix it, or to point LIBRARIAN_WORKSPACE somewhere else.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let bad = tmp.path().join("workspace.toml");
+        std::fs::write(&bad, "this is [[ not toml").unwrap();
+        let env = LibrarianEnv {
+            workspace: Some(bad.clone()),
+            init_default_workspace: true,
+            ..Default::default()
+        };
+
+        let err = load_workspace_config(&env, || unreachable!("an explicit path needs no default"))
+            .expect_err("a malformed file must fail");
+        let msg = format!("{err:#}");
+
+        assert!(msg.contains(&bad.display().to_string()), "{msg}");
+        assert!(msg.contains("LIBRARIAN_WORKSPACE"), "{msg}");
+        assert!(
+            !msg.contains("create an empty file"),
+            "an existing file must not be told to be created: {msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&bad).unwrap(),
+            "this is [[ not toml",
+            "the user's file is left untouched"
+        );
     }
     #[test]
     fn the_default_path_is_created_only_when_the_env_asks() {

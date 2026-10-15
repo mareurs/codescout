@@ -36,7 +36,16 @@ pub struct Umbrella {
 }
 
 pub fn default_config_path() -> Result<PathBuf> {
-    let base = dirs::config_dir().context("no config dir")?;
+    config_path_under(dirs::config_dir())
+}
+
+/// The default `workspace.toml` under `config_dir`. A platform with no user config
+/// directory is an error that names the way out, not a bare "no config dir".
+fn config_path_under(config_dir: Option<PathBuf>) -> Result<PathBuf> {
+    let base = config_dir.context(
+        "this platform reports no user config directory, so the global librarian \
+         workspace.toml has no default location; set LIBRARIAN_WORKSPACE to the path of one",
+    )?;
     Ok(base.join("librarian").join("workspace.toml"))
 }
 
@@ -54,7 +63,11 @@ pub fn load(path: &Path) -> Result<WorkspaceConfig> {
 }
 /// Written to the default path on first start. Comments only: an empty file is a
 /// valid [`WorkspaceConfig`], and the built-in classifier rules need no copy here.
-pub const DEFAULT_WORKSPACE_TOML: &str = r##"# Global librarian workspace config (~/.config/librarian/workspace.toml).
+///
+/// It must stay comments-only. Creation is not atomic with the write, so a server that
+/// loses the `create_new` race can read the file while it is still a prefix; a prefix of
+/// a comments-only text is always a valid empty config, a prefix of real content might not be.
+pub const DEFAULT_WORKSPACE_TOML: &str = r##"# Global librarian workspace config (librarian/workspace.toml in the user config dir).
 # Created automatically on first start. An empty file is valid.
 # This is NOT the per-project .codescout/workspace.toml.
 #
@@ -175,6 +188,38 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&path).unwrap(), mine);
         assert_eq!(cfg.rules.len(), 1);
+    }
+    #[test]
+    fn create_default_leaves_an_existing_file_alone() {
+        // The race loser: another server created the file between the absence check and
+        // `create_new`. That is success, and the winner's bytes must survive.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.toml");
+        let theirs = "# written by the race winner\n";
+        std::fs::write(&path, theirs).unwrap();
+
+        create_default(&path).expect("AlreadyExists is success, not an error");
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), theirs);
+    }
+
+    #[test]
+    fn a_missing_config_dir_names_the_remedy() {
+        let err = config_path_under(None).expect_err("no config dir has no default path");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("LIBRARIAN_WORKSPACE"),
+            "the error must name the way out, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn the_default_path_lives_under_the_config_dir() {
+        let base = std::path::PathBuf::from("/cfg");
+        assert_eq!(
+            config_path_under(Some(base)).unwrap(),
+            std::path::PathBuf::from("/cfg/librarian/workspace.toml")
+        );
     }
 
     #[test]
