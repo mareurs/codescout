@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 194
-entry_high_water_W: 150
+entry_high_water_F: 195
+entry_high_water_W: 151
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,6 +65,7 @@ entry_high_water_W: 150
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-195 | 2026-10-14 | med | plan-drift | fixed-verified | **"An empty workspace.toml is a reasonable default" was false for classification** — built-in rules cover none of specs, plans, ADRs, audits, handoffs, runbooks, ROADMAP or manual; the only copy of those nine rules is test-only `import_codescout`. |
 | F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
 | F-193 | 2026-10-13 | high | persistence-ordering | promoted-to-bug-tracker | **Backfill's durable progress claim uses chunk metadata and a cursor ahead of unwritten vectors** — observed retry skips and an unwritten checkpoint in private SQLite tests. |
 | F-192 | 2026-10-13 | med | shell-parity | promoted-to-bug-tracker | **The own-stderr wrapper assumed shell parity that dash disproved** — literal dash output and an actual-marker regression expose the unsafe brace wrapper. |
@@ -268,6 +269,7 @@ entry_high_water_W: 150
 |----|------|-------:|---------|----------------|--------|
 | W-150 | 2026-10-01 | med | **Three mutants at three sites separated "the label says repo" from "the population is repo", and only the third reached the population assertion.** Reading which assertion killed each mutant, not how many died. | Inferred: M2's kill would have been reported as covering the whole property while the population assertion behind the label check stayed unexercised. Observed: M3 failed at `:427` alone, with the label still `repo`. | validated |
 | W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
+| W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-149 | 2026-09-30 | med | **A comment predicting the exact regression sat beside a fixture that could not see it.** Reading what the fixture PASSES (`is_write=false` hard-coded for `"workspace"`), not what it asserts, exposed the gap. | Inferred: an exemption fix with both old guards green and the exemption unguarded. Observed: widening it was caught by the new exact-set pin alone. | validated |
 | W-147 | 2026-09-30 | med | size the fixture to the limit rather than re-derive boundaries | ~8 hand-derived literals avoided, each a chance for a still-green off-by-N | validated |
 | W-144 | 2026-09-16 | med | **The discriminator was already in the output OF THE RUN THAT ESTABLISHED THE FINDING** — three sessions, three instruments, one evening: `FutureWarning` ×3, a `FAILED` with no `left:`/`right:` lines, a `64 vs 99` line count. Worse than CLAUDE.md's "assert on the name": nobody chose a proxy, the answer was on screen in the scrollback being read to write up the result. Each caught only by a peer stating a checkable fact that collided. | validated |
@@ -17493,3 +17495,42 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
      Omitting index_row/index_after_line silently gives you the retired two-call
      form: the section lands, the row does not, and nothing reports it. That is
      how 9 entries in this file came to have evidence and no index row. -->
+## W-151 — A plan to "create the default file when absent" would have made six existing tests write into the developer's real home directory
+
+**Context:** work on `docs/issues/archive/2026-10-14-new-project-setup-does-not-configure-the-librarian.md` (id `ae511945b43ba0c8`). The plan: when `workspace.toml` is absent, `build_tool_context_with` creates it at `workspace::default_config_path()`.
+
+**Pattern:** before editing, read every caller that reaches the seam with the field unset, not only the production caller. `LibrarianEnv::workspace` is `None` in production (default path) and also in tests that set only `db`.
+
+**Observed (2026-10-14):**
+- `src/server.rs` builds `LibrarianEnv { db: Some(..), ..Default::default() }` with no `workspace` at lines 12974, 13177, 13247, 13290, 13385 and 13442. (Line numbers from a grep this session; each block was read at one site only, 12968-12984.)
+- With `workspace: None`, those tests resolve the real `~/.config/librarian/workspace.toml`. On this machine it exists (2710 bytes, `ls -la`, 2026-10-14), so they pass today.
+- `make_server` at `src/server.rs:11296-11330` already records the same failure from the other side: a missing default file made the `artifact` tool not register (the 2026-07-02 wine cluster).
+
+**Counterfactual (inferred, not run):** an unconditional create-when-absent would have been green here, because the file exists. On a clean CI runner or a fresh clone it would have created a file in that user's real config directory during `cargo test`. No test would have failed.
+
+**Decision it forced:** creation must be an explicit opt-in field on `LibrarianEnv`, set to true only by `LibrarianEnv::from_env()` (`src/librarian/mod.rs:90-110`). `Default` leaves it false. See `docs/conventions/test-env-isolation.md`.
+
+**Also found:** `reindex_cli` (`src/librarian/mod.rs:473`) is `#[cfg(test)]` and loads the file with no hint text, so it is not a production path.
+
+**Valid:** dated 2026-10-14
+
+## F-195 — "An empty workspace.toml is a reasonable default" held for loading, not for classification
+
+**Context:** same work as W-151 (`docs/issues/archive/2026-10-14-new-project-setup-does-not-configure-the-librarian.md`). The design said: "an empty `workspace.toml` is a valid default, because `WorkspaceConfig` derives `Default`".
+
+**Plan said:** an empty global `workspace.toml` is a reasonable default.
+
+**Reality (read 2026-10-14):**
+- An empty file is valid to load: `WorkspaceConfig` is `#[derive(Default)]` with `#[serde(default)]` on every field (`src/librarian/workspace.rs:9-18`).
+- It is not a complete default for classification. The built-in `DEFAULT_RULES_TOML` (`src/librarian/classify.rs:66-130`) has 15 rules. None covers `docs/superpowers/specs`, `docs/superpowers/plans`, `docs/research`, `docs/audits`, `docs/handoffs`, `docs/runbooks`, `docs/adrs`, `ROADMAP.md` or `docs/manual`. A grep of `classify.rs` for those globs matched only test samples.
+- The only definition of those nine rules is the body of `import_codescout` (`src/librarian/mod.rs:345-470`). That function is `#[cfg(test)]`, so no production command writes them. The `librarian-mcp import-codescout` command named in the error hint does not exist (see the issue file).
+- Not verified: what `classify` returns for a file that no rule matches, and so what a spec or plan gets on a fresh project.
+
+**Also found:** `doctor`'s `declared_root_missing` reads the project-local `.codescout/workspace.toml` (`src/librarian/tools/doctor.rs:2801-2870`), which is a different file from the global `~/.config/librarian/workspace.toml`. Both are called `workspace.toml`. The new default-file comment and the error text must say which one they mean.
+
+**Cost if missed:** the fix would ship a default that loads without error but classifies no spec, plan or ADR, and the user would see a working librarian with the wrong `kind` on those files. Inferred, not run.
+
+**Open decision for the user:** put the nine rules in the created file, move them into `DEFAULT_RULES_TOML`, or leave them out.
+
+**Valid:** dated 2026-10-14
+
