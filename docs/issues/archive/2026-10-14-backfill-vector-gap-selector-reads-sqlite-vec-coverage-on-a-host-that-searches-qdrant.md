@@ -46,7 +46,7 @@ Linux; `cargo rb` = `build --release --features server-stack` (`.cargo/config.to
 - `src/cli/backfill_chunks.rs` never resolves the backend.
 - `index_repo_sync`'s own `vectorless` comment states the hazard: counting `artifact_vec_v2` "would report EVERY artifact as vectorless whenever an external store is configured".
 
-The store is a per-PROCESS choice, not a per-project one. Every project in this catalog resolves `default`, yet MRV-poc has 12,957 of 15,195 chunks in sqlite-vec and also a Qdrant collection, while codescout has 0. A coverage gap in `artifact_vec_v2` is evidence only for a process that searches `artifact_vec_v2`.
+The store is a per-PROCESS choice, not a per-project one. Every project in this catalog resolves `default`, yet MRV-poc has 12,957 of 15,195 chunks in sqlite-vec and also a Qdrant collection, while codescout has 43 of 38,531 (the Symptom block's `chunks_with_sqlite_vec`). A coverage gap in `artifact_vec_v2` is evidence only for a process that searches `artifact_vec_v2`.
 
 ## Evidence
 

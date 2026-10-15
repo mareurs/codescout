@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 195
+entry_high_water_F: 197
 entry_high_water_W: 151
 ---
 
@@ -65,6 +65,8 @@ entry_high_water_W: 151
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
+| F-196 | 2026-10-15 | med | plan-drift | fixed-verified | **The artifact backend is resolved per process, and the plan treated it as a property of the project** — env outranks `project.toml`, no project in the catalog sets one, and `--all` spans projects, so a per-project selector would have been wrong for it. Fixed in `8c02ad77` and `934946e9`. |
 | F-195 | 2026-10-14 | med | plan-drift | fixed-verified | **"An empty workspace.toml is a reasonable default" was false for classification** — built-in rules cover none of specs, plans, ADRs, audits, handoffs, runbooks, ROADMAP or manual; the only copy of those nine rules is test-only `import_codescout`. |
 | F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
 | F-193 | 2026-10-13 | high | persistence-ordering | promoted-to-bug-tracker | **Backfill's durable progress claim uses chunk metadata and a cursor ahead of unwritten vectors** — observed retry skips and an unwritten checkpoint in private SQLite tests. |
@@ -17534,3 +17536,38 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 **Valid:** dated 2026-10-14
 
+## F-196 — The artifact backend is resolved per process, and the plan treated it as a property of the project
+
+**Context:** fix for `docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md` (fixed in `8c02ad77`). Scouted before editing `backfill_chunk_vectors_with`.
+
+**Plan said:** "Backend resolution is per project (`ArtifactBackend::resolve(project_path)`: env, then `.codescout/project.toml`, then build default)". The plan then asked whether `backfill-chunks --all` could repair "whichever store each project uses".
+
+**Reality (read and measured 2026-10-14):**
+- `ArtifactBackend::resolve` reads the env var first, and the env var belongs to the process. The `project.toml` layer applies only when the env is unset. The last layer is the build default, which is Qdrant on a `server-stack` build (`cargo rb`).
+- No project in the live catalog sets `[librarian] vector_backend`. The store follows the build and env of the process that wrote it. One project had 12,957 of 15,195 chunks in `artifact_vec_v2` and also a Qdrant collection, while this project had 43 of 38,531 (measured on the live catalog, read-only).
+- `--all` walks every project in one catalog, so no single project's setting applies to it.
+
+**Cost if missed:** a selector keyed on each project's own setting would have been wrong for `--all`. A per-project coverage query would also have needed a coverage method that `ArtifactVectorStore` does not have (`upsert`, `delete`, `refile` and `knn` only).
+
+**Decision it forced:** the CLI resolves the backend in `backfill_backend()`. A scoped run takes its project's setting, and `--all` takes the host setting. The follow-up fix (`934946e9`) went further: `--all` on Qdrant is refused, because one collection exists per project.
+
+**Valid:** dated 2026-10-15
+
+## F-197 — The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it
+
+**Context:** the review of `62177b8c~1..6cf6d6e8`, while measuring whether this project's vectors were in Qdrant.
+
+**Doc said:** `ArtifactBackend::Qdrant` — "Default — a shared Qdrant `artifacts` collection" (`src/librarian/artifact_store.rs`).
+
+**Reality (read 2026-10-14):**
+- Chunk vectors live in one collection per project, `artifact_chunks_<base>_<hash>`. For this project that is `artifact_chunks_codescout_dc6a871595179329`, with 48,223 points.
+- `build_tool_context_with` (`src/librarian/mod.rs`) says the old shared `artifacts` collection "is superseded rather than migrated", and none of its points resolve there.
+- The doc was older than `62177b8c`. The review did not introduce it.
+
+**What it cost:** I counted the shared `artifacts` collection and told the user the Qdrant index "looked stale". That was wrong. I counted a collection that nothing reads, and I said so to the user once I found the per-project collection.
+
+**Tell:** a count over a store is evidence only when the name came from the code that reads the store, not from a doc comment about it.
+
+**Fix:** the doc names the per-project collection and `artifact_collection_name`, and says the shared collection is superseded (`934946e9`).
+
+**Valid:** dated 2026-10-15
