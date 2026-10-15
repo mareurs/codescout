@@ -1110,26 +1110,42 @@ pub struct BackfillReport {
     /// Artifacts whose body yielded no embeddable chunk (blank, or
     /// frontmatter-only). These are correctly vectorless and will stay so.
     pub skipped_empty: usize,
-    /// Artifacts whose file is genuinely absent (`ErrorKind::NotFound`). A
+    /// Artifacts with no chunk rows whose file is absent (`ErrorKind::NotFound`). An
+    /// absent file whose chunk rows exist is repaired from those rows and not counted. A
     /// catalog-vs-filesystem drift this run declines to repair —
     /// `librarian(action="reindex")` owns removal, and for THIS arm that remedy
     /// actually applies.
     pub missing_file: usize,
-    /// Artifacts whose file is present but is not valid UTF-8
+    /// Artifacts with no chunk rows whose file is present but is not valid UTF-8
     /// (`ErrorKind::InvalidData`) — a binary payload behind a text extension.
     /// `reindex` will not clear these: the file is on disk, so there is nothing for
     /// it to remove, and `NOT EXISTS` re-selects the row on every future run. The
     /// remedy is upstream — exclude it at the classifier, or fix the extension.
     pub unreadable_encoding: usize,
-    /// Artifacts whose file could not be read for any other reason — permissions,
+    /// Artifacts with no chunk rows whose file could not be read for any other reason — permissions,
     /// I/O error, a path that is a directory. Deliberately not folded into either
     /// arm above: both of those name a specific remedy, and this one means "go look".
     pub unreadable_other: usize,
     /// Artifacts visited.
     pub artifacts: usize,
 }
+/// Where [`backfill_chunk_vectors`] writes its vectors. It must be the store this run's
+/// search reads: a vector written anywhere else is counted as embedded and found by no query.
+#[derive(Clone, Copy)]
+pub enum BackfillTarget<'a> {
+    /// The shared sqlite-vec table, `artifact_vec_v2`.
+    SqliteVec,
+    /// One project's vectors in another store, under `project_id`: the project's `abs_path`,
+    /// the id its `find` and `reindex` use, so the vectors land in the collection they read.
+    Store {
+        store: &'a dyn crate::librarian::artifact_store::ArtifactVectorStore,
+        project_id: &'a str,
+    },
+}
 
-/// `catalog_meta` key holding the resume cursor, as `"<updated_at>|<id>"`.
+/// `catalog_meta` key for a run's progress marker, as `"<updated_at>|<id>"`: the last
+/// page whose vectors are durable. Each run clears it at entry and again at the end, and
+/// no code resumes from it; every run re-selects from coverage instead.
 const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
 
 /// Every character `str::trim` strips (Unicode `White_Space`), for SQL's two-argument
@@ -1137,16 +1153,16 @@ const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
 /// test written with it disagrees with the embed queue's `content.trim().is_empty()`.
 const BLANK_CHARS: &str = "\t\n\u{b}\u{c}\r \u{85}\u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
 
-/// Repair artifacts with no chunk metadata and, when `backend` is sqlite-vec, chunks
+/// Repair artifacts with no chunk metadata and, when `target` is sqlite-vec, chunks
 /// with no `artifact_vec_v2` vector, without a filesystem walk or the ordinary
 /// indexer's content-hash gate.
 ///
-/// `backend` is the store this process's search reads. A missing `artifact_vec_v2` row
-/// is a gap only for `ArtifactBackend::SqliteVec`; on any other backend that table is
-/// empty by design, so the run selects only artifacts with no chunk rows. That arm stays
-/// on every backend: `reembed=true` reaches existing chunk rows only, so creating them is
-/// the one way out of the no-chunk state. A blank chunk is never embedded, so it is never
-/// a gap ([`BLANK_CHARS`]).
+/// `target` is the store this run's search reads ([`BackfillTarget`]). A missing
+/// `artifact_vec_v2` row is a gap only for [`BackfillTarget::SqliteVec`]; any other store
+/// leaves that table empty by design and offers no coverage query, so the run selects
+/// only artifacts with no chunk rows. That arm stays on every target: `reembed=true`
+/// reaches existing chunk rows only, so creating them is the one way out of the no-chunk
+/// state. A blank chunk is never embedded, so it is never a gap ([`BLANK_CHARS`]).
 ///
 /// Existing chunks are repaired from persisted content and title context without
 /// re-chunking changed files or changing their grain. Healthy vectors are kept.
@@ -1169,7 +1185,7 @@ pub async fn backfill_chunk_vectors(
     svc: &crate::librarian::embedding::EmbeddingService,
     batch: usize,
     root_prefix: Option<&str>,
-    backend: crate::librarian::artifact_store::ArtifactBackend,
+    target: BackfillTarget<'_>,
 ) -> Result<BackfillReport> {
     let raw = std::env::var(ARTIFACT_VEC_MIGRATE_ENV).ok();
     backfill_chunk_vectors_with(
@@ -1178,7 +1194,7 @@ pub async fn backfill_chunk_vectors(
         batch,
         root_prefix,
         migrate_opt_in(raw.as_deref()),
-        backend,
+        target,
     )
     .await
 }
@@ -1188,7 +1204,7 @@ async fn backfill_chunk_vectors_with(
     batch: usize,
     root_prefix: Option<&str>,
     allow_dim_migration: bool,
-    backend: crate::librarian::artifact_store::ArtifactBackend,
+    target: BackfillTarget<'_>,
 ) -> Result<BackfillReport> {
     use crate::librarian::catalog::gc::set_meta;
 
@@ -1217,32 +1233,38 @@ async fn backfill_chunk_vectors_with(
     }
     {
         let cat = catalog.lock();
-        if allow_dim_migration
-            && root_prefix.is_some()
-            && vec0_table_dim(&cat.conn, "artifact_vec_v2")?.is_some_and(|dim| dim != expected_dim)
-        {
-            anyhow::bail!(
-                "artifact_vec_v2 is shared across projects: dimension migration requires \
-                 backfill-chunks --all with {ARTIFACT_VEC_MIGRATE_ENV}=1. \
-                 No vectors have been changed."
-            );
+        // Only a run that writes `artifact_vec_v2` checks its dimension. Checked for a store
+        // run, a stale table refused it, and the opt-in would drop every project's vectors.
+        if matches!(target, BackfillTarget::SqliteVec) {
+            // Ahead of `ensure_artifact_vec_v2_dim`, and whatever the opt-in: that refusal
+            // would tell a scoped run to set the opt-in and retry, and the retry would land here.
+            if root_prefix.is_some()
+                && vec0_table_dim(&cat.conn, "artifact_vec_v2")?
+                    .is_some_and(|dim| dim != expected_dim)
+            {
+                anyhow::bail!(
+                    "artifact_vec_v2 is shared across projects: dimension migration requires \
+                     backfill-chunks --all with {ARTIFACT_VEC_MIGRATE_ENV}=1. \
+                     No vectors have been changed."
+                );
+            }
+            ensure_artifact_vec_v2_dim(&cat, expected_dim, allow_dim_migration)?;
         }
-        ensure_artifact_vec_v2_dim(&cat, expected_dim, allow_dim_migration)?;
-        // Older runs could checkpoint chunk metadata before vectors were durable.
-        // Re-select from persisted vector coverage instead of trusting that cursor.
-        // Completed chunks are excluded, so retry does not repeat completed embedding.
+        // Older runs could checkpoint chunk metadata before vectors were durable, and a run
+        // that resumed from that marker skipped the gap. Clear it: the walk below re-selects
+        // from coverage, and completed chunks are excluded, so it repeats no completed embedding.
         set_meta(&cat.conn, &cursor_key, "")?;
     }
     let (mut cur_updated, mut cur_id) = (i64::MIN, String::new());
 
-    let mut pending: Vec<(String, Vec<f32>)> = Vec::with_capacity(flush);
+    let mut pending: Vec<(String, String, Vec<f32>)> = Vec::with_capacity(flush);
 
     // A missing `artifact_vec_v2` row is a gap only for a process whose search reads that
     // table. On any other backend `index_repo` leaves it empty, and the arm selected every
     // chunked artifact. A blank chunk is never embedded, so it is never a gap either.
     // docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md
     // docs/issues/archive/2026-10-14-backfill-reselects-whitespace-only-chunks-because-the-selector-and-the-embed-queue-disagree-on-blank.md
-    let gap_arm = if backend == crate::librarian::artifact_store::ArtifactBackend::SqliteVec {
+    let gap_arm = if matches!(target, BackfillTarget::SqliteVec) {
         format!(
             " OR EXISTS ( \
                SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
@@ -1354,7 +1376,7 @@ async fn backfill_chunk_vectors_with(
                 let vec = svc
                     .embed_artifact(item.title.as_deref(), &item.text)
                     .await?;
-                anyhow::Ok((item.chunk_id, vec))
+                anyhow::Ok((item.chunk_id, item.artifact_id, vec))
             });
             let mut s = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
             while let Some(res) = s.next().await {
@@ -1362,11 +1384,20 @@ async fn backfill_chunk_vectors_with(
             }
         }
 
-        // Write, THEN advance the cursor: the other order loses a batch on a
-        // crash between the two and calls the range done.
+        // Write, THEN record the marker: the other order lets the marker name a page whose
+        // vectors a crash between the two never wrote.
         if !pending.is_empty() {
-            let cat = catalog.lock();
-            write_embeddings_v2_with(&cat, &pending, false)?;
+            match target {
+                BackfillTarget::SqliteVec => {
+                    let cat = catalog.lock();
+                    write_embeddings_v2_with(&cat, &pairs_for_sqlite(&pending), false)?;
+                }
+                BackfillTarget::Store { store, project_id } => {
+                    for (chunk_id, artifact_id, vec) in &pending {
+                        store.upsert(project_id, chunk_id, artifact_id, vec).await?;
+                    }
+                }
+            }
             report.embedded += pending.len();
             pending.clear();
         }
@@ -1376,14 +1407,10 @@ async fn backfill_chunk_vectors_with(
         }
     }
 
-    // A completed run CLEARS the cursor, and this is not tidiness. Left at the
-    // end of the corpus, the next run's `updated_at > cursor` predicate would
-    // skip any artifact that becomes vectorless later with an earlier timestamp —
-    // which is precisely what a re-formed hole looks like, since the trap is
-    // entered by content the walk considers old. The cursor's job is to make one
-    // run terminate over rows it cannot fix (empty bodies and missing files keep
-    // no chunk rows, so `NOT EXISTS` re-selects them forever); it is not a
-    // watermark over the corpus's lifetime.
+    // A completed run clears the marker, as every run's entry does; no run reads it back.
+    // What makes one run terminate over rows it cannot fix is the in-memory
+    // `(cur_updated, cur_id)` above, which every page query starts past: empty bodies and
+    // missing files keep no chunk rows, so `NOT EXISTS` would select them again otherwise.
     {
         let cat = catalog.lock();
         set_meta(&cat.conn, &cursor_key, "")?;
@@ -1406,8 +1433,9 @@ const ARTIFACT_VEC_MIGRATE_ENV: &str = "LIBRARIAN_ARTIFACT_VEC_MIGRATE";
 /// Back up `catalog.db` (if file-backed), then drop + recreate `artifact_vec_v2`
 /// at `new_dim`.
 ///
-/// Only called from [`write_embeddings_v2_with`] when opted in AND a dimension
-/// mismatch was detected — a deliberate migration for "I changed my embedding
+/// Only called from [`ensure_artifact_vec_v2_dim`], when opted in AND a dimension
+/// mismatch was detected. [`write_embeddings_v2_with`] and the backfill preflight both
+/// reach it through that function. It is a deliberate migration for "I changed my embedding
 /// model", not an automatic silent-heal path. `artifact_vec_v2` is a shared,
 /// cross-project table (one catalog.db per user, not per-repo), so this affects
 /// every project using this catalog — the caller logs a loud warning either way.
@@ -1552,7 +1580,6 @@ pub async fn index_repo(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::artifact_store::ArtifactBackend;
     use crate::librarian::classify::load_rules;
     use std::path::PathBuf;
 
@@ -2124,7 +2151,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2182,7 +2209,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2265,7 +2292,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2358,7 +2385,7 @@ kind = "memory"
                 100,
                 None,
                 true,
-                ArtifactBackend::SqliteVec,
+                BackfillTarget::SqliteVec,
             )
             .await
             .unwrap_err();
@@ -2431,7 +2458,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap_err();
@@ -2464,7 +2491,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2530,7 +2557,7 @@ kind = "memory"
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
         let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(report.artifacts, 1);
@@ -2604,7 +2631,7 @@ kind = "memory"
             FailingEmbedder,
         ));
         let error =
-            backfill_chunk_vectors(&catalog, &failing, 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&catalog, &failing, 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap_err();
         assert!(error.to_string().contains("fixture embedding failed"));
@@ -2627,7 +2654,7 @@ kind = "memory"
             &backfill_svc(),
             100,
             None,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2683,7 +2710,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2735,7 +2762,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2827,13 +2854,13 @@ kind = "memory"
                 )
                 .unwrap();
         }
-        // Three artifacts with page size two: the first page has one real document
-        // and one missing file, so its one vector sits below the flush threshold.
+        // Three artifacts with page size two: the first page holds the missing file and one
+        // real document, so it writes one vector and records its marker; the second fails.
         let svc = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
             FailSecondEmbedder(std::sync::atomic::AtomicUsize::new(0)),
         ));
         let error =
-            backfill_chunk_vectors_with(&catalog, &svc, 2, None, false, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors_with(&catalog, &svc, 2, None, false, BackfillTarget::SqliteVec)
                 .await
                 .unwrap_err();
         assert!(error.to_string().contains("second page embedding failed"));
@@ -2862,7 +2889,7 @@ kind = "memory"
             2,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -2959,7 +2986,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap_err();
@@ -2990,7 +3017,7 @@ kind = "memory"
             100,
             Some(&prefix),
             true,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap_err();
@@ -2999,16 +3026,10 @@ kind = "memory"
             "a shared dimension change must require explicit catalog scope: {scoped_error:#}"
         );
 
-        let retry = backfill_chunk_vectors_with(
-            &catalog,
-            &svc,
-            100,
-            None,
-            true,
-            ArtifactBackend::SqliteVec,
-        )
-        .await
-        .unwrap();
+        let retry =
+            backfill_chunk_vectors_with(&catalog, &svc, 100, None, true, BackfillTarget::SqliteVec)
+                .await
+                .unwrap();
         assert_eq!(
             retry.artifacts, 2,
             "both projects need recovery after a shared-table rebuild"
@@ -3104,7 +3125,7 @@ kind = "memory"
             100,
             None,
             false,
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -3120,6 +3141,49 @@ kind = "memory"
     #[tokio::test]
     async fn backfill_model_change_detects_an_already_populated_old_dimension() {
         check_backfill_dimension_failure_then_opted_in_retry(true, false).await;
+    }
+    /// A project-scoped run whose embedder changed dimension must name the command that can
+    /// work in its FIRST refusal. The shared preflight answered before the scope guard ran and
+    /// told a scoped caller to set the opt-in and retry; the retry then met the scope guard,
+    /// which named `--all`. Two round trips, the first on advice that could not work.
+    /// BUG docs/issues/2026-10-14-backfill-dimension-refusal-tells-a-scoped-run-to-retry-a-command-the-scope-guard-refuses.md
+    #[tokio::test]
+    async fn a_scoped_dimension_change_names_the_catalog_wide_command_in_its_first_refusal() {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        // `open_in_memory` creates `artifact_vec_v2` at FLOAT[768]; this embedder returns 384.
+        let prefix = format!("{}%", root.path().display());
+        let error = backfill_chunk_vectors_with(
+            &catalog,
+            &backfill_svc_at_dim(384),
+            100,
+            Some(&prefix),
+            false,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap_err();
+        let text = error.to_string();
+        assert!(
+            text.contains("--all") && text.contains(ARTIFACT_VEC_MIGRATE_ENV),
+            "the first refusal must name the catalog-wide command and its opt-in: {error:#}"
+        );
+        assert_eq!(
+            vec0_table_dim(&catalog.lock().conn, "artifact_vec_v2").unwrap(),
+            Some(768),
+            "a refusal changes no vectors"
+        );
     }
 
     /// The backfill's per-file resolver, guarded in the direction that
@@ -3161,7 +3225,7 @@ kind = "memory"
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
         let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(report.artifacts, 1, "sanity: one artifact was reached");
@@ -3194,7 +3258,7 @@ kind = "memory"
         std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
 
         let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(report.artifacts, 2);
@@ -3252,7 +3316,7 @@ kind = "memory"
             &backfill_svc(),
             100,
             Some(&prefix),
-            ArtifactBackend::SqliteVec,
+            BackfillTarget::SqliteVec,
         )
         .await
         .unwrap();
@@ -3278,7 +3342,7 @@ kind = "memory"
 
         // And an unscoped run still reaches it, so the scoping narrowed rather than broke.
         let wide =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(
@@ -3332,7 +3396,7 @@ kind = "memory"
         std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
 
         let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
 
@@ -3370,7 +3434,7 @@ kind = "memory"
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
         let first =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(first.artifacts, 2);
@@ -3385,7 +3449,7 @@ kind = "memory"
         }
 
         let second =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(
@@ -3452,10 +3516,22 @@ kind = "memory"
             (chunked, artifact_id_named(&cat, "bare.md"))
         };
 
-        let qdrant =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::Qdrant)
-                .await
-                .unwrap();
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+        let prefix = format!("{project_id}%");
+        let qdrant = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            Some(&prefix),
+            BackfillTarget::Store {
+                store: &store,
+                project_id: &project_id,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(
             qdrant.artifacts, 1,
             "only the artifact with no chunk rows: {qdrant:?}"
@@ -3475,14 +3551,123 @@ kind = "memory"
             );
         }
 
-        // Control: the same gap IS one for a sqlite-vec process, so the Qdrant run above
-        // skipped a real candidate rather than finding nothing.
+        // Control: the same gap IS one for a sqlite-vec process, so the store run above
+        // skipped a real candidate rather than finding nothing. `bare.md` is a gap here too:
+        // the store run filed its vectors in the store, never in `artifact_vec_v2`.
         let sqlite =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
-        assert_eq!(sqlite.artifacts, 1, "{sqlite:?}");
+        assert_eq!(sqlite.artifacts, 2, "{sqlite:?}");
         assert!(sqlite_vectors_of(&m.lock(), &chunked) > 0);
+        assert!(sqlite_vectors_of(&m.lock(), &bare) > 0);
+    }
+    /// A backfill into a store other than sqlite-vec must write there. It always wrote into
+    /// `artifact_vec_v2`, so on a Qdrant host an artifact gained chunk rows, and left the
+    /// `vectorless` count, while the collection its search reads stayed empty.
+    /// BUG docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
+    #[tokio::test]
+    async fn a_store_backfill_writes_its_vectors_to_the_store_and_not_to_artifact_vec_v2() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("bare.md"), "# Bare\n\nbeta\n").unwrap();
+        index_repo_sync(
+            &m.lock(),
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        let bare = artifact_id_named(&m.lock(), "bare.md");
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+
+        let report = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            Some(&format!("{project_id}%")),
+            BackfillTarget::Store {
+                store: &store,
+                project_id: &project_id,
+            },
+        )
+        .await
+        .unwrap();
+
+        let chunks = crate::librarian::catalog::chunk::chunks_for(&m.lock(), &bare)
+            .unwrap()
+            .len();
+        assert!(chunks > 0, "the no-chunk arm gives the artifact its rows");
+        assert_eq!(
+            store.chunks_under(&bare),
+            chunks,
+            "every chunk's vector is in the store"
+        );
+        assert_eq!(
+            store.project_ids(),
+            vec![project_id.clone()],
+            "filed under the scope's project, the collection its search reads"
+        );
+        assert_eq!(
+            sqlite_vectors_of(&m.lock(), &bare),
+            0,
+            "nothing in the table this process does not search"
+        );
+        assert_eq!(report.embedded, chunks);
+    }
+
+    /// `artifact_vec_v2`'s dimension is no concern of a run that does not write it. Checked
+    /// first, a stale table from an older model refused a store run outright, and with the
+    /// opt-in set it would have dropped every project's sqlite-vec vectors for nothing.
+    #[tokio::test]
+    async fn a_store_backfill_does_not_check_artifact_vec_v2s_dimension() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("bare.md"), "# Bare\n\nbeta\n").unwrap();
+        index_repo_sync(
+            &m.lock(),
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        let bare = artifact_id_named(&m.lock(), "bare.md");
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+
+        // `open_in_memory` creates `artifact_vec_v2` at FLOAT[768]; this embedder returns 384.
+        backfill_chunk_vectors_with(
+            &m,
+            &backfill_svc_at_dim(384),
+            100,
+            Some(&format!("{project_id}%")),
+            false,
+            BackfillTarget::Store {
+                store: &store,
+                project_id: &project_id,
+            },
+        )
+        .await
+        .unwrap();
+
+        let chunk = crate::librarian::catalog::chunk::chunks_for(&m.lock(), &bare).unwrap()[0]
+            .chunk_id
+            .clone();
+        assert_eq!(store.chunk(&chunk).map(|(_, v)| v.len()), Some(384));
+        assert_eq!(
+            vec0_table_dim(&m.lock().conn, "artifact_vec_v2").unwrap(),
+            Some(768),
+            "the table this run does not write is left as it was"
+        );
     }
 
     /// **A blank chunk never gets a vector, so lacking one does not mean it needs repair.**
@@ -3514,7 +3699,7 @@ kind = "memory"
         )
         .unwrap();
         let first =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(first.artifacts, 2);
@@ -3547,7 +3732,7 @@ kind = "memory"
         }
 
         let second =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, ArtifactBackend::SqliteVec)
+            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
                 .await
                 .unwrap();
         assert_eq!(

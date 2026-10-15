@@ -7,6 +7,8 @@
 //!
 //! A model-dimension change is explicit and backed up. It requires `--all` because
 //! the sqlite-vec table is shared across every project in the catalog.
+//! On the `qdrant` backend a run writes through that project's collection, so it must be
+//! scoped to one project; `--all` is refused there.
 //! The catalog lock is released across embedding awaits.
 //!
 //! [`backfill_chunk_vectors`]: crate::librarian::indexer::backfill_chunk_vectors
@@ -16,6 +18,7 @@ use clap::Args;
 use serde_json::json;
 
 use crate::cli::{open_ctx, CommonOpts};
+use crate::librarian::indexer::BackfillTarget;
 
 #[derive(Debug, Args)]
 pub struct BackfillChunksArgs {
@@ -76,6 +79,18 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
             .ok()
             .as_deref(),
     );
+    let project_id = if args.all {
+        None
+    } else {
+        ctx.current_project
+            .as_ref()
+            .map(|p| p.abs_path.to_string_lossy().into_owned())
+    };
+    let target = backfill_target(
+        backend,
+        project_id.as_deref(),
+        ctx.artifact_store.as_deref(),
+    )?;
 
     // The lock is released across every embedding await inside, so this does not
     // serialize a long remote run behind a single guard.
@@ -84,7 +99,7 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
         &svc,
         args.batch,
         root_prefix.as_deref(),
-        backend,
+        target,
     )
     .await?;
 
@@ -109,8 +124,9 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
     Ok(())
 }
 
-/// The store this run's search reads, which decides whether a missing `artifact_vec_v2` row
-/// is a gap. A scoped run resolves against its project, as `build_tool_context_with` does;
+/// The store this run's search reads, which decides where the run writes
+/// ([`backfill_target`]) and whether a missing `artifact_vec_v2` row is a gap. A scoped run
+/// resolves against its project, as `build_tool_context_with` does;
 /// `--all` has no single project and takes the host setting (env, then build default), as
 /// the CLI reindex does. `env` is `CODESCOUT_ARTIFACT_BACKEND`, read by the caller.
 fn backfill_backend(
@@ -125,10 +141,44 @@ fn backfill_backend(
     };
     crate::librarian::artifact_store::ArtifactBackend::resolve_with(env, project.as_deref())
 }
+/// Where this run writes its vectors: the store its search reads. sqlite-vec writes its own
+/// table through `write_embeddings_v2_with`, which holds the dimension guard. Qdrant writes
+/// through the context's store, under the scoped project's `abs_path`, the id that `find` and
+/// `reindex` use. Two Qdrant runs are refused because no target is right for them: `--all`
+/// (`project_id` is `None`) has no single collection, and a process with no Qdrant store
+/// (`store` is `None`) has nowhere that search reads. Both used to write `artifact_vec_v2`.
+/// docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
+fn backfill_target<'a>(
+    backend: crate::librarian::artifact_store::ArtifactBackend,
+    project_id: Option<&'a str>,
+    store: Option<&'a dyn crate::librarian::artifact_store::ArtifactVectorStore>,
+) -> Result<BackfillTarget<'a>> {
+    use crate::librarian::artifact_store::ArtifactBackend;
+    match backend {
+        ArtifactBackend::SqliteVec => Ok(BackfillTarget::SqliteVec),
+        ArtifactBackend::Qdrant => {
+            let project_id = project_id.context(
+                "backfill-chunks --all cannot run on the `qdrant` artifact backend: its vectors \
+                 live in one collection per project, and a catalog-wide walk has no single \
+                 project to file them under. Run it from inside each project, or pass \
+                 --project <path>.",
+            )?;
+            let store = store.context(
+                "the `qdrant` artifact backend resolved for this project, but this process has \
+                 no Qdrant store (Qdrant is unreachable, or this build lacks the `server-stack` \
+                 feature), so there is nothing that search reads to back fill into. Fix that and \
+                 re-run, or set `[librarian] vector_backend = \"sqlite-vec\"` \
+                 (CODESCOUT_ARTIFACT_BACKEND=sqlite-vec) for the offline backend.",
+            )?;
+            Ok(BackfillTarget::Store { store, project_id })
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
     use crate::librarian::artifact_store::ArtifactBackend;
 
     fn project_with_backend(backend: &str) -> tempfile::TempDir {
@@ -172,5 +222,44 @@ mod tests {
             ArtifactBackend::SqliteVec,
             "the env var outranks project.toml, as in build_tool_context_with"
         );
+    }
+    /// `--all` on a store with one collection per project has no single project to file its
+    /// vectors under. Before the target existed it wrote them into `artifact_vec_v2`, which
+    /// that host's search never reads.
+    /// BUG docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md
+    #[test]
+    fn a_catalog_wide_backfill_on_qdrant_is_refused() {
+        let store = InMemoryArtifactStore::default();
+        let Err(error) = backfill_target(ArtifactBackend::Qdrant, None, Some(&store)) else {
+            panic!("--all on qdrant must be refused");
+        };
+        assert!(error.to_string().contains("--project"), "{error:#}");
+    }
+
+    /// Qdrant resolved but unreachable leaves the context with no store. Writing into
+    /// `artifact_vec_v2` instead would report vectors that no search reads.
+    #[test]
+    fn a_qdrant_backfill_with_no_reachable_store_is_refused() {
+        let Err(error) = backfill_target(ArtifactBackend::Qdrant, Some("/work/p"), None) else {
+            panic!("a qdrant run with no store must be refused");
+        };
+        assert!(error.to_string().contains("sqlite-vec"), "{error:#}");
+    }
+
+    /// A scoped Qdrant run files its vectors under the project's `abs_path`, the id that
+    /// project's `find` reads with. A sqlite-vec run writes its own table through
+    /// `write_embeddings_v2_with`, which holds the dimension guard, whatever store the
+    /// context holds.
+    #[test]
+    fn a_scoped_qdrant_backfill_targets_the_projects_collection_and_sqlite_vec_its_table() {
+        let store = InMemoryArtifactStore::default();
+        match backfill_target(ArtifactBackend::Qdrant, Some("/work/p"), Some(&store)).unwrap() {
+            BackfillTarget::Store { project_id, .. } => assert_eq!(project_id, "/work/p"),
+            BackfillTarget::SqliteVec => panic!("a qdrant run must write through the store"),
+        }
+        assert!(matches!(
+            backfill_target(ArtifactBackend::SqliteVec, Some("/work/p"), Some(&store)).unwrap(),
+            BackfillTarget::SqliteVec
+        ));
     }
 }

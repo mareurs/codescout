@@ -331,13 +331,10 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 ///
 /// That is harmless TODAY because of a property of the CALLER, never of this key:
 /// `embed_queue_items` rebuilds its title table from the CURRENT body on every
-/// call and returns an item for EVERY stored chunk, and both production callers
-/// embed every item they are handed. `index_repo_sync` gates per ARTIFACT on the
-/// file's `sha256`, which any rename changes. Backfill calls `embed_queue_items`
-/// only for artifacts with no stored chunks. Its partial-vector repair path reads
-/// persisted chunks and their stored title context directly, without re-chunking.
-/// So a reused row from this writer is overwritten with freshly-titled text
-/// whatever this key matched on.
+/// call and returns an item for EVERY stored chunk. `index_repo_sync` embeds every
+/// item it is handed, and gates per ARTIFACT on the file's `sha256`, which any
+/// rename changes. So a reused row from this writer is overwritten with
+/// freshly-titled text whatever this key matched on.
 ///
 /// **So do not filter that queue against chunks that already hold a vector.** It
 /// is the obvious cost optimisation, and it is precisely the change that would
@@ -348,6 +345,14 @@ pub fn build_single_chunk(artifact_id: &str, body: &str, line_offset: usize) -> 
 /// `indexer.rs`'s `a_reused_chunk_embeds_with_the_current_entry_title_not_the_stored_one`
 /// is the guard, and it asserts the reuse actually happened so it cannot pass by
 /// the row being rebuilt instead.
+///
+/// Backfill does filter, against `artifact_vec_v2`, and is safe for reasons of its
+/// own. It calls `embed_queue_items` only for an artifact with no stored chunks, so
+/// this writer reuses no row there and the filter drops nothing. Its repair arm
+/// filters a queue rebuilt from persisted rows and their stored title context, not
+/// this writer's queue. There a row whose vector was embedded under an older title
+/// keeps that vector; only an embed of every chunk (a content change, or
+/// `reembed=true`) replaces it.
 ///
 /// # Positions are re-synced separately from the vector
 ///

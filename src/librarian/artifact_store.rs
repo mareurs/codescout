@@ -22,8 +22,9 @@ use crate::retrieval::qdrant::QdrantWrap;
 /// Which vector backend the librarian artifact index uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactBackend {
-    /// Default — a shared Qdrant `artifacts` collection. Needs a reachable
-    /// Qdrant daemon.
+    /// Default on a `server-stack` build — one Qdrant collection per project, named by
+    /// [`artifact_collection_name`]. The older shared `artifacts` collection is
+    /// superseded, not read. Needs a reachable Qdrant daemon.
     Qdrant,
     /// Escape hatch — the in-process sqlite-vec `artifact_vec_v2` table. No
     /// daemon; works fully offline on low-end / locked-down machines.
