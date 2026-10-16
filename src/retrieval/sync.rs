@@ -48,6 +48,28 @@ pub struct SyncOpts {
     /// testable while leaving detection where it belongs.
     pub writer: Option<crate::retrieval::index_state::WriterProvenance>,
 }
+impl SyncOpts {
+    /// Options for syncing a **library** directory (`lib:<name>`).
+    ///
+    /// Libraries get their own explicit pattern list — nothing — rather than a project's
+    /// `[ignored_paths]`. A library directory has no `project.toml` of its own, so the
+    /// config resolved for it is the absent-section default, which is now the project
+    /// default-ignore set. Those defaults are chosen for a project's own tree
+    /// (`node_modules`, `dist`, `build`, `target` are other people's output there) but a
+    /// library's `dist/` or `build/` is frequently the package itself, and a bare name
+    /// prunes at any depth, so adopting them would silently drop it from the index.
+    /// `.gitignore` and the `ALWAYS_SKIP_DIRS` still apply to the walk.
+    ///
+    /// One constructor for both library call sites (`index(scope=lib:<name>)` and the
+    /// background auto-index) so they cannot disagree.
+    pub fn for_library(force_reindex: bool) -> Self {
+        Self {
+            force_reindex,
+            ignore_patterns: Vec::new(),
+            ..Default::default()
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct SyncReport {
@@ -1211,6 +1233,56 @@ mod tests {
     use crate::retrieval::reranker::RerankerHttp;
     use crate::retrieval::search::Hit;
     use std::sync::{Arc, Mutex};
+
+    /// Files `indexable_files` yields for a fixture library laid out like an npm package.
+    fn library_fixture_walk(patterns: &[String]) -> Vec<String> {
+        let dir = tempfile::tempdir().unwrap();
+        for rel in [
+            "src/index.js",
+            "dist/axios.js",
+            "build/out.js",
+            "lib/core.js",
+        ] {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "export const x = 1;\n").unwrap();
+        }
+        let mut got: Vec<String> = indexable_files(dir.path(), patterns)
+            .into_iter()
+            .map(|(_, _, rel)| rel)
+            .collect();
+        got.sort();
+        got
+    }
+
+    /// A library directory has no `project.toml`, so the config the library branches of
+    /// `index` resolve for it is the absent-section default. Before the default-ignore fix
+    /// that was `[]`; resolving it as the PROJECT defaults would silently drop a package's
+    /// own `dist/` and `build/` — the published artefact an npm/pip library is made of.
+    #[test]
+    fn a_library_walk_keeps_dist_and_build_directories() {
+        let patterns = SyncOpts::for_library(false).ignore_patterns;
+        assert_eq!(
+            library_fixture_walk(&patterns),
+            vec![
+                "build/out.js".to_string(),
+                "dist/axios.js".to_string(),
+                "lib/core.js".to_string(),
+                "src/index.js".to_string()
+            ]
+        );
+    }
+
+    /// Guard for the premise: the PROJECT defaults really do prune those directories, so the
+    /// library list above is a decision and not a no-op.
+    #[test]
+    fn the_project_default_patterns_do_prune_dist_and_build() {
+        let defaults = crate::config::project::IgnoredPathsSection::default().patterns;
+        assert_eq!(
+            library_fixture_walk(&defaults),
+            vec!["lib/core.js".to_string(), "src/index.js".to_string()]
+        );
+    }
 
     #[test]
     fn always_skipped_covers_git_and_codescout_state_only_as_directories() {

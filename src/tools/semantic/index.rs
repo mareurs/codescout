@@ -153,13 +153,7 @@ impl Tool for IndexProject {
             // project_id namespace (`lib:<name>`). The retrieval stack
             // handles chunking, embedding, and incremental upsert/delete.
             let client = crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
-            let opts = crate::retrieval::sync::SyncOpts {
-                force_reindex: force,
-                ignore_patterns: crate::config::project::ProjectConfig::load_or_default(&lib_path)
-                    .map(|c| c.ignored_paths.patterns)
-                    .unwrap_or_default(),
-                ..Default::default()
-            };
+            let opts = crate::retrieval::sync::SyncOpts::for_library(force);
             client
                 .sync_project(&lib_project_id, &lib_path, opts)
                 .await?;
