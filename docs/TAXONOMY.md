@@ -408,11 +408,19 @@ Policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-pol
 
 ## Archive cadence
 
-Closed entries graduate to `docs/trackers/archive/<tracker>-<YYYY>-q<n>.md`:
+Two operations, two destinations. Ratified in [`archive-cadence-policy.md`](trackers/archive-cadence-policy.md) (2026-08-16; surface 3 narrowed 2026-08-17):
 
-- **Trigger**: status is closed AND (SHA is on master OR closure is `wontfix` / `by-design` / `substrate-caught` / cross-repo verified).
-- **Cadence**: manual quarterly pass + accelerated by release cuts.
-- **Archive file**: per-tracker, time-partitioned. Frontmatter `kind: tracker, status: archived`.
+| Operation | Destination |
+|---|---|
+| **Entry-level** — closed entries leave a live ledger | `docs/trackers/archive/<ledger>-archived-entries.md` — one stable companion per ledger, appended to repeatedly, **no timestamp** |
+| **Whole-file** — the stream wrapped, happens once | `docs/trackers/archive/<name>-<YYYY-MM-DD>.md`, the date being the day the stream was declared wrapped |
+
+- **Check before creating.** Look for the ledger's existing archive artifact first (`doc(action="find", filter={"rel_path": {"contains": "archive/<ledger>"}}, include_archived=true)`). A second archive file for one ledger splits its definitions and makes every shared token ambiguous.
+- **Keep the heading.** An archived entry keeps its `## <ID> — <title>` heading; never reduce it to a row (`get_guide("tracker-conventions")` § *Compaction and archival*).
+- **Trigger**: an entry is archive-eligible when it is closed, or when any promote-or-die condition holds — its `promote-when` criterion has fired (promote it to its permanent surface, or flip it `wontfix`); it is 90 days past its date with the criterion unmet and no action taken; or it carries no `promote-when` and is older than 90 days.
+- **Cadence**: manual quarterly pass, accelerated by release cuts, plus promote-or-die.
+- **Whole-file archival is three steps, not two**: `doc(update, patch={status: "archived"})` (or a `supersedes` edge when a successor replaced it); `doc(move, new_rel_path=…)`, reading the new id from the response; then repoint citations of the old path **and** the old 16-hex id in the same commit, verified by a scoped `audit_doc_refs`.
+- **Archive file**: frontmatter `kind: tracker, status: archived`.
 - **Recovery**: `doc(action="find", kind="tracker", include_archived=true)`.
 
 Full policy: [`docs/trackers/archive-cadence-policy.md`](trackers/archive-cadence-policy.md).
