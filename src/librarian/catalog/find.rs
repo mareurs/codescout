@@ -285,9 +285,11 @@ pub struct SemanticPage {
     /// How many times the loop had to widen `k` to fill the page. `0` means the
     /// first KNN pass already had enough survivors.
     pub widenings: usize,
-    /// The loop hit `K_CAP` and returned a SHORT page — the corpus, or the
-    /// filter, genuinely ran out.
+    /// The requested page is short: corpus, filter or search budget ran out.
     pub exhausted: bool,
+    /// Candidate discovery reached its K budget with a short artifact page;
+    /// farther candidates may still exist. False for an ordinary small corpus.
+    pub candidates_capped: bool,
     /// Hits dropped by `max_per_artifact`. Distinct from `exhausted`: the page
     /// is full and relevant, but one artifact had more to say than it was
     /// allowed. A caller that cannot see this cannot tell a capped page from a
@@ -351,6 +353,9 @@ pub async fn semantic_find(
     let mut k = (target * 5 * max_per_artifact.max(1)).max(200);
     // cap-class: RESULT_CAP catalog.semantic_k — probed
     const K_CAP: usize = 8000;
+    let k_cap = K_CAP.min(store.max_knn_k());
+    // Preserve larger initial requests on backends that support them.
+    k = k.min(store.max_knn_k());
     let mut widenings = 0usize;
 
     loop {
@@ -448,14 +453,15 @@ pub async fn semantic_find(
         // `target` counts SURVIVING hits after the cap, not raw candidates —
         // otherwise a big ledger's suppressed chunks would read as a full page.
         let enough = hits_all.len() >= target;
-        // The vector store returned fewer candidates than asked for, so it holds
-        // nothing further and widening `k` cannot find more. Without this the loop
+        // The vector store returned fewer candidates than asked for: either its
+        // corpus or its backend search budget ran out. Widening cannot find more
+        // within that budget. Without this the loop
         // re-queried a 2-row corpus five more times on its way to K_CAP, and —
         // worse — every small-corpus query came out looking filter-starved when
         // the truth was simply that the corpus is small. A signal that fires when
         // it is not true is worse than no signal.
         let store_exhausted = candidates.len() < k;
-        let capped = k >= K_CAP;
+        let capped = k >= k_cap;
 
         // Enough results, or nothing left to find → return the requested page.
         if enough || store_exhausted || capped {
@@ -467,6 +473,7 @@ pub async fn semantic_find(
                 // A full page at K_CAP is the ordinary large-corpus case and is not
                 // exhaustion.
                 exhausted: !enough,
+                candidates_capped: !enough && capped && !store_exhausted,
                 cap_suppressed,
                 unresolved,
             });
@@ -476,7 +483,7 @@ pub async fn semantic_find(
         // and the filter removed enough of them to leave the page short. Widen and
         // retry. `widenings > 0` is therefore the genuine filter-starvation signal:
         // corpus exhaustion exits above without ever incrementing it.
-        k = (k * 2).min(K_CAP);
+        k = (k * 2).min(k_cap);
         widenings += 1;
     }
 }

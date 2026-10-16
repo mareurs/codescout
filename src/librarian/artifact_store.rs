@@ -175,7 +175,16 @@ pub trait ArtifactVectorStore: Send + Sync {
     /// until the next `reembed` — a different silent degradation, not a fix.
     async fn refile(&self, old_artifact_id: &str, new_artifact_id: &str) -> Result<u64>;
 
+    /// Largest positive K accepted by this backend. A full response at this
+    /// boundary does not prove that the corpus contains no farther neighbors.
+    fn max_knn_k(&self) -> usize {
+        usize::MAX
+    }
+
     /// Dense KNN → ranked `(chunk_id, distance)` pairs, closest first.
+    /// Returns at most `k` pairs, subject to the backend's search budget
+    /// (sqlite-vec accepts at most 4096 neighbors per query). A short result
+    /// may therefore mean budget exhaustion rather than the entire corpus.
     ///
     /// **The returned id is a CHUNK id**, which the caller resolves to its
     /// artifact through `artifact_chunk` — see `semantic_find`. (This doc
@@ -531,6 +540,10 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         Ok(n as u64)
     }
 
+    fn max_knn_k(&self) -> usize {
+        4096
+    }
+
     async fn knn(
         &self,
         _project_id: Option<&str>,
@@ -540,10 +553,13 @@ impl ArtifactVectorStore for SqliteVecArtifactStore {
         // sqlite-vec has no project_id column; the catalog's scoped filter does
         // the project narrowing after hydration (results match the Qdrant path).
         //
-        // `artifact_vec_v2` is declared `vec0(id, embedding FLOAT[N])` by the v11
-        // migration with no distance metric, so sqlite-vec's default L2 applies and the
-        // `distance` column is already lower-is-closer — the polarity the trait
-        // requires. No conversion here, unlike the Qdrant path.
+        // sqlite-vec rejects KNN requests above 4096. Direct callers may ask
+        // for more, so enforce this backend's bound before issuing SQL too.
+        // The coordinator also reads max_knn_k to distinguish this budget
+        // from corpus exhaustion. Ranking and smaller requests are unchanged.
+        let k = k.min(self.max_knn_k());
+        // artifact_vec_v2 uses sqlite-vec's default L2 distance: lower is closer,
+        // matching the trait contract without Qdrant's similarity conversion.
         let blob: Vec<u8> = query.iter().flat_map(|f| f.to_le_bytes()).collect();
         let cat = self.catalog.lock();
         let mut stmt = cat.conn.prepare(
@@ -1041,5 +1057,35 @@ mod backend_tests {
             )
             .unwrap();
         assert_eq!(v1_tables, 0, "the retired v1 table must not be re-created");
+    }
+
+    #[tokio::test]
+    async fn sqlite_knn_bounds_large_requests_without_losing_nearest_chunks() {
+        let cat = std::sync::Arc::new(parking_lot::Mutex::new(Catalog::open_in_memory().unwrap()));
+        let store = SqliteVecArtifactStore::new(cat);
+        // More rows than SQLite's KNN ceiling distinguishes a safe bound from an
+        // arbitrary small cap. Unique distances also pin ranking and membership.
+        for i in 0..4100 {
+            let mut vector = vec![0.0; 768];
+            vector[0] = i as f32;
+            store
+                .upsert("p", &format!("chunk-{i}"), "a", &vector)
+                .await
+                .unwrap();
+        }
+        let query = vec![0.0; 768];
+        for requested in [8000, usize::MAX] {
+            let hits = store.knn(None, &query, requested).await.unwrap();
+            assert_eq!(hits.len(), 4096);
+            for (i, (id, distance)) in hits.iter().enumerate() {
+                assert_eq!(id, &format!("chunk-{i}"));
+                assert_eq!(*distance, i as f32);
+            }
+        }
+        let small = store.knn(None, &query, 3).await.unwrap();
+        assert_eq!(
+            small.iter().map(|h| h.0.as_str()).collect::<Vec<_>>(),
+            ["chunk-0", "chunk-1", "chunk-2"]
+        );
     }
 }

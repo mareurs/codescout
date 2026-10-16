@@ -701,7 +701,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // candidate ids, so the distances are dropped here deliberately rather
             // than plumbed through a second consumer that has no use for them.
             let mut rows = page.hits;
-            candidates_capped = rows.len() > 50;
+            candidates_capped = rows.len() > 50 || page.candidates_capped;
             rows.truncate(50);
             Some(rows.into_iter().map(|h| h.row.id).collect())
         } else {
@@ -1228,6 +1228,98 @@ mod tests {
             ids.len(),
             "context packed one artifact's body twice, once per chunk: {ids:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_topic_context_survives_knn_widening_past_backend_limit() {
+        use crate::librarian::artifact_store::{ArtifactVectorStore, SqliteVecArtifactStore};
+        use crate::librarian::catalog::chunk;
+
+        for (count, expected_capped) in [(4081, false), (4096, true)] {
+            let tmp = TempDir::new().unwrap();
+            let body = "# Ledger\n\nretained body\n";
+            std::fs::write(tmp.path().join("ledger.md"), body).unwrap();
+            let cat = Catalog::open_in_memory().unwrap();
+            artifact::upsert(
+                &cat,
+                &sample_row("r/ledger.md", "r", "ledger.md", "Ledger", None),
+            )
+            .unwrap();
+            let mut ctx = mk_ctx(tmp.path().to_path_buf(), cat);
+            let vector = vec![0.5; 768];
+            ctx.embedding = Some(Arc::new(
+                crate::librarian::embedding::EmbeddingService::new(Arc::new(ConstEmbedder(
+                    vector.clone(),
+                ))),
+            ));
+            let store = Arc::new(SqliteVecArtifactStore::new(ctx.catalog.clone()));
+            // Candidates collapse to one artifact, forcing iterative KNN widening.
+            let rows: Vec<_> = (0..count)
+                .map(|i| chunk::ChunkRow {
+                    chunk_id: format!("candidate-{i}"),
+                    artifact_id: "r/ledger.md".into(),
+                    chunk_ix: i,
+                    start_line: 1,
+                    end_line: 3,
+                    entry_token: None,
+                    entry_part: None,
+                    entry_parts: None,
+                    content: format!("body {i}"),
+                    content_hash: format!("hash-{i}"),
+                })
+                .collect();
+            let rows = chunk::replace_chunks(&ctx.catalog.lock(), "r/ledger.md", &rows).unwrap();
+            assert_eq!(rows.len(), count);
+            for row in &rows {
+                store
+                    .upsert("p", &row.chunk_id, &row.artifact_id, &vector)
+                    .await
+                    .unwrap();
+            }
+            if expected_capped {
+                // The 4097th, farther chunk proves an actual indexed artifact is
+                // outside SQLite's budget. It must not disappear without a warning.
+                std::fs::write(tmp.path().join("tail.md"), "# Tail\n\nfarther body\n").unwrap();
+                let mut row = sample_row("r/tail.md", "r", "tail.md", "Tail", None);
+                row.abs_path = tmp.path().join("tail.md");
+                artifact::upsert(&ctx.catalog.lock(), &row).unwrap();
+                let mut tail = rows[0].clone();
+                tail.artifact_id = "r/tail.md".into();
+                tail.chunk_ix = 0;
+                tail.content = "tail body".into();
+                tail.content_hash = "tail hash".into();
+                let tail =
+                    chunk::replace_chunks(&ctx.catalog.lock(), "r/tail.md", &[tail]).unwrap();
+                let mut distant = vector.clone();
+                distant[0] = 100.0;
+                store
+                    .upsert("p", &tail[0].chunk_id, "r/tail.md", &distant)
+                    .await
+                    .unwrap();
+            }
+            ctx.artifact_store = Some(store);
+            // No title/topic match: a text fallback cannot satisfy the assertion.
+            let result = call(
+                &ctx,
+                json!({"topic": "zz-no-lexical-match-zz", "max_tokens": 900}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["included_ids"], json!(["r/ledger.md"]));
+            assert!(result["markdown"]
+                .as_str()
+                .unwrap()
+                .contains("retained body"));
+            assert_eq!(result["overflow"]["candidates_capped"], expected_capped);
+            if expected_capped {
+                assert!(result["overflow"]["hint"].as_str().unwrap().contains("cap"));
+            } else {
+                assert!(
+                    result["overflow"].get("hint").is_none(),
+                    "a small corpus must not be mislabeled as capped: {result}"
+                );
+            }
+        }
     }
 
     #[tokio::test]
