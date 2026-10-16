@@ -1,7 +1,7 @@
 ---
 id: '9928e5450ba5b859'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the artifact-id ADR promises full fidelity on any developer machine; a checkout at another path gets the CI false positives'
 owners:
 - marius
@@ -10,11 +10,13 @@ tags:
 - adr
 - documentation
 - librarian
+closed: 2026-10-16
 opened: 2026-10-16
 owner: marius
 related:
 - docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md
 severity: low
+unverified: The audit still cannot tell a checkout at another absolute path from one at the authors' path; the ADR now says so but no code detects it. The 8-versus-9 count was left unreconciled, not re-measured.
 ---
 
 # BUG: the artifact-id ADR promises full fidelity on any developer machine; a checkout at another path gets the CI false positives
@@ -44,16 +46,21 @@ See Reproduction. Also in the same ADR, a one-number inconsistency recorded here
 N/A.
 
 ## Fix
-Not started. Qualify the fidelity claim ("on the machine and at the path where the ids were minted"), and reconcile 8 versus 9 (or say what each counts).
+
+Fixed 2026-10-16 by amending the ADR; the doc side was wrong. At the bytes: `src/librarian/tools/audit_doc_refs/mod.rs` `live_ids_or_disabled` is `(!ids.is_empty()).then_some(ids)`, and its single call site (`.and_then(live_ids_or_disabled)`) adds no path comparison, so only an empty catalog disables the check. `docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md`: Decision and Consequences now say fidelity holds where the ids were minted (machine and absolute path), not on "a developer machine"; a new `## Amendment 2026-10-16` explains the frame, notes the pre-commit hook has the same limit, and records that the ADR's 8 (Context, alternatives) and 9 (measurement table, `src/cli/audit_doc_refs.rs`, commit `66cce698`) were never reconciled and were not re-measured here. The decision (no CI placement) is unchanged.
+
+Fix commit `2d56edc2` on branch `worktree-agent-aa532b30b45f11948` (to be merged to experiments), patch-id `9787be24db6a362ca759ab8dee4085108e823018` (shared with the two sibling doc fixes). No code changed.
 
 ## Tests added
-N/A — documentation.
+
+N/A — documentation. `an_empty_artifact_table_disables_the_id_check_rather_than_dooming_every_citation` already pins the only gate the code has; the amendment documents that it is the only one.
 
 ## Workarounds
 N/A.
 
 ## Resume
-Edit the ADR's Decision, Consequences and the 8/9 counts.
+
+N/A — fixed. If the checkout-root case should be detected rather than documented, that is a new design question (ids are `sha256(abs_path)`, so it cannot be done from the id alone). Archive once on experiments with the gate green.
 
 ## References
 - `docs/adrs/2026-09-14-an-id-keyed-on-an-absolute-path-cannot-be-checked-off-the-machine.md`
