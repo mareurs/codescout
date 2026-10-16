@@ -214,6 +214,12 @@ What is NOT covered:
 
 Status stays `open` and the frontmatter `unverified:` caveat is kept: it concerns the Tier 2 write-path fork, the undiscovered eval artifact behind the memory `gotchas:493` claim, and Tier 2's missing demand argument, none of which this commit resolves.
 
+## Re-verified 2026-10-16 (usage agent) -- Tier 1 green, SKILL.md reconciled, Tier 2 still a human decision
+
+- Tier 1 re-run at the bytes with `--features dashboard` (a plain `cargo test --lib` filters `src/dashboard` out): `report_names_the_recorder_scope_beside_the_counts`, `non_usage_resource_does_not_carry_the_recorder_scope`, `usage_response_names_the_recorder_scope_beside_the_counts` and `unavailable_usage_response_carries_no_scope` all pass (4 passed, 0 failed, `scripts/with-slot.sh cargo test --lib --features dashboard -- <the four names>`).
+- `.claude/skills/analyze-usage/SKILL.md` lines ~255 and ~386 now use the `usage::RECORDER_SCOPE` wording ("codescout MCP calls only; native harness tools (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded"), so there is one wording across the doctor report, the dashboard and the skill (commit `6c53c7f3`). That closes the "reconcile SKILL.md" follow-up.
+- Still open, and not a code question: Tier 2 (the H-8 recorder: write path via CLI subcommand vs direct sqlite vs server endpoint, and what of a command to store). The user has not chosen; with `permissions.deny` blocking native `Bash`/`Write`/`Edit` in all three profiles the `Bash` demand argument is gone, leaving `Read`/`Grep`/`Glob`/`Agent`/`WebFetch` unrecorded. Status stays `open` and the `unverified:` caveat stays.
+
 ## Resume
 
 Tier 1 is in on `experiments` (local, not pushed at the time of writing). Remaining, needs a human decision: Tier 2 (*Open question 1*, the write path, and *Open question 2*, what of the command to store), and whether Tier 2 still has a demand argument now that `permissions.deny` blocks native `Bash` in all three profiles (the `Bash` half is closed by policy; `Read`, `Grep`, `Glob`, `Agent`, `WebFetch` remain unrecorded). Smaller follow-ups: reconcile `.claude/skills/analyze-usage/SKILL.md` ~255 / ~387 with `RECORDER_SCOPE` so there is one wording, and retitle the file to the native-non-shell-tool blind spot (only if the id-rekey cost named in `## Summary` is judged acceptable).
