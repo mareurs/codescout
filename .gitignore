@@ -16,6 +16,9 @@
 # mutation-probe markers: per-session, transient, removed on revert by the
 # arming process. Never shared — a marker is only true of the tree it sits in.
 /.codescout/mutations/
+# Resident-session scratch (run logs, exit files, patches): private to the session that wrote it,
+# never shared. Untracked and unignored it was offered for commit with every `git add -A`.
+/.codescout/resident-private/
 /.codescout/embeddings.db
 /.codescout/embeddings.db-wal
 /.codescout/embeddings.db-shm
@@ -55,6 +58,7 @@ crates/*/.codescout/peer-audit.jsonl
 crates/*/.codescout/peers.toml
 crates/*/.codescout/private-memories/
 crates/*/.codescout/project.toml
+crates/*/.codescout/resident-private/
 crates/*/.codescout/tantivy/
 crates/*/.codescout/tmp/
 crates/*/.codescout/usage.db
