@@ -670,8 +670,14 @@ impl LibrarianAdapter {
 /// array, plus `path` inside a `doctor`-style `violations` array — deliberately shallow. A
 /// deep walk over an arbitrarily large response to choose a guide would cost more than the
 /// guide saves, and the shallow form covers the shapes that actually carry a path:
-/// `get`/`create`/`update`/`move` return one at the top level, `find` returns them per
-/// item, `doctor` returns them per violation under a differently-named key.
+/// `get`/`create` return one at the top level, `find` returns them per item, `doctor`
+/// returns them per violation under a differently-named key. **`update` and `move` do
+/// NOT** (measured 2026-10-16 against a `docs/trackers/` artifact: `update` returns
+/// `{id, updated}`, `move` returns `old_abs_path`/`new_abs_path`, keys this scan does not
+/// read), nor do `append_entry`, `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` or
+/// `augment` — so those calls route to `librarian`, and the `tracker-conventions` sections
+/// that need them are pull-only. See
+/// `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
 ///
 /// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*
 /// rather than as an error — see
@@ -3029,9 +3035,11 @@ mod tests {
     /// reach them.
     ///
     /// The existing gate `every_observed_shape_of_a_declaring_topic_has_a_section`
-    /// cannot catch this and is not the place to try: it skips non-declaring
-    /// topics, and `tracker-conventions` declares no sections at all, so the
-    /// routing destination is invisible to it by construction.
+    /// could not catch this when it was written: it skips non-declaring topics, and
+    /// `tracker-conventions` declared no sections at all, so the routing destination was
+    /// invisible to it by construction. It does see the topic now that it declares, but
+    /// only for the `librarian.*` rows of `shape_census.txt` (the `artifact.*` rows name
+    /// no registered tool), and a waiver names each, so this test still owns the claim.
     ///
     /// Mutations that must kill this: move any mode's semantics out of the `fix`
     /// description again; or make `names_tracker_path` ignore `violations[].path`,

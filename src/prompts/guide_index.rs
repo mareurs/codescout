@@ -675,6 +675,28 @@ n body
         }
     }
 
+    /// Whether two shapes declared by DIFFERENT topics could leave `topic_declaring`
+    /// choosing between them by `BTreeMap` order, i.e. by accident.
+    ///
+    /// Overlap is over-approximated on `(tool, action)` with `None` as a wildcard.
+    /// Beyond that one refinement is allowed, and only one: **exactly one** of the
+    /// pair carrying a `path~` predicate is a deliberate narrowing, not an ambiguity.
+    /// The narrower shape can match only a call whose RESULT names that path, and for
+    /// such a call the tool's own result-based topic is consulted before
+    /// `topic_declaring` (`emit_guide_sections`), so which topic answers is decided
+    /// by the content, not by the alphabet. `tracker-conventions` declares
+    /// `doc.create(path~docs/trackers/)` beside `librarian`'s unqualified `doc.create`
+    /// on exactly that basis.
+    ///
+    /// Two shapes that BOTH carry a predicate stay ambiguous: their needles may
+    /// nest, and nothing here compares needles. Two that BOTH omit one stay
+    /// ambiguous too — that is the case this test was written for.
+    fn ambiguous_across_topics(a: &Shape, b: &Shape) -> bool {
+        let overlaps =
+            a.tool == b.tool && (a.action.is_none() || b.action.is_none() || a.action == b.action);
+        overlaps && a.path_contains.is_some() == b.path_contains.is_some()
+    }
+
     #[test]
     fn no_two_topics_declare_an_overlapping_shape() {
         // `topic_declaring` scans topics in `BTreeMap` order and takes the first
@@ -683,19 +705,10 @@ n body
         // never consulted. That is the exact failure mode section-grain delivery
         // exists to prevent, so it must not be reintroducible one level up.
         //
-        // **Vacuous today, and deliberately kept.** Only `librarian` declares
-        // anything, so nothing can collide yet; this fires the moment a second
-        // topic adopts `serves:`, which is precisely when the ambiguity becomes
-        // possible and no one is looking for it. `tracker-conventions` is the
-        // likely next adopter — see
+        // Not vacuous since `tracker-conventions` adopted `serves:`: it is the
+        // second declaring topic, and the only pairs this test now tolerates are the
+        // path-qualified narrowings `ambiguous_across_topics` documents. See
         // `docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`.
-        //
-        // Overlap is over-approximated on `(tool, action)` with `None` as a
-        // wildcard. Sound in the direction that matters: `path~` can only narrow
-        // a shape, never widen it, so two shapes disagreeing here can never both
-        // match one call. It may flag a pair that `path~` would in fact keep
-        // disjoint — the right answer then is to make the ambiguity explicit,
-        // not to loosen this.
         let idx = GuideIndex::try_build().unwrap();
         let mut seen: Vec<(&str, &Shape)> = Vec::new();
         for topic in crate::prompts::GUIDE_TOPICS {
@@ -712,15 +725,13 @@ n body
                         if *other_topic == *topic {
                             continue;
                         }
-                        let overlaps = other.tool == shape.tool
-                            && (other.action.is_none()
-                                || shape.action.is_none()
-                                || other.action == shape.action);
                         assert!(
-                            !overlaps,
+                            !ambiguous_across_topics(other, shape),
                             "`{topic}` and `{other_topic}` both declare a shape matching \
                              {}.{} — topic_declaring would resolve that by BTreeMap \
-                             order, i.e. by accident",
+                             order, i.e. by accident. A path-qualified shape in one topic \
+                             beside an unqualified one in the other is allowed; two of the \
+                             same kind are not.",
                             shape.tool,
                             shape.action.as_deref().unwrap_or("*")
                         );
@@ -729,6 +740,31 @@ n body
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_path_qualified_shape_beside_an_unqualified_one_is_a_narrowing_not_an_ambiguity() {
+        let plain = parse_shape("doc.create").unwrap();
+        let narrow = parse_shape("doc.create(path~docs/trackers/)").unwrap();
+        let other_narrow = parse_shape("doc.create(path~docs/issues/)").unwrap();
+        let other_action = parse_shape("doc.get").unwrap();
+        let whole_tool = parse_shape("doc").unwrap();
+
+        // The one tolerated pairing, in both argument orders.
+        assert!(!ambiguous_across_topics(&plain, &narrow));
+        assert!(!ambiguous_across_topics(&narrow, &plain));
+        // The case the test exists for: two unqualified shapes on one call.
+        assert!(ambiguous_across_topics(
+            &plain,
+            &parse_shape("doc.create").unwrap()
+        ));
+        assert!(ambiguous_across_topics(&plain, &whole_tool));
+        // Two qualified shapes: needles are not compared, so they stay ambiguous even
+        // when these two happen to be disjoint.
+        assert!(ambiguous_across_topics(&narrow, &other_narrow));
+        // Different actions never collide, qualified or not.
+        assert!(!ambiguous_across_topics(&plain, &other_action));
+        assert!(!ambiguous_across_topics(&narrow, &other_action));
     }
 
     #[test]
@@ -974,6 +1010,148 @@ Body Mu.
             "expected § Filter Syntax to serve `artifact.find`, got {:?}",
             got.iter().map(|s| s.heading.as_str()).collect::<Vec<_>>()
         );
+    }
+    /// The result shapes that REALLY route a call to `tracker-conventions`, each with
+    /// the guide sections that call needs, so the first tracker-path call of a session
+    /// ships those and not the whole topic.
+    ///
+    /// The four shapes are the ones verified at runtime on 2026-10-16 by making the
+    /// calls and reading which results name a tracker or bug path (the only thing
+    /// `LibrarianAdapter::relevant_guide_topic` looks at): `doc.create` and `doc.get`
+    /// name `abs_path`, `doc.find` names `rel_path` per item, and
+    /// `librarian.doctor` names `path` per violation. `doc.update`, `append_entry`,
+    /// `move`, `delete`, `rekey_prefix` and the rest name no scanned path, so they
+    /// route to `librarian` and no tracker-conventions declaration could ever
+    /// reach them — see SECTION_WAIVERS.
+    ///
+    /// **A bound on bytes as well as on headings.** `MAX_AUTO_INJECT_GUIDE_BYTES` is
+    /// the size a harness may save to disk unread; a "section" set larger than that
+    /// would be the old whole-topic problem in several blocks.
+    #[test]
+    fn tracker_conventions_ships_sections_to_each_shape_that_routes_to_it() {
+        let idx = GuideIndex::try_build().unwrap();
+        assert!(
+            idx.declares("tracker-conventions"),
+            "tracker-conventions declares no `serves:` section, so its first call ships the \
+             whole topic (or a pointer, over the auto-inject bound)"
+        );
+        let whole = crate::prompts::topic_body("tracker-conventions")
+            .unwrap()
+            .len();
+        let tracker = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let issue = serde_json::json!({"abs_path": "docs/issues/x.md"});
+        let find_tracker = serde_json::json!({"items": [{"rel_path": "docs/trackers/x.md"}]});
+        let find_issue = serde_json::json!({"items": [{"rel_path": "docs/issues/x.md"}]});
+        let cases: [(&str, &Value, &[&str]); 6] = [
+            (
+                "doc.create",
+                &tracker,
+                &[
+                    "Tracker artifacts (docs/trackers/)",
+                    "Declaring a ledger",
+                    "A prefix has one owner per repository",
+                    "Make the tracker guarded",
+                ],
+            ),
+            (
+                "doc.create",
+                &issue,
+                &[
+                    "Bug files (docs/issues/)",
+                    "Bug frontmatter and status vocabulary",
+                    "Trigger rules and capture discipline",
+                ],
+            ),
+            (
+                "doc.get",
+                &tracker,
+                &["A `## Resume` states its own currency"],
+            ),
+            (
+                "doc.get",
+                &issue,
+                &[
+                    "Bug frontmatter and status vocabulary",
+                    "Claiming and releasing a bug",
+                    "The unverified caveat, made queryable",
+                ],
+            ),
+            ("doc.find", &find_tracker, &["Querying with the librarian"]),
+            (
+                "doc.find",
+                &find_issue,
+                &[
+                    "Bug frontmatter and status vocabulary",
+                    "Claiming and releasing a bug",
+                    "Querying with the librarian",
+                ],
+            ),
+        ];
+        for (sel, result, want) in cases {
+            let got = idx.match_sections("tracker-conventions", Some(sel), result);
+            let headings: Vec<&str> = got.iter().map(|s| s.heading.as_str()).collect();
+            for w in want {
+                assert!(
+                    headings.contains(w),
+                    "`{sel}` on {result} must be served § {w}, got {headings:?}"
+                );
+            }
+            let bytes: usize = got.iter().map(|s| s.body.len()).sum();
+            assert!(
+                bytes <= crate::tools::guide_emit::MAX_AUTO_INJECT_GUIDE_BYTES,
+                "`{sel}` on {result} ships {bytes} B of sections — over the auto-inject bound"
+            );
+            assert!(
+                bytes * 4 < whole,
+                "`{sel}` on {result} ships {bytes} B of a {whole} B guide; that is not section grain"
+            );
+        }
+    }
+
+    /// A `path~` shape can never match a result-less call, which is what keeps the
+    /// pre-call first-use gate (`first_use_guide_gate`) from ever holding a call for a
+    /// tracker-conventions section: the gate asks `topic_declaring` about the selector
+    /// alone, with a null result. If this fails, a path-qualified declaration has become
+    /// reachable before the call runs and the gate would stall a call to serve it.
+    #[test]
+    fn no_tracker_conventions_section_is_reachable_without_a_result() {
+        let idx = GuideIndex::try_build().unwrap();
+        let entry = idx.topic("tracker-conventions").expect("topic indexed");
+        for sec in entry.declared() {
+            for shape in &sec.serves {
+                assert!(
+                    shape.path_contains.is_some(),
+                    "tracker-conventions § {} declares an unqualified shape `{}.{}`: it would \
+                     overlap librarian's declaration and be reachable from the selector alone",
+                    sec.heading,
+                    shape.tool,
+                    shape.action.as_deref().unwrap_or("*")
+                );
+            }
+        }
+        for action in [
+            "create",
+            "get",
+            "find",
+            "update",
+            "move",
+            "delete",
+            "graft",
+            "rekey_prefix",
+            "append_entry",
+            "update_entry",
+            "link",
+            "graph",
+            "state_at",
+            "augment",
+        ] {
+            let sel = format!("doc.{action}");
+            assert_ne!(
+                idx.topic_declaring(Some(&sel), &Value::Null),
+                Some("tracker-conventions"),
+                "`{sel}` with no result must not resolve to tracker-conventions"
+            );
+        }
     }
 
     #[test]
