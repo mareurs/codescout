@@ -72,6 +72,21 @@ backend that actually exhibits the failure.
 response shapes captured above; the endpoints themselves were verified by `curl` against the
 live server. The probe was not run end-to-end against that live server from Rust.
 
+### Review follow-up 2026-10-16: the probe no longer trusts where its URL leads
+
+An Opus review noted that the probe's client followed redirects (reqwest follows up to 10, to
+any host) and read a body of any size, bounded only by the 2 s timeout. Both reproduced red
+first: a loopback server redirecting to a second loopback port had its target contacted and
+the target's `/slots` reported as this server's ceiling, and a valid 257 KB `/slots` body was
+parsed whole. Fixed in `probe_embed_ceiling_with_timeout`
+(`crates/codescout-embed/src/remote.rs`): redirects are disabled (a 3xx is "unknown"), a
+declared `Content-Length` over `CEILING_PROBE_MAX_BODY` is refused before reading, and the
+body is streamed and abandoned past the cap. The cap is 256 KiB, chosen against a measured
+18 039-byte `/slots` for 16 slots on the live server (about 230 slots of headroom).
+Tests: `a_redirect_is_not_followed_to_another_host` (asserts both the unchanged default
+ceiling and that the target saw no request), `an_oversized_body_fails_soft_instead_of_being_read_whole`,
+and `a_body_just_under_the_cap_is_still_read` (guards the cap against being set too low).
+
 ### Half 2 — the 8 lost memories: already repaired, nothing to write
 
 Re-checked against HEAD, as the Fix section instructed. A read-only

@@ -118,6 +118,8 @@ mod tests {
     struct CeilingEmbedder {
         max_chars: usize,
         calls: AtomicUsize,
+        /// Also refuse whitespace-only input, with the real `RemoteEmbedder::embed` message.
+        refuse_blank: bool,
     }
 
     impl CeilingEmbedder {
@@ -125,6 +127,17 @@ mod tests {
             Self {
                 max_chars,
                 calls: AtomicUsize::new(0),
+                refuse_blank: false,
+            }
+        }
+
+        /// As [`Self::new`], but mirrors `RemoteEmbedder::embed`'s refusal of an
+        /// all-whitespace batch (`crates/codescout-embed/src/remote.rs`), which
+        /// `embed_artifact` propagates, leaving the artifact with no vector.
+        fn refusing_blank(max_chars: usize) -> Self {
+            Self {
+                refuse_blank: true,
+                ..Self::new(max_chars)
             }
         }
     }
@@ -139,6 +152,11 @@ mod tests {
             let mut out = Vec::with_capacity(texts.len());
             for t in texts {
                 let n = t.chars().count();
+                anyhow::ensure!(
+                    !(self.refuse_blank && t.trim().is_empty()),
+                    "cannot embed batch — all 1 text(s) are empty/whitespace; \
+                     filter empty inputs before calling embed()"
+                );
                 // Counted BEFORE the ceiling check, so this tallies requests SENT,
                 // including refused ones. The opt-out test's whole claim is that the text
                 // reached the embedder whole; a counter that only tallied *accepted*
@@ -199,6 +217,22 @@ mod tests {
             emb.calls.load(Ordering::SeqCst) > 1,
             "must have segmented: one raw call would have exceeded the ceiling"
         );
+    }
+
+    /// A whitespace run between two over-budget tokens used to be emitted as a segment of
+    /// its own; the backend refuses a blank input and `embed_artifact` propagates it, so the
+    /// artifact got no vector at all. Untitled, as production's empty-title case, so the
+    /// composed text also begins with a blank `"\n\n"` group.
+    #[tokio::test]
+    async fn a_blank_run_inside_a_long_artifact_does_not_cost_it_its_vector() {
+        let emb = Arc::new(CeilingEmbedder::refusing_blank(100));
+        let svc = EmbeddingService::with_budget(emb, 100);
+        let body = format!("{}{}{}", "x".repeat(100), " ".repeat(60), "y".repeat(100));
+        let v = svc
+            .embed_artifact(None, &body)
+            .await
+            .expect("a blank segment reached the embedder and was refused");
+        assert_eq!(v.len(), 3);
     }
 
     #[tokio::test]
