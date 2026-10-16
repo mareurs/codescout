@@ -12244,7 +12244,7 @@ mod guide_hint_tests {
         }
         let activate = |dir: &tempfile::TempDir| json!({"action": "activate", "path": dir.path(), "read_only": false});
 
-        let (_home, server) = make_server().await;
+        let (home, server) = make_server().await;
         let (f1, f2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
 
         // 1. The parent (unstamped) activates a foreign root, as the documented
@@ -12261,6 +12261,21 @@ mod guide_hint_tests {
         assert!(
             out.contains("concurrent_activation_warning"),
             "a subagent displacing its parent inside the window must warn the switcher: {out}"
+        );
+
+        // 2b. A PINNED call names its own tree, so nothing was resolved by default and
+        //     there is nothing to disclose. It must also not CONSUME the notice owed to
+        //     the parent's next unpinned call (step 3 proves that).
+        let out = call(
+            &server,
+            "run_command",
+            json!({"command": "echo hi", "workspace": home.path()}),
+            None,
+        )
+        .await;
+        assert!(
+            !out.contains("sess-1/agent-a"),
+            "a pinned call resolved nothing by default: {out}"
         );
 
         // 3. THE HARMED PARTY. The parent's next unpinned call resolves against the

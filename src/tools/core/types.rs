@@ -515,6 +515,21 @@ fn join_notices(a: Option<String>, b: Option<String>) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+mod join_notices_tests {
+    use super::join_notices;
+
+    /// A call that earns both notices carries both: the second must not silently lose.
+    #[test]
+    fn a_call_earning_both_notices_carries_both_and_one_carries_one() {
+        let s = |x: &str| Some(x.to_string());
+        assert_eq!(join_notices(None, None), None);
+        assert_eq!(join_notices(s("a"), None), s("a"));
+        assert_eq!(join_notices(None, s("b")), s("b"));
+        assert_eq!(join_notices(s("a"), s("b")), s("a b"));
+    }
+}
+
 /// Tools whose `is_write` is true but whose write does not land at a path
 /// resolved against the project root, so naming a checkout would mislead:
 /// `approve_write` grants a scope rather than writing a file, and the library
