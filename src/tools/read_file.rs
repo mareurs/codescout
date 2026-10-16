@@ -665,7 +665,7 @@ fn page_of_text(
 /// page then overflows the limit and `call_content` buffers it under a second handle. Past the
 /// floor `next` says the same thing in prose, with the caller's own path implied and the line
 /// numbers given, which costs no room in proportion to the path.
-// cap-class: RESULT_CAP read_file.json_path_route_room — probed
+// cap-class: NOT_A_CAP — a floor that only chooses the WORDING of a page's `next` (a literal route or the same continuation in prose); both reach the last line of the value (`a_json_path_next_is_a_whole_route_or_plain_prose` asserts `last == total` on every path length), so no row of the result is withheld; classified 2026-10-16 after it was a `RESULT_CAP` row certified `Probed`+`Killed`
 const JSON_PATH_ROUTE_ROOM_FLOOR: usize = 2_000;
 
 /// The continuation a page's `next` is phrased in, and the page's widest skeleton priced with

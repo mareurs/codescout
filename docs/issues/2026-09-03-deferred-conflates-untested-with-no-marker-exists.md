@@ -1,13 +1,14 @@
 ---
 id: '1a0a6887f5998777'
 kind: bug
-status: open
+status: fixed
 title: Coverage::Deferred conflates "untested" with "no marker exists" — 4 of 5 no-marker rows went unescalated
 owners:
 - marius
 tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-09-03
+closed: 2026-10-16
 severity: medium
 ---
 
@@ -70,11 +71,17 @@ Each of the last three states, in its own words, `IC-13`'s defining claim: *"A r
 
 ## Fix
 
-Not designed. Candidate directions: (a) split `Coverage::Deferred` into two variants (e.g. `Deferred::Untested(reason)` and `Deferred::NoMarkerExists(reason)`), changing the tally to report them separately; (b) leave the enum alone but grep the 48 reasons for the "silently returns/drops/resolves fewer ... with no field disclosing it" shape as a standing audit step before publishing any future tally; (c) open individual `IC-13`-tagged bug files for the four production-defect candidates named above (three of them still need filing as of this bug).
+Candidate (a) of the original filing, plus the structural half of (c).
+
+- `Coverage::Deferred(&str)` is replaced by `Coverage::Untested(&str)` (a marker exists; the remedy is a test) and `Coverage::NoMarker { reason, bug }` (the cap discloses nothing; the remedy is a code change, and `bug` names the `docs/issues/` file that tracks it). `Tally` reports `untested` and `no_marker` as separate numbers, each counted from its own variant (no `total - probed` subtraction).
+- `probe_rows_are_well_formed` refuses a `NoMarker` row whose `bug` is not an existing `docs/issues/*.md` file, so the escalation cannot be skipped by choosing the variant.
+- `no_untested_row_describes_a_cap_that_discloses_nothing` scans the real table's `Untested` reasons for the phrases that say so (option (b), as a standing guard rather than an audit step). It is a text backstop, not a proof: it cannot see a use site the reason never mentions.
+- Nine rows were reclassified as `NoMarker` and filed (the issue's eight, re-derived against the tree at `f5f1c6f7`, plus `format.shape_scalars`, which a use-site read showed drops scalars past `MAX_SCALARS` with no count while its reason named only a missing test): `preview.plan_open_next` and `preview.plan_task_text`, `doctor.exposure_threshold`, `format.shape_scalar_len` and `format.shape_scalars`, `references.corroborate_files_scan`, `audit_doc_refs.basename_index`, `call_graph.workspace_files_scan`, `doctor.recently_touched_walk` -- seven bug files `docs/issues/2026-10-16-*.md`.
+- Tally before: 86 total, 37 probed, 49 deferred, 36 mutation-verified. After: 84 total, 35 probed, 40 untested, 9 no-marker, 34 mutation-verified (the two probe rows removed are `context.attestation_exposure` and `read_file.json_path_route_room`, both `NOT_A_CAP` floors; see the sibling issue).
 
 ## Tests added
 
-None yet — this is a classification-hygiene finding, not a code fix.
+In `src/tools/core/cap_probe_tests.rs`: `no_untested_row_describes_a_cap_that_discloses_nothing` (seen RED against the unmigrated table, listing the nine rows plus one false positive whose reason said "silently bind"), `the_classification_guards_flag_what_they_exist_to_flag` (fixtures for the phrase scan and the bug-file check), the extended `tally_distinguishes_killed_from_not_yet_and_deferred` (a fixture with 2 `NoMarker` rows; mutating the `no_marker` count to count `Untested` reds it), and the `NoMarker` arm of `probe_rows_are_well_formed`. `tests/result_caps.rs` passes in full (71 tests).
 
 ## Workarounds
 
@@ -82,9 +89,7 @@ A reader triaging the 48 `Deferred` rows should read each reason string for "no 
 
 ## Resume
 
-1. Re-derive the full 43/5 split against the merged `cap_probe.rs` (line numbers here are approximate, from the worktree pre-merge).
-2. File the three still-unfiled production-defect candidates (`format.shape_scalar_len`, `references.corroborate_files_scan`, `audit_doc_refs.basename_index`) as their own `IC-13`-tagged bugs, or as entries under this one if they turn out to share a single remedy.
-3. Decide on (a)/(b)/(c) above.
+Not audited, stated rather than implied: the phrase scan and the row reasons only see what a reason mentions. A use-site read of the remaining 40 `Untested` rows covered about half; `lsp.did_open_size` (`client.rs:1172-1181`, a `tracing::debug!` and `return Ok(())` for a file over 10 MiB) and `workspace.scan_files` / `workspace.scan_depth` (silent bounds on a language guess) were seen to drop without telling the caller but were not traced to a caller-visible consequence, so they stay `Untested`. If either is confirmed to surface a wrong answer, move it to `NoMarker` with a bug file.
 
 ## References
 
