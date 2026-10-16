@@ -1,5 +1,6 @@
 #[cfg(feature = "server-stack")]
 pub mod artifact;
+pub mod ceiling;
 pub mod client;
 pub mod code_store;
 pub mod config;
