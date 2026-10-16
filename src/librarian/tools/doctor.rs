@@ -3899,8 +3899,11 @@ fn declared_status_enum(schema: &serde_json::Value) -> Option<Vec<String>> {
 /// What one sweep of the corpus knows about entry tokens.
 #[derive(Default)]
 struct CorpusTokens {
-    /// Tokens cited anywhere in the catalog.
-    cited: std::collections::BTreeSet<String>,
+    /// Token → the artifacts that cite it anywhere in the catalog, in `abs_path` order.
+    /// A map rather than a set so a finding can NAME the citer: extraction cannot tell a real
+    /// reference from a documentation example of citation syntax, and the only recurring
+    /// measure of that exposure is a reader seeing the source on every run.
+    cited: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     /// Token → the artifacts carrying a `## <ID> — <title>` heading for it, in `abs_path`
     /// order. A token absent from this map is defined **nowhere**, which is the only state
     /// that makes a citation of it genuinely dangle.
@@ -3959,9 +3962,16 @@ struct CorpusTokens {
 /// Measured 2026-08-25 across the full machine-wide catalog: zero live findings are actually
 /// affected — the one current `entry_without_definition` violation
 /// (`provenance-subsystem.md`, 33 cited / 9 uncited) was independently hand-verified as
-/// accurate, not example-inflated. Revisit if a future violation's cited count looks
-/// suspicious against its source's actual prose, rather than pre-emptively widening this
-/// function's return type for a problem with no measured victim yet.
+/// accurate, not example-inflated.
+///
+/// **That measurement was one date's corpus, so the exposure is now re-measured on every
+/// run instead of once.** The map keeps WHICH artifacts cite each token, and
+/// [`citing_sources_clause`] names them in the `entry_without_definition` finding, so a
+/// token whose only citer is a guide teaching the syntax is visible at the refusal site.
+/// Nothing is excluded: a guard that drops "teaching" sources needs a rule for what a
+/// teaching source is, and `docs/issues/archive/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`
+/// declined the literal marker that would supply one. The residual:
+/// `docs/issues/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md`.
 ///
 /// Extraction is deliberately dumb — `UTF-8` and `SHA-256` arrive as entry tokens — which
 /// costs nothing here, because the result is only ever intersected against ids a ledger
@@ -3985,11 +3995,14 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<CorpusTokens> {
         for c in doc.citations {
             match c.kind {
                 CitationKind::EntryToken => {
-                    out.cited.insert(c.raw);
+                    out.cited.entry(c.raw).or_default().insert(path.clone());
                 }
                 CitationKind::CrossRepoToken => {
                     if let Some((_, token)) = c.raw.rsplit_once(':') {
-                        out.cited.insert(token.to_string());
+                        out.cited
+                            .entry(token.to_string())
+                            .or_default()
+                            .insert(path.clone());
                     }
                 }
                 _ => {}
@@ -4000,6 +4013,52 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<CorpusTokens> {
         }
     }
     Ok(out)
+}
+/// The sentence that names who supplies each sampled broken citation, or `""` when there is
+/// nothing to name.
+///
+/// `extract` cannot tell a real reference from a documentation example of citation syntax
+/// (`docs/issues/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md`), and no
+/// affordable escape exists, so the refusal site says so. Measured zero exposure on
+/// 2026-08-25 was a fact about that date's corpus; naming the citing artifacts on every run
+/// is what makes the exposure re-measurable without anyone remembering to re-measure it.
+///
+/// Bounded twice, because an unbounded attribution list buries the finding it annotates:
+/// at most [`SOURCE_SAMPLE_TOKENS`] tokens, each naming at most [`SOURCES_PER_TOKEN`]
+/// sources and counting the rest. The ledger's own path appears when it cites itself —
+/// self-citations count by decision (see [`corpus_cited_tokens`]), so it is a source like
+/// any other.
+fn citing_sources_clause(corpus: &CorpusTokens, broken: &[String]) -> String {
+    const SOURCE_SAMPLE_TOKENS: usize = 3;
+    const SOURCES_PER_TOKEN: usize = 2;
+    let parts: Vec<String> = broken
+        .iter()
+        .take(SOURCE_SAMPLE_TOKENS)
+        .filter_map(|t| {
+            let sources = corpus.cited.get(t)?;
+            let named = sources
+                .iter()
+                .take(SOURCES_PER_TOKEN)
+                .map(|p| format!("`{p}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rest = sources.len().saturating_sub(SOURCES_PER_TOKEN);
+            Some(if rest > 0 {
+                format!("{t} in {named} (+{rest} more)")
+            } else {
+                format!("{t} in {named}")
+            })
+        })
+        .collect();
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!(
+        "Cited from: {}. Extraction cannot tell a documentation example of citation syntax \
+         from a real reference, so read the named source before acting on a token whose only \
+         citer is a guide or convention page. ",
+        parts.join("; ")
+    )
 }
 
 /// Whether this row counts as "archived" for exposure purposes.
@@ -5153,7 +5212,7 @@ fn scan_undefined_entries(
             let (cited_undefined, uncited): (Vec<String>, Vec<String>) = undefined
                 .iter()
                 .cloned()
-                .partition(|t| corpus.cited.contains(t));
+                .partition(|t| corpus.cited.contains_key(t));
 
             // A cited entry with no heading HERE is not automatically a broken reference:
             // `link_scan` binds a token to its defining heading wherever that heading
@@ -5224,7 +5283,7 @@ fn scan_undefined_entries(
                     "{} of {} `{}` entries have no `## <ID> — <title>` heading. Cited despite \
                          that: {} — {}{}, whose references resolve to nothing right now. Fix those \
                          first; each needs a `## <ID> — <title>` heading, the only shape `link_scan` \
-                         binds a token to. {}Uncited: {} — nothing is broken there yet, and that is \
+                         binds a token to. {}{}Uncited: {} — nothing is broken there yet, and that is \
                          consistent with a ledger whose convention is to define an entry when \
                          something first cites it. This check reads the citation graph, so the split \
                          is measured rather than assumed. \
@@ -5235,6 +5294,7 @@ fn scan_undefined_entries(
                     broken.len(),
                     shown,
                     suffix,
+                    citing_sources_clause(&corpus, &broken),
                     elsewhere_clause,
                     uncited.len()
                 )
@@ -13740,6 +13800,104 @@ mod tests {
             detail.contains("resolve to nothing"),
             "nothing anywhere defines BL-3, so this citation IS broken and the finding \
              must keep saying so: {detail}"
+        );
+    }
+    /// docs/issues/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md
+    ///
+    /// `corpus_cited_tokens` cannot tell a documentation example of citation syntax from a
+    /// real reference, and "nothing live is affected" was measured once, on one date's
+    /// corpus. The finding therefore has to make the exposure re-measurable on EVERY run:
+    /// a "broken" citation must name the artifact that supplies it, so a reader can see
+    /// that the only citer is a guide teaching the syntax before acting on it.
+    ///
+    /// The ledger itself carries no mention of BL-3 here; the guide is the sole citer. If
+    /// the check dropped source attribution this fixture would still report BL-3 as broken
+    /// and only the path assertion would fail.
+    #[test]
+    fn a_broken_citation_names_the_artifact_that_supplies_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+        seed_ledger(
+            &cat,
+            "guide",
+            &tmp.path().join("citing-guide.md"),
+            "# How to cite\n\nWrite an entry as `BL-3` to cite it.\n",
+        );
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let detail = &v[0].detail;
+        assert!(
+            detail.contains("resolve to nothing"),
+            "BL-3 is defined nowhere, so it is still broken: {detail}"
+        );
+        assert!(
+            detail.contains("BL-3 in") && detail.contains("citing-guide.md"),
+            "the finding must name WHICH artifact cites the broken token: {detail}"
+        );
+        assert!(
+            detail.contains("cannot tell a documentation example"),
+            "and must say, at the refusal site, that a citing source may be a syntax \
+             example rather than a reference: {detail}"
+        );
+    }
+
+    /// Attribution is bounded: a token cited from many artifacts names a couple and counts
+    /// the rest, as the SAMPLE cap on the ids themselves does. An unbounded source list
+    /// would bury the finding it annotates.
+    #[test]
+    fn a_broken_citation_caps_the_sources_it_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_tracker(
+            &cat,
+            "log",
+            tmp.path(),
+            "# L\n\n## BL-1 — first\n\n## BL-2 — second\n",
+            &["BL-1", "BL-2", "BL-3"],
+        );
+        for n in 1..=4 {
+            seed_ledger(
+                &cat,
+                &format!("g{n}"),
+                &tmp.path().join(format!("citer-{n}.md")),
+                "See BL-3 for the rest.\n",
+            );
+        }
+
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_undefined_entries(&mut ds, &cat.conn).unwrap();
+        assert_eq!(v.len(), 1, "{v:?}");
+        let detail = &v[0].detail;
+        assert!(
+            detail.contains("citer-1.md") && detail.contains("citer-2.md"),
+            "the first two sources are named: {detail}"
+        );
+        assert!(
+            !detail.contains("citer-3.md") && !detail.contains("citer-4.md"),
+            "sources beyond the cap are counted, not listed: {detail}"
+        );
+        assert!(
+            detail.contains("+2 more"),
+            "the count carries the magnitude the list drops: {detail}"
         );
     }
 

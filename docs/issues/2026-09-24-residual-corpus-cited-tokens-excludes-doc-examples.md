@@ -1,16 +1,17 @@
 ---
 id: '2cc00cdc9dac8462'
 kind: bug
-status: open
+status: fixed
 title: 'RESIDUAL: Exclude doc-example citation syntax from corpus_cited_tokens (or add a recurring re-measure of its exposure)'
 tags:
 - cluster/addressing-without-an-escape-hatch
-closed: null
+closed: 2026-10-16
 opened: 2026-09-24
 owner: marius
 related:
 - docs/issues/archive/2026-08-21-doctor-cited-uncited-partition-inherits-doc-example-defect.md
 severity: low
+unverified: STANDING — extraction still cannot tell a documentation example of citation syntax from a reference, and nothing is excluded; entry_without_definition now names the citing artifacts of each sampled broken token on every run, so the exposure is read, not inferred.
 ---
 
 ## Summary
@@ -27,7 +28,21 @@ Remaining work split out of `docs/issues/archive/2026-08-21-doctor-cited-uncited
 
 ## Fix
 
-Not started. The parent's § Fix and § Resume hold the design context; read them before acting, and re-check the caveat against HEAD first — it was written at the parent's closing and may have been overtaken since.
+Re-checked at HEAD first: the caveat still held. `extract` skips fenced blocks only (`fenced_blocks_are_skipped_inline_code_is_scanned` pins that inline code IS scanned), and `corpus_cited_tokens` returned a flat set with no source.
+
+Chosen: the second branch of the title, a re-measure on every run, and NOT an exclusion. An exclusion needs a rule for what a teaching source is, and the literal marker that would supply one was declined on 2026-10-06 (`docs/issues/archive/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`, option 1 chosen). Contradicting that here would reopen it for a population still measured at zero.
+
+`CorpusTokens.cited` is now token to the set of citing artifact paths (`src/librarian/tools/doctor.rs`), and `citing_sources_clause` writes into the `entry_without_definition` finding which artifacts cite each sampled broken token (3 tokens, 2 sources each, the rest counted), with the sentence that extraction cannot tell an example from a reference. That is the refusal site the convention in `docs/conventions/parsers-over-a-namespace.md` asks for, and it replaces a one-time measurement of one date's corpus with one that runs whenever `doctor` runs.
+
+Left: nothing is excluded. A guide that cites a ledger-claimed token as an example still lands in the broken half; the finding now shows the guide as the only citer so a reader can see that.
+
+## Tests added
+
+`a_broken_citation_names_the_artifact_that_supplies_it` and `a_broken_citation_caps_the_sources_it_names` in `src/librarian/tools/doctor.rs`. Both were red first (the detail named no source), and green after. The 320 `doctor::tests::` tests pass; clippy with `-D warnings` is clean.
+
+## Resolution
+
+Fixed 2026-10-16 by attribution, not exclusion. See Fix.
 
 ## References
 
