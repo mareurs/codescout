@@ -461,6 +461,18 @@ min_section_chars = 40
         let msg = refusal(tmp.path(), "bug", &["cluster/alpha"], &body);
         assert!(msg.contains("## Class fit"), "got: {msg}");
     }
+    /// Kills a heading match that accepts a SHALLOWER heading. The heading scan's branch is entered only
+    /// for `# ` and `## ` lines, so the `###` case above never reaches it and says nothing about this one:
+    /// a bug whose title line happens to read `# Class fit` would otherwise carry the section for free.
+    /// (Found by a mutation run on 2026-10-16: replacing the `## ` match with "any number of hashes"
+    /// survived every test.)
+    #[test]
+    fn a_level_one_heading_is_not_the_section() {
+        let tmp = project();
+        let body = format!("# Class fit\n\n{GOOD}\n");
+        let msg = refusal(tmp.path(), "bug", &["cluster/alpha"], &body);
+        assert!(msg.contains("## Class fit"), "got: {msg}");
+    }
 
     /// Kills a floor that reads past the section: text under the NEXT heading must not satisfy this one.
     #[test]
@@ -517,9 +529,17 @@ min_section_chars = 40
         let msg = enforce_on_create(tmp.path(), "bug", &tags(&["cluster/alpha"]), &fit(GOOD))
             .expect_err("nothing declared: the tag cannot be checked")
             .to_string();
+        // The message must be about the SOURCE, not about the tag. An earlier version accepted any message
+        // containing "declare", which "`cluster/alpha` is not a declared value" also does: a code path that
+        // reported the wrong error passed this test (a mutation run found it, 2026-10-16).
+        assert!(msg.contains("cannot be checked"), "got: {msg}");
         assert!(
-            msg.contains("ledger.md") || msg.contains("declare"),
-            "got: {msg}"
+            msg.contains("ledger.md"),
+            "the missing source must be named: {msg}"
+        );
+        assert!(
+            !msg.contains("is not a declared value"),
+            "this is a policy problem, not a bad tag: {msg}"
         );
     }
     /// Kills drift between this module's reading of the ledger and the commit hook's. They are two
