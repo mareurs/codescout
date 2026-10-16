@@ -16,7 +16,7 @@ owner: marius
 related:
 - '6e2cafbb1dea1678'
 severity: med
-unverified: 'TRACKED 2cc00cdc9dac8462 — The counting defect in `corpus_cited_tokens` is DOCUMENTED, not fixed — doc examples of citation syntax still enter its token set. Option 1 was chosen because measured exposure was zero on 2026-08-25, which is a fact about that date''s corpus rather than a property of the parser: a future ledger written in the guide-example style re-exposes it, and nothing re-measures.'
+unverified: 'RESOLVED 2026-10-16 by 2cc00cdc9dac8462. Was: the counting defect in `corpus_cited_tokens` is documented, not fixed, and nothing re-measures. Now entry_without_definition names the citing artifacts of each sampled broken token on every run; nothing is excluded, so extraction still cannot tell an example from a reference, but the exposure is read on each run rather than inferred from one date.'
 ---
 
 # BUG: doctor's entry_without_definition inherits the doc-example-looks-like-a-citation defect, with no breakdown to mitigate it
