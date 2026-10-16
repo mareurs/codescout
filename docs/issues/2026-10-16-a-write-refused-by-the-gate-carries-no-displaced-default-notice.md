@@ -1,10 +1,11 @@
 ---
 id: ebf872db2c2df46e
 kind: bug
-status: open
+status: fixed
 title: A write refused by the access gate carries no displaced-default notice, so the harmed party's first signal is still the misleading refusal
 tags:
 - cluster/shared-resource-carries-no-owner
+closed: 2026-10-16
 opened: 2026-10-16
 owner: marius
 related:
@@ -48,11 +49,11 @@ Source read only, see Reproduction.
 
 ## Fix
 
-Not started. Options: hoist `poll_rendezvous` above the gate (it only re-arms the ledger, which a refused call would then also re-arm) and compute the caller there; or enrich the refusal text in the gate path with the notice after resolving the caller lazily.
+Fixed 2026-10-16 (commit `4a63de23`, worktree branch). `call_tool_inner` (`src/server.rs`) resolves the caller on the gate-refusal path the same way it does below (stamped principal, else conversation, else the rendezvous poll, else the construction-time key), peeks `Agent::displaced_default_notice`, appends the text to the refusal's content and marks it spent. The rendezvous poll is consumed once per call: this branch returns, so the later poll is not reached for the same call. A pinned call is owed nothing. An Opus review of the integrated branch reproduced the gap end to end (`notice_on_refusal=false`) before this.
 
 ## Tests added
 
-N/A (not started).
+`server::guide_hint_tests::a_write_refused_by_the_gate_names_the_principal_that_moved_the_default` (positive control: the write IS refused; the refusal names the mover and the pin; spent once; the mover's own refusal carries none). Mutants killed: refusal not marked, refusal carries nothing.
 
 ## Workarounds
 
@@ -60,7 +61,7 @@ The next successful unpinned call carries the notice. `workspace(action="status"
 
 ## Resume
 
-Read `CodeScoutServer::call_tool_inner` order: `check_tool_access`, `poll_rendezvous`, `adopt_request_conversation`. Decide whether hoisting `poll_rendezvous` is safe (`guide_hint_tests::a_tool_call_polls_the_rendezvous_and_re_arms` pins its position relative to the ledger consult, not the gate), then attach `displaced_default_notice` to the refusal.
+N/A.
 
 ## References
 
