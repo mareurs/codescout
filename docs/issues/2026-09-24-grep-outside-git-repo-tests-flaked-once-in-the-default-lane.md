@@ -41,7 +41,16 @@ I ran the three tests with the pre-change binary and `TMPDIR` pointed at a direc
 
 **Checked clean:** the `git init` sites in `src/agent/mod.rs` (`activate_populates_head_sha`, which uses `.current_dir(dir.path())`) and in `src/librarian/tools/mv.rs` (which uses `-C <tmp>`).
 
-**Not audited:** about 34 other `git init` or `Repository::init` sites. They are in `src/librarian/tools/doctor.rs` (7), `git/mod.rs`, `catalog/gc.rs`, `append_entry.rs`, `run_command/tests.rs`, `embed/preflight.rs`, `catalog/rekey.rs`, `delete.rs`, `reindex.rs`, `retrieval/index_state.rs:393` (`.or_else(|_| git2::Repository::init(root))`), `run_command/attribution.rs` and `tests/issue_clusters.rs`.
+**Audited in a second pass, same day:** 24 Rust init sites in 14 files. The search pattern was `Repository::init`, `Repository::init_opts`, `.arg("init")`, `.args(["init"` and `["init"`. An earlier note said "about 34" sites. That figure came from a looser search, and I could not reproduce it. Every one of the 24 targets its own `tempfile::tempdir()`, or a child of one, through `-C <tmp>`, `.current_dir(<tmp>)` or a path joined onto a tempdir.
+- `doctor.rs` joins `ROUTE_ROOT_NAMES` onto a tempdir. All six names are relative, so `Path::join` cannot replace the base.
+- `retrieval/index_state.rs:393` calls `Repository::open(root)` first, which does not search parent directories. It falls back to `init(root)`, and `root` is a tempdir.
+- `rekey.rs:1869` writes a `.git` file inside its own tempdir. That cannot reach a sibling tempdir.
+
+The shell suites under `tests/` build their repos under `mktemp -d`. I read the two unscoped `git init -q .` calls (`tests/hooks-discrimination.sh:102` and `tests/count-with-members.sh:56`). Each follows `cd "$T" || exit 1` or `cd "$REPO" || exit 1`. `tests/gate-slot.sh:311` inits `"$WORK/repo"`. The search over shell and Python files returned 110 matches. I read 80 of them, so about 30 are not read.
+
+**Result:** no Rust test in this repository can plant a `.git` in an ancestor of a grep tempdir.
+
+**The ancestor chain depends on the launcher.** `TMPDIR` in the session that ran this audit was `/home/marius/.cache/cc-tmp`, not `/tmp`. Tempdirs made from that shell have the ancestors `~/.cache`, `~`, `/home` and `/`. None held a `.git` on 2026-10-16. A transient `.git` at any of them, or in `/tmp` when `TMPDIR` is unset, would reproduce the failure. That is a candidate, not a finding: nothing shows that one existed on 2026-09-24, and the 2026-09-24 gate's `TMPDIR` is unknown.
 
 **Stale references corrected:** the `set_current_dir` lines cited under "Root cause" had moved. The sites are now `src/util/path_security.rs:2861` (test `write_within_cwd_allowed_even_outside_project_root`) and `src/agent/mod.rs:3317` (test `new_with_relative_path_canonicalizes_home_root`). A third site, `tests/e2e/eval_common/report.rs:144`, is in a separate test binary.
 
@@ -108,9 +117,12 @@ Re-run the three tests before reading your own diff when a gate reds on them.
 
 ## Resume
 
-On recurrence, read the panic first. If it names an ancestor, the cause is an environment fault: find out what created that `.git`, and when. If the old `left: 0 right: 1` appears instead, the premise held and the cause is something else, so also check whether a CWD-changing test ran at that moment (a `--test-threads=1` re-run that passes would point at parallelism).
+On recurrence, read the panic first. If it names an ancestor, the cause is an environment fault: find out what created that `.git`, and when. Also record `TMPDIR` for the gate run. If the old `left: 0 right: 1` appears instead, the premise held and the cause is something else, so also check whether a CWD-changing test ran at that moment (a `--test-threads=1` re-run that passes would point at parallelism).
 
-Without a recurrence, the next step is to audit the remaining `git init` sites listed above for one that can run in an ancestor of a tempdir, and to stress the `tools::grep` module alongside the `set_current_dir` tests.
+The audit of this repository's own `git init` sites is done (see above). The cause, if it is an ancestor `.git`, is therefore not in the Rust tests. It may still be in the unread shell files or outside the repository. What is left without a recurrence:
+- read the 30 unread shell and Python matches;
+- stress the `tools::grep` module alongside the `set_current_dir` tests;
+- look for a tool or a peer session that runs `git init` in `~`, `~/.cache` or `/tmp`.
 
 ## References
 
