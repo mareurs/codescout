@@ -203,6 +203,40 @@ pub fn principal_from_arguments(input: &mut serde_json::Value) -> Option<String>
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+tokio::task_local! {
+    /// Who is making the tool call currently in flight: the stamped principal
+    /// (`<session_id>/<agent_id>`) of a subagent, else the session's own id. `None`
+    /// when nothing identifies the caller at all (no companion, no harness id).
+    ///
+    /// Set once by `CodeScoutServer::call_tool_inner`, around the one future that
+    /// reaches `Tool::call_content`, from the same value that picks the guide ledger
+    /// to serve. A task-local rather than a `ToolContext` field for the reason
+    /// `PEER_SERVE_DISPATCH` records: `ToolContext` is built with bare struct literals
+    /// at ~250 sites, so a new required field ripples through files that have no
+    /// business changing. No `tokio::spawn` sits between the scope and its readers.
+    ///
+    /// **This, not the process environment, is the caller's identity.** Reading
+    /// `CLAUDE_CODE_SESSION_ID` per call yields one value for the whole process, so a
+    /// parent and every subagent it spawns "are the same caller" under it — which is
+    /// the false answer the activation guard gave until it was routed through here.
+    static CALLER: Option<String>;
+}
+
+/// Run `future` with `caller` as [`current_caller`].
+pub(crate) async fn scope_caller<F: std::future::Future>(
+    caller: Option<String>,
+    future: F,
+) -> F::Output {
+    CALLER.scope(caller, future).await
+}
+
+/// The caller of the tool call this task is serving; `None` outside a scope (tests
+/// that call a tool directly) and when the caller is unidentified. Both mean the
+/// same thing to a reader: do not assume this is anyone in particular.
+pub(crate) fn current_caller() -> Option<String> {
+    CALLER.try_with(|c| c.clone()).ok().flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

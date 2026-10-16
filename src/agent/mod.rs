@@ -128,17 +128,51 @@ pub struct AgentInner {
     /// cannot answer that question.
     pub project_chosen_this_session: bool,
     pub home_root: Option<PathBuf>,
-    /// Last `activate()` as (root, when). Drives the concurrent-activation
+    /// Last `activate()` as (root, when, caller). Drives the concurrent-activation
     /// guard (`Agent::note_activation`): if a *different* root is activated
     /// under this shared server within a short window, the activate response
     /// carries a `concurrent_activation_warning`. The third element is the
-    /// activating session id — `IC-17` layer 2, the owner field that lets the
+    /// activating CALLER — `IC-17` layer 2, the owner field that lets the
     /// guard compare identity instead of substituting wall-clock proximity for
-    /// it. `None` means the caller did not identify itself, never that it was
-    /// the same caller. See
+    /// it. It is the per-call principal (`crate::tools::session_key::current_caller`),
+    /// NOT the process's `CLAUDE_CODE_SESSION_ID`: that is one value for the
+    /// whole process, so a parent and every subagent it spawns share it and
+    /// comparing it can only ever say "same caller". `None` means the caller did
+    /// not identify itself, never that it was the same caller. See
     /// docs/issues/archive/2026-05-30-shared-server-global-active-project-race.md
     pub last_activation: Option<(PathBuf, std::time::Instant, Option<String>)>,
+    /// The most recent time the default MOVED to a different root, and who moved
+    /// it. See [`Displacement`] and `Agent::displaced_default_notice`.
+    pub displacement: Option<Displacement>,
+    /// caller -> `Displacement::epoch` it was last told about (or caused). Bounded
+    /// by `DISPLACEMENT_TOLD_CAP`; clearing it only ever re-tells.
+    pub displacement_told: HashMap<String, u64>,
 }
+/// One move of the default workspace to a different root — the record the
+/// harmed party's notice is built from (`Agent::displaced_default_notice`).
+///
+/// The activation guard (`Agent::note_activation`) speaks to the party that MOVED
+/// the slot. The party that is harmed is whoever makes an unpinned call afterwards
+/// and resolves against a root it never chose, and it receives nothing. This
+/// record is what lets the server tell it, because it names who moved the
+/// default and to where.
+#[derive(Debug, Clone)]
+pub struct Displacement {
+    /// 1-based, bumped on every move. A caller is told about each epoch once, so a
+    /// NEW move re-arms the notice for everyone (the one-shot-per-conversation
+    /// form was spent on the wrong episode — see `worktree_read_notice`).
+    pub epoch: u64,
+    pub from: Option<PathBuf>,
+    pub to: PathBuf,
+    /// The caller that moved it. `None` = it did not identify itself, in which case
+    /// nobody can be told "someone ELSE moved it".
+    pub by: Option<String>,
+    pub at: std::time::Instant,
+}
+
+/// Upper bound on `AgentInner::displacement_told`. A subagent fan-out is tens of
+/// principals; past this the map is cleared, which re-tells and never loses a notice.
+const DISPLACEMENT_TOLD_CAP: usize = 256;
 
 impl AgentInner {
     /// The workspace that unpinned calls resolve to (the per-session default).
@@ -685,6 +719,8 @@ impl Agent {
                 project_chosen_this_session: false,
                 home_root,
                 last_activation: None,
+                displacement: None,
+                displacement_told: HashMap::new(),
             })),
             indexing: Arc::new(std::sync::Mutex::new(IndexingState::Idle)),
             nudged_libraries: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1158,28 +1194,124 @@ impl Agent {
     /// *different* recently-activated root. Best-effort drift signal — it cannot
     /// prevent the race (the active project is process-global shared state), only
     /// surface it. The real fix is per-request workspace pinning; see the bug file.
-    pub async fn note_activation(&self, root: &std::path::Path) -> Option<String> {
-        let sid = crate::tools::session_key::resolve(
-            std::env::var("CODESCOUT_SESSION_ID").ok(),
-            crate::tools::session_key::HARNESS_SESSION_VARS
-                .iter()
-                .filter_map(|v| std::env::var(v).ok().map(|val| (*v, val))),
-        )
-        .id()
-        .map(str::to_string);
+    ///
+    /// `caller` is the per-call principal (`session_key::current_caller`), and it
+    /// is passed in rather than read here on purpose. This used to derive the
+    /// identity from `CLAUDE_CODE_SESSION_ID`, which is ONE value for the whole
+    /// process — a parent and every subagent share it — so under Claude Code the
+    /// "same caller" comparison was always true and the guard was silent on exactly
+    /// the race it exists for (measured 2026-10-16: two rapid activations of
+    /// different roots, process env set, both returned `None`).
+    ///
+    /// Also records the move for the harmed party's notice
+    /// ([`displaced_default_notice`](Self::displaced_default_notice)): this
+    /// function is the one production writer of activation records.
+    pub async fn note_activation(
+        &self,
+        root: &std::path::Path,
+        caller: Option<&str>,
+    ) -> Option<String> {
         let mut inner = self.inner.write().await;
         let prev = inner
             .last_activation
             .as_ref()
             .map(|(p, at, s)| (p.as_path(), at.elapsed(), s.as_deref()));
-        let warning = Self::concurrent_switch_warning(
-            prev,
-            root,
-            sid.as_deref(),
-            Self::CONCURRENT_ACTIVATION_WINDOW,
-        );
-        inner.last_activation = Some((root.to_path_buf(), std::time::Instant::now(), sid));
+        let warning =
+            Self::concurrent_switch_warning(prev, root, caller, Self::CONCURRENT_ACTIVATION_WINDOW);
+        // What the default was BEFORE this activation: the previous record's root,
+        // else the home project the server started on. Re-activating the root that is
+        // already the default moves nothing, so it is not a displacement.
+        let from = inner
+            .last_activation
+            .as_ref()
+            .map(|(p, _, _)| p.clone())
+            .or_else(|| inner.home_root.clone());
+        if from.as_deref() != Some(root) {
+            let epoch = inner.displacement.as_ref().map_or(1, |d| d.epoch + 1);
+            inner.displacement = Some(Displacement {
+                epoch,
+                from,
+                to: root.to_path_buf(),
+                by: caller.map(str::to_string),
+                at: std::time::Instant::now(),
+            });
+        }
+        inner.last_activation = Some((
+            root.to_path_buf(),
+            std::time::Instant::now(),
+            caller.map(str::to_string),
+        ));
         warning
+    }
+
+    /// The notice owed to the party HARMED by a move of the default workspace:
+    /// whoever makes an unpinned call afterwards and resolves against a root it
+    /// did not choose.
+    ///
+    /// [`note_activation`](Self::note_activation)'s warning is attached to the
+    /// response of the call that PERFORMED the switch, so it reaches the switcher.
+    /// The harmed party — in the archived incidents the controller, whose own writes
+    /// were refused minutes after a subagent activated — received nothing. This is the
+    /// delivery to it: `caller` is the party making the unpinned call now.
+    ///
+    /// Told when ALL of these hold; every other case is silent:
+    /// - both sides are identified, and they differ. "Someone ELSE moved it" is a
+    ///   claim, so unlike the activation guard — where identity may only silence a
+    ///   warning — identity is needed to CREATE this one. A caller with no identity
+    ///   might be the mover, and a mover with none cannot be named.
+    /// - the default is not home. Back at home nothing is displaced, and the
+    ///   overwhelmingly common session (activate home once, subagents read it) never
+    ///   sees this.
+    /// - this caller has not already been told about THIS move. The unit is the move
+    ///   (`Displacement::epoch`), not the conversation, so a later move re-arms it.
+    ///
+    /// The REMEDY is the per-call pin, never a re-activation: the harmed party can
+    /// perform it, and a re-activation would move the default under whoever now
+    /// relies on it. See `get_guide("workspace-state")` § Per-call workspace pinning.
+    pub async fn displaced_default_notice(&self, caller: Option<&str>) -> Option<String> {
+        let caller = caller?;
+        let owed = |inner: &AgentInner| -> Option<Displacement> {
+            let d = inner.displacement.as_ref()?;
+            let current = inner.default_workspace_root.as_deref()?;
+            // The record must describe the default as it stands: a default moved by
+            // some path that did not go through `note_activation` is not ours to
+            // attribute.
+            if d.to != current || inner.home_root.as_deref() == Some(current) {
+                return None;
+            }
+            if d.by.as_deref().is_none_or(|by| by == caller) {
+                return None;
+            }
+            if inner.displacement_told.get(caller) == Some(&d.epoch) {
+                return None;
+            }
+            Some(d.clone())
+        };
+        // Read-locked fast path: this runs on every unpinned call, and in the common
+        // session nothing is owed.
+        owed(&*self.inner.read().await)?;
+        let mut inner = self.inner.write().await;
+        let d = owed(&inner)?;
+        if inner.displacement_told.len() >= DISPLACEMENT_TOLD_CAP {
+            inner.displacement_told.clear();
+        }
+        inner.displacement_told.insert(caller.to_string(), d.epoch);
+        let home = inner
+            .home_root
+            .as_ref()
+            .map(|h| format!(" (home is {})", h.display()))
+            .unwrap_or_default();
+        Some(format!(
+            "This call carried no workspace= pin, so it resolved against {to}, which \
+             caller {by} made the server's active project {ago:?} ago{home}. If you \
+             did not choose {to}, results and refused writes describe the wrong \
+             workspace. Fix: pass workspace=<absolute path> on each tool call to pin \
+             resolution for yourself. Do not re-activate to get your root back: \
+             activation is process-wide and would move the default under {by}.",
+            to = d.to.display(),
+            by = d.by.as_deref().unwrap_or("another caller"),
+            ago = d.at.elapsed(),
+        ))
     }
 
     /// Get the active project root, or error if none is set.
@@ -2915,6 +3047,302 @@ mod tests {
                  proximity warning: identity can only silence, never create"
             );
         }
+    }
+
+    // ---- the party HARMED by a move of the default workspace ----------------------
+    //
+    // `note_activation`'s guard speaks to whoever MOVED the slot. These cover the other
+    // half: whoever makes an unpinned call afterwards and resolves against a root it
+    // never chose. `docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`.
+
+    /// A server whose home project is a fresh tempdir, plus a function to move the
+    /// default the way the activate handler does (`activate`, then `note_activation`).
+    async fn displaced_fixture() -> (tempfile::TempDir, std::path::PathBuf, Agent) {
+        let home = tempdir().unwrap();
+        let home_root = home.path().canonicalize().unwrap();
+        let agent = Agent::new(Some(home_root.clone())).await.unwrap();
+        (home, home_root, agent)
+    }
+
+    async fn move_default(agent: &Agent, to: &std::path::Path, by: Option<&str>) {
+        agent.activate(to.to_path_buf(), None).await.unwrap();
+        agent.note_activation(to, by).await;
+    }
+
+    /// The incident shape (E-5 of the archived 2026-08-23 bug): a SUBAGENT activates a
+    /// foreign root; the PARENT's next unpinned call resolves against it and, until
+    /// now, was told nothing.
+    #[tokio::test]
+    async fn the_parent_is_told_when_a_subagent_moved_the_default_off_home() {
+        let (_h, home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
+
+        let n = agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .expect("the party resolving against a root a subagent chose must be told");
+        assert!(
+            n.contains(&foreign_root.display().to_string()),
+            "must name the root the call resolved against: {n}"
+        );
+        assert!(
+            n.contains("sess-1/agent-a"),
+            "must name WHO moved it, so the reader has someone to reach: {n}"
+        );
+        assert!(
+            n.contains(&home.display().to_string()),
+            "must name the home the default was moved off: {n}"
+        );
+        // The remedy has to be one the harmed party can perform: a per-call pin. It
+        // must NOT send them to re-activate, which would move the default under the
+        // subagent that is relying on it.
+        assert!(
+            n.contains("workspace=<absolute path>"),
+            "must prescribe the per-call pin: {n}"
+        );
+        // Once per move: a second unpinned call is not told again.
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_none(),
+            "the same move is reported to the same caller once"
+        );
+    }
+
+    /// Absence assertions are monotone under removal, so this is paired with the test
+    /// above: that one proves the notice exists, this one proves it is addressed.
+    #[tokio::test]
+    async fn the_party_that_moved_the_default_is_never_told_it_did() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1")).await;
+
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_none(),
+            "the switcher chose this root; telling it someone ELSE moved it is false"
+        );
+        // The same principal on a later call is still the mover, however long after.
+        assert!(agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .is_none());
+        // ...and a different principal is still owed it: the silence above is
+        // identity, not "the notice is broken".
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1/agent-b"))
+                .await
+                .is_some(),
+            "positive control: another principal must still be told"
+        );
+    }
+
+    /// Back at home nothing is displaced, however many moves it took to get there.
+    #[tokio::test]
+    async fn nothing_is_reported_once_the_default_is_back_at_home() {
+        let (_h, home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_some(),
+            "positive control: displaced, and the parent is owed the notice"
+        );
+
+        move_default(&agent, &home, Some("sess-1/agent-a")).await;
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_none(),
+            "the default is home again: there is nothing to tell"
+        );
+        // Re-activating home by the PARENT over an already-home default is no move.
+        move_default(&agent, &home, Some("sess-1")).await;
+        assert!(agent
+            .displaced_default_notice(Some("sess-1/agent-b"))
+            .await
+            .is_none());
+    }
+
+    /// A NEW move re-arms the notice. The one-shot-per-conversation form was spent on
+    /// the wrong episode once already (`worktree_read_notice`), so the unit of
+    /// delivery is the move, not the conversation.
+    #[tokio::test]
+    async fn each_new_move_is_reported_again_naming_its_own_mover() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let f1 = tempdir().unwrap();
+        let f2 = tempdir().unwrap();
+        let (r1, r2) = (
+            f1.path().canonicalize().unwrap(),
+            f2.path().canonicalize().unwrap(),
+        );
+
+        move_default(&agent, &r1, Some("sess-1/agent-a")).await;
+        let first = agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .unwrap();
+        assert!(first.contains("sess-1/agent-a"));
+
+        move_default(&agent, &r2, Some("sess-1/agent-b")).await;
+        let second = agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .expect("a second move is a new episode and must be reported");
+        assert!(
+            second.contains("sess-1/agent-b"),
+            "names the NEW mover: {second}"
+        );
+        assert!(
+            second.contains(&r2.display().to_string()),
+            "names the NEW root: {second}"
+        );
+        assert!(
+            !second.contains("sess-1/agent-a"),
+            "must not attribute the new move to the previous mover: {second}"
+        );
+    }
+
+    /// Identity is needed to CREATE this notice (unlike the activation guard, where it
+    /// may only silence one): "someone else moved it" is a claim, and with either side
+    /// unidentified it could be false. Silence is the honest answer.
+    #[tokio::test]
+    async fn an_unidentified_party_is_never_told_someone_else_moved_it() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+
+        // Unidentified mover: no one can be told it was someone else.
+        move_default(&agent, &foreign_root, None).await;
+        assert!(agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .is_none());
+
+        // Unidentified reader of an identified move: it may BE the mover.
+        let other = tempdir().unwrap();
+        let other_root = other.path().canonicalize().unwrap();
+        move_default(&agent, &other_root, Some("sess-1/agent-a")).await;
+        assert!(agent.displaced_default_notice(None).await.is_none());
+        // Positive control: the same move does reach an identified reader.
+        assert!(agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .is_some());
+    }
+
+    /// The told-map cannot grow without bound over a long session of subagent fan-outs,
+    /// and shedding it only ever re-tells.
+    #[tokio::test]
+    async fn the_told_map_is_bounded() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1/mover")).await;
+
+        for i in 0..(DISPLACEMENT_TOLD_CAP * 2) {
+            let caller = format!("sess-1/agent-{i}");
+            assert!(
+                agent
+                    .displaced_default_notice(Some(&caller))
+                    .await
+                    .is_some(),
+                "each distinct caller is told once"
+            );
+        }
+        let told = agent.inner.read().await.displacement_told.len();
+        assert!(
+            told <= DISPLACEMENT_TOLD_CAP,
+            "told-map holds {told} entries, cap is {DISPLACEMENT_TOLD_CAP}"
+        );
+    }
+
+    /// Re-activating the root that is ALREADY the default moves nothing, so it must not
+    /// transfer the blame: the harmed party is owed the name of whoever actually
+    /// moved it, not of the last caller to touch the slot.
+    #[tokio::test]
+    async fn re_activating_the_current_root_does_not_change_who_moved_it() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
+        move_default(&agent, &foreign_root, Some("sess-1/agent-b")).await;
+
+        let n = agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .expect("still displaced, and the parent has not been told");
+        assert!(n.contains("sess-1/agent-a"), "names the real mover: {n}");
+        assert!(!n.contains("sess-1/agent-b"), "agent-b moved nothing: {n}");
+    }
+
+    /// A default moved by a path that never went through `note_activation` is not ours
+    /// to attribute: the record describes an OLDER move, and naming its mover for the
+    /// current root would be a false statement.
+    #[tokio::test]
+    async fn a_default_moved_without_a_record_is_not_attributed_to_the_last_recorded_mover() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let (f1, f2) = (tempdir().unwrap(), tempdir().unwrap());
+        let (r1, r2) = (
+            f1.path().canonicalize().unwrap(),
+            f2.path().canonicalize().unwrap(),
+        );
+        move_default(&agent, &r1, Some("sess-1/agent-a")).await;
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_some(),
+            "positive control: the recorded move is reportable"
+        );
+
+        // Moved with no `note_activation`.
+        agent.activate(r2, None).await.unwrap();
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1/agent-b"))
+                .await
+                .is_none(),
+            "the record names {r1:?}, the default is elsewhere: say nothing"
+        );
+    }
+
+    /// The activation guard compares the per-call caller it is GIVEN. It used to read
+    /// `CLAUDE_CODE_SESSION_ID` — one value per process, shared by a parent and all its
+    /// subagents — and so was silent on the very race it exists for.
+    ///
+    /// Env-independent by construction: nothing here reads or sets `environ`.
+    #[tokio::test]
+    async fn note_activation_tells_a_parent_from_its_subagent() {
+        let a = std::path::Path::new("/tmp/cc-na-a");
+        let b = std::path::Path::new("/tmp/cc-na-b");
+
+        let agent = Agent::new(None).await.unwrap();
+        assert!(agent.note_activation(a, Some("sess-1")).await.is_none());
+        let w = agent
+            .note_activation(b, Some("sess-1/agent-a"))
+            .await
+            .expect("parent then subagent, rapidly, different roots: a real race");
+        assert!(w.contains("sess-1"), "names the previous holder: {w}");
+
+        // The documented single-session cross-project pattern stays silent.
+        let agent = Agent::new(None).await.unwrap();
+        assert!(agent.note_activation(a, Some("sess-1")).await.is_none());
+        assert!(
+            agent.note_activation(b, Some("sess-1")).await.is_none(),
+            "one caller switching its own slot is not a race"
+        );
     }
 
     #[tokio::test]
