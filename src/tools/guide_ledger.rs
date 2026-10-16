@@ -377,6 +377,32 @@ impl GuideLedger {
         self.key.as_deref()
     }
 
+    /// Mark `topics` delivered because the conversation on the other end ALREADY
+    /// HOLDS them — a `fork` subagent's inherited context — so the next triggering
+    /// call does not ship them a second time. Returns how many were added.
+    ///
+    /// Only seeds an EMPTY ledger and is a no-op otherwise. The topics are the
+    /// parent's key set as of the fork's dispatch, but the companion's
+    /// `SubagentStart` hook fires again on a `SendMessage` resume and would then
+    /// name the parent's LATER keys: marking those delivered on a fork that has
+    /// already been served would withhold guides it never received, the unsafe
+    /// direction (docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md,
+    /// Decision #8). A fork with any history of its own has, by construction, already
+    /// had its inherited context accounted for. Persists only when it seeded.
+    pub fn seed_inherited(&mut self, topics: &[&str]) -> usize {
+        if !self.emitted.is_empty() {
+            return 0;
+        }
+        let now = Utc::now();
+        for topic in topics {
+            self.emitted.insert((*topic).to_string(), now);
+        }
+        if !topics.is_empty() {
+            self.persist();
+        }
+        self.emitted.len()
+    }
+
     /// Forget the named topics so they inject again, leaving every other topic
     /// in place. This is the surgical twin of [`clear`](Self::clear): a project
     /// switch re-teaches only the project-scoped guide, not the tool-contract
@@ -770,6 +796,47 @@ mod tests {
             l.is_empty(),
             "an unreadable ledger degrades to re-sending, never to suppressing"
         );
+    }
+
+    #[test]
+    fn seed_inherited_marks_topics_delivered_on_an_empty_ledger_and_persists() {
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+
+        let mut l = GuideLedger::load("sess-fork-seed", Some(hints.clone()));
+        assert_eq!(l.seed_inherited(&["librarian", "symbol-navigation"]), 2);
+        assert!(l.contains("librarian"));
+        assert!(l.contains("symbol-navigation"));
+        drop(l);
+
+        // Survives a reload: an /mcp reconnect must not re-serve the inherited guides.
+        let l2 = GuideLedger::load("sess-fork-seed", Some(hints));
+        assert!(l2.contains("librarian"), "seed_inherited must persist");
+    }
+
+    #[test]
+    fn seed_inherited_is_a_no_op_once_the_ledger_has_its_own_history() {
+        // The seed is the parent's keys as of dispatch; a later one (a resume
+        // re-fires SubagentStart) would mark guides delivered that this
+        // conversation never received.
+        let dir = tempdir().unwrap();
+        let hints = dir.path().join("guide_hints");
+
+        let mut l = GuideLedger::load("sess-fork-late", Some(hints.clone()));
+        l.insert("tracker-conventions".to_string());
+        let before = std::fs::metadata(hints.join("sess-fork-late.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        assert_eq!(l.seed_inherited(&["librarian"]), 0);
+        assert!(!l.contains("librarian"), "a late seed must not land");
+        assert!(l.contains("tracker-conventions"));
+        let after = std::fs::metadata(hints.join("sess-fork-late.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(before, after, "a refused seed must not rewrite the file");
     }
 
     #[test]
