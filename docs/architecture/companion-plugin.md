@@ -111,3 +111,13 @@ prevented in advance.
 
 After any `workspace(activate, path=foreign)` issued by the top-level session itself,
 restore the home project before finishing the turn. Full rules: `get_guide("workspace-state")`.
+
+
+**Unpinned concurrent use is unsupported** (decided 2026-10-16, closing the open question in
+`docs/plans/2026-05-30-per-request-workspace-pinning.md` § Risks). A session that runs
+concurrent callers against different roots must pin every call; unpinned calls race on the one
+default and the server will not arbitrate. The server's two softer answers both depend on the
+principal stamp this plugin's `principal-stamp.mjs` writes: the activate response warns the
+switcher, and the first unpinned call of any other principal after the default leaves home
+carries a `_workspace_notice` naming the mover (`Agent::displaced_default_notice`). Without
+this plugin both are silent, because a parent and its subagents then look like one caller.

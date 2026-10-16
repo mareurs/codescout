@@ -158,6 +158,32 @@ clears your block by flipping the substrate under whoever set it, mid-task. Pass
 activation intact. Measured 2026-09-01: the pin worked first try during an SDD run
 where re-activation would have disrupted a running implementer
 (`docs/issues/archive/2026-09-01-workspace-activation-is-process-wide-and-a-subagent-can-flip-it.md`).
+## Unpinned concurrent use is unsupported
+
+The server holds **one** default workspace, and an unpinned call resolves against
+whatever it currently is. So a session that runs concurrent callers (a parent and
+subagents, or several subagents) against **different** roots **must pin every call** with
+`workspace=<absolute path>`. If it does not, its unpinned calls race on that one slot and
+the outcome depends on arrival order. That is the supported contract, not a bug to
+engineer around: nothing in the server can make two unpinned callers see different
+defaults.
+
+What the server does about it, and what it cannot:
+
+- **The switcher is warned.** A `workspace(activate)` that replaces a different root
+  another caller activated within 5 s returns `concurrent_activation_warning`.
+- **The harmed party is told.** The first unpinned call by any *other* identified caller
+  after the default moves off home carries a `_workspace_notice` naming the principal that
+  moved it and the pin that fixes it, once per move. It is silent when the default is home,
+  when the call is pinned, and for the principal that moved it.
+- **Both rest on caller identity, which exists only with the companion plugin.** Its
+  `PreToolUse` hook stamps `<session_id>/<agent_id>` on every subagent call; a parent's call
+  is its session id. Without the companion a parent and its subagents are the same caller
+  to the server: nobody can be told, and neither message is sent.
+- **Neither prevents it.** A subagent that `activate`s still moves the default under its
+  parent, and the notice arrives on the parent's next *successful* call, not on a write
+  refused by the gate. Brief subagents to pin; do not brief them to activate.
+
 ## Anti-patterns
 
 - **Forgetting to restore home.** Iron-Law-grade. Server is shared
