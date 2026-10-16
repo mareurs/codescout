@@ -383,6 +383,31 @@ fn a_floor_is_a_result_cap_only_when_it_drops_rows_of_the_result() {
          NOT_A_CAP and carries no probe row, so it cannot inflate the mutation-verified count"
     );
 
+    assert!(
+        PROBE_ROWS
+            .iter()
+            .all(|r| r.id != "read_file.json_path_route_room"),
+        "read_file's route-room floor only chooses the wording of `next`; both forms reach the \
+         last line, so it withholds no row and is NOT_A_CAP with no probe row"
+    );
+
+    let above_const = |src: &str, name: &str| -> String {
+        src.lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .find(|w| w[1].contains(&format!("const {name}")))
+            .map(|w| w[0].to_string())
+            .unwrap_or_else(|| panic!("const {name} is not declared"))
+    };
+    let rf = above_const(
+        include_str!("../read_file.rs"),
+        "JSON_PATH_ROUTE_ROOM_FLOOR",
+    );
+    assert!(
+        rf.contains("cap-class: NOT_A_CAP"),
+        "JSON_PATH_ROUTE_ROOM_FLOOR must be annotated NOT_A_CAP; the line above it reads: {rf:?}"
+    );
+
     let src = include_str!("../../librarian/tools/context.rs");
     let above = src
         .lines()

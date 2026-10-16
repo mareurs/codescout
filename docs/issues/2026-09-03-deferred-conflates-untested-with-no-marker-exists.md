@@ -77,7 +77,7 @@ Candidate (a) of the original filing, plus the structural half of (c).
 - `probe_rows_are_well_formed` refuses a `NoMarker` row whose `bug` is not an existing `docs/issues/*.md` file, so the escalation cannot be skipped by choosing the variant.
 - `no_untested_row_describes_a_cap_that_discloses_nothing` scans the real table's `Untested` reasons for the phrases that say so (option (b), as a standing guard rather than an audit step). It is a text backstop, not a proof: it cannot see a use site the reason never mentions.
 - Nine rows were reclassified as `NoMarker` and filed (the issue's eight, re-derived against the tree at `f5f1c6f7`, plus `format.shape_scalars`, which a use-site read showed drops scalars past `MAX_SCALARS` with no count while its reason named only a missing test): `preview.plan_open_next` and `preview.plan_task_text`, `doctor.exposure_threshold`, `format.shape_scalar_len` and `format.shape_scalars`, `references.corroborate_files_scan`, `audit_doc_refs.basename_index`, `call_graph.workspace_files_scan`, `doctor.recently_touched_walk` -- seven bug files `docs/issues/2026-10-16-*.md`.
-- Tally before: 86 total, 37 probed, 49 deferred, 36 mutation-verified. After: 85 total, 36 probed, 40 untested, 9 no-marker, 35 mutation-verified (the one probe row removed is `context.attestation_exposure`, see the sibling issue).
+- Tally before: 86 total, 37 probed, 49 deferred, 36 mutation-verified. After: 84 total, 35 probed, 40 untested, 9 no-marker, 34 mutation-verified (the two probe rows removed are `context.attestation_exposure` and `read_file.json_path_route_room`, both `NOT_A_CAP` floors; see the sibling issue).
 
 ## Tests added
 

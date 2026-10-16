@@ -229,6 +229,13 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 // `Coverage::NoMarker`, with its bug filed.
 //
 // The rule, once: a floor is a `RESULT_CAP` iff what it suppresses is rows of the result.
+//
+// `read_file.json_path_route_room` was struck by the same rule on 2026-10-16. Its floor only
+// chooses the wording of a page's `next` (literal route vs the same continuation in prose);
+// the cited test follows either to the last line on every path length (`last == total`), so
+// the caller receives the whole value both ways. Its row was `Probed` + `Killed` (mutated
+// 2026-10-07: the floor at 0, and at 20,000, each turned the cited test red); that evidence
+// still holds for the test and is no longer counted as result-cap coverage.
 
 /// One row per `RESULT_CAP` id declared in tracked `src/` — 66 as of the
 /// 2026-09-02 census. The id list is derived from
@@ -1181,26 +1188,6 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             marker: Marker::TextContains("the rest is the value you passed"),
             mutation: Mutation::Killed,
             cited_test: "an_overlong_json_path_or_key_echo_keeps_one_handle",
-        },
-    },
-    ProbeRow {
-        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test
-        // pages a 600-line value under json_paths of 9, 301, 3,005 and 12,005 B, and sweeps
-        // paths across the floor in 200 B steps, through the real tool. Below the floor every
-        // `next` is a literal route that is executed as written to the end of the value; past
-        // it `next` is prose naming the handle and the line numbers, with no placeholder, and
-        // following it with the caller's own path reaches the end too. Every page is checked to
-        // mint no handle. Measured before the floor: the 12,005 B path either named a
-        // placeholder route that failed when copied (`path segment '<your json_path: …' not
-        // found`) or, quoted whole, made a page over the limit buffered under `@tool_*`.
-        // Marker written by production in `read_file::read_from_buffer` (the `prose` closure).
-        // MUTATION (2026-10-07): the floor at 0 (a 12 KB path quoted whole, `@tool_*` minted)
-        // and at 20,000 (a 9 B path given prose) each turn the cited test red.
-        id: "read_file.json_path_route_room",
-        coverage: Coverage::Probed {
-            marker: Marker::TextContains("with the json_path you passed"),
-            mutation: Mutation::Killed,
-            cited_test: "a_json_path_next_is_a_whole_route_or_plain_prose",
         },
     },
     ProbeRow {
