@@ -1431,10 +1431,31 @@ impl CodeScoutServer {
         // call still serialises behind it.
         let gated_as_write = is_write && !tool.lifts_write_block(&input);
 
-        if let Err(err) = self
+        if let Err(mut err) = self
             .check_tool_access(&req.name, gated_as_write, workspace_override.as_deref())
             .await
         {
+            // The harmed party's first signal is often THIS refusal: a subagent's
+            // read-only activation became the default, and the parent's next write was
+            // refused with text that names nothing about who moved it. Carry the
+            // displaced-default notice on the refusal too. The caller is resolved here
+            // the way it is below, INCLUDING the rendezvous poll (consumed once per call,
+            // and this branch returns, so the later poll is not reached twice): resolving
+            // from the construction-time key alone would call a parent a stranger after
+            // a `/clear`. A pinned call named its own tree and is owed nothing.
+            // docs/issues/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
+            if workspace_override.is_none() {
+                let caller = asserted_principal
+                    .clone()
+                    .or_else(|| asserted_conversation.clone())
+                    .or_else(|| self.poll_rendezvous())
+                    .or_else(|| self.base_ledger_key.clone());
+                if let Some(n) = self.agent.displaced_default_notice(caller.as_deref()).await {
+                    err.content
+                        .push(Content::text(format!("\u{26a0} {}", n.text)));
+                    self.agent.mark_displaced_told(&n).await;
+                }
+            }
             return Ok(err);
         }
 
@@ -12450,6 +12471,169 @@ mod guide_hint_tests {
             out.contains("sess-1/agent-a"),
             "a sibling that did not move it is owed the notice: {out}"
         );
+    }
+
+    /// `make_server`, with a discoverable sub-project (`packages/api`, id `api`) written
+    /// BEFORE the agent is built — discovery runs at construction, so a project created
+    /// afterwards is invisible to the session.
+    async fn make_server_with_subproject() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::Builder::new().prefix(".tmp").tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let sub = dir.path().join("packages").join("api");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join("package.json"),
+            r#"{"name":"api","scripts":{"build":"tsc"}}"#,
+        )
+        .unwrap();
+        let ws_path = dir.path().join("librarian-workspace.toml");
+        std::fs::write(&ws_path, "").unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some(uuid::Uuid::new_v4().to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                workspace: Some(ws_path),
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let lsp = LspManager::new_arc();
+        let server = CodeScoutServer::from_parts_with_env(agent, lsp, false, env).await;
+        (dir, server)
+    }
+
+    /// One dispatch through the real `call_tool_inner`, every content block as text.
+    async fn dispatch_text(
+        server: &CodeScoutServer,
+        tool: &str,
+        mut arguments: Value,
+        principal: Option<&str>,
+    ) -> String {
+        if let Some(p) = principal {
+            arguments[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!(p);
+        }
+        let req: CallToolRequestParams =
+            serde_json::from_value(json!({"name": tool, "arguments": arguments})).unwrap();
+        let out = server
+            .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+            .await
+            .expect("dispatch");
+        out.content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A subagent that switches PROJECTS BY ID inside the home workspace moves where
+    /// unpinned calls resolve exactly as a path activation does, so its parent is owed
+    /// the same notice. `activate_within_workspace` skipped `note_activation`, so that
+    /// move was never recorded and never reported.
+    #[tokio::test]
+    async fn a_subagent_switching_projects_by_id_is_reported_to_the_parent() {
+        let (home, server) = make_server_with_subproject().await;
+        let activate = |path: &str| json!({"action": "activate", "path": path, "read_only": false});
+
+        // The parent activates home explicitly, as an ordinary session does; it moves
+        // nothing (home is already the default).
+        dispatch_text(
+            &server,
+            "workspace",
+            activate(home.path().to_str().unwrap()),
+            None,
+        )
+        .await;
+
+        let out = dispatch_text(
+            &server,
+            "workspace",
+            activate("api"),
+            Some("sess-1/agent-a"),
+        )
+        .await;
+        assert!(
+            out.contains("concurrent_activation_warning"),
+            "a by-id switch by a different principal inside the window must warn the switcher: {out}"
+        );
+
+        let out = dispatch_text(&server, "run_command", json!({"command": "echo hi"}), None).await;
+        assert!(
+            out.contains("sess-1/agent-a") && out.contains("packages/api"),
+            "the parent must be told the by-id switch moved it, and to where: {out}"
+        );
+
+        // Back at the workspace root by id: nothing is displaced any more.
+        dispatch_text(
+            &server,
+            "workspace",
+            activate(crate::workspace::ROOT_PROJECT_ID),
+            Some("sess-1/agent-a"),
+        )
+        .await;
+        let out = dispatch_text(
+            &server,
+            "run_command",
+            json!({"command": "echo hi"}),
+            Some("sess-1/agent-b"),
+        )
+        .await;
+        assert!(
+            !out.contains("workspace=<absolute path>"),
+            "default is home again: {out}"
+        );
+    }
+
+    /// The harmed party's FIRST signal used to be the gate's refusal, which carries
+    /// nothing about who moved the default. A write refused because a subagent's
+    /// read-only activation is now the default must name that subagent.
+    /// docs/issues/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
+    #[tokio::test]
+    async fn a_write_refused_by_the_gate_names_the_principal_that_moved_the_default() {
+        let (_home, server) = make_server().await;
+        let foreign = tempfile::tempdir().unwrap();
+
+        // The subagent activates a foreign root with no `read_only`: foreign defaults ro.
+        dispatch_text(
+            &server,
+            "workspace",
+            json!({"action": "activate", "path": foreign.path()}),
+            Some("sess-1/agent-a"),
+        )
+        .await;
+
+        // POSITIVE CONTROL for the whole test: the call IS refused by the gate.
+        let out = dispatch_text(
+            &server,
+            "create_file",
+            json!({"path": "x.txt", "content": "hi"}),
+            None,
+        )
+        .await;
+        assert!(
+            out.to_lowercase().contains("disabled") || out.to_lowercase().contains("read-only"),
+            "the unpinned write must be refused by the gate: {out}"
+        );
+        assert!(
+            out.contains("sess-1/agent-a") && out.contains("workspace=<absolute path>"),
+            "the refusal must name who moved the default and the pin that fixes it: {out}"
+        );
+
+        // Spent: the next unpinned call does not repeat it.
+        let out = dispatch_text(&server, "run_command", json!({"command": "echo hi"}), None).await;
+        assert!(!out.contains("sess-1/agent-a"), "told once: {out}");
+
+        // The mover's own refused write is not told it moved the default.
+        let out = dispatch_text(
+            &server,
+            "create_file",
+            json!({"path": "y.txt", "content": "hi"}),
+            Some("sess-1/agent-a"),
+        )
+        .await;
+        assert!(!out.contains("workspace=<absolute path>"), "{out}");
     }
 
     /// A parent's call after a subagent's restores the PARENT's own ledger,
