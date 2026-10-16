@@ -11,7 +11,7 @@ topic: authorship attribution at a red
 closed: 2026-10-13
 opened: 2026-10-13
 severity: medium
-unverified: 'TRACKED f1e8539dbf3cb90f — tests/attribute-red.sh still has no CI or gate runner. Full gate 2026-10-14: the first run was red on two tests outside this change (prompts::tests::reader_docs_contain_no_retired_call_forms, 46 hits, every one under the untracked .codescout/resident-private/codex-pilot-fix-20261013/commit-snapshot/; server::guide_hint_tests::native_context_wire_reaches_interactive_shell, open bug 098fca009ecbdd78). The second run, after only comment re-pointing, passed every lane: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0. Why the reader-docs hits did not recur was not established. tests/attribute-red.sh passed 43 of 43 by hand on 2026-10-14. A Codex session''s own write is not covered, because that needs a Codex transcript fixture.'
+unverified: 'STANDING — two limits remain that no action here settles. A Codex session''s own write is not covered, because that needs a Codex transcript fixture. Why the reader-docs hits (prompts::tests::reader_docs_contain_no_retired_call_forms, 46 hits under the untracked .codescout/resident-private/codex-pilot-fix-20261013/commit-snapshot/) did not recur on the second gate run was not established. CLEARED 2026-10-16: the missing runner. tests/attribute-red.sh now runs in CI as the job attribute-red-tests; it passed on ubuntu-latest in run 38848320964 at 59e43edc. Gate 2026-10-14: the first run was red on prompts::tests::reader_docs_contain_no_retired_call_forms and on server::guide_hint_tests::native_context_wire_reaches_interactive_shell (open bug 098fca009ecbdd78); the second run, after only comment re-pointing, passed every lane: FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0.'
 ---
 
 # BUG: attribute-red compares a raw session id with qualified owners, so a session's own uncommitted write reads as a peer's
@@ -90,7 +90,7 @@ Run `scripts/file-provenance.py` directly. It resolves the identity correctly.
 
 ## Resume
 
-Complete. Fixed in `3fb612b9`, public on `origin/experiments`. The missing runner is tracked in `docs/issues/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md`.
+Complete. Fixed in `3fb612b9`, public on `origin/experiments`. The missing runner was tracked in `docs/issues/archive/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md`, fixed in `4f5b16e4` and green in CI on 2026-10-16.
 
 Found while fixing, kept here as the record: `tests/attribute-red.sh` has no runner. Verified 2026-10-13 and again 2026-10-14 by a repository grep: the only hit is a code comment. `.github/workflows/ci.yml` job `shell-tests` runs `hooks-discrimination.sh`, `file-provenance.sh` and `peer-sessions.sh` only, and `scripts/gate.sh` does not run it. That is how the suite sat 5 cases red from `eed25579` (2026-10-11) with every gate green.
 

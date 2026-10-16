@@ -1029,7 +1029,7 @@ jobs:
   # WHY IT IS WIRED AT ALL. `tests/attribute-red.sh` is the regression suite for
   # `scripts/attribute-red.py`, the engine that names who wrote a dirty file at a red. Nothing
   # ran it: it sat 5 cases red from `eed25579` (2026-10-11) to `3fb612b9` (2026-10-13) with
-  # every gate green (docs/issues/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md).
+  # every gate green (docs/issues/archive/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md).
   # Not folded into `shell-tests`: that lane is known-flaky, and this suite's assertions
   # are verdicts about ATTRIBUTION.
   #
