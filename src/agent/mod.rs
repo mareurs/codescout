@@ -112,11 +112,12 @@ pub struct Agent {
 
 pub struct AgentInner {
     /// Registry of activated workspaces, keyed by canonical workspace root.
-    /// Phase 1: holds at most one entry — `activate` clears and reinserts,
-    /// mirroring the previous single-slot drop-and-replace, so behavior is
-    /// unchanged. Phase 3 lifts the clear-on-activate to enable true
-    /// multi-workspace residence + eviction. See
-    /// docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    /// `activate` clears the map and inserts the new default, so it drops every
+    /// pinned resident; `ensure_resident` adds a pinned workspace alongside without
+    /// clearing, so the map can hold several entries. Nothing evicts: a pinned
+    /// workspace stays resident until the next `activate` or a restart. Per-`Workspace`
+    /// locking and the eviction sweep are Phase 4b, deferred by decision. See
+    /// docs/plans/2026-05-30-per-request-workspace-pinning.md § Phase 4b.
     pub workspaces: HashMap<PathBuf, Workspace>,
     /// Canonical root of the workspace that unpinned calls resolve to — the
     /// per-session default (what `activate` sets). Replaces the implicit
@@ -142,8 +143,9 @@ pub struct AgentInner {
 
 impl AgentInner {
     /// The workspace that unpinned calls resolve to (the per-session default).
-    /// Phase 1 this is the single live workspace; the ambient accessors below
-    /// route through it. Phase 2+ adds selector-aware twins alongside.
+    /// The ambient accessors below route through it. The selector-aware twins
+    /// (`Agent::with_project_at`, `project_root_for`, ...) resolve a pinned
+    /// workspace instead.
     pub fn default_workspace(&self) -> Option<&Workspace> {
         self.workspaces.get(self.default_workspace_root.as_ref()?)
     }
@@ -721,9 +723,9 @@ impl Agent {
             if inner.home_root.is_none() {
                 inner.home_root = Some(root.clone());
             }
-            // Phase 1: single-entry default registry — clear + reinsert mirrors
-            // the previous single-slot drop-and-replace. ensure_resident adds
-            // pinned entries alongside without clearing.
+            // Clear + reinsert: `activate` replaces the whole registry, pinned
+            // residents included (the previous single-slot drop-and-replace).
+            // `ensure_resident` adds pinned entries alongside without clearing.
             inner.workspaces.clear();
             inner.workspaces.insert(root.clone(), ws);
             inner.default_workspace_root = Some(root);
@@ -1026,10 +1028,11 @@ impl Agent {
     /// `library_registry.register`) rather than via the `Arc<Mutex>`
     /// interior-mutability fields — those use the read `with_project_at`.
     ///
-    /// Phase 4a holds the single `AgentInner` write lock for the closure's
-    /// duration; the closure MUST stay non-blocking (no `.await` on a per-project
-    /// lock) per `## Phase 4 — Lock-Ordering Proof`. Phase 4b moves this onto the
-    /// per-`Workspace` lock.
+    /// Holds the single `AgentInner` write lock for the closure's duration; the
+    /// closure MUST stay non-blocking (no `.await` on a per-project lock) per
+    /// `## Phase 4 — Lock-Ordering Proof`. Moving this onto a per-`Workspace` lock
+    /// is Phase 4b, deferred by decision (plan § Phase 4b), so writes to different
+    /// workspaces still serialize here.
     pub async fn with_project_at_mut<F, T>(
         &self,
         workspace_override: Option<&Path>,
@@ -2243,8 +2246,8 @@ impl Agent {
     /// and wraps the resulting `client.embedder` (`Arc<dyn CodeEmbedder>`) in
     /// [`crate::retrieval::embedder::CodeDenseAdapter`], rather than building a
     /// second, independent embedder. This means memory recall always rides
-    /// whatever backend code search selected — HTTP or (once the local ONNX
-    /// path lands) in-process — instead of having its own selection path that
+    /// whatever backend code search selected — HTTP or the in-process local ONNX
+    /// path — instead of having its own selection path that
     /// could drift from code search's. Subsequent calls share the cached `Arc`.
     ///
     /// In tests, pre-populate via [`Agent::set_memory_embedder_for_test`] to

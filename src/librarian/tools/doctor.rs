@@ -3462,9 +3462,10 @@ fn shared_entry_overlap(
 ///   is merely absent from the main catalog view, not conflicting with it.
 /// - `collision` — a row already exists at the main-repo path (same
 ///   [`ids::artifact_id_from_abs`]). If both rows are augmented with the
-///   SAME `entry_collection`, the overlapping entry ids are surfaced too —
-///   `fix=reseat_worktree` (a follow-up change) will need this to merge
-///   safely instead of clobbering.
+///   SAME `entry_collection`, the overlapping entry ids are surfaced too
+///   (`id_overlap`). `fix=reseat_worktree` does not consume them — it leaves a
+///   collision row untouched and reports it (`reseat_worktree_leaves_collisions_for_graft`),
+///   so the ids are for the operator deciding a `doc(action="graft")`.
 ///
 /// Every row also carries `registered`: whether an ACTIVE
 /// `worktree_registration` covers the row's worktree root. Registered rows
