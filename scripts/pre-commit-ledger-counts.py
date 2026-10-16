@@ -84,6 +84,7 @@ HOOK_RULES = [
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
     "every_declared_class_has_an_index_row",
+    "no_mechanism_status_falsifier_is_violated",
     "no_mechanism_status_is_a_bare_verdict",
     "the_index_file_holds_no_class_sections",
 ]
@@ -662,6 +663,226 @@ def mechanism_statuses(ledger: str) -> list[list]:
     return out
 
 
+def field_label(line: str) -> str | None:
+    """Mirrors `field_label` -- the `**Label:**` opening a class-entry field line, or None.
+
+    Letters and spaces only, at most 24, closed by `:**`. A bold sentence that merely begins a
+    paragraph is not a label, so it does not end a `**Mechanism status:**` field.
+    """
+    if not line.startswith("**"):
+        return None
+    rest = line[2:]
+    end = rest.find(":**")
+    if end <= 0 or end > 24:
+        return None
+    label = rest[:end]
+    if not all(c.isascii() and (c.isalpha() or c == " ") for c in label):
+        return None
+    return label
+
+
+def backtick_spans(line: str) -> tuple[list[str], str]:
+    """Mirrors `backtick_spans` -- single-backtick spans, and the line with them removed.
+
+    An unclosed final backtick opens nothing: its tail stays in the remainder.
+    """
+    parts = line.split("`")
+    spans: list[str] = []
+    rest: list[str] = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1 and i < len(parts) - 1:
+            spans.append(part)
+        else:
+            rest.append(part)
+    return spans, "".join(rest)
+
+
+def glob_error(glob: str) -> str | None:
+    """Mirrors `glob_error` -- why `glob` cannot be a falsifier glob, or None.
+
+    Everything refused here would otherwise be silently read as a literal (`[ab]`), silently
+    widened, or silently match nothing (`..`, a leading `/`).
+    """
+    if not glob:
+        return "the glob is empty"
+    if glob.startswith("/"):
+        return "the glob is absolute; paths are repo-relative"
+    for c in glob:
+        if c in "[]{}\\":
+            return (
+                f"`{c}` is not glob syntax here (only `*`, `?` and a whole `**` segment are) "
+                "and would be read as a literal; a path containing it cannot be declared"
+            )
+    for seg in glob.split("/"):
+        if seg == "":
+            return "the glob has an empty segment (`//` or a trailing `/`)"
+        if seg in (".", ".."):
+            return f"`{seg}` segment; paths are repo-relative and normalised"
+        if "**" in seg and seg != "**":
+            return "`**` is only a whole segment"
+    return None
+
+
+def _seg_match(pat: str, text: str) -> bool:
+    if not pat:
+        return not text
+    c = pat[0]
+    if c == "*":
+        return any(_seg_match(pat[1:], text[k:]) for k in range(len(text) + 1))
+    if c == "?":
+        return bool(text) and _seg_match(pat[1:], text[1:])
+    return bool(text) and text[0] == c and _seg_match(pat[1:], text[1:])
+
+
+def _match_segs(pat: list[str], path: list[str]) -> bool:
+    if not pat:
+        return not path
+    if pat[0] == "**":
+        return any(_match_segs(pat[1:], path[k:]) for k in range(len(path) + 1))
+    return bool(path) and _seg_match(pat[0], path[0]) and _match_segs(pat[1:], path[1:])
+
+
+def glob_match(pattern: str, path: str) -> bool:
+    """Mirrors `glob_match` -- `*`/`?` stay inside one segment, a whole `**` segment matches
+    zero or more, nothing else is special (a leading `.` included). NOT `fnmatch`, whose `*`
+    crosses `/`."""
+    return _match_segs(pattern.split("/"), path.split("/"))
+
+
+def glob_dir_prefix(glob: str) -> str:
+    """Mirrors `glob_dir_prefix` -- the directory a glob is anchored under: the segments before
+    the first wildcard segment, never counting the last (file) segment."""
+    segs = glob.split("/")
+    first_wild = next((i for i, s in enumerate(segs) if "*" in s or "?" in s), len(segs))
+    n = min(first_wild, len(segs) - 1)
+    return "/".join(segs[:n]) + "/" if n else ""
+
+
+def mechanism_falsifier_scan(text: str) -> dict:
+    """Mirrors `mechanism_falsifier_scan`.
+
+    Grammar (the one definition, in docs/trackers/issue-clusters.md § Falsifier rows): inside a
+    `**Mechanism status:**` field -- that line through the line before the next `**Label:**`
+    field or heading, fences skipped -- a single-backtick span reading exactly
+    `falsifier: <glob> expect=absent|present` is a declaration. A span that begins with the word
+    `falsifier` followed by `:` and is anything else is MALFORMED, as is a bare `expect=` outside
+    a span. A fenced block is the escape for a mention; a span holding the bare word is a mention.
+    """
+    falsifiers: list[list[str]] = []
+    malformed: list[list[str]] = []
+    ident: str | None = None
+    in_field = False
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("## IC-"):
+            tok = line[len("## IC-") :].split()
+            if tok:
+                end = len(tok[0])
+                while end > 0 and not (tok[0][end - 1].isascii() and tok[0][end - 1].isdigit()):
+                    end -= 1
+                ident = "IC-" + tok[0][:end]
+            else:
+                ident = "IC-"
+            in_field = False
+            continue
+        if line.startswith("#"):
+            in_field = False
+            continue
+        if line.startswith("**Mechanism status:**"):
+            in_field = ident is not None
+            body = line[len("**Mechanism status:**") :]
+        elif field_label(line) is not None:
+            in_field = False
+            continue
+        elif in_field:
+            body = line
+        else:
+            continue
+        if ident is None:
+            continue
+        spans, rest = backtick_spans(body)
+        for span in spans:
+            after = span.lstrip().lower()
+            if not after.startswith("falsifier"):
+                continue
+            if not after[len("falsifier") :].lstrip().startswith(":"):
+                continue  # the word in a span is a mention, not a declaration
+            parts = span.split(" ")
+            if (
+                len(parts) != 3
+                or parts[0] != "falsifier:"
+                or parts[2] not in ("expect=absent", "expect=present")
+            ):
+                malformed.append(
+                    [
+                        ident,
+                        span,
+                        "expected exactly `falsifier: <glob> expect=absent|present`, single "
+                        "spaces, lower case",
+                    ]
+                )
+                continue
+            why = glob_error(parts[1])
+            if why is not None:
+                malformed.append([ident, span, why])
+                continue
+            falsifiers.append([ident, parts[1], parts[2][len("expect=") :]])
+        if "expect=absent" in rest or "expect=present" in rest:
+            malformed.append(
+                [
+                    ident,
+                    line.strip(),
+                    "`expect=` outside a `falsifier:` code span declares nothing and would be "
+                    "silently ignored",
+                ]
+            )
+    return {"falsifiers": falsifiers, "malformed": malformed}
+
+
+def falsifier_problems(text: str, paths: list[str]) -> list[str]:
+    """Mirrors `falsifier_problems` -- malformed spans first, then dead, then violated, in scan
+    order, byte-identical to the Rust lines (the parity test compares the strings)."""
+    scan = mechanism_falsifier_scan(text)
+    out = [f"{ic} -- malformed `{span}`: {why}" for ic, span, why in scan["malformed"]]
+    for ic, glob, expect in scan["falsifiers"]:
+        prefix = glob_dir_prefix(glob)
+        if prefix and not any(p.startswith(prefix) for p in paths):
+            out.append(
+                f"{ic} -- dead `falsifier: {glob} expect={expect}`: no tracked file lives under "
+                f"`{prefix}`, so the glob would hold expect=absent whatever the tree contains"
+            )
+            continue
+        matched = [p for p in paths if glob_match(glob, p)]
+        if (expect == "present") != bool(matched):
+            if not matched:
+                found = "nothing matches"
+            else:
+                more = len(matched) - 3
+                found = f"matched {', '.join(matched[:3])}" + (f" (+{more} more)" if more > 0 else "")
+            out.append(f"{ic} -- violated `falsifier: {glob} expect={expect}`: {found}")
+    return out
+def tracked_paths(source: str) -> list[str]:
+    """Mirrors `tracked_paths` -- the tree a falsifier is evaluated against, as the commit would
+    leave it: the git index (`index`, the hook's own source), `HEAD`, or the index plus untracked
+    files for `worktree`. NUL-separated, so a path with a newline is one path."""
+    if source == "head":
+        raw = _git("ls-tree", "-r", "--name-only", "-z", "HEAD")
+    elif source == "worktree":
+        raw = _git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    else:
+        raw = _git("ls-files", "-z")
+    return sorted({p for p in raw.split("\0") if p})
+
+
+
+
+
+
 def is_unbasised(body: str) -> bool:
     """Mirrors `is_unbasised` -- the field states a verdict and gives no way to check it.
 
@@ -1078,6 +1299,18 @@ def main() -> int:
                 sort_keys=True,
             ))
             return 0
+        elif arg == "--fixture-mechanism-falsifier":
+            payload = json.loads(sys.stdin.read())
+            scan = mechanism_falsifier_scan(payload["text"])
+            print(json.dumps(
+                {
+                    "falsifiers": scan["falsifiers"],
+                    "malformed": scan["malformed"],
+                    "problems": falsifier_problems(payload["text"], payload["paths"]),
+                },
+                sort_keys=True,
+            ))
+            return 0
         else:
             # No arm above matched. Without this, an unrecognized flag fell through the loop
             # silently and execution proceeded into the real check suite as though no flag had
@@ -1338,6 +1571,38 @@ def main() -> int:
             f"{LEDGER_DIR}/<entry>.md and only its author knows what was checked and when;\n"
             "writing a basis you did not verify is worse than the bare verdict, because it reads\n"
             "as established for the same reason. Ask them:\n"
+            f"    python3 scripts/file-provenance.py {LEDGER_DIR}/\n"
+            "Do NOT reach for --no-verify: this same run carries the one-tag and growth checks\n"
+            "your own bug files need.",
+            file=sys.stderr,
+        )
+        _emit_sequence_tail()
+        return 1
+
+    # CHECK 8 -- no declared `**Mechanism status:**` falsifier is violated, malformed or dead.
+    #
+    # Mirrors `no_mechanism_status_falsifier_is_violated`. Grammar: docs/trackers/issue-clusters.md
+    # § Falsifier rows. Evaluated against the tree this commit WOULD leave (`--source`), so the
+    # commit that adds the file a field said did not exist is the commit that is refused -- the
+    # one moment the original stale field (0dea2246 vs 99d5acac) had no check pointing back.
+    #
+    # NOT a proof the field is true: a falsifier is a tripwire on a name its author guessed, and a
+    # resource nobody declared one for stays invisible.
+    falsifier_findings = falsifier_problems(ledger, tracked_paths(source))
+    if falsifier_findings:
+        print(
+            "a `**Mechanism status:**` falsifier fails:\n  "
+            + "\n  ".join(falsifier_findings)
+            + "\n\n"
+            "VIOLATED: the claim the field makes about the tree stopped being true -- very likely\n"
+            "because of a file in THIS commit. Re-read the field against the code, correct the\n"
+            "sentence, then the falsifier. MALFORMED / DEAD: grammar and semantics are in\n"
+            "docs/trackers/issue-clusters.md § Falsifier rows; a falsifier that cannot be read is\n"
+            "never skipped.\n"
+            "\n"
+            f"IF THE ENTRY NAMED ABOVE IS NOT YOURS, THIS IS NOT YOUR DEFECT to silence: the field\n"
+            f"lives in {LEDGER_DIR}/<entry>.md. Do NOT delete the falsifier to get the commit\n"
+            "through -- that re-creates the stale field this check exists to catch. Ask the author:\n"
             f"    python3 scripts/file-provenance.py {LEDGER_DIR}/\n"
             "Do NOT reach for --no-verify: this same run carries the one-tag and growth checks\n"
             "your own bug files need.",

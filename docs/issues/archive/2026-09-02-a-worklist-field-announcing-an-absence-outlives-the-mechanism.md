@@ -16,7 +16,7 @@ owner: marius
 related:
 - docs/issues/2026-09-02-a-doc-comment-announcing-unbuilt-work-outlives-the-work.md
 severity: high
-unverified: 'TRACKED 604bfbcecf4602d5 — No regression test, and § *Tests added* records that as a deliberate finding rather than an omission: a test would have to assert that no `Mechanism status` field in the corpus contradicts a later commit, which is the unbuilt mechanism itself and not a test of this fix. Recurrence of the class is therefore unguarded — the corrected field is pinned, the mechanism that would keep it correct is not.'
+unverified: 'RESOLVED 2026-10-16 by 604bfbcecf4602d5 (declared falsifier rows, gated by no_mechanism_status_falsifier_is_violated and the pre-commit hook). Was: No regression test, and the class was unguarded; a Mechanism status field contradicted by a later commit had no check. Standing limit: a falsifier only flips on a name its author guessed, and only IC-17 is migrated.'
 ---
 
 # BUG: a worklist field announcing an absence outlives the mechanism that filled it, and dispatches the next session to rebuild it

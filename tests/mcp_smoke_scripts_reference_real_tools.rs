@@ -210,3 +210,64 @@ fn no_smoke_script_asserts_absence_over_a_blankable_result() {
          script list or the read is wrong, and this gate checked almost nothing"
     );
 }
+
+/// `mcp call` prints the tool's reply as PLAIN TEXT, so a helper that parses `$RESULT` as
+/// JSON can never be satisfied by it, and the scripts spent their first live run red for
+/// that reason alone.
+///
+/// Measured 2026-10-16 (the first live run of both scripts, docs/issues/archive/
+/// 2026-09-24-residual-mcp-smoke-scripts-run.md): `mcp call read_file -p '{"path":
+/// "_test_smoke.txt"}'` prints `1 line`, a blank line and `test`, not
+/// `{"content": ...}`; `symbols` prints `src/server.rs (4)` followed by indented rows. Of
+/// 26 steps in `mcp-smoke-rust.sh`, 18 failed, and 11 of those failed on a JSON helper
+/// (`assert_json_has "content"`, `assert_symbols_found`) that reads `json.load(sys.stdin)`
+/// over text. `mcp call -f json` does not rescue the shape: it wraps the reply as
+/// `{"content":[{"type":"text","text":...}]}`, so `assert_json_has "content"` would then
+/// pass on ANY reply, an error included, which is the same vacuity from the other side.
+///
+/// So the shape is banned rather than repaired: assert on the text the server printed.
+/// Matches the helper NAMES and the `json.load` over `$RESULT` separately, so deleting
+/// the helpers and inlining the python buys no pass.
+#[test]
+fn no_smoke_script_parses_the_reply_as_json() {
+    let re = regex::Regex::new(r"assert_json_has|assert_symbols_found|json\.load\(\s*sys\.stdin")
+        .unwrap();
+    let mut offenders = Vec::new();
+    let mut scanned_lines = 0usize;
+
+    for script in smoke_scripts() {
+        let content = std::fs::read_to_string(&script)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", script.display()));
+        let rel = script
+            .strip_prefix(repo_root())
+            .unwrap_or(&script)
+            .display()
+            .to_string();
+        for (i, line) in content.lines().enumerate() {
+            scanned_lines += 1;
+            // A comment explaining why the shape is banned is not the shape.
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            if re.is_match(line) {
+                offenders.push(format!("{rel}:{}  {}", i + 1, line.trim()));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "these lines parse the `mcp call` reply as JSON, but the reply is plain text:\n  {}\n\n\
+         Assert on the text instead (`assert_contains '<string the server prints>'`). \
+         `mcp call -f json` is not a way out: it wraps the text in a content array, so a \
+         `\"content\"` key is present on every reply, errors included.",
+        offenders.join("\n  ")
+    );
+
+    // Non-vacuity: an empty script set would find nothing and report clean.
+    assert!(
+        scanned_lines > 100,
+        "expected >100 lines across both smoke scripts; scanned {scanned_lines} — the \
+         script list or the read is wrong, and this gate checked almost nothing"
+    );
+}

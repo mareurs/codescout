@@ -144,6 +144,27 @@ adjacency-classification suppresses exactly the counts that were about to promot
 same rule `CLAUDE.md` § *Reaching a Peer Session* states for authorship — *never route by
 adjacency* — arriving at classification, and it fails the same way in both places.
 
+### Falsifier rows — a `**Mechanism status:**` claim about the tree, made checkable
+
+A `**Mechanism status:**` is a claim about the state of the tree **outside its own file**, and a later commit can falsify it without touching it: `0dea2246` wrote *"nothing owns the git index"* and `99d5acac`, 64 minutes later, added the four scripts that own it, with no diff hunk here. The basis gate (`no_mechanism_status_is_a_bare_verdict`) cannot see that — the field had a basis. A field **may** therefore carry falsifier rows, which the gate and the commit hook evaluate against the tree.
+
+**One grammar, defined here and nowhere else.** A declaration is a single-backtick code span reading exactly:
+
+```text
+`falsifier: <glob> expect=absent|present`
+`falsifier: scripts/pre-commit-foreign-index.sh expect=present`
+`falsifier: scripts/*index* expect=absent`
+```
+
+- **Where.** Anywhere in the field: from the `**Mechanism status:**` line to the line before the next `**Label:**` field or heading. Put one on the bullet of the resource it guards. Fenced blocks are skipped.
+- **The glob.** Repo-relative, `/`-separated, matched against the git index. `*` and `?` stay inside one segment, a whole `**` segment matches zero or more segments, a leading `.` is nothing special. Nothing else is syntax.
+- **`expect=present`** holds when at least one tracked path matches; **`expect=absent`** holds when none does. A violated falsifier reds `no_mechanism_status_falsifier_is_violated` and refuses the commit that made it false — which is the commit that adds the file.
+- **Opt-in, and new or edited fields only.** A field with no falsifier is unchecked, exactly as before. Only `IC-17` is migrated so far.
+
+**Nothing is silently ignored — the parser owes an escape and a disambiguator** (`docs/conventions/parsers-over-a-namespace.md`). *Escape:* to write the grammar in prose without declaring anything, put it in a fenced block, or write the bare word in a span (a span holding only the word is a mention). *Malformed is loud:* a span that begins with the word followed by a colon and is not exactly the grammar — a capital letter, two spaces, `expect=maybe` — is a finding, as is a glob holding `[`, `]`, `{`, `}` or a backslash (they would be read as literals), a `..` segment, a leading `/`, or `**` fused to other characters, as is a bare `expect=absent` or `expect=present` outside a span. *Dead is loud:* a glob anchored under a directory in which no tracked file lives holds `expect=absent` whatever the tree contains, so it is refused as an absence assertion over an empty population. *Which declaration:* every finding is keyed `IC-N` and quotes the span.
+
+**The limit, stated rather than left implicit.** A falsifier is a tripwire on a **name its author guessed**. It flips only when the mechanism that lands matches the glob; a resource nobody declared a falsifier for stays invisible — which is exactly how the original field went stale — and so does a mechanism built under a name the glob did not anticipate. It is a cheaper way to be wrong less often, not a proof the field is true. Implementations: `tests/issue_clusters.rs` (`mechanism_falsifier_scan`, `falsifier_problems`) and `scripts/pre-commit-ledger-counts.py`, held in step by `the_hook_script_agrees_on_the_mechanism_falsifier_scan`.
+
 ## How a cluster becomes a rule
 
 **Threshold: three or more instances spanning two or more subsystems.**
