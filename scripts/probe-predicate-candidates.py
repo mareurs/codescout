@@ -348,7 +348,12 @@ def classify_next(prev, nxt):
       * linkage — 'queried_the_buffer' fires on any REF_PREFIXES string in the
         next input; the handle `prev` actually emitted is never compared, so
         reading an UNRELATED buffer counts (retrieval OVERcounted).
-    Any retrieval claim needs handle matching over a declared horizon.
+    Measured 2026-10-16 (usage.db snapshot, 3,652 linkable overflows): 175 next-call
+    buffer references were of an unrelated buffer; 1,528 overflows had their own handle
+    referenced by session end against 808 at the next call.
+    The key names stay as recorded so earlier figures remain comparable. For a handle-matched
+    figure use `own_handle_referenced_later` (q4), which reports several horizons and designates
+    none; "referenced" there is a MENTION in `read_output_ids`, not delivery of needed content.
     docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md
     """
     if nxt is None:

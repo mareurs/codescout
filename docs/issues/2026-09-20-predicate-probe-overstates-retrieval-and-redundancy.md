@@ -1,13 +1,14 @@
 ---
 id: a8f384cc0052d7b9
 kind: bug
-status: investigating
+status: mitigated
 title: 'BUG: predicate probe counts next-call buffer syntax and repeated arguments as retrieval and redundancy'
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 opened: 2026-09-20
 owner: marius
 severity: medium
+unverified: STANDING Which retrieval horizon is the headline figure is a user decision, deliberately not made; the existing key names still overclaim by name and are kept for comparability.
 ---
 
 # BUG: predicate probe observations are broader in prose than in the instrument
@@ -87,7 +88,7 @@ Deliberately NOT done, and the reason this stays open rather than archived: `cla
 
 No figure was recomputed and no historical rerun was performed, so the magnitudes of both errors remain unmeasured; 32.1% was left in place throughout as a correct measurement of a narrower thing.
 
-## Update 2026-10-16 — handle-matched fields added; status stays `investigating`
+## Update 2026-10-16 — handle-matched fields added
 
 Added to `scripts/probe-predicate-candidates.py`, **additively** (every existing key is byte-identical
 old versus new on one usage.db snapshot; verified by diffing the two `--json` outputs with the new keys
@@ -112,11 +113,20 @@ Tests: `tests/test_probe_predicate_candidates.py` (14 cases, all failing against
 the three counterexamples above plus unlinkable overflow, cross-session handle, malformed
 `read_output_ids`, malformed edit input, empty input, missing columns).
 
-**Not decided, because each changes what a recorded figure means:** which horizon (if any) is the
-retrieval figure, since "the next call" was the horizon that produced the overclaim; and whether to
-rename `queried_the_buffer` / `repeat_with_identical_args`, which would break comparability with the
-32.1% recorded in the research doc and handoff tracker. The handle is still a MENTION, not delivery of
-content that was needed. `docs/PROBES.md` is owned by another agent and does not yet name the new keys.
+The `docs/PROBES.md` Q4/Q2 cells and the `classify_next` docstring now state the measured over- and
+undercount, the 600 unlinkable overflows and the new keys.
+
+## Resolution
+
+Status `mitigated` (set 2026-10-16, on the coordinator's instruction): additive instrumentation landed
+(`own_handle_referenced_later`, `repeat_with_identical_args_no_named_edit_between`, 14 regression tests,
+`classify_next` and `docs/PROBES.md` Q4/Q2 cells now name the measured over- and undercount, the 600
+unlinkable overflows and the new keys). The existing keys keep their names and meaning.
+
+**Left open on purpose, for the user:** which horizon, if any, is the headline eventual-retrieval figure.
+The probe reports 1, 3, 10 calls and session end side by side and designates none; "referenced" is a
+mention in `read_output_ids`, not delivery of content that was needed. Whether the misleading key names
+should ever be renamed is also left open (not done: it would break comparability with the recorded 32.1%).
 
 ## References
 
