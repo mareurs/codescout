@@ -1,13 +1,13 @@
 ---
 id: bb2cec400c3f8020
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the growth gate accepts a bare stem and a trailing space while its refusal text says it demands `+1: <slug>` and a derivation'
 owners:
 - marius
 tags:
 - cluster/guard-narrower-than-its-name
-closed: null
+closed: 2026-10-16
 opened: 2026-10-16
 owner: marius
 related: []
@@ -133,18 +133,30 @@ the code does.
 
 ## Fix
 
-Not started, and it may not be needed. Decide the direction first:
-`docs/adrs/2026-10-16-the-reasoning-for-a-class-member-lives-in-the-members-own-bug-file.md`
-proposes moving the check off the shared `**Members:**` line into a `## Class fit` section of the
-member's own bug file, which replaces `CHECK 3` rather than tightening it. If that ADR is
-accepted, tightening the substring test is wasted work. If it is rejected, the smallest repair is
-to require the stem in backticks after a `+1` marker, followed by a minimum amount of text. Any
-presence test is satisfiable by a placeholder, so whichever form lands needs a mutation test
-that an empty derivation is refused.
+Fixed by replacement, not by tightening. `CHECK 3` no longer reads the class's `**Members:**` line at all. It
+reads the staged bug file's own `## Class fit` section and requires at least 40 letters or digits
+under it, outside a code fence. The ADR
+`docs/adrs/2026-10-16-the-reasoning-for-a-class-member-lives-in-the-members-own-bug-file.md` records the
+decision. The substring test is gone, so the gap between the refusal text and the check is gone with it:
+the text now asks for a section, and the check tests for a section.
+
+- Fix commit on `experiments`: `9c4609c8` (hook and its suite), `ff186ccf` (policy file, template,
+  fixtures). Patch-id of `9c4609c8`: `896d3fcee31b698b36d837685b2143f9e1cde47e`.
+- The same rule is checked at `doc(create)` by `src/librarian/requirements.rs` and
+  `.codescout/requirements.toml`. That half takes effect after `./scripts/rb.sh` and `/mcp`; the hook
+  half has been live since the commit.
+- Measured 2026-10-16: `gate.sh --check` green on the feature branch (FMT, CLIPPY, LEAN, DEFAULT = 0).
 
 ## Tests added
 
-None. The record is open, and no fix exists. N/A is justified only until a fix lands.
+`tests/pre-commit-ledger-growth.sh`, 39 assertions, each naming the production change that fails it.
+Against the pre-fix hook 12 of its first 35 assertions failed, so it can fail. Mutation run on the new
+rule: 12 of 13 hook mutants killed; the survivor (a retained `\r`) is equivalent, because the heading is
+compared after `.strip()` and the count skips non-alphanumerics. Wired into CI beside
+`tests/pre-commit-ledger-divergence.sh`.
+
+Also `tests/commit-mine.sh` (R3 reworded, R4 added) and, in `src/librarian/requirements.rs`, tests that
+the hook and the server count a section the same way and agree on the policy constants.
 
 ## Workarounds
 
@@ -153,10 +165,9 @@ forgets.
 
 ## Resume
 
-1. Read the ADR named under § Fix and settle it first.
-2. If the ADR is rejected, add the five cases of § Reproduction as a fixture beside
-   `tests/pre-commit-ledger-divergence.sh` and make the three accepted-but-weak cases refuse.
-3. Re-run § Reproduction against HEAD before acting: the script and this record can both have moved.
+Nothing owed on the defect. Open follow-ups, none of them this bug: the roster still describes the old
+rule in prose at several historical places, and the legacy `**Members:**` lines are frozen and not
+migrated.
 
 ## References
 

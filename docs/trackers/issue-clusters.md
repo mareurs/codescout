@@ -56,8 +56,12 @@ was retired 2026-05-18. `open-issue-work-queue.md` § *Sequencing notes* listed 
 same defect `docs/TAXONOMY.md` records for a bare SHA and a bare ordinal. A query is re-evaluated
 on read and cannot go stale.
 
-So: a `**Members:**` line carries the query, plus a per-member derivation saying why that
-instance belongs to this class. It does **not** carry a bare count — counts are derived
+So: a `**Members:**` line carries the query. **Since 2026-10-16 it no longer carries a derivation
+for a new member.** That reasoning lives in the member's own bug file, under `## Class fit`, and
+the commit hook (`CHECK 3`) and `doc(create)` both require it there
+(`docs/adrs/2026-10-16-the-reasoning-for-a-class-member-lives-in-the-members-own-bug-file.md`).
+The existing `**Members:**` lines are frozen: nothing reads them for that rule, so do not append to
+one. A `**Members:**` line still does **not** carry a bare count — counts are derived
 (`scripts/probe-cluster-census.py`) and `no_class_field_states_a_bare_n` refuses a stored one.
 Trust the query; run the probe before trusting any figure.
 
@@ -89,7 +93,7 @@ Seven fields, and nothing else is required.
 |---|---|
 | `**Slug:**` | the `cluster/<slug>` tag value — the closed-set entry the gate checks against |
 | `**Claim:**` | the mechanism, stated so it can be false |
-| `**Members:**` | the query, plus a per-member derivation. **Never a bare `n=`** — counts are derived (`scripts/probe-cluster-census.py`), and `no_class_field_states_a_bare_n` refuses one here. *Bare* means **outside backticks**; read the two paragraphs under this table before reaching for a backtick |
+| `**Members:**` | the query, plus the derivations already written (frozen since 2026-10-16: a new member's derivation goes in its own bug file's `## Class fit`). **Never a bare `n=`** — counts are derived (`scripts/probe-cluster-census.py`), and `no_class_field_states_a_bare_n` refuses one here. *Bare* means **outside backticks**; read the two paragraphs under this table before reaching for a backtick |
 | `**Blind party:**` | who structurally cannot see it, and why — or `none — ordinary design defect` |
 | `**Promotes to:**` | target surface, per the routing table below |
 | `**Mechanism status:**` | `none yet` \| `designed` \| `shipped (<what>)` — borrowed from `OB` |
