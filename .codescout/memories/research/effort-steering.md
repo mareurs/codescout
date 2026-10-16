@@ -53,3 +53,91 @@ plan `claude-plugins/docs/superpowers/plans/2026-10-07-effort-steering-quality-t
   will live in `.../spikes/s5/` (throwaway too).
 - Design and first-phase records: codescout `docs/superpowers/specs/2026-10-04-effort-steering-design.md`,
   `docs/research/2026-10-04-effort-steering-*.md`.
+
+## S5 smoke, control and pilot (2026-10-11 and 12, CLI 2.1.296, Sonnet 5.5, personal account)
+
+- **Cost is far below the published $2 to $5 per `xhigh` run.** Client-reported `costUsd` means: A $0.53, B $0.45, C $0.18 (pilot, 3 tasks, 1 run each). Whole smoke + control + pilot: about $7.06 notional. Indicative only (3 easy tasks).
+- **All 9 pilot runs passed, in every arm, including `low`.** A ceiling signal: calibration must find tasks where the arms differ.
+- **Claude Code fires `UserPromptSubmit` on a queued `<task-notification>` prompt.** A Bash command over 120 s is auto-backgrounded, and its completion re-fires the hook, so arm B gets the steer a second time. The old "exactly one context" rule (R147) classified such a run as `steer_mismatch`; R-ST1 now accepts one or more identical contexts with the first before the first assistant record (S5 README rule 20, commits 294192b..29c3ee3). `analyze` reports `counts.<arm>.multiSteer`.
+- **`num_turns` of the stdout JSON is unreliable for a run that ends with a trailing task-notification** (cs-p07.C.0: 1 turn reported, about 13 in the transcript) and the wall time then includes the CLI waiting for the background task (about 10 minutes there).
+- **Proxy control:** the first request has the same total input (16,545 tokens) open and proxied; thinking and output were lower through the proxy in 2 runs per side (not settled with n=2). Allowlist hosts seen: `api.anthropic.com`, `http-intake.logs.us5.datadoghq.com`, `static.rust-lang.org`; no refusal in allowlist mode.
+- **Kept run directories are large:** 3 to 6.5 GB each; `runs/` was 62 GB after the pilot.
+
+## S5 calibration of the first 10 tasks (2026-10-12, CLI 2.1.296, Sonnet 5.5)
+
+- 30 runs (A xhigh x2, C low x1 on cs-p01, p02, p04, p05, p06, p07, p08, p10, p11, p12): **30 of 30 passed**, no infra row, no timeout, no p2p regression. `s5 select`: **all 10 tasks dropped `effort_idle`** (A 2/2 and C 1/1), 0 kept of the spec's target 32.
+- Means: A $1.13, 616 s, 23,326 thinking tokens, 39,881 output tokens; C $0.22, 466 s, 1,274 thinking tokens, 5,370 output tokens. So `low` thinks about 18 times less and passes the same.
+- Meaning: on these well-specified tasks there is no headroom for the steer to hurt (the spec's "xhigh equals high" risk, here low equals xhigh). A wider margin does not fix it; the tasks must be harder or the question must change. Decision for the operator.
+- Task authoring yield: 3 usable of 6 attempts in batch 1 (cs-p09, p13, p14 dropped: the fix's own tests call helpers the fix adds). Window moved to 2026-07-15 (spec amended 2026-10-12); `tasks/candidates-0715.json` has 196 candidates.
+
+## S5 calibration of batch 2 (cs-p15..p20, 2026-10-13) and a grader defect
+
+- 18 runs, $11.76 (client estimate): 17 of 18 passed. `s5 select`: cs-p15, p16, p17, p18, p20 dropped `effort_idle`; cs-p19 "kept" only because of an invalid failure (below). With the 10 earlier tasks, 0 of 16 survive the drop rule: arm C (`low`) passed 16 of 16, arm A 31 of 32. Means batch 2: A $0.91, 15,069 thinking tokens; C $0.15, 764.
+- **Grader defect (cs-p19.A.0):** `grade.mjs` graftScript appends a graftLines line only when the agent's file does not already declare that module. The agent's CLAUDE.md is built from `p2p.command`, which named `server::pin_scope_checks::...`; the agent wrote its own inline `mod pin_scope_checks { ... }` with the same test names, so the hidden module was never mounted: f2p `notRun`, p2p "passed" (its own tests). Fixed in the task definitions: graft module names now carry the prefix `s5h_`, and no `p2p.command` names a hidden module (cs-p19 uses `server::`, cs-p10 `integration_ unaltered_`). Not fixed in code: no loader check yet; the author brief has the rule. A passing row proves the hidden tests ran (a shadowed module gives `notRun` = fail), so the 33 other passing rows are not affected.
+- Tasks whose `p2p.command` named hidden tests also leak them to the agent's CLAUDE.md: always give a prefix filter.
+
+## S5 thin-spec probe (2026-10-13, CLI 2.1.296, Sonnet 5.5)
+
+Question: do thin-spec variants (shorter TASK.md) of cs-p15, p16, p17, p19, p20 give effort headroom (arm A passes, arm C fails)? Config `s5-work/configs/probe-thin.json`, rows `s5-work/rows-probe-thin.jsonl`, 10 runs (A and C once per variant), cost $5.18 client-reported (A $4.24, C $0.94), no infra failures, no plan-limit stop, ~1 h.
+
+Result: A passed 5/5 and C passed 5/5. Every pass has f2p all passed, p2p all passed, no timeout. No headroom: thin specs did not make arm C fail.
+
+Process still differs by effort: A took 28-58 turns, C took 10-18 turns. A cost about 4.5 times what C cost. So effort changes the process and the bill, not the outcome, on these tasks.
+
+Caveat: n=1 per arm per variant. A 5/5 vs 5/5 tie does not exclude a small effect. It only says that the effect is not large on these 5 tasks.
+
+## S5 verdict to date (2026-10-13): uninformative, G4 stays held
+
+Written into the spec section "Result to date (2026-10-13)" and into ES-22 (claude-plugins commit ab35073, not pushed). By the spec's decision rule the verdict is "uninformative": arm C passed 21 of 21 valid runs, arm A 36 of 37, the drop rule leaves 0 of 16 tasks, so the validity gate cannot hold. The registered measured run was not made and no prereg exists. Do not word this as "no harm found": the spec says the verdict is never "pass" in this case.
+
+Pilot mechanism lead (3 tasks, 1 run each, rows-pilot.jsonl, `usage.main`): the steer cut main-session thinking 21 percent (25,422 to 20,032) and output 23 percent (58,485 to 44,837); per task thinking minus 27, 28, 3 percent; cost minus 17 percent. Arm C: thinking minus 94 percent, cost minus 67 percent. Earlier in the session I said the steer "saves little" next to `low`; that compared B with C. Against A it saves about a fifth.
+
+Operator options still open: close ES-22 with this result; redesign with a new task source (a spec amendment and budget); or run arm B on the calibrated tasks for a cost and mechanism number only. Cleanup pending: 62 GB of run dirs in `s5-work/runs/`, the `s5-proxy` container, the exposed OAuth token.
+
+## R1 (effort routing, first rule): state at 2026-10-13
+
+Design: claude-plugins spec `docs/superpowers/specs/2026-10-13-effort-routing-first-rule-design.md` (id `fc50071781001cd0`). R1 = `hasStackTrace` -> shallow -> `low`; stage 0 (no model call), stage 1 (arm C, ~32 runs, ~$6), stage 2 (arm A, ~32 runs, ~$34, only if C failed). Margin 0.15, 12 usable tasks.
+
+Where the code is: branch `effort-routing-r1` in claude-plugins (the main checkout is on it; `main` stays at 7ba960f). Code in `effort-steering/spikes/r1/`. **Operator ruling 2026-10-13: the branch stays separate from `main` until after stage 1.** Nothing is pushed.
+
+Verified 2026-10-13: 30 of 30 test files pass from the repo root (the S5 `hook-copy` test fails when run from `effort-steering/`, a cwd quirk that predates R1); no model call made (no rows files); the registration equals its HEAD blob.
+
+Open before stage 1 (decision 4 in the spec): the agent's tree must hold no `TASK.md` and no `CLAUDE.md` pointer. The first implementation kept both, which made the lab easier than S5. Needs: strip the files in `r1-workroot.mjs`, recompute treeHash, re-gate the 12 tasks (one at a time, 4 CPUs / 8 GB), re-register, update the README, Opus review. Stage 1 needs the operator's separate approval (run count, model, cost).
+
+## R1 V2 stage 1 (2026-10-14): arm C passes 19 of 24 (verdict needs_stage_2)
+
+State: branch `effort-routing-r1` in claude-plugins (HEAD eb90bd3 + later), never pushed, separate from main until the operator rules. V2 = hidden tests in the agent's tree (spec decision 5). The V1 stage 1 (10 of 24 runs asked for the test file, C 4 of 24) is a pilot only.
+- V2 stage 1: 24 runs, arm C (`low`), Sonnet 5.5, $3.7766 real, no infra, no stop. C passed 19 of 24; every run edited; the shadow guard never fired. Per task: 9 tasks 2 of 2, cs-p12 1 of 2, cs-p18 0 of 2, cs-p20 0 of 2.
+- cs-p18 (both runs, verified in the transcripts): the agent ran `cargo test` only with `--no-default-features`, so the `librarian` module (default feature) never compiled and the 2 `update_entry` f2p tests never existed for it. The warm target is built with `--no-default-features`, so the flag is also the cheap path: a lab artifact of hint plus cache, not shown to be an effort effect.
+- cs-p20 (both runs): grade `build=failed`, 5 files edited, agent said it changed `progress` in the context builders and the `derive_ctx` call sites; cause of the build error not established (the grade dir is not kept; set S5_KEEP_GRADES=1 to keep it).
+- cs-p12.C.1: fixed one part, ended by asking whether to fix the other 5 f2p tests.
+- Lab changes made for V2: grader shadow guard (diff-based, in the graft step), `r1-v2-adjust.json` (cs-p01/p06/p08 hidden file from P, cs-p16 doc comment dropped). Guard NOT closed against: git attribute/config tampering, skip-worktree, git replace, `#[cfg(any())]`; a sentinel test appended to each hidden file would close it (not built).
+- Next gate: stage 2 = 24 runs of arm A (`xhigh`), about $25 by the S5 per-run figure, cap $60; operator approval needed. G4 stays held.
+
+### R1 V2 stage 1: why cs-p18 and cs-p20 failed (checked 2026-10-14)
+- The build-hint sentence anchors the agent on `--no-default-features`: 22 of 24 stage 1 agents used it at least once (20 in every cargo command); with the sentence removed (diagnostic, 4 runs, $0.53, rows in `s5-work-v2d/rows-diag.jsonl`, not in the verdict) 0 of 4 did.
+- cs-p20: replaying the agent's edits onto the V2 tree (fidelity checked against the row's files/insertions/deletions) and grading with S5_KEEP_GRADES=1 gives `E0063 missing field progress in ToolContext` in `tests/link_scan.rs:29` and `tests/audit_shards_cross_machine.rs:50`: the agent added a field and did not compile the other test targets. Under the flag it could not see them at all (the `librarian` module is gated); without the sentence one run still failed the same way and one passed after running the integration tests.
+- cs-p18: NOT the flag. Without the sentence both agents ran default features and still fixed only the `edit_file` site; the prompt trace shows one failing test, the two `update_entry` tests are a second site they never ran. 0 of 2 before and after.
+- So the sentence is a real harness artifact, but the flag is not the main cause of the failures; both look like incomplete verification or an incomplete fix at `low`. Whether `xhigh` does better is what stage 2 measures. n is 4, so p20 0 of 2 to 1 of 2 is not evidence.
+- Infra note: Docker's address pool was full (a new unrelated network took the last slot), so `proxy up` failed; creating `s5-internal` by hand (`--internal --label s5=1 --subnet 10.253.77.0/24`) lets `proxyUp` use it. `proxy down` removes it again.
+
+## R1 V2 verdict (2026-10-14): `not_shown_safe` (R1 no-ship), G4 still held
+- Stage 2 (arm A, `xhigh`, 24 runs, $14.38, no infra, no stop): A passed 22 of 24 against C 19 of 24. Per run: C $0.157, 2.5 min median, 12 turns; A $0.599, 8.3 min, 28 turns (74 percent cheaper at `low`).
+- Per task (C then A, of 2): 9 tasks 2/2 and 2/2; cs-p12 1/2 and 2/2; cs-p18 0/2 and 0/2 (tie, the second bug site is not in the trace and both arms used `--no-default-features`); cs-p20 0/2 and 2/2.
+- `analyze`: mean C minus A = -0.125, one-sided 95 percent lower bound -0.286 (margin 0.15), verdict `not_shown_safe`. Not "unsafe": two tasks carry the difference at N = 12.
+- What separates the arms is verification depth: on cs-p20 A ran a plain `cargo test` (whole suite, integration targets, `git stash` to separate old failures) and caught `E0063 missing field progress` in two other test targets; C ran narrow filters. cs-p12.C.1 stopped to ask. A candidate lever for a later experiment: a prompt line that asks for the whole suite before finishing (arm B was never run). Not tested.
+- Full write-up with the artifacts and caveats: R1 spec section "Result (2026-10-14)" in claude-plugins, branch `effort-routing-r1` (not merged, never pushed). Rows and analyses: `~/work/claude/s5-work-v2/` (sha256 prefixes in the spec).
+- Caveats that stay: V2 gives the exact test interface (easier than a real prompt); the build sentence is a harness artifact (symmetric between arms); V2, the grader guard and the repairs were chosen after the V1 pilot outcome; the guard does not stop deliberate git manipulation.
+
+## When to switch effort: research (2026-10-14)
+
+- Index with verified claims and the four-stage design: `docs/research/2026-10-14-effort-steering-when-to-switch.md` (three raw subagent reports beside it; only the index items were checked at the source).
+- Anthropic's Effort doc: a per-message effort change after a `tool_result`-only user turn "waits for the next `user` turn with new input". So "a `turn.step` rewrite reaches the wire" (our 2.1.292 probe) does NOT show that a mid-loop change takes effect. Stage 0 measures it (thinking per request after a switch, positive control, cache-read share).
+- Discordance between effort levels is unstable on rerun (arXiv 2608.01347: 3 of 6 Sonnet 5 rescues reproduced). Untrained prompted selectors lose to fixed effort (ARES 2603.07915; Nadir). Always compare a router with random at the same dose.
+- Transcripts record `effort` and `perTurnEffort` on every `assistant` record (mining source; correlational only).
+- CLI on this host is 2.1.299 (2026-10-14); R1 ran on 2.1.296; `VERIFIED_CLI_VERSIONS` in the plan-limit detector lists only 2.1.292 and 2.1.296.
+- Stage 0 (2026-10-14, CLI 2.1.296, 14 runs incl. 12 calibration): thinking tokens at the tool-result step did not separate `xhigh` from `low` on any of 6 questions (q1: low 2094 and 3198 vs xhigh 3319 and 3295; easy questions near 0 at both). So that readout cannot serve as the positive control for a mid-loop switch; whether a switch takes effect is still not shown. Details and instrument paths: the index doc, section "Stage 0 result".
+- Rerun of the three losses (2026-10-14, root `/home/marius/work/claude/s5-work-v2r`, 12 runs, $6.62): cs-p20 reproduces (C 0/3, A 3/3; pooled with V2 0/5 vs 5/5), cs-p12 does not (C 2/3, A 3/3; the new C failure is a wrong fix, not a stop-to-ask). cs-p20 cause in the command text: all three `low` runs compiled only `--lib` or `--no-default-features` targets, all three `xhigh` runs ran plain `cargo test`, `--tests` or `clippy --all-targets`; all three `low` rows grade `build=failed`. Breadth of verification, not whether a test ran. Over all 48 V2 runs "any test after the last edit" was 21/24 at `low` vs 16/24 at `xhigh`. Details: index doc, sections "Verification behaviour" and "Rerun".
+- Verification paragraph at `low` on cs-p20 (2026-10-14, root `s5-work-v2p`, 5 runs, $1.11): 0/5 pass, all `build=failed`; no run compiled all targets; two final messages state what was not run. Rule fixed before (effect if >= 4/5, none if <= 1/5): no effect. So an instruction asking for a real check did not widen the verification at `low` on this task. Not tested: a more specific instruction; the paragraph in the system prompt. Observation, not shown causal: `low` followed the prompt's `--no-default-features` hint from its first command in 8 of 8 cs-p20 runs, `xhigh` in 0 of 3.
+- Termination gate at `low` on cs-p20 (2026-10-15, root `s5-work-v2g`, 5 runs, $1.26): 5/5 pass (rule fixed before: gap closed if >= 4/5). A `Stop` hook in a COPY of the harness (`es-stage0/es-gate`) runs `cargo check --offline --all-targets` and blocks the stop once with the compiler output; it blocked in 4 of 5 runs, always `E0063 missing field progress` in other test targets, and each of those 4 then passed. Claude Code 2.1.296 runs `Stop` hooks in `-p` mode and honours `decision: block` (seen in the transcripts as "Stop hook feedback"). One task, compile-class failure, references from other batches (low without the gate 0/10, xhigh 5/5). Cost per run: gated low $0.25, low $0.18, xhigh $0.48 (cs-p20 rerun means).
+- Stage A, a critic as a gate for plans and design docs (2026-10-16, `/home/marius/work/claude/es-stage0/critic-a/`, pre-registered in `prereg.md`, 80 calls, $14.55, Sonnet 5.5, CLI 2.1.296, tools Read/Grep/Glob on the code snapshot the author wrote against): 20 codescout docs, each clean and with one planted defect. Found as blocking: `low` 18/20, `high` 17/20; no clean original blocked without a real defect (0 at both); verdict usable at both. The critic's effort made no difference (paired −1) and `low` costs half ($0.124 vs $0.240 per call). 58 of 72 verified blocking findings on the UNMODIFIED docs were real defects, so a gate would send nearly every doc back once. Traps hit: the parent of a doc's first commit can already hold the implementation (pick the snapshot from a marker the implementation introduced, and check the marker is the name the code used); removing CLAUDE.md from the tree makes critics report it missing. Not shown: that a producer fixes what the gate reports, the cost of that round, defects not planted by us. Index doc section "Generalizing the gate beyond code".
