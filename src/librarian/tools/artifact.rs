@@ -65,6 +65,35 @@ fn id_as_artifact_id(args: &Value) -> Value {
     a
 }
 
+/// Refuse a malformed WRITE call with its own corrected-call error, before anything can write.
+///
+/// `LibrarianAdapter::call` runs the worktree write guard for every call that can write, and it
+/// runs THIS first, so a call that fails argument validation gets the tool's validation error
+/// ("requires 'id' and 'new_rel_path'", with its `e.g.` hint) instead of "Write blocked". Such a
+/// call cannot write: each arm below is the same pure parse `call` begins with, and `call`
+/// refuses at that parse on exactly the inputs this refuses on.
+///
+/// Read actions and unknown actions return `Ok(())`: they are not guarded, and an unknown action
+/// is answered by `call`'s own fallback arm.
+///
+/// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    match args["action"].as_str() {
+        Some("create") => super::create::preflight(args),
+        Some("update") => super::update::preflight(args),
+        Some("move") => super::mv::preflight(args),
+        Some("delete") => super::delete::preflight(args),
+        Some("graft") => super::graft::preflight(args),
+        Some("link") => super::link::preflight(args),
+        Some("append_entry") => super::append_entry::preflight(args),
+        Some("update_entry") => super::update_entry::preflight(args),
+        Some("rekey_prefix") => super::rekey_prefix::preflight(args),
+        Some("event_create") => super::event_create::preflight(&flatten_event_args(args)?),
+        Some("augment") => super::augment::preflight(&flatten_augment_args(args)?),
+        _ => Ok(()),
+    }
+}
+
 pub struct Artifact;
 
 #[async_trait]

@@ -254,18 +254,31 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
     Ok(json!("ok"))
 }
 
-/// `doc(action="augment", id=…, augment={prompt, params, …})` dispatches here via
-/// `artifact.rs`'s `flatten_augment_args`, which lifts the nested `augment` object
-/// and carries `id`/`merge` into it — so this function still reads a flat `Args`.
-pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let mut a: Args = serde_json::from_value(args).map_err(|e| {
+/// Argument parse for `augment` (on the flattened args): pure, no catalog or filesystem access.
+/// `call` runs it first, and [`preflight`] runs it alone so the worktree write guard can sit
+/// behind it.
+fn parse_args(args: Value) -> Result<Args> {
+    serde_json::from_value(args).map_err(|e| {
         super::deser_error(
             e,
             "augment",
             "doc(action=\"augment\") requires 'id'",
             "e.g. doc(action=\"augment\", id=\"<16-hex>\", augment={prompt: \"...\"}). Get an id from doc(action=\"find\", ...). Pass merge=true to patch an existing augmentation — merge=false (the default) REPLACES all seven shape fields, silently resetting any you omit.",
         )
-    })?;
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+/// `doc(action="augment", id=…, augment={prompt, params, …})` dispatches here via
+/// `artifact.rs`'s `flatten_augment_args`, which lifts the nested `augment` object
+/// and carries `id`/`merge` into it — so this function still reads a flat `Args`.
+pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let mut a = parse_args(args)?;
 
     // params_path: read the params JSON from a filesystem path server-side.
     // A large params array (≳9 KB) can't be round-tripped through the model

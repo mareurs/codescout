@@ -54,7 +54,9 @@ fn default_entry() -> Value {
     json!({})
 }
 
-pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+/// Argument parse for `append_entry`: pure, no catalog or filesystem access. `call` runs it
+/// first, and [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(format!("doc(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. doc(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry.")
     })?;
@@ -63,6 +65,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "append_entry: `entry` must be a JSON object",
         ));
     }
+    Ok(a)
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a = parse_args(args)?;
     // Above the branch, so the params path and the prose path refuse alike: the params
     // allocator checks no declaration at all, so this is the only place both reach. A
     // ledger can still carry such a prefix — hand-written, or declared before the write

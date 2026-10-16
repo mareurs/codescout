@@ -478,7 +478,11 @@ macro_rules! lift_top_level_param {
     };
 }
 
-pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+/// Argument parse for `update`: pure, no catalog or filesystem access — the refusals that name a
+/// mistake before serde sees it, the `patch: null` normalisation, and the deserialisation.
+/// `call` runs it first, and [`preflight`] runs it alone so the worktree write guard can sit
+/// behind it.
+fn parse_args(args: Value) -> Result<Args> {
     // `rel_path` is owned by `move`, at BOTH nesting levels. Checking only
     // `patch.rel_path` let a top-level one fall through to the generic empty-patch
     // guard below, which would answer a specific mistake with a generic route.
@@ -516,14 +520,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
-    let mut a: Args = serde_json::from_value(args).map_err(|e| {
+    serde_json::from_value(args).map_err(|e| {
         super::deser_error(
             e,
             "update",
             "doc(action=\"update\") requires 'id' and well-typed patch fields",
             "e.g. doc(action=\"update\", id=\"<16-hex>\", patch={\"status\": \"fixed\"}). Get an id from doc(action=\"find\", ...).",
         )
-    })?;
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let mut a = parse_args(args)?;
 
     // Every top-level param the artifact schema advertises for `update` is lifted
     // into `patch`, which is where the write actually reads from. Skipping one does

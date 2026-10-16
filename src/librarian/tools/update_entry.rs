@@ -17,14 +17,9 @@ fn default_fields() -> Value {
     json!({})
 }
 
-/// Patch one entry of a tracker's `entry_collection` in place.
-///
-/// The counterpart `append_entry` never had. Without it the only way to change a
-/// row was `doc(update, patch={params:{…}})`, whose RFC 7396 array semantics
-/// replace the whole collection — so flipping one row's status meant re-sending
-/// every other row, and getting that wrong silently deleted them.
-/// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
-pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+/// Argument parse for `update_entry`: pure, no catalog or filesystem access. `call` runs it
+/// first, and [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
     // `append_entry` names its payload `entry`; this action names its patch
     // `fields`. Nothing in the action name says which noun applies, so `entry` is
     // a natural guess — and an undeclared key is dropped before it reaches the
@@ -57,6 +52,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "update_entry: `fields` must be a JSON object",
         ));
     }
+    Ok(a)
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+/// Patch one entry of a tracker's `entry_collection` in place.
+///
+/// The counterpart `append_entry` never had. Without it the only way to change a
+/// row was `doc(update, patch={params:{…}})`, whose RFC 7396 array semantics
+/// replace the whole collection — so flipping one row's status meant re-sending
+/// every other row, and getting that wrong silently deleted them.
+/// docs/issues/archive/2026-08-16-params-merge-patch-wipes-entry-arrays-with-no-guard.md
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a = parse_args(args)?;
     let mut cat = ctx.catalog.lock();
     let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
     let outcome = augmentation::update_entry(

@@ -301,7 +301,10 @@ fn next_monotonic_id() -> String {
     })
 }
 
-pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+/// Argument parse for `event_create` (on the flattened args): pure, no catalog or filesystem
+/// access — deserialisation plus the kind and payload checks. `call` runs it first, and
+/// [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         super::deser_error(
             e,
@@ -318,6 +321,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         ));
     }
     validate_payload(&a.kind, &a.payload)?;
+    Ok(a)
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a = parse_args(args)?;
 
     let a = {
         let mut cat = ctx.catalog.lock();

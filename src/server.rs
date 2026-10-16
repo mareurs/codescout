@@ -9024,6 +9024,123 @@ mod tests {
             "file must not have been created in pinned workspace A"
         );
     }
+    /// docs/issues/2026-10-06-edit-file-heading-grammar-reported-ignoring-workspace-on-managed-markdown.md
+    ///
+    /// A subagent reported `edit_file(workspace=<worktree>, heading=..., action=...)` on
+    /// librarian-managed markdown landing in the MAIN checkout, each response carrying a
+    /// `wrote_to` naming main. `wrote_to` is attached only to UNPINNED writes, so that
+    /// response shape means the call reached the server without a pin. This pins both halves
+    /// through the whole dispatch path (`call_tool_inner`: pin extraction, access gate,
+    /// `call_content`, post-processing), not just `EditFile::call`:
+    ///
+    /// - a PINNED heading-grammar edit on a stamped file changes the pinned workspace's file,
+    ///   leaves main's file byte-identical, and carries no `wrote_to`, for a relative path
+    ///   and for an absolute path inside the pinned workspace, single-edit and batch grammar;
+    /// - the UNPINNED control, on a main checkout that has linked worktrees, does carry
+    ///   `wrote_to` — so a `wrote_to` on a call you pinned does mean the pin was lost
+    ///   before the server.
+    #[tokio::test]
+    async fn a_pinned_heading_edit_on_a_stamped_file_writes_the_pinned_workspace_not_main() {
+        const STAMPED: &str = "---\nid: abc513d3ee0f0b50\nkind: tracker\n---\n\n## S\n\nalpha\n";
+        let (main_dir, server) = make_server().await;
+        let main_root = std::fs::canonicalize(main_dir.path()).unwrap();
+        // Main looks like a checkout with one linked worktree, the way `list_git_worktrees`
+        // reads it — which is what makes the unpinned control annotate.
+        let linked = main_root.join(".git").join("worktrees").join("wt");
+        std::fs::create_dir_all(&linked).unwrap();
+        let wt_root = tempdir().unwrap();
+        let wt = std::fs::canonicalize(wt_root.path()).unwrap();
+        std::fs::write(linked.join("gitdir"), format!("{}/.git\n", wt.display())).unwrap();
+        std::fs::create_dir_all(wt.join(".codescout")).unwrap();
+        for root in [&main_root, &wt] {
+            std::fs::create_dir_all(root.join("docs")).unwrap();
+            std::fs::write(root.join("docs/m.md"), STAMPED).unwrap();
+        }
+
+        async fn run(server: &CodeScoutServer, args: serde_json::Value) -> (String, Option<bool>) {
+            let req = CallToolRequestParams::new("edit_file")
+                .with_arguments(serde_json::from_value(args).unwrap());
+            let result = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap();
+            let text = result
+                .content
+                .iter()
+                .find_map(|c| c.as_text().map(|t| t.text.clone()))
+                .unwrap_or_default();
+            (text, result.is_error)
+        }
+
+        let edit = |path: String| {
+            serde_json::json!({
+                "path": path, "heading": "## S", "action": "edit",
+                "old_string": "alpha", "new_string": "beta",
+                "workspace": wt.to_string_lossy(),
+            })
+        };
+        let batch = |path: String| {
+            serde_json::json!({
+                "path": path,
+                "edits": [{"heading": "## S", "action": "edit",
+                           "old_string": "alpha", "new_string": "beta"}],
+                "workspace": wt.to_string_lossy(),
+            })
+        };
+        let abs_in_wt = wt.join("docs/m.md").to_string_lossy().to_string();
+        let mut failures: Vec<String> = Vec::new();
+        for (label, args) in [
+            ("relative/single", edit("docs/m.md".into())),
+            ("relative/batch", batch("docs/m.md".into())),
+            ("absolute-in-worktree/single", edit(abs_in_wt.clone())),
+            ("absolute-in-worktree/batch", batch(abs_in_wt)),
+        ] {
+            std::fs::write(wt.join("docs/m.md"), STAMPED).unwrap();
+            let (text, is_error) = run(&server, args).await;
+            let wt_after = std::fs::read_to_string(wt.join("docs/m.md")).unwrap();
+            let main_after = std::fs::read_to_string(main_root.join("docs/m.md")).unwrap();
+            if is_error == Some(true) || !wt_after.contains("beta") {
+                failures.push(format!(
+                    "{label}: the pinned edit did not apply to the pinned workspace: {text}"
+                ));
+            }
+            if main_after != STAMPED {
+                failures.push(format!("{label}: MAIN's file changed: {main_after:?}"));
+            }
+            if text.contains("wrote_to") {
+                failures.push(format!(
+                    "{label}: a pinned write must not carry wrote_to: {text}"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+
+        // Control: the same shape UNPINNED, session chosen, annotates the checkout.
+        server
+            .agent
+            .activate(main_root.clone(), None)
+            .await
+            .unwrap();
+        let (text, is_error) = run(
+            &server,
+            serde_json::json!({
+                "path": "docs/m.md", "heading": "## S", "action": "edit",
+                "old_string": "alpha", "new_string": "beta",
+            }),
+        )
+        .await;
+        assert_ne!(is_error, Some(true), "unpinned control failed: {text}");
+        assert!(
+            text.contains("wrote_to") && text.contains(&main_root.to_string_lossy().to_string()),
+            "an unpinned write in a repo with linked worktrees names the checkout it reached: {text}"
+        );
+        assert!(
+            std::fs::read_to_string(main_root.join("docs/m.md"))
+                .unwrap()
+                .contains("beta"),
+            "the unpinned control must write main"
+        );
+    }
 
     #[tokio::test]
     async fn post_process_annotates_against_the_pinned_root_without_mutating_text() {

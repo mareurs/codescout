@@ -132,15 +132,27 @@ fn citations_with_dated_flag(
 /// How many citing files to name before switching to a count alone.
 const CITATION_SAMPLE: usize = 20;
 
-pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args).map_err(|e| {
+/// Argument parse for `move`: pure, no catalog or filesystem access. `call` runs it first, and
+/// [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
+    serde_json::from_value(args).map_err(|e| {
         super::deser_error(
             e,
             "move",
             "doc(action=\"move\") requires 'id' and 'new_rel_path'",
             "e.g. doc(action=\"move\", id=\"<16-hex>\", new_rel_path=\"docs/archive/foo.md\"). new_rel_path is relative to the repo root; get an id from doc(action=\"find\", ...).",
         )
-    })?;
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a = parse_args(args)?;
 
     // Defense-in-depth: new_rel_path must stay within the resolved root. Reject
     // absolute paths and `..` segments so a move can never escape the project

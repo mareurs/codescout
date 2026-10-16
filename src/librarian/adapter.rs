@@ -343,7 +343,14 @@ impl crate::tools::Tool for LibrarianAdapter {
         // Keyed on whether THIS call can write, not on the action name: a dry-run
         // `delete`/`graft` preview writes nothing and must reach the tool. See
         // `doc_call_can_write`.
+        //
+        // A call that fails its own argument validation cannot write either, so it gets the
+        // tool's corrected-call error rather than "Write blocked": `preflight` is the pure
+        // parse each write tool begins with, run ahead of the guard. It never writes, so
+        // running it first cannot let a write past the guard.
         if self.inner.name() == "doc" && doc_call_can_write(&input) {
+            crate::librarian::tools::artifact::preflight(&input)
+                .map_err(bridge_recoverable_error)?;
             crate::tools::guard_worktree_write(ctx)
                 .await
                 .map_err(bridge_recoverable_error)?;
@@ -1066,7 +1073,9 @@ fn is_mutating_doc_action(action: &str) -> bool {
 /// Anything other than an absent, null or boolean-`false` `force` counts as applying: a
 /// string `"true"`, a number, an object. The guard may refuse a call the tool would then have
 /// rejected as malformed, and that is the safe direction — the guard must never be skipped for
-/// a call that can write bytes.
+/// a call that can write bytes. (`artifact::preflight` runs ahead of the guard and answers the
+/// malformed ones with their own validation error, so in practice only a well-formed call that
+/// can write reaches the guard.)
 ///
 /// **`rekey_prefix` is deliberately NOT narrowed**, although it is also a dry run by default.
 /// Its preview calls `worktree::resolve_write_target` first, which forks a main-checkout
@@ -2577,8 +2586,8 @@ mod tests {
     /// The other half, and the one that matters: a call that CAN write is still refused with the
     /// worktree-activation text. `rekey_prefix` is in this table although it is a dry run by
     /// default, because its preview forks a worktree shadow row first (`resolve_write_target`).
-    /// A string `"true"` counts as applying: the guard must never be skipped for a call that
-    /// might write.
+    /// Every input here is well-formed: a malformed call is answered by its own validation error
+    /// before the guard (see `doc_malformed_calls_get_their_own_error_not_the_worktree_guard`).
     #[tokio::test]
     async fn doc_calls_that_can_write_are_still_refused_in_an_unactivated_worktree_repo() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2590,7 +2599,6 @@ mod tests {
 
         for input in [
             json!({"action": "delete", "id": "0000000000000000", "force": true}),
-            json!({"action": "delete", "id": "0000000000000000", "force": "true"}),
             json!({"action": "graft", "from_id": "0000000000000000", "into_id": "1111111111111111", "force": true}),
             json!({"action": "rekey_prefix", "id": "0000000000000000", "from": "T", "to": "SRI"}),
             json!({"action": "rekey_prefix", "id": "0000000000000000", "from": "T", "to": "SRI", "force": true}),
@@ -2630,6 +2638,113 @@ mod tests {
             assert!(
                 text.contains("unknown id"),
                 "a pinned call must reach the tool: {input} -> {text}"
+            );
+        }
+    }
+
+    /// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+    /// A call that fails its own argument validation cannot write, so it must get the tool's
+    /// corrected-call error, not "Write blocked". One row per mutating action, plus the pure
+    /// pre-parse refusals (`update` + `rel_path`, `update_entry` + `entry`) and two ill-typed
+    /// `force` values — a string `"true"` is refused by the tool's own parse, so it never reaches
+    /// a write either. Asserts on the TEXT: `is_err()` cannot tell the guard from the tool.
+    #[tokio::test]
+    async fn doc_malformed_calls_get_their_own_error_not_the_worktree_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("main");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        seed_linked_worktree_for_guard(&root, "feat");
+        let ctx = core_ctx_for_guard(&root).await;
+        let adapter = adapter_for_test();
+
+        for (input, tool_text) in [
+            (json!({"action": "create"}), "requires 'rel_path'"),
+            (json!({"action": "update"}), "requires 'id'"),
+            (
+                json!({"action": "update", "id": "0000000000000000", "patch": {"rel_path": "x.md"}}),
+                "cannot change `rel_path`",
+            ),
+            (
+                json!({"action": "move"}),
+                "requires 'id' and 'new_rel_path'",
+            ),
+            (json!({"action": "delete"}), "requires 'id'"),
+            (
+                json!({"action": "delete", "id": "0000000000000000", "force": "true"}),
+                "requires 'id'",
+            ),
+            (
+                json!({"action": "graft"}),
+                "requires 'from_id' and 'into_id'",
+            ),
+            (
+                json!({"action": "graft", "from_id": "0000000000000000", "into_id": "1111111111111111", "force": "true"}),
+                "requires 'from_id' and 'into_id'",
+            ),
+            (json!({"action": "link"}), "requires 'src_id'"),
+            (
+                json!({"action": "append_entry"}),
+                "requires 'id' and 'id_prefix'",
+            ),
+            (
+                json!({"action": "update_entry"}),
+                "requires 'id', 'entry_collection'",
+            ),
+            (
+                json!({"action": "update_entry", "id": "0000000000000000", "entry_collection": "c", "entry_id": "T-1", "entry": {}}),
+                "takes `fields`",
+            ),
+            (
+                json!({"action": "rekey_prefix"}),
+                "requires 'id', 'from' and 'to'",
+            ),
+            (json!({"action": "event_create"}), "requires 'id'"),
+            (
+                json!({"action": "event_create", "id": "0000000000000000"}),
+                "requires an `event` object",
+            ),
+            (json!({"action": "augment"}), "requires 'id'"),
+            (
+                json!({"action": "augment", "id": "0000000000000000"}),
+                "requires an `augment` object",
+            ),
+        ] {
+            let text = outcome_text(adapter.call(input.clone(), &ctx).await);
+            assert!(
+                !text.contains("Write blocked"),
+                "a malformed call writes nothing and must get its own validation error, not the worktree guard: {input} -> {text}"
+            );
+            assert!(
+                text.contains(tool_text),
+                "expected the tool's own validation text `{tool_text}`: {input} -> {text}"
+            );
+        }
+    }
+
+    /// Drift guard for `artifact::preflight`: it is a third hand-kept list beside the schema enum
+    /// and `is_mutating_doc_action`, and a mutating action missing from it falls to `_ => Ok(())`,
+    /// so its malformed calls would meet the worktree guard again with the suite still green.
+    /// Every required-argument write action refuses a bare `{action}` call, so an action that
+    /// answers `Ok` has no arm. The oracle is the schema enum, not a literal list here.
+    #[test]
+    fn every_mutating_doc_action_has_a_preflight_arm() {
+        use crate::librarian::tools::Tool as _;
+        let schema = crate::librarian::tools::artifact::Artifact.input_schema();
+        let mutating: Vec<&str> = schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("the action enum is this test's oracle")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .filter(|a| is_mutating_doc_action(a))
+            .collect();
+        assert!(
+            mutating.len() >= 11,
+            "anti-vacuity floor: the mutating set should not shrink; got {mutating:?}"
+        );
+        for action in mutating {
+            assert!(
+                crate::librarian::tools::artifact::preflight(&json!({ "action": action })).is_err(),
+                "`{action}` is a mutating doc action with required arguments, but preflight accepted a bare call: it has no arm"
             );
         }
     }
