@@ -498,7 +498,9 @@ pub(super) async fn worktree_read_notice(
 /// directly) it is `None` and this is silent — no identity, no claim.
 ///
 /// docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md
-pub(super) async fn displaced_default_notice(ctx: &ToolContext) -> Option<String> {
+pub(super) async fn displaced_default_notice(
+    ctx: &ToolContext,
+) -> Option<crate::agent::DisplacedNotice> {
     if ctx.workspace_override.is_some() {
         return None;
     }
@@ -1784,10 +1786,17 @@ pub trait Tool: Send + Sync {
             .as_ref()
             .map(|p| format!("{}/", crate::util::fs::to_forward_slash(p)))
             .unwrap_or_default();
+        // The displaced-default notice is only PEEKED here; it is marked spent below, once
+        // a block has actually carried it.
+        let displaced = displaced_default_notice(ctx).await;
         let workspace_notice = join_notices(
             worktree_read_notice(ctx, project_root.as_deref()).await,
-            displaced_default_notice(ctx).await,
+            displaced.as_ref().map(|d| d.text.clone()),
         );
+        // Whether the notice rode a block of this response. Every render path below sets
+        // it, or fills `notice_block` (a result with no object to hold a field).
+        let mut notice_carried = false;
+        let mut notice_block: Option<Content> = None;
         crate::tools::core::path_strip::strip_paths_in_value(&mut val, &root_prefix);
         // AFTER stripping, deliberately: the annotation's whole job is to name
         // the checkout absolutely, and the stripper rewrites project-rooted
@@ -1931,6 +1940,8 @@ pub trait Tool: Send + Sync {
             }
             if let Some(notice) = &workspace_notice {
                 inject_notice(&mut buffered, notice);
+                // `buffered` is an object built just above, so it always holds the field.
+                notice_carried = true;
             }
             // Carry the tool's OWN `corrections` into the envelope. The envelope is
             // rebuilt from a fixed key literal above, so anything the tool wrote is
@@ -1971,10 +1982,15 @@ pub trait Tool: Send + Sync {
         } else {
             // Small output path.
             let mut val = val;
+            // Whether `val` itself now holds the notice (only an object can).
+            let mut notice_in_val = false;
             if let Some((topic, shape)) = &guide_hint {
                 inject_hint(&mut val, topic, *shape);
             }
             if let Some(notice) = &workspace_notice {
+                // `inject_notice` writes into an OBJECT only, and says nothing when it
+                // cannot. Whether it did is a property of the shape, read before.
+                notice_in_val = val.is_object();
                 inject_notice(&mut val, notice);
             }
             if let Some(c) = &param_corrections {
@@ -2011,8 +2027,34 @@ pub trait Tool: Send + Sync {
                     merge_param_corrections(obj, c);
                 }
             }
+            // Whether the compact text renderer will carry this result. Decided once, here,
+            // because it decides how the workspace notice travels: the compact text takes
+            // it as a prefix; any JSON rendering needs a place for it in (or beside) `val`.
+            let compact = if form == OutputForm::Text {
+                self.format_compact(&val)
+            } else {
+                None
+            };
+            if compact.is_some() {
+                notice_carried = workspace_notice.is_some();
+            } else if let Some(n) = &workspace_notice {
+                if !notice_in_val {
+                    // No object to hold a field: a bare string (every no-echo write
+                    // answers `"ok"`), an array, a number, null. A string is promoted to
+                    // `{status}` - the one-shape promotion `annotate_write_root` already
+                    // makes, and only here, when a notice is being delivered. Anything
+                    // else is left byte-for-byte as the tool returned it and the notice
+                    // rides a block of its own: a tool's answer is not traded for a note.
+                    if let Some(s) = val.as_str() {
+                        val = serde_json::json!({ "status": s, "_workspace_notice": n });
+                    } else {
+                        notice_block = Some(Content::text(format!("\u{26a0} {n}")));
+                    }
+                }
+                notice_carried = true;
+            }
             if form == OutputForm::Text {
-                if let Some(text) = self.format_compact(&val) {
+                if let Some(text) = compact {
                     // The notice must be re-attached HERE, not left to `inject_notice`.
                     // That function writes `_workspace_notice` into the `Value`, and
                     // `format_compact` builds its text by selecting the fields the tool
@@ -2074,7 +2116,15 @@ pub trait Tool: Send + Sync {
         // either the single whole-topic block (non-declaring topic) or the
         // per-section slices / preamble fallback (declaring topic).
         let mut blocks = vec![primary];
+        // A result that could not hold the notice carries it beside, never inside.
+        blocks.extend(notice_block);
         blocks.extend(injected);
+        // Spent only now, and only because a block above carries it.
+        if let Some(d) = &displaced {
+            if notice_carried {
+                ctx.agent.mark_displaced_told(d).await;
+            }
+        }
         Ok(blocks)
     }
 

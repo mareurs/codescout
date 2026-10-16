@@ -181,8 +181,12 @@ What the server does about it, and what it cannot:
   is its session id. Without the companion a parent and its subagents are the same caller
   to the server: nobody can be told, and neither message is sent.
 - **Neither prevents it.** A subagent that `activate`s still moves the default under its
-  parent, and the notice arrives on the parent's next *successful* call, not on a write
-  refused by the gate. Brief subagents to pin; do not brief them to activate.
+  parent. The notice reaches the parent on its next unpinned call, on a successful response
+  or on a write the access gate refused, and rides a block of its own when the result has no
+  object to hold a field. A project switch by id counts as a move. It is spent only once a
+  response has carried it. It says who moved the default, not whether that principal is still
+  running, and after a `/clear` the reader's own earlier identity can appear as the mover.
+  Brief subagents to pin; do not brief them to activate.
 
 ## Anti-patterns
 

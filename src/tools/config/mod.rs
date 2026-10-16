@@ -279,7 +279,21 @@ impl Tool for ActivateProject {
             );
             let auto_registered =
                 crate::library::auto_register::auto_register_deps(&project_root, ctx).await;
-            return build_activation_response(ctx, scenario, &auto_registered).await;
+            // A by-id switch moves where unpinned calls resolve exactly as a path
+            // activation does, so it is recorded and guarded the same way. It was not,
+            // which left this move invisible to the harmed party's notice.
+            let caller = crate::tools::session_key::current_caller();
+            let concurrent_warning = ctx
+                .agent
+                .note_activation(&project_root, caller.as_deref())
+                .await;
+            let mut resp = build_activation_response(ctx, scenario, &auto_registered).await?;
+            if let Some(w) = concurrent_warning {
+                if let Some(obj) = resp.as_object_mut() {
+                    obj.insert("concurrent_activation_warning".to_string(), json!(w));
+                }
+            }
+            return Ok(resp);
         }
 
         // Full-activation path

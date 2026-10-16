@@ -593,6 +593,119 @@ async fn echo_once(ctx: &ToolContext) -> String {
         .unwrap_or_default()
 }
 
+// ---- the displaced-default notice must actually REACH a result before it is spent ----
+//
+// `Agent::displaced_default_notice` is once-per-move, so a notice that is "delivered"
+// into a result shape that cannot carry it is a notice lost for good. The carrier used
+// to be `inject_notice`, which writes into a JSON OBJECT only: a bare string (every
+// no-echo write answers `"ok"`) or an array swallowed it, and the caller was marked
+// told anyway. Measured by an Opus review of the integrated branch, 2026-10-16: after a
+// subagent moved the default, the parent's unpinned `memory(action="write")` landed in
+// the foreign root and answered `"ok"`, and its NEXT call carried no notice either.
+
+/// A ctx whose agent has been moved off home by `sess-1/agent-a`, plus the foreign
+/// dir that must outlive the test.
+async fn displaced_ctx() -> (tempfile::TempDir, tempfile::TempDir, ToolContext) {
+    let home = tempfile::tempdir().unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    let foreign_root = foreign.path().canonicalize().unwrap();
+    let mut ctx = bare_ctx().await;
+    ctx.agent = crate::agent::Agent::new(Some(home.path().canonicalize().unwrap()))
+        .await
+        .unwrap();
+    ctx.agent
+        .activate(foreign_root.clone(), Some(false))
+        .await
+        .unwrap();
+    ctx.agent
+        .note_activation(&foreign_root, Some("sess-1/agent-a"))
+        .await;
+    (home, foreign, ctx)
+}
+
+/// Every content block of one call, as text.
+async fn call_as(ctx: &ToolContext, caller: &str, result: serde_json::Value) -> Vec<String> {
+    let tool = EchoTool {
+        result,
+        user_summary: None,
+    };
+    crate::tools::session_key::scope_caller(
+        Some(caller.to_string()),
+        tool.call_content(serde_json::json!({}), ctx),
+    )
+    .await
+    .unwrap()
+    .iter()
+    .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+    .collect()
+}
+
+#[tokio::test]
+async fn the_displaced_notice_is_carried_by_a_bare_string_result_and_only_then_spent() {
+    let (_h, _f, ctx) = displaced_ctx().await;
+
+    let first = call_as(&ctx, "sess-1", serde_json::json!("ok")).await;
+    let all = first.join("\n");
+    assert!(
+        all.contains("sess-1/agent-a"),
+        "a bare-string result must still carry the notice: {all}"
+    );
+    // The answer survives: promoted to `{status: ...}`, the same one-shape promotion
+    // `annotate_write_root` makes, never dropped.
+    let primary: serde_json::Value = serde_json::from_str(&first[0]).unwrap();
+    assert_eq!(
+        primary["status"], "ok",
+        "the tool's answer is kept: {primary}"
+    );
+
+    // Spent only because it was carried.
+    let second = call_as(&ctx, "sess-1", serde_json::json!({"k": "v"})).await;
+    assert!(
+        !second.join("\n").contains("sess-1/agent-a"),
+        "delivered once, not repeated: {second:?}"
+    );
+}
+
+/// Shapes with no object to write a field into. The result itself must come through
+/// byte-for-byte (a tool's answer is not traded for a note), and the notice must
+/// still arrive and still be spent exactly once.
+#[tokio::test]
+async fn the_displaced_notice_reaches_results_that_are_not_objects_without_reshaping_them() {
+    for result in [
+        serde_json::json!([1, 2, 3]),
+        serde_json::json!(42),
+        serde_json::json!(null),
+        serde_json::json!(true),
+    ] {
+        let (_h, _f, ctx) = displaced_ctx().await;
+        let first = call_as(&ctx, "sess-1", result.clone()).await;
+        let primary: serde_json::Value = serde_json::from_str(&first[0]).unwrap();
+        assert_eq!(primary, result, "the answer must not be reshaped");
+        assert!(
+            first[1..].join("\n").contains("sess-1/agent-a"),
+            "{result}: the notice must ride a block of its own: {first:?}"
+        );
+        let second = call_as(&ctx, "sess-1", result.clone()).await;
+        assert_eq!(
+            second.len(),
+            1,
+            "{result}: spent after one delivery: {second:?}"
+        );
+    }
+}
+
+/// The other half of "do not change result shapes for callers who get no notice": the
+/// promotion of a bare string happens ONLY when a notice is being delivered.
+#[tokio::test]
+async fn a_caller_owed_no_notice_gets_its_result_shape_untouched() {
+    let (_h, _f, ctx) = displaced_ctx().await;
+    // The mover itself is never told, so nothing may reshape its `"ok"`.
+    let out = call_as(&ctx, "sess-1/agent-a", serde_json::json!("ok")).await;
+    assert_eq!(out, vec!["\"ok\"".to_string()], "no notice, no reshaping");
+    let out = call_as(&ctx, "sess-1/agent-a", serde_json::json!([1, 2])).await;
+    assert_eq!(out.len(), 1);
+}
+
 /// docs/issues/archive/2026-08-15-worktree-guard-covers-writes-but-not-reads.md
 /// docs/issues/archive/2026-09-02-worktree-guard-refuses-writes-and-lets-unpinned-reads-through.md
 ///
@@ -3088,9 +3201,12 @@ async fn an_exempt_tool_is_not_annotated() {
 
     let val = write_echo(&ctx, "approve_write", serde_json::json!("ok")).await;
 
-    assert_eq!(
-        val,
-        serde_json::json!("ok"),
+    // The tool's bare `"ok"` now arrives as `{status: "ok"}` because the worktree-read
+    // notice is live in this repo and a bare string has nowhere to carry it (it used to
+    // be swallowed silently). What this test pins is the ANNOTATION: no `wrote_to`.
+    assert_eq!(val["status"], "ok", "the answer is kept: {val}");
+    assert!(
+        val.get("wrote_to").is_none(),
         "a tool that writes no project-relative path must not claim a checkout; got {val}"
     );
 }

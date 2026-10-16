@@ -53,7 +53,14 @@ Mutation-probed once per guarded site (2026-10-16, manual): 11 mutants, 11 kille
 
 ## Resume
 
-N/A for this issue. The refused-write gap is its own file (see § Fix).
+N/A. **Addendum 2026-10-16, after an Opus review of the integrated branch (commit `4a63de23`):**
+
+- **HIGH, confirmed and fixed.** The notice was marked spent before rendering and `inject_notice` writes into JSON objects only, so a bare-string result (every no-echo write answers `"ok"`) or an array swallowed it. It is now peeked, carried, then marked: a bare string is promoted to `{status}` (the `annotate_write_root` precedent) only when a notice is delivered, other non-objects keep their bytes and the notice rides a block of its own, and `mark_displaced_told` runs only if a block carried it. The same swallow had been dropping the worktree-read notice on a bare `"ok"`; `an_exempt_tool_is_not_annotated` encoded that and now pins the `wrote_to` annotation instead. The other `inject_notice` users are the buffered envelope (always an object) and the small-result path, both covered.
+- **LOW, confirmed and fixed.** `activate_within_workspace` is a real default-moving path (the focused project is where unpinned calls resolve) and skipped `note_activation`. The handler now records it and attaches the activation guard's warning; "the default" in the notice is the focused project.
+- **Wording.** The text no longer asserts that the mover still relies on the default (it may have finished), says re-activating is process-wide, and admits the mover may be the reader's own pre-`/clear` identity. What it still cannot say is whether the mover is alive, which nothing in the server records.
+- **Refused writes** are covered now: see `docs/issues/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md`.
+
+Tests: `tools::core::tests::{the_displaced_notice_is_carried_by_a_bare_string_result_and_only_then_spent, the_displaced_notice_reaches_results_that_are_not_objects_without_reshaping_them, a_caller_owed_no_notice_gets_its_result_shape_untouched}`, `agent::tests::{a_notice_is_owed_until_a_response_carries_it, the_notice_text_claims_only_what_the_record_shows}`, `server::guide_hint_tests::{a_subagent_switching_projects_by_id_is_reported_to_the_parent, a_write_refused_by_the_gate_names_the_principal_that_moved_the_default}`. 8 further mutants killed (never marked, no string promotion, no side block, refusal not marked / carries nothing, by-id not recorded, `current` ignoring focus, pinned not silent).
 
 ## References
 

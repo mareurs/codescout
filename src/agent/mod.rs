@@ -171,6 +171,15 @@ pub struct Displacement {
     pub at: std::time::Instant,
 }
 
+/// A notice owed to one caller, not yet spent. Carry `text` in a response, then hand
+/// this back to [`Agent::mark_displaced_told`].
+#[derive(Debug, Clone)]
+pub struct DisplacedNotice {
+    pub text: String,
+    pub caller: String,
+    pub epoch: u64,
+}
+
 /// Upper bound on `AgentInner::displacement_told`. A subagent fan-out is tens of
 /// principals; past this the map is cleared, which re-tells and never loses a notice.
 // cap-class: NOT_A_CAP — bounds the memory of which principals were told a displacement; past it the map clears and everyone is re-told, so no notice is lost and no result is shortened
@@ -1265,57 +1274,72 @@ impl Agent {
     ///   might be the mover, and a mover with none cannot be named.
     /// - the default is not home. Back at home nothing is displaced, and the
     ///   overwhelmingly common session (activate home once, subagents read it) never
-    ///   sees this.
+    ///   sees this. "The default" is where an unpinned call resolves: the FOCUSED
+    ///   project of the default workspace, so a by-id project switch counts.
     /// - this caller has not already been told about THIS move. The unit is the move
     ///   (`Displacement::epoch`), not the conversation, so a later move re-arms it.
     ///
+    /// **This only PEEKS.** It never marks the caller told: the caller is told when a
+    /// response has actually carried the text, and the carrier then calls
+    /// [`mark_displaced_told`](Self::mark_displaced_told). Marking here, before a
+    /// renderer had decided whether the result could hold it, spent the notice into
+    /// result shapes that swallowed it (a bare `"ok"`).
+    ///
     /// The REMEDY is the per-call pin, never a re-activation: the harmed party can
-    /// perform it, and a re-activation would move the default under whoever now
-    /// relies on it. See `get_guide("workspace-state")` § Per-call workspace pinning.
-    pub async fn displaced_default_notice(&self, caller: Option<&str>) -> Option<String> {
+    /// perform it, and a re-activation is process-wide. See
+    /// `get_guide("workspace-state")` § Per-call workspace pinning.
+    pub async fn displaced_default_notice(&self, caller: Option<&str>) -> Option<DisplacedNotice> {
         let caller = caller?;
-        let owed = |inner: &AgentInner| -> Option<Displacement> {
-            let d = inner.displacement.as_ref()?;
-            let current = inner.default_workspace_root.as_deref()?;
-            // The record must describe the default as it stands: a default moved by
-            // some path that did not go through `note_activation` is not ours to
-            // attribute.
-            if d.to != current || inner.home_root.as_deref() == Some(current) {
-                return None;
-            }
-            if d.by.as_deref().is_none_or(|by| by == caller) {
-                return None;
-            }
-            if inner.displacement_told.get(caller) == Some(&d.epoch) {
-                return None;
-            }
-            Some(d.clone())
-        };
-        // Read-locked fast path: this runs on every unpinned call, and in the common
-        // session nothing is owed.
-        owed(&*self.inner.read().await)?;
-        let mut inner = self.inner.write().await;
-        let d = owed(&inner)?;
-        if inner.displacement_told.len() >= DISPLACEMENT_TOLD_CAP {
-            inner.displacement_told.clear();
+        let inner = self.inner.read().await;
+        let d = inner.displacement.as_ref()?;
+        let current = inner
+            .default_workspace()
+            .and_then(|ws| ws.focused_project_root().ok())
+            .or_else(|| inner.default_workspace_root.clone())?;
+        // The record must describe the default as it stands: a default moved by some
+        // path that did not go through `note_activation` is not ours to attribute.
+        if d.to != current || inner.home_root.as_deref() == Some(current.as_path()) {
+            return None;
         }
-        inner.displacement_told.insert(caller.to_string(), d.epoch);
+        if d.by.as_deref().is_none_or(|by| by == caller) {
+            return None;
+        }
+        if inner.displacement_told.get(caller) == Some(&d.epoch) {
+            return None;
+        }
         let home = inner
             .home_root
             .as_ref()
             .map(|h| format!(" (home is {})", h.display()))
             .unwrap_or_default();
-        Some(format!(
-            "This call carried no workspace= pin, so it resolved against {to}, which \
-             caller {by} made the server's active project {ago:?} ago{home}. If you \
-             did not choose {to}, results and refused writes describe the wrong \
-             workspace. Fix: pass workspace=<absolute path> on each tool call to pin \
-             resolution for yourself. Do not re-activate to get your root back: \
-             activation is process-wide and would move the default under {by}.",
-            to = d.to.display(),
-            by = d.by.as_deref().unwrap_or("another caller"),
-            ago = d.at.elapsed(),
-        ))
+        let by = d.by.as_deref().unwrap_or("another caller");
+        Some(DisplacedNotice {
+            caller: caller.to_string(),
+            epoch: d.epoch,
+            text: format!(
+                "This call carried no workspace= pin, so it resolved against {to}, which \
+                 caller {by} made the server's active project {ago:?} ago{home}. If you \
+                 did not choose {to}, results and refused writes describe the wrong \
+                 workspace. Fix: pass workspace=<absolute path> on each tool call to pin \
+                 resolution for yourself. Re-activating is not a fix: activation is \
+                 process-wide and moves the default for every caller. If {by} is your own \
+                 earlier identity (for example from before a /clear), nobody else moved it.",
+                to = d.to.display(),
+                ago = d.at.elapsed(),
+            ),
+        })
+    }
+
+    /// Record that `notice` was carried by a response, so its caller is not told this
+    /// move again. Bounded by `DISPLACEMENT_TOLD_CAP`; shedding only ever re-tells.
+    pub async fn mark_displaced_told(&self, notice: &DisplacedNotice) {
+        let mut inner = self.inner.write().await;
+        if inner.displacement_told.len() >= DISPLACEMENT_TOLD_CAP {
+            inner.displacement_told.clear();
+        }
+        inner
+            .displacement_told
+            .insert(notice.caller.clone(), notice.epoch);
     }
 
     /// Get the active project root, or error if none is set.
@@ -3072,6 +3096,72 @@ mod tests {
         agent.note_activation(to, by).await;
     }
 
+    /// What the notice machinery does for a caller whose response CARRIED the notice:
+    /// peek, then mark spent. Production does exactly this in `call_content` (and the
+    /// gate-refusal path), only with a render in between.
+    async fn told(agent: &Agent, caller: Option<&str>) -> Option<String> {
+        let n = agent.displaced_default_notice(caller).await?;
+        agent.mark_displaced_told(&n).await;
+        Some(n.text)
+    }
+
+    /// Peeking must not spend the notice: a response that could not carry it leaves it
+    /// owed, and the next one that can carry it does. Marking inside the peek spent it
+    /// on a bare `"ok"` that had nowhere to put it.
+    #[tokio::test]
+    async fn a_notice_is_owed_until_a_response_carries_it() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
+
+        let first = agent
+            .displaced_default_notice(Some("sess-1"))
+            .await
+            .expect("owed");
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_some(),
+            "an uncarried notice is still owed"
+        );
+        agent.mark_displaced_told(&first).await;
+        assert!(
+            agent
+                .displaced_default_notice(Some("sess-1"))
+                .await
+                .is_none(),
+            "carried and marked: spent"
+        );
+        // Spending is per caller: a sibling is unaffected.
+        assert!(agent
+            .displaced_default_notice(Some("sess-1/agent-b"))
+            .await
+            .is_some());
+    }
+
+    /// The notice must not claim what is not known: it names the mover as a fact, says
+    /// re-activating is process-wide rather than asserting someone relies on the
+    /// default, and admits the mover may be the reader's own earlier identity.
+    #[tokio::test]
+    async fn the_notice_text_claims_only_what_the_record_shows() {
+        let (_h, _home, agent) = displaced_fixture().await;
+        let foreign = tempdir().unwrap();
+        let foreign_root = foreign.path().canonicalize().unwrap();
+        move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
+        let n = told(&agent, Some("sess-1")).await.unwrap();
+        assert!(n.contains("process-wide"), "{n}");
+        assert!(
+            !n.contains("under sess-1/agent-a"),
+            "must not assert the mover still relies on the default: {n}"
+        );
+        assert!(
+            n.contains("/clear"),
+            "must admit the mover may be the reader's own earlier identity: {n}"
+        );
+    }
+
     /// The incident shape (E-5 of the archived 2026-08-23 bug): a SUBAGENT activates a
     /// foreign root; the PARENT's next unpinned call resolves against it and, until
     /// now, was told nothing.
@@ -3082,8 +3172,7 @@ mod tests {
         let foreign_root = foreign.path().canonicalize().unwrap();
         move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
 
-        let n = agent
-            .displaced_default_notice(Some("sess-1"))
+        let n = told(&agent, Some("sess-1"))
             .await
             .expect("the party resolving against a root a subagent chose must be told");
         assert!(
@@ -3107,10 +3196,7 @@ mod tests {
         );
         // Once per move: a second unpinned call is not told again.
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1"))
-                .await
-                .is_none(),
+            told(&agent, Some("sess-1")).await.is_none(),
             "the same move is reported to the same caller once"
         );
     }
@@ -3125,24 +3211,15 @@ mod tests {
         move_default(&agent, &foreign_root, Some("sess-1")).await;
 
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1"))
-                .await
-                .is_none(),
+            told(&agent, Some("sess-1")).await.is_none(),
             "the switcher chose this root; telling it someone ELSE moved it is false"
         );
         // The same principal on a later call is still the mover, however long after.
-        assert!(agent
-            .displaced_default_notice(Some("sess-1"))
-            .await
-            .is_none());
+        assert!(told(&agent, Some("sess-1")).await.is_none());
         // ...and a different principal is still owed it: the silence above is
         // identity, not "the notice is broken".
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1/agent-b"))
-                .await
-                .is_some(),
+            told(&agent, Some("sess-1/agent-b")).await.is_some(),
             "positive control: another principal must still be told"
         );
     }
@@ -3155,27 +3232,18 @@ mod tests {
         let foreign_root = foreign.path().canonicalize().unwrap();
         move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1"))
-                .await
-                .is_some(),
+            told(&agent, Some("sess-1")).await.is_some(),
             "positive control: displaced, and the parent is owed the notice"
         );
 
         move_default(&agent, &home, Some("sess-1/agent-a")).await;
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1"))
-                .await
-                .is_none(),
+            told(&agent, Some("sess-1")).await.is_none(),
             "the default is home again: there is nothing to tell"
         );
         // Re-activating home by the PARENT over an already-home default is no move.
         move_default(&agent, &home, Some("sess-1")).await;
-        assert!(agent
-            .displaced_default_notice(Some("sess-1/agent-b"))
-            .await
-            .is_none());
+        assert!(told(&agent, Some("sess-1/agent-b")).await.is_none());
     }
 
     /// A NEW move re-arms the notice. The one-shot-per-conversation form was spent on
@@ -3192,15 +3260,11 @@ mod tests {
         );
 
         move_default(&agent, &r1, Some("sess-1/agent-a")).await;
-        let first = agent
-            .displaced_default_notice(Some("sess-1"))
-            .await
-            .unwrap();
+        let first = told(&agent, Some("sess-1")).await.unwrap();
         assert!(first.contains("sess-1/agent-a"));
 
         move_default(&agent, &r2, Some("sess-1/agent-b")).await;
-        let second = agent
-            .displaced_default_notice(Some("sess-1"))
+        let second = told(&agent, Some("sess-1"))
             .await
             .expect("a second move is a new episode and must be reported");
         assert!(
@@ -3228,21 +3292,15 @@ mod tests {
 
         // Unidentified mover: no one can be told it was someone else.
         move_default(&agent, &foreign_root, None).await;
-        assert!(agent
-            .displaced_default_notice(Some("sess-1"))
-            .await
-            .is_none());
+        assert!(told(&agent, Some("sess-1")).await.is_none());
 
         // Unidentified reader of an identified move: it may BE the mover.
         let other = tempdir().unwrap();
         let other_root = other.path().canonicalize().unwrap();
         move_default(&agent, &other_root, Some("sess-1/agent-a")).await;
-        assert!(agent.displaced_default_notice(None).await.is_none());
+        assert!(told(&agent, None).await.is_none());
         // Positive control: the same move does reach an identified reader.
-        assert!(agent
-            .displaced_default_notice(Some("sess-1"))
-            .await
-            .is_some());
+        assert!(told(&agent, Some("sess-1")).await.is_some());
     }
 
     /// The told-map cannot grow without bound over a long session of subagent fan-outs,
@@ -3257,10 +3315,7 @@ mod tests {
         for i in 0..(DISPLACEMENT_TOLD_CAP * 2) {
             let caller = format!("sess-1/agent-{i}");
             assert!(
-                agent
-                    .displaced_default_notice(Some(&caller))
-                    .await
-                    .is_some(),
+                told(&agent, Some(&caller)).await.is_some(),
                 "each distinct caller is told once"
             );
         }
@@ -3282,8 +3337,7 @@ mod tests {
         move_default(&agent, &foreign_root, Some("sess-1/agent-a")).await;
         move_default(&agent, &foreign_root, Some("sess-1/agent-b")).await;
 
-        let n = agent
-            .displaced_default_notice(Some("sess-1"))
+        let n = told(&agent, Some("sess-1"))
             .await
             .expect("still displaced, and the parent has not been told");
         assert!(n.contains("sess-1/agent-a"), "names the real mover: {n}");
@@ -3303,20 +3357,14 @@ mod tests {
         );
         move_default(&agent, &r1, Some("sess-1/agent-a")).await;
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1"))
-                .await
-                .is_some(),
+            told(&agent, Some("sess-1")).await.is_some(),
             "positive control: the recorded move is reportable"
         );
 
         // Moved with no `note_activation`.
         agent.activate(r2, None).await.unwrap();
         assert!(
-            agent
-                .displaced_default_notice(Some("sess-1/agent-b"))
-                .await
-                .is_none(),
+            told(&agent, Some("sess-1/agent-b")).await.is_none(),
             "the record names {r1:?}, the default is elsewhere: say nothing"
         );
     }
