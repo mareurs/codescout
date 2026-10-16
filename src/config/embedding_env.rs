@@ -15,6 +15,13 @@
 //! | dim | `CODESCOUT_MODEL_DIM` |
 //! | query prefix | `CODESCOUT_QUERY_PREFIX` |
 //!
+//! `CODESCOUT_EMBEDDER_MODEL_NAME` is listed under *model* because it reached the model
+//! name historically, but it is deliberately **not** an alias in [`MODEL`]: it overrides
+//! the name sent on the wire *over* the resolved model (the 2026-09-17 ruling), so folding
+//! it into the alias chain would change precedence. It is read at the edge in
+//! `retrieval::config::EmbedEnv::from_real_env`, with its own dotenv provenance, so the
+//! shadowing warning covers it like the `CODESCOUT_EMBEDDING_*` family.
+//!
 //! Worse than the count: the `CODESCOUT_EMBED_*` pair applied at a **different layer**
 //! from the `CODESCOUT_EMBEDDER_*` pair — the first inside
 //! `ProjectConfig::load_or_default`, the second in `merge_embed_config` — so two
