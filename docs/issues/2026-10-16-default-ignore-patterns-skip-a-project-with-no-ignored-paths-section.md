@@ -53,10 +53,11 @@ The `unverified:` frontmatter question, by reading only (not measured): `GlobalI
 
 ## Fix
 
-Implemented 2026-10-16 on branch `worktree-agent-a5de56cff4863b268`, commit `80d4cb49` (not yet on `experiments`/master; re-cite the SHA after the merge). `src/config/project.rs`:
+Implemented 2026-10-16 on branch `worktree-agent-a5de56cff4863b268`: `80d4cb49`, then a follow-up after an Opus review of the integrated branch (commit recorded in the git log as `fix(config): keep ignored_paths provenance ...`). Re-cite SHAs after the merge. `src/config/project.rs`:
 
 - `IgnoredPathsSection` implements `Default` by hand: `patterns` is `default_ignored_patterns()`. Absent section, absent file, `default_for` and onboarding's `Default::default()` now agree with the present-table serde default. An explicit `patterns = []` still means "ignore nothing".
-- `patterns` carries `skip_serializing_if = is_default_ignored_patterns`. Without it, the whole-config write-backs (`onboarding.rs` creation and the two version-stamp rewrites) would write the 28 defaults into every `project.toml`, freezing them so a later default could never reach those projects. With it, an unmodified list stays implicit; a custom list or an explicit `[]` differs from the defaults and is still written, so a rewrite cannot flip an opt-out.
+- Write-back provenance. The struct deserialises through `IgnoredPathsRaw` (`patterns: Option<Vec<_>>`) and remembers `patterns_explicit`. The key is omitted on serialise only when it was absent at load AND the list is still the defaults. The first version omitted it whenever the list equalled the defaults; the review showed that changes meaning across a write-back (global `patterns = ["generated"]` + a project that explicitly lists the defaults: load 1 gives the defaults, write-back drops the key, load 2 gives `["generated"]`). Reproduced by `explicit_default_patterns_survive_write_back_when_a_global_list_exists` (red under the old rule).
+- Libraries get their own list. `SyncOpts::for_library` (`src/retrieval/sync.rs`) passes no patterns; both library call sites (`src/tools/semantic/index.rs` library branch, `Agent::maybe_auto_index_library`, including its scope guard) use it. Without it, the library branch's `load_or_default(lib_path)` (a library has no `project.toml`) would have resolved the new project defaults and a bare `dist`/`build` prunes at any depth, dropping a package's own `dist/`. Behaviour note: auto-index used to apply the HOST project's `[ignored_paths]` to libraries; it now applies none, so a host with an explicit list no longer prunes inside libraries either.
 
 Decision taken on the issue's open question: onboarding writes no `patterns` key for a default config (so new projects follow future defaults). Already-written explicit `patterns = []` files (5 on this machine) are untouched; migrating them is still the operator's call.
 
@@ -67,11 +68,13 @@ All in `src/config/project.rs` `tests`:
 - `absent_ignored_paths_section_gets_default_patterns` (red before the fix)
 - `missing_project_toml_gets_default_patterns` (red before)
 - `default_for_and_default_agree_on_default_patterns` (red before)
-- `ignored_paths_section_without_patterns_key_gets_default_patterns` (guard, green before and after)
-- `explicit_empty_patterns_still_means_ignore_nothing` (guard)
-- `default_patterns_are_not_frozen_into_a_written_project_toml`, `explicit_empty_patterns_survive_a_serialise_round_trip` (guard the write-back half of the fix)
+- `ignored_paths_section_without_patterns_key_gets_default_patterns`, `explicit_empty_patterns_still_means_ignore_nothing` (guards)
+- `default_patterns_are_not_frozen_into_a_written_project_toml`, `explicit_empty_patterns_survive_a_serialise_round_trip`
+- load / write back / reload with a global layer present: `explicit_default_patterns_survive_write_back_when_a_global_list_exists` (mutation-checked: red when the omit rule is reverted to "equals the defaults"), `explicit_empty_patterns_survive_write_back_when_a_global_list_exists`, `absent_key_stays_implicit_across_write_back_and_follows_the_global_layer`, `a_missing_project_toml_with_a_global_list_round_trips`
 
-`cargo test --lib` over the whole lib: 6876 passed, 2 failed (`util::path_security::tests::write_to_tmp_allowed`, `tools::read_file::buffer_edge_tests::siblings_go_before_breadcrumb_and_the_pair_is_judged_together`); neither file mentions ignored paths, both fail deterministically on a rerun, and they were not run on a clean baseline.
+In `src/retrieval/sync.rs` `tests`: `a_library_walk_keeps_dist_and_build_directories` (mutation-checked: red when `for_library` returns the project defaults) and `the_project_default_patterns_do_prune_dist_and_build` (premise: the project defaults do prune those dirs on the real walker).
+
+Targeted run (`config::`, `retrieval::sync`, `tools::semantic`, `agent::`) green: 484 passed. Full lib earlier: 2 unrelated failures, `util::path_security::tests::write_to_tmp_allowed` and `tools::read_file::buffer_edge_tests::siblings_go_before_breadcrumb_and_the_pair_is_judged_together`, not run on a clean baseline.
 
 ## Workarounds
 Add `[ignored_paths]` without `patterns`, or with an explicit list, to the project's `project.toml`.

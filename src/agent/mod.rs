@@ -2093,7 +2093,7 @@ impl Agent {
 
     /// Spawn a background library indexing task if auto_index is enabled and library is not yet indexed.
     pub async fn maybe_auto_index_library(&self, lib_name: &str) {
-        let (should_index, root, entry_path, max_index_bytes, ignore_patterns) = {
+        let (should_index, root, entry_path, max_index_bytes) = {
             let inner = self.inner.read().await;
             let Some(p) = inner.active_project() else {
                 return;
@@ -2112,12 +2112,14 @@ impl Agent {
                 p.root.clone(),
                 entry.path.clone(),
                 p.config.security.max_index_bytes,
-                p.config.ignored_paths.patterns.clone(),
             )
         };
         if !should_index {
             return;
         }
+        // A library is walked under the library policy, not the host project's
+        // `[ignored_paths]`: the scope guard below and the sync must judge the SAME set.
+        let ignore_patterns = crate::retrieval::sync::SyncOpts::for_library(false).ignore_patterns;
 
         let name = lib_name.to_string();
 
@@ -2129,7 +2131,7 @@ impl Agent {
         // code index. Mirror the `index` tool's preflight; on "needs confirmation",
         // decline. (docs/issues/archive/2026-06-19-mcp-server-oom-68gb.md)
         let scope_root = entry_path.clone();
-        let pf_patterns = ignore_patterns.clone();
+        let pf_patterns = ignore_patterns;
         let verdict = tokio::task::spawn_blocking(move || {
             crate::embed::preflight::check_index_scope(&scope_root, max_index_bytes, &pf_patterns)
         })
@@ -2143,7 +2145,7 @@ impl Agent {
                     file_count = info.file_count,
                     approx_bytes = info.approx_bytes,
                     "skipping background auto-index: root exceeds scope guard \
-                     (raise security.max_index_bytes or set [ignored_paths] to index it)"
+                     (raise security.max_index_bytes to index it)"
                 );
                 self.set_library_state(
                     &name,
@@ -2183,10 +2185,7 @@ impl Agent {
             let result = async {
                 let client =
                     crate::retrieval::client::RetrievalClient::from_env(Some(&root)).await?;
-                let opts = crate::retrieval::sync::SyncOpts {
-                    ignore_patterns: ignore_patterns.clone(),
-                    ..Default::default()
-                };
+                let opts = crate::retrieval::sync::SyncOpts::for_library(false);
                 client
                     .sync_project(&lib_project_id, &entry_path, opts)
                     .await

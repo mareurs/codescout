@@ -182,19 +182,19 @@ pub struct EmbeddingsSection {
 /// "key absent → defaults apply" has to hold on both paths, so both route through the
 /// same function. An explicit `patterns = []` still means "ignore nothing".
 /// `docs/issues/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md`.
+///
+/// **Whether `patterns` was written down is remembered** (`patterns_explicit`), because
+/// the write-back must not change what the file means. Onboarding and the version
+/// stamps re-serialise a whole `ProjectConfig` over `project.toml`. Writing the default
+/// list out would freeze today's defaults into every such file, so a later addition could
+/// never reach it — but omitting the key *whenever the list equals the defaults* is wrong
+/// too: with a global `patterns = ["generated"]`, a project that explicitly lists the
+/// defaults would lose the key and the global list would fill the gap on the next load.
+/// The key is therefore omitted only when it was absent at load **and** the list is still
+/// the defaults; an explicit list (including `[]`) and any in-memory edit are written.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "IgnoredPathsRaw", into = "IgnoredPathsRaw")]
 pub struct IgnoredPathsSection {
-    /// Not serialized while equal to the built-in defaults: several call sites
-    /// (`onboarding`, the version stamps) write a whole `ProjectConfig` back with
-    /// `toml::to_string_pretty`, and emitting the list would freeze today's defaults
-    /// into every such `project.toml`, so a later addition to
-    /// [`default_ignored_patterns`] could never reach those projects. An absent key
-    /// parses back to the defaults; a customised list — including an explicit
-    /// `patterns = []` opt-out — differs from them and is therefore still written.
-    #[serde(
-        default = "default_ignored_patterns",
-        skip_serializing_if = "is_default_ignored_patterns"
-    )]
     pub patterns: Vec<String>,
     /// Glob patterns that the librarian walker visits even when
     /// `.gitignore`/`.git/info/exclude`/a global excludesfile would otherwise
@@ -205,14 +205,40 @@ pub struct IgnoredPathsSection {
     /// this struct at runtime (librarian's `ToolContext` doesn't carry the
     /// main server's parsed config) — this field exists for schema
     /// documentation/validation, not as the live read path.
-    #[serde(default)]
     pub force_include: Vec<String>,
+    /// True when `patterns` was present in the merged TOML this was loaded from. Not a
+    /// config key; see the type's doc for why the write-back needs it.
+    patterns_explicit: bool,
 }
 
-/// `skip_serializing_if` predicate for [`IgnoredPathsSection::patterns`]: true when the
-/// list is exactly the built-in defaults, so it need not be written.
-fn is_default_ignored_patterns(patterns: &[String]) -> bool {
-    patterns == default_ignored_patterns().as_slice()
+/// The on-disk shape of [`IgnoredPathsSection`]: `patterns` is an `Option` so absent and
+/// empty stay distinguishable through a load.
+#[derive(Serialize, Deserialize)]
+struct IgnoredPathsRaw {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    patterns: Option<Vec<String>>,
+    #[serde(default)]
+    force_include: Vec<String>,
+}
+
+impl From<IgnoredPathsRaw> for IgnoredPathsSection {
+    fn from(raw: IgnoredPathsRaw) -> Self {
+        Self {
+            patterns_explicit: raw.patterns.is_some(),
+            patterns: raw.patterns.unwrap_or_else(default_ignored_patterns),
+            force_include: raw.force_include,
+        }
+    }
+}
+
+impl From<IgnoredPathsSection> for IgnoredPathsRaw {
+    fn from(s: IgnoredPathsSection) -> Self {
+        let implicit = !s.patterns_explicit && s.patterns == default_ignored_patterns();
+        Self {
+            patterns: (!implicit).then_some(s.patterns),
+            force_include: s.force_include,
+        }
+    }
 }
 
 impl Default for IgnoredPathsSection {
@@ -220,6 +246,7 @@ impl Default for IgnoredPathsSection {
         Self {
             patterns: default_ignored_patterns(),
             force_include: Vec::new(),
+            patterns_explicit: false,
         }
     }
 }
@@ -1361,6 +1388,91 @@ model = "local:test"
         cfg.ignored_paths.patterns = vec!["custom".into()];
         let back: ProjectConfig = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
         assert_eq!(back.ignored_paths.patterns, vec!["custom".to_string()]);
+    }
+
+    // Load -> write back -> reload, with a GLOBAL config layer present. Onboarding and the
+    // version stamps re-serialise a whole `ProjectConfig` over `project.toml`, so the
+    // written file must resolve to the SAME patterns the first load produced. Omitting the
+    // key on "equals the defaults" alone breaks that: a project that explicitly lists the
+    // defaults loses the key, and the global layer's list then fills the gap on reload.
+    fn load_write_back_reload(
+        project_toml: Option<&str>,
+        global_toml: &str,
+    ) -> (Vec<String>, String, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(text) = project_toml {
+            let cs = dir.path().join(".codescout");
+            std::fs::create_dir_all(&cs).unwrap();
+            std::fs::write(cs.join("project.toml"), text).unwrap();
+        }
+        let global: toml::Value = toml::from_str(global_toml).unwrap();
+        let first = ProjectConfig::load_with_global_base(dir.path(), global.clone()).unwrap();
+        let written = toml::to_string_pretty(&first).unwrap();
+        let cs = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cs).unwrap();
+        std::fs::write(cs.join("project.toml"), &written).unwrap();
+        let second = ProjectConfig::load_with_global_base(dir.path(), global).unwrap();
+        (
+            first.ignored_paths.patterns,
+            written,
+            second.ignored_paths.patterns,
+        )
+    }
+
+    #[test]
+    fn explicit_default_patterns_survive_write_back_when_a_global_list_exists() {
+        let explicit = format!(
+            "[project]\nname = \"p\"\n\n[ignored_paths]\npatterns = {}\n",
+            toml::Value::try_from(default_ignored_patterns()).unwrap()
+        );
+        let (first, written, second) = load_write_back_reload(
+            Some(&explicit),
+            "[ignored_paths]\npatterns = [\"generated\"]\n",
+        );
+        assert_eq!(first, default_ignored_patterns(), "project layer wins");
+        assert_eq!(
+            second, first,
+            "write-back changed the meaning of the file:\n{written}"
+        );
+    }
+
+    #[test]
+    fn explicit_empty_patterns_survive_write_back_when_a_global_list_exists() {
+        let (first, written, second) = load_write_back_reload(
+            Some("[project]\nname = \"p\"\n\n[ignored_paths]\npatterns = []\n"),
+            "[ignored_paths]\npatterns = [\"generated\"]\n",
+        );
+        assert!(first.is_empty());
+        assert_eq!(second, first, "write-back changed the file:\n{written}");
+    }
+
+    #[test]
+    fn absent_key_stays_implicit_across_write_back_and_follows_the_global_layer() {
+        // No project key, no global list: defaults, and the key is not frozen into the file.
+        let (first, written, second) =
+            load_write_back_reload(Some("[project]\nname = \"p\"\n"), "[ignored_paths]\n");
+        assert_eq!(first, default_ignored_patterns());
+        assert!(
+            !written.lines().any(|l| l.starts_with("patterns")),
+            "an absent key must stay absent:\n{written}"
+        );
+        assert_eq!(second, first);
+
+        // No project key, a global list: the global list wins, and survives the round trip.
+        let (first, _, second) = load_write_back_reload(
+            Some("[project]\nname = \"p\"\n"),
+            "[ignored_paths]\npatterns = [\"generated\"]\n",
+        );
+        assert_eq!(first, vec!["generated".to_string()]);
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn a_missing_project_toml_with_a_global_list_round_trips() {
+        let (first, written, second) =
+            load_write_back_reload(None, "[ignored_paths]\npatterns = [\"generated\"]\n");
+        assert_eq!(first, vec!["generated".to_string()]);
+        assert_eq!(second, first, "written:\n{written}");
     }
 
     #[test]
