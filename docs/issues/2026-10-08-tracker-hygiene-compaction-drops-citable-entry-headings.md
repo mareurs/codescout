@@ -58,7 +58,25 @@ Never reduce an entry to a bare row to "compact" it.
 1. Archived status alone might preserve entry definitions. Rejected by code inspection: resolution needs definitions in the indexed artifact body; git history is not consulted by this resolver.
 
 ## Fix
-Not implemented. Preserve defining headings and evidence in the archive, and treat an outcomes digest as an additional reading surface. The fix belongs in the companion source and serving copies if this recipe is revised. No fix SHA or patch-id exists.
+
+Not implemented; the fix site is in another repository, so this record stays `open`. `src/librarian/tools/link_scan/resolve.rs` needs no change. Verified 2026-10-16 at checkout f5f1c6f7: in `resolve` (resolve.rs:320-451) the `EntryToken` arm and the qualified `CrossRepoToken` arm both ask `index.definers(token)` for the defining artifact. `DefinitionIndex::build` fills that from `## PREFIX-N` headings in the indexed body, and nothing reads git history. A digest that drops the headings leaves zero definers, so a token of a known prefix resolves to `Outcome::Dangling` (resolve.rs, `0 =>` branch). The defect is only the skill text.
+
+**Where.** `/home/marius/work/claude/claude-plugins/codescout-companion/skills/tracker-hygiene/SKILL.md`, D10 step 4 (line 244 of that file at 2026-10-16; the same text also sits in the serving copy under `~/.codex/plugins/cache/sdd-misc-plugins/codescout-companion/` and in the `claude-plugins-effort-steering-*` checkouts). The file's other uses of the word "heading" (lines 193, 392-404) concern D11 and the ledger template, not compaction, so nothing in the skill preserves entry headings.
+
+**Proposed replacement for step 4** (the owner applies it; this session did not edit the plugin repo because its tree is dirty on branch `effort-routing-r1`):
+
+```text
+4. **Compact.** Never reduce an F-N / W-N entry to a bare row: every entry keeps
+   its `## <ID> — <title>` heading in the archived file, because `link_scan` binds
+   PREFIX-N to that heading and to nothing else, and git history is not consulted.
+   Prose beneath a heading may be shortened. Add the outcomes digest (the Index /
+   Wins Index tables with updated statuses, one paragraph per promoted/rehomed
+   entry naming its destination, and unfired Promote-when criteria) as an
+   ADDITIONAL reading surface at the top. Verify with `link_scan`: no new dangling
+   citation for the stem's tokens.
+```
+
+After the plugin edit, bump the plugin version and sync the serving copies.
 
 ## Tests added
 None: documentation conflict logged during exploration. Existing resolver test inspected; no new failure was executed.
@@ -67,7 +85,8 @@ None: documentation conflict logged during exploration. Existing resolver test i
 Preserve complete entry sections during retirement. Resolve the separate file-stem change when repairing qualified citations.
 
 ## Resume
-Reconcile D10's compact step with the heading-preservation contract; verify the eventual recipe with an actual retirement fixture and citation resolution before applying it to a live tracker.
+
+User action: apply the step 4 text above to the companion SKILL.md (and its serving copies), then verify with a retirement fixture: compact a throwaway session log per the new step 4, run `link_scan`, and confirm its F-N / W-N tokens still resolve. Flip this record to `fixed` once the plugin commit exists, recording its SHA and `git patch-id --stable`.
 
 ## References
 - `get_guide("tracker-conventions")`, Compaction and archival.
