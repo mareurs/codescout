@@ -45,6 +45,17 @@ D. Keep the advisory and close this as overtaken by `snapshot_anchor`, with the 
 
 Recommended: C. Awaiting the product decision.
 
+### Decision C applied 2026-10-16: none of the 12 can declare an anchor
+
+The decision was option C: declare `snapshot_anchor` on a tracker only after its table columns equal the `render_template` output. Checked byte for byte, by rendering each tracker's template with its catalog params and comparing each body row with the rendered row (the comparison `resync_snapshot_row` itself makes, `src/librarian/catalog/augmentation.rs`). Result for the 12:
+
+- **No body table holds the ids at all (rendered row exists, no `| ID |` row in the body):** `claim-decay`, `tracker-management-redesign`, `structural-debt-refactor`, `test-escape-hardening`, `codex-pilot-checks-2026-10-13`, `fable-tuning-tasks`, `fable-tuning-findings`, `tool-usage-patterns`. Their ids are anchored by `##`/`###` headings, not table rows. The "15 keep a snapshot" count earlier in this file counted heading lines as well as table rows, so it overstated the table-keeping population.
+- **A body table exists but its columns differ from the template:** `2026-08-16-iron-law-gate-firing-audit` (all 8 rows differ: the body keeps a shorter Finding and a different Status/Target than the rendered `| ID | Finding | Sev | Status | Target |`, e.g. GF-1 body `**Incomplete fix** of ...` against rendered `INCOMPLETE FIX of ...`), `windows-platform-support` (body `| id | area | status | summary | ref | since |` against rendered `| id | area | status | since | ref |`; 31 of 35 ids are filtered out of the render), `prompt-hamsa-audit-log` (body `| ID | Date | Artifact | Gap | ... |`; the template renders no row for any of the 40 ids), `system-retrospective-improvements` (rendered `| ID | Task | Status | Notes |` has no matching body table).
+
+Declaring an anchor on any of these would make the first `update_entry` rewrite a hand-authored row into the rendered shape, or no-op, so none was declared. No tracker file was changed. The two that already declare one (`review-catches`: 56 of 56 rows byte-equal; `open-issue-work-queue`: 48 of 77 equal, 29 differ) are unchanged. The 29 differing rows in `open-issue-work-queue` were already known (`resync_snapshot_row` re-renders per row for that reason).
+
+The doctor check "snapshot-keeping tracker without declared snapshot_anchor" was NOT added: it would fire on all 12 with nothing actionable, because the condition it tests (`body_keeps_snapshot`, a majority of ids line-anchored) is satisfied by heading-anchored ledgers that keep no table. The finding worth a follow-up is the advisory itself: `snapshot_missing` / `snapshot_stale` fire for heading-anchored ledgers on the same heuristic.
+
 ## References
 
 - `docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md` — parent
