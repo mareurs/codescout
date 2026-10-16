@@ -89,8 +89,8 @@ after an `Err`; never write the column; drop the timeout; ignore mtime; recorder
 
 ## Fix provenance
 
-- **SHA:** recorded in the commit that closes this file (`experiments` once merged).
-- **patch-id:** see `git log --grep 'observed_changed'`.
+- **SHA:** `cb903567` (`worktree-agent-a23d4d95fd696c1ca`, to merge onto `experiments`)
+- **patch-id:** `436ed5359e456b238f13ec2e3f44e08a2839f148`
 
 ## References
 
