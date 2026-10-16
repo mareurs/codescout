@@ -6,7 +6,8 @@
 ## Decision
 
 The dead-artifact-id citation guard runs **only where a machine-wide librarian catalog
-exists** — a developer machine. It does **not** run in CI, and `Audit Doc Refs` staying
+exists** — a developer machine *(and is trustworthy only where that catalog holds the ids
+the citing authors minted, i.e. a checkout at the same absolute path; see the Amendment)*. It does **not** run in CI, and `Audit Doc Refs` staying
 green about artifact ids is correct rather than a gap. `live_ids_or_disabled`
 (`ae6dc663`) makes an empty catalog disable the check, which is what implements this.
 
@@ -68,8 +69,10 @@ work. The second row is CI.
 ## Consequences
 
 **Now easier.** CI is honest: it makes no claim about artifact-id citations rather than a
-false one. The check keeps full fidelity where it runs — on a developer machine it
-resolves cross-repo ids correctly, which no CI placement could.
+false one. The check keeps full fidelity where it runs — **on the machine, at the
+absolute path, where the ids were minted**: there it resolves cross-repo ids correctly,
+which no CI placement could. *(Qualified 2026-10-16: this originally read "on a developer
+machine"; see the Amendment.)*
 
 **Now harder.** A dead intra-repo citation can reach `master` uncaught by CI. The
 compensating placement is commit time on the machine that minted the ids, which has the
@@ -110,3 +113,37 @@ failure mode this repo tracks as `cluster/declared-not-wired`.
 — and it was confirmed end-to-end by a clone at a second path rather than inferred from
 the hash alone. The earlier reading that the empty catalog was the whole problem was
 produced by a simulation that held the one variable that mattered constant, by accident.
+
+## Amendment 2026-10-16 — "a developer machine" is not the frame; the minting path is
+
+- **Status:** accepted correction to the Decision and Consequences wording. The decision
+  (no CI placement, no `--reindex`) is unchanged. **Trigger:**
+  `docs/issues/2026-10-16-artifact-id-adr-promises-full-fidelity-on-any-developer-machine.md`.
+
+**What the code does, and does not, gate on.** `live_ids_or_disabled`
+(`src/librarian/tools/audit_doc_refs/mod.rs`) is `(!ids.is_empty()).then_some(ids)`. The
+only condition under which the check switches itself off is an **empty** catalog. Nothing
+compares this checkout's absolute path with the path the citing authors' ids were minted
+at. A developer whose checkout sits at a different path has a populated catalog, so the
+check runs, and every id minted at the other path misses: the same wall the table's
+"a clone at a different path" row measured (50, the display cap, all `artifact_id`).
+
+So the Decision's "a developer machine" and the Consequences' "on a developer machine it
+resolves cross-repo ids correctly" name the wrong frame. **Property 2 above is exactly the
+reason**: an id is `sha256(absolute path)`, so fidelity is a property of *machine and path*
+("the machine and path the citing ids were minted at"), not of "being a developer
+machine". A second developer, or the same developer with a second clone, sits outside it.
+
+The consequence for the compensating hook is the same: `scripts/pre-commit-dead-artifact-ids.sh`
+is only as trustworthy as that frame, and on a checkout at another path it can report live
+citations as dead. Nothing in the code detects that situation today; this amendment records
+it rather than closing it. A guard that did would have to compare checkout roots, which the
+id scheme (property 2) makes impossible to do from the id alone.
+
+**The 8 versus 9 count.** Context property 1 and the second alternative say 8 (cross-repo
+citations / live counter-examples). The measurement table says 9 findings for the
+same-path row, and `src/cli/audit_doc_refs.rs` and commit `66cce698` say 9. The ADR never
+recorded what separates the two figures, and neither was re-measured for this amendment, so
+they are left unreconciled rather than guessed at: 9 is the figure with a recorded
+measurement behind it (table row, arg-site comment, commit message), 8 is the count in the Context prose. The conclusion does not depend on which is right; in both, the ids counted are
+cross-repo ones a single-repo observer cannot resolve.

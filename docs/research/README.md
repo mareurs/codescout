@@ -25,8 +25,8 @@ To read the index:
 
 ```
 librarian(action="context", anchor_id="5086e3c7c0b9d83c")
-artifact(action="get", id="5086e3c7c0b9d83c",
-         entry_filter={"topic": {"eq": "retrieval-quality"}})
+doc(action="get", id="5086e3c7c0b9d83c",
+    entry_filter={"topic": {"eq": "retrieval-quality"}})
 ```
 
 Do not hand-write a table into this file.
@@ -66,15 +66,17 @@ the error.
    frontmatter and write it to the augmentation on this file:
 
    ```
-   artifact_augment(id="5086e3c7c0b9d83c", merge=true,
-                    params_path="<abs path to the rebuilt entries JSON>")
+   doc(action="augment", id="5086e3c7c0b9d83c", merge=true,
+       augment={params_path: "<abs path to the rebuilt entries JSON>"})
    ```
 
    **Send every entry, every time.** A params write REPLACES the collection
    rather than merging into it, so a patch carrying only the new row deletes all
    the others — and the catalog is not in git, so nothing recovers them. Rebuild
    from the files; their frontmatter is the source of truth and this array is
-   only a projection of it.
+   only a projection of it. The rebuild is by hand: this tracker has no gather
+   source, so `doc(action="gather")` returns an empty `context` for it and
+   cannot enumerate `docs/research/`. See § Suspected stragglers.
 
    If librarian is unavailable, the file is still saved correctly with its
    frontmatter, and the next librarian-equipped session picks it up. Never
@@ -196,7 +198,11 @@ status: complete          # draft | complete | superseded
 
 ## Suspected stragglers
 
-*(Refreshed by gather pass. None at index creation time.)*
+*(Maintained by hand during an index rebuild — see the augmentation prompt's
+straggler pass. This tracker has no gather source: the `gather_from` list is a
+params value, params are catalog-local and do not travel through git, and the
+committed sidecar `docs/augmentations/docs-research-README.yaml` carries none,
+so `doc(action="gather")` returns nothing here. None at index creation time.)*
 
 ## History
 

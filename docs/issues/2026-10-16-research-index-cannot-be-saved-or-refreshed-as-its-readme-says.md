@@ -1,7 +1,7 @@
 ---
 id: '1709e5706e0b5bfa'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the research index cannot be saved or refreshed the way its README says'
 owners:
 - marius
@@ -10,13 +10,14 @@ tags:
 - librarian
 - research-index
 - documentation
+closed: 2026-10-16
 opened: 2026-10-16
 owner: marius
 related:
 - docs/research/README.md
 - docs/augmentations/docs-research-README.yaml
 severity: low
-unverified: The catalog-local entry count (about 15 of 41 files) comes from the triage agent and was not re-measured.
+unverified: 'The local catalog still holds 15 entries for the research files (re-measured 2026-10-16 via doc gather: 15 rows in params.entries). Params are catalog-local and not in git, so the committed fix cannot rebuild them; rebuild by hand per the sidecar prompt.'
 ---
 
 # BUG: the research index cannot be saved or refreshed the way its README says
@@ -50,16 +51,23 @@ See Reproduction; lines read 2026-10-16. Provenance: the original plan for this 
 N/A.
 
 ## Fix
-Not started. Replace step 4 with the current `doc(action="augment", id=..., merge=true, params_path=...)` (or `doc(action="update", patch={params: ...})`), and either configure a gather source that can enumerate `docs/research/*.md` or remove the "Refreshed by gather pass" claim and keep the by-hand rebuild the sidecar prompt already describes.
+
+Fixed 2026-10-16 in `docs/research/README.md`; the README was the wrong side. Verified: `artifact_augment` and `artifact` are in `RETIRED_TOOL_NAMES` (`src/server.rs:6450-6459`); `doc(action="gather")` on `5086e3c7c0b9d83c` returned `context: {}` and `hints: []` (no `gather_from` in params, and `src/librarian/tools/refresh.rs` reads gather sources only from `params.gather_from`).
+
+Changes: the save step now reads `doc(action="augment", id=..., merge=true, augment={params_path: ...})` (the form the sidecar prompt already used); the read example `artifact(action="get", ...)` became `doc(action="get", ...)`; step 4 says the rebuild is by hand and the tracker has no gather source; § Suspected stragglers no longer claims "Refreshed by gather pass" and says why (`gather_from` is a params value, params do not travel through git, the sidecar carries none). Decision: no gather source was configured, because `gather_from` is a params value and cannot be committed, so a configured source would exist on one machine only; the by-hand rebuild the sidecar prompt describes stays the procedure.
+
+Fix commit `2d56edc2` on branch `worktree-agent-aa532b30b45f11948` (to be merged to experiments), patch-id `9787be24db6a362ca759ab8dee4085108e823018` (shared with the two sibling doc fixes).
 
 ## Tests added
-None — documentation and catalog configuration.
+
+None — documentation of a procedure; the retirement itself is pinned by the test at `src/server.rs:6868-6870`, which asserts the name is not registered; no test was added for this README.
 
 ## Workarounds
 Rebuild `entries` by globbing `docs/research/` by hand, then write them with `doc(action="augment", merge=true, params_path=...)`.
 
 ## Resume
-Decide whether the index should be gatherable; then fix the README text accordingly.
+
+N/A — fixed. Separate, not done here: rebuild the local catalog `entries` from the files' frontmatter (catalog-local, not in git). Archive once on experiments with the gate green.
 
 ## References
 - `docs/research/README.md`, `docs/augmentations/docs-research-README.yaml`

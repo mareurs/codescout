@@ -1,7 +1,7 @@
 ---
 id: f9608c9978ad8e69
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the write-path ADR says every unpinned write already carries wrote_to; only repos with linked worktrees do'
 owners:
 - marius
@@ -10,6 +10,7 @@ tags:
 - adr
 - documentation
 - tool-contracts
+closed: 2026-10-16
 opened: 2026-10-16
 owner: marius
 related:
@@ -43,16 +44,21 @@ See Reproduction. Provenance: found by the effort-steering Stage A critic experi
 N/A.
 
 ## Fix
-Not started. Correct the Context to "for every unpinned write in a repo with linked worktrees", and state that in single-checkout repos `annotate_write_path` changes a bare `"ok"` into an object.
+
+Fixed 2026-10-16 by amending the ADR, not the code. At the bytes: `src/tools/core/types.rs` `annotate_write_root` begins `if crate::util::path_security::list_git_worktrees(root).is_empty() { return; }` (gate added in `22e60ee9`, 2026-08-27, before the ADR), so the ADR was the wrong side. `docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`: Context and the "narrow widening" sentence now say `wrote_to` exists only in repos with linked worktrees, and a new `## Amendment 2026-10-16` states that in a single checkout `annotate_write_path` is the first change of the write response shape (bare `"ok"` to object). The decision is unchanged.
+
+Fix commit `2d56edc2` on branch `worktree-agent-aa532b30b45f11948` (to be merged to experiments), patch-id `9787be24db6a362ca759ab8dee4085108e823018` (`git show 2d56edc2 | git patch-id --stable`; the commit also carries the two sibling doc fixes). `src/tools/core/types.rs` was not touched.
 
 ## Tests added
-N/A — documentation; the behaviour is already pinned by the test cited in the code's doc comment.
+
+N/A — documentation. The behaviour described (no annotation when `list_git_worktrees` is empty) is the code's existing, documented behaviour; nothing in the code changed.
 
 ## Workarounds
 N/A.
 
 ## Resume
-Edit the ADR's Context and the "narrow widening" sentence.
+
+N/A — fixed. Archive once the fix is on experiments with the gate green.
 
 ## References
 - `docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`

@@ -25,8 +25,10 @@ The convention was never absolute. Two exceptions already shipped:
 - `memory/mod.rs:844` returns `{"status":"ok","warnings":[…]}` when a best-effort side
   effect failed, on the grounds that the caller cannot otherwise know.
 - `annotate_write_root` promotes a bare `"ok"` to `{"status":"ok","wrote_to":<root>}` for
-  every unpinned write, so a call that resolved against the session default is
-  distinguishable from one that landed where the caller meant.
+  every unpinned write **in a repo that has linked git worktrees**, so a call that resolved
+  against the session default is distinguishable from one that landed where the caller
+  meant. *(Scope corrected 2026-10-16: this originally read "for every unpinned write".
+  See the Amendment below.)*
 
 `OP-4` declares `**Serves:** edit_file(path~/.claude), create_file(path~/.claude)`. Its
 predicate runs through `names_path_containing`, which scans the **response**. So the rule
@@ -54,7 +56,8 @@ a real `abs_path` does.
   the input.
 
 **This is a narrow widening of no-echo, not its repeal.** A path is bounded, is already
-half-present as `wrote_to`, and tells the caller where the write landed. The content
+half-present as `wrote_to` *where a repo has linked worktrees* (in a single-checkout repo it
+is not; see the Amendment), and tells the caller where the write landed. The content
 prohibition is untouched.
 
 ## The alternative, and why measurement rejected it
@@ -100,6 +103,37 @@ bug nor its repair. It is removed, per its own instruction.
 - The no-echo convention is revisited as a whole. This ADR widens it by one bounded field
   and does not license a second widening by analogy.
 
+## Amendment 2026-10-16 — `wrote_to` was never universal; for a single checkout this ADR is the first shape change
+
+- **Status:** accepted correction to a shipped decision. **Trigger:**
+  `docs/issues/2026-10-16-write-path-adr-says-every-unpinned-write-carries-wrote-to.md`.
+
+The Context said `annotate_write_root` promotes a bare `"ok"` "for every unpinned write",
+and the Decision called the path "already half-present as `wrote_to`". Both overstated the
+scope. `annotate_write_root` returns at once when
+`crate::util::path_security::list_git_worktrees(root)` is empty
+(`src/tools/core/types.rs`, the function's first statement), and its doc comment says the
+single-checkout case is untouched. That gate predates this ADR (added in `22e60ee9`,
+2026-08-27). So `wrote_to` exists only in a repo with linked worktrees.
+
+What that changes:
+
+- **In a repo with linked worktrees** the ADR's account stands as written: a write already
+  answered `{"status":"ok","wrote_to":…}`, and `annotate_write_path` added `abs_path` or
+  `rel_path` to that object.
+- **In a single-checkout repo** a write answered the bare string `"ok"` before this ADR.
+  `annotate_write_path` is there the **first** change of the write response shape: it
+  promotes `"ok"` to `{"status":"ok","rel_path":…}` (or `abs_path`) for every write whose
+  tool is not exempt, pinned or not. In the common case the no-echo convention therefore
+  moved by one bounded field *and* by one response shape (string to object), not by one
+  field on a response that was already an object.
+- **The decision is unchanged.** The content prohibition is untouched and the path is still
+  bounded. The measurement table above is not re-derived here.
+
+A reader sizing the blast radius of a future widening of no-echo should start from this:
+the baseline for most repos is a bare string, and a second annotation there is a shape
+change, not a field addition.
+
 ## Sites (initial)
 
 - `src/tools/core/types.rs` — `annotate_write_path`, and its capture in `call_content`
@@ -107,4 +141,3 @@ bug nor its repair. It is removed, per its own instruction.
 - `src/operator_rules/route.rs` — `op_4s_predicate_is_itself_sound_given_a_path_bearing_response`
 - `src/tools/core/tests.rs` — `op_4_routes_on_a_write_response_the_pipeline_produced`
 - `docs/issues/archive/2026-08-28-op-4-path-predicate-can-never-fire.md`
-
