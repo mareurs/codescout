@@ -69,7 +69,11 @@ condition is the hook's own and not yours.
   line and reported 55 refusals. Replayed on firing events (443 of them), it refused 42, and 29 of
   those were events the old gate had accepted.
 - **Subtract the baseline.** Events the old rule also refused are commits made without the hook
-  enforcing. Of the 42 refusals in that replay, 13 were that.
+  enforcing, **or states that predate a rule the hook has today**. Replaying the ledger hook over
+  2026-09-03 to 2026-10-16, the `1,1` cell held 501 of 1,135 commits, and 496 of them were one rule
+  (`the Index table stores mechanism status again`) that was introduced after those commits: 494 of 648
+  in early September, 0 of 127 from 2026-09-16. Replay only the window in which the rules under test
+  existed, and read `1,1` by first refusal line before you read `0,1`.
 - **Split by period.** A shape that decays is a different decision from one that recurs. Of the 4
   October events in the false-refusal set, 3 came from two consecutive `fix(memory)` commits on
   2026-10-14 (one event in the first, two in the second), which `scripts/probe-hook-replay.py` showed
