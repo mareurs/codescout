@@ -1,19 +1,19 @@
 ---
 id: '975ebfd99fc8b060'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a fork child is re-served every guide it inherited — the hook identifies the fork, the server''s principal adoption cannot'
 owners:
 - marius
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-10-16
 opened: 2026-09-24
 related:
 - docs/issues/archive/2026-08-31-subagents-receive-guides-their-parent-already-holds.md
 - docs/issues/archive/2026-09-24-residual-in-session-subagent-guide-starvation.md
 severity: low
-unverified: Whether a fork's PreToolUse payload carries agent_type (only SubagentStart's was observed to, indirectly) — decides which of the two fix routes is available.
+unverified: 'Not measured live: a fork child''s first triggering call on a rebuilt binary with the claude-plugins fix/guide-hooks-20261016 hook loaded. The server half and the hook half are each tested, but not together in one session.'
 ---
 
 # BUG: a fork child is re-served every guide it inherited — the hook identifies the fork, the server's principal adoption cannot
@@ -81,16 +81,20 @@ Recorded here because it closed `1503dca6c81fc3d4`: the fresh child received `sy
 
 ## Fix
 
-Not started. Two routes, both seeding a fork's principal from its parent's ledger at adoption instead of from empty:
+Fixed 2026-10-16 by route 1 (`SubagentStart`); the `PreToolUse` question stayed unverified because it is no longer needed.
 
-- **Via `SubagentStart` (payload field observed).** The snapshot hook already writes a per-`(pid, agent_id)` request for a fresh child; write a "seed from parent" request for a fork into the same inbox, and have `poll_guide_rearm`'s consumer copy the parent's `emitted` into the new principal.
-- **Via the principal stamp.** If a fork's `PreToolUse` payload carries `agent_type` (unverified — see frontmatter), `principal-stamp.mjs` could stamp it and `adopt_request_conversation` could seed from the parent's parked or live ledger.
-
-Seed from the parent's ledger **as of the fork**, not later: a fork inherits the context present at dispatch.
+- **Server (codescout `be059756`).** `RearmRequest` gains `fork: bool` (serde default `false`). `poll_guide_rearm` sends a fork request to `GuideLedger::seed_inherited`, which marks the topics delivered (the opposite of `re_arm`) and ONLY on an empty ledger. The ledger is empty exactly when adoption has just started a never-seen fork principal; a `SendMessage` resume re-fires `SubagentStart` with the parent's LATER keys, and seeding those onto a fork with history of its own would withhold guides it never received, so a late seed is consumed and ignored. Known limit: a fork that was resumed before it ever delivered anything still has an empty ledger and takes the later key set.
+- **Hook (claude-plugins `fix/guide-hooks-20261016`, commit `64fa076`).** `agent-guide-snapshot.mjs` stops skipping forks and writes the same `<pid>-<hash(agent)>.json` with `fork: true`. The seed is the parent's key set at dispatch, read from its on-disk ledger, which `persist` rewrites on every insert.
+- **Compatibility.** An old server reads a fork request as a re-arm of topics an empty ledger does not hold: a no-op, i.e. the old behaviour. Old-shape requests parse with `fork: false`. A fresh child still receives everything (the control direction, tested).
 
 ## Tests added
 
-None — this record opens the defect. A fix wants a server test that a fork principal's first triggering call ships nothing for a topic the parent held at adoption, paired with the existing fresh-child test that it ships the topic — one test per direction, since each is monotone the other way.
+Written red first, one test per direction:
+
+- `server::guide_hint_tests::a_fork_principals_first_call_ships_nothing_the_parent_held_at_dispatch`: a fork's first call ships no opener, and a FRESH sibling with no request in the same server still receives it. Failed before the fix on the fork assertion.
+- `server::guide_hint_tests::a_fork_seed_is_ignored_once_the_fork_has_its_own_history`: a late seed neither lands nor survives on disk. This one is a guard rather than a red test: it passes on the old code too (nothing seeded anything) and would red under a naive fix that seeds unconditionally.
+- `tools::guide_ledger::tests::seed_inherited_*` (persists and survives reload; no-op and no file rewrite on a non-empty ledger) and `tools::guide_rearm::tests::a_request_carries_the_fork_flag_and_defaults_to_not_a_fork`.
+- Plugin: `agent-guide-snapshot.test.sh` case 7 now asserts a fork writes exactly one request, `fork:true`, naming the parent's topics, and that a fresh dispatch's request is not marked fork (this replaced the assertion that a fork writes none). 27/27.
 
 ## Workarounds
 
@@ -98,7 +102,7 @@ None needed for correctness; the cost is bytes.
 
 ## Resume
 
-Settle the frontmatter `unverified:` first — it picks the route.
+Merge both branches together. Remaining: a live measurement (a fork child's first `symbols(path=...)` in a session whose parent already holds `symbol-navigation` must carry no `auto-injected get_guide` block) on a rebuilt binary with the plugin branch loaded; the tests exercise the server in-process and the hook against a fake server slot.
 
 ## References
 

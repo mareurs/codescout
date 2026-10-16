@@ -298,6 +298,43 @@ pub(crate) fn guide_blocks_for(
     (out, shape)
 }
 
+/// The pre-call gate's blocks: the `serves:` section(s) for `selector`, served
+/// BEFORE a destructive call runs, or empty when there is nothing to hold it for.
+///
+/// Empty means "execute": no declared section serves this selector, or every one
+/// of them was already delivered this session, or the ledger belongs to no
+/// conversation. The last is the non-interactive opt-out — an anonymous ledger
+/// (the CLI, a script, a client with no session identity) has nobody to
+/// acknowledge a held call, so it keeps today's behaviour and the post-call
+/// delivery. Never blocks without text to show.
+///
+/// Input-derivable only. `topic_declaring` and `match_sections` are given a null
+/// result: a `serves:` shape of the plain `tool.action` form matches on the
+/// selector alone, which is all that exists before the call runs. A shape that
+/// also needs the result (`path_contains`) cannot gate, by construction.
+///
+/// Stamps the ledger (inside [`guide_blocks_for`]), which is the whole of the
+/// no-double-serve story: the post-call emission finds the keys present and ships
+/// nothing, and the caller's re-issue of the identical call finds them present
+/// here and executes. State lives in the ledger, so it inherits the ledger's
+/// persistence, idle TTL, per-principal scoping and fork seeding
+/// (`GuideLedger::seed_inherited`) for free; there is no stash to bound.
+/// docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md
+pub(crate) fn first_use_guide_gate(
+    selector: Option<&str>,
+    emitted: &mut crate::tools::guide_ledger::GuideLedger,
+) -> Vec<Content> {
+    if emitted.key().is_none() {
+        return Vec::new();
+    }
+    let null = Value::Null;
+    let Some(topic) = crate::prompts::guide_index::GUIDE_INDEX.topic_declaring(selector, &null)
+    else {
+        return Vec::new();
+    };
+    guide_blocks_for(topic, selector, &null, emitted).0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,5 +631,74 @@ mod tests {
         );
         assert!(pointer.contains("NOT delivered"), "got: {pointer}");
         assert!(!pointer.contains("do not re-call"), "got: {pointer}");
+    }
+
+    /// A ledger that belongs to a conversation, as every MCP session's does.
+    /// `anonymous` has no key and the gate stands down for it by design.
+    fn keyed_ledger() -> (GuideLedger, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let led = GuideLedger::load("gate-sess", Some(dir.path().join("guide_hints")));
+        assert!(
+            led.key().is_some(),
+            "premise: this ledger names a conversation"
+        );
+        (led, dir)
+    }
+
+    #[test]
+    fn the_gate_serves_a_declared_section_once_and_stamps_it() {
+        let (mut led, _dir) = keyed_ledger();
+        let blocks = first_use_guide_gate(Some("doc.move"), &mut led);
+
+        assert!(!blocks.is_empty(), "a declared destructive shape is held");
+        assert!(
+            blocks.iter().any(|b| text(b).contains("§")),
+            "what ships is a SECTION, not the preamble fallback"
+        );
+        // The re-issue of the identical call must find it spent and execute.
+        assert!(
+            first_use_guide_gate(Some("doc.move"), &mut led).is_empty(),
+            "a second call has nothing left to be held for"
+        );
+        // And the post-call emission must not serve it a second time.
+        let (after, _) = guide_blocks_for("librarian", Some("doc.move"), &json!({}), &mut led);
+        assert!(
+            after.is_empty(),
+            "the gate already delivered the section; the post-call path ships nothing"
+        );
+    }
+
+    #[test]
+    fn the_gate_never_holds_a_call_for_a_shape_no_section_serves() {
+        let (mut led, _dir) = keyed_ledger();
+        assert!(first_use_guide_gate(Some("doc.no_such_action"), &mut led).is_empty());
+        assert!(
+            first_use_guide_gate(None, &mut led).is_empty(),
+            "a tool with no selector has no declared shape to gate on"
+        );
+        assert!(
+            led.is_empty(),
+            "a gate that held nothing must stamp nothing — a stamp with no delivery is starvation"
+        );
+    }
+
+    #[test]
+    fn the_gate_stands_down_for_an_anonymous_ledger() {
+        // The non-interactive opt-out: no conversation, nobody to acknowledge.
+        let mut led = ledger();
+        assert!(first_use_guide_gate(Some("doc.move"), &mut led).is_empty());
+        assert!(led.is_empty());
+    }
+
+    #[test]
+    fn the_gate_does_not_hold_a_call_whose_section_the_session_already_holds() {
+        // A fork's seeded ledger, or a session that read the section on an earlier call.
+        let (mut led, _dir) = keyed_ledger();
+        let first = first_use_guide_gate(Some("doc.delete"), &mut led);
+        assert!(!first.is_empty(), "premise: doc.delete shares the section");
+        assert!(
+            first_use_guide_gate(Some("doc.move"), &mut led).is_empty(),
+            "doc.move and doc.delete are served by one section; it was delivered"
+        );
     }
 }

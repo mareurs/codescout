@@ -1450,6 +1450,27 @@ pub trait Tool: Send + Sync {
     fn is_write(&self, _input: &Value) -> bool {
         false
     }
+    /// Returns true if THIS call's first occurrence in a session should be held
+    /// until the caller has read the guide section that warns about it.
+    ///
+    /// A `serves:` section otherwise arrives inside the response of the call it
+    /// informs, which for a destructive call is after the damage. When this is
+    /// true and a declared section serves the call's selector, `call_content`
+    /// serves the section INSTEAD of running the call and says so
+    /// (`executed: false`); the identical re-issue then runs. See
+    /// [`first_use_guide_gate`](crate::tools::core::guide_emit::first_use_guide_gate).
+    ///
+    /// Defaults to `false`. Opt in per call SHAPE, from `input` alone: this runs
+    /// before the call, so nothing about the result exists to inspect. Cover only
+    /// shapes a first call can silently damage. A call that is already a dry run by
+    /// default (`doc` `delete`/`graft`/`rekey_prefix`, `librarian` `fix` without
+    /// `confirm`) is harmless on the first call and gains nothing from a stall; an
+    /// idempotent read never belongs here. Distinct from [`Tool::is_write`], which
+    /// answers a different question (the write lock) and is true for far more calls.
+    fn is_destructive(&self, _input: &Value) -> bool {
+        false
+    }
+
     /// Returns true if this call is the DOCUMENTED WAY OUT of a write block, so the
     /// read-only gate must let it through even though [`Tool::is_write`] is `true`.
     ///
@@ -1651,6 +1672,41 @@ pub trait Tool: Send + Sync {
             } else {
                 None
             };
+        // The pre-call guide gate. A `serves:` section otherwise rides in the response
+        // of the call it informs, which for a destructive call is after the damage:
+        // the first such call in a session is held, the section served in its place,
+        // and the identical re-issue runs. `executed: false` is the whole contract
+        // with the caller; nothing was stashed, so there is no handle to replay and no
+        // new ack kind (the ledger key IS the state — see `first_use_guide_gate`).
+        // Input-derived only: the topic and section come from `selector`, never from
+        // a result that does not exist yet. After `selector` and before `self.call`
+        // consumes `input`.
+        // docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md
+        if self.is_destructive(&input) {
+            let held = {
+                let mut emitted = ctx.guide_hints_emitted.lock();
+                crate::tools::core::guide_emit::first_use_guide_gate(
+                    selector.as_deref(),
+                    &mut emitted,
+                )
+            };
+            if !held.is_empty() {
+                let mut out = vec![Content::text(
+                    serde_json::json!({
+                        "executed": false,
+                        "tool": self.name(),
+                        "action": selector,
+                        "reason": "First call of this destructive shape this session. It was \
+                                   NOT run; the guide section that applies to it follows. Read \
+                                   it, then re-issue the identical call to proceed — it will \
+                                   run, and the section will not be served again.",
+                    })
+                    .to_string(),
+                )];
+                out.extend(held);
+                return Ok(out);
+            }
+        }
         // NOT `?`. Every render site for `param_corrections` below sits under this
         // call, so a bare `?` returned past all of them and the advisory was lost on
         // exactly the calls a caller reads hardest — the ones that failed. See

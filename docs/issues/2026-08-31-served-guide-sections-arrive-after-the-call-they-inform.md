@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - guides
@@ -8,11 +8,12 @@ tags:
 - tool-surface
 - ack-handle
 - progressive-disclosure
-closed: null
+closed: 2026-10-16
 opened: 2026-08-31
 owner: marius
 related: []
 severity: medium
+unverified: Agent ack-reflex risk is unmeasured - whether a caller reads the held section or reflexively re-issues needs an eval arm; and no live-session reproduction on a rebuilt binary has been run (tests exercise the server in-process).
 ---
 
 # BUG: a `serves:`-declared guide section is delivered with the RESPONSE, so it cannot prevent the first-call mistake it exists to prevent
@@ -117,7 +118,7 @@ every mode is a dry run until `confirm=true`, so its first call is harmless.
 
 ## Fix
 
-Not applied. Proposed strategy, from Marius, 2026-08-31 — **block the first call, serve
+Applied 2026-10-16 as decision B (see `### Implemented 2026-10-16` below). Original proposal, from Marius, 2026-08-31 — **block the first call, serve
 the guide, and let the agent acknowledge**:
 
 1. First call to a served shape is **not executed**. The full input is stashed.
@@ -193,12 +194,31 @@ The ~2155B above becomes movable, and the rule "long reference material lives in
 stops having a destructive-tools exception. That is roughly 4% of the 56519-char budget
 recovered from a single mechanism change.
 
+### Implemented 2026-10-16 — decision B: a per-call property gate, not a declaration
+
+Decision (user, via main): gate on a property of the CALL, not a new `blocks:` declaration. Design note, boundaries first.
+
+**Boundary.** One new trait method, one early-return in `Tool::call_content`, one pure function. No new handle kind, no new declaration, no change to `GuideIndex::declares()`.
+
+- `Tool::is_destructive(&self, input) -> bool` (`src/tools/core/types.rs`, beside `is_write`, default `false`). Input-derivable only, because the topic and section are chosen from the RESULT on the post path and no result exists yet. Opt-in per call shape. `LibrarianAdapter` answers `true` for `doc` `move` and `librarian` `merge_worktree` unless `dry_run` is true. Not widened to the dry-run-by-default shapes (`doc` `delete`/`graft`/`rekey_prefix`, `librarian` `fix`) nor `doc` `update` (shrink-guarded): a stall there buys no protection.
+- Pre-phase: in `call_content`, after `selector_key` and before `self.call(input, ctx)` consumes `input`. If `is_destructive(&input)`, ask `first_use_guide_gate(selector, ledger)` (`src/tools/core/guide_emit.rs`). It resolves the topic with `GUIDE_INDEX.topic_declaring(selector, &Null)` and calls the existing `guide_blocks_for` with a null result, so a plain `tool.action` shape matches on the selector alone and a `path_contains` shape cannot gate, by construction.
+- Returns: not the tool's result but `[ {executed:false, tool, action, reason}, <guide section block(s)> ]`. The caller re-issues the IDENTICAL call. No handle: nothing is stashed. The cost is one re-emission of the call's input, which for `doc.move` and `merge_worktree` is a few fields. A handle (replay the stored input, as `write_ack.rs` does) would need a NEW ack kind, because `maybe_replay_ack` is keyed on `input["path"]` and approves a directory. That is the design's one deliberate omission, to be revisited only if re-emission proves costly.
+- No double serve, and the state is the ledger. `guide_blocks_for` stamps `topic#heading` before the call returns, so (a) the re-issue finds the key and executes, (b) the post-call emission finds it and ships nothing, (c) a fork's `seed_inherited` ledger already holds it and is never held (`docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md`), (d) a post-compact re-arm clears it and the gate fires again. TTL, persistence and per-principal scoping are the ledger's; there is no stash to bound.
+- `GuideIndex::declares()` is untouched: the gate reads the SAME `serves:` sections the post path does (`doc.move, doc.delete` is one section in `librarian.md`). It never holds without text to show: no declared section for the selector, or all already delivered, means execute.
+- Non-interactive opt-out: the gate stands down for a ledger with no conversation key (`GuideLedger::key() == None`: the CLI, scripts, clients with no session identity). Nobody is there to re-issue, so those keep today's post-call delivery.
+- Held responses skip the param-corrections advisory and the path-stripping; the call did not run.
+
+**OPEN EVAL NEED, not built here:** the block degrades to a reflexive re-issue if callers learn to ack without reading. Whether the section is read is unmeasured and wants an eval arm (`prompt-engineering` can measure read vs reflexive). Until then the gate is two shapes wide on purpose.
+
 ## Tests added
 
-None — nothing implemented yet. A regression test for the fix should assert that the
-first call to a blocking shape **did not execute** (observe the side effect's absence,
-not the response shape), and that the replayed input is byte-identical to the stashed
-one rather than re-parsed from the acknowledgement.
+Written red first, one assertion on the SIDE EFFECT, not the response shape:
+
+- `server::guide_hint_tests::the_first_destructive_call_is_held_and_serves_its_guide_before_the_side_effect`: creates an artifact, issues `doc` `move`; the file has not moved, the response says `executed:false` and carries the `librarian` section; the identical re-issue moves it and does not repeat the section. It failed on the pre-gate code at the first assertion (the file had already moved).
+- `tools::core::guide_emit::tests::the_gate_serves_a_declared_section_once_and_stamps_it`, `..._never_holds_a_call_for_a_shape_no_section_serves` (and stamps nothing), `..._stands_down_for_an_anonymous_ledger`, `..._does_not_hold_a_call_whose_section_the_session_already_holds`.
+- `librarian::adapter::tests::only_move_and_a_real_merge_worktree_are_held_for_the_guide`: the discriminator rows, `delete`/`graft`/`rekey_prefix`/`update` and a dry-run `merge_worktree` are not held.
+
+Not covered: a live session. `a_p50_session_stays_under_the_committed_emission_byte_ceiling` still passes.
 
 ## Workarounds
 
@@ -210,17 +230,12 @@ or a dry run, it can move.
 
 ## Resume
 
-Decide whether to scope the gate with a new `<!-- blocks: tool.action -->` declaration in
-`src/prompts/guide_index.rs::parse_declarations` (which already parses `serves:` and
-`requires:` and rejects malformed shapes loudly), or to derive it from a property of the
-call. Then wire `src/tools/core/write_ack.rs`'s capture/replay pair to that trigger —
-read its four tests first, since they already pin the cross-tool and unknown-handle
-rejections a guide gate would need identically.
+Gate is implemented for two shapes (see `### Implemented 2026-10-16`). Remaining: (1) the ack-reflex eval; (2) widen shape by shape only on evidence that a first call damaged something; (3) a live reproduction on a rebuilt binary (`doc(action="move", ...)` first call in a fresh session must answer `executed:false`).
 
 ## References
 
-- `src/prompts/guide_index.rs` — `serves:` / `requires:` parsing; its doc comment on why a
-  shape that parses but never matches is the failure mode this feature exists to prevent.
-- `src/server.rs:3272` — the test asserting every routed shape has a serving section.
-- `src/tools/core/write_ack.rs` — the capture/replay machinery this would reuse.
-- `52712759`, `d94dd53d` — the tool-surface compaction whose stopping point this defines.
+- `src/prompts/guide_index.rs`: `serves:` / `requires:` parsing; unchanged.
+- `src/server.rs`: `SECTION_WAIVERS` test asserting every routed shape has a serving section.
+- `src/tools/core/guide_emit.rs::first_use_guide_gate`, `src/tools/core/types.rs` (`Tool::is_destructive`, the pre-call block in `call_content`), `src/librarian/adapter.rs` (`LibrarianAdapter::is_destructive`): the implementation.
+- `src/tools/core/write_ack.rs`: the capture/replay machinery that was NOT reused (see the no-handle note above).
+- `52712759`, `d94dd53d`: the tool-surface compaction whose stopping point this defines.

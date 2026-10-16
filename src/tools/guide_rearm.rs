@@ -1,6 +1,8 @@
-//! One-shot "please re-arm these topics" requests, written by the companion's
-//! `SubagentStart` hook for a (non-`fork`) subagent dispatch — and, measured
-//! 2026-09-24, on every `SendMessage` resume too — and consumed by the ALREADY
+//! One-shot request files written by the companion's `SubagentStart` hook —
+//! "please re-arm these topics" for a (non-`fork`) subagent dispatch and, measured
+//! 2026-09-24, on every `SendMessage` resume too; "these topics are already held,
+//! mark them delivered" (`"fork": true`, see [`RearmRequest`]) for a `fork`, which
+//! inherits its parent's conversation. Consumed by the ALREADY
 //! RUNNING server on the NAMED subagent's own next request, never on another
 //! principal's (see [`GuideRearmInbox::poll`]).
 //!
@@ -41,12 +43,25 @@
 
 use std::path::{Path, PathBuf};
 
-/// The body of one request file. Any other key (e.g. a `created_at` debugging
-/// timestamp the hook writes) is ignored by serde's default "extra fields are
-/// dropped" behaviour — this struct only needs the one field it acts on.
-#[derive(Debug, serde::Deserialize)]
-struct RearmRequest {
-    topics: Vec<String>,
+/// The body of one request file, and what [`GuideRearmInbox::poll`] hands back.
+/// Any other key (e.g. a `created_at` debugging timestamp the hook writes) is
+/// ignored by serde's default "extra fields are dropped" behaviour — this struct
+/// only needs the fields it acts on.
+///
+/// `fork` flips what `topics` MEANS. Absent or `false`: the topics are ones the
+/// recipient has NOT seen and must be delivered again (a re-arm, for a fresh
+/// subagent). `true`: the recipient is a `fork`, which inherits its parent's whole
+/// conversation, so the topics are ones it ALREADY HOLDS and must be marked
+/// delivered instead — the parent's key set as of dispatch
+/// (docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md).
+/// A server that predates the field reads a fork request as a re-arm of topics an
+/// empty ledger does not hold, which changes nothing: the status quo, not a
+/// regression.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct RearmRequest {
+    pub topics: Vec<String>,
+    #[serde(default)]
+    pub fork: bool,
 }
 
 /// Directory of pending re-arm requests. See module docs for the problem and the
@@ -75,19 +90,19 @@ impl GuideRearmInbox {
     }
 
     /// Consume the pending request addressed to this process AND to `agent_id` —
-    /// `<pid>-<request_hash(agent_id)>.json` — returning its topics. Only the named
-    /// subagent's own call may consume it: consumed on any other principal's call,
-    /// it re-armed THAT principal's ledger, so the parent's next call after a
-    /// dispatch or resume lost its entire ledger
+    /// `<pid>-<request_hash(agent_id)>.json` — returning it (empty when there is
+    /// none). Only the named subagent's own call may consume it: consumed on any
+    /// other principal's call, it re-armed THAT principal's ledger, so the parent's
+    /// next call after a dispatch or resume lost its entire ledger
     /// (docs/issues/archive/2026-09-24-guide-rearm-request-is-consumed-by-whichever-principal-calls-next.md).
     /// A request whose agent never calls again waits for its server to exit, and the
     /// next server's dead-pid [`gc`] removes it.
     ///
     /// Best-effort: a file that fails to parse is removed rather than retried, since
     /// it will not parse differently on the next poll.
-    pub fn poll(&self, agent_id: &str) -> Vec<String> {
+    pub fn poll(&self, agent_id: &str) -> RearmRequest {
         let Some(dir) = self.dir.as_deref() else {
-            return Vec::new();
+            return RearmRequest::default();
         };
         let path = dir.join(format!(
             "{}-{}.json",
@@ -95,12 +110,10 @@ impl GuideRearmInbox {
             request_hash(agent_id)
         ));
         let Ok(text) = std::fs::read_to_string(&path) else {
-            return Vec::new();
+            return RearmRequest::default();
         };
         let _ = std::fs::remove_file(&path);
-        serde_json::from_str::<RearmRequest>(&text)
-            .map(|req| req.topics)
-            .unwrap_or_default()
+        serde_json::from_str::<RearmRequest>(&text).unwrap_or_default()
     }
 }
 
@@ -173,14 +186,14 @@ mod tests {
     #[test]
     fn poll_with_no_directory_returns_empty_and_never_panics() {
         let inbox = GuideRearmInbox { dir: None };
-        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT).topics, Vec::<String>::new());
     }
 
     #[test]
     fn poll_with_an_empty_directory_returns_empty() {
         let dir = tempfile::tempdir().unwrap();
         let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
-        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT).topics, Vec::<String>::new());
     }
 
     #[test]
@@ -195,7 +208,7 @@ mod tests {
             &["librarian", "progressive-disclosure"],
         );
 
-        let mut topics = inbox.poll(AGENT);
+        let mut topics = inbox.poll(AGENT).topics;
         topics.sort();
         assert_eq!(
             topics,
@@ -219,7 +232,7 @@ mod tests {
             &["librarian"],
         );
 
-        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT).topics, Vec::<String>::new());
     }
 
     #[test]
@@ -229,12 +242,43 @@ mod tests {
         let my_pid = std::process::id();
         write_request(dir.path(), my_pid, &request_hash(AGENT), &["librarian"]);
 
-        assert_eq!(inbox.poll(AGENT), vec!["librarian".to_string()]);
+        assert_eq!(inbox.poll(AGENT).topics, vec!["librarian".to_string()]);
         assert_eq!(
-            inbox.poll(AGENT),
+            inbox.poll(AGENT).topics,
             Vec::<String>::new(),
             "the second poll must find nothing — the first must have deleted the file"
         );
+    }
+
+    #[test]
+    fn a_request_carries_the_fork_flag_and_defaults_to_not_a_fork() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = GuideRearmInbox::new(Some(dir.path().to_path_buf()));
+        let path = dir.path().join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            request_hash(AGENT)
+        ));
+
+        // The pre-existing shape (no `fork` key) is a re-arm, not a seed.
+        write_request(
+            dir.path(),
+            std::process::id(),
+            &request_hash(AGENT),
+            &["librarian"],
+        );
+        let req = inbox.poll(AGENT);
+        assert!(!req.fork, "an old-shape request must not read as a fork");
+        assert_eq!(req.topics, vec!["librarian".to_string()]);
+
+        std::fs::write(
+            &path,
+            serde_json::json!({ "topics": ["librarian"], "fork": true }).to_string(),
+        )
+        .unwrap();
+        let req = inbox.poll(AGENT);
+        assert!(req.fork, "`fork: true` must survive parsing");
+        assert_eq!(req.topics, vec!["librarian".to_string()]);
     }
 
     #[test]
@@ -256,12 +300,12 @@ mod tests {
         );
 
         assert_eq!(
-            inbox.poll("agent-one"),
+            inbox.poll("agent-one").topics,
             vec!["librarian".to_string()],
             "a call consumes only the request naming its own agent"
         );
         assert_eq!(
-            inbox.poll("agent-two"),
+            inbox.poll("agent-two").topics,
             vec!["workspace-state".to_string()],
             "a concurrently-dispatched sibling's request must survive the first agent's poll"
         );
@@ -277,7 +321,7 @@ mod tests {
             .join(format!("{my_pid}-{}.json", request_hash(AGENT)));
         std::fs::write(&path, "{ not valid json").unwrap();
 
-        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT).topics, Vec::<String>::new());
         assert!(
             !path.exists(),
             "a request that will never parse must be removed, not retried on every future poll"
@@ -291,7 +335,7 @@ mod tests {
         let stray = dir.path().join("README.txt");
         std::fs::write(&stray, "not ours").unwrap();
 
-        assert_eq!(inbox.poll(AGENT), Vec::<String>::new());
+        assert_eq!(inbox.poll(AGENT).topics, Vec::<String>::new());
         assert!(stray.exists());
     }
 
@@ -326,6 +370,6 @@ mod tests {
 
         // Still there after construction's own gc — `poll` (not gc) is what
         // consumes a live pid's own request.
-        assert_eq!(inbox.poll(AGENT), vec!["librarian".to_string()]);
+        assert_eq!(inbox.poll(AGENT).topics, vec!["librarian".to_string()]);
     }
 }

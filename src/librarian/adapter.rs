@@ -488,6 +488,32 @@ impl crate::tools::Tool for LibrarianAdapter {
         }
     }
 
+    /// The call shapes whose FIRST occurrence in a session is held until the
+    /// caller has read the guide section that warns about them
+    /// ([`Tool::is_destructive`]). Deliberately two, and both unguarded by any
+    /// other mechanism:
+    ///
+    /// - `doc` `move` mints a NEW artifact id (id = sha256 of the path), dangling
+    ///   every citation of the old one, and is not a dry run.
+    /// - `librarian` `merge_worktree` folds a worktree's shadow rows onto main
+    ///   (or, with `abandon`, deletes them) and is a dry run only when `dry_run`
+    ///   is explicitly true.
+    ///
+    /// Not widened to the shapes that are already safe on a first call: `doc`
+    /// `delete`/`graft`/`rekey_prefix` are dry runs until `force`, `doc` `update`
+    /// is behind the >50% body-shrink guard, `librarian` `fix` is a dry run until
+    /// `confirm`. Holding those would buy a stall and no protection.
+    fn is_destructive(&self, input: &Value) -> bool {
+        let action = input.get("action").and_then(Value::as_str);
+        match (self.inner.name(), action) {
+            ("doc", Some("move")) => true,
+            ("librarian", Some("merge_worktree")) => {
+                input.get("dry_run").and_then(Value::as_bool) != Some(true)
+            }
+            _ => false,
+        }
+    }
+
     fn relevant_guide_topic(&self, result: &Value) -> Option<&str> {
         // Three guides serve this tool and only one can be delivered per call.
         //
@@ -1226,6 +1252,59 @@ mod tests {
                 "librarian(action={action:?}) — {why}"
             );
         }
+    }
+    /// The pre-call gate's coverage is exactly two shapes, and the discriminators
+    /// are the rows that must hold: a dry-run `merge_worktree` and every
+    /// dry-run-by-default `doc` action are NOT held (a stall with no protection),
+    /// while `move` and a real `merge_worktree` are. A gate rewritten to return
+    /// `true` for all of `doc` passes the second pair and fails the first.
+    #[test]
+    fn only_move_and_a_real_merge_worktree_are_held_for_the_guide() {
+        let ctx = Arc::new(
+            crate::librarian::tools::TestToolContextBuilder::new(
+                crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
+            )
+            .build(),
+        );
+        let adapter_named = |name: &str| {
+            let inner = lib_all_tools()
+                .into_iter()
+                .find(|t| t.name() == name)
+                .unwrap_or_else(|| panic!("the `{name}` tool must be registered"));
+            LibrarianAdapter {
+                inner,
+                ctx: ctx.clone(),
+            }
+        };
+        let doc = adapter_named("doc");
+        let lib = adapter_named("librarian");
+
+        for (action, held) in [
+            ("move", true),
+            ("delete", false),
+            ("graft", false),
+            ("rekey_prefix", false),
+            ("update", false),
+            ("get", false),
+            ("find", false),
+        ] {
+            assert_eq!(
+                doc.is_destructive(&json!({ "action": action })),
+                held,
+                "doc(action={action:?})"
+            );
+        }
+        assert!(lib.is_destructive(&json!({ "action": "merge_worktree", "root": "/w" })));
+        assert!(
+            !lib.is_destructive(
+                &json!({ "action": "merge_worktree", "root": "/w", "dry_run": true })
+            ),
+            "a dry run is harmless on a first call"
+        );
+        assert!(
+            !lib.is_destructive(&json!({ "action": "doctor" })),
+            "an unrelated librarian action is never held"
+        );
     }
 
     /// The end-to-end shape, at the trait method rather than the extracted decision, so

@@ -1189,11 +1189,25 @@ impl CodeScoutServer {
         let Some(agent) = agent else {
             return;
         };
-        let topics = self.guide_rearm.poll(agent);
-        if topics.is_empty() {
+        let request = self.guide_rearm.poll(agent);
+        if request.topics.is_empty() {
             return;
         }
-        let refs: Vec<&str> = topics.iter().map(String::as_str).collect();
+        let refs: Vec<&str> = request.topics.iter().map(String::as_str).collect();
+        if request.fork {
+            // A fork inherits its parent's conversation: these are topics it already
+            // HOLDS, so they are marked delivered, not forgotten. Adoption started
+            // its ledger empty (a never-seen principal has no file), which is what
+            // `seed_inherited` requires.
+            let seeded = ledger.lock().seed_inherited(&refs);
+            tracing::info!(
+                topics = ?refs,
+                agent,
+                seeded,
+                "seeded a fork subagent's guide ledger with the topics it inherited"
+            );
+            return;
+        }
         tracing::info!(topics = ?refs, agent, "re-arming guide topics for the subagent that requested them");
         ledger.lock().re_arm(&refs);
     }
@@ -13968,6 +13982,254 @@ mod guide_hint_tests {
                 .lock()
                 .contains(crate::prompts::SESSION_OPENING_GUIDE),
             "with no request file, the ledger must be unaffected by guide-rearm polling"
+        );
+    }
+    /// Regression for
+    /// docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md.
+    ///
+    /// A `fork` subagent inherits its parent's whole conversation, guides included,
+    /// but its principal is never-seen so adoption starts its ledger EMPTY and the
+    /// first triggering call re-ships what it already holds. The companion's
+    /// `SubagentStart` hook knows it is a fork and writes a request carrying
+    /// `"fork": true` and the parent's key set as of dispatch: those topics are
+    /// ALREADY HELD, so they must be marked delivered rather than re-armed.
+    ///
+    /// One test per direction, since each is monotone the other way: the fork
+    /// receives nothing it inherited, and a FRESH sibling with no such request still
+    /// receives the opener (the fix must not become blanket suppression).
+    #[tokio::test]
+    async fn a_fork_principals_first_call_ships_nothing_the_parent_held_at_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        let as_principal = |name: &'static str| {
+            move |mut args: Value| {
+                args[crate::tools::session_key::PRINCIPAL_ARG_KEY] =
+                    json!(format!("conv-A/{name}"));
+                args
+            }
+        };
+        let marker = format!(
+            "<!-- auto-injected get_guide('{}')",
+            crate::prompts::SESSION_OPENING_GUIDE
+        );
+
+        // The parent's own first call delivers the opener, as it would before it
+        // dispatched a fork.
+        let parent = server
+            .call_tool_by_name("tree", json!({ "path": "." }))
+            .await
+            .expect("parent call ok");
+        assert!(
+            all_text(&parent).contains(&marker),
+            "premise: the parent holds the opener before the dispatch"
+        );
+
+        let request_path = rearm_dir.path().join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            crate::tools::guide_rearm::request_hash("forkagent")
+        ));
+        std::fs::write(
+            &request_path,
+            serde_json::json!({
+                "topics": [crate::prompts::SESSION_OPENING_GUIDE],
+                "fork": true,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let fork = server
+            .call_tool_by_name("tree", as_principal("forkagent")(json!({ "path": "." })))
+            .await
+            .expect("fork call ok");
+        assert!(
+            !all_text(&fork).contains(&marker),
+            "a fork already holds the opener in its inherited context; shipping it \
+             again is the over-delivery this request exists to prevent"
+        );
+        assert!(
+            !request_path.exists(),
+            "the request must be consumed by the fork's own call"
+        );
+
+        // Control: a fresh child with NO request has zero inherited context.
+        let fresh = server
+            .call_tool_by_name("tree", as_principal("freshagent")(json!({ "path": "." })))
+            .await
+            .expect("fresh call ok");
+        assert!(
+            all_text(&fresh).contains(&marker),
+            "a fresh subagent with no request must still receive the opener"
+        );
+    }
+
+    /// The seed names the parent's keys AS OF DISPATCH. Applied to a fork that has
+    /// already been served (a `SendMessage` resume fires `SubagentStart` again, so
+    /// the request can be re-written with the parent's LATER keys), it would mark
+    /// topics delivered that the fork never saw: starvation, the unsafe direction.
+    /// A request that finds a non-empty fork ledger is consumed and ignored.
+    #[tokio::test]
+    async fn a_fork_seed_is_ignored_once_the_fork_has_its_own_history() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let rearm_dir = tempfile::tempdir().unwrap();
+
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            guide_rearm_dir: Some(rearm_dir.path().to_path_buf()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        let as_fork = |mut args: Value| {
+            args[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!("conv-A/forkagent");
+            args
+        };
+
+        // The fork's first call opens its own ledger (opener delivered there).
+        server
+            .call_tool_by_name("tree", as_fork(json!({ "path": "." })))
+            .await
+            .expect("first fork call ok");
+
+        let request_path = rearm_dir.path().join(format!(
+            "{}-{}.json",
+            std::process::id(),
+            crate::tools::guide_rearm::request_hash("forkagent")
+        ));
+        std::fs::write(
+            &request_path,
+            serde_json::json!({ "topics": ["librarian"], "fork": true }).to_string(),
+        )
+        .unwrap();
+
+        server
+            .call_tool_by_name("tree", as_fork(json!({ "path": "." })))
+            .await
+            .expect("second fork call ok");
+
+        assert!(
+            !server.live_ledger().lock().contains("librarian"),
+            "a late seed must not mark a topic delivered that this fork never received"
+        );
+        assert!(
+            !request_path.exists(),
+            "the stale seed must still be consumed, not retried forever"
+        );
+    }
+    /// Regression for
+    /// docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md.
+    ///
+    /// A `serves:` section reached the caller only inside the RESPONSE of the call it
+    /// informs, so for a destructive call the guidance arrived with the result of
+    /// having made the mistake. `doc(action="move")` mints a new id and dangles every
+    /// citation of the old one, and is not dry-run by default. The first such call in
+    /// a session must NOT execute: it serves the section instead, and the identical
+    /// re-issue then runs. Asserted on the side effect (the file did not move), never
+    /// on the response shape alone — a response that merely carried the section
+    /// alongside a completed move would pass any shape check.
+    #[tokio::test]
+    async fn the_first_destructive_call_is_held_and_serves_its_guide_before_the_side_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        let created = call_tool_checked(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/specs/gate-fixture.md",
+                "kind": "spec",
+                "title": "gate fixture",
+                "body": "fixture body",
+            }),
+            "create",
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(
+            &created[0].as_text().expect("primary block is text").text,
+        )
+        .unwrap()["id"]
+            .as_str()
+            .expect("create response carries an id")
+            .to_string();
+        let old = dir.path().join("docs/specs/gate-fixture.md");
+        let new = dir.path().join("docs/specs/gate-fixture-moved.md");
+        assert!(old.exists(), "premise: the fixture file was created");
+        let mv = json!({
+            "action": "move", "id": id, "new_rel_path": "docs/specs/gate-fixture-moved.md"
+        });
+
+        // First move: held. Nothing on disk changes; the section is in the response.
+        let held = server
+            .call_tool_by_name("doc", mv.clone())
+            .await
+            .expect("dispatch ok");
+        assert!(
+            old.exists() && !new.exists(),
+            "the first destructive call must NOT execute — the file moved before the \
+             caller could read the section that warns about exactly this"
+        );
+        let held_text = all_text(&held);
+        assert!(
+            held_text.contains("\"executed\":false"),
+            "the response must say the call did not run, got: {held_text}"
+        );
+        assert!(
+            held_text.contains("<!-- auto-injected get_guide('librarian') §"),
+            "the section that informs the call rides in the held response"
+        );
+
+        // The identical re-issue executes, and does not serve the section a second time.
+        let ran = server
+            .call_tool_by_name("doc", mv)
+            .await
+            .expect("dispatch ok");
+        assert!(
+            !old.exists() && new.exists(),
+            "the re-issued call must execute: {}",
+            all_text(&ran)
+        );
+        assert!(
+            !all_text(&ran).contains("<!-- auto-injected get_guide('librarian') § "),
+            "the gate already delivered the section; the post-call path must not repeat it"
         );
     }
 
