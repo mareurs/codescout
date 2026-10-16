@@ -171,9 +171,30 @@ pub struct EmbeddingsSection {
     pub file_group_size: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// `[ignored_paths]` in `project.toml`.
+///
+/// **`Default` is hand-written, not derived, and that is load-bearing.** The serde
+/// field default on `patterns` (`default_ignored_patterns`) only fires when the
+/// `[ignored_paths]` table is *present* without a `patterns` key. An *absent* table
+/// takes `Default::default()` via `ProjectConfig`'s `#[serde(default)]`, and the derived
+/// impl yields `Vec::new()` — so a project with no `[ignored_paths]` section silently
+/// got no default ignores, while one with an empty section got them. The design's
+/// "key absent → defaults apply" has to hold on both paths, so both route through the
+/// same function. An explicit `patterns = []` still means "ignore nothing".
+/// `docs/issues/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IgnoredPathsSection {
-    #[serde(default = "default_ignored_patterns")]
+    /// Not serialized while equal to the built-in defaults: several call sites
+    /// (`onboarding`, the version stamps) write a whole `ProjectConfig` back with
+    /// `toml::to_string_pretty`, and emitting the list would freeze today's defaults
+    /// into every such `project.toml`, so a later addition to
+    /// [`default_ignored_patterns`] could never reach those projects. An absent key
+    /// parses back to the defaults; a customised list — including an explicit
+    /// `patterns = []` opt-out — differs from them and is therefore still written.
+    #[serde(
+        default = "default_ignored_patterns",
+        skip_serializing_if = "is_default_ignored_patterns"
+    )]
     pub patterns: Vec<String>,
     /// Glob patterns that the librarian walker visits even when
     /// `.gitignore`/`.git/info/exclude`/a global excludesfile would otherwise
@@ -186,6 +207,21 @@ pub struct IgnoredPathsSection {
     /// documentation/validation, not as the live read path.
     #[serde(default)]
     pub force_include: Vec<String>,
+}
+
+/// `skip_serializing_if` predicate for [`IgnoredPathsSection::patterns`]: true when the
+/// list is exactly the built-in defaults, so it need not be written.
+fn is_default_ignored_patterns(patterns: &[String]) -> bool {
+    patterns == default_ignored_patterns().as_slice()
+}
+
+impl Default for IgnoredPathsSection {
+    fn default() -> Self {
+        Self {
+            patterns: default_ignored_patterns(),
+            force_include: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1205,6 +1241,126 @@ model = "local:test"
             err.to_string().contains("ignored_paths.patterns"),
             "expected ignored_paths limit error, got {err}"
         );
+    }
+
+    // docs/issues/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md
+    //
+    // The serde field default on `IgnoredPathsSection::patterns` applies only when the
+    // `[ignored_paths]` table is PRESENT; an absent table takes the struct's `Default`,
+    // which used to be the derived one (`patterns = []`). Every case below must resolve
+    // to the same defaults, and an explicit empty list must stay an explicit opt-out.
+    #[test]
+    fn absent_ignored_paths_section_gets_default_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"proj\"\n",
+        )
+        .unwrap();
+
+        let empty_global = toml::Value::Table(toml::map::Map::new());
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty_global).unwrap();
+        assert_eq!(
+            cfg.ignored_paths.patterns,
+            default_ignored_patterns(),
+            "no [ignored_paths] section must mean \"defaults apply\" (design § 3)"
+        );
+    }
+
+    #[test]
+    fn missing_project_toml_gets_default_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty_global = toml::Value::Table(toml::map::Map::new());
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty_global).unwrap();
+        assert_eq!(cfg.ignored_paths.patterns, default_ignored_patterns());
+    }
+
+    #[test]
+    fn ignored_paths_section_without_patterns_key_gets_default_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"proj\"\n\n[ignored_paths]\nforce_include = [\"docs\"]\n",
+        )
+        .unwrap();
+
+        let empty_global = toml::Value::Table(toml::map::Map::new());
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty_global).unwrap();
+        assert_eq!(cfg.ignored_paths.patterns, default_ignored_patterns());
+        assert_eq!(cfg.ignored_paths.force_include, vec!["docs".to_string()]);
+    }
+
+    #[test]
+    fn explicit_empty_patterns_still_means_ignore_nothing() {
+        // The deliberate opt-out (e.g. a Kotlin backend whose source lives under `build/`)
+        // must survive the fix: only an ABSENT key falls back to the defaults.
+        let dir = tempfile::tempdir().unwrap();
+        let codescout_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&codescout_dir).unwrap();
+        std::fs::write(
+            codescout_dir.join("project.toml"),
+            "[project]\nname = \"proj\"\n\n[ignored_paths]\npatterns = []\n",
+        )
+        .unwrap();
+
+        let empty_global = toml::Value::Table(toml::map::Map::new());
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty_global).unwrap();
+        assert!(
+            cfg.ignored_paths.patterns.is_empty(),
+            "explicit `patterns = []` is an opt-out and must not be replaced by defaults"
+        );
+    }
+
+    #[test]
+    fn default_for_and_default_agree_on_default_patterns() {
+        // `default_for` and onboarding build the section via `Default::default()`.
+        assert_eq!(
+            ProjectConfig::default_for("x".into())
+                .ignored_paths
+                .patterns,
+            default_ignored_patterns()
+        );
+        assert_eq!(
+            IgnoredPathsSection::default().patterns,
+            default_ignored_patterns()
+        );
+    }
+
+    #[test]
+    fn default_patterns_are_not_frozen_into_a_written_project_toml() {
+        // Onboarding and the version stamps re-serialise a whole `ProjectConfig`. Writing
+        // the default list out would pin today's defaults into that file forever.
+        let written = toml::to_string_pretty(&ProjectConfig::default_for("x".into())).unwrap();
+        // Line-anchored: `shell_dangerous_patterns` also contains the substring.
+        assert!(
+            !written.lines().any(|l| l.starts_with("patterns")),
+            "default patterns must stay implicit in a written project.toml, got:\n{written}"
+        );
+        let back: ProjectConfig = toml::from_str(&written).unwrap();
+        assert_eq!(back.ignored_paths.patterns, default_ignored_patterns());
+    }
+
+    #[test]
+    fn explicit_empty_patterns_survive_a_serialise_round_trip() {
+        // The re-serialisation above must not flip a deliberate opt-out back to defaults:
+        // an empty list differs from the defaults, so it has to be written.
+        let mut cfg = ProjectConfig::default_for("x".into());
+        cfg.ignored_paths.patterns = Vec::new();
+        let written = toml::to_string_pretty(&cfg).unwrap();
+        let back: ProjectConfig = toml::from_str(&written).unwrap();
+        assert!(
+            back.ignored_paths.patterns.is_empty(),
+            "written:\n{written}"
+        );
+
+        let mut cfg = ProjectConfig::default_for("x".into());
+        cfg.ignored_paths.patterns = vec!["custom".into()];
+        let back: ProjectConfig = toml::from_str(&toml::to_string_pretty(&cfg).unwrap()).unwrap();
+        assert_eq!(back.ignored_paths.patterns, vec!["custom".to_string()]);
     }
 
     #[test]
