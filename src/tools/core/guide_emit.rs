@@ -280,16 +280,7 @@ pub(crate) fn guide_blocks_for(
             continue;
         }
         emitted.insert(key);
-        out.push(Content::text(format!(
-            "<!-- auto-injected get_guide('{topic}') § {} — first call this \
-                 session that serves this section. Do NOT re-call get_guide for \
-                 it. -->\n\
-                 \n\
-                 {}\n\
-                 \n\
-                 <!-- end auto-injected get_guide('{topic}') § {} -->",
-            sec.heading, sec.body, sec.heading
-        )));
+        out.push(section_block(topic, sec));
     }
     let shape = if out.is_empty() {
         None
@@ -323,17 +314,76 @@ pub(crate) fn guide_blocks_for(
 /// docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md
 pub(crate) fn first_use_guide_gate(
     selector: Option<&str>,
+    digest: &str,
     emitted: &mut crate::tools::guide_ledger::GuideLedger,
 ) -> Vec<Content> {
+    use crate::prompts::guide_index::GUIDE_INDEX;
+
     if emitted.key().is_none() {
         return Vec::new();
     }
     let null = Value::Null;
-    let Some(topic) = crate::prompts::guide_index::GUIDE_INDEX.topic_declaring(selector, &null)
-    else {
+    let Some(topic) = GUIDE_INDEX.topic_declaring(selector, &null) else {
         return Vec::new();
     };
-    guide_blocks_for(topic, selector, &null, emitted).0
+    // A caller who fetched the WHOLE guide (`get_guide`, which stamps the bare topic
+    // name) already holds every one of its sections; so does a fork whose seed carries
+    // only that key. Holding them again buys a stall and no protection.
+    if emitted.contains(topic) {
+        return Vec::new();
+    }
+    let sections = GUIDE_INDEX.match_sections(topic, selector, &null);
+    let keys: Vec<String> = sections.iter().map(|s| s.ledger_key()).collect();
+    if keys.is_empty() {
+        return Vec::new();
+    }
+
+    // First sight of a section: serve it (the stamp is `guide_blocks_for`'s) and hold
+    // THIS call.
+    if keys.iter().any(|k| !emitted.contains(k)) {
+        let blocks = guide_blocks_for(topic, selector, &null, emitted).0;
+        emitted.hold(&keys, digest);
+        return blocks;
+    }
+    // Served, and nobody has yet proved they read it. Keying the decision on the
+    // section alone let the SECOND of two parallel first calls through: a batch is
+    // composed before any response is read, so every call in it is a first call.
+    // Only the identical re-issue of a call that WAS held runs, and the first such
+    // re-issue acknowledges the section for everyone; any other call is held in its
+    // turn, and shown the text, since it too was composed without it.
+    if !emitted.has_pending_hold(&keys) {
+        return Vec::new();
+    }
+    if emitted.was_held(&keys, digest) {
+        emitted.acknowledge(&keys);
+        return Vec::new();
+    }
+    emitted.hold(&keys, digest);
+    sections.iter().map(|s| section_block(topic, s)).collect()
+}
+
+/// A digest of a call's input, to recognise its identical re-issue. Taken after
+/// parameter-alias normalisation, so an alias spelling and its canonical form agree.
+/// Not a security boundary: it keys in-memory state in the caller's own session.
+pub(crate) fn input_digest(input: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(input).unwrap_or_default();
+    hex::encode(Sha256::digest(&bytes))[..16].to_string()
+}
+
+/// One served section, wrapped. The text a caller reads, shared by the post-call
+/// delivery and the pre-call gate.
+fn section_block(topic: &str, sec: &crate::prompts::guide_index::GuideSection) -> Content {
+    Content::text(format!(
+        "<!-- auto-injected get_guide('{topic}') § {} — first call this \
+             session that serves this section. Do NOT re-call get_guide for \
+             it. -->\n\
+             \n\
+             {}\n\
+             \n\
+             <!-- end auto-injected get_guide('{topic}') § {} -->",
+        sec.heading, sec.body, sec.heading
+    ))
 }
 
 #[cfg(test)]
@@ -649,7 +699,7 @@ mod tests {
     #[test]
     fn the_gate_serves_a_declared_section_once_and_stamps_it() {
         let (mut led, _dir) = keyed_ledger();
-        let blocks = first_use_guide_gate(Some("doc.move"), &mut led);
+        let blocks = first_use_guide_gate(Some("doc.move"), "d1", &mut led);
 
         assert!(!blocks.is_empty(), "a declared destructive shape is held");
         assert!(
@@ -658,8 +708,13 @@ mod tests {
         );
         // The re-issue of the identical call must find it spent and execute.
         assert!(
-            first_use_guide_gate(Some("doc.move"), &mut led).is_empty(),
-            "a second call has nothing left to be held for"
+            first_use_guide_gate(Some("doc.move"), "d1", &mut led).is_empty(),
+            "the identical re-issue runs"
+        );
+        // And so does ANY call once one re-issue has run (the section is acknowledged).
+        assert!(
+            first_use_guide_gate(Some("doc.move"), "d2", &mut led).is_empty(),
+            "after one re-issue ran, nothing else is held for it"
         );
         // And the post-call emission must not serve it a second time.
         let (after, _) = guide_blocks_for("librarian", Some("doc.move"), &json!({}), &mut led);
@@ -672,9 +727,9 @@ mod tests {
     #[test]
     fn the_gate_never_holds_a_call_for_a_shape_no_section_serves() {
         let (mut led, _dir) = keyed_ledger();
-        assert!(first_use_guide_gate(Some("doc.no_such_action"), &mut led).is_empty());
+        assert!(first_use_guide_gate(Some("doc.no_such_action"), "d", &mut led).is_empty());
         assert!(
-            first_use_guide_gate(None, &mut led).is_empty(),
+            first_use_guide_gate(None, "d", &mut led).is_empty(),
             "a tool with no selector has no declared shape to gate on"
         );
         assert!(
@@ -687,7 +742,7 @@ mod tests {
     fn the_gate_stands_down_for_an_anonymous_ledger() {
         // The non-interactive opt-out: no conversation, nobody to acknowledge.
         let mut led = ledger();
-        assert!(first_use_guide_gate(Some("doc.move"), &mut led).is_empty());
+        assert!(first_use_guide_gate(Some("doc.move"), "d", &mut led).is_empty());
         assert!(led.is_empty());
     }
 
@@ -695,11 +750,30 @@ mod tests {
     fn the_gate_does_not_hold_a_call_whose_section_the_session_already_holds() {
         // A fork's seeded ledger, or a session that read the section on an earlier call.
         let (mut led, _dir) = keyed_ledger();
-        let first = first_use_guide_gate(Some("doc.delete"), &mut led);
+        let first = first_use_guide_gate(Some("doc.delete"), "d1", &mut led);
         assert!(!first.is_empty(), "premise: doc.delete shares the section");
+        // Same section, DIFFERENT call, and the first one's hold is still pending: the
+        // second must NOT run on the strength of the first's hold.
         assert!(
-            first_use_guide_gate(Some("doc.move"), &mut led).is_empty(),
-            "doc.move and doc.delete are served by one section; it was delivered"
+            !first_use_guide_gate(Some("doc.move"), "d2", &mut led).is_empty(),
+            "a different call is held while another's hold is pending"
         );
+        // Once a held call's re-issue has run, the section is acknowledged.
+        assert!(first_use_guide_gate(Some("doc.delete"), "d1", &mut led).is_empty());
+        assert!(
+            first_use_guide_gate(Some("doc.move"), "d2", &mut led).is_empty(),
+            "doc.move and doc.delete are served by one section; it was acknowledged"
+        );
+    }
+
+    #[test]
+    fn a_stamped_bare_topic_covers_every_section_of_it() {
+        // `get_guide("librarian")` stamps the bare topic; a fork seeded with only that
+        // key is the same case. Neither holds anything for a call it already read.
+        let (mut led, _dir) = keyed_ledger();
+        led.insert("librarian".to_string());
+        assert!(first_use_guide_gate(Some("doc.move"), "d", &mut led).is_empty());
+        assert!(first_use_guide_gate(Some("doc.delete"), "d", &mut led).is_empty());
+        assert_eq!(led.key_set().len(), 1, "and it stamps nothing further");
     }
 }

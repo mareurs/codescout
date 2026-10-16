@@ -490,23 +490,32 @@ impl crate::tools::Tool for LibrarianAdapter {
 
     /// The call shapes whose FIRST occurrence in a session is held until the
     /// caller has read the guide section that warns about them
-    /// ([`Tool::is_destructive`]). Deliberately two, and both unguarded by any
-    /// other mechanism:
+    /// ([`Tool::is_destructive`]). Decided on the EFFECT of the call, from `input`:
     ///
     /// - `doc` `move` mints a NEW artifact id (id = sha256 of the path), dangling
     ///   every citation of the old one, and is not a dry run.
+    /// - `doc` `delete`/`graft`/`rekey_prefix` are dry runs until `force: true`, and
+    ///   `doc` `update` is behind the >50% body-shrink guard until `force: true`: held
+    ///   only WHEN forced. (A held call needs a declared section; `graft` and
+    ///   `rekey_prefix` have none today, so the gate runs them: it never holds
+    ///   without text to show.)
     /// - `librarian` `merge_worktree` folds a worktree's shadow rows onto main
     ///   (or, with `abandon`, deletes them) and is a dry run only when `dry_run`
     ///   is explicitly true.
     ///
-    /// Not widened to the shapes that are already safe on a first call: `doc`
-    /// `delete`/`graft`/`rekey_prefix` are dry runs until `force`, `doc` `update`
-    /// is behind the >50% body-shrink guard, `librarian` `fix` is a dry run until
-    /// `confirm`. Holding those would buy a stall and no protection.
+    /// Not widened to dry-run-by-default calls: an unforced `delete`/`graft`/
+    /// `rekey_prefix`, an unconfirmed `librarian` `fix`. Holding those would buy a
+    /// stall and no protection.
     fn is_destructive(&self, input: &Value) -> bool {
         let action = input.get("action").and_then(Value::as_str);
+        let forced = input.get("force").and_then(Value::as_bool) == Some(true);
         match (self.inner.name(), action) {
             ("doc", Some("move")) => true,
+            // Decided on the EFFECT, as `merge_worktree`/`dry_run` below: these are
+            // dry runs (or, for `update`, behind the body-shrink guard) until
+            // `force: true`, and a forced one applies. An unforced call is harmless
+            // on a first call and is not held.
+            ("doc", Some("delete" | "graft" | "rekey_prefix" | "update")) => forced,
             ("librarian", Some("merge_worktree")) => {
                 input.get("dry_run").and_then(Value::as_bool) != Some(true)
             }
@@ -1259,13 +1268,14 @@ mod tests {
             );
         }
     }
-    /// The pre-call gate's coverage is exactly two shapes, and the discriminators
-    /// are the rows that must hold: a dry-run `merge_worktree` and every
-    /// dry-run-by-default `doc` action are NOT held (a stall with no protection),
-    /// while `move` and a real `merge_worktree` are. A gate rewritten to return
-    /// `true` for all of `doc` passes the second pair and fails the first.
+    /// The pre-call gate's coverage, decided on the EFFECT of the call. The
+    /// discriminators are the rows that must hold: a dry-run `merge_worktree` and every
+    /// UNFORCED dry-run-by-default `doc` action are NOT held (a stall with no
+    /// protection), while `move`, a real `merge_worktree` and a FORCED
+    /// delete/graft/rekey_prefix/update are. A gate rewritten to return `true` for all
+    /// of `doc` passes the second set and fails the first.
     #[test]
-    fn only_move_and_a_real_merge_worktree_are_held_for_the_guide() {
+    fn the_gate_holds_exactly_the_applied_destructive_shapes() {
         let ctx = Arc::new(
             crate::librarian::tools::TestToolContextBuilder::new(
                 crate::librarian::catalog::Catalog::open_in_memory().unwrap(),
@@ -1297,7 +1307,27 @@ mod tests {
             assert_eq!(
                 doc.is_destructive(&json!({ "action": action })),
                 held,
-                "doc(action={action:?})"
+                "doc(action={action:?}) unforced"
+            );
+        }
+        // The same actions are decided on their EFFECT: `force: true` applies.
+        for (action, held) in [
+            ("delete", true),
+            ("graft", true),
+            ("rekey_prefix", true),
+            ("update", true),
+            // `force` means nothing to a read, so it never holds one.
+            ("get", false),
+            ("find", false),
+        ] {
+            assert_eq!(
+                doc.is_destructive(&json!({ "action": action, "force": true })),
+                held,
+                "doc(action={action:?}, force=true)"
+            );
+            assert!(
+                !doc.is_destructive(&json!({ "action": action, "force": false })),
+                "doc(action={action:?}, force=false) is a dry run or guarded"
             );
         }
         assert!(lib.is_destructive(&json!({ "action": "merge_worktree", "root": "/w" })));

@@ -21,7 +21,7 @@
 //! `ToolContext` builders get for free, so they compile unchanged.
 
 use chrono::{DateTime, TimeZone, Utc};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Prune a ledger once it has been idle this long. Measured 2026-08-18 across
@@ -76,6 +76,12 @@ pub struct GuideLedger {
     /// Ephemeral by design: a notice describes this process's view of the
     /// tree, not something the model has been taught.
     notices: HashSet<String>,
+    /// Digests of the destructive calls HELD by the pre-call guide gate, per
+    /// section ledger key, that have not yet been followed by their identical
+    /// re-issue. Ephemeral like `notices`: it describes this process's in-flight
+    /// holds, not something the model has been taught. Non-empty for a key means
+    /// "served, but no caller has proved they read it"; see `first_use_guide_gate`.
+    held: HashMap<String, BTreeSet<String>>,
     /// Anonymous tier only. `None` ⇒ never expire by time.
     idle_ttl: Option<std::time::Duration>,
     /// Has a companion hook ever stamped this server's rendezvous slot?
@@ -137,6 +143,7 @@ impl GuideLedger {
             path,
             emitted,
             notices: HashSet::new(),
+            held: HashMap::new(),
             idle_ttl: None,
             key: Some(session_id.to_string()),
             rendezvous_active: false,
@@ -151,6 +158,7 @@ impl GuideLedger {
             path: None,
             emitted: Default::default(),
             notices: HashSet::new(),
+            held: HashMap::new(),
             idle_ttl,
             key: None,
             rendezvous_active: false,
@@ -274,6 +282,7 @@ impl GuideLedger {
         // worktree notice asks the caller to perform, and a post-compact
         // re-arm means the model no longer remembers being told.
         self.notices.clear();
+        self.held.clear();
         if was_nonempty {
             self.persist();
         }
@@ -313,6 +322,7 @@ impl GuideLedger {
         // Notices re-arm with the guides, for the same reason `clear` re-arms
         // them: the model on the other end has never been told.
         self.notices.clear();
+        self.held.clear();
     }
 
     /// Adopt `session`, re-arming everything, but ONLY when it differs from the
@@ -363,6 +373,7 @@ impl GuideLedger {
         // only), so there is nothing on disk to restore; clear for the same
         // reason `rekey` does: the model on the other end has never been told.
         self.notices.clear();
+        self.held.clear();
     }
 
     /// The conversation this ledger is currently keyed to, if any.
@@ -403,6 +414,37 @@ impl GuideLedger {
         self.emitted.len()
     }
 
+    /// Record that a destructive call with input digest `digest` was HELD on each of
+    /// `keys` (section ledger keys). See `first_use_guide_gate`.
+    pub(crate) fn hold(&mut self, keys: &[String], digest: &str) {
+        for key in keys {
+            self.held
+                .entry(key.clone())
+                .or_default()
+                .insert(digest.to_string());
+        }
+    }
+
+    /// Is any of `keys` served but not yet acknowledged by a re-issue?
+    pub(crate) fn has_pending_hold(&self, keys: &[String]) -> bool {
+        keys.iter()
+            .any(|k| self.held.get(k).is_some_and(|d| !d.is_empty()))
+    }
+
+    /// Was a call with this digest held on any of `keys`?
+    pub(crate) fn was_held(&self, keys: &[String], digest: &str) -> bool {
+        keys.iter()
+            .any(|k| self.held.get(k).is_some_and(|d| d.contains(digest)))
+    }
+
+    /// A held call's identical re-issue is about to run: the section has been read by
+    /// at least one caller, so every pending hold on `keys` is released.
+    pub(crate) fn acknowledge(&mut self, keys: &[String]) {
+        for key in keys {
+            self.held.remove(key);
+        }
+    }
+
     /// Forget the named topics so they inject again, leaving every other topic
     /// in place. This is the surgical twin of [`clear`](Self::clear): a project
     /// switch re-teaches only the project-scoped guide, not the tool-contract
@@ -429,6 +471,10 @@ impl GuideLedger {
             !matches
         });
         if changed {
+            // A hold on a section that is no longer stamped is stale: its section
+            // will be served again, which registers a fresh hold.
+            let emitted = &self.emitted;
+            self.held.retain(|key, _| emitted.contains_key(key));
             self.persist();
         }
     }

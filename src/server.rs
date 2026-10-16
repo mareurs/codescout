@@ -14266,6 +14266,220 @@ mod guide_hint_tests {
             "the stale seed must still be consumed, not retried forever"
         );
     }
+
+    /// A server with a keyed (conversation-bound) ledger and a librarian catalog, so the
+    /// pre-call gate is live, plus the project dir. Shared by the gate tests below.
+    async fn gate_server() -> (tempfile::TempDir, CodeScoutServer) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+        (dir, server)
+    }
+
+    /// Create a spec artifact at `rel_path` and return its id.
+    async fn gate_create_doc(server: &CodeScoutServer, rel_path: &str) -> String {
+        let created = call_tool_checked(
+            server,
+            "doc",
+            json!({
+                "action": "create", "rel_path": rel_path, "kind": "spec",
+                "title": rel_path, "body": "fixture body",
+            }),
+            "create",
+        )
+        .await;
+        serde_json::from_str::<Value>(&created[0].as_text().expect("primary is text").text).unwrap()
+            ["id"]
+            .as_str()
+            .expect("create response carries an id")
+            .to_string()
+    }
+
+    /// Review finding 2026-10-16 (MED, confirmed): the gate was keyed on the guide
+    /// SECTION, so of two parallel first `doc(move)` calls on different docs one was
+    /// held and the other ran (`a: held, moved=false; b: held=false, moved=true`).
+    /// A batch is composed before ANY response is read, so every call in it is a first
+    /// call: none may run until its own identical re-issue. Closed by recording a digest
+    /// of each held input; a call runs only once a call with its digest was held.
+    /// Asserted on the files.
+    #[tokio::test]
+    async fn parallel_first_destructive_calls_are_all_held() {
+        let (dir, server) = gate_server().await;
+        let id_a = gate_create_doc(&server, "docs/specs/par-a.md").await;
+        let id_b = gate_create_doc(&server, "docs/specs/par-b.md").await;
+        let mv_a = json!({"action": "move", "id": id_a, "new_rel_path": "docs/specs/par-a2.md"});
+        let mv_b = json!({"action": "move", "id": id_b, "new_rel_path": "docs/specs/par-b2.md"});
+
+        let (ra, rb) = tokio::join!(
+            server.call_tool_by_name("doc", mv_a.clone()),
+            server.call_tool_by_name("doc", mv_b.clone()),
+        );
+        let (ra, rb) = (ra.expect("a dispatch ok"), rb.expect("b dispatch ok"));
+        assert!(
+            dir.path().join("docs/specs/par-a.md").exists()
+                && dir.path().join("docs/specs/par-b.md").exists()
+                && !dir.path().join("docs/specs/par-a2.md").exists()
+                && !dir.path().join("docs/specs/par-b2.md").exists(),
+            "neither parallel first call may run: a={} b={}",
+            all_text(&ra),
+            all_text(&rb)
+        );
+        for r in [&ra, &rb] {
+            assert!(
+                all_text(r).contains("\"executed\":false"),
+                "each held response says so: {}",
+                all_text(r)
+            );
+            assert!(
+                all_text(r).contains("<!-- auto-injected get_guide('librarian') §"),
+                "each caller composed its call without the section, so each is shown it"
+            );
+        }
+
+        // Each identical re-issue then runs.
+        server.call_tool_by_name("doc", mv_a).await.expect("ok");
+        server.call_tool_by_name("doc", mv_b).await.expect("ok");
+        assert!(
+            dir.path().join("docs/specs/par-a2.md").exists()
+                && dir.path().join("docs/specs/par-b2.md").exists(),
+            "every held call runs on its identical re-issue"
+        );
+    }
+
+    /// A DIFFERENT call is held again until one re-issue has run; after that the
+    /// section is acknowledged and nothing else is held.
+    #[tokio::test]
+    async fn a_different_call_is_held_until_one_reissue_has_run() {
+        let (dir, server) = gate_server().await;
+        let id_a = gate_create_doc(&server, "docs/specs/seq-a.md").await;
+        let id_b = gate_create_doc(&server, "docs/specs/seq-b.md").await;
+        let mv_a = json!({"action": "move", "id": id_a, "new_rel_path": "docs/specs/seq-a2.md"});
+        let mv_b = json!({"action": "move", "id": id_b, "new_rel_path": "docs/specs/seq-b2.md"});
+
+        server.call_tool_by_name("doc", mv_a.clone()).await.unwrap(); // held
+                                                                      // A different call arrives before A's re-issue: held, not run.
+        server.call_tool_by_name("doc", mv_b.clone()).await.unwrap();
+        assert!(
+            dir.path().join("docs/specs/seq-b.md").exists(),
+            "a call that was not the held one must not run on the strength of another's hold"
+        );
+        server.call_tool_by_name("doc", mv_a).await.unwrap(); // A's re-issue runs
+        assert!(dir.path().join("docs/specs/seq-a2.md").exists());
+        // The section is now acknowledged: B's re-issue runs, and so would any new call.
+        server.call_tool_by_name("doc", mv_b).await.unwrap();
+        assert!(dir.path().join("docs/specs/seq-b2.md").exists());
+    }
+
+    /// Review finding 2026-10-16 (MED, confirmed): `doc(delete, force=true)` first call
+    /// ran, and the "Archiving / Moving Trackers" section arrived after the delete.
+    /// The decision is on the EFFECT: a forced delete applies, an unforced one is a dry
+    /// run and stays unheld.
+    #[tokio::test]
+    async fn a_forced_delete_is_held_and_an_unforced_one_is_not() {
+        // (a) The first thing a session does is a FORCED delete: held, then runs.
+        let (dir, server) = gate_server().await;
+        let id = gate_create_doc(&server, "docs/specs/del-a.md").await;
+        let file = dir.path().join("docs/specs/del-a.md");
+        let forced = json!({"action": "delete", "id": id, "force": true});
+        let held = server
+            .call_tool_by_name("doc", forced.clone())
+            .await
+            .unwrap();
+        assert!(
+            file.exists() && all_text(&held).contains("\"executed\":false"),
+            "the first forced delete must not run: {}",
+            all_text(&held)
+        );
+        server.call_tool_by_name("doc", forced).await.unwrap();
+        assert!(!file.exists(), "the identical re-issue deletes");
+
+        // (b) The dry run is harmless on a first call and is NOT held; its ordinary
+        // post-call delivery puts the section in front of the caller BEFORE any forced
+        // delete, so the forced one then runs at once. That is the section arriving
+        // ahead of the damage, which is all the gate is for.
+        let (dir, server) = gate_server().await;
+        let id = gate_create_doc(&server, "docs/specs/del-b.md").await;
+        let file = dir.path().join("docs/specs/del-b.md");
+        let dry = server
+            .call_tool_by_name("doc", json!({"action": "delete", "id": id}))
+            .await
+            .unwrap();
+        assert!(
+            !all_text(&dry).contains("\"executed\":false"),
+            "a dry run is not held"
+        );
+        assert!(file.exists(), "and it deleted nothing");
+        server
+            .call_tool_by_name("doc", json!({"action": "delete", "id": id, "force": true}))
+            .await
+            .unwrap();
+        assert!(
+            !file.exists(),
+            "the section was already delivered; the forced call runs"
+        );
+    }
+
+    /// The forced shapes of the other three dry-run-by-default / guarded actions are
+    /// held on their first call too; asserted at the trait method, because a held
+    /// call needs a declared section and `graft`/`rekey_prefix` have none (the gate
+    /// then runs the call: it never holds without text to show).
+    #[tokio::test]
+    async fn a_forced_update_is_held_on_its_first_call() {
+        let (dir, server) = gate_server().await;
+        let id = gate_create_doc(&server, "docs/specs/upd-a.md").await;
+        let file = dir.path().join("docs/specs/upd-a.md");
+        let before = std::fs::read_to_string(&file).unwrap();
+        let forced = json!({"action": "update", "id": id, "force": true,
+                            "patch": {"body": "x"}});
+        let held = server
+            .call_tool_by_name("doc", forced.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            before,
+            "the first forced update must not rewrite the body: {}",
+            all_text(&held)
+        );
+        assert!(all_text(&held).contains("\"executed\":false"));
+        server.call_tool_by_name("doc", forced).await.unwrap();
+        assert_ne!(std::fs::read_to_string(&file).unwrap(), before);
+    }
+
+    /// Review finding 2026-10-16 (LOW, confirmed): a caller who already read the whole
+    /// guide (`get_guide("librarian")` stamps the bare topic) was still held. A stamped
+    /// bare topic covers all of its sections. A fork whose seed holds only the
+    /// topic-level key is the same case.
+    #[tokio::test]
+    async fn a_caller_who_read_the_whole_guide_is_not_held() {
+        let (dir, server) = gate_server().await;
+        let id = gate_create_doc(&server, "docs/specs/whole-a.md").await;
+        server.live_ledger().lock().insert("librarian".to_string());
+        server
+            .call_tool_by_name(
+                "doc",
+                json!({"action": "move", "id": id, "new_rel_path": "docs/specs/whole-a2.md"}),
+            )
+            .await
+            .unwrap();
+        assert!(
+            dir.path().join("docs/specs/whole-a2.md").exists(),
+            "the whole guide was already delivered; holding the call buys nothing"
+        );
+    }
+
     /// Regression for
     /// docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md.
     ///
