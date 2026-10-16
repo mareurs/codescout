@@ -30,7 +30,10 @@ SCRIPT = ROOT / "scripts/phase2-score-dp1.py"
 def clean_profile(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / ".credentials.json").write_text("{}")  # INERT: only its existence is checked
-    (root / "settings.json").write_text('{"enabledPlugins":{},"hooks":{}}')
+    # syncClaudeAiSkills:false is part of the clean channel (bug 2026-09-25): left unset, the CLI
+    # syncs the account's claude.ai skills into skills/synced and registers them in every session.
+    (root / "settings.json").write_text(
+        '{"enabledPlugins":{},"hooks":{},"syncClaudeAiSkills":false}')
     return root
 
 
@@ -148,12 +151,23 @@ class Scorer(unittest.TestCase):
 class DirtyReasons(unittest.TestCase):
     """Each dirty case breaks exactly one condition, so each exercises only the check it names."""
 
+    NO_SYNC = '"syncClaudeAiSkills":false'
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.d = clean_profile(Path(self.tmp.name))
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def _sync_a_skill(self, name="docx"):
+        """The on-disk shape the CLI writes (read from a real profile, 2026-10-16):
+        skills/synced/<org>_<account>/<skill>/SKILL.md, beside hidden bucket markers."""
+        bucket = self.d / "skills" / "synced" / "org_acct"
+        (bucket / name).mkdir(parents=True)
+        (bucket / name / "SKILL.md").write_text("---\nname: docx\n---\n")
+        (self.d / "skills" / "synced" / ".bucket-org_acct").write_text("")
+        (bucket / "manifest.json").write_text("{}")
 
     def test_a_clean_profile_has_no_reasons(self):
         self.assertEqual(sc.dirty_reasons(str(self.d)), [])
@@ -163,17 +177,51 @@ class DirtyReasons(unittest.TestCase):
         self.assertEqual(sc.dirty_reasons(str(self.d)), ["CLAUDE.md present"])
 
     def test_an_enabled_plugin_is_dirty(self):
-        (self.d / "settings.json").write_text('{"enabledPlugins":{"p@m":true},"hooks":{}}')
+        (self.d / "settings.json").write_text(
+            '{"enabledPlugins":{"p@m":true},"hooks":{},' + self.NO_SYNC + '}')
         self.assertEqual(sc.dirty_reasons(str(self.d)), ["plugins enabled"])
 
     def test_a_configured_hook_is_dirty(self):
-        (self.d / "settings.json").write_text('{"enabledPlugins":{},"hooks":{"Stop":[]}}')
+        (self.d / "settings.json").write_text(
+            '{"enabledPlugins":{},"hooks":{"Stop":[]},' + self.NO_SYNC + '}')
         self.assertEqual(sc.dirty_reasons(str(self.d)), ["hooks configured"])
 
     def test_a_missing_settings_file_is_dirty_not_clean(self):
-        # A profile with no settings.json loads the defaults, plugins and hooks included.
+        # A profile with no settings.json loads the defaults: plugins, hooks and claude.ai skill sync.
         (self.d / "settings.json").unlink()
-        self.assertEqual(sc.dirty_reasons(str(self.d)), ["plugins enabled", "hooks configured"])
+        self.assertEqual(sc.dirty_reasons(str(self.d)),
+                         ["plugins enabled", "hooks configured", "claude.ai skill sync enabled"])
+
+    def test_a_synced_claude_ai_skill_is_dirty(self):
+        # Passes the three older checks: no CLAUDE.md, no plugins, no hooks. Bug 2026-09-25.
+        self._sync_a_skill()
+        self.assertEqual(sc.dirty_reasons(str(self.d)), ["claude.ai skills synced"])
+
+    def test_hidden_markers_with_no_synced_skill_are_not_dirty(self):
+        # A bucket marker and a manifest without a SKILL.md registers nothing.
+        (self.d / "skills" / "synced" / "org_acct").mkdir(parents=True)
+        (self.d / "skills" / "synced" / ".bucket-org_acct").write_text("")
+        (self.d / "skills" / "synced" / "org_acct" / "manifest.json").write_text("{}")
+        self.assertEqual(sc.dirty_reasons(str(self.d)), [])
+
+    def test_a_user_skill_outside_synced_is_not_the_synced_check(self):
+        # skills/<name>/SKILL.md is a user skill (the CLAUDE.md-class channel), not a claude.ai sync.
+        (self.d / "skills" / "mine").mkdir(parents=True)
+        (self.d / "skills" / "mine" / "SKILL.md").write_text("x")
+        self.assertEqual(sc.dirty_reasons(str(self.d)), [])
+
+    def test_skill_sync_left_unset_is_dirty(self):
+        # The flag is only off when it is exactly false: unset and true both leave syncing on.
+        for settings in ('{"enabledPlugins":{},"hooks":{}}',
+                         '{"enabledPlugins":{},"hooks":{},"syncClaudeAiSkills":true}'):
+            (self.d / "settings.json").write_text(settings)
+            self.assertEqual(sc.dirty_reasons(str(self.d)), ["claude.ai skill sync enabled"], settings)
+
+    def test_both_sync_reasons_are_reported_together(self):
+        self._sync_a_skill()
+        (self.d / "settings.json").write_text('{"enabledPlugins":{},"hooks":{}}')
+        self.assertEqual(sc.dirty_reasons(str(self.d)),
+                         ["claude.ai skills synced", "claude.ai skill sync enabled"])
 
 
 if __name__ == "__main__":

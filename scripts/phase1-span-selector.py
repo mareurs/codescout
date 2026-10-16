@@ -528,7 +528,8 @@ def main() -> int:
     if dirty and not args.allow_dirty_judge:
         sys.exit(f"judge config {cfg} is not clean ({', '.join(dirty)}): set JUDGE_CONFIG_DIR "
                  f"to a dir with only .credentials.json and settings.json "
-                 f'{{"enabledPlugins":{{}},"hooks":{{}}}}, or pass --allow-dirty-judge to '
+                 f'{{"enabledPlugins":{{}},"hooks":{{}},"syncClaudeAiSkills":false}} (and no '
+                 f"skills/synced), or pass --allow-dirty-judge to "
                  f"reproduce the pre-2026-09-24 channel on purpose")
     if args.model != _sc._p.model:
         # Same SubscriptionJudge (API key stripped, subscription profile), another model.
