@@ -2818,8 +2818,14 @@ mod tests {
     #[test]
     fn write_to_tmp_allowed() {
         let project = tempdir().unwrap();
-        // /tmp itself must exist on the system for this test to be meaningful
-        let target = PathBuf::from("/tmp/codescout-test-write.txt");
+        // The allowlist holds the PLATFORM temp dir (`platform::temp_dir()`, which is `$TMPDIR`
+        // when set), not a literal `/tmp`. Hardcoding `/tmp` made this test red on any host whose
+        // `TMPDIR` points elsewhere (this repo's harness sets `~/.cache/cc-tmp`), while the
+        // production check was behaving as designed. The directory must exist for the test to mean
+        // anything: a missing one is canonicalized by its parent only, which is a different path.
+        let tmp = crate::platform::temp_dir();
+        assert!(tmp.is_dir(), "fixture: temp dir {tmp:?} does not exist");
+        let target = tmp.join("codescout-test-write.txt");
         let result = validate_write_path(
             target.to_str().unwrap(),
             project.path(),
@@ -2828,7 +2834,7 @@ mod tests {
         );
         assert!(
             result.is_ok(),
-            "writes to /tmp should be allowed: {:?}",
+            "writes to the temp dir ({tmp:?}) should be allowed: {:?}",
             result.err()
         );
         assert_eq!(result.unwrap(), target);
