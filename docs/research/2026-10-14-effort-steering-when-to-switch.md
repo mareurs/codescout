@@ -38,6 +38,7 @@
 6. The personal S5 token was pasted into a chat session earlier: revoke or replace it when the study ends.
 7. The termination gate was built and tested on `cs-p20` (section below): `low` with a `Stop` hook that type-checks all targets passed 5 of 5 for $1.26, against 0 of 10 without it in the earlier batches. One task, a compile-class failure, references from other batches. The next step, if any, is the operator's.
 8. Stage A (2026-10-16, section below): a grounded critic used as a gate for plans and design docs found 18 of 20 (`low`) and 17 of 20 (`high`) planted defects as blocking and blocked no clean original without a real defect; its effort made no difference (paired −1) at half the cost for `low`. It also blocked 16 to 19 of 20 originals for real defects. Not shown: that a producer fixes what it reports, the cost of that round, or results on defects not planted by me (Stage B).
+9. Stage C (2026-10-16, section below): with the critic as a `Stop` hook in a plan-writing loop, verified defects in the final plans were `low` 5, gated `low` 4, `xhigh` 0 (6 plans each); the gate blocked once in 6 runs and passed plans with real defects. No help shown; gated `low` does not match `xhigh` ($0.54 vs $1.92 per run). For plans, producer effort mattered and a cheap critic did not replace it.
 
 ## Our own evidence (R1 V2, Sonnet 5.5, CLI 2.1.296)
 
@@ -184,3 +185,36 @@ Result (pre-registered rules):
 - The one miss at both efforts is a wrong verbatim quote of existing code. That is exactly what a mechanical check catches ("does this quoted line exist in that file"), which supports layer 1 before the critic.
 
 Limits: one call per cell; the defects are mine and the rubric names their classes (an upper bound for recall); one model (Sonnet 5.5); the verifiers are models, not people; the critic was run outside an agent loop, so nothing here shows that a producer FIXES what the gate reports, or what the extra round costs. Files: `critic-a/grading/` (`results.json`, `results-final.json`, the verifier results, the hashes taken before unblinding).
+
+## Stage C (2026-10-16): the critic as a `Stop` hook in a plan-writing loop — no help shown; `xhigh` wins
+
+Pre-registered in `/home/marius/work/claude/es-stage0/critic-c/prereg-c.md` (with two recorded deviations, both before the batch: the first smoke run showed that Claude Code does not pass `CLAUDE_CODE_OAUTH_TOKEN` to hook processes, so the nested critic was "Not logged in" and the hook failed open — fixed by reading the token from a file, with a test that fails on the old code; the second smoke start was killed by my own tool timeout and discarded). An agent (Sonnet 5.5) wrote an implementation plan from a real codescout spec in the code snapshot the original author used, 6 items (p01, p02, p03, p08, p09, p10) × 3 arms: `L` (`low`), `LG` (`low` + the Stage A critic at `low` as a `Stop` hook that blocks once with its blocking findings), `X` (`xhigh`). Grading: an Opus 5.5 `high` audit of each final plan (same rubric, different model, arm unseen), then an Opus verifier on every blocking audit finding (codes only, the tree behind a code-named link). Batch $35.40 (producers, critics and audits).
+
+| arm | verified blocking defects in the final plans (D, 6 plans) | mean cost per run (producer + critic) | plan length |
+|---|---|---|---|
+| `L` | **5** (p02 2, p09 3) | $0.35 | 140–294 lines |
+| `LG` | **4** (p02 1, p03 1, p09 2) | $0.54 | 128–345 lines |
+| `X` | **0** | $1.92 | 612–1240 lines |
+
+- Rules: gate helps `low` if D(LG) < D(L) in >= 5 of 6 — it was 2 of 6: **no help shown**. Gated `low` matches `xhigh` if D(LG) <= D(X) in >= 4 of 6 — it was 3 of 6: **not shown**.
+- The gate blocked in 1 of 6 runs (p02, 2 findings; the producer revised and the second check passed). In the other 5 it read the plan and the code (about 25 tool calls on p10) and returned no findings, including on p03 and p09, whose final plans hold verified defects. All 9 blocking audit findings were verified `true`.
+- So the `low` critic that found 18 of 20 PLANTED defects in Stage A missed the NATURAL defects of these fresh plans (examples: a stated type `dyn Layer<Registry>` that does not compile; an overflow threshold the plan's inputs never reach; a selector the spec names that the plan's gate omits). The auditor was a stronger model at `high`; whether model or effort makes the difference was not separated.
+- `X` produced zero verified blocking defects in 6 of 6, at 5.4 times the cost of `L` and 4 to 6 times the plan length.
+
+What this means for "when to change effort": for plan writing on this material, producer effort mattered and a cheap `low` critic did not substitute for it. This is the opposite of the code result (`cargo check` closed the gap), and the difference is the check: a compiler is a complete oracle for its class of defect; a `low` LLM critic is not, on defects nobody planted.
+
+Limits: 6 items, one run per cell; the audit's depth per line is not constant (an Opus `high` audit of a 1,240-line plan may look less closely than of a 140-line one, so `X`'s zero may be optimistic); the auditor used the gate's rubric; nothing here shows whether a plan leads to working code.
+
+## Defects filed from Stage A (2026-10-16)
+
+The 58 verified findings on the ORIGINAL documents (about 35 distinct defects) were triaged at HEAD `a16f7d42` (operator's choice: file only those that still matter now). About 20 were historical only: execution details of plans whose implementers worked around them (wrong test helpers and counts, clippy failures, contradictory steps). Fourteen candidates were re-checked at HEAD by two Opus agents, and every `live` verdict was re-checked by me at the source:
+
+- **Filed, commit `9cef019f`:**
+  - a project with no `[ignored_paths]` section gets no default ignore patterns in the code index (IC-3, medium; 5 of 7 real `project.toml` files on this machine also carry an explicit `patterns = []`);
+  - the research index README names the retired `artifact_augment` and a gather pass the tracker cannot run (IC-11);
+  - the write-path ADR's "every unpinned write" (IC-24);
+  - the artifact-id ADR's "full fidelity on a developer machine", with its 8-versus-9 count noted in the same file (IC-24).
+- **Refuted at HEAD after a `live` verdict:** reqwest built without `system-proxy`. In the default build, hyper-util's `client-proxy-system` is still enabled through reqwest 0.12.28 (pulled in by `hf-hub` under `local-embed`), and reqwest 0.13 always installs the system matcher. So the macOS system proxy is honoured by an accident of feature unification. The file I had already created was removed (copy kept in `critic-a/filing/`).
+- **Not live:** the rest were fixed later (TLS swap `6c19cc7d`; research README frontmatter and params, `952ad795` / `69d09851`) or never reached the code (heartbeat instance id, `resolve_sids` order, dirty-set drain, CLI ignore plumbing, `/v1/v1`). The one-measure ADR's six-versus-nine census is a dated snapshot that no longer drives work, so it was not filed.
+
+So the critic's findings on old documents led to one medium code defect that matters now, and the triage itself needed a source check: one of its `live` verdicts was wrong.
