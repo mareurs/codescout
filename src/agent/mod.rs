@@ -173,6 +173,7 @@ pub struct Displacement {
 
 /// Upper bound on `AgentInner::displacement_told`. A subagent fan-out is tens of
 /// principals; past this the map is cleared, which re-tells and never loses a notice.
+// cap-class: NOT_A_CAP — bounds the memory of which principals were told a displacement; past it the map clears and everyone is re-told, so no notice is lost and no result is shortened
 const DISPLACEMENT_TOLD_CAP: usize = 256;
 
 impl AgentInner {
