@@ -1,7 +1,7 @@
 ---
 id: c7bd57f261ca9463
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: imported Pi memory guard reencodes invalid UTF-8 before backup'
 owners:
 - marius
@@ -12,13 +12,19 @@ tags:
 - external-extension
 - memory
 - backup
-closed: null
+closed: 2026-10-16
 opened: 2026-10-14
 severity: medium
-unverified: Native SDK/adaptor acceptance of the proposed isolated correction and evidence JSON remain pending.
+unverified: 'WITHDRAWN 2026-10-16. Was: native SDK/adaptor acceptance of the proposed isolated correction and evidence JSON; moot, the client guard is not adopted.'
 ---
 
 # BUG: imported Pi memory guard reencodes invalid UTF-8 before backup
+
+## Resolution
+
+Closed 2026-10-16 as wontfix: covered by the server contract; client guard not adopted, by decision of the user. The invalid-UTF-8 half is enforced by the server (`src/memory/write_transaction.rs:74-77`, tests `invalid_utf8_is_refused_even_with_force_without_touching_old_bytes` and `forced_writes_preserve_history_in_the_selected_store_and_refuse_invalid_bytes`), and the exact bytes of a valid topic are backed up before every overwrite. What a client guard may and may not assume of the server, including that delete keeps no backup, is recorded in [`docs/conventions/memory-write-client-overlap.md`](../conventions/memory-write-client-overlap.md); `delete_keeps_no_backup_of_the_final_bytes` (`tests/memory_write_history.rs`) pins the delete limit.
+
+The four defects below (import review, items 1 to 4) are kept only as a record for anyone who later writes a client guard; none is adopted, none is fixed here: HOME store checked and backed up although the server writes only the project store; `readFileSync` follows a symlink the server then refuses; backups beside `.history` without `.history/.gitignore` when the guard blocks; a string `event.input` dispatched unpinned and a throw in the `mcp` gateway path. Item 5 is covered by the policy document.
 
 ## Summary
 
@@ -68,7 +74,7 @@ Still not established: the native Pi SDK / adapter run, and where the guard is t
 4. Line 76, 138, 142: a top-level `event.input` that is a JSON string is parsed into a copy, so the workspace pin is applied to the copy and the string is dispatched unpinned (probe: `has workspace pin: false`). Through the `mcp` gateway the same input makes line 142 assign a property on a string and throw `TypeError: Cannot create property 'args' on string`; what Pi does with a throwing hook was not measured.
 5. Not defects of the code but limits to state in any README: `action: "delete"` is not guarded here and the server's delete keeps no backup (`write_transaction.rs:26`, `begin_delete` reads no existing content); the override marker is matched anywhere in `content`, including prose that only mentions it (probe: total replacement permitted); a `cwd` that is a subdirectory of the project finds no topic and permits the write; the guard does not take the server's `write.lock`.
 
-The invalid-UTF-8 half of this bug is covered in the server as of `f5f1c6f7`: `WriteTransaction::prepare` refuses a non-UTF-8 topic (`src/memory/write_transaction.rs:77`) and `write` stores the exact bytes of a valid one, tested by `forced_writes_preserve_history_in_the_selected_store_and_refuse_invalid_bytes` (`src/tools/memory/tests.rs:1345-1356`). The received client guard would duplicate that backup in a second layout (`.history/<topic>.<stamp>.<n>.md.bak` beside the server's `.history/<topic>.md/<uuid>.md.bak`). Unresolved ownership question for the user: keep a client guard at all, or rely on the server contract and add the overlap policy there. Keep this issue open until that is decided; if the guard is imported later, fix 1 to 4 first and add a committed test for each.
+The invalid-UTF-8 half of this bug is covered in the server as of `f5f1c6f7`: `WriteTransaction::prepare` refuses a non-UTF-8 topic (`src/memory/write_transaction.rs:77`) and `write` stores the exact bytes of a valid one, tested by `forced_writes_preserve_history_in_the_selected_store_and_refuse_invalid_bytes` (`src/tools/memory/tests.rs:1345-1356`). The received client guard would duplicate that backup in a second layout (`.history/<topic>.<stamp>.<n>.md.bak` beside the server's `.history/<topic>.md/<uuid>.md.bak`). Ownership question decided 2026-10-16: rely on the server contract (see Resolution). If a client guard is written later, fix 1 to 4 first and add a committed test for each.
 
 ## Hypotheses tried
 
@@ -87,13 +93,15 @@ No fix commit or patch-id is assigned: the candidate is an isolated received-art
 
 The handoff includes guard-contract.test.mjs. Expected behavior is tested through the actual imported extension and real temporary files. Original RED, corrected GREEN and lossy-decoder mutation RED were observed. Source SHA256 was verified unchanged afterward.
 
+In this repository (2026-10-16): `delete_keeps_no_backup_of_the_final_bytes` in `tests/memory_write_history.rs` pins the limit that delete keeps no backup. Mutation probe: making `WriteTransaction::delete` write a backup turns it red (`delete must add no history file`); reverted. The other server guarantees in the policy document already had tests (named there); the 5 s lock timeout and a subdirectory cwd have none.
+
 ## Workarounds
 
-Do not approve destructive writes of topics whose bytes cannot be decoded as UTF-8. Retain originals and fix encoding separately only after preserving them. Use the bounded client profile until a backend history contract is designed and verified.
+Do not approve destructive writes of topics whose bytes cannot be decoded as UTF-8. Retain originals and fix encoding separately only after preserving them. The backend history contract now exists (`docs/conventions/memory-write-history.md`); see Resolution.
 
 ## Resume
 
-Receive Albert's evidence JSON; rerun the corrected extension's full native profile on his SDK/adaptor/Node versions; decide ownership of a shared backend backup contract. Keep this issue open until the supported integration is fixed and verified.
+None. Closed as wontfix on 2026-10-16: Albert's evidence JSON and the native SDK/adaptor run concern a client guard that is not adopted.
 
 ## References
 

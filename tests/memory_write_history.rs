@@ -365,6 +365,44 @@ fn shrink_refusal_creates_no_backup_and_changes_no_content() {
     assert_eq!(store.read("topic").unwrap().as_deref(), Some(old.as_str()));
     assert!(backups(store.dir()).is_empty());
 }
+/// A deletion is the one mutation the history contract does NOT cover: the topic's
+/// final bytes are gone and nothing in `.history` holds them. A client guard that
+/// treats "the server backs up before it destroys" as covering `delete` is wrong
+/// (`docs/conventions/memory-write-client-overlap.md`). Both delete entry points reach
+/// `WriteTransaction::delete`, so both are exercised. The overwrite first makes
+/// one backup so that `backups()` is proved able to see one, which an `is_empty()`
+/// alone could not (it is also what a broken reader returns).
+#[test]
+fn delete_keeps_no_backup_of_the_final_bytes() {
+    use codescout::memory::guarded::guarded_delete;
+    let root = tempfile::tempdir().unwrap();
+    let store = MemoryStore::open(root.path()).unwrap();
+    for (topic, raw) in [("via-guarded", false), ("via-store", true)] {
+        store.write(topic, "version one").unwrap();
+        store.write(topic, "version two, the final bytes").unwrap();
+        let before = backups(store.dir());
+        assert!(
+            before
+                .iter()
+                .any(|p| std::fs::read_to_string(p).unwrap() == "version one"),
+            "control: the overwrite must have produced a visible backup of version one"
+        );
+        if raw {
+            store.delete(topic).unwrap();
+        } else {
+            guarded_delete(&store, topic).unwrap();
+        }
+        assert_eq!(store.read(topic).unwrap(), None);
+        let after = backups(store.dir());
+        assert_eq!(after, before, "{topic}: delete must add no history file");
+        assert!(
+            !after
+                .iter()
+                .any(|p| std::fs::read_to_string(p).unwrap() == "version two, the final bytes"),
+            "{topic}: the deleted final bytes must not be recoverable from history"
+        );
+    }
+}
 
 #[test]
 fn history_is_gitignored_without_changing_the_project_gitignore() {
