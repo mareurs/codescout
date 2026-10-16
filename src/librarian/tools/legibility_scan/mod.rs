@@ -204,7 +204,8 @@ pub struct CandidateRow {
     pub tier: u8,
     /// `open`, `closed` (the defect was repaired, or the target is gone — see
     /// `closed_reason`) or `retired` (the detector that produced the row no longer
-    /// exists, so nothing was repaired).
+    /// exists, or its budget moved so the target stopped qualifying; nothing was
+    /// repaired).
     pub status: String,
     pub measure: Measure,
     pub cost: Cost,
@@ -213,8 +214,9 @@ pub struct CandidateRow {
     pub before: Measure,
     pub after: Option<Measure>,
     pub closed_at: Option<String>,
-    /// Why a non-open row left `open`: `refactored`, `symbol_gone` or
-    /// `detector_removed`. Absent on rows closed before the field existed, and a
+    /// Why a non-open row left `open`: `refactored`, `symbol_gone` (both `closed`),
+    /// `detector_removed` or `threshold_changed` (both `retired`). Absent on rows closed
+    /// before the field existed, and a
     /// reader must treat absence as "unknown", never as "refactored".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_reason: Option<String>,
@@ -257,11 +259,14 @@ fn is_live_defect(s: &str) -> bool {
 ///    `first_seen` and `before`; re-open a regressed closed or retired row);
 /// 2. settle every prior `open` row whose key is absent from the current scan.
 ///    Absence alone proves nothing: a deleted detector empties `current` exactly as a
-///    repair does. So the row's own `defects` decide what the absence means —
-///    - any defect kind no scan can emit any more -> `retired`, no `after` delta (the
-///      detector is gone; nothing was repaired);
-///    - every kind still live and the target re-measures -> `closed` / `refactored`,
-///      recording `after` and `closed_at`;
+///    repair does, and so does a widened budget. So the row decides what the absence means —
+///    - any defect kind no scan can emit any more -> `retired` / `detector_removed`, no
+///      `after` delta (the detector is gone; nothing was repaired);
+///    - every kind still live, the target re-measures, and it still exceeds the budget the
+///      row was recorded against -> `retired` / `threshold_changed`, no `after` delta (the
+///      budget moved; nothing was repaired);
+///    - every kind still live and the target re-measures within that budget -> `closed` /
+///      `refactored`, recording `after` and `closed_at`;
 ///    - every kind still live but the target no longer resolves (renamed, deleted)
 ///      -> `closed` / `symbol_gone`, no `after`.
 ///
@@ -336,14 +341,25 @@ pub fn reconcile(
             row.after = None;
             continue;
         }
+        let measured = crate::legibility::measure_target(files, &row.rel_file, &row.name_path);
+        if let Some((tokens, _)) = measured {
+            if still_over_recorded_budget(tokens, row.measure.budget) {
+                // The target still measures over the budget the row was flagged against,
+                // so nothing was repaired: the budget moved (or the measure changed) and
+                // the detector stopped flagging a body nobody touched. No `after` delta,
+                // because there is no change to state.
+                row.status = "retired".to_string();
+                row.closed_reason = Some("threshold_changed".to_string());
+                row.after = None;
+                continue;
+            }
+        }
         row.status = "closed".to_string();
-        row.after = crate::legibility::measure_target(files, &row.rel_file, &row.name_path).map(
-            |(tokens, lines)| Measure {
-                tokens,
-                budget: crate::tools::MAX_INLINE_TOKENS,
-                lines,
-            },
-        );
+        row.after = measured.map(|(tokens, lines)| Measure {
+            tokens,
+            budget: crate::tools::MAX_INLINE_TOKENS,
+            lines,
+        });
         row.closed_reason = Some(
             if row.after.is_some() {
                 "refactored"
@@ -354,6 +370,21 @@ pub fn reconcile(
         );
     }
     rows
+}
+
+/// Does a target that now measures `tokens` still exceed the budget its row was recorded
+/// against? `row.measure.budget` is refreshed on every scan the row appears in, so it is the
+/// budget of the last scan that flagged the target. The detectors flag a target only when its
+/// measure is `> budget` (`over_budget_bodies`: `bytes > (MAX_INLINE_TOKENS + 1) * 4 - 1`, i.e.
+/// `bytes / 4 > MAX_INLINE_TOKENS`; pinned by
+/// `the_recorded_budget_comparison_matches_the_detectors_edge`), so `true` proves the target
+/// would have been flagged under the old budget and its absence is not a repair. `false` is
+/// not a proof of repair for an `un_mappable_file` row, whose byte measure `bytes / 4` cannot
+/// express the `bytes > budget * 4` edge exactly; it errs toward reporting a repair there,
+/// never toward calling a repair a budget change. A zero budget (a malformed row) proves
+/// nothing.
+fn still_over_recorded_budget(tokens: usize, recorded_budget: usize) -> bool {
+    recorded_budget > 0 && tokens > recorded_budget
 }
 
 const TRACKER_REL_PATH: &str = "docs/trackers/legibility-backlog.md";
@@ -725,6 +756,72 @@ mod tests {
         assert_eq!(rows[0].closed_reason.as_deref(), Some("symbol_gone"));
         assert!(rows[0].after.is_none());
         assert_eq!(rows[0].closed_at.as_deref(), Some("2026-06-14"));
+    }
+    /// The third cause of absence (docs/issues/2026-09-21-legibility-auto-close-...):
+    /// the budget moved, so a body nobody touched stopped qualifying. `small_file()`'s
+    /// `Foo/big` measures 40 tokens (163 bytes). A row recorded against a budget of 39
+    /// is still over it, so its absence from `current` is not a repair; against 40 the
+    /// body is within budget (the detector flags only `tokens > budget`), so it is.
+    /// The boundary pair, not one side, is what pins the comparison to the detector's.
+    #[test]
+    fn reconcile_does_not_report_a_widened_threshold_as_a_repair() {
+        let files = [small_file()];
+        let tokens = crate::legibility::measure_target(&files, "src/foo.rs", "Foo/big")
+            .expect("target resolves")
+            .0;
+        assert_eq!(tokens, 40, "fixture drifted; the boundary below assumes 40");
+
+        let with_recorded_budget = |budget: usize| {
+            let mut prior = prior_with_defects(&["over_budget_body"]);
+            prior.candidates[0].measure.budget = budget;
+            reconcile(&prior, &[], &files, "2026-06-14")
+        };
+
+        let widened = with_recorded_budget(tokens - 1);
+        assert_eq!(widened[0].status, "retired");
+        assert_eq!(
+            widened[0].closed_reason.as_deref(),
+            Some("threshold_changed")
+        );
+        assert!(
+            widened[0].after.is_none(),
+            "no before->after delta for a body that was not changed: {:?}",
+            widened[0].after
+        );
+        assert_eq!(widened[0].closed_at.as_deref(), Some("2026-06-14"));
+
+        let repaired = with_recorded_budget(tokens);
+        assert_eq!(repaired[0].status, "closed");
+        assert_eq!(repaired[0].closed_reason.as_deref(), Some("refactored"));
+        assert!(repaired[0].after.is_some());
+    }
+
+    /// The comparison `reconcile` uses (`measured tokens > recorded budget`) is exactly the
+    /// detector's predicate for a body, at the edge: the first body `over_budget_bodies`
+    /// flags measures `MAX_INLINE_TOKENS + 1` tokens, and the last one it does not flag
+    /// measures `MAX_INLINE_TOKENS`. Without this the rule above could drift off by one
+    /// from the detector and mislabel a body sitting on the edge.
+    #[test]
+    fn the_recorded_budget_comparison_matches_the_detectors_edge() {
+        let max = crate::tools::MAX_INLINE_TOKENS;
+        let edge_len = crate::tools::INLINE_MAX_RESPONSE_LEN;
+        for (len, flagged) in [(edge_len, false), (edge_len + 1, true)] {
+            let mut file = small_file();
+            file.lines = vec!["x".repeat(len)];
+            file.symbols[0].start_line = 0;
+            file.symbols[0].end_line = 0;
+            let files = [file];
+            let detected = !crate::legibility::over_budget_bodies(&files).is_empty();
+            let tokens = crate::legibility::measure_target(&files, "src/foo.rs", "Foo/big")
+                .expect("target resolves")
+                .0;
+            assert_eq!(detected, flagged, "detector verdict at {len} bytes");
+            assert_eq!(
+                tokens > max,
+                flagged,
+                "`tokens > budget` must agree with the detector at {len} bytes"
+            );
+        }
     }
 
     /// Both live kinds count as producible (positive control for the roster: a roster
