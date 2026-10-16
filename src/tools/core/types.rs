@@ -487,6 +487,49 @@ pub(super) async fn worktree_read_notice(
     ))
 }
 
+/// Notice that an unpinned call resolved against a root ANOTHER caller made the
+/// server's active project — the delivery of `Agent::note_activation`'s warning to
+/// the party it was always meant for. See `Agent::displaced_default_notice` for the
+/// conditions and the remedy.
+///
+/// **A pinned call is silent**, as in [`worktree_read_notice`]: it named its own tree,
+/// so nothing was resolved by default. The caller is the per-call principal
+/// (`session_key::current_caller`); outside a `call_tool_inner` scope (a tool called
+/// directly) it is `None` and this is silent — no identity, no claim.
+///
+/// docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md
+pub(super) async fn displaced_default_notice(ctx: &ToolContext) -> Option<String> {
+    if ctx.workspace_override.is_some() {
+        return None;
+    }
+    let caller = crate::tools::session_key::current_caller();
+    ctx.agent.displaced_default_notice(caller.as_deref()).await
+}
+
+/// Both notices ride the one `_workspace_notice` channel; a call that earns both
+/// carries both, in that order, rather than the second silently losing.
+fn join_notices(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(format!("{a} {b}")),
+        (a, b) => a.or(b),
+    }
+}
+
+#[cfg(test)]
+mod join_notices_tests {
+    use super::join_notices;
+
+    /// A call that earns both notices carries both: the second must not silently lose.
+    #[test]
+    fn a_call_earning_both_notices_carries_both_and_one_carries_one() {
+        let s = |x: &str| Some(x.to_string());
+        assert_eq!(join_notices(None, None), None);
+        assert_eq!(join_notices(s("a"), None), s("a"));
+        assert_eq!(join_notices(None, s("b")), s("b"));
+        assert_eq!(join_notices(s("a"), s("b")), s("a b"));
+    }
+}
+
 /// Tools whose `is_write` is true but whose write does not land at a path
 /// resolved against the project root, so naming a checkout would mislead:
 /// `approve_write` grants a scope rather than writing a file, and the library
@@ -1739,7 +1782,10 @@ pub trait Tool: Send + Sync {
             .as_ref()
             .map(|p| format!("{}/", crate::util::fs::to_forward_slash(p)))
             .unwrap_or_default();
-        let workspace_notice = worktree_read_notice(ctx, project_root.as_deref()).await;
+        let workspace_notice = join_notices(
+            worktree_read_notice(ctx, project_root.as_deref()).await,
+            displaced_default_notice(ctx).await,
+        );
         crate::tools::core::path_strip::strip_paths_in_value(&mut val, &root_prefix);
         // AFTER stripping, deliberately: the annotation's whole job is to name
         // the checkout absolutely, and the stripper rewrites project-rooted

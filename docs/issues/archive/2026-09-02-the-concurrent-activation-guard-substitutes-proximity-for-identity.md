@@ -1,5 +1,5 @@
 ---
-id: 6779f47d3c986e9c
+id: '6779f47d3c986e9c'
 kind: bug
 status: fixed
 title: The concurrent-activation guard substitutes wall-clock proximity for caller identity, so a fast linear session is a systematic false positive
@@ -10,7 +10,7 @@ tags:
 closed: 2026-09-07
 opened: 2026-09-02
 severity: low
-unverified: TRACKED b663dd5102ecb992 — Only the FALSE-POSITIVE half is fixed. § Root cause names a second and worse consequence of the same gap — the warning is attached to the response of the call that PERFORMED the switch, so it reaches the switcher, while the party harmed is whoever resolves against the wrong workspace afterwards and receives nothing. fd985218 does not touch routing. The guard is now accurate and still speaks to the wrong party.
+unverified: 'CLEARED 2026-10-16. Was: TRACKED b663dd5102ecb992 - the warning reached only the switcher. Delivered to the harmed party by Agent::displaced_default_notice (patch-id a69292e1af694e6c57c6d02bd32db8f37c90d46e). Also corrected: fd985218 compared the process-wide CLAUDE_CODE_SESSION_ID, identical for a parent and all its subagents, so the guard was silent on real races under Claude Code; it now compares the per-call principal.'
 ---
 
 ## Summary

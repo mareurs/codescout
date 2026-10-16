@@ -12,7 +12,7 @@ opened: 2026-08-23
 owner: marius
 related: []
 severity: high
-unverified: TRACKED 3b4fce62b0289f20 — Root cause (global mutable default_workspace_root, no per-caller identity) is NOT addressed — options 2/3 in Fix remain open. This closes the specific incident trigger (a Workflow script briefed to call activate) by strengthening the existing, already-correct-but-underweighted guidance; a subagent that ignores the briefing can still reproduce the original failure.
+unverified: "CLEARED 2026-10-16. Was: TRACKED 3b4fce62b0289f20 - options 2/3 open. Option 2 taken (workspace-state guide, companion-plugin.md); soft option 3 built (Agent::displaced_default_notice and a per-call caller for the activation guard, patch-id a69292e1af694e6c57c6d02bd32db8f37c90d46e). Hard guard (refuse subagent activate / per-principal default) declined by the lead; the root cause (one global default, no per-caller default) stands by decision, so a subagent that activates still moves it but its parent is now told."
 ---
 
 # BUG: a background subagent's workspace(activate) mutates the PARENT session's active project, breaking the parent's writes mid-turn

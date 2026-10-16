@@ -343,7 +343,8 @@ impl Tool for ActivateProject {
             HintScenario::SwitchAway
         };
 
-        let concurrent_warning = ctx.agent.note_activation(&root).await;
+        let caller = crate::tools::session_key::current_caller();
+        let concurrent_warning = ctx.agent.note_activation(&root, caller.as_deref()).await;
         timer.lap("note_activation");
         let auto_registered = crate::library::auto_register::auto_register_deps(&root, ctx).await;
         timer.lap("auto_register_deps");

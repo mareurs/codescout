@@ -1470,6 +1470,16 @@ impl CodeScoutServer {
             rendezvous_session.clone(),
         );
         let serving_session = asserted_back.or(rendezvous_session);
+        // WHO is making this call, for the tools that must tell a parent from its
+        // subagent. The same value that picked the ledger above — the stamped
+        // principal (`<session_id>/<agent_id>`) for a subagent, else the session's
+        // own id — and for the same reason: the process environment cannot tell them
+        // apart, since they share it. `None` only when nothing identifies the caller
+        // at all, and a reader of it must treat that as "unknown", never "same".
+        // Read by `ActivateProject::call` (guard) and `displaced_default_notice`.
+        let caller = serving_session
+            .clone()
+            .or_else(|| self.base_ledger_key.clone());
         // On THIS call's resolved ledger, never the slot: after adoption, so it lands
         // on the principal being served, and through `ledger`, so a sibling adopting
         // concurrently cannot redirect it. Two locks in sequence, never held
@@ -1526,6 +1536,8 @@ impl CodeScoutServer {
             ctx.workspace_override.as_deref(),
             || tool.call_content(input, &ctx),
         );
+
+        let tool_call_fut = crate::tools::session_key::scope_caller(caller, tool_call_fut);
 
         let tool_call_fut = crate::tools::invocation_context::scope(
             crate::tools::invocation_context::NativeInvocation::from_meta(
@@ -12325,6 +12337,118 @@ mod guide_hint_tests {
         assert!(
             !call(&server, Some("sess-1/agent-b")).await.is_empty(),
             "a second concurrent principal must be re-armed independently"
+        );
+    }
+
+    /// A subagent that moves the default is named to its PARENT, through the real
+    /// dispatch — and the activation guard tells a parent from its subagent.
+    ///
+    /// Two sites, so a test of each alone proves nothing: `call_tool_inner` must hand
+    /// the stamped principal to the tools (`scope_caller`), and the tools must read it
+    /// (`current_caller`). Deleting the `scope_caller` call leaves every `Agent` unit
+    /// test green and kills every assertion here.
+    ///
+    /// Before this, `note_activation` read `CLAUDE_CODE_SESSION_ID` — one value for the
+    /// whole process — so step 2's warning never fired under Claude Code, and the harmed
+    /// party (step 3) was never told at all.
+    #[tokio::test]
+    async fn a_subagent_moving_the_default_is_reported_to_the_parent_via_the_stamped_principal() {
+        async fn call(
+            server: &CodeScoutServer,
+            tool: &str,
+            mut arguments: Value,
+            principal: Option<&str>,
+        ) -> String {
+            if let Some(p) = principal {
+                arguments[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!(p);
+            }
+            let req: CallToolRequestParams =
+                serde_json::from_value(json!({"name": tool, "arguments": arguments})).unwrap();
+            let out = server
+                .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+                .await
+                .expect("dispatch");
+            out.content
+                .iter()
+                .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        let activate = |dir: &tempfile::TempDir| json!({"action": "activate", "path": dir.path(), "read_only": false});
+
+        let (home, server) = make_server().await;
+        let (f1, f2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+
+        // 1. The parent (unstamped) activates a foreign root, as the documented
+        //    cross-project pattern does. Nothing is displaced FOR the parent.
+        let out = call(&server, "workspace", activate(&f1), None).await;
+        assert!(
+            !out.contains("concurrent_activation_warning"),
+            "first move, nobody to race: {out}"
+        );
+
+        // 2. A stamped subagent moves it again, rapidly. Parent and subagent share the
+        //    process and its session id, so only the stamp can tell them apart.
+        let out = call(&server, "workspace", activate(&f2), Some("sess-1/agent-a")).await;
+        assert!(
+            out.contains("concurrent_activation_warning"),
+            "a subagent displacing its parent inside the window must warn the switcher: {out}"
+        );
+
+        // 2b. A PINNED call names its own tree, so nothing was resolved by default and
+        //     there is nothing to disclose. It must also not CONSUME the notice owed to
+        //     the parent's next unpinned call (step 3 proves that).
+        let out = call(
+            &server,
+            "run_command",
+            json!({"command": "echo hi", "workspace": home.path()}),
+            None,
+        )
+        .await;
+        assert!(
+            !out.contains("sess-1/agent-a"),
+            "a pinned call resolved nothing by default: {out}"
+        );
+
+        // 3. THE HARMED PARTY. The parent's next unpinned call resolves against the
+        //    subagent's root, and must hear who moved it.
+        let out = call(&server, "run_command", json!({"command": "echo hi"}), None).await;
+        assert!(
+            out.contains("sess-1/agent-a") && out.contains("workspace=<absolute path>"),
+            "the parent must be told which principal moved the default, and the pin \
+             that fixes it: {out}"
+        );
+
+        // 4. Once per move.
+        let out = call(&server, "run_command", json!({"command": "echo hi"}), None).await;
+        assert!(
+            !out.contains("sess-1/agent-a"),
+            "the same move is not repeated to the same caller: {out}"
+        );
+
+        // 5. The mover is never told. POSITIVE CONTROL for step 3: without it, a notice
+        //    that fires for nobody would satisfy step 4 just as well as dedup does.
+        let out = call(
+            &server,
+            "run_command",
+            json!({"command": "echo hi"}),
+            Some("sess-1/agent-a"),
+        )
+        .await;
+        assert!(
+            !out.contains("workspace=<absolute path>"),
+            "the principal that moved the default must not be told someone else did: {out}"
+        );
+        let out = call(
+            &server,
+            "run_command",
+            json!({"command": "echo hi"}),
+            Some("sess-1/agent-b"),
+        )
+        .await;
+        assert!(
+            out.contains("sess-1/agent-a"),
+            "a sibling that did not move it is owed the notice: {out}"
         );
     }
 
