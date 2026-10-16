@@ -13,6 +13,25 @@ struct Args {
     force: Option<bool>,
 }
 
+/// Argument parse for `delete`: pure, no catalog or filesystem access. `call` runs it first, and
+/// [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
+    serde_json::from_value(args).map_err(|e| {
+        super::deser_error(
+            e,
+            "delete",
+            "doc(action=\"delete\") requires 'id'",
+            "e.g. doc(action=\"delete\", id=\"<16-hex>\") previews; add force=true to apply. Get an id from doc(action=\"find\", ...).",
+        )
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
 /// Delete an artifact: remove its file from disk, its catalog row, and its
 /// chunk vectors.
 ///
@@ -33,14 +52,7 @@ struct Args {
 /// foreign keys and kept every point. The claim was correct about the backend
 /// the tests exercise, which is why it read as complete.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args).map_err(|e| {
-        super::deser_error(
-            e,
-            "delete",
-            "doc(action=\"delete\") requires 'id'",
-            "e.g. doc(action=\"delete\", id=\"<16-hex>\") previews; add force=true to apply. Get an id from doc(action=\"find\", ...).",
-        )
-    })?;
+    let a = parse_args(args)?;
 
     // The catalog guard lives in an EXPLICIT BLOCK, and the block is the fix rather
     // than a tidy-up. The vector delete below is `async`, and this guard is a

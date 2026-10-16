@@ -301,10 +301,22 @@ fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String>
     }
 }
 
+/// Argument parse for `create`: pure, no catalog or filesystem access. `call` runs it first, and
+/// [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
+    serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. doc(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.").into()
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let mut a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("doc(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. doc(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.")
-    })?;
+    let mut a = parse_args(args)?;
 
     // F4: `params_path` is advertised on the shared `augment` schema object (honored
     // by `doc(action="augment")`) but not meaningful here — `create` writes the

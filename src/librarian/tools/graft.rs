@@ -14,15 +14,27 @@ struct Args {
     force: Option<bool>,
 }
 
-pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args).map_err(|e| {
+/// Argument parse for `graft`: pure, no catalog or filesystem access. `call` runs it first, and
+/// [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
+    serde_json::from_value(args).map_err(|e| {
         super::deser_error(
             e,
             "graft",
             "doc(action=\"graft\") requires 'from_id' and 'into_id'",
             "e.g. doc(action=\"graft\", from_id=\"<16-hex>\", into_id=\"<16-hex>\") previews; add force=true to apply. from_id is DELETED and its history moves to into_id.",
         )
-    })?;
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
+pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let a = parse_args(args)?;
 
     let mut cat = ctx.catalog.lock();
 

@@ -1,7 +1,7 @@
 ---
 id: '2df804b3435e2300'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the worktree write guard keys on the doc action name, so it refuses dry-run previews and malformed calls that could never write'
 tags:
 - librarian
@@ -10,11 +10,12 @@ tags:
 - codescout-tool
 - cluster/unclassified
 opened: 2026-10-06
+closed: 2026-10-16
 owner: marius
 related:
 - docs/issues/archive/2026-09-03-the-worktree-write-guard-covers-file-writes-and-no-doc-action.md
 severity: low
-unverified: 'PARTIAL FIX (40349c9d): dry-run delete and graft previews now reach the tool. NOT fixed: a malformed call still meets the guard before its own validation error; rekey_prefix previews stay refused on purpose, because they can fork a shadow row. See ## Partial fix.'
+unverified: 'CLEARED 2026-10-16. Was: PARTIAL FIX (40349c9d), the malformed-call half and rekey_prefix open. The malformed-call half is now fixed by running a pure argument preflight ahead of the guard; rekey_prefix previews stay refused on purpose.'
 ---
 
 # BUG: the worktree write guard keys on the doc action name, so it refuses dry-run previews and malformed calls that could never write
@@ -86,16 +87,31 @@ The three calls in "Symptom" ran in this session after the reconnect to the buil
 
 ## Fix
 
-Partly done: the first option below is implemented for `delete` and `graft` (see `## Partial fix`). The options were:
+Fix commit (malformed-call half), on the guards worktree branch `worktree-agent-a4ecb4e88086aea56`, to be merged onto `experiments`: SHA `feb69976`, patch-id `09a68be4d2a7c02c5f9f01228ac0c02f34351428`. The SHA is positional; the patch-id survives the merge and any rebase.
 
-- For the three dry-run actions, run the guard only when the call will apply (`force=true`). The set would need a per-action predicate, not a name list.
-- Run the guard after the argument check, so a malformed call returns its own error. This needs the guard inside each tool, or a parse step in the adapter. Today only the adapter sees both `ctx` and `action`.
+Both halves are fixed. The dry-run half landed first (`40349c9d`, see `## Partial fix`). The malformed-call half is the second option from the original list: validate before the guard.
 
-Whichever is chosen, the guard must still run before the first write.
+- Each of the eleven write tools now has a private `parse_args` (`src/librarian/tools/{create,update,mv,delete,graft,link,append_entry,update_entry,rekey_prefix,event_create,augment}.rs`). It is the pure prefix `call` already began with: deserialisation plus the refusals that need no catalog or filesystem (for `update`, the `rel_path` and non-object `patch` refusals and the `patch: null` normalisation; for `update_entry`, the `entry` redirect and the `fields`-is-object check; for `append_entry`, the `entry`-is-object check; for `event_create`, the kind and payload checks). `call` runs `parse_args` first, exactly as before, and a new `pub(crate) fn preflight(args)` runs it alone.
+- `artifact::preflight` (`src/librarian/tools/artifact.rs`) dispatches on `action` to the right tool's `preflight`, flattening `event_create`/`augment` args the same way `call` does. Read actions and unknown actions return `Ok(())`.
+- `LibrarianAdapter::call` (`src/librarian/adapter.rs`) runs `artifact::preflight` immediately before `guard_worktree_write`, inside the same `doc_call_can_write` branch. A malformed call now gets the tool's own corrected-call error. A well-formed call that can write still meets the guard, unchanged.
+
+Why the guard is not weakened: `preflight` and `call` run the same `parse_args`, so `call` refuses on exactly the inputs `preflight` refuses on, before any catalog or file access. Nothing `preflight` lets through skips the guard, and nothing it refuses could have written.
+
+One behaviour changed deliberately: `doc(action="delete", force="true")` (and `graft`) used to be refused by the GUARD, because a string `force` was treated as "might apply". It is ill-typed, so the tool refuses it at its own parse and could never have written; it now gets that parse error. `doc_call_can_write` is unchanged.
+
+Still deliberate: `rekey_prefix` previews meet the guard (see `## Partial fix`). A well-formed one is not narrowed.
 
 ## Tests added
 
-Partial. Four tests in `src/librarian/adapter.rs` cover the dry-run half and assert on the error TEXT (named in `## Partial fix`). The malformed-call half still needs two tests that assert on the error TEXT, not only `is_err()`: a malformed `move` and a `delete` preview, each unpinned in a worktree repo (see `docs/issues/archive/2026-09-18-the-worktree-write-block-names-an-arbitrary-worktree-as-the-remedy.md` on why `is_err()` alone proved nothing about the hint).
+Dry-run half (`40349c9d`): `doc_dry_run_previews_reach_the_tool_in_an_unactivated_worktree_repo`, `doc_calls_that_can_write_are_still_refused_in_an_unactivated_worktree_repo`, `doc_calls_pinned_to_a_workspace_reach_the_tool_in_an_unactivated_worktree_repo`, `doc_call_can_write_is_keyed_on_the_effect_not_the_action_name`.
+
+Malformed-call half, all in `src/librarian/adapter.rs`:
+
+- `doc_malformed_calls_get_their_own_error_not_the_worktree_guard`: unpinned, in a repo with a linked worktree, 17 malformed shapes (a bare call to each of the eleven write actions, `update` + `rel_path`, `update_entry` + `entry`, `event_create` without `event`, `augment` without `augment`, and a string `force` on `delete` and `graft`). Each must NOT say "Write blocked" and MUST contain the tool's own validation text. Asserts on the text, not `is_err()`. Red before the fix (first row: `{"action":"create"} -> Write blocked: ...`), green after.
+- `every_mutating_doc_action_has_a_preflight_arm`: drift guard. For every action in the schema enum that `is_mutating_doc_action` names, `artifact::preflight` must refuse a bare `{action}` call; an action with no arm falls to `_ => Ok(())` and would fail it. Floor of 11 so it cannot go vacuous.
+- `doc_calls_that_can_write_are_still_refused_in_an_unactivated_worktree_repo` keeps its well-formed rows, so a preflight that swallowed the guard would red there. The string-`force` row moved to the malformed test, where it now gets the tool's error.
+
+Verified: `cargo test --lib librarian::` 2192 passed, 0 failed, 2026-10-16.
 
 ## Workarounds
 
@@ -117,7 +133,7 @@ Tests added, all in `src/librarian/adapter.rs`, each asserting on the error text
 
 ## Resume
 
-The dry-run half is fixed (see `## Partial fix`). What remains is the malformed-call ordering, which needs the guard moved into each tool or a second parse of each tool's private `Args`. Decide whether that is worth the change. `rekey_prefix` previews staying refused is deliberate, not a gap.
+N/A. Fixed. Archive once the gate is green on the integrated tree.
 
 ## References
 

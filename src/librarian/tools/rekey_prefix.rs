@@ -13,6 +13,25 @@ struct Args {
     force: bool,
 }
 
+/// Argument parse for `rekey_prefix`: pure, no catalog or filesystem access. `call` runs it
+/// first, and [`preflight`] runs it alone so the worktree write guard can sit behind it.
+fn parse_args(args: Value) -> Result<Args> {
+    serde_json::from_value(args).map_err(|e| {
+        crate::tools::RecoverableError::with_hint(
+            format!("doc(action=\"rekey_prefix\") requires 'id', 'from' and 'to': {e}"),
+            "e.g. doc(action=\"rekey_prefix\", id=\"<16-hex>\", from=\"T\", to=\"SRI\"). \
+             Dry run by default — read the report, then pass force=true to apply.",
+        )
+        .into()
+    })
+}
+
+/// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
+/// See `artifact::preflight`.
+pub(crate) fn preflight(args: &Value) -> Result<()> {
+    parse_args(args.clone()).map(|_| ())
+}
+
 /// Move a ledger's entry-id namespace from one prefix to another, atomically.
 ///
 /// The counterpart `update_entry` deliberately refuses. That refusal
@@ -29,13 +48,7 @@ struct Args {
 ///
 /// Motivating case: `docs/issues/archive/2026-09-02-prefix-t-collides-again-with-the-zero-padding-protection-gone.md`.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(
-            format!("doc(action=\"rekey_prefix\") requires 'id', 'from' and 'to': {e}"),
-            "e.g. doc(action=\"rekey_prefix\", id=\"<16-hex>\", from=\"T\", to=\"SRI\"). \
-             Dry run by default — read the report, then pass force=true to apply.",
-        )
-    })?;
+    let a = parse_args(args)?;
 
     let mode = if a.force {
         RekeyMode::Apply
