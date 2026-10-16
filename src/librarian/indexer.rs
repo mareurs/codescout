@@ -1087,8 +1087,8 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
     Ok(ids.len())
 }
 
-/// What a [`backfill_chunk_vectors`] run did. Six counts rather than four, and the
-/// split is the same argument the original four rested on: a file that is *gone*, a
+/// What a [`backfill_chunk_vectors`] run did. Seven counts and a sample of failures
+/// rather than four counts, and the split is the same argument the original four rested on: a file that is *gone*, a
 /// file that is *not text*, and a file that is *unreadable* are different outcomes
 /// with different remedies, and folding them into one number makes the report assert
 /// a cause it never checked.
@@ -1128,6 +1128,13 @@ pub struct BackfillReport {
     pub unreadable_other: usize,
     /// Artifacts visited.
     pub artifacts: usize,
+    /// Chunks whose embed call failed. The run goes on to the next chunk, so one input the
+    /// embedder always rejects holds back only itself. Each such chunk keeps its row and no
+    /// vector, and a later run on a sqlite-vec host selects its artifact again.
+    pub embed_failed: usize,
+    /// The first 20 failures, as `"<chunk_id>: embed failed: <error>"` (the reindex's form).
+    /// `embed_failed` is the full count.
+    pub embed_errors: Vec<String>,
 }
 /// Where [`backfill_chunk_vectors`] writes its vectors. It must be the store this run's
 /// search reads: a vector written anywhere else is counted as embedded and found by no query.
@@ -1147,6 +1154,9 @@ pub enum BackfillTarget<'a> {
 /// page whose vectors are durable. Each run clears it at entry and again at the end, and
 /// no code resumes from it; every run re-selects from coverage instead.
 const BACKFILL_CURSOR: &str = "chunk_backfill_cursor";
+
+/// How many failed chunks a [`BackfillReport`] names. The count it keeps is complete.
+const BACKFILL_ERROR_SAMPLE: usize = 20;
 
 /// Every character `str::trim` strips (Unicode `White_Space`), for SQL's two-argument
 /// `trim(content, BLANK_CHARS)`. The one-argument `trim()` strips spaces only, so a blank
@@ -1173,6 +1183,10 @@ const BLANK_CHARS: &str = "\t\n\u{b}\u{c}\r \u{85}\u{a0}\u{1680}\u{2000}\u{2001}
 ///
 /// The catalog mutex is released across every embedding await. `batch` bounds the
 /// number of artifacts in a page; every nonempty page is flushed before checkpointing.
+///
+/// A chunk whose embed call fails is counted in [`BackfillReport::embed_failed`] and the
+/// run goes on, so an input the embedder always rejects holds back only its own chunk. A
+/// failed catalog or store write is a different fault and still ends the run.
 ///
 /// `root_prefix` is the optional path LIKE pattern, already suffixed with `%`.
 /// `None` explicitly walks the whole catalog. A backed-up dimension change requires
@@ -1372,15 +1386,28 @@ async fn backfill_chunk_vectors_with(
                 continue;
             }
 
+            // One failed chunk is counted, not fatal: a chunk the embedder rejects every time
+            // would otherwise stop every run at its page, and the page's finished vectors in
+            // `pending` would be dropped with it. Its row stays, so a sqlite-vec run selects the
+            // artifact again; a store or catalog write failing below still ends the run.
+            // docs/issues/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md
             let futures_iter = items.into_iter().map(|item| async move {
-                let vec = svc
-                    .embed_artifact(item.title.as_deref(), &item.text)
-                    .await?;
-                anyhow::Ok((item.chunk_id, item.artifact_id, vec))
+                let embedded = svc.embed_artifact(item.title.as_deref(), &item.text).await;
+                (item.chunk_id, item.artifact_id, embedded)
             });
             let mut s = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
-            while let Some(res) = s.next().await {
-                pending.push(res?);
+            while let Some((chunk_id, artifact_id, embedded)) = s.next().await {
+                match embedded {
+                    Ok(vec) => pending.push((chunk_id, artifact_id, vec)),
+                    Err(e) => {
+                        report.embed_failed += 1;
+                        if report.embed_errors.len() < BACKFILL_ERROR_SAMPLE {
+                            report
+                                .embed_errors
+                                .push(format!("{chunk_id}: embed failed: {e}"));
+                        }
+                    }
+                }
             }
         }
 
@@ -2096,6 +2123,36 @@ kind = "memory"
         }
         crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(FixedEmbedder(dim)))
     }
+    /// An embedder that refuses, every time, any text containing `marker`, and embeds the
+    /// rest as `backfill_svc` does. The shape of a remote embedder that answers HTTP 4xx for
+    /// one payload.
+    fn backfill_rejecting_svc(
+        marker: &'static str,
+    ) -> crate::librarian::embedding::EmbeddingService {
+        struct RejectingEmbedder(&'static str);
+        #[async_trait::async_trait]
+        impl codescout_embed::Embedder for RejectingEmbedder {
+            fn dimensions(&self) -> usize {
+                768
+            }
+            async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+                if texts.iter().any(|t| t.contains(self.0)) {
+                    anyhow::bail!("fixture embedder rejected the input");
+                }
+                Ok(texts
+                    .iter()
+                    .map(|_| {
+                        let mut vector = vec![0.0; 768];
+                        vector[0] = 1.0;
+                        vector
+                    })
+                    .collect())
+            }
+        }
+        crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(RejectingEmbedder(
+            marker,
+        )))
+    }
 
     fn backfill_recording_svc(
         declared_dim: usize,
@@ -2638,11 +2695,19 @@ kind = "memory"
         let failing = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
             FailingEmbedder,
         ));
-        let error =
+        // A failed embed is reported and does not end the run: the run's other chunks still
+        // get their turn, so one rejected chunk cannot starve the pages behind it.
+        let failed =
             backfill_chunk_vectors(&catalog, &failing, 100, None, BackfillTarget::SqliteVec)
                 .await
-                .unwrap_err();
-        assert!(error.to_string().contains("fixture embedding failed"));
+                .unwrap();
+        assert_eq!(failed.embedded, 0);
+        assert_eq!(failed.embed_failed, 2, "both chunks were attempted");
+        assert_eq!(failed.embed_errors.len(), 2);
+        assert!(failed
+            .embed_errors
+            .iter()
+            .all(|e| e.contains("embed failed") && e.contains("fixture embedding failed")));
         {
             let cat = catalog.lock();
             let chunks: i64 = cat
@@ -2689,6 +2754,215 @@ kind = "memory"
                 [chunk_id], |row| row.get(0),
             ).unwrap();
             assert_eq!(found, path.to_string_lossy());
+        }
+    }
+    /// **One chunk the embedder always rejects must not block the artifacts after it.**
+    /// `docs/issues/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md`
+    ///
+    /// The rejected artifact sorts first and `batch` is 1, so it sits alone in page one: the
+    /// shape in which every run used to stop at page one and write nothing behind it.
+    #[tokio::test]
+    async fn a_chunk_the_embedder_rejects_does_not_block_the_artifacts_after_it() {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        for (name, body) in [("first", "POISON"), ("second", "fine"), ("third", "fine")] {
+            std::fs::write(
+                root.path().join(format!("{name}.md")),
+                format!("# {name}\n\n{body}\n"),
+            )
+            .unwrap();
+        }
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        {
+            // Pin the walk order; the index stamps all three alike.
+            let cat = catalog.lock();
+            for (at, name) in ["first", "second", "third"].iter().enumerate() {
+                cat.conn
+                    .execute(
+                        "UPDATE artifact SET updated_at = ?1 WHERE abs_path LIKE ?2",
+                        rusqlite::params![1000 + at as i64, format!("%/{name}.md")],
+                    )
+                    .unwrap();
+            }
+        }
+
+        let report = backfill_chunk_vectors(
+            &catalog,
+            &backfill_rejecting_svc("POISON"),
+            1,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.artifacts, 3, "the walk must reach every page");
+        assert_eq!(report.embed_failed, 1, "the one rejected chunk");
+        let covered = |cat: &Catalog| -> Vec<String> {
+            let mut stmt = cat
+                .conn
+                .prepare(
+                    "SELECT DISTINCT a.abs_path FROM artifact a \
+                 JOIN artifact_chunk c ON c.artifact_id = a.id \
+                 JOIN artifact_vec_v2 v ON v.id = c.chunk_id ORDER BY a.abs_path",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let with_vectors = covered(&catalog.lock());
+        assert_eq!(
+            with_vectors.len(),
+            2,
+            "the two artifacts behind the rejected one must get vectors: {with_vectors:?}"
+        );
+        assert!(
+            with_vectors.iter().all(|p| !p.ends_with("/first.md")),
+            "the rejected artifact has no vector: {with_vectors:?}"
+        );
+        assert_eq!(
+            report.embedded,
+            catalog
+                .lock()
+                .conn
+                .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap() as usize,
+            "the report must count what landed"
+        );
+
+        // The rejected artifact is retried, and only it: its chunk row has no vector, so the
+        // gap arm selects it again, while the two healthy artifacts are not embedded twice.
+        let again = backfill_chunk_vectors(
+            &catalog,
+            &backfill_rejecting_svc("POISON"),
+            1,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!(again.artifacts, 1);
+        assert_eq!(again.embed_failed, 1);
+        assert_eq!(again.embedded, 0);
+    }
+
+    /// **A rejected chunk keeps the vectors of its artifact's other chunks.** The failure is
+    /// per chunk: dropping the artifact would re-embed the healthy chunk on every retry.
+    #[tokio::test]
+    async fn a_rejected_chunk_keeps_the_vectors_of_its_artifacts_other_chunks() {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("mixed.md"),
+            "# Mixed\n\nalpha\n\n## Second\n\nPOISON beta\n",
+        )
+        .unwrap();
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let report = backfill_chunk_vectors(
+            &catalog,
+            &backfill_rejecting_svc("POISON"),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.embedded, 1, "the healthy chunk is written");
+        assert_eq!(report.embed_failed, 1, "the rejected chunk is counted");
+        let vectors: i64 = catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(vectors, 1);
+
+        let retry = backfill_chunk_vectors(
+            &catalog,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            retry.embedded, 1,
+            "only the rejected chunk is embedded on the retry"
+        );
+        assert_eq!(retry.embed_failed, 0);
+    }
+
+    /// **The report names a failed chunk, and its sample stops at 20.** The count stays
+    /// complete: a run that rejects 25 chunks says 25, and shows 20 of them.
+    #[tokio::test]
+    async fn the_report_names_a_failed_chunk_and_caps_its_sample() {
+        let catalog = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        for n in 0..25 {
+            std::fs::write(
+                root.path().join(format!("doc-{n:02}.md")),
+                format!("# Doc {n}\n\nPOISON {n}\n"),
+            )
+            .unwrap();
+        }
+        index_repo_sync(
+            &catalog.lock(),
+            &md_rules(),
+            root.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+
+        let report = backfill_chunk_vectors(
+            &catalog,
+            &backfill_rejecting_svc("POISON"),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.embed_failed, 25, "the count is complete");
+        assert_eq!(report.embed_errors.len(), 20, "the sample is capped");
+        let cat = catalog.lock();
+        for message in &report.embed_errors {
+            let (chunk_id, error) = message
+                .split_once(": embed failed: ")
+                .unwrap_or_else(|| panic!("unexpected message shape: {message}"));
+            assert!(error.contains("fixture embedder rejected the input"));
+            let known: i64 = cat
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM artifact_chunk WHERE chunk_id = ?1",
+                    [chunk_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(known, 1, "{chunk_id} must name a real chunk");
         }
     }
 
@@ -2822,7 +3096,9 @@ kind = "memory"
             }
             async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
                 if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
-                    anyhow::bail!("second page embedding failed");
+                    // An embed failure no longer ends a run, so the second page fails at its
+                    // WRITE instead: a wrong-width vector embeds, and the table refuses it.
+                    return Ok(texts.iter().map(|_| vec![1.0; 3]).collect());
                 }
                 Ok(texts
                     .iter()
@@ -2863,7 +3139,8 @@ kind = "memory"
                 .unwrap();
         }
         // Three artifacts with page size two: the first page holds the missing file and one
-        // real document, so it writes one vector and records its marker; the second fails.
+        // real document, so it writes one vector and records its marker; the write of the
+        // second fails.
         let svc = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
             FailSecondEmbedder(std::sync::atomic::AtomicUsize::new(0)),
         ));
@@ -2871,7 +3148,10 @@ kind = "memory"
             backfill_chunk_vectors_with(&catalog, &svc, 2, None, false, BackfillTarget::SqliteVec)
                 .await
                 .unwrap_err();
-        assert!(error.to_string().contains("second page embedding failed"));
+        assert!(
+            error.to_string().contains("dimension"),
+            "the second page must fail at its write: {error:#}"
+        );
         {
             let cat = catalog.lock();
             let cursor = get_meta(&cat.conn, BACKFILL_CURSOR)
