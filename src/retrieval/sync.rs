@@ -2447,6 +2447,53 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn mjs_stream_index_keeps_modules_and_respects_ignores() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join("nested")).unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "gitignored.mjs\n").unwrap();
+        let source = "export function moduleAnswer() { return 42; }\n";
+        for path in [
+            "keep.mjs",
+            "nested/helper.mjs",
+            "node_modules/skip.mjs",
+            "gitignored.mjs",
+        ] {
+            std::fs::write(dir.path().join(path), source).unwrap();
+        }
+        let emb = FakeEmbedder {
+            dim: 4,
+            seen: Mutex::new(Vec::new()),
+        };
+        let store = RecordingStore::default();
+        let (added, _, _) = stream_index(
+            dir.path(),
+            "p",
+            "coll",
+            &[],
+            &emb,
+            &store,
+            false,
+            1200,
+            256,
+            &["node_modules".to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(added, 2);
+        let mut paths = store.upserted_file_paths();
+        paths.sort();
+        assert_eq!(paths, ["keep.mjs", "nested/helper.mjs"]);
+        assert!(emb
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|text| text.contains("moduleAnswer")));
+    }
+
     /// docs/issues/archive/2026-08-16-chunk-id-omits-index-so-duplicate-chunks-collapse.md
     ///
     /// Two chunks in the same file with byte-identical content must get distinct

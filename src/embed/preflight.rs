@@ -445,6 +445,29 @@ mod tests {
     }
 
     #[test]
+    fn mjs_preflight_counts_modules_toward_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = "export function moduleAnswer() { return 42; }\n";
+        std::fs::write(dir.path().join("keep.mjs"), source).unwrap();
+        std::fs::create_dir(dir.path().join("node_modules")).unwrap();
+        std::fs::write(dir.path().join("node_modules/skip.mjs"), source.repeat(10)).unwrap();
+        std::fs::write(dir.path().join("unrelated.bin"), source.repeat(10)).unwrap();
+        let patterns = ["node_modules".to_string()];
+        match check_index_scope(dir.path(), source.len() as u64 - 1, &patterns).unwrap() {
+            PreflightVerdict::RequiresConfirmation(info) => {
+                assert_eq!(info.file_count, 1);
+                assert_eq!(info.approx_bytes, source.len() as u64);
+                assert!(info.size_exceeds_threshold);
+            }
+            other => panic!("the eligible .mjs must trigger size confirmation: {other:?}"),
+        }
+        assert!(matches!(
+            check_index_scope(dir.path(), source.len() as u64, &patterns).unwrap(),
+            PreflightVerdict::Clear
+        ));
+    }
+
+    #[test]
     fn elicitation_message_includes_home_reason() {
         let info = PreflightInfo {
             root: PathBuf::from("/home/alice"),

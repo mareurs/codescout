@@ -36,7 +36,7 @@ pub fn lang_for_ext(ext: &str) -> Option<&'static str> {
         "rs" => "rust",
         "py" => "python",
         "ts" | "tsx" => "typescript",
-        "js" | "jsx" => "javascript",
+        "js" | "jsx" | "mjs" => "javascript",
         "go" => "go",
         "java" => "java",
         "kt" => "kotlin",
