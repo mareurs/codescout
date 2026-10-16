@@ -5910,6 +5910,97 @@ fn the_interactive_result_is_redacted_once_on_the_whole_accumulated_output() {
     let clean = super::interactive::interactive_response(0, "hello", 1, None);
     assert!(clean.get("redacted_credentials").is_none(), "{clean}");
 }
+
+#[tokio::test]
+async fn the_interactive_drain_keeps_one_streams_bytes_when_the_other_is_already_at_eof() {
+    use super::interactive::drain_with_settle;
+    use tokio::io::{empty, BufReader};
+    // `tokio::select!` picks among ready arms at random, so one pass proves little: a drain
+    // that ends at the first EOF loses the other stream's bytes on about half of the passes.
+    // 64 passes make that loss certain for all practical purposes.
+    for pass in 0..64 {
+        let mut out = BufReader::new(&b"hello\n"[..]);
+        let mut err = BufReader::new(empty());
+        let (text, both_eof) = drain_with_settle(&mut out, &mut err, 150).await;
+        assert_eq!(text, "hello\n", "stdout bytes, pass {pass}");
+        assert!(both_eof, "pass {pass}");
+
+        let mut out = BufReader::new(empty());
+        let mut err = BufReader::new(&b"oops\n"[..]);
+        let (text, both_eof) = drain_with_settle(&mut out, &mut err, 150).await;
+        assert_eq!(text, "oops\n", "stderr bytes, pass {pass}");
+        assert!(both_eof, "pass {pass}");
+    }
+}
+
+#[tokio::test]
+async fn the_interactive_drain_ends_on_the_settle_window_while_a_pipe_is_open_and_quiet() {
+    use super::interactive::drain_with_settle;
+    use tokio::io::{duplex, AsyncWriteExt, BufReader};
+    // A REPL that printed its prompt and waits: both pipes stay open, one holds bytes.
+    let (mut out_writer, out_reader) = duplex(64);
+    let (_err_writer, err_reader) = duplex(64);
+    out_writer.write_all(b"prompt> ").await.unwrap();
+    let mut out = BufReader::new(out_reader);
+    let mut err = BufReader::new(err_reader);
+    let started = std::time::Instant::now();
+    let (text, both_eof) = drain_with_settle(&mut out, &mut err, 50).await;
+    assert_eq!(text, "prompt> ");
+    assert!(
+        !both_eof,
+        "an open pipe is not EOF: the caller must elicit, not report an exit"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the drain must end on the settle window, not wait for a pipe that never closes"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn child_exit_waits_once_both_pipes_are_closed_and_only_that_long() {
+    use super::interactive::child_exit;
+    use std::time::{Duration, Instant};
+    let spawn = |script: &str| {
+        tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap()
+    };
+    // Closes both pipes, then lives 300 ms more before exiting 0: what the drain sees when a
+    // command finishes, since a process closes its descriptors before it can be waited on.
+    let mut closing = spawn("exec 1>&- 2>&-; sleep 0.3");
+    assert!(
+        child_exit(&mut closing, false, Duration::from_secs(5))
+            .await
+            .unwrap()
+            .is_none(),
+        "without EOF on both pipes it is a single try_wait, and the child has not exited yet"
+    );
+    let status = child_exit(&mut closing, true, Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(
+        status.is_some_and(|s| s.success()),
+        "with both pipes closed the exit is waited for: {status:?}"
+    );
+
+    // Pipes closed but the child lives on: it is reported as running once the bound passes.
+    let mut lingering = spawn("exec 1>&- 2>&-; sleep 5");
+    let started = Instant::now();
+    assert!(child_exit(&mut lingering, true, Duration::from_millis(100))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(started.elapsed() < Duration::from_secs(3));
+    let _ = lingering.kill().await;
+}
+
 #[test]
 fn the_compact_summary_names_a_redaction_and_stays_silent_without_one() {
     use super::output::format_run_command;

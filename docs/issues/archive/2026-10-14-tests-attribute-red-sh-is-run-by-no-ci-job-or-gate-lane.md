@@ -1,14 +1,14 @@
 ---
-id: f1e8539dbf3cb90f
+id: f580495df895c775
 kind: bug
-status: open
+status: fixed
 title: 'BUG: tests/attribute-red.sh (43 cases) is run by no CI job and no gate lane, so its suite sat 5 cases red for two days with every gate green'
 owners:
 - marius
 tags:
 - cluster/declared-not-wired
 topic: authorship attribution at a red
-closed: ''
+closed: 2026-10-16
 opened: 2026-10-14
 owner: marius
 severity: medium
@@ -36,7 +36,7 @@ The only hit is a code comment, `src/tools/run_command/attribution.rs:532`. Meas
 
 ## Environment
 
-Linux, `experiments` at `388416f2`. The suite passes by hand in this checkout: `bash tests/attribute-red.sh` gave `passed=43 failed=0` on 2026-10-14. Whether it passes on `ubuntu-latest` is not measured; it needs `python3` and `git`.
+Linux, `experiments` at `388416f2`. The suite passes by hand in this checkout: `bash tests/attribute-red.sh` gave `passed=43 failed=0` on 2026-10-14. It passes on `ubuntu-latest`: the job `attribute-red.sh (red attribution engine)` concluded `success` in CI run 38848320964 at `59e43edc`, which contains `4f5b16e4` (measured 2026-10-16 with `gh run view`).
 
 ## Root cause
 
@@ -53,9 +53,14 @@ None. The cause is the missing runner; there is nothing to hypothesise.
 
 ## Fix
 
-Implemented 2026-10-14 in `4f5b16e4` (`experiments`): the job `attribute-red-tests` at the END of `.github/workflows/ci.yml` runs `bash tests/attribute-red.sh`, with its own comment, following `gate-slot-tests`. The job configures no git identity: `env -i PATH=... HOME=<empty dir> GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null bash tests/attribute-red.sh` passed every case (45 of 45) on 2026-10-14. That is a local simulation of the runner, not a CI run.
+Implemented 2026-10-14 in `4f5b16e4` (`experiments`): the job `attribute-red-tests` at the END of `.github/workflows/ci.yml` runs `bash tests/attribute-red.sh`, with its own comment, following `gate-slot-tests`. The job configures no git identity: `env -i PATH=... HOME=<empty dir> GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null bash tests/attribute-red.sh` passed every case (45 of 45) on 2026-10-14. That was a local simulation of the runner. The first CI run of the job is green: run 38848320964, job 116803860689, `success`, completed 2026-10-16T04:00:42Z. The suite ends with `[ "$FAIL" = "0" ]`, so a failing case gives a non-zero exit and fails the job; this was read in `tests/attribute-red.sh:343` and no red run was provoked in CI.
 
 Not done: `scripts/gate.sh` still does not run the suite. Adding it there is a separate decision, because the gate's own tests are the ones other sessions wait on.
+
+## Fix provenance
+
+- **SHA:** `4f5b16e4730592c662d5b9e484bbc33b35971120` (`experiments`; the same commit fixes `docs/issues/archive/2026-10-14-a-failure-of-the-red-attribution-helper-is-discarded-twice-and-reads-as-nothing-to-say.md`)
+- **patch-id:** `bb101f16a080b6ba3f57381953117d7d57f92fca` (`git show 4f5b16e4 | git patch-id --stable`)
 
 ## Tests added
 
@@ -67,7 +72,7 @@ Run `bash tests/attribute-red.sh` by hand before changing `scripts/attribute-red
 
 ## Resume
 
-Push `experiments`, read the first result of the `attribute-red-tests` job, and close this bug only when it is green. Then archive it with the fix SHA `4f5b16e4730592c662d5b9e484bbc33b35971120` and patch-id `bb101f16a080b6ba3f57381953117d7d57f92fca`.
+Closed 2026-10-16. The first CI result of `attribute-red-tests` was green. Nothing remains for this bug. Whether `scripts/gate.sh` should also run the suite is a separate decision and is not tracked here.
 
 ## References
 

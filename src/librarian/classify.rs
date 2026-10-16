@@ -60,7 +60,10 @@ pub fn load_rules(toml_str: &str) -> Result<Vec<CompiledRule>> {
 ///
 /// User rules win because `classify` is first-match. These cover common
 /// repo conventions that aren't worth re-declaring per workspace:
-/// CHANGELOG, top-level docs, issue trackers, src-tree prompt files, etc.
+/// CHANGELOG, top-level docs, issue trackers, src-tree prompt files, and the
+/// workflow directories (specs, plans, research, audits, handoffs, runbooks,
+/// ADRs, roadmap, manual, trackers) — without those a fresh project's specs and
+/// plans land as `kind: unknown` and `find(kind=...)` cannot see them.
 /// Every entry must be commonly recognizable across the projects we expect
 /// to index. Keep the list tight — broad globs cause misclassification.
 pub const DEFAULT_RULES_TOML: &str = r#"
@@ -97,6 +100,16 @@ glob = "**/docs/experimental/**/*.md"
 kind = "doc"
 
 [[rule]]
+glob = "**/docs/trackers/archive/**/*.md"
+kind = "tracker"
+status = "archived"
+
+[[rule]]
+glob = "**/docs/issues/archive/**/*.md"
+kind = "tracker"
+status = "archived"
+
+[[rule]]
 glob = "**/docs/issues/**/*.md"
 kind = "tracker"
 status = "active"
@@ -127,6 +140,50 @@ kind = "doc"
 [[rule]]
 glob = "**/crates/**/prompts/*.md"
 kind = "doc"
+
+[[rule]]
+glob = "**/docs/superpowers/specs/*.md"
+kind = "spec"
+status = "active"
+
+[[rule]]
+glob = "**/docs/superpowers/plans/*.md"
+kind = "plan"
+
+[[rule]]
+glob = "**/docs/research/*.md"
+kind = "memory"
+time_scope = "dated_snapshot"
+
+[[rule]]
+glob = "**/docs/audits/*.md"
+kind = "audit"
+
+[[rule]]
+glob = "**/docs/handoffs/*.md"
+kind = "handoff"
+
+[[rule]]
+glob = "**/docs/runbooks/*.md"
+kind = "runbook"
+
+[[rule]]
+glob = "**/docs/adrs/*.md"
+kind = "adr"
+status = "active"
+
+[[rule]]
+glob = "**/ROADMAP.md"
+kind = "roadmap"
+
+[[rule]]
+glob = "**/docs/manual/**/*.md"
+kind = "doc"
+
+[[rule]]
+glob = "**/docs/trackers/**/*.md"
+kind = "tracker"
+status = "active"
 "#;
 
 /// Compile the built-in default rules. Errors only on programmer mistake
@@ -319,6 +376,58 @@ kind = "spec"
         let rules = default_rules().unwrap();
         let c = classify(&rules, "code-explorer/src/prompts/server_instructions.md").unwrap();
         assert_eq!(c.kind, "doc");
+    }
+
+    #[test]
+    fn default_rules_classify_the_workflow_directories() {
+        // (path, kind, status, time_scope)
+        let table: &[(&str, &str, Option<&str>, Option<&str>)] = &[
+            ("docs/superpowers/specs/a.md", "spec", Some("active"), None),
+            ("docs/superpowers/plans/b.md", "plan", None, None),
+            (
+                "docs/research/2026-01-01-c.md",
+                "memory",
+                None,
+                Some("dated_snapshot"),
+            ),
+            ("docs/audits/d.md", "audit", None, None),
+            ("docs/handoffs/e.md", "handoff", None, None),
+            ("docs/runbooks/f.md", "runbook", None, None),
+            ("docs/adrs/g.md", "adr", Some("active"), None),
+            ("ROADMAP.md", "roadmap", None, None),
+            ("docs/manual/sub/h.md", "doc", None, None),
+            ("docs/trackers/sub/t.md", "tracker", Some("active"), None),
+        ];
+        let rules = default_rules().unwrap();
+        for (path, kind, status, time_scope) in table {
+            let c = classify(&rules, path)
+                .unwrap_or_else(|| panic!("{path}: no built-in rule matched"));
+            assert_eq!(c.kind, *kind, "{path}: kind");
+            assert_eq!(c.status.as_deref(), *status, "{path}: status");
+            assert_eq!(c.time_scope.as_deref(), *time_scope, "{path}: time_scope");
+        }
+        // Control: a path no rule names stays unclassified.
+        assert!(classify(&rules, "docs/misc/notes.md").is_none());
+    }
+    #[test]
+    fn default_rules_mark_the_archive_directories_archived() {
+        // An archive file with no `status:` of its own must not be stamped `active` by the
+        // tracker rules that cover its parent directory (first match wins).
+        let rules = default_rules().unwrap();
+        for path in [
+            "docs/trackers/archive/old.md",
+            "proj/docs/trackers/archive/sub/old.md",
+            "docs/issues/archive/2026-01-01-old.md",
+        ] {
+            let c = classify(&rules, path).unwrap_or_else(|| panic!("{path}: no rule matched"));
+            assert_eq!(c.kind, "tracker", "{path}: kind");
+            assert_eq!(c.status.as_deref(), Some("archived"), "{path}: status");
+        }
+        // Control: the live directories keep `active`.
+        for path in ["docs/trackers/live.md", "docs/issues/2026-01-01-open.md"] {
+            let c = classify(&rules, path).unwrap();
+            assert_eq!(c.status.as_deref(), Some("active"), "{path}: status");
+        }
     }
 
     #[test]

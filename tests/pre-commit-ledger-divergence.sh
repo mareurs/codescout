@@ -59,73 +59,19 @@ trap 'rm -rf "$WORK"' EXIT
 
 MARKER="the worktree and the index DISAGREE"
 
-# ELEVEN classes, and the number is load-bearing rather than arbitrary. The hook carries
-# its own vacuity guard — `len(index_rows) <= 10` refuses, on the grounds that CHECK 1
-# passing over a table nobody could parse is exactly how a format change goes unnoticed.
-# A one-class fixture therefore cannot reach ANY of the rules under test here: it reds on
-# the row-count guard instead, which is a different refusal wearing the same exit code.
-# Drop this to ten and every case below starts testing that guard by accident.
-CLASSES=11
-
-# Slugs are LETTERED (`demo-a` … `demo-k`), never numbered. `valid_slugs` admits a slug
-# only when every character is lowercase ASCII or `-`, so `demo-1` is silently not a slug:
-# `valid` comes back empty, no Index row resolves, and the hook reds on its own row-count
-# guard — measured 2026-09-15, "only 0 Index row(s) parsed", from a fixture that looked
-# entirely reasonable. The live corpus has no digits in a slug, so nothing else showed it.
-SLUGS=(demo-a demo-b demo-c demo-d demo-e demo-f demo-g demo-h demo-i demo-j demo-k)
-
-# The corpus is TWO surfaces, and collapsing them into one is the mistake this comment
-# exists to stop the next reader repeating. `docs/trackers/issue-clusters.md` is the
-# ROSTER: a header and the Index table, nothing else — a `## IC-N` section left in it is
-# its own refusal ("this commit leaves class section(s) in it"). The `**Slug:**` and
-# `**Members:**` declarations live one per file under `docs/trackers/issue-clusters/`, and
-# `read_ledger` concatenates the two before parsing. A fixture that puts the declarations
-# in the roster reds on the section rule instead of whatever it meant to test.
-_write_roster() { # _write_roster <repo> <clean|counted>
-    local p="$1" kind="$2" f="$1/docs/trackers/issue-clusters.md"
-    {
-        echo "# Issue clusters"
-        echo
-        echo "| id | class | slug | promotes to |"
-        echo "|---|---|---|---|"
-        # The post-slug cell is what `parse_index_counts` reads. Prose there is no stored
-        # count and the hook is silent; an integer is CHECK 1 (`no_index_row_stores_a_count`),
-        # the cheapest deterministic refusal here and the one chosen because it needs no
-        # second file — so a case meant to vary only the divergence varies only that.
-        if [ "$kind" = counted ]; then
-            printf '| IC-1 | a demo class | `%s` | 3 |\n' "${SLUGS[0]}"
-        else
-            printf '| IC-1 | a demo class | `%s` | not yet |\n' "${SLUGS[0]}"
-        fi
-        for i in $(seq 2 "$CLASSES"); do
-            printf '| IC-%s | a demo class | `%s` | not yet |\n' "$i" "${SLUGS[$((i - 1))]}"
-        done
-    } > "$f"
-}
-
-# FOUR cells per row, never five. A fifth trips `index_rows_with_extra_cells` (the
-# mechanism-column rule) instead, and because CHECK 1 runs first the suite would still
-# look green while asserting against a refusal it never triggered.
-#
-# The slug cell carries the BARE slug (`demo-a`), never `cluster/demo-a`. Measured against
-# the script 2026-09-15: with the prefixed form `parse_index_counts` matches nothing, the
-# declared map comes back empty, and a different check fires. The live ledger is bare.
-_write_classes() { # _write_classes <repo>
-    local p="$1" i s
-    for i in $(seq 1 "$CLASSES"); do
-        s="${SLUGS[$((i - 1))]}"
-        printf '# IC-%s — demo class %s\n\n**Slug:** `cluster/%s`\n\n**Members:** none yet.\n' \
-            "$i" "$i" "$s" > "$p/docs/trackers/issue-clusters/IC-$i-$s.md"
-    done
-}
+# The corpus writers, and the three traps a fixture can fall into (ELEVEN classes, LETTERED
+# slugs, roster and per-class files kept apart), live in ONE place: every case below depends on
+# them, and re-deriving them in each suite is how they drifted into two copies.
+# shellcheck source=lib/ledger-corpus.sh
+source "$SELF_ROOT/tests/lib/ledger-corpus.sh"
 
 newrepo() { # newrepo <clean|counted> -> echoes the repo path, corpus COMMITTED
     local p="$WORK/repo$RANDOM$RANDOM"
     mkdir -p "$p/docs/trackers/issue-clusters" "$p/docs/issues" "$p/scripts"
     git -C "$p" init -q
     git -C "$p" config user.email t@t; git -C "$p" config user.name t
-    _write_roster "$p" "$1"
-    _write_classes "$p"
+    ledger_write_roster "$p" "$1"
+    ledger_write_classes "$p"
     cp "$SCRIPT" "$p/scripts/"
     [ -f "$SELF_ROOT/scripts/commit-sequence-tail.txt" ] \
         && cp "$SELF_ROOT/scripts/commit-sequence-tail.txt" "$p/scripts/"
@@ -217,8 +163,8 @@ has  "5 and says waiting is not one of them" "$OUT" "index moves only when someb
 # bare `_git` call there would red this line.
 P="$WORK/nogit$RANDOM"
 mkdir -p "$P/docs/trackers/issue-clusters" "$P/scripts"
-_write_roster "$P" counted
-_write_classes "$P"
+ledger_write_roster "$P" counted
+ledger_write_classes "$P"
 cp "$SCRIPT" "$P/scripts/"
 OUT=$(cd "$P" && python3 scripts/pre-commit-ledger-counts.py 2>&1); RC=$?
 eq   "6 outside a repo the hook exits clean" "$RC" "0"

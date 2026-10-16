@@ -242,6 +242,15 @@ jobs:
       # not behind a cargo lane: a case that skips itself for a missing toolchain reports
       # success while testing nothing.
       - run: bash tests/pre-commit-ledger-divergence.sh
+      # The replay probe's own suite, same job and same reason: it builds throwaway git repos and
+      # needs the committer identity above, and it is python3 + git only, so a case cannot skip
+      # itself for a missing toolchain and report success while testing nothing.
+      - run: bash tests/probe-hook-replay.sh
+      # What CHECK 3 of the same hook ACCEPTS: a bug that joins a class must carry its own
+      # `## Class fit`. Same job and same reason as the two above (throwaway git repos, the
+      # committer identity, python3 + git only). 39 assertions, one per production change; it is also
+      # what `--no-verify` cannot skip, because CI runs it on every push.
+      - run: bash tests/pre-commit-ledger-growth.sh
 
   # ITS OWN JOB, same reason as `push-guard-tests` above: `shell-tests` is a known-
   # flaky lane, and this suite's assertions are verdicts about ATTRIBUTION -- the one
@@ -1029,7 +1038,7 @@ jobs:
   # WHY IT IS WIRED AT ALL. `tests/attribute-red.sh` is the regression suite for
   # `scripts/attribute-red.py`, the engine that names who wrote a dirty file at a red. Nothing
   # ran it: it sat 5 cases red from `eed25579` (2026-10-11) to `3fb612b9` (2026-10-13) with
-  # every gate green (docs/issues/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md).
+  # every gate green (docs/issues/archive/2026-10-14-tests-attribute-red-sh-is-run-by-no-ci-job-or-gate-lane.md).
   # Not folded into `shell-tests`: that lane is known-flaky, and this suite's assertions
   # are verdicts about ATTRIBUTION.
   #

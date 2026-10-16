@@ -1,14 +1,14 @@
 ---
-id: '8b7a1374ac8e9a1e'
+id: e33228bb4787d18b
 kind: bug
-status: open
+status: fixed
 title: 'BUG: backfill''s dimension refusal tells a project-scoped run to retry a command that the scope guard then refuses'
 owners:
 - marius
 tags:
 - cluster/hint-composed-without-the-request
 topic: backfill-chunks dimension migration
-closed: ''
+closed: 2026-10-15
 opened: 2026-10-14
 related: []
 severity: low
@@ -46,11 +46,20 @@ N/A.
 
 ## Fix
 
-Unknown — under investigation. Option: have the scoped preflight name `--all` together with the env var in its first refusal.
+Verified and committed on **experiments**.
+
+- **SHA:** `934946e95e5f81c5091c80ae95d21c3624133612`
+- **patch-id:** `361950b91e00766a6b4fbf03f5e19a63f0f2f120`
+
+The scope guard in `backfill_chunk_vectors_with` now runs for every project-scoped sqlite-vec run, whether or not the opt-in is set, and it runs ahead of `ensure_artifact_vec_v2_dim`. A scoped run with a dimension change is therefore refused once, in the first refusal, with `--all` and `LIBRARIAN_ARTIFACT_VEC_MIGRATE` both named. The shared preflight's own message is unchanged: it still names only the opt-in, because the write path (`write_embeddings_v2_with`) has no scope to name.
+
+The same commit fixes `docs/issues/archive/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md` and `docs/issues/archive/2026-10-14-backfill-repair-docs-contradict-the-code-62177b8c-shipped.md`.
 
 ## Tests added
 
-N/A — not fixed.
+- `a_scoped_dimension_change_names_the_catalog_wide_command_in_its_first_refusal` (`src/librarian/indexer.rs`): observed RED first. The first refusal read "set LIBRARIAN_ARTIFACT_VEC_MIGRATE=1 and retry" and did not contain `--all`. It also asserts that the refusal changed no vectors (`artifact_vec_v2` stays at 768).
+
+Mutation with `scripts/mutation-probe.sh` in an isolated worktree: the scope guard gated on the opt-in again (the old behaviour) was killed by this test. The full ordered `./scripts/gate.sh --check` was green on the committed bytes: lean library 4509 passed, default library 6825 passed, 0 failed.
 
 ## Workarounds
 
@@ -58,7 +67,7 @@ Run `LIBRARIAN_ARTIFACT_VEC_MIGRATE=1 codescout backfill-chunks --all`.
 
 ## Resume
 
-Open. Not in the current fix set.
+Complete. Fixed in `934946e9`, patch-id above.
 
 ## References
 

@@ -11,11 +11,18 @@
 #   R2  `git commit -- <both files>` -> unreviewed-content refuses: a pathspec commit takes
 #                                       the WHOLE working-tree file, peer's hunk included
 #   R3  `git commit -- <bug file>`   -> ledger-counts refuses: the class gained a member and
-#                                       its `**Members:**` line did not change with it
+#                                       the bug file has no `## Class fit` (until 2026-10-16 the
+#                                       reason was: its `**Members:**` line did not change)
 #
 # R1-R3 assert that reproduction. They are the RED this suite was written from, kept as
 # regression cases: if one of them stops refusing, the premise of `scripts/commit-mine.sh`
 # has changed and this file should be re-read, not just re-greened.
+#
+# THE PREMISE CHANGED ON 2026-10-16, and R4 records it. CHECK 3 now reads the bug file's own
+# `## Class fit`, so a bug file that carries one commits ALONE: the ledger half of the empty
+# intersection is gone. The helper is still needed, because R1 and R2 are about the shared index,
+# not about the ledger, and F1-F12 below still build their entangled state with an IC-1 edit that
+# a peer also touches. What no longer exists is a RULE that forces the coupling.
 #
 # F1-F9 are the helper's contract. MEASURED with scripts/mutation-probe.sh, eight mutations,
 # one per guarded site, all killed against a 37/0 baseline. Which assertion kills each is
@@ -65,33 +72,25 @@ trap 'rm -rf "$WORK"' EXIT
 
 A=aaaaaaaa-0000-4000-8000-00000000000a
 B=bbbbbbbb-0000-4000-8000-00000000000b
-CLASSES=11
-SLUGS=(demo-a demo-b demo-c demo-d demo-e demo-f demo-g demo-h demo-i demo-j demo-k)
+# The corpus writers and the three fixture traps (ELEVEN classes, LETTERED slugs, roster and
+# per-class files kept apart) live in one place, shared with the divergence suite.
+# shellcheck source=lib/ledger-corpus.sh
+source "$SELF_ROOT/tests/lib/ledger-corpus.sh"
 IC1=docs/trackers/issue-clusters/IC-1-demo-a.md
 BUG=docs/issues/2026-09-24-new-bug.md
+# 49 letters or digits, over the 40 the rule asks for; the content is not what the cases test.
+FIT='the selector covers one of the two forms the population has'
 
 # The corpus is committed BEFORE the hooks are installed, so the stage log starts absent and
 # every row in it is written by a case below. F8 depends on that: it is the no-log case.
 new_repo() {
-    local p="$WORK/repo$RANDOM$RANDOM" i s
+    local p="$WORK/repo$RANDOM$RANDOM"
     mkdir -p "$p/docs/trackers/issue-clusters" "$p/docs/issues" "$p/scripts"
     git -C "$p" init -q
     git -C "$p" config user.email t@t
     git -C "$p" config user.name t
-    {
-        echo "# Issue clusters"
-        echo
-        echo "| id | class | slug | promotes to |"
-        echo "|---|---|---|---|"
-        for i in $(seq 1 "$CLASSES"); do
-            printf '| IC-%s | a demo class | `%s` | not yet |\n' "$i" "${SLUGS[$((i - 1))]}"
-        done
-    } > "$p/docs/trackers/issue-clusters.md"
-    for i in $(seq 1 "$CLASSES"); do
-        s="${SLUGS[$((i - 1))]}"
-        printf '# IC-%s — demo class %s\n\n**Slug:** `cluster/%s`\n\n**Members:** none yet.\n' \
-            "$i" "$i" "$s" > "$p/docs/trackers/issue-clusters/IC-$i-$s.md"
-    done
+    ledger_write_roster "$p"
+    ledger_write_classes "$p"
     echo "same content" > "$p/old.txt"
     for f in pre-commit-foreign-index.sh pre-commit-unreviewed-content.sh \
              pre-commit-ledger-counts.py post-index-change-stage-log.sh \
@@ -127,6 +126,8 @@ as() { local sid="$1"; shift; CLAUDE_CODE_SESSION_ID="$sid" "$@"; }
 # So IC-1's index entry is A's alone while the working-tree file holds both hunks.
 entangle() {
     printf -- '---\nkind: bug\nstatus: open\ntags:\n- cluster/demo-a\n---\n\n# BUG: new\n' > "$BUG"
+    # The IC-1 hunk is no longer REQUIRED by any rule. It stays so that A's staged set is still
+    # coupled to a file B is also editing, which is what F1-F12 are about.
     sed -i 's/^\*\*Members:\*\* none yet\.$/**Members:** none yet. +1: `new-bug` — filed by A./' "$IC1"
     as "$A" git add -- "$BUG" "$IC1"
     echo theirs > b.txt
@@ -156,6 +157,12 @@ out=$(as "$A" git commit -qm r3 -- "$BUG" 2>&1); rc=$?
 [ "$rc" -ne 0 ] && ok || no "R3 pathspec commit of the bug file alone is refused"
 eq "R3 refusal leaves HEAD alone" "$(head_of)" "$h0"
 has "R3 is refused by the ledger rule" "$out" "a class gained a member"
+has "R3 says why: the bug file has no Class fit" "$out" 'has no `## Class fit` section'
+
+# A does what the refusal says: writes the section into the bug file and restages it. From here
+# on the commit is one the hook accepts, so F1 starts from a state a helper can finish.
+printf '\n## Class fit\n%s\n' "$FIT" >> "$BUG"
+as "$A" git add -- "$BUG"
 
 # ------------------------------------------------------------ F1: the helper commits exactly A's
 out=$(as "$A" bash scripts/commit-mine.sh -m fix 2>&1); rc=$?
@@ -182,6 +189,21 @@ eq "F2 B's bare commit afterwards is accepted" "$rc" "0"
 [ "$rc" -eq 0 ] || printf '  output: %s\n' "$out"
 eq "F2 B's commit carries only b.txt" "$(git show --name-only --format= HEAD)" "b.txt"
 has "F2 B's commit did not revert A's IC-1" "$(git show "HEAD:$IC1")" '+1: `new-bug`'
+
+# ------------------------------------------------------------ R4: the ledger no longer couples
+# A bug file that carries its own Class fit commits ALONE, with no IC-1 edit. This is the case that
+# says the ledger half of the old empty intersection is gone; it fails if CHECK 3 asks for a
+# `**Members:**` change again. B's staged path is there so a bare commit would still be refused.
+cd "$(new_repo)" || exit 1
+printf -- '---\nkind: bug\nstatus: open\ntags:\n- cluster/demo-a\n---\n\n# BUG: new\n\n## Class fit\n%s\n' "$FIT" > "$BUG"
+as "$A" git add -- "$BUG"
+echo theirs > b.txt
+as "$B" git add -- b.txt
+out=$(as "$A" git commit -qm r4 -- "$BUG" 2>&1); rc=$?
+eq "R4 the bug file alone is accepted" "$rc" "0"
+[ "$rc" -eq 0 ] || printf '  output: %s\n' "$out"
+eq "R4 the commit carries only the bug file" "$(git show --name-only --format= HEAD)" "$BUG"
+eq "R4 B's staged path is still staged" "$(git diff --cached --name-only)" "b.txt"
 
 # ------------------------------------------------------------ F3: nothing staged is mine
 cd "$(new_repo)" || exit 1

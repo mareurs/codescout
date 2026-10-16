@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 194
-entry_high_water_W: 150
+entry_high_water_F: 197
+entry_high_water_W: 151
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -65,9 +65,14 @@ entry_high_water_W: 150
 
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
+| F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
+| F-196 | 2026-10-15 | med | plan-drift | fixed-verified | **The artifact backend is resolved per process, and the plan treated it as a property of the project** — env outranks `project.toml`, no project in the catalog sets one, and `--all` spans projects, so a per-project selector would have been wrong for it. Fixed in `8c02ad77` and `934946e9`. |
+| F-195 | 2026-10-14 | med | plan-drift | fixed-verified | **"An empty workspace.toml is a reasonable default" was false for classification** — built-in rules cover none of specs, plans, ADRs, audits, handoffs, runbooks, ROADMAP or manual; the only copy of those nine rules is test-only `import_codescout`. |
 | F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
 | F-193 | 2026-10-13 | high | persistence-ordering | promoted-to-bug-tracker | **Backfill's durable progress claim uses chunk metadata and a cursor ahead of unwritten vectors** — observed retry skips and an unwritten checkpoint in private SQLite tests. |
+| F-190 | 2026-10-02 | med | process | mitigated | **Diagnosed MCP concurrency before reading the required project contract** — restart with the full contract and an independent read-only diagnosis. |
 | F-192 | 2026-10-13 | med | shell-parity | promoted-to-bug-tracker | **The own-stderr wrapper assumed shell parity that dash disproved** — literal dash output and an actual-marker regression expose the unsafe brace wrapper. |
+| F-191 | 2026-10-08 | med | doc-vs-code | fixed-verified | **Python runner report falsely said CI was absent** — workflow existed even at its cited commit; corrected the record; the Python lanes were subsequently implemented and verified. |
 | F-189 | 2026-10-01 | med | plan-drift | open | **An open issue and an open PR both described `--scope` as outstanding while local `experiments` had already shipped it, unpushed** - found only by grepping local HEAD; the PR conflicts in `doctor.rs` and collides on `W-146`. |
 | F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
 | F-188 | 2026-09-30 | med | doc-vs-code | open | **A bug file's mechanism claim ("the gate skips a closed wrapper list") was false: the gate never calls `producer_index`, so `env`/`FOO=1`/`time cat` all bypass, and PR #29 it leaned on was unmerged** - measured on the live binary before any code; only the `&` half fixed. |
@@ -266,6 +271,7 @@ entry_high_water_W: 150
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-150 | 2026-10-01 | med | **Three mutants at three sites separated "the label says repo" from "the population is repo", and only the third reached the population assertion.** Reading which assertion killed each mutant, not how many died. | Inferred: M2's kill would have been reported as covering the whole property while the population assertion behind the label check stayed unexercised. Observed: M3 failed at `:427` alone, with the label still `repo`. | validated |
 | W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
 | W-149 | 2026-09-30 | med | **A comment predicting the exact regression sat beside a fixture that could not see it.** Reading what the fixture PASSES (`is_write=false` hard-coded for `"workspace"`), not what it asserts, exposed the gap. | Inferred: an exemption fix with both old guards green and the exemption unguarded. Observed: widening it was caught by the new exact-set pin alone. | validated |
@@ -17397,6 +17403,42 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 **Rests on:** the bytes of `ae45438c`. The verdict measures those bytes, so a rewrite of the test or of `to_tool_args` invalidates it. Mutants were reverted and the worktree removed; only the 6 `cli::doctor` lib tests were run, not the full gate.
 
+## F-190 — Diagnosed MCP concurrency before reading the required project contract
+
+**Observed:** I began the MCP concurrency diagnosis after reading only lines 1–353 of `CLAUDE.md`, despite the repository instruction to read it fully before any work.
+
+**Cost:** I ran an isolated raw-server probe against the shared project and reported a stronger root-cause conclusion than the repository process justified.
+
+**Recovery:** Complete the instructions and delegate a fresh, read-only diagnosis that must independently establish the request boundary before drawing conclusions.
+
+**Status:** mitigated
+
+**Valid:** dated 2026-10-02
+
+**Rests on:** This session's tool transcript and `CLAUDE.md`.
+
+## F-191 — Python runner report claimed CI was absent although its cited commit contained the workflow
+
+**Observed:** 2026-10-08, rechecking the five issues selected by the user.
+
+**Expected (record):** The Summary and Reproduction in `docs/issues/archive/2026-10-06-twenty-seven-python-test-files-are-run-by-no-gate-and-three-do-not-collect-here.md` said no CI workflow existed at `10e935e3`.
+
+**Got (scouted reality):** Read `.github/workflows/ci.yml` and ran `git ls-tree --name-only 10e935e3 .github/workflows/ci.yml`; the workflow is present both now and at the cited commit. It has no pytest invocation. A current run over all 27 Python files produced 980 passed, three collection errors, 421 subtests passed; missing sklearn/torch prevent those three modules collecting.
+
+**Cause:** The recorded directory-absence observation was wrong; no evidence establishes why that observation was made. Missing execution coverage remains confirmed, but the broader claim about CI absence does not.
+
+**Workaround:** Corrected the existing issue through doc body_edits and added the current measurement. No new CI job was created from the false premise.
+
+**Severity:** med — accepting the record would have sent a future implementation toward creating CI rather than adding a Python lane to existing CI.
+
+**Status:** fixed-verified — corrected the record, not the missing Python runner.
+
+**Valid:** dated 2026-10-08
+
+**Rests on:** reading the workflow and verifying its presence in the original commit, independently of the bug file's own assertion.
+
+**Pointer:** The missing Python runner was subsequently fixed by experiments `4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34` (patch-id `7e1a3a2858f3c27a5b777db567352e50b31b6d44`) and archived at `docs/issues/archive/2026-10-06-twenty-seven-python-test-files-are-run-by-no-gate-and-three-do-not-collect-here.md`.
+
 ## F-192 — The own-stderr wrapper assumed shell parity that dash disproved
 
 **Valid:** dated 2026-10-13
@@ -17468,6 +17510,81 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 **Rests on:** The remote/factory/bootstrap symbols read on 2026-10-14 and `.codescout/resident-private/albert-r01-backfill-retry-20261013/deferred-dimensions-red.log`.
 
 **Fix idea / Pointer:** `docs/issues/archive/2026-10-13-backfill-retry-skips-existing-chunks-without-vectors.md`. The revised indexer suite and its independent restored run both pass 65 tests. Five applied probe-path faults and the nine earlier recovery faults were all caught on the final revision: fourteen killed, zero survived, zero inconclusive (`review3-report.json`, `review3-P*.log`, `review3-M*.log`). The full ordered gate passed with exit 0 (`gate-final.log`). Verified source on experiments: SHA `62177b8cc6ebce0d667cc7c48c37d755356bc388`, stable patch-id `a917aff453617da7e34630e24b6ab144b9bcaf8f`.
+
+## W-151 — A plan to "create the default file when absent" would have made six existing tests write into the developer's real home directory
+
+**Context:** work on `docs/issues/archive/2026-10-14-new-project-setup-does-not-configure-the-librarian.md` (id `ae511945b43ba0c8`). The plan: when `workspace.toml` is absent, `build_tool_context_with` creates it at `workspace::default_config_path()`.
+
+**Pattern:** before editing, read every caller that reaches the seam with the field unset, not only the production caller. `LibrarianEnv::workspace` is `None` in production (default path) and also in tests that set only `db`.
+
+**Observed (2026-10-14):**
+- `src/server.rs` builds `LibrarianEnv { db: Some(..), ..Default::default() }` with no `workspace` at lines 12974, 13177, 13247, 13290, 13385 and 13442. (Line numbers from a grep this session; each block was read at one site only, 12968-12984.)
+- With `workspace: None`, those tests resolve the real `~/.config/librarian/workspace.toml`. On this machine it exists (2710 bytes, `ls -la`, 2026-10-14), so they pass today.
+- `make_server` at `src/server.rs:11296-11330` already records the same failure from the other side: a missing default file made the `artifact` tool not register (the 2026-07-02 wine cluster).
+
+**Counterfactual (inferred, not run):** an unconditional create-when-absent would have been green here, because the file exists. On a clean CI runner or a fresh clone it would have created a file in that user's real config directory during `cargo test`. No test would have failed.
+
+**Decision it forced:** creation must be an explicit opt-in field on `LibrarianEnv`, set to true only by `LibrarianEnv::from_env()` (`src/librarian/mod.rs:90-110`). `Default` leaves it false. See `docs/conventions/test-env-isolation.md`.
+
+**Also found:** `reindex_cli` (`src/librarian/mod.rs:473`) is `#[cfg(test)]` and loads the file with no hint text, so it is not a production path.
+
+**Valid:** dated 2026-10-14
+
+## F-195 — "An empty workspace.toml is a reasonable default" held for loading, not for classification
+
+**Context:** same work as W-151 (`docs/issues/archive/2026-10-14-new-project-setup-does-not-configure-the-librarian.md`). The design said: "an empty `workspace.toml` is a valid default, because `WorkspaceConfig` derives `Default`".
+
+**Plan said:** an empty global `workspace.toml` is a reasonable default.
+
+**Reality (read 2026-10-14):**
+- An empty file is valid to load: `WorkspaceConfig` is `#[derive(Default)]` with `#[serde(default)]` on every field (`src/librarian/workspace.rs:9-18`).
+- It is not a complete default for classification. The built-in `DEFAULT_RULES_TOML` (`src/librarian/classify.rs:66-130`) has 15 rules. None covers `docs/superpowers/specs`, `docs/superpowers/plans`, `docs/research`, `docs/audits`, `docs/handoffs`, `docs/runbooks`, `docs/adrs`, `ROADMAP.md` or `docs/manual`. A grep of `classify.rs` for those globs matched only test samples.
+- The only definition of those nine rules is the body of `import_codescout` (`src/librarian/mod.rs:345-470`). That function is `#[cfg(test)]`, so no production command writes them. The `librarian-mcp import-codescout` command named in the error hint does not exist (see the issue file).
+- Not verified: what `classify` returns for a file that no rule matches, and so what a spec or plan gets on a fresh project.
+
+**Also found:** `doctor`'s `declared_root_missing` reads the project-local `.codescout/workspace.toml` (`src/librarian/tools/doctor.rs:2801-2870`), which is a different file from the global `~/.config/librarian/workspace.toml`. Both are called `workspace.toml`. The new default-file comment and the error text must say which one they mean.
+
+**Cost if missed:** the fix would ship a default that loads without error but classifies no spec, plan or ADR, and the user would see a working librarian with the wrong `kind` on those files. Inferred, not run.
+
+**Open decision for the user:** put the nine rules in the created file, move them into `DEFAULT_RULES_TOML`, or leave them out.
+
+**Valid:** dated 2026-10-14
+
+## F-196 — The artifact backend is resolved per process, and the plan treated it as a property of the project
+
+**Context:** fix for `docs/issues/archive/2026-10-14-backfill-vector-gap-selector-reads-sqlite-vec-coverage-on-a-host-that-searches-qdrant.md` (fixed in `8c02ad77`). Scouted before editing `backfill_chunk_vectors_with`.
+
+**Plan said:** "Backend resolution is per project (`ArtifactBackend::resolve(project_path)`: env, then `.codescout/project.toml`, then build default)". The plan then asked whether `backfill-chunks --all` could repair "whichever store each project uses".
+
+**Reality (read and measured 2026-10-14):**
+- `ArtifactBackend::resolve` reads the env var first, and the env var belongs to the process. The `project.toml` layer applies only when the env is unset. The last layer is the build default, which is Qdrant on a `server-stack` build (`cargo rb`).
+- No project in the live catalog sets `[librarian] vector_backend`. The store follows the build and env of the process that wrote it. One project had 12,957 of 15,195 chunks in `artifact_vec_v2` and also a Qdrant collection, while this project had 43 of 38,531 (measured on the live catalog, read-only).
+- `--all` walks every project in one catalog, so no single project's setting applies to it.
+
+**Cost if missed:** a selector keyed on each project's own setting would have been wrong for `--all`. A per-project coverage query would also have needed a coverage method that `ArtifactVectorStore` does not have (`upsert`, `delete`, `refile` and `knn` only).
+
+**Decision it forced:** the CLI resolves the backend in `backfill_backend()`. A scoped run takes its project's setting, and `--all` takes the host setting. The follow-up fix (`934946e9`) went further: `--all` on Qdrant is refused, because one collection exists per project.
+
+**Valid:** dated 2026-10-15
+
+## F-197 — The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it
+
+**Context:** the review of `62177b8c~1..6cf6d6e8`, while measuring whether this project's vectors were in Qdrant.
+
+**Doc said:** `ArtifactBackend::Qdrant` — "Default — a shared Qdrant `artifacts` collection" (`src/librarian/artifact_store.rs`).
+
+**Reality (read 2026-10-14):**
+- Chunk vectors live in one collection per project, `artifact_chunks_<base>_<hash>`. For this project that is `artifact_chunks_codescout_dc6a871595179329`, with 48,223 points.
+- `build_tool_context_with` (`src/librarian/mod.rs`) says the old shared `artifacts` collection "is superseded rather than migrated", and none of its points resolve there.
+- The doc was older than `62177b8c`. The review did not introduce it.
+
+**What it cost:** I counted the shared `artifacts` collection and told the user the Qdrant index "looked stale". That was wrong. I counted a collection that nothing reads, and I said so to the user once I found the per-project collection.
+
+**Tell:** a count over a store is evidence only when the name came from the code that reads the store, not from a doc comment about it.
+
+**Fix:** the doc names the per-project collection and `artifact_collection_name`, and says the shared collection is superseded (`934946e9`).
+
+**Valid:** dated 2026-10-15
 
 ## Template for new entries
 

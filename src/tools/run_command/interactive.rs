@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 use super::super::{RecoverableError, ToolContext};
 
@@ -30,7 +31,7 @@ pub(crate) async fn run_command_interactive(
     security: &crate::util::path_security::PathSecurityConfig,
     ctx: &ToolContext,
 ) -> anyhow::Result<Value> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
 
     // Gate: elicitation must be available.
     if ctx.peer.is_none() {
@@ -89,50 +90,6 @@ pub(crate) async fn run_command_interactive(
 
     let mut accumulated_output = String::new();
 
-    // Drain available output from stdout+stderr using a settle window.
-    // We use two separate buffers to avoid the double-borrow-of-mut-buf compiler error
-    // when both futures reference the same buffer slice simultaneously.
-    //
-    // Loop structure: alternate trying stdout vs stderr within the settle timeout;
-    // break out of the loop when both are silent for `settle_ms` ms (timeout fires).
-    //
-    // Note: this is an inner async fn — Rust supports these as non-capturing closures.
-    // We cannot use a closure here because async closures that borrow mutable state across
-    // await points are not yet stable (rust-lang/rust#62290).
-    async fn drain_with_settle(
-        stdout_reader: &mut tokio::io::BufReader<tokio::process::ChildStdout>,
-        stderr_reader: &mut tokio::io::BufReader<tokio::process::ChildStderr>,
-        settle_ms: u64,
-    ) -> String {
-        let settle = std::time::Duration::from_millis(settle_ms);
-        let mut output = String::new();
-        // Two independent buffers — one per reader — avoids the E0499 double-borrow.
-        let mut out_buf = [0u8; 4096];
-        let mut err_buf = [0u8; 4096];
-
-        loop {
-            tokio::select! {
-                result = tokio::time::timeout(settle, stdout_reader.read(&mut out_buf)) => {
-                    match result {
-                        Ok(Ok(n)) if n > 0 => {
-                            output.push_str(&String::from_utf8_lossy(&out_buf[..n]));
-                        }
-                        _ => break, // timeout or EOF
-                    }
-                }
-                result = tokio::time::timeout(settle, stderr_reader.read(&mut err_buf)) => {
-                    match result {
-                        Ok(Ok(n)) if n > 0 => {
-                            output.push_str(&String::from_utf8_lossy(&err_buf[..n]));
-                        }
-                        _ => break, // timeout or EOF
-                    }
-                }
-            }
-        }
-        output
-    }
-
     #[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
     struct InteractiveInput {
         /// Text to send to the process stdin (leave empty to cancel and kill the process)
@@ -153,17 +110,19 @@ pub(crate) async fn run_command_interactive(
         round += 1;
 
         // Read post-spawn / post-input output with 150 ms settle.
-        let chunk = drain_with_settle(&mut stdout_reader, &mut stderr_reader, 150).await;
+        let (chunk, both_eof) =
+            drain_with_settle(&mut stdout_reader, &mut stderr_reader, 150).await;
         if !chunk.is_empty() {
             accumulated_output.push_str(&chunk);
         }
 
-        // Check whether the process already exited.
-        match child.try_wait() {
+        // Check whether the process already exited (see `child_exit` for why one `try_wait`
+        // is not enough once both pipes have closed).
+        match child_exit(&mut child, both_eof, EXIT_WAIT_BOUND).await {
             Ok(Some(status)) => {
                 let code = status.code().unwrap_or(-1);
                 // Drain any remaining output after exit.
-                let tail = drain_with_settle(&mut stdout_reader, &mut stderr_reader, 50).await;
+                let (tail, _) = drain_with_settle(&mut stdout_reader, &mut stderr_reader, 50).await;
                 if !tail.is_empty() {
                     accumulated_output.push_str(&tail);
                 }
@@ -222,7 +181,7 @@ pub(crate) async fn run_command_interactive(
     }
 
     // Final drain after loop exit.
-    let tail = drain_with_settle(&mut stdout_reader, &mut stderr_reader, 50).await;
+    let (tail, _) = drain_with_settle(&mut stdout_reader, &mut stderr_reader, 50).await;
     if !tail.is_empty() {
         accumulated_output.push_str(&tail);
     }
@@ -234,6 +193,82 @@ pub(crate) async fn run_command_interactive(
         Some("process killed or loop exited before natural termination"),
     ))
 }
+
+/// Drain what stdout and stderr hold until both are quiet for `settle_ms`, or both are at EOF.
+///
+/// Returns the text and whether BOTH streams reached EOF. A stream at EOF is retired from the
+/// race, not treated as the end of the drain: ending the drain there dropped the other stream's
+/// unread bytes, because `tokio::select!` picks among ready arms at random (a short command's
+/// pipes close together, so such a command could come back with `stdout: ""`).
+///
+/// Two independent buffers, one per reader, avoid the double-borrow of one `&mut buf`.
+pub(super) async fn drain_with_settle<O, E>(
+    stdout_reader: &mut tokio::io::BufReader<O>,
+    stderr_reader: &mut tokio::io::BufReader<E>,
+    settle_ms: u64,
+) -> (String, bool)
+where
+    O: AsyncRead + Unpin,
+    E: AsyncRead + Unpin,
+{
+    let settle = std::time::Duration::from_millis(settle_ms);
+    let mut output = String::new();
+    let mut out_buf = [0u8; 4096];
+    let mut err_buf = [0u8; 4096];
+    let mut out_eof = false;
+    let mut err_eof = false;
+
+    while !(out_eof && err_eof) {
+        tokio::select! {
+            result = tokio::time::timeout(settle, stdout_reader.read(&mut out_buf)), if !out_eof => {
+                match result {
+                    Ok(Ok(n)) if n > 0 => {
+                        output.push_str(&String::from_utf8_lossy(&out_buf[..n]));
+                    }
+                    Ok(_) => out_eof = true, // EOF or read error
+                    Err(_) => break,         // settle window elapsed with the pipe quiet
+                }
+            }
+            result = tokio::time::timeout(settle, stderr_reader.read(&mut err_buf)), if !err_eof => {
+                match result {
+                    Ok(Ok(n)) if n > 0 => {
+                        output.push_str(&String::from_utf8_lossy(&err_buf[..n]));
+                    }
+                    Ok(_) => err_eof = true, // EOF or read error
+                    Err(_) => break,         // settle window elapsed with the pipe quiet
+                }
+            }
+        }
+    }
+    (output, out_eof && err_eof)
+}
+
+/// How long `child_exit` waits for a child whose pipes have both closed.
+// cap-class: NOT_A_CAP — a wait bound on a child's exit; on expiry the child is treated as still running, nothing is truncated
+const EXIT_WAIT_BOUND: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether the child has exited.
+///
+/// A process closes its file descriptors while it exits, BEFORE it can be waited on. So once
+/// both pipes are at EOF (`both_eof`) a single `try_wait` can still answer "running" for a child
+/// that is about to be reaped, and the caller then asks the user for input on a finished process.
+/// In that case this waits for the child, up to `bound`; a child that closed both pipes but lives
+/// on is reported as running once `bound` passes. Without `both_eof` it is one `try_wait`.
+pub(super) async fn child_exit(
+    child: &mut tokio::process::Child,
+    both_eof: bool,
+    bound: std::time::Duration,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+    if both_eof {
+        match tokio::time::timeout(bound, child.wait()).await {
+            Ok(waited) => waited.map(Some),
+            Err(_) => Ok(None),
+        }
+    } else {
+        child.try_wait()
+    }
+}
+
 /// The response for an interactive run. **The accumulated output is scrubbed here, once, on the whole
 /// text** and never per chunk: `drain_with_settle` decodes whatever each read returned, so a
 /// credential that straddles two reads is in neither chunk whole. (Bug bc0cb248b224d1dd.) The

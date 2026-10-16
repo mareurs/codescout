@@ -46,7 +46,7 @@ Linux; `cargo rb` = `build --release --features server-stack` (`.cargo/config.to
 - `src/cli/backfill_chunks.rs` never resolves the backend.
 - `index_repo_sync`'s own `vectorless` comment states the hazard: counting `artifact_vec_v2` "would report EVERY artifact as vectorless whenever an external store is configured".
 
-The store is a per-PROCESS choice, not a per-project one. Every project in this catalog resolves `default`, yet MRV-poc has 12,957 of 15,195 chunks in sqlite-vec and also a Qdrant collection, while codescout has 0. A coverage gap in `artifact_vec_v2` is evidence only for a process that searches `artifact_vec_v2`.
+The store is a per-PROCESS choice, not a per-project one. Every project in this catalog resolves `default`, yet MRV-poc has 12,957 of 15,195 chunks in sqlite-vec and also a Qdrant collection, while codescout has 43 of 38,531 (the Symptom block's `chunks_with_sqlite_vec`). A coverage gap in `artifact_vec_v2` is evidence only for a process that searches `artifact_vec_v2`.
 
 ## Evidence
 
@@ -65,7 +65,7 @@ Verified and committed on **experiments**.
 
 `backfill_chunk_vectors` takes the resolved `ArtifactBackend` and applies the vector-gap arm only for `SqliteVec`. The no-chunk arm stays on every backend, because `reembed=true` reaches existing chunk rows only. The CLI resolves the backend in `backfill_backend()` from the same project input as `build_tool_context_with`; `--all` takes the host setting, as the CLI reindex does. `ArtifactBackend::resolve_with` takes the env value as an argument, so the decision is tested without process env.
 
-Known limit: under `--all`, a project whose `project.toml` sets a backend different from the host's is resolved by the host setting. No project in this catalog sets one. Backfill on a Qdrant host still writes its no-chunk vectors to `artifact_vec_v2`; that older defect is `docs/issues/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md`.
+Known limit: under `--all`, a project whose `project.toml` sets a backend different from the host's is resolved by the host setting. No project in this catalog sets one. Backfill on a Qdrant host still writes its no-chunk vectors to `artifact_vec_v2`; that older defect is `docs/issues/archive/2026-10-14-on-a-qdrant-host-backfill-writes-its-vectors-to-sqlite-vec-and-clears-vectorless-without-a-searchable-vector.md`, fixed in `934946e95e5f81c5091c80ae95d21c3624133612`.
 
 ## Tests added
 

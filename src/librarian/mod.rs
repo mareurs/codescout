@@ -8,6 +8,7 @@ pub use adapter::{
 
 pub mod classify;
 pub mod filter;
+pub mod requirements;
 
 pub mod catalog;
 
@@ -65,6 +66,11 @@ pub struct LibrarianEnv {
     pub embed_api_key: Option<String>,
     /// `LIBRARIAN_CWD` — overrides the process cwd for current-project resolution.
     pub cwd: Option<std::path::PathBuf>,
+    /// Ask [`workspace::load_or_init`] to create the default `workspace.toml` when it is
+    /// absent. True only from [`LibrarianEnv::from_env`]; `Default` leaves it false so a
+    /// test that builds a `LibrarianEnv` without a `workspace` path never writes into the
+    /// real config directory. It has no effect when `workspace` names an explicit path.
+    pub init_default_workspace: bool,
 }
 
 /// `explicit` (the `LIBRARIAN_EMBED_*` value) wins if set; otherwise falls back to
@@ -106,13 +112,14 @@ impl LibrarianEnv {
                 envs::read(&envs::API_KEY),
             ),
             cwd: std::env::var_os("LIBRARIAN_CWD").map(PathBuf::from),
+            init_default_workspace: true,
         }
     }
 }
 
 #[cfg(test)]
 mod librarian_env_tests {
-    use super::librarian_embed_field;
+    use super::{librarian_embed_field, should_init_default_workspace, LibrarianEnv};
 
     #[test]
     fn explicit_wins_when_both_are_set() {
@@ -154,6 +161,72 @@ mod librarian_env_tests {
     fn a_blank_fallback_does_not_win_over_nothing() {
         assert_eq!(librarian_embed_field(None, Some("  ".into())), None);
     }
+    #[test]
+    fn init_is_requested_only_for_the_default_path() {
+        let asked = LibrarianEnv {
+            init_default_workspace: true,
+            ..Default::default()
+        };
+        assert!(should_init_default_workspace(&asked));
+
+        let explicit_path = LibrarianEnv {
+            workspace: Some("/somewhere/else.toml".into()),
+            init_default_workspace: true,
+            ..Default::default()
+        };
+        assert!(
+            !should_init_default_workspace(&explicit_path),
+            "a path the user named is theirs: a missing file stays an error"
+        );
+
+        assert!(
+            !should_init_default_workspace(&LibrarianEnv::default()),
+            "tests build LibrarianEnv::default() and must never write the real config dir"
+        );
+    }
+
+    #[test]
+    fn from_env_requests_the_default_file() {
+        // Reads the process environment, sets nothing.
+        assert!(LibrarianEnv::from_env().init_default_workspace);
+        assert!(!LibrarianEnv::default().init_default_workspace);
+    }
+}
+
+/// Whether this run may create the default workspace file: only when the caller asked
+/// (`init_default_workspace`) AND the path is the default one. A path named through
+/// `LIBRARIAN_WORKSPACE` is the user's, so a missing file there stays an error.
+fn should_init_default_workspace(env: &LibrarianEnv) -> bool {
+    env.init_default_workspace && env.workspace.is_none()
+}
+
+/// Resolve and load the global workspace config for `env`. `default_path` supplies the
+/// path used when `env.workspace` names none; it is a parameter so a test can aim the
+/// default at a tempdir without touching the process environment.
+fn load_workspace_config(
+    env: &LibrarianEnv,
+    default_path: impl FnOnce() -> Result<std::path::PathBuf>,
+) -> Result<workspace::WorkspaceConfig> {
+    use anyhow::Context as _;
+
+    let cfg_path = match env.workspace.clone() {
+        Some(p) => p,
+        None => default_path()?,
+    };
+    workspace::load_or_init(&cfg_path, should_init_default_workspace(env)).with_context(|| {
+        // The remedy depends on the cause: creating a file only helps when none exists.
+        let remedy = if cfg_path.exists() {
+            "That file exists but could not be loaded: fix its content or permissions, \
+             or set LIBRARIAN_WORKSPACE to another path."
+        } else {
+            "Set LIBRARIAN_WORKSPACE to another path, or create an empty file there."
+        };
+        format!(
+            "Load workspace config from {} (the global librarian file, not \
+             .codescout/workspace.toml). {remedy}",
+            cfg_path.display()
+        )
+    })
 }
 
 pub async fn build_tool_context(
@@ -166,19 +239,9 @@ pub async fn build_tool_context_with(
     lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
     env: &LibrarianEnv,
 ) -> Result<tools::ToolContext> {
-    use anyhow::Context as _;
     use std::path::PathBuf;
 
-    let cfg_path = match env.workspace.clone() {
-        Some(p) => p,
-        None => workspace::default_config_path()?,
-    };
-    let ws = workspace::load(&cfg_path).with_context(|| {
-        format!(
-            "Load workspace from {}. Run `librarian-mcp import-codescout` to seed.",
-            cfg_path.display()
-        )
-    })?;
+    let ws = load_workspace_config(env, workspace::default_config_path)?;
     let db_path = env.db.clone().unwrap_or_else(|| {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -703,6 +766,87 @@ kind = "spec"
             .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+    #[tokio::test]
+    async fn a_missing_explicit_workspace_is_an_error_that_names_a_real_remedy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join("missing.toml");
+        let env = LibrarianEnv {
+            workspace: Some(missing.clone()),
+            db: Some(tmp.path().join("catalog.db")),
+            init_default_workspace: true,
+            ..Default::default()
+        };
+
+        let err = build_tool_context_with(crate::lsp::LspManager::new_arc(), &env)
+            .await
+            .err()
+            .expect("a missing explicit workspace file must fail");
+        let msg = format!("{err:#}");
+
+        assert!(msg.contains(&missing.display().to_string()), "{msg}");
+        assert!(
+            msg.contains("LIBRARIAN_WORKSPACE") && msg.contains("create an empty file"),
+            "the remedy for a missing file must be named: {msg}"
+        );
+        assert!(
+            !msg.contains("import-codescout"),
+            "the hint named a command that no longer exists: {msg}"
+        );
+        assert!(!missing.exists(), "an explicit path is never created");
+    }
+
+    #[test]
+    fn a_malformed_workspace_file_is_not_told_to_be_created() {
+        // The file exists, so "create an empty file there" would be wrong advice: the
+        // remedy is to fix it, or to point LIBRARIAN_WORKSPACE somewhere else.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let bad = tmp.path().join("workspace.toml");
+        std::fs::write(&bad, "this is [[ not toml").unwrap();
+        let env = LibrarianEnv {
+            workspace: Some(bad.clone()),
+            init_default_workspace: true,
+            ..Default::default()
+        };
+
+        let err = load_workspace_config(&env, || unreachable!("an explicit path needs no default"))
+            .expect_err("a malformed file must fail");
+        let msg = format!("{err:#}");
+
+        assert!(msg.contains(&bad.display().to_string()), "{msg}");
+        assert!(msg.contains("LIBRARIAN_WORKSPACE"), "{msg}");
+        assert!(
+            !msg.contains("create an empty file"),
+            "an existing file must not be told to be created: {msg}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&bad).unwrap(),
+            "this is [[ not toml",
+            "the user's file is left untouched"
+        );
+    }
+    #[test]
+    fn the_default_path_is_created_only_when_the_env_asks() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let asked_path = tmp.path().join("asked/librarian/workspace.toml");
+        let asked = LibrarianEnv {
+            init_default_workspace: true,
+            ..Default::default()
+        };
+        load_workspace_config(&asked, || Ok(asked_path.clone())).unwrap();
+        assert!(
+            asked_path.exists(),
+            "the env asked: the default file is created"
+        );
+
+        let quiet_path = tmp.path().join("quiet/workspace.toml");
+        let quiet = LibrarianEnv::default();
+        assert!(load_workspace_config(&quiet, || Ok(quiet_path.clone())).is_err());
+        assert!(
+            !quiet_path.exists(),
+            "LibrarianEnv::default() must never write a file"
+        );
     }
 
     /// `reindex_cli` must never delete artifact rows under the root before its

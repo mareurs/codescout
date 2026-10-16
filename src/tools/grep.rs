@@ -1450,6 +1450,35 @@ mod tests {
             workspace_override: None,
         }
     }
+    /// The nearest directory at or above `dir` that holds a `.git` (a directory, or the file a linked
+    /// worktree leaves), if there is one.
+    fn ambient_git_above(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+        dir.ancestors()
+            .find(|a| a.join(".git").exists())
+            .map(std::path::Path::to_path_buf)
+    }
+
+    /// A tempdir for a test whose premise is that no `.git` sits above it.
+    ///
+    /// The `ignore` crate applies `.gitignore` rules only inside a git worktree, so a test that
+    /// pins the outside-a-worktree behaviour fails, with `left: 0 right: 1`, when any ancestor of
+    /// the tempdir holds a `.git` — whatever put it there. Measured 2026-10-16: a throwaway repo
+    /// above `TMPDIR` reproduces the recorded failure exactly. The failure used to say nothing about
+    /// that cause. This one names the ancestor, so the next occurrence reads as an environment fault
+    /// and not as a regression in whatever diff is under test.
+    fn tempdir_with_no_git_above() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(found) = ambient_git_above(dir.path()) {
+            panic!(
+                "this test needs a directory with no `.git` above it, but `{}` holds one (the tempdir is `{}`). \
+             Another process may have put it there; see docs/issues/2026-09-24-grep-outside-git-repo-tests-flaked-once-in-the-default-lane.md",
+                found.display(),
+                dir.path().display()
+            );
+        }
+        dir
+    }
+
     async fn rooted_ctx(root: &std::path::Path) -> ToolContext {
         std::fs::create_dir_all(root.join(".codescout")).unwrap();
         ToolContext {
@@ -2396,7 +2425,7 @@ mod tests {
         // the gitignore clause: if gitignore rules applied outside a worktree too, gating the
         // clause on finding a `.git` would silence it exactly where it was needed. A premise a
         // fix rests on earns a test that fails when the dependency changes it.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir_with_no_git_above();
         std::fs::write(dir.path().join(".gitignore"), "secret.txt\n").unwrap();
         std::fs::write(dir.path().join("secret.txt"), "TARGET\n").unwrap();
         let ctx = rooted_ctx(dir.path()).await;
@@ -2411,6 +2440,30 @@ mod tests {
             r["total"].as_u64().unwrap(),
             1,
             "no .git here, so the .gitignore must not be honoured: {r}"
+        );
+    }
+    #[test]
+    fn an_ancestor_git_is_named_whether_it_is_a_directory_or_a_worktree_link_file() {
+        // The helper is what turns an unexplained `left: 0 right: 1` into a named cause, so it must
+        // see both forms of `.git`: the directory of a clone and the one-line file a linked worktree
+        // leaves. It must also stop at the NEAREST one.
+        let outer = tempfile::tempdir().unwrap();
+        let inner = outer.path().join("a").join("b");
+        std::fs::create_dir_all(&inner).unwrap();
+
+        std::fs::create_dir(outer.path().join(".git")).unwrap();
+        assert_eq!(
+            ambient_git_above(&inner).as_deref(),
+            Some(outer.path()),
+            "a `.git` directory two levels up must be found"
+        );
+
+        std::fs::remove_dir(outer.path().join(".git")).unwrap();
+        std::fs::write(outer.path().join("a").join(".git"), "gitdir: /elsewhere\n").unwrap();
+        assert_eq!(
+            ambient_git_above(&inner).as_deref(),
+            Some(outer.path().join("a").as_path()),
+            "a `.git` file one level up must be found, and found before any farther one"
         );
     }
 
@@ -2505,7 +2558,7 @@ mod tests {
         // The other half of the gate. Outside a worktree the `ignore` crate applies no
         // gitignore rules at all, so claiming a filter stood in the way would be true only
         // vacuously — the shape that trains readers to skip warnings.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir_with_no_git_above();
         std::fs::write(dir.path().join("code.rs"), "fn present() {}\n").unwrap();
         let ctx = rooted_ctx(dir.path()).await;
         let r = Grep
@@ -3147,7 +3200,7 @@ mod tests {
         // side of that gate — no `.git` here, so the `ignore` crate applies no gitignore rules
         // (`require_git` defaults to true), nothing was pruned, and the zero is trustworthy.
         // The worktree case is `widening_past_hidden_names_the_gitignore_filter_it_cannot_lift`.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir_with_no_git_above();
         std::fs::create_dir_all(dir.path().join(".github")).unwrap();
         std::fs::write(dir.path().join(".github/ci.yml"), "nothing here\n").unwrap();
         let ctx = rooted_ctx(dir.path()).await;

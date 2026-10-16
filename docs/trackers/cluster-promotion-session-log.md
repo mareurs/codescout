@@ -11,7 +11,7 @@ tags:
 - observer-blindness
 - mechanism-design
 topic: cluster promotion and mechanism design
-entry_high_water_F: 8
+entry_high_water_F: 9
 entry_high_water_W: 3
 entry_prefix:
 - F
@@ -57,6 +57,7 @@ snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 | F-6 | 2026-09-01 | med | architectural | fixed-verified | Ruling 2 — all 7 `IC-13` non-members fit **no existing class**, unanimously across two independent readers; four-class partition taken → IC-19/20/21/22, IC-13 16→9 |
 | F-7 | 2026-09-01 | med | tooling | **fixed-verified** | The ledger shipped without its corpus — 3 new classes published counts of 3/1/2 against **0 members at HEAD**; the gate reads the working tree, so a partial commit is invisible to it. Repaired; mechanism owed |
 | F-8 | 2026-09-03 | low | documentation | open | A refusal hint's stated condition (`edit_file` "without its `frontmatter` param") is **always true of the call it refuses** — the real discriminator is extent-bounded vs raw-text grammar. I reported the guard as broken; the guard is correct and deliberate. `IC-22` fit left unsettled rather than resolved by filing |
+| F-9 | 2026-10-16 | low | documentation | open | The open `**Members:**` residual states a 26 KB line; five lines now exceed 50 KB (`IC-18` 82,313 bytes), and its `severity: low` rests on the old figure |
 
 ## Wins Index
 
@@ -761,6 +762,28 @@ either file a phantom bug or stop using `edit_file` on stamped files.
 `src/util/librarian_guard.rs:206-207` naming the grammar rather than the parameter; whoever
 takes it should decide the `IC-22` grain question first, because the answer determines whether
 this is a wording fix or a member.
+
+## F-9 — The open `**Members:**` residual states a 26 KB line; five lines now exceed 50 KB, and its `severity: low` rests on the old figure
+
+**Valid:** dated 2026-10-16
+
+**Observed:** `docs/issues/2026-09-24-residual-members-line-wrapping-and-vectorless-reembed.md` names its work as a wrapping form for "the **Members:** line (26 KB single line)" and carries `severity: low`. That figure is the parent's, taken 2026-09-04 when `IC-18` was 25,859 bytes. Measured 2026-10-16 with `grep '^\*\*Members:\*\*' <file> | wc -c` (bytes, newline included): `IC-18` 82,313; `cluster/unclassified` (`docs/trackers/issue-clusters.md:598`) 75,249; `IC-14` 72,828; `IC-6` 60,405; `IC-2` 53,632. Each is one physical line (`IC-18`: 1 `**Members:**` line in a 45-line file; 61 of the class's 69 tagged members are named on it, in at least three entry formats — an earlier draft of this entry said "41 `+1:` entries", which counted only one of those formats). `IC-18` grew about 3.2x in six weeks.
+
+**Expected:** a residual filed to track a quality concern states the size that concern is measured against, so the reader can tell whether `low` still holds.
+
+**Cost:** low so far. Nothing failed. But the severity was set against a line a third of today's size, and no surface reports the distance to any limit — the same gap the parent named for the chunker ("nothing reports the distance to it"). The line grows by the rule: the `ledger-counts` gate requires each new member to be named on it.
+
+**Not established:** whether retrieval quality for these classes has degraded. I did not run a search against them. The parent's Fix says `embed_artifact` now segments and pools long lines (`8acec9c7`); I read that account and did not read the code. So "blurry vector" is the parent's claim, not mine.
+
+**Measurement note:** my first pass used `awk length($0)` and labelled it bytes. The files hold multi-byte characters, so that was a character count and read about 0.6% low (`IC-18`: 81,822 chars vs 82,313 bytes). A byte figure needs `wc -c`.
+
+**Workaround:** none needed for the finding. Correct the residual's size and re-judge its severity when it is next worked.
+
+**Rests on:** the five `wc -c` / `wc -m` figures above, run 2026-10-16 on the working tree at `36e88906`; `git log --oneline -- docs/trackers/issue-clusters/IC-18-selector-narrower-than-its-population.md | wc -l` → 56.
+
+**Addendum, same day, after measuring the whole field:** "single line" is itself wrong for 20 of 25 `**Members:**` fields. A field is its first line plus the following non-blank lines up to the first blank line, and entries can be multi-line bullet lists (`IC-11`: line 18 is 4,160 bytes, its continuation 49,992). Field sizes in bytes: `IC-18` 88,932; roster (`cluster/unclassified`) 75,248; `IC-14` 72,827; `IC-6` 62,533; `IC-2` 55,301; `IC-11` 54,152 — six over 50 KB, not five. `members_fields` (`scripts/pre-commit-ledger-counts.py:820`) reads only the first line, so 94,039 bytes of field continuation sit outside what the gate reads. Whether a filer was ever wrongly refused or passed because of that is NOT demonstrated. The line sizes in the **Observed** paragraph are first-line sizes and remain correct as such.
+
+**Severity:** low — doc drift, no failed call.
 
 ## Template for new entries
 

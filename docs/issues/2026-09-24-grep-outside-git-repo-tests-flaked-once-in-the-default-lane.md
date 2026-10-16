@@ -32,6 +32,30 @@ Gate fallback completed with `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`. The default la
 
 The subsequent implementation gate completed with `PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`. The outside-repository grep cases did not recur. No grep production change was made and this remains open; the root-cause hypotheses above are still unproven.
 
+
+### Measured 2026-10-16 — a `.git` above the tempdir reproduces the exact failure
+
+I ran the three tests with the pre-change binary and `TMPDIR` pointed at a directory under a throwaway `git init` repo. All three failed with `left: 0 right: 1` and the same assertion text as the 2026-09-24 log. The control run, with the normal `TMPDIR`, passed. So a `.git` in any ancestor of the tempdir is **sufficient** to cause this failure. That does not show it caused the 2026-09-24 failure.
+
+**Ruled out:** no test sets `TMPDIR`. Only two comments mention it: `src/server.rs:14897` and `src/tools/run_command/tests.rs:1243`.
+
+**Checked clean:** the `git init` sites in `src/agent/mod.rs` (`activate_populates_head_sha`, which uses `.current_dir(dir.path())`) and in `src/librarian/tools/mv.rs` (which uses `-C <tmp>`).
+
+**Audited in a second pass, same day:** 24 Rust init sites in 14 files. The search pattern was `Repository::init`, `Repository::init_opts`, `.arg("init")`, `.args(["init"` and `["init"`. An earlier note said "about 34" sites. That figure came from a looser search, and I could not reproduce it. Every one of the 24 targets its own `tempfile::tempdir()`, or a child of one, through `-C <tmp>`, `.current_dir(<tmp>)` or a path joined onto a tempdir.
+- `doctor.rs` joins `ROUTE_ROOT_NAMES` onto a tempdir. All six names are relative, so `Path::join` cannot replace the base.
+- `retrieval/index_state.rs:393` calls `Repository::open(root)` first, which does not search parent directories. It falls back to `init(root)`, and `root` is a tempdir.
+- `rekey.rs:1869` writes a `.git` file inside its own tempdir. That cannot reach a sibling tempdir.
+
+The shell suites under `tests/` build their repos under `mktemp -d`. I read the two unscoped `git init -q .` calls (`tests/hooks-discrimination.sh:102` and `tests/count-with-members.sh:56`). Each follows `cd "$T" || exit 1` or `cd "$REPO" || exit 1`. `tests/gate-slot.sh:311` inits `"$WORK/repo"`. The search over shell and Python files returned 110 matches. I read 80 of them, so about 30 are not read.
+
+**Result:** no Rust test in this repository can plant a `.git` in an ancestor of a grep tempdir.
+
+**The ancestor chain depends on the launcher.** `TMPDIR` in the session that ran this audit was `/home/marius/.cache/cc-tmp`, not `/tmp`. Tempdirs made from that shell have the ancestors `~/.cache`, `~`, `/home` and `/`. None held a `.git` on 2026-10-16. A transient `.git` at any of them, or in `/tmp` when `TMPDIR` is unset, would reproduce the failure. That is a candidate, not a finding: nothing shows that one existed on 2026-09-24, and the 2026-09-24 gate's `TMPDIR` is unknown.
+
+**Stale references corrected:** the `set_current_dir` lines cited under "Root cause" had moved. The sites are now `src/util/path_security.rs:2861` (test `write_within_cwd_allowed_even_outside_project_root`) and `src/agent/mod.rs:3317` (test `new_with_relative_path_canonicalizes_home_root`). A third site, `tests/e2e/eval_common/report.rs:144`, is in a separate test binary.
+
+**Diagnostic change, not a fix.** Commit `1e67e8a3` (patch-id `07ed8ad7153c101ba089dd9a97e98a159895c191`, from `git show 1e67e8a3 | git patch-id --stable`) adds `tempdir_with_no_git_above()` to `src/tools/grep.rs`. The three tests use it. When an ancestor holds a `.git`, it panics and names that ancestor and the tempdir. Evidence: `tools::grep::tests` 52 passed, 0 failed. With `TMPDIR` under a throwaway repo, each guarded test now fails with the named-ancestor message. A mutation of the helper from `.exists()` to `.is_dir()` failed only the new helper test. The gate gave `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed`. This does not find the creator of the 2026-09-24 `.git`, and `WalkAudit::git_ignore_in_effect` is unchanged.
+
 ## Symptom (Effect)
 
 Gate run 2026-09-24 22:25:50 local, `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`, `5812 passed; 3 failed`:
@@ -63,7 +87,7 @@ Unknown.
 **Checked and not it:** measured 2026-09-24 right after the failure, `/tmp` held no `.git`, `.gitignore` or `.ignore`, and `git -C /tmp rev-parse` reported not a repository.
 
 **Candidates, not verified:**
-- Process-global state shared by parallel tests in the same binary: two tests call `std::env::set_current_dir` (`src/util/path_security.rs:2360`, `src/agent/mod.rs:3196`).
+- Process-global state shared by parallel tests in the same binary: two tests call `std::env::set_current_dir` (`src/util/path_security.rs:2861`, `src/agent/mod.rs:3317`; lines re-checked 2026-10-16).
 - A transient `.git`/`.gitignore` in a tempdir ancestor created by another process.
 
 Neither has been shown to reach these tests: they search absolute tempdir paths, and `WalkBuilder::require_git` discovery was not traced.
@@ -74,15 +98,18 @@ The gate log above, plus the re-run (3 passed, 0 failed). The lean lane of the s
 
 ## Hypotheses tried
 
-None beyond the `/tmp` check above.
+- `/tmp` held a `.git` after the failure: no (measured 2026-09-24).
+- A test sets `TMPDIR`: no (searched 2026-10-16).
+- Two `git init` sites, `activate_populates_head_sha` and `mv.rs`: both scoped to their own tempdir, so not it.
+- Recurrence in twenty targeted runs and two full gates (2026-10-08): none.
 
 ## Fix
 
-Not started.
+Not started. The root cause is unknown. Commit `1e67e8a3` only makes the next occurrence self-diagnosing.
 
 ## Tests added
 
-N/A: not reproduced.
+`an_ancestor_git_is_named_whether_it_is_a_directory_or_a_worktree_link_file` in `src/tools/grep.rs` (commit `1e67e8a3`). It pins the helper that names the ancestor `.git`, for both a directory and a worktree link file. It is not a regression test for the flake itself.
 
 ## Workarounds
 
@@ -90,7 +117,12 @@ Re-run the three tests before reading your own diff when a gate reds on them.
 
 ## Resume
 
-On recurrence, capture in the same turn: whether the default lane was running tests that change the CWD at that moment (a `--test-threads=1` re-run that passes would point at parallelism), the full panic text of all three tests, and any `.git` in the tempdir's ancestor chain. The test at `src/tools/grep.rs:2328` is the one to instrument.
+On recurrence, read the panic first. If it names an ancestor, the cause is an environment fault: find out what created that `.git`, and when. Also record `TMPDIR` for the gate run. If the old `left: 0 right: 1` appears instead, the premise held and the cause is something else, so also check whether a CWD-changing test ran at that moment (a `--test-threads=1` re-run that passes would point at parallelism).
+
+The audit of this repository's own `git init` sites is done (see above). The cause, if it is an ancestor `.git`, is therefore not in the Rust tests. It may still be in the unread shell files or outside the repository. What is left without a recurrence:
+- read the 30 unread shell and Python matches;
+- stress the `tools::grep` module alongside the `set_current_dir` tests;
+- look for a tool or a peer session that runs `git init` in `~`, `~/.cache` or `/tmp`.
 
 ## References
 

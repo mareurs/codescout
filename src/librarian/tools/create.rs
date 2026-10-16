@@ -390,6 +390,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &crate::librarian::catalog::augmentation::claimed_prefixes(&a.extra),
     )?;
     reject_body_leading_frontmatter(&a.body)?;
+    // The project's own write-time requirements (`.codescout/requirements.toml`). Checked here, with the
+    // other validators and BEFORE the file and the catalog row are written, so a refusal leaves neither.
+    crate::librarian::requirements::enforce_on_create(&base_dir, &a.kind, &a.tags, &a.body)?;
     let status = resolve_status(&a.kind, a.status.as_deref())?;
     let fm = Frontmatter {
         id: Some(id.clone()),
@@ -633,6 +636,75 @@ mod tests {
             .await
             .unwrap_or_else(|e| panic!("{s} should be accepted: {e}"));
         }
+    }
+    /// The write-path rule, end to end through `doc(create)`. The unit tests in `requirements.rs` prove
+    /// the rule; this proves the tool CALLS it, and that a refusal comes before any write, so it leaves no
+    /// file for the next reindex to catalog and no row behind.
+    ///
+    /// Kills: the call being dropped from `call()`; the call moving AFTER the file write or the catalog
+    /// upsert; the call applying to a kind the policy does not name.
+    #[tokio::test]
+    async fn a_bug_that_breaks_the_project_requirements_is_refused_before_anything_is_written() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codescout")).unwrap();
+        std::fs::write(
+            tmp.path().join(".codescout/requirements.toml"),
+            "[[require]]\nkind = \"bug\"\ntag_prefix = \"cluster/\"\ntag_values_from = [\"ledger.md\"]\n\
+             tag_declared_by = \"**Slug:**\"\nsections = [\"Class fit\"]\nmin_section_chars = 40\n",
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("ledger.md"), "**Slug:** `cluster/alpha`\n").unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let rel = "docs/issues/2026-10-16-x.md";
+
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": rel, "kind": "bug", "title": "X",
+                "body": "# BUG: x\n\n## Summary\n\ns\n", "tags": ["cluster/alpha"]
+            }),
+        )
+        .await
+        .expect_err("a bug with no `## Class fit` section must be refused");
+        assert!(err.to_string().contains("## Class fit"), "got: {err}");
+        assert!(
+            !tmp.path().join(rel).exists(),
+            "a refused create must not leave a file behind"
+        );
+        let rows: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            rows, 0,
+            "a refused create must not leave a catalog row behind"
+        );
+
+        // The same bug WITH the section is created: the rule refuses the gap, not the kind.
+        let body = "# BUG: x\n\n## Class fit\n\nthe selector covers one of the two forms the population has\n";
+        call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": rel, "kind": "bug", "title": "X",
+                "body": body, "tags": ["cluster/alpha"]
+            }),
+        )
+        .await
+        .expect("a complete bug is created");
+        assert!(tmp.path().join(rel).exists());
+
+        // Over-match guard: a kind the policy does not name is untouched.
+        call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/trackers/t.md",
+                "kind": "tracker", "title": "T", "body": "t"
+            }),
+        )
+        .await
+        .expect("a tracker is not subject to the bug policy");
     }
 
     #[test]
