@@ -162,6 +162,27 @@ Both sites of "Four" are deleted in `codescout-companion/hooks/pre-edit-dirty-ch
 
 What is NOT done: the release. `release.sh` has not run, and the installed plugin caches of all three profiles (`~/.claude`, `~/.claude-sdd`, `~/.claude-kat`, `codescout-companion` 1.20.13, 1.20.14 and 1.20.15) still serve "Four such captures" (grep, 2026-10-07). The advisory a reader sees comes from those caches, so the symptom persists until a release ships and the caches refresh.
 
+## Re-verified 2026-10-16 — nothing further actionable in this repo; waiting on a plugin release
+
+Read at the bytes, not carried over from the sections above:
+
+- **codescout half still fixed.** `scripts/pre-commit-unreviewed-content.sh:12` reads "It has
+  happened repeatedly in this repo" and `:156` reads "Such captures are recorded in"; neither
+  script (`pre-commit-unreviewed-content.sh`, `pre-commit-ledger-counts.py`) carries a
+  capture count. No code change was needed or made here.
+- **Plugin source still fixed.** `claude-plugins/codescout-companion/hooks/pre-edit-dirty-check.mjs`
+  `:8-9` and `:118-119` read "Such captures are recorded in codescout's"; commit `949c85e` is
+  reachable from `main` and from the checked-out `effort-routing-r1`.
+- **Served text still stale.** `grep -E "Four such"` over `plugins/` finds the old string in six
+  installed copies of `hooks/pre-edit-dirty-check.mjs`: `~/.claude` 1.20.15;
+  `~/.claude-sdd` 1.20.13, 1.20.14, 1.20.15; `~/.claude-kat` 1.20.14, 1.20.15. A reader
+  therefore still gets "Four such captures" until a release ships and the caches refresh.
+
+What is left is the release, which belongs to the `claude-plugins` repo and is not a change
+this repo can make. The wider guard (a stored-count scan over plugin served strings) still has
+no owner and is a design decision, not a fix. Status stays `open`; the `unverified:` caveat in
+the frontmatter is still accurate.
+
 ## Tests added
 
 None. A regression test would have to assert the absence of a digit in an advisory string,
