@@ -11,7 +11,7 @@ closed: 2026-10-14
 opened: 2026-10-14
 related: []
 severity: high
-unverified: 'Nine review minors (Residual, #4-#12) are open and not fixed. The AlreadyExists race branch of create_default has no unit test. server-stack and macOS/Windows paths were not run. The follow-up brainstorm (a librarian that starts but cannot search says nothing) is not started.'
+unverified: 'server-stack and macOS/Windows config-dir paths were not run (the manual names them from the `dirs` crate''s documented locations, not from a run on those systems). The two new archive rules were measured only through `classify`, not on a real reindex. Mutation probe ran only for #4; #5, #9 and #11 were shown RED then GREEN by their tests, #6, #7, #8, #10, #12 are assertion, comment or text changes. The follow-up brainstorm (a librarian that starts but cannot search says nothing) is not started.'
 ---
 
 # BUG: setting up codescout on a new project does not set up the librarian — the user must find and apply each knob by hand
@@ -207,6 +207,7 @@ All on `experiments`. Each commit is recorded with its patch-id (`git show <sha>
 | `8af07570` | `2f313c9d54cb5b2d84228acd78e6802288cc8cde` | Manual: First run section, all 25 built-in rules, no more "opt-in" |
 | `f61ac4b6` | `f040ef4b560aede6e63b80c0343fce0067accd83` | `load_workspace_config(env, default_path)` extracted, so the wiring is testable |
 | `50b2ac12` | `59f986883a2a2f87cd5509ea7ca771e6dd98c24e` | Review fixes: `confirmed_absent` (no replacing an unreadable user file); spawned-binary test no longer writes the real config dir |
+| `6f2fe8d2` | `37cf5d5ac48f20f2d02985a31f9bdbf0de331f3b` | The nine deferred review minors #4-#12 (see Residual): `config_path_under`, cause-specific error remedy, two archive rules, test anchors, manual wording |
 
 Decisions taken with the user: create the file only at the default path; the nine workflow rules plus `docs/trackers` live in `DEFAULT_RULES_TOML`, not in the created file; the created file is comments only. Not done, by agreement: the "librarian starts but cannot search" visibility problem (separate brainstorm).
 
@@ -219,6 +220,17 @@ Decisions taken with the user: create the file only at the default path; the nin
 - `librarian::tests`: `a_missing_explicit_workspace_is_an_error_that_names_a_real_remedy`, `the_default_path_is_created_only_when_the_env_asks`
 - `tests/cross_process_write_lock.rs`: the spawned child now gets a scratch `LIBRARIAN_WORKSPACE` and `LIBRARIAN_DB` (verified: config dir empty after the run)
 
+Added for the minors (`6f2fe8d2`):
+
+- `workspace::tests::create_default_leaves_an_existing_file_alone` (#4; mutant `AlreadyExists => Err(e)` KILLED by `scripts/mutation-probe.sh --strict`: 14 tests ran, exactly this one red)
+- `librarian::tests::a_malformed_workspace_file_is_not_told_to_be_created` (#5; RED before the fix)
+- `librarian::tests::a_missing_explicit_workspace_is_an_error_that_names_a_real_remedy` now asserts `LIBRARIAN_WORKSPACE` and `create an empty file` (#6)
+- `indexer::tests::a_frontmatter_kind_beats_a_built_in_rule` now starts with a `classify` anchor on `docs/superpowers/specs/x.md` (#7)
+- `workspace::tests::a_missing_config_dir_names_the_remedy`, `workspace::tests::the_default_path_lives_under_the_config_dir` (#9; RED was a compile error, `config_path_under` did not exist)
+- `classify::tests::default_rules_mark_the_archive_directories_archived` (#11; RED before the fix)
+
+Run after the change: `cargo test --lib librarian::` 2161 passed, 0 failed; `./scripts/gate.sh --check` exit 0 (`PYTHON_LIGHT=0 FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`).
+
 Each new decision was mutated in an isolated worktree; see Evidence, "After the fix".
 
 
@@ -229,29 +241,37 @@ Primary fix (the commit that makes the librarian register on a clean machine). T
 - **SHA:** `3454e094` (`experiments`)
 - **patch-id:** `1e32b2a99497ad354a4e98561b4a4ad6f450178e`
 
+Review minors #4-#12:
+
+- **SHA:** `6f2fe8d2` (`experiments`)
+- **patch-id:** `37cf5d5ac48f20f2d02985a31f9bdbf0de331f3b`
+
 ## Workarounds
 
 None needed after the fix. Before it: create an empty `~/.config/librarian/workspace.toml` by hand (an empty file is valid).
 
 ## Resume
 
-Fixed and verified on `experiments` (see Fix, "Implemented"). Open follow-ups are under Residual.
+Fixed and verified on `experiments` (see Fix, "Implemented"). The branch is left as is: no merge and no PR, by the user's instruction. The only open follow-up is under Residual.
 
 ## Residual
 
-Deferred review minors (Opus review of `86dba52d..f61ac4b6`), none blocking:
+The nine deferred review minors (Opus review of `86dba52d..f61ac4b6`) are fixed in `6f2fe8d2` (patch-id `37cf5d5ac48f20f2d02985a31f9bdbf0de331f3b`):
 
-- **#4** `create_default`'s `AlreadyExists` branch can be unit-tested (call it on an existing file: `Ok`, bytes unchanged). The plan said it could not; that was wrong, and the mutant `AlreadyExists => Err(e)` survives.
-- **#5** The error hint says "create an empty file there", which is wrong advice when the existing file is malformed. Tailor it to the cause.
-- **#6** `a_missing_explicit_workspace_is_an_error_that_names_a_real_remedy` never asserts the remedy text; add `contains("LIBRARIAN_WORKSPACE")`.
-- **#7** `a_frontmatter_kind_beats_a_built_in_rule` could pass if the spec rule were absent; anchor it with a `classify` assertion first (IC-9 shape).
-- **#8** The manual and the file header say `~/.config/librarian/workspace.toml`; `dirs::config_dir()` differs on macOS and Windows.
-- **#9** `dirs::config_dir()` returning `None` is still fatal and unexplained (`default_path()?` sits outside `with_context`).
-- **#10** Comment on `DEFAULT_WORKSPACE_TOML` that it must stay comments-only (a race loser may read a prefix).
-- **#11** `docs/trackers/**/*.md` stamps `status: active` on archive files that lack a status (same precedent as `docs/issues/**`).
-- **#12** "## First run" follows a paragraph without a blank line (renders fine).
+- **#4** `create_default`'s `AlreadyExists` branch now has a unit test. The mutant `AlreadyExists => Err(e)` is killed.
+- **#5** `load_workspace_config` picks the remedy by whether the file exists: an existing file that fails to load is told to fix its content or permissions, a missing one is told to create an empty file.
+- **#6** The remedy text is asserted (`LIBRARIAN_WORKSPACE`, `create an empty file`).
+- **#7** The frontmatter-precedence test is anchored by a `classify` assertion.
+- **#8** The manual and the `DEFAULT_WORKSPACE_TOML` header say `librarian/workspace.toml` in the user config dir, with the Linux, macOS and Windows locations.
+- **#9** `workspace::config_path_under(Option<PathBuf>)` names `LIBRARIAN_WORKSPACE` when the config dir is unknown.
+- **#10** `DEFAULT_WORKSPACE_TOML` carries a comment that it must stay comments-only.
+- **#11** Two built-in rules, `**/docs/trackers/archive/**/*.md` and `**/docs/issues/archive/**/*.md`, mark archive files `status: archived`. The minor named only trackers; the issue archive has the same shape and got the same rule. Measured in this repo: 0 of 51 tracker-archive files and 0 of 1056 issue-archive files lack `status:`, so the defect was theoretical here.
+- **#12** The blank line before "## First run" is in.
 
-Out of scope by agreement, needs its own brainstorm: a librarian that starts but cannot search (no embedder, Qdrant down) reports nothing to the agent beyond an INFO log line (`src/librarian/adapter.rs:34`).
+Still open, out of scope by agreement, needs its own brainstorm:
+
+- A librarian that starts but cannot search (no embedder, Qdrant down) reports nothing to the agent beyond an INFO log line (`src/librarian/adapter.rs:34`).
+- `docs/manual/src/getting-started/first-project.md` has no librarian step.
 
 ## References
 
