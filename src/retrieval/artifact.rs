@@ -84,6 +84,19 @@ impl QdrantWrap {
         Ok(())
     }
 
+    /// Exact number of points in `collection`, unfiltered. Used only to REPORT a retired
+    /// collection's size; nothing here mutates.
+    pub async fn collection_point_count(&self, collection: &str) -> Result<u64> {
+        Ok(self
+            .client
+            .count(CountPointsBuilder::new(collection).exact(true))
+            .await
+            .context("count(collection)")?
+            .result
+            .map(|r| r.count)
+            .unwrap_or(0))
+    }
+
     /// Insert or update a single CHUNK's embedding.
     ///
     /// The point id is derived from `chunk_id`, so a second call with the same

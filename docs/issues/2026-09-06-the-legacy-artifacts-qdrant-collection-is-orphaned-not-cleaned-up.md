@@ -124,13 +124,30 @@ construction.** If the prefix changes again, the same thing happens again and no
 report it. A `doctor` check that lists Qdrant collections not matching the current prefix
 would turn this from a thing someone happens to notice into a thing the tool says.
 
+## Detector shipped 2026-10-16 (report only) — the bug stays OPEN
+
+The second half of the proposal is done; the first half is deliberately not. `librarian(action="doctor")` now emits `retired_vector_collection_present` (`Check::RetiredVectorCollectionPresent`, `scan_retired_vector_collections` in `src/librarian/tools/doctor.rs`): **informational** (does not count in `summary.defects` or the CLI exit code), `id: None`, path `qdrant:<name>`, with the **exact** point count and a row that says *DO NOT delete* and why. A named `EXEMPT` entry in `every_declared_check_is_scope_gated_or_a_named_exemption`: its subject is the shared backend, not a catalogued artifact.
+
+- Seam: new default-empty method `ArtifactVectorStore::retired_collections()` (`src/librarian/artifact_store.rs`), overridden only by `QdrantArtifactStore`, which derives the retired name from its own prefix (`{config_prefix}artifacts`, via `retired_collection_names`) and counts through new `QdrantWrap::collection_point_count` (`src/retrieval/artifact.rs`). sqlite-vec and the in-memory store keep the empty default and are silent.
+- **No deletion code exists and none was added** — no `fix=`, no `drop_retired`. The trait method's doc comment states it is read-only by contract. The evidence above (growing, writer unidentified) is why.
+- Runs before the catalog lock is taken (it awaits). An unreachable daemon yields no row and a `tracing::warn!`, not a failed doctor.
+
+### What would close this bug
+
+One of, in order:
+
+1. **Identify the writer of `artifacts`.** Re-run `doctor` (or `curl .../collections/artifacts` count) twice some minutes apart to confirm it still grows, then find which binary or checkout writes that name: for each `codescout` process, `readlink /proc/<pid>/exe` and its cwd; look for other checkouts/worktrees still carrying a `"artifacts"` Qdrant write (the stale July worktree `check-codescout-integration` was the only source hit on 2026-09-24, with no built binary — so look for a *built* binary elsewhere, e.g. a `cargo rb` install or another machine pointed at this daemon).
+2. Once the count has been **flat across a period in which every process on the host was restarted on a post-`6f032dbd` build**, the collection is genuinely orphaned: record the point count, then drop it by hand (`DELETE /collections/artifacts`). Close the bug with that count in the Resolution.
+3. Or decide the data is wanted: migrate its 993 `project_id`-bearing points into the per-project collections instead of deleting.
+
+The doctor row disappears by itself once the collection is dropped.
+
 ## Tests added
 
-None — filed at notice. A regression test is not obviously available: the defect is a
-leftover in a stateful external daemon, not a branch in the code, and no gate lane compiles
-the Qdrant path at all (`server-stack` is not a default feature). The `doctor` check
-proposed above **would** be testable, against `InMemoryArtifactStore` or a stubbed
-collection list.
+- `a_retired_vector_collection_is_reported_with_its_count_and_a_do_not_delete_warning` (`doctor.rs`) — controls first (no backend; default-empty store), then the finding: informational, `id: None`, exact count, "DO NOT delete".
+- `a_store_that_cannot_list_collections_yields_no_row_not_a_failed_doctor` (`doctor.rs`).
+- `the_retired_collection_name_follows_the_config_prefix_and_never_guesses` and `a_store_that_keeps_the_default_has_nothing_retired` (`artifact_store.rs`).
+- Compiled and run with `--features server-stack` as well as the default build, so the `QdrantArtifactStore` override is type-checked; **the override's daemon calls (`collection_exists`, `collection_point_count`) are NOT exercised by any test** — there is no Qdrant in the gate. Confirm once against a live daemon: `librarian(action="doctor")` should list `qdrant:artifacts` with a count matching `curl`.
 
 ## Workarounds
 
@@ -138,11 +155,7 @@ None needed. The collection costs disk and nothing else; no query reads it.
 
 ## Resume
 
-Decide whether to drop it. If yes: run the `DELETE` above, having first checked for other
-readers on this host, and record the point count you removed. If the `doctor` check is
-wanted, it belongs beside the existing catalog-drift checks in
-`src/librarian/tools/doctor.rs` and needs a live Qdrant handle, which no current check has —
-that is the real cost of the second half, not the predicate itself.
+Identify the writer (see *What would close this bug*). Do not run the `DELETE` before that. Confirm the new doctor row against the live daemon (count matches `curl`).
 
 ## References
 

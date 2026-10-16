@@ -1,11 +1,12 @@
 ---
 id: '787345ce75805909'
 kind: bug
-status: open
+status: mitigated
 title: the legibility-backlog's catalog params are older than the committed body that was machine-rendered from them
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 closed: null
+unverified: 'Detector added (rendered_region_drift) but the mechanism that left params behind is NOT established; hypotheses 2 and 3 need another host catalog. Not yet run against the live stale catalog.'
 opened: 2026-09-21
 owner: marius
 related: []
@@ -237,21 +238,23 @@ prior snapshot.
 
 ## Fix
 
-None. Filed for the record; not fixed in this session.
+**The detector the previous version of this section said was needed now exists; the mechanism is still not established, so this is `mitigated`, not `fixed`.**
 
-The repair for *this artifact* is a `legibility_scan(write=true)` re-run, which would overwrite
-both halves from a fresh measurement — but that discards the question rather than answering it,
-and would destroy the evidence above. Do not run it before the mechanism is established.
+`rendered_region_drift` (new `Check` in `src/librarian/tools/doctor.rs`, `scan_rendered_region_drift`) re-renders the artifact's `params` through the same compiled-in template the writer uses and compares the result against the managed region of the file on disk. It is a **defect** (not informational), row-grain, scoped like every other row check (`ROW_GRAIN_SCOPED_CHECKS`, `admits_relevance_exemption`), and reports only — no `fix=`.
 
-What a real fix needs is a detector: a check that compares the committed rendered region against
-what the current `params` would render, for every artifact declaring a `render_template`. That is
-strictly wider than `params_behind_body`, which is id-keyed and correctly declines this case, and
-it is the direction `sidecar_shape_drift` already takes for the *shape* half of the same row.
+- Writer and detector share one renderer: `legibility_scan::render_managed` (`src/librarian/tools/legibility_scan/mod.rs`), now called by both `render_managed_body` and `rendered_region_drift`, so "rendered from these params" cannot mean two things.
+- The finding states what each side says (`Scanned 2026-08-28 · 47 open` vs `Scanned 2026-06-15 · 17 open`) and **never claims which is newer** — from one host that is not knowable.
+- It names the hazard of the obvious repair: `legibility_scan(write=true)` reconciles against `params` (auto-closing prior open rows) and then overwrites both sides.
+- Deliberately scoped to the one artifact whose body a scan renders (`TRACKER_REL_PATH`). A generic "body == render_template(params)" check would fire on every augmented tracker with a hand-written body — most of them — and the `render_template` is a context projection, not a body contract.
+
+Not run against the live catalog in this change: the tests reproduce the 2026-09-21 shape with seeded rows. Running `librarian(action="doctor")` on the host that holds the stale `params` is the real-world confirmation still owed.
 
 ## Tests added
 
-None — no fix was attempted. A regression test is owed with the fix and cannot be written before
-the mechanism is known: the assertion would have to name the write path that reverts the row.
+- `rendered_region_drift_is_silent_after_a_real_write_and_fires_when_params_are_older` (`legibility_scan/mod.rs`) — fixture is the writer's own output, not a hand-typed body; asserts silence in step, silence under trailing-whitespace noise, firing on older params, firing on row-only difference, silence when no managed heading.
+- `rendered_region_drift_fires_when_catalog_params_are_older_than_the_rendered_body` and `rendered_region_drift_ignores_other_artifacts_and_foreign_checkouts` (`doctor.rs`) — control first (in step = silent), then the stale-catalog case naming both sides and the do-not-rescan warning; foreign checkout is scoped out and the refusal announced.
+- Mutation probe: inverting the artifact-path filter in `scan_rendered_region_drift` reds both doctor tests.
+- `every_declared_check_is_scope_gated_or_a_named_exemption` and `admits_relevance_exemption_allow_list_stays_exhaustive_over_check_all` updated for the new checks.
 
 ## Workarounds
 
@@ -261,12 +264,9 @@ state and only one of them travels.
 
 ## Resume
 
-- The mechanism is open. The two live candidates are hypotheses 2 and 3; hypothesis 1 is refuted
-  in code and should not be re-opened.
-- Cheapest next step: ask the other hosts. `ripper-1848b7` inserted an `artifact_augmentation`
-  row for this id on 2026-09-14 — read *that* catalog's `scan_meta` and see which of the three
-  states it holds.
-- Do not run `legibility_scan(write=true)` on this artifact first; it overwrites both sides.
+- The mechanism that left this host's `params` behind is **still open**: hypotheses 2 (cross-host divergence) and 3 (backup restore) are untested and need another host's catalog. The detector does not answer it; it makes the next occurrence visible at the first `doctor` run instead of by accident.
+- Cheapest next step is unchanged: read `ripper-1848b7`'s `scan_meta` for `cd886c414f6751b4`.
+- Do not run `legibility_scan(write=true)` on this artifact before deciding which side is newer.
 
 ## References
 

@@ -121,6 +121,36 @@ pub fn artifact_collection_name(prefix: &str, project_root: &str) -> String {
     format!("{prefix}{sanitized}_{hash}")
 }
 
+/// A vector collection this backend's naming scheme has RETIRED but which still exists.
+///
+/// Reported, never reclaimed: see [`ArtifactVectorStore::retired_collections`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredCollection {
+    pub name: String,
+    /// Exact point count at the time of the call.
+    pub points: u64,
+}
+
+/// The collection names the Qdrant scheme has retired, derived from the store's own
+/// `prefix` (`{config_prefix}artifact_chunks_`) rather than hard-coded, so a
+/// `CODESCOUT_QDRANT_COLLECTION_PREFIX`-isolated run looks for ITS legacy collection and
+/// not a neighbour's. Before `6f032dbd` the single shared collection was
+/// `config.collection("artifacts")`.
+///
+/// Empty when `prefix` does not end in `artifact_chunks_`: then the config prefix cannot be
+/// recovered, and guessing one could name a collection that belongs to someone else — an
+/// absent finding is the honest answer to a question this function cannot ask.
+///
+/// Compiled for `server-stack` (its only non-test caller) **and for tests**, so its unit test
+/// runs in the default build rather than only under a feature no default gate lane enables.
+#[cfg(any(feature = "server-stack", test))]
+pub(crate) fn retired_collection_names(prefix: &str) -> Vec<String> {
+    match prefix.strip_suffix("artifact_chunks_") {
+        Some(base) => vec![format!("{base}artifacts")],
+        None => Vec::new(),
+    }
+}
+
 /// Backend-agnostic artifact vector store. Implementations:
 /// - [`QdrantArtifactStore`] — default.
 /// - [`SqliteVecArtifactStore`] — the daemon-free escape hatch.
@@ -179,6 +209,21 @@ pub trait ArtifactVectorStore: Send + Sync {
     /// boundary does not prove that the corpus contains no farther neighbors.
     fn max_knn_k(&self) -> usize {
         usize::MAX
+    }
+
+    /// Vector collections this backend's naming scheme has RETIRED that still exist, with
+    /// their exact point counts. **Read-only by contract — no implementation may delete,
+    /// and there is deliberately no `drop_retired` sibling.**
+    ///
+    /// The default is empty: a backend that never renamed its storage (sqlite-vec) has
+    /// nothing retired, and an in-memory test store has nothing to report. Only the Qdrant
+    /// backend overrides it, because its scheme is addressed by a name prefix that can
+    /// leave an old collection outside the namespace with no code path left to reach it
+    /// (`docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`).
+    ///
+    /// Same lock rule as every method here: never call it while holding the catalog lock.
+    async fn retired_collections(&self) -> Result<Vec<RetiredCollection>> {
+        Ok(Vec::new())
     }
 
     /// Dense KNN → ranked `(chunk_id, distance)` pairs, closest first.
@@ -381,6 +426,18 @@ impl ArtifactVectorStore for QdrantArtifactStore {
                 .await?;
         }
         Ok(total)
+    }
+
+    async fn retired_collections(&self) -> Result<Vec<RetiredCollection>> {
+        let mut out = Vec::new();
+        for name in retired_collection_names(&self.prefix) {
+            if !self.qdrant.collection_exists(&name).await? {
+                continue;
+            }
+            let points = self.qdrant.collection_point_count(&name).await?;
+            out.push(RetiredCollection { name, points });
+        }
+        Ok(out)
     }
 
     /// `project_id = Some` reads the active project's collection; `None` fans
@@ -749,6 +806,38 @@ mod backend_tests {
             Some(ArtifactBackend::SqliteVec)
         );
         assert_eq!(ArtifactBackend::parse("nonsense"), None);
+    }
+
+    /// The retired name is derived from the store's own prefix, so an isolated bench run
+    /// (`CODESCOUT_QDRANT_COLLECTION_PREFIX`) looks for ITS legacy collection, and a prefix that
+    /// cannot be traced back to the per-project scheme names nothing rather than guessing.
+    #[test]
+    fn the_retired_collection_name_follows_the_config_prefix_and_never_guesses() {
+        assert_eq!(
+            retired_collection_names("artifact_chunks_"),
+            vec!["artifacts".to_string()]
+        );
+        assert_eq!(
+            retired_collection_names("bench7_artifact_chunks_"),
+            vec!["bench7_artifacts".to_string()],
+            "an isolated run must not report the shared host's collection as its own"
+        );
+        assert!(
+            retired_collection_names("something_else_").is_empty(),
+            "a prefix that is not the per-project scheme's cannot yield a config prefix"
+        );
+    }
+
+    /// The default is empty — the sqlite-vec backend and the in-memory store have no retired
+    /// naming scheme, and must be silent without opting out. Pins the contract the doctor check's
+    /// control relies on.
+    #[tokio::test]
+    async fn a_store_that_keeps_the_default_has_nothing_retired() {
+        assert!(InMemoryArtifactStore::default()
+            .retired_collections()
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// Two projects sharing a basename get DIFFERENT collections.

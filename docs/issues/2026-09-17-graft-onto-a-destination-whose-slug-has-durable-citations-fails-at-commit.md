@@ -96,6 +96,8 @@ changing.
 
 Deliberately NOT done: re-pointing the displaced slug's rows (the `rekey.rs` style handler). Which slug survives a graft between two established artifacts is a product choice, and a refusal loses nothing. The `graft_rows` doc comment was rewritten from "precondition satisfied by accident" to describe the refusal.
 
+Fix commit: `1d76c5b0` on `worktree-agent-a14e953bad0fa514c`; patch-id `fb5f31daa6c74ffb1bded8d0c5032326a5def6f0` (survives rebase/cherry-pick). Archive once the gate is green on `experiments`.
+
 ## Tests added
 
 In `src/librarian/catalog/graft.rs`:
