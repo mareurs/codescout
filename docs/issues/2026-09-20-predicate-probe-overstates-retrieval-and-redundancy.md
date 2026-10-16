@@ -87,6 +87,37 @@ Deliberately NOT done, and the reason this stays open rather than archived: `cla
 
 No figure was recomputed and no historical rerun was performed, so the magnitudes of both errors remain unmeasured; 32.1% was left in place throughout as a correct measurement of a narrower thing.
 
+## Update 2026-10-16 — handle-matched fields added; status stays `investigating`
+
+Added to `scripts/probe-predicate-candidates.py`, **additively** (every existing key is byte-identical
+old versus new on one usage.db snapshot; verified by diffing the two `--json` outputs with the new keys
+stripped):
+
+- `q4.own_handle_referenced_later` matches the handle each overflow emitted (`emitted_output_id`)
+  against the handles later calls in the same `session_id` recorded as referenced (`read_output_ids`),
+  at horizons 1, 3, 10 calls and session end, side by side. It also reports
+  `overflowed_calls_without_handle` (unlinkable, excluded from every denominator) and
+  `next_call_queried_other_buffer` (the size of `classify_next`'s overcount).
+- `q2.repeat_with_identical_args_no_named_edit_between` drops re-reads that follow an
+  `edit_file`/`edit_code`/`create_file` naming the same path string. Still an upper bound.
+- An older db without the two columns degrades to "unlinkable" instead of failing.
+
+Measured on a copy of the live db (63,211 rows): 4,248 overflows, 600 unlinkable; of 3,652 linkable,
+own handle referenced at the next call 808 (22.12%), within 3 calls 1,135 (31.08%), within 10 1,400
+(38.34%), by session end 1,528 (41.84%). `classify_next`'s `queried_the_buffer` was 25.47% of all
+overflows, 175 of them an unrelated buffer. q2: 223 identical-args repeats (3.19% of 6,998 path
+reads), 202 (2.89%) with no named edit between.
+
+Tests: `tests/test_probe_predicate_candidates.py` (14 cases, all failing against the old script:
+the three counterexamples above plus unlinkable overflow, cross-session handle, malformed
+`read_output_ids`, malformed edit input, empty input, missing columns).
+
+**Not decided, because each changes what a recorded figure means:** which horizon (if any) is the
+retrieval figure, since "the next call" was the horizon that produced the overclaim; and whether to
+rename `queried_the_buffer` / `repeat_with_identical_args`, which would break comparability with the
+32.1% recorded in the research doc and handoff tracker. The handle is still a MENTION, not delivery of
+content that was needed. `docs/PROBES.md` is owned by another agent and does not yet name the new keys.
+
 ## References
 
 - `docs/research/2026-09-20-predicate-candidates-for-the-observer-phase.md`

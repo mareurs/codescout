@@ -114,6 +114,12 @@ def read_target(inp) -> str | None:
     if p.startswith(REF_PREFIXES):
         return None
     return p
+def read_target_of_edit(inp) -> str | None:
+    """The path string an edit call names, or None (malformed input, no path)."""
+    if not isinstance(inp, dict):
+        return None
+    p = inp.get("path") or inp.get("file_path") or inp.get("file")
+    return p if isinstance(p, str) and p else None
 
 
 def is_narrowed(inp) -> bool:
@@ -163,9 +169,14 @@ def load(db: Path, no_alias: bool):
     # Frozen cutoff: everything below describes rows <= max_id at this instant.
     max_id = cur.execute("SELECT MAX(id) FROM tool_calls").fetchone()[0]
     cols = {r[1] for r in cur.execute("PRAGMA table_info(tool_calls)")}
+    # emitted_output_id / read_output_ids (a832ae89) are absent from an older db: select NULL
+    # for them rather than fail, so q4 reports those overflows as unlinkable.
+    handle_cols = ", ".join(
+        c if c in cols else f"NULL AS {c}" for c in ("emitted_output_id", "read_output_ids")
+    )
     rows = cur.execute(
         "SELECT id, tool_name, called_at, latency_ms, outcome, overflowed, "
-        "       session_id, project_root, input_json, output_json "
+        f"       session_id, project_root, input_json, output_json, {handle_cols} "
         "FROM tool_calls WHERE id <= ? ORDER BY session_id, called_at, id",
         (max_id,),
     ).fetchall()
@@ -219,6 +230,9 @@ def q1(rows, cols, span, max_id, direct):
     }
 
 
+NAMED_EDIT_TOOLS = frozenset({"edit_file", "edit_code", "create_file"})
+
+
 def q2(rows):
     """Repeat reads of one path within one session.
 
@@ -233,12 +247,25 @@ def q2(rows):
     the same path is invisible and a correct re-read of CHANGED content lands
     here too. Argument equality is not result equality.
     docs/issues/2026-09-20-predicate-probe-overstates-retrieval-and-redundancy.md
+
+    `repeat_with_identical_args_no_named_edit_between` (added 2026-10-16) removes the
+    re-reads that follow an edit_file/edit_code/create_file naming the SAME path string in
+    the same session. It is still an UPPER bound on redundancy: a path spelled differently
+    (relative vs absolute), a write through run_command, a rename, or a `doc` write
+    changes content and is invisible here.
     """
     seen: dict[tuple, int] = defaultdict(int)
     seen_args: dict[tuple, int] = defaultdict(int)
-    total = first = any_rep = narrowed = identical = 0
+    seen_args_epoch: dict[tuple, int] = defaultdict(int)
+    epoch: dict[tuple, int] = defaultdict(int)
+    total = first = any_rep = narrowed = identical = identical_no_edit = 0
     depth = Counter()
     for r in rows:
+        if r["tool"] in NAMED_EDIT_TOOLS:
+            etgt = read_target_of_edit(jload(r["input_json"]))
+            if etgt is not None:
+                epoch[(r["session_id"], etgt)] += 1
+            continue
         if r["tool"] != "read_file":
             continue
         inp = jload(r["input_json"])
@@ -248,6 +275,7 @@ def q2(rows):
         total += 1
         k = (r["session_id"], tgt)
         ak = (r["session_id"], tgt, json.dumps(inp, sort_keys=True))
+        ek = ak + (epoch[k],)
         if seen[k] == 0:
             first += 1
         else:
@@ -256,8 +284,11 @@ def q2(rows):
                 narrowed += 1
             if seen_args[ak] > 0:
                 identical += 1
+            if seen_args_epoch[ek] > 0:
+                identical_no_edit += 1
         seen[k] += 1
         seen_args[ak] += 1
+        seen_args_epoch[ek] += 1
     for v in seen.values():
         depth[min(v, 10)] += 1
     return {
@@ -269,6 +300,9 @@ def q2(rows):
         "repeat_that_is_narrowing_pct": round(100.0 * narrowed / any_rep, 2) if any_rep else 0.0,
         "repeat_with_identical_args": identical,
         "repeat_with_identical_args_pct": round(100.0 * identical / total, 2) if total else 0.0,
+        "repeat_with_identical_args_no_named_edit_between": identical_no_edit,
+        "repeat_with_identical_args_no_named_edit_between_pct":
+            round(100.0 * identical_no_edit / total, 2) if total else 0.0,
         "distinct_session_path_pairs": len(seen),
         "visits_per_pair_distribution_capped_at_10": dict(sorted(depth.items())),
     }
@@ -334,6 +368,75 @@ def classify_next(prev, nxt):
     return "same_tool_other_args"
 
 
+def _read_handles(r) -> list[str]:
+    """The @ref handles a call recorded as referenced in its input (a MENTION, not a delivery).
+
+    `read_output_ids` is a JSON list on rows from a db that has the column, absent or NULL
+    otherwise; anything that is not a list of strings is treated as no handles.
+    """
+    ids = jload(r.get("read_output_ids"))
+    return [h for h in ids if isinstance(h, str)] if isinstance(ids, list) else []
+
+
+HANDLE_HORIZONS = (1, 3, 10)
+
+
+def own_handle_referenced_later(seq_by_session):
+    """Per overflowed call: does a LATER call in the same session reference ITS OWN handle?
+
+    Matches the handle the overflowing call emitted (`emitted_output_id`) against the handles later
+    calls recorded as referenced (`read_output_ids`), which `classify_next` never does. Reported at
+    several horizons side by side and no single one is chosen: "the next call" is itself a horizon,
+    and was the one that produced the overclaim. Handles are per-process counters or random ids, so
+    the match is confined to one session_id (per-process).
+
+    Still a MENTION, not a retrieval of needed content: a call that names the handle may be
+    reading a page of it, listing it, or acknowledging it. Overflows with no recorded handle
+    (`overflowed_calls_without_handle`) cannot be linked at all and are excluded from every ratio
+    denominator here, so they are not 'never retrieved' either.
+    """
+    linkable = unlinkable = 0
+    within = Counter()
+    ever = 0
+    other_buffer_next = 0
+    for seq in seq_by_session:
+        positions: dict[str, list[int]] = defaultdict(list)
+        for j, c in enumerate(seq):
+            for h in _read_handles(c):
+                positions[h].append(j)
+        for i, r in enumerate(seq):
+            if not r["overflowed"]:
+                continue
+            handle = r.get("emitted_output_id")
+            if not isinstance(handle, str) or not handle:
+                unlinkable += 1
+                continue
+            linkable += 1
+            later = [j for j in positions.get(handle, ()) if j > i]
+            gap = (later[0] - i) if later else None
+            if gap is not None:
+                ever += 1
+            for h in HANDLE_HORIZONS:
+                if gap is not None and gap <= h:
+                    within[h] += 1
+            nxt = seq[i + 1] if i + 1 < len(seq) else None
+            if gap != 1 and classify_next(r, nxt) == "queried_the_buffer":
+                other_buffer_next += 1
+    out = {
+        "overflowed_calls_without_handle": unlinkable,
+        "linkable_overflows": linkable,
+        **{f"within_{h}_calls": within[h] for h in HANDLE_HORIZONS},
+        "by_session_end": ever,
+        "next_call_queried_other_buffer": other_buffer_next,
+    }
+    out.update({
+        f"within_{h}_calls_pct": round(100.0 * within[h] / linkable, 2) if linkable else 0.0
+        for h in HANDLE_HORIZONS
+    })
+    out["by_session_end_pct"] = round(100.0 * ever / linkable, 2) if linkable else 0.0
+    return out
+
+
 def q4(rows):
     by_sess = defaultdict(list)
     for r in rows:
@@ -357,6 +460,8 @@ def q4(rows):
         "adjacent_pairs": adj,
         "adjacent_pairs_sharing_a_second": ties,
         "tie_pct": round(100.0 * ties / adj, 2) if adj else 0.0,
+        # ADDITIVE (2026-10-16): handle-matched, multi-horizon. The keys above keep their meaning.
+        "own_handle_referenced_later": own_handle_referenced_later(by_sess.values()),
     }
 
 
