@@ -1,7 +1,7 @@
 ---
 id: '95c954f2a7bd3f2d'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a dotenv-supplied CODESCOUT_EMBEDDER_MODEL_NAME silently outranks [embeddings].model, and the shadowing warning does not cover it'
 tags:
 - embeddings
@@ -9,6 +9,7 @@ tags:
 - dotenv
 - cluster/guard-narrower-than-its-name
 opened: 2026-10-06
+closed: 2026-10-16
 owner: marius
 related:
 - docs/issues/archive/2026-09-17-the-configured-embedding-model-is-discarded-whenever-a-url-is-set.md
@@ -62,20 +63,30 @@ The archived record `docs/issues/archive/2026-09-17-the-configured-embedding-mod
 
 ## Hypotheses tried
 
-None yet. A runtime check is the next step.
+1. **Hypothesis** — a dotenv-supplied `CODESCOUT_EMBEDDER_MODEL_NAME` shadows `[embeddings].model` with no warning. **Test** — read the five cited locations at `f5f1c6f7` (`RetrievalConfig::from_env_and_project` read the variable straight from `std::env`; `DotenvProvenance` had only `url`/`model`/`api_key`; `dotenv_shadowed_fields` could name only those three), then wrote tests that need the variable to be nameable. **Verdict** — confirmed. **Evidence** — the cited lines; the new tests do not compile before the fix (no `model_name` field) and, after it, each of the three conditions was mutated and killed (see Tests added). No end-to-end run on the real binary: the shadow decision is a pure predicate, and the warning is a `tracing::warn!` over its result.
 
 ## Fix
 
-Not started. Options:
+Implemented 2026-10-16 on branch `worktree-agent-a5de56cff4863b268`, commit `164e60d6` (not yet on `experiments`/master; re-cite the SHA after the merge).
 
-- Record dotenv provenance for `CODESCOUT_EMBEDDER_MODEL_NAME` in `EmbedEnv` and add `"model_name"` to `dotenv_shadowed_fields`. The fire condition stays the same: from the dotenv, non-blank, and the config layers set `model`.
-- Or state in the plan that the override is exempt, and say why.
+- `src/retrieval/config.rs`: `EmbedEnv` gained `model_name` (read once at the edge, blank-is-absent) and `DotenvProvenance` gained `model_name` (true when the key is in `dotenv_injected_keys()`). `dotenv_shadowed_fields` names `"model_name"` under the same three conditions as the other fields, judged against the config layers' own `[embeddings].model`. `from_env_and_project` now takes `dense_model_name_override` from that same `EmbedEnv` read, so the wire value and the warning cannot diverge.
+- `dotenv_shadow_warning(field)` owns the wording: `model_name` is printed as the variable shadowing `[embeddings].model`, not as a nonexistent `[embeddings].model_name` key, and its remedy does not say "move it to config.toml" (that would not carry the wire-name semantics).
+- `src/config/embedding_env.rs`: module doc now says `_NAME` is deliberately not an alias in `MODEL` and where it is read.
 
-Precedence must not change: the ruling keeps the override on top.
+Precedence is unchanged: the override still wins the wire name (pinned by the existing `build_http_embedder_lets_the_env_override_win_over_the_configured_model`).
 
 ## Tests added
 
-N/A — not fixed. A fix needs a test on the pure predicate, as the five existing ones, and a mutation check per condition.
+All in `src/retrieval/config.rs`, `merge_tests`:
+
+- `a_dotenv_model_name_that_overrides_a_configured_model_is_named`
+- `an_exported_model_name_is_silent` (condition 1, provenance)
+- `a_blank_dotenv_model_name_shadows_nothing` (condition 2, non-blank)
+- `a_dotenv_model_name_with_no_configured_model_is_silent` (condition 3, config sets `model`)
+- `model_name_provenance_is_independent_of_model_provenance`
+- `the_model_name_warning_names_the_variable_not_a_config_key_that_does_not_exist`
+
+Mutation checks, one per condition, each run and each killed: provenance replaced by `true` (2 tests red), configured-model operand replaced by a constant (1 red), non-blank check relaxed to `is_some()` (2 red, one of them the pre-existing url blank test). Mutants restored; `cargo test --lib -- retrieval::config config::` is green (218 passed).
 
 ## Workarounds
 
@@ -83,7 +94,7 @@ Export the variable in the MCP server's env block instead of the dotenv, where i
 
 ## Resume
 
-Run the reproduction on the real binary first. Then decide between the two fixes.
+N/A — fixed. Archive to `docs/issues/archive/` once `164e60d6` (or its cherry-pick) is on master (`git branch --contains <sha>`).
 
 ## References
 

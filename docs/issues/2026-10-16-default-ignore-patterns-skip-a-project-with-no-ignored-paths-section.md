@@ -1,7 +1,7 @@
 ---
 id: '90157cd66c15921c'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a project with no [ignored_paths] section gets no default ignore patterns in the code index'
 owners:
 - marius
@@ -11,11 +11,11 @@ tags:
 - config
 - indexing
 opened: 2026-10-16
+closed: 2026-10-16
 owner: marius
 related:
 - docs/superpowers/specs/2026-06-30-default-ignore-globs-design.md
 severity: medium
-unverified: With a global ~/.config/codescout/config.toml present, GlobalConfig::to_toml_value may emit an empty [ignored_paths] table, which would make the serde field default apply; not measured. Whether onboarding wrote the explicit `patterns = []` seen in local project.toml files is not established.
 ---
 
 # BUG: a project with no [ignored_paths] section gets no default ignore patterns in the code index
@@ -46,19 +46,39 @@ codescout, Linux, branch experiments, HEAD `a16f7d42`.
 - Provenance: found 2026-10-16 by the effort-steering Stage A critic experiment (a grounded critic reading the design against its snapshot `b9f63ee2`), verified at that snapshot by an independent verifier, and re-checked live at HEAD (`docs/research/2026-10-14-effort-steering-when-to-switch.md`).
 
 ## Hypotheses tried
-N/A — the cause is read from the code, not inferred.
+
+N/A — the cause was read from the code. Verification at `f5f1c6f7`: a new test loading a `project.toml` with no `[ignored_paths]` section, one with no `project.toml`, and `ProjectConfig::default_for` all returned `patterns == []` (3 red) while the present-section-without-key and explicit-`patterns = []` cases passed — exactly the split the issue describes.
+
+The `unverified:` frontmatter question, by reading only (not measured): `GlobalIgnoredPathsSection` has one `skip_serializing_if` field, so a present global config should re-serialise to an empty `[ignored_paths]` table and the serde default would apply there, meaning a machine with a global config got defaults and one without did not. Moot after the fix, since both paths now agree. Onboarding is where the explicit `patterns = []` came from, again by reading: `src/tools/onboarding.rs` builds the config with `Default::default()` and writes it with `toml::to_string_pretty`, which serialised the derived-empty list.
 
 ## Fix
-Not started. Likely shape: implement `Default` for `IgnoredPathsSection` by hand so `patterns` defaults to `default_ignored_patterns()`, keep an explicit `patterns = []` meaning "ignore nothing", and decide what onboarding writes. Already-written explicit `[]` lists are untouched by such a fix; whether to migrate them is an operator decision. The index prunes newly excluded files on the next sync (the design's self-healing step).
+
+Implemented 2026-10-16 on branch `worktree-agent-a5de56cff4863b268`, commit `80d4cb49` (not yet on `experiments`/master; re-cite the SHA after the merge). `src/config/project.rs`:
+
+- `IgnoredPathsSection` implements `Default` by hand: `patterns` is `default_ignored_patterns()`. Absent section, absent file, `default_for` and onboarding's `Default::default()` now agree with the present-table serde default. An explicit `patterns = []` still means "ignore nothing".
+- `patterns` carries `skip_serializing_if = is_default_ignored_patterns`. Without it, the whole-config write-backs (`onboarding.rs` creation and the two version-stamp rewrites) would write the 28 defaults into every `project.toml`, freezing them so a later default could never reach those projects. With it, an unmodified list stays implicit; a custom list or an explicit `[]` differs from the defaults and is still written, so a rewrite cannot flip an opt-out.
+
+Decision taken on the issue's open question: onboarding writes no `patterns` key for a default config (so new projects follow future defaults). Already-written explicit `patterns = []` files (5 on this machine) are untouched; migrating them is still the operator's call.
 
 ## Tests added
-None yet — a regression test should load a config with no `[ignored_paths]` section and assert the defaults.
+
+All in `src/config/project.rs` `tests`:
+
+- `absent_ignored_paths_section_gets_default_patterns` (red before the fix)
+- `missing_project_toml_gets_default_patterns` (red before)
+- `default_for_and_default_agree_on_default_patterns` (red before)
+- `ignored_paths_section_without_patterns_key_gets_default_patterns` (guard, green before and after)
+- `explicit_empty_patterns_still_means_ignore_nothing` (guard)
+- `default_patterns_are_not_frozen_into_a_written_project_toml`, `explicit_empty_patterns_survive_a_serialise_round_trip` (guard the write-back half of the fix)
+
+`cargo test --lib` over the whole lib: 6876 passed, 2 failed (`util::path_security::tests::write_to_tmp_allowed`, `tools::read_file::buffer_edge_tests::siblings_go_before_breadcrumb_and_the_pair_is_judged_together`); neither file mentions ignored paths, both fail deterministically on a rerun, and they were not run on a clean baseline.
 
 ## Workarounds
 Add `[ignored_paths]` without `patterns`, or with an explicit list, to the project's `project.toml`.
 
 ## Resume
-Decide the onboarding behaviour, then make the absent-section case return the defaults, with the regression test above.
+
+N/A — fixed. Archive to `docs/issues/archive/` once `80d4cb49` (or its cherry-pick) is on master (`git branch --contains <sha>`).
 
 ## References
 - `docs/superpowers/specs/2026-06-30-default-ignore-globs-design.md`
