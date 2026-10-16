@@ -11,7 +11,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
 severity: low
-unverified: 'PARTIAL FIX (34d39567): a missing guide file is now refused apart from ''no rules matched''. NOT done: signature authoring for the nine other topics. It is blocked on two design decisions (the probe''s tool scope, and a (topic, heading) key) and, for four topics, on evidence that does not exist; see ## Partial fix, Update 2026-10-06. The marker-form decision was built on 2026-10-10.'
+unverified: 'PARTIAL FIX (2026-10-16, ec439798): keyed by (topic, heading), librarian signatures authored and checked on real transcripts, the other eight topics refused with a recorded reason. NOT done: a tool scope for progressive-disclosure, symbol-navigation and workspace-state (injected in 57%, 62% and 10% of sessions but carried by tools scan_transcript does not count), which is a design decision, and four topics (error-handling, iron-laws-detail, librarian-runtime, untrusted-content) have no injection anywhere so no positive control can exist. Python tests are hand-run only (no gate or CI lane runs tests/test_*.py).'
 ---
 
 ## Summary
@@ -51,6 +51,25 @@ What is NOT covered: authoring `SECTION_SIGNATURES` for the other nine topics, s
 - The probe cannot see section-grain injections of `librarian`. That is filed as `15d81831913d045e`, and fixed and archived on 2026-10-10 (see the archived record).
 
 Decisions needed before anyone authors: widen the tool scope per topic, or declare those seven topics out of scope; and key by `(topic, heading)`. The third decision, matching the `§ <heading>` marker form, was made and built on 2026-10-10. After those, `librarian` is the only topic with a feasible population.
+
+## Partial fix (2026-10-16)
+
+- **SHA:** `ec439798` (`worktree-agent-a547c2640763139eb`, to be rebased onto `experiments` by the lead)
+- **patch-id:** `57b119b84b0b47a7b989f001c049b0f94e37e64b`
+
+What is covered, each verified at the bytes on real transcripts (3,094 transcript files copied to a scratch directory, scripts run with `python3 -I`):
+
+- **`(topic, heading)` key.** `SECTION_SIGNATURES` is `topic -> heading -> rules`; `signatures_for(topic)` is the one reader. Collisions measured in the guides: `Related` in four, `Anti-patterns` and `Path-relative annotation` in two, `(preamble)` in all ten. Mutated back to a heading-only lookup, four of the new tests fail.
+- **`librarian` signatures.** 11 of its 14 `##` sections have rules, read off the section text and its `serves:` declaration. Run over 712 sessions (258 main, 454 subagent): main 44.2% never-engaged, subagent 88.1%, sampled by hand with `--explain`: `merge_worktree`, `event_create/list`, `link`, `move`, `status: archived` and `commit_refresh` calls each credit the section they should. Self-trigger control: a `create_file` carrying the same words engages nothing (unit test). Unruled, with the reason in the source: `Common Mistakes` (prose across every shape) and `Runtime tips` (a pointer).
+- **`tracker-conventions` unchanged.** Same run before and after: 141 main sessions, 104/105/64/19/41/132 sessions engaging the six ruled sections, 70 subagent sessions 1/2/0/0/0/30. The new `###` headings do not move the probe's `##` grain.
+- **The other eight topics are refused with a recorded reason** (`UNMEASURABLE_TOPICS`), and `topics_unaccounted_for()` is empty, so a new guide registered in `TOPICS` with neither rules nor a reason is a failing test, not a silent gap. Four have **no population** (error-handling, iron-laws-detail, librarian-runtime, untrusted-content: 0 injections in 2,411 sessions, so no positive control can exist). Four are injected but **out of the probe's tool scope** (progressive-disclosure 57% of sessions, symbol-navigation 62%, workspace-state 10%, project-activation-bootstrap 95% as the session opener).
+- **`report()` scores only ruled sections** and names the rest `NOT SCORED`, so an unruled section no longer counts its bytes as never-engaged by construction. It now also states that `delivered` assumes whole-topic delivery, which is false for `librarian` and, since d34c398e, for `tracker-conventions`.
+
+Tests: `tests/test_probe_section_signatures.py` (13 cases, hand-run like the rest of `tests/test_*.py`).
+
+**Reading the librarian non-zeros:** a `librarian` section is delivered BY the call shape its rule then matches, so a later call of that shape scores it engaged. Only its zeros carry information; e.g. `Worktree overlay` was engaged by 0 of 454 subagent sessions and 11 of 258 main sessions.
+
+**Not done, and not an authoring task:** a tool scope per topic for progressive-disclosure, symbol-navigation and workspace-state. Widening `scan_transcript` beyond doc/librarian is what once scored all six tracker-conventions sections at 100% from the `create_file` that wrote the script, so each tool added needs its own self-trigger control. Options and evidence were sent to the lead; until it is decided those three stay refused with `OUT OF SCOPE (decision pending)`.
 
 ## Resume
 
