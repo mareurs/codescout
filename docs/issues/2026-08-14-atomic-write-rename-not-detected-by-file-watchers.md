@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: zombie
 tags:
 - cluster/gate-keyed-on-unobservable-event
 - fs
@@ -11,6 +11,8 @@ opened: 2026-08-14
 owner: marius
 related: []
 severity: medium
+last_observed: 2026-06-09
+unverified: "Windows half never reproduced or A/B-tested from any host available to codescout; no Windows machine, no wine watchfiles harness. Re-open trigger: a controlled Windows A/B (see Resume) or a second sibling-repo report."
 ---
 
 # BUG: `atomic_write`'s temp-file-then-rename pattern is not detected by dev-server file watchers (uvicorn `--reload` / watchfiles) on Windows
@@ -105,6 +107,24 @@ N/A — root cause unconfirmed, no fix implemented.
 Full backend restart after every codescout edit when running a hot-reload
 dev server on Windows, until this is confirmed/resolved (workaround
 documented independently in the MRP project).
+
+## Status: zombie (2026-10-16, wave-3 devtools sweep)
+
+Not reproducible from here, so no code change was made. Checked at the bytes:
+
+- `scripts/dev.sh` (the dev-server launcher named in the Mercury MRP report) does **not exist in this repo**
+  (`ls scripts/dev.sh` -> No such file). The `uvicorn --reload` setup lives in the sibling repo, so there is no
+  in-repo script to adjust.
+- `atomic_write` is still `src/util/fs.rs:105-128`: sibling `<filename>.tmp`, `std::fs::rename`, no mtime touch.
+- The host is Linux (`uname`: Linux 7.2.8-zen). `watchfiles` is not installed and the defect is claimed to be
+  Windows-only. The 2026-09-25 Linux control already showed the temp-then-rename shape is visible there.
+
+Untested options if a Windows A/B ever confirms it: (a) set the target's mtime after the rename (a behaviour change
+on every write path, benefit unproven), or (b) document the interaction and keep the crash-safety property. Choosing
+between them is a policy decision, not made here.
+
+**Re-open trigger:** a controlled Windows A/B (`## Resume`) shows the watcher missing the codescout write, or a second
+downstream repo reports stale hot-reload after a codescout edit.
 
 ## Resume
 Set up a minimal Windows `uvicorn --reload` (or a bare `watchfiles` Python
