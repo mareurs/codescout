@@ -637,8 +637,14 @@ impl LibrarianAdapter {
 /// array, plus `path` inside a `doctor`-style `violations` array — deliberately shallow. A
 /// deep walk over an arbitrarily large response to choose a guide would cost more than the
 /// guide saves, and the shallow form covers the shapes that actually carry a path:
-/// `get`/`create`/`update`/`move` return one at the top level, `find` returns them per
-/// item, `doctor` returns them per violation under a differently-named key.
+/// `get`/`create` return one at the top level, `find` returns them per item, `doctor`
+/// returns them per violation under a differently-named key. **`update` and `move` do
+/// NOT** (measured 2026-10-16 against a `docs/trackers/` artifact: `update` returns
+/// `{id, updated}`, `move` returns `old_abs_path`/`new_abs_path`, keys this scan does not
+/// read), nor do `append_entry`, `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` or
+/// `augment` — so those calls route to `librarian`, and the `tracker-conventions` sections
+/// that need them are pull-only. See
+/// `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
 ///
 /// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*
 /// rather than as an error — see

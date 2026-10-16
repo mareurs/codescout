@@ -13,7 +13,7 @@ opened: 2026-08-31
 owner: marius
 related: []
 severity: high
-unverified: 'TRACKED 084e2642586069b3 — Cost, not correctness. Reachability is fixed, mutation-verified, and confirmed live 2026-08-31 09:49Z. What remains: a session''s FIRST tracker-path-naming call still ships tracker-conventions WHOLE (39,106 B) and no section — deliberate, since that route closed 32736ca0 — so the 26x overshoot stands on that one call until tracker-conventions adopts `serves:`. See § Resume item 1.'
+unverified: 'TRACKED b9eec23561e3299b — the first-call cost is closed for doc.create, doc.get and doc.find (084e2642586069b3 fixed 2026-10-16: tracker-conventions now declares serves: sections). What remains is that the sections a write needs (update, append_entry, move) are unreachable because those results name no scanned path.'
 ---
 
 # BUG: a guide section can declare a call's shape, pass every test, and still never be delivered — because the TOPIC router picks a different topic from the result's content
