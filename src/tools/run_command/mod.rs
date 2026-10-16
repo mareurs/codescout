@@ -480,8 +480,12 @@ impl Tool for RunCommand {
 
         // Only a call that returned `Ok` ran a command to the end of its call; an `Err`
         // (refused, malformed, failed to spawn) records no observation rather than "unchanged".
-        if let (Some(observation), Ok(_)) = (observation, &result) {
-            observation.finish().await;
+        // So does a command HELD for acknowledgement: it is `Ok` but ran nothing, and its
+        // replay is what gets observed.
+        if let (Some(observation), Ok(value)) = (observation, &result) {
+            if value.get("pending_ack").is_none() {
+                observation.finish().await;
+            }
         }
         result
     }
