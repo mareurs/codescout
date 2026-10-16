@@ -73,6 +73,10 @@ pub async fn embed_document_pooled(
 ///
 /// **Always lossless.** Concatenating the returned segments reproduces `content` byte for
 /// byte: a cut never discards whitespace, it leaves it on the earlier segment.
+///
+/// **No whitespace-only segment** unless it cannot be avoided within the budget (see
+/// [`absorb_blank_segments`]): the embedder refuses a blank input, and one refused segment
+/// leaves the whole document without a vector.
 pub fn segment_for_budget(content: &str, budget_chars: usize) -> Vec<String> {
     let budget = budget_chars.max(1);
     let mut out: Vec<String> = Vec::new();
@@ -101,6 +105,7 @@ pub fn segment_for_budget(content: &str, budget_chars: usize) -> Vec<String> {
     if !cur.is_empty() {
         out.push(cur);
     }
+    absorb_blank_segments(&mut out, budget);
     out
 }
 
@@ -142,6 +147,8 @@ fn split_long_line(line: &str, budget: usize, out: &mut Vec<String>) {
         // 1. The last entry marker starting inside the qualifying part of the window. The
         //    haystack runs a marker's length past the window so one that straddles the
         //    window end is still seen (it is cut BEFORE, so only its start must be inside).
+        //    The piece it leaves must hold content: a cut that leaves only whitespace
+        //    would emit a segment the embedder refuses.
         let mut hay_end = (window_end + ENTRY_MARKER.len()).min(rest.len());
         while !rest.is_char_boundary(hay_end) {
             hay_end -= 1;
@@ -149,14 +156,18 @@ fn split_long_line(line: &str, budget: usize, out: &mut Vec<String>) {
         let at_marker = rest[..hay_end]
             .rmatch_indices(ENTRY_MARKER)
             .map(|(i, _)| i)
-            .find(|&i| i <= window_end && i >= min_fill);
+            .find(|&i| i <= window_end && i >= min_fill && has_content(&rest[..i]));
 
-        // 2. Just after the last whitespace char of the window.
+        // 2. Just after the last whitespace char of the window, again only if the piece
+        //    before it holds content (a long whitespace run in the window's second half
+        //    would otherwise be cut off as a whitespace-only segment).
         let after_space = || {
             rest[..window_end]
                 .char_indices()
                 .rev()
-                .find(|&(i, c)| c.is_whitespace() && i + c.len_utf8() >= min_fill)
+                .find(|&(i, c)| {
+                    c.is_whitespace() && i + c.len_utf8() >= min_fill && has_content(&rest[..i])
+                })
                 .map(|(i, c)| i + c.len_utf8())
         };
 
@@ -164,6 +175,119 @@ fn split_long_line(line: &str, budget: usize, out: &mut Vec<String>) {
         let cut = at_marker.or_else(after_space).unwrap_or(window_end);
         out.push(rest[..cut].to_string());
         rest = &rest[cut..];
+    }
+}
+
+/// Whether `s` holds anything but whitespace — what `RemoteEmbedder::embed` tests
+/// (`!t.trim().is_empty()`) before refusing an input.
+fn has_content(s: &str) -> bool {
+    s.chars().any(|c| !c.is_whitespace())
+}
+
+/// Byte offsets inside `s` at which the tail handed to a following blank segment could
+/// start, best first: the last whole word, then just the last non-whitespace char. Only
+/// offsets that leave `s[..at]` with content qualify, so `s` is never itself made blank.
+fn tail_steal_points(s: &str) -> Vec<usize> {
+    let Some((last, _)) = s.char_indices().rev().find(|(_, c)| !c.is_whitespace()) else {
+        return Vec::new();
+    };
+    let word_start = s[..last]
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map_or(0, |(i, c)| i + c.len_utf8());
+    [word_start, last]
+        .into_iter()
+        .filter(|&at| at > 0 && has_content(&s[..at]))
+        .collect()
+}
+
+/// The mirror of [`tail_steal_points`]: offsets just past the first whole word (leading
+/// whitespace included), then just past the first non-whitespace char, that leave
+/// `s[at..]` with content.
+fn head_steal_points(s: &str) -> Vec<usize> {
+    let Some((first, c)) = s.char_indices().find(|(_, c)| !c.is_whitespace()) else {
+        return Vec::new();
+    };
+    let one_char = first + c.len_utf8();
+    let word_end = s[first..]
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace())
+        .map_or(s.len(), |(i, _)| first + i);
+    [word_end, one_char]
+        .into_iter()
+        .filter(|&at| at < s.len() && has_content(&s[at..]))
+        .collect()
+}
+
+/// Make no segment whitespace-only, so none is refused by the embedder.
+///
+/// `RemoteEmbedder::embed` bails on an all-whitespace input, and `embed_artifact` /
+/// `embed_document_pooled` propagate it: one blank segment leaves the whole document with
+/// NO vector. Blank segments arise two ways: a cut in a long line that leaves a run of
+/// whitespace on its own, and a group of blank lines flushed ahead of a long line (an
+/// untitled artifact is composed as `"\n\n{body}"`).
+///
+/// Each blank segment is, in order: appended to the previous segment; prepended to the
+/// next; or, when neither neighbour has room, given the last word (else last char) of the
+/// previous segment, or the first word (else first char) of the next — whichever lets the
+/// result stay within `budget`. Every step is a byte-exact move of text between neighbours
+/// on char boundaries, so the concatenation is unchanged.
+///
+/// **Limits, stated rather than hidden.** A blank segment no neighbour can absorb within
+/// the budget stays blank: a whitespace run longer than the budget, or a budget so small a
+/// lone newline cannot join anything. Input that is blank throughout is left as is, since
+/// there is nothing to merge a blank segment into. This pass never exceeds `budget`; a
+/// blank segment is the lesser evil only where the alternative is an oversize request.
+///
+/// Terminates: each step shortens `segs` or turns a blank segment into one with content,
+/// otherwise the index advances.
+fn absorb_blank_segments(segs: &mut Vec<String>, budget: usize) {
+    if !segs.iter().any(|s| has_content(s)) {
+        return;
+    }
+    let chars = |s: &str| s.chars().count();
+    let mut i = 0;
+    while i < segs.len() {
+        if has_content(&segs[i]) {
+            i += 1;
+            continue;
+        }
+        let n = chars(&segs[i]);
+
+        if i > 0 && chars(&segs[i - 1]) + n <= budget {
+            let blank = segs.remove(i);
+            segs[i - 1].push_str(&blank);
+            continue;
+        }
+        if i + 1 < segs.len() && n + chars(&segs[i + 1]) <= budget {
+            let blank = segs.remove(i);
+            segs[i].insert_str(0, &blank);
+            continue;
+        }
+        if i > 0 {
+            let prev = &segs[i - 1];
+            let at = tail_steal_points(prev)
+                .into_iter()
+                .find(|&at| chars(&prev[at..]) + n <= budget);
+            if let Some(at) = at {
+                let tail = segs[i - 1].split_off(at);
+                segs[i].insert_str(0, &tail);
+                continue;
+            }
+        }
+        if i + 1 < segs.len() {
+            let next = &segs[i + 1];
+            let at = head_steal_points(next)
+                .into_iter()
+                .find(|&at| n + chars(&next[..at]) <= budget);
+            if let Some(at) = at {
+                let head: String = segs[i + 1].drain(..at).collect();
+                segs[i].push_str(&head);
+                continue;
+            }
+        }
+        i += 1;
     }
 }
 
@@ -355,5 +479,132 @@ mod segment_tests {
                 "seven\n".to_string()
             ]
         );
+    }
+
+    fn is_blank(s: &str) -> bool {
+        s.chars().all(char::is_whitespace)
+    }
+
+    /// The reviewer's confirmed repro: a whitespace run between two over-budget tokens used
+    /// to come out as its own all-whitespace segment, which `RemoteEmbedder::embed` refuses —
+    /// and `embed_artifact` propagates that, so the whole document got NO vector.
+    #[test]
+    fn a_blank_run_between_two_long_tokens_is_not_its_own_segment() {
+        let text = format!("{}{}{}", "x".repeat(100), " ".repeat(60), "y".repeat(100));
+        let segs = segment_for_budget(&text, 100);
+        assert_eq!(segs.concat(), text);
+        assert!(
+            segs.iter().all(|s| !is_blank(s)),
+            "whitespace-only segment emitted: {:?}",
+            segs.iter().map(|s| s.chars().count()).collect::<Vec<_>>()
+        );
+        assert!(segs.iter().all(|s| s.chars().count() <= 100));
+    }
+
+    /// A line ending in a blank run longer than the room left after a hard cut left the run
+    /// as a lone final segment.
+    #[test]
+    fn a_trailing_blank_run_is_absorbed() {
+        let text = format!("{}{}", "x".repeat(100), " ".repeat(5));
+        let segs = segment_for_budget(&text, 100);
+        assert_eq!(segs.concat(), text);
+        assert!(segs.iter().all(|s| !is_blank(s)), "{segs:?}");
+        assert!(segs.iter().all(|s| s.chars().count() <= 100));
+    }
+
+    /// `embed_artifact` composes `"{title}\n\n{body}"`, so an untitled artifact whose first
+    /// line is over budget starts with a blank `"\n\n"` group that the long line then flushed
+    /// as a segment of its own — the same defect, reachable from the old code too.
+    #[test]
+    fn a_leading_blank_group_before_a_long_line_is_absorbed() {
+        let text = format!("\n\n{}", "x".repeat(250));
+        let segs = segment_for_budget(&text, 100);
+        assert_eq!(segs.concat(), text);
+        assert!(segs.iter().all(|s| !is_blank(s)), "{segs:?}");
+        assert!(segs.iter().all(|s| s.chars().count() <= 100));
+    }
+
+    /// Input that is blank all the way through has nothing to merge a blank segment INTO;
+    /// it is returned as it always was, rather than concatenated into one oversize piece.
+    #[test]
+    fn input_that_is_blank_throughout_is_left_alone() {
+        let text = " ".repeat(250);
+        let segs = segment_for_budget(&text, 100);
+        assert_eq!(segs.concat(), text);
+        assert!(segs.iter().all(|s| s.chars().count() <= 100));
+    }
+
+    /// PROPERTY: whenever the input holds non-whitespace and its longest whitespace run is at
+    /// most an eighth of the budget, NO segment is whitespace-only, and every segment stays
+    /// within the budget. (A run longer than the budget cannot be absorbed within it, and at
+    /// budget 1 a lone newline cannot join anything; those are the documented limits, which
+    /// is why the property is gated on the run length.)
+    #[test]
+    fn no_segment_is_whitespace_only_when_it_can_be_avoided() {
+        for seed in 1..=1500u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let len = 1 + rng.below(400);
+            let text = random_text(&mut rng, len);
+            if is_blank(&text) {
+                continue;
+            }
+            let mut max_run = 0usize;
+            let mut run = 0usize;
+            for c in text.chars() {
+                run = if c.is_whitespace() { run + 1 } else { 0 };
+                max_run = max_run.max(run);
+            }
+            for budget in [8usize, 13, 40, 97, 300] {
+                if max_run * 8 > budget {
+                    continue;
+                }
+                let segs = segment_for_budget(&text, budget);
+                assert_eq!(segs.concat(), text, "seed={seed} budget={budget}");
+                for s in &segs {
+                    assert!(
+                        !is_blank(s),
+                        "seed={seed} budget={budget}: whitespace-only segment {s:?}"
+                    );
+                    assert!(
+                        s.chars().count() <= budget,
+                        "seed={seed} budget={budget}: segment over budget"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The failure being prevented, with the REAL refusal as the oracle: `RemoteEmbedder::embed`
+    /// bails on a whitespace-only input before any network call. Each segment of the repro is
+    /// sent to a real embedder aimed at a dead port with a single attempt; the only outcome
+    /// that matters is that none is refused as empty/whitespace (a connect error is expected
+    /// and fine).
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn no_segment_of_the_repro_meets_the_real_embedders_blank_refusal() {
+        use codescout_embed::Embedder;
+        let emb =
+            codescout_embed::remote::RemoteEmbedder::from_url("http://127.0.0.1:1", "m", None)
+                .unwrap()
+                .with_max_attempts(1);
+        // The oracle itself must fire on a blank input, or the loop below proves nothing.
+        let refusal = emb.embed(&["   "]).await.unwrap_err().to_string();
+        assert!(refusal.contains("empty/whitespace"), "{refusal}");
+
+        let text = format!(
+            "\n\n{}{}{}",
+            "x".repeat(100),
+            " ".repeat(60),
+            "y".repeat(100)
+        );
+        for seg in segment_for_budget(&text, 100) {
+            if let Err(e) = emb.embed(&[seg.as_str()]).await {
+                assert!(
+                    !e.to_string().contains("empty/whitespace"),
+                    "segment of {} chars was refused as blank",
+                    seg.chars().count()
+                );
+            }
+        }
     }
 }

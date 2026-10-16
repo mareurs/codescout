@@ -702,6 +702,15 @@ pub async fn probe_ollama(host: &str) -> anyhow::Result<()> {
 /// server must cost a missing log line, never a delayed one that blocks anything.
 pub const CEILING_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Most bytes of one probe response that are read (256 KiB).
+///
+/// Measured 2026-10-16 against the live llama-server: `/slots` is 18 039 bytes for 16 slots
+/// (about 1.1 KB a slot) and `/v1/models` is 585, so this admits roughly 230 slots. The cap
+/// exists because the probe's URL is configuration: a hostile or broken endpoint could
+/// otherwise stream into memory for the whole of [`CEILING_PROBE_TIMEOUT`]. A larger body is
+/// treated as a probe failure, never parsed from a prefix.
+pub const CEILING_PROBE_MAX_BODY: usize = 256 * 1024;
+
 /// Ask an embedding server for the largest input it will accept, without embedding anything.
 ///
 /// Two read-only GETs against the server root derived from `embedder_url` (a bare host, a
@@ -723,6 +732,12 @@ pub async fn probe_embed_ceiling(embedder_url: &str) -> crate::ceiling::EmbedCei
 
 /// [`probe_embed_ceiling`] with an explicit per-request timeout, so a test can exercise the
 /// timeout arm in milliseconds rather than waiting out the production bound.
+///
+/// **The URL is configuration, so the probe does not trust where it leads.** Redirects are
+/// disabled — reqwest would otherwise follow up to 10 to ANY host, sending this GET somewhere
+/// the operator never named — and a 3xx is simply "unknown". A body is read as a stream and
+/// abandoned past [`CEILING_PROBE_MAX_BODY`], so the 2 s timeout is not the only bound on
+/// what a hostile endpoint can make this process hold.
 pub async fn probe_embed_ceiling_with_timeout(
     embedder_url: &str,
     timeout: std::time::Duration,
@@ -730,17 +745,36 @@ pub async fn probe_embed_ceiling_with_timeout(
     // Same reason as `probe_ollama`: `ClientBuilder::build()` panics without a default
     // rustls provider, whatever the URL scheme.
     RemoteEmbedder::install_default_crypto_provider();
-    let Ok(client) = reqwest::Client::builder().timeout(timeout).build() else {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    else {
         return crate::ceiling::EmbedCeiling::default();
     };
     let root = crate::normalize_embeddings_base(embedder_url);
 
     async fn get_json(client: &reqwest::Client, url: String) -> Option<serde_json::Value> {
-        let resp = client.get(url).send().await.ok()?;
+        let mut resp = client.get(url).send().await.ok()?;
         if !resp.status().is_success() {
             return None;
         }
-        resp.json().await.ok()
+        // A declared length over the cap is refused before reading a byte; the streamed
+        // count below covers a server that omits or understates it.
+        if resp
+            .content_length()
+            .is_some_and(|n| n > CEILING_PROBE_MAX_BODY as u64)
+        {
+            return None;
+        }
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = resp.chunk().await.ok()? {
+            if body.len() + chunk.len() > CEILING_PROBE_MAX_BODY {
+                return None;
+            }
+            body.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&body).ok()
     }
 
     let (slots, models) = tokio::join!(
@@ -1096,6 +1130,92 @@ mod tests {
         .await
         .expect("probe must honour its own timeout");
         assert_eq!(got, crate::ceiling::EmbedCeiling::default());
+    }
+
+    /// Loopback server that answers EVERY request with a 302 to `location`.
+    async fn spawn_redirecting_server(location: String) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let location = location.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 302 Found\r\nLocation: {location}\r\n\
+                                 Content-Length: 0\r\nConnection: close\r\n\r\n"
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// reqwest follows up to 10 redirects to ANY host by default. The probe's URL is
+    /// configuration, and a redirect must not be able to aim its GET somewhere the operator
+    /// never named. The target here answers with a perfectly valid `/slots` document, so a
+    /// followed redirect would be visible both as a hit and as a reported ceiling.
+    #[tokio::test]
+    async fn a_redirect_is_not_followed_to_another_host() {
+        let (target, target_seen) = spawn_route_server(vec![
+            ("/slots", 200, LIVE_SLOTS),
+            ("/v1/models", 200, LIVE_MODELS),
+        ])
+        .await;
+        let redirector = spawn_redirecting_server(format!("{target}/slots")).await;
+
+        let got = super::probe_embed_ceiling(&redirector).await;
+
+        assert_eq!(
+            got,
+            crate::ceiling::EmbedCeiling::default(),
+            "a redirect target's answer must not be reported as this server's ceiling"
+        );
+        assert!(
+            target_seen.lock().unwrap().is_empty(),
+            "the redirect target was contacted: {:?}",
+            target_seen.lock().unwrap()
+        );
+    }
+
+    /// A body is read only up to `CEILING_PROBE_MAX_BODY`; past it the probe fails soft.
+    /// The document is VALID and would parse to a ceiling if read whole, so a pass means the
+    /// cap fired rather than the JSON being unusable.
+    #[tokio::test]
+    async fn an_oversized_body_fails_soft_instead_of_being_read_whole() {
+        let padding = " ".repeat(super::CEILING_PROBE_MAX_BODY + 1024);
+        let body: &'static str =
+            Box::leak(format!(r#"[{{"n_ctx":4096}}{padding}]"#).into_boxed_str());
+        let (url, _) = spawn_route_server(vec![("/slots", 200, body)]).await;
+
+        let got = super::probe_embed_ceiling(&url).await;
+
+        assert_eq!(
+            got.per_slot_ctx, None,
+            "an over-cap body must not be parsed"
+        );
+    }
+
+    /// The cap sits above what a real server sends: the live llama-server answers `/slots`
+    /// with 18 KB for 16 slots, so a body just under the cap must still be read.
+    #[tokio::test]
+    async fn a_body_just_under_the_cap_is_still_read() {
+        let padding = " ".repeat(super::CEILING_PROBE_MAX_BODY - 64);
+        let body: &'static str =
+            Box::leak(format!(r#"[{{"n_ctx":4096}}{padding}]"#).into_boxed_str());
+        let (url, _) = spawn_route_server(vec![("/slots", 200, body)]).await;
+
+        let got = super::probe_embed_ceiling(&url).await;
+
+        assert_eq!(got.per_slot_ctx, Some(4096));
     }
 
     /// A peer that completes the TCP handshake and then goes silent is the shape

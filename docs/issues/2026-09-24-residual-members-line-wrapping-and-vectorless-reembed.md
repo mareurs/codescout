@@ -66,6 +66,46 @@ Lines at or under the budget and the newline-joined path are untouched.
 - **SHA:** `a5c3adcc` (branch `worktree-agent-aa5d85ef986eb51aa`, on top of `experiments` `3923da8c`)
 - **patch-id:** `40a6d107bfdc50c2b93a032f2e2b9cc1ccba3786`
 
+### Review follow-up 2026-10-16: no segment may be whitespace-only
+
+An Opus review of the integrated branch confirmed on a verbatim copy that the first cut
+could emit an all-whitespace segment: `"x"*100 + " "*60 + "y"*100` at budget 100 gave
+`[x100][60 spaces][y100]`, where the old code gave none. `RemoteEmbedder::embed` refuses an
+all-whitespace input (`crates/codescout-embed/src/remote.rs`, `embed`), and `embed_artifact`
+and `embed_document_pooled` propagate the error, so such a document would have got NO
+vector. Reproduced at the bytes before the fix, including end to end: with a double that
+returns the real refusal message, `embed_artifact` failed. A second shape was found while
+tracing it: `embed_artifact` composes `"{title}\n\n{body}"`, so an untitled artifact whose
+first line is over budget starts with a blank `"\n\n"` group that the long line flushed as
+a segment of its own. That one also fails under the pre-change code.
+
+Fixed in two layers (`src/embed/document.rs`):
+
+1. Cut candidates (marker and whitespace) must leave a piece that holds non-whitespace.
+2. `absorb_blank_segments` runs last. Each blank segment joins the previous segment, else
+   the next, else takes the last word (or char) of the previous segment or the first word
+   (or char) of the next, whichever stays within the budget. All moves are byte-exact between
+   neighbours on char boundaries, so the concatenation is unchanged.
+
+**Documented limits.** A blank segment no neighbour can absorb within the budget stays blank:
+a whitespace run longer than the budget, or a budget so small that a lone newline cannot join
+anything (budget 1). Input that is blank throughout is left as it was. The pass never exceeds
+the budget.
+
+Tests, red first (each failed on the code as reviewed): four shape tests (`a_blank_run_between_two_long_tokens_is_not_its_own_segment`,
+`a_trailing_blank_run_is_absorbed`, `a_leading_blank_group_before_a_long_line_is_absorbed`,
+`input_that_is_blank_throughout_is_left_alone`); the property
+`no_segment_is_whitespace_only_when_it_can_be_avoided` (1500 seeded texts x 5 budgets, gated
+on the longest whitespace run being at most an eighth of the budget, asserting no blank
+segment and none over budget); `no_segment_of_the_repro_meets_the_real_embedders_blank_refusal`
+(feeds each segment to a real `RemoteEmbedder` and fails if any is refused as blank, after
+checking the oracle does fire on a blank input); and
+`librarian::embedding::tests::a_blank_run_inside_a_long_artifact_does_not_cost_it_its_vector`.
+Mutations: disabling the absorb pass turned the leading, trailing, property and artifact tests
+red; dropping the content check on whitespace cuts turned the repro red.
+
+**A reindex with `reembed=true` is still needed and has NOT been run** (see the next section).
+
 ### A reindex is needed afterwards. NOT run.
 
 Changing segmentation changes the vectors, but only for text embedded from now on. Every
