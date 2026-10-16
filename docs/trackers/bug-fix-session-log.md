@@ -70,7 +70,9 @@ entry_high_water_W: 151
 | F-195 | 2026-10-14 | med | plan-drift | fixed-verified | **"An empty workspace.toml is a reasonable default" was false for classification** — built-in rules cover none of specs, plans, ADRs, audits, handoffs, runbooks, ROADMAP or manual; the only copy of those nine rules is test-only `import_codescout`. |
 | F-194 | 2026-10-14 | med | api-contract | fixed-verified | **Remote embedder dimensions are unknown until the first response** — three observed RED regressions now pass; probe ordering/counts and the full gate are verified. |
 | F-193 | 2026-10-13 | high | persistence-ordering | promoted-to-bug-tracker | **Backfill's durable progress claim uses chunk metadata and a cursor ahead of unwritten vectors** — observed retry skips and an unwritten checkpoint in private SQLite tests. |
+| F-190 | 2026-10-02 | med | process | mitigated | **Diagnosed MCP concurrency before reading the required project contract** — restart with the full contract and an independent read-only diagnosis. |
 | F-192 | 2026-10-13 | med | shell-parity | promoted-to-bug-tracker | **The own-stderr wrapper assumed shell parity that dash disproved** — literal dash output and an actual-marker regression expose the unsafe brace wrapper. |
+| F-191 | 2026-10-08 | med | doc-vs-code | fixed-verified | **Python runner report falsely said CI was absent** — workflow existed even at its cited commit; corrected the record; the Python lanes were subsequently implemented and verified. |
 | F-189 | 2026-10-01 | med | plan-drift | open | **An open issue and an open PR both described `--scope` as outstanding while local `experiments` had already shipped it, unpushed** - found only by grepping local HEAD; the PR conflicts in `doctor.rs` and collides on `W-146`. |
 | F-187 | 2026-09-30 | low | cross-session | mitigated | **A clean `git status` and a fresh catalog claim did not stop a second session starting the same bug, and a red run's `wip_authors` line was what named it** - second instance of `F-186`; withdrew and handed over rather than merged. |
 | F-188 | 2026-09-30 | med | doc-vs-code | open | **A bug file's mechanism claim ("the gate skips a closed wrapper list") was false: the gate never calls `producer_index`, so `env`/`FOO=1`/`time cat` all bypass, and PR #29 it leaned on was unmerged** - measured on the live binary before any code; only the `&` half fixed. |
@@ -269,9 +271,9 @@ entry_high_water_W: 151
 
 | ID | Date | Impact | Pattern | Counterfactual | Status |
 |----|------|-------:|---------|----------------|--------|
+| W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-150 | 2026-10-01 | med | **Three mutants at three sites separated "the label says repo" from "the population is repo", and only the third reached the population assertion.** Reading which assertion killed each mutant, not how many died. | Inferred: M2's kill would have been reported as covering the whole property while the population assertion behind the label check stayed unexercised. Observed: M3 failed at `:427` alone, with the label still `repo`. | validated |
 | W-148 | 2026-09-30 | med | **A red baseline on files I had not touched was an authorship question, and asking it before the first edit kept two sessions from writing the same markers.** Suite, then `git status`, then provenance, then the peer's diff read-only. | Inferred, not observed: a second marker helper over three of the peer's uncommitted functions in a hash-frozen file, plus literals re-invalidated. Observed: the peer's claim that the markers were done held at the bytes. Second data point after `W-135`. | validated |
-| W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-149 | 2026-09-30 | med | **A comment predicting the exact regression sat beside a fixture that could not see it.** Reading what the fixture PASSES (`is_write=false` hard-coded for `"workspace"`), not what it asserts, exposed the gap. | Inferred: an exemption fix with both old guards green and the exemption unguarded. Observed: widening it was caught by the new exact-set pin alone. | validated |
 | W-147 | 2026-09-30 | med | size the fixture to the limit rather than re-derive boundaries | ~8 hand-derived literals avoided, each a chance for a still-green off-by-N | validated |
 | W-144 | 2026-09-16 | med | **The discriminator was already in the output OF THE RUN THAT ESTABLISHED THE FINDING** — three sessions, three instruments, one evening: `FutureWarning` ×3, a `FAILED` with no `left:`/`right:` lines, a `64 vs 99` line count. Worse than CLAUDE.md's "assert on the name": nobody chose a proxy, the answer was on screen in the scrollback being read to write up the result. Each caught only by a peer stating a checkable fact that collided. | validated |
@@ -17401,6 +17403,42 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 **Rests on:** the bytes of `ae45438c`. The verdict measures those bytes, so a rewrite of the test or of `to_tool_args` invalidates it. Mutants were reverted and the worktree removed; only the 6 `cli::doctor` lib tests were run, not the full gate.
 
+## F-190 — Diagnosed MCP concurrency before reading the required project contract
+
+**Observed:** I began the MCP concurrency diagnosis after reading only lines 1–353 of `CLAUDE.md`, despite the repository instruction to read it fully before any work.
+
+**Cost:** I ran an isolated raw-server probe against the shared project and reported a stronger root-cause conclusion than the repository process justified.
+
+**Recovery:** Complete the instructions and delegate a fresh, read-only diagnosis that must independently establish the request boundary before drawing conclusions.
+
+**Status:** mitigated
+
+**Valid:** dated 2026-10-02
+
+**Rests on:** This session's tool transcript and `CLAUDE.md`.
+
+## F-191 — Python runner report claimed CI was absent although its cited commit contained the workflow
+
+**Observed:** 2026-10-08, rechecking the five issues selected by the user.
+
+**Expected (record):** The Summary and Reproduction in `docs/issues/archive/2026-10-06-twenty-seven-python-test-files-are-run-by-no-gate-and-three-do-not-collect-here.md` said no CI workflow existed at `10e935e3`.
+
+**Got (scouted reality):** Read `.github/workflows/ci.yml` and ran `git ls-tree --name-only 10e935e3 .github/workflows/ci.yml`; the workflow is present both now and at the cited commit. It has no pytest invocation. A current run over all 27 Python files produced 980 passed, three collection errors, 421 subtests passed; missing sklearn/torch prevent those three modules collecting.
+
+**Cause:** The recorded directory-absence observation was wrong; no evidence establishes why that observation was made. Missing execution coverage remains confirmed, but the broader claim about CI absence does not.
+
+**Workaround:** Corrected the existing issue through doc body_edits and added the current measurement. No new CI job was created from the false premise.
+
+**Severity:** med — accepting the record would have sent a future implementation toward creating CI rather than adding a Python lane to existing CI.
+
+**Status:** fixed-verified — corrected the record, not the missing Python runner.
+
+**Valid:** dated 2026-10-08
+
+**Rests on:** reading the workflow and verifying its presence in the original commit, independently of the bug file's own assertion.
+
+**Pointer:** The missing Python runner was subsequently fixed by experiments `4487a34c2e7a4a919b2d0bd9e92be7f3856f9d34` (patch-id `7e1a3a2858f3c27a5b777db567352e50b31b6d44`) and archived at `docs/issues/archive/2026-10-06-twenty-seven-python-test-files-are-run-by-no-gate-and-three-do-not-collect-here.md`.
+
 ## F-192 — The own-stderr wrapper assumed shell parity that dash disproved
 
 **Valid:** dated 2026-10-13
@@ -17473,30 +17511,6 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 
 **Fix idea / Pointer:** `docs/issues/archive/2026-10-13-backfill-retry-skips-existing-chunks-without-vectors.md`. The revised indexer suite and its independent restored run both pass 65 tests. Five applied probe-path faults and the nine earlier recovery faults were all caught on the final revision: fourteen killed, zero survived, zero inconclusive (`review3-report.json`, `review3-P*.log`, `review3-M*.log`). The full ordered gate passed with exit 0 (`gate-final.log`). Verified source on experiments: SHA `62177b8cc6ebce0d667cc7c48c37d755356bc388`, stable patch-id `a917aff453617da7e34630e24b6ab144b9bcaf8f`.
 
-## Template for new entries
-
-<!-- Insert new F-N / W-N entries above this line with ONE call:
-
-       doc(action="append_entry", id="2dd9d90bc83f9f49", id_prefix="F",
-           anchor_heading="## Template for new entries",
-           title="...", body="**Observed:** ...",
-           index_row="| {id} | <date> | <sev> | <cat> | open | **<title>** - ... |",
-           index_after_line="|----|------|---------:|----------|--------|-------|")
-
-     `index_after_line` selects the TABLE, and the two differ:
-       F-N -> "|----|------|---------:|----------|--------|-------|"        (the Index table)
-       W-N -> "|----|------|-------:|---------|----------------|--------|"  (the Wins Index table)
-
-     Written WITHOUT the leading `## ` deliberately: this file documents its own
-     headings, so a scan that anchors by substring rather than by whole line
-     resolves "## Index" to these instructions instead of the real heading and
-     reports every row as being in the other table. Same remedy as the template's
-     `F-<n>` placeholder rows -- make the example structurally unable to match the
-     thing it describes, rather than asking the reader to tell them apart.
-
-     Omitting index_row/index_after_line silently gives you the retired two-call
-     form: the section lands, the row does not, and nothing reports it. That is
-     how 9 entries in this file came to have evidence and no index row. -->
 ## W-151 — A plan to "create the default file when absent" would have made six existing tests write into the developer's real home directory
 
 **Context:** work on `docs/issues/archive/2026-10-14-new-project-setup-does-not-configure-the-librarian.md` (id `ae511945b43ba0c8`). The plan: when `workspace.toml` is absent, `build_tool_context_with` creates it at `workspace::default_config_path()`.
@@ -17571,3 +17585,28 @@ Fix `acda6a40`, bug archived as `df38c4ac3b9a64a5`.
 **Fix:** the doc names the per-project collection and `artifact_collection_name`, and says the shared collection is superseded (`934946e9`).
 
 **Valid:** dated 2026-10-15
+
+## Template for new entries
+
+<!-- Insert new F-N / W-N entries above this line with ONE call:
+
+       doc(action="append_entry", id="2dd9d90bc83f9f49", id_prefix="F",
+           anchor_heading="## Template for new entries",
+           title="...", body="**Observed:** ...",
+           index_row="| {id} | <date> | <sev> | <cat> | open | **<title>** - ... |",
+           index_after_line="|----|------|---------:|----------|--------|-------|")
+
+     `index_after_line` selects the TABLE, and the two differ:
+       F-N -> "|----|------|---------:|----------|--------|-------|"        (the Index table)
+       W-N -> "|----|------|-------:|---------|----------------|--------|"  (the Wins Index table)
+
+     Written WITHOUT the leading `## ` deliberately: this file documents its own
+     headings, so a scan that anchors by substring rather than by whole line
+     resolves "## Index" to these instructions instead of the real heading and
+     reports every row as being in the other table. Same remedy as the template's
+     `F-<n>` placeholder rows -- make the example structurally unable to match the
+     thing it describes, rather than asking the reader to tell them apart.
+
+     Omitting index_row/index_after_line silently gives you the retired two-call
+     form: the section lands, the row does not, and nothing reports it. That is
+     how 9 entries in this file came to have evidence and no index row. -->
