@@ -1092,7 +1092,7 @@ mod merge_tests {
     // The wire-name override outranks the resolved `model`, so a dotenv-supplied value
     // for it shadows a configured `[embeddings].model` exactly like the variables above
     // — and used to do so with no warning, because its provenance was never recorded.
-    // `docs/issues/2026-10-06-a-dotenv-supplied-embedder-model-name-shadows-embeddings-model-with-no-warning.md`
+    // `docs/issues/archive/2026-10-06-a-dotenv-supplied-embedder-model-name-shadows-embeddings-model-with-no-warning.md`
     // Each test below flips ONE of the three conditions, so dropping any of them from
     // the predicate turns exactly one of them red.
 

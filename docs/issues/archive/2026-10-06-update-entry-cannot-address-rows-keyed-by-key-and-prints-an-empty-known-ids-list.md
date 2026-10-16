@@ -12,7 +12,7 @@ closed: 2026-10-10
 opened: 2026-10-06
 owner: marius
 related:
-- docs/issues/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md
+- docs/issues/archive/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md
 severity: low
 ---
 
@@ -59,7 +59,7 @@ So an entry collection is addressable only when its rows carry `id`. Nothing dec
 
 ## Evidence
 
-The legibility bug (`docs/issues/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md`) advised a per-row retag "never a `params` array rewrite". Its 2026-10-06 update records that the advised route does not exist for these rows, and that the retag was done as one whole-array `doc(action="augment", merge=true)` with `params_path`, built with `jq` from the live params: 42 rows before and after.
+The legibility bug (`docs/issues/archive/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md`) advised a per-row retag "never a `params` array rewrite". Its 2026-10-06 update records that the advised route does not exist for these rows, and that the retag was done as one whole-array `doc(action="augment", merge=true)` with `params_path`, built with `jq` from the live params: 42 rows before and after.
 
 ## Hypotheses tried
 
@@ -109,6 +109,6 @@ Not done: the live legibility tracker was retagged on 2026-10-06 with a whole-ar
 
 ## References
 
-- `docs/issues/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md`, Update 2026-10-06.
+- `docs/issues/archive/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md`, Update 2026-10-06.
 - `get_guide("librarian")` § Augmentation Lifecycle, and the `update_entry` description in the `doc` tool: both prescribe `update_entry` rather than `patch={params:...}`.
 - Cluster `IC-6`: the scheme addresses by one field and provides no way to address a row that has another.

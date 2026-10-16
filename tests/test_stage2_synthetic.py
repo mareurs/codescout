@@ -138,7 +138,7 @@ class FreezeMenuGuard(unittest.TestCase):
 class FreezeTSetTwinGuard(unittest.TestCase):
     """t_mined_rows skips a T row whose twin already sits in its own context_before.
 
-    docs/issues/2026-10-06-freeze-stage2-t-set-loop-has-no-twin-in-context-before-guard.md: the
+    docs/issues/archive/2026-10-06-freeze-stage2-t-set-loop-has-no-twin-in-context-before-guard.md: the
     train/val/cal loop has the guard; the T loop did not, so a re-label of one of the two flagged
     T rows to a menu rule would have put a leaking positive into the held-out set.
     """

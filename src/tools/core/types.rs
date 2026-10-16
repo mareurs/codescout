@@ -497,7 +497,7 @@ pub(super) async fn worktree_read_notice(
 /// (`session_key::current_caller`); outside a `call_tool_inner` scope (a tool called
 /// directly) it is `None` and this is silent — no identity, no claim.
 ///
-/// docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md
+/// docs/issues/archive/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md
 pub(super) async fn displaced_default_notice(
     ctx: &ToolContext,
 ) -> Option<crate::agent::DisplacedNotice> {

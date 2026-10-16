@@ -23,7 +23,7 @@ generated class view in version 1**; this ADR and its companion bug are both fil
 implemented. The measurements below are **dated snapshots**; each carries its derivation so a
 reader re-checks it instead of re-deriving it.
 
-Companion bug (the gate's text and code disagree): `docs/issues/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`.
+Companion bug (the gate's text and code disagree): `docs/issues/archive/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`.
 Session measurements: `docs/trackers/cluster-promotion-session-log.md` `F-9`.
 
 ## Context

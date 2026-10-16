@@ -269,7 +269,7 @@ fn missing_cited_tests_flags_only_probed_rows_with_an_empty_cited_test() {
 
 /// No `Untested` row may describe, in its own reason, a cap that discloses nothing.
 ///
-/// This is the regression for `docs/issues/2026-09-03-deferred-conflates-untested-with-no-marker-exists.md`:
+/// This is the regression for `docs/issues/archive/2026-09-03-deferred-conflates-untested-with-no-marker-exists.md`:
 /// the old single `Deferred` variant held 43 "write a test" rows beside 5 (later 8, now 9) rows
 /// whose reason said no marker exists, and three of those five stated `IC-13`'s defining
 /// property in their own text while sitting in the backlog. The assertion reads the REAL
@@ -348,7 +348,7 @@ fn the_classification_guards_flag_what_they_exist_to_flag() {
 
 /// A floor is a `RESULT_CAP` iff what it suppresses is ROWS OF THE RESULT.
 ///
-/// Regression for `docs/issues/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`:
+/// Regression for `docs/issues/archive/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`:
 /// `doctor.exposure_threshold` and `context.attestation_exposure` are both `>=`/`<` floors
 /// over the same constant value, and were classified oppositely — the doctor one `Deferred`,
 /// the context one `Probed` + `Mutation::Killed`, inside the branch's own "17 mutation-verified".

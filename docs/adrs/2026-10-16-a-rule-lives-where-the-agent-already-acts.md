@@ -36,7 +36,7 @@ observations, each dated 2026-10-16, each with its derivation.
    2026-09-03 found at least four shapes in use, and a strict
    version of the stated shape would have refused 29 of those events (6.5%) that the real gate accepted.
    The check tested a substring, not the shape
-   (`docs/issues/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`).
+   (`docs/issues/archive/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`).
 3. **A rule inside the file the agent fills is followed.** Counting `## ` headings outside code
    fences in the 1,131 bug files: `## Summary` appears in 1,084 (96%), `## References` in 1,004
    (89%) and `## Resume` in 948 (84%).

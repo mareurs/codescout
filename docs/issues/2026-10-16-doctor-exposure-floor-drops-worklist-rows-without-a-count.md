@@ -16,7 +16,7 @@ Three `doctor` checks skip every entry whose citation exposure is below `EXPOSUR
 
 ## Class fit
 
-A suppression floor rather than a truncating ceiling, and the first floor in the class that withholds ROWS of a result: the caller receives a partial worklist because of a bound and cannot tell. It differs from the ceiling members in that "the cap bit" is not a property of the input size but of how many citers each entry has, and in that the omission is intended (`doctor.rs:4497-4500`: "a conditional nobody is citing is not worth anyone's attention"). Compare `context.attestation_exposure`, which is NOT a member: its floor gates an advisory block and withholds no row (see `docs/issues/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`).
+A suppression floor rather than a truncating ceiling, and the first floor in the class that withholds ROWS of a result: the caller receives a partial worklist because of a bound and cannot tell. It differs from the ceiling members in that "the cap bit" is not a property of the input size but of how many citers each entry has, and in that the omission is intended (`doctor.rs:4497-4500`: "a conditional nobody is citing is not worth anyone's attention"). Compare `context.attestation_exposure`, which is NOT a member: its floor gates an advisory block and withholds no row (see `docs/issues/archive/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`).
 
 ## Symptom (Effect)
 
@@ -48,5 +48,5 @@ None — filing only.
 
 - `src/librarian/tools/doctor.rs:4481-4488,4553,4699,4828`
 - `src/tools/core/cap_probe.rs` row `doctor.exposure_threshold`
-- `docs/issues/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`
+- `docs/issues/archive/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`
 - `docs/trackers/issue-clusters/IC-13-capped-result-presented-as-complete.md`

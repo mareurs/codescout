@@ -328,7 +328,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # 2026-10-16, and a tag or refs/wip/x push publishes its commits exactly as a branch
     # push does -- including the second step of docs/RELEASE.md's `git push` + `git push --tags`.
     # Operator decision (option D) in
-    # docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-and-fails-open-on-an-unlistable-range.md.
+    # docs/issues/archive/2026-10-06-the-foreign-session-check-skips-non-branch-refs-and-fails-open-on-an-unlistable-range.md.
     # Only the branch-shaped ENTRY-ID COLLISION SCAN below stays branch-only: it is about merge
     # commits resolving a rejected branch push and is not part of that decision.
     # Deletions are already handled above.

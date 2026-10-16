@@ -284,7 +284,7 @@ state and only one of them travels.
   (the body ahead of params, which is this defect's inverse and the origin of `params_behind_body`).
   Here there is no shared id namespace at all, and it is the catalog that ran *behind*.
 - Same tracker, different claim, filed the same day:
-  `docs/issues/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md`
+  `docs/issues/archive/2026-09-21-legibility-auto-close-cannot-tell-repair-from-detector-removal.md`
 
 ## Cluster classification — nearest fit, with the mismatch recorded
 

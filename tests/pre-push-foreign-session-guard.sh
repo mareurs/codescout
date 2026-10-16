@@ -1764,7 +1764,7 @@ has   "unlistable with a hold: says the range could not be listed" "$HOLD_OUT" "
 rm -r "$SHIM_DIR"
 
 # --- the FOREIGN check covers every non-deletion ref and an unfetched remote tip
-# docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-and-fails-open-on-an-unlistable-range.md
+# docs/issues/archive/2026-10-06-the-foreign-session-check-skips-non-branch-refs-and-fails-open-on-an-unlistable-range.md
 # Policy (operator decision 2026-10-16, option D): scan tags and refs/wip/* with the hold check's range
 # (`<tip> --not --remotes` whenever the remote tip is not a local commit); an unlistable range with
 # no hold present STAYS fail-open. Every refusal below has a silent twin on the same history.

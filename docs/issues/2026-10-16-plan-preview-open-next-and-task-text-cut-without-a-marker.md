@@ -12,7 +12,7 @@ severity: low
 
 ## Summary
 
-`preview::plan::extract` bounds two things in the `tasks` object it returns and discloses neither bound: `open_next` keeps the first `OPEN_NEXT_LIMIT` (3) open tasks, and every task string is cut to `TASK_TEXT_MAX` (100) characters. Filed from the `PROBE_ROWS` classification (`preview.plan_open_next`, `preview.plan_task_text` as `Coverage::NoMarker`) — see `docs/issues/2026-09-03-deferred-conflates-untested-with-no-marker-exists.md`.
+`preview::plan::extract` bounds two things in the `tasks` object it returns and discloses neither bound: `open_next` keeps the first `OPEN_NEXT_LIMIT` (3) open tasks, and every task string is cut to `TASK_TEXT_MAX` (100) characters. Filed from the `PROBE_ROWS` classification (`preview.plan_open_next`, `preview.plan_task_text` as `Coverage::NoMarker`) — see `docs/issues/archive/2026-09-03-deferred-conflates-untested-with-no-marker-exists.md`.
 
 ## Class fit
 

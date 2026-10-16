@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-16
 owner: marius
 related:
-- docs/issues/2026-09-24-residual-mcp-smoke-scripts-run.md
+- docs/issues/archive/2026-09-24-residual-mcp-smoke-scripts-run.md
 severity: low
 ---
 
@@ -16,7 +16,7 @@ severity: low
 
 ## Summary
 
-`tests/mcp-smoke-kotlin.sh` hardcodes `KOTLIN_PROJECT=/home/marius/work/mirela/backend-kotlin` and asserts on `src/main/kotlin/edu/planner/service/AuthService.kt`, `CalendarService.kt`, `NotificationService.kt`, `build.gradle.kts` and `gradle.properties` at that project's root. Found while running the smoke scripts for `docs/issues/2026-09-24-residual-mcp-smoke-scripts-run.md`, 2026-10-16.
+`tests/mcp-smoke-kotlin.sh` hardcodes `KOTLIN_PROJECT=/home/marius/work/mirela/backend-kotlin` and asserts on `src/main/kotlin/edu/planner/service/AuthService.kt`, `CalendarService.kt`, `NotificationService.kt`, `build.gradle.kts` and `gradle.properties` at that project's root. Found while running the smoke scripts for `docs/issues/archive/2026-09-24-residual-mcp-smoke-scripts-run.md`, 2026-10-16.
 
 ## Class fit
 
@@ -59,5 +59,5 @@ Run `tests/mcp-smoke-rust.sh` only.
 
 ## References
 
-- `docs/issues/2026-09-24-residual-mcp-smoke-scripts-run.md`
+- `docs/issues/archive/2026-09-24-residual-mcp-smoke-scripts-run.md`
 - `tests/mcp-smoke-kotlin.sh`

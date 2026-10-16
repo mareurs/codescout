@@ -9,7 +9,7 @@ closed: 2026-10-16
 opened: 2026-10-16
 owner: marius
 related:
-- docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md
+- docs/issues/archive/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md
 severity: low
 ---
 
@@ -17,7 +17,7 @@ severity: low
 
 ## Summary
 
-`Agent::displaced_default_notice` (fix of `docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`) tells a caller, once per move, that an unpinned call resolved against a root another caller moved the default to. It rides `Tool::call_content`, i.e. SUCCESSFUL responses. `CodeScoutServer::check_tool_access` runs earlier in `call_tool_inner` and returns the gate's refusal (`File writes are disabled for this project`) before the caller identity is resolved, so a displaced party whose FIRST call after the move is a write gets the old misleading refusal and no notice. Its next successful call still carries the notice, so the information arrives one call late rather than never.
+`Agent::displaced_default_notice` (fix of `docs/issues/archive/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`) tells a caller, once per move, that an unpinned call resolved against a root another caller moved the default to. It rides `Tool::call_content`, i.e. SUCCESSFUL responses. `CodeScoutServer::check_tool_access` runs earlier in `call_tool_inner` and returns the gate's refusal (`File writes are disabled for this project`) before the caller identity is resolved, so a displaced party whose FIRST call after the move is a write gets the old misleading refusal and no notice. Its next successful call still carries the notice, so the information arrives one call late rather than never.
 
 ## Class fit
 
@@ -65,5 +65,5 @@ N/A.
 
 ## References
 
-- `docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`
+- `docs/issues/archive/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`
 - `docs/issues/archive/2026-08-23-subagent-activate-mutates-parent-active-project.md`

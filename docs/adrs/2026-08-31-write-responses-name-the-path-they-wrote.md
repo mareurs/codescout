@@ -106,7 +106,7 @@ bug nor its repair. It is removed, per its own instruction.
 ## Amendment 2026-10-16 — `wrote_to` was never universal; for a single checkout this ADR is the first shape change
 
 - **Status:** accepted correction to a shipped decision. **Trigger:**
-  `docs/issues/2026-10-16-write-path-adr-says-every-unpinned-write-carries-wrote-to.md`.
+  `docs/issues/archive/2026-10-16-write-path-adr-says-every-unpinned-write-carries-wrote-to.md`.
 
 The Context said `annotate_write_root` promotes a bare `"ok"` "for every unpinned write",
 and the Decision called the path "already half-present as `wrote_to`". Both overstated the

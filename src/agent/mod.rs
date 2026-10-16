@@ -3080,7 +3080,7 @@ mod tests {
     //
     // `note_activation`'s guard speaks to whoever MOVED the slot. These cover the other
     // half: whoever makes an unpinned call afterwards and resolves against a root it
-    // never chose. `docs/issues/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`.
+    // never chose. `docs/issues/archive/2026-09-24-residual-route-activation-warning-to-the-harmed-party.md`.
 
     /// A server whose home project is a fresh tempdir, plus a function to move the
     /// default the way the activate handler does (`activate`, then `note_activation`).

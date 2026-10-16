@@ -76,7 +76,7 @@ fn id_as_artifact_id(args: &Value) -> Value {
 /// Read actions and unknown actions return `Ok(())`: they are not guarded, and an unknown action
 /// is answered by `call`'s own fallback arm.
 ///
-/// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+/// docs/issues/archive/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
 pub(crate) fn preflight(args: &Value) -> Result<()> {
     match args["action"].as_str() {
         Some("create") => super::create::preflight(args),

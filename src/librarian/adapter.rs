@@ -1122,7 +1122,7 @@ fn is_mutating_doc_action(action: &str) -> bool {
 /// Its preview calls `worktree::resolve_write_target` first, which forks a main-checkout
 /// artifact into a shadow row, a `worktree_fork` event and a lineage link when the session is
 /// a worktree — catalog writes — before `RekeyMode::Preview` runs.
-/// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+/// docs/issues/archive/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
 fn doc_call_can_write(input: &Value) -> bool {
     let action = input.get("action").and_then(Value::as_str).unwrap_or("");
     if !is_mutating_doc_action(action) {
@@ -2652,7 +2652,7 @@ mod tests {
         }
     }
 
-    /// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+    /// docs/issues/archive/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
     /// A dry-run `delete`/`graft` writes nothing, so the guard must let it reach the tool.
     /// The id does not exist, so the tool's own `unknown id` refusal is what proves it ran.
     #[tokio::test]
@@ -2757,7 +2757,7 @@ mod tests {
         }
     }
 
-    /// docs/issues/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
+    /// docs/issues/archive/2026-10-06-the-worktree-write-guard-keys-on-the-doc-action-name-and-refuses-previews-and-malformed-calls.md
     /// A call that fails its own argument validation cannot write, so it must get the tool's
     /// corrected-call error, not "Write blocked". One row per mutating action, plus the pure
     /// pre-parse refusals (`update` + `rel_path`, `update_entry` + `entry`) and two ill-typed

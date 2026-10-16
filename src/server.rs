@@ -1443,7 +1443,7 @@ impl CodeScoutServer {
             // and this branch returns, so the later poll is not reached twice): resolving
             // from the construction-time key alone would call a parent a stranger after
             // a `/clear`. A pinned call named its own tree and is owed nothing.
-            // docs/issues/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
+            // docs/issues/archive/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
             if workspace_override.is_none() {
                 let caller = asserted_principal
                     .clone()
@@ -12589,7 +12589,7 @@ mod guide_hint_tests {
     /// The harmed party's FIRST signal used to be the gate's refusal, which carries
     /// nothing about who moved the default. A write refused because a subagent's
     /// read-only activation is now the default must name that subagent.
-    /// docs/issues/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
+    /// docs/issues/archive/2026-10-16-a-write-refused-by-the-gate-carries-no-displaced-default-notice.md
     #[tokio::test]
     async fn a_write_refused_by_the_gate_names_the_principal_that_moved_the_default() {
         let (_home, server) = make_server().await;

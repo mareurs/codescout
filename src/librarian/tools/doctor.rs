@@ -4139,7 +4139,7 @@ struct CorpusTokens {
 /// Nothing is excluded: a guard that drops "teaching" sources needs a rule for what a
 /// teaching source is, and `docs/issues/archive/2026-08-31-an-entry-id-cannot-be-mentioned-without-citing-it.md`
 /// declined the literal marker that would supply one. The residual:
-/// `docs/issues/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md`.
+/// `docs/issues/archive/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md`.
 ///
 /// Extraction is deliberately dumb — `UTF-8` and `SHA-256` arrive as entry tokens — which
 /// costs nothing here, because the result is only ever intersected against ids a ledger
@@ -4186,7 +4186,7 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<CorpusTokens> {
 /// nothing to name.
 ///
 /// `extract` cannot tell a real reference from a documentation example of citation syntax
-/// (`docs/issues/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md`), and no
+/// (`docs/issues/archive/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md`), and no
 /// affordable escape exists, so the refusal site says so. Measured zero exposure on
 /// 2026-08-25 was a fact about that date's corpus; naming the citing artifacts on every run
 /// is what makes the exposure re-measurable without anyone remembering to re-measure it.
@@ -14292,7 +14292,7 @@ mod tests {
              must keep saying so: {detail}"
         );
     }
-    /// docs/issues/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md
+    /// docs/issues/archive/2026-09-24-residual-corpus-cited-tokens-excludes-doc-examples.md
     ///
     /// `corpus_cited_tokens` cannot tell a documentation example of citation syntax from a
     /// real reference, and "nothing live is affected" was measured once, on one date's

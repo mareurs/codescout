@@ -6,7 +6,7 @@
 # CHECK 3 refuses a commit in which a bug file JOINS a defect class (a new file, or a retag)
 # unless that bug file carries a `## Class fit` section with at least 40 letters or digits. Until
 # 2026-10-16 the same check asked for an entry on the class's shared `**Members:**` line, and it
-# tested that with a substring (`docs/issues/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`).
+# tested that with a substring (`docs/issues/archive/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`).
 # The ADR that moved the reasoning into the member's own file:
 # `docs/adrs/2026-10-16-the-reasoning-for-a-class-member-lives-in-the-members-own-bug-file.md`.
 #

@@ -181,7 +181,7 @@ pub struct EmbeddingsSection {
 /// got no default ignores, while one with an empty section got them. The design's
 /// "key absent → defaults apply" has to hold on both paths, so both route through the
 /// same function. An explicit `patterns = []` still means "ignore nothing".
-/// `docs/issues/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md`.
+/// `docs/issues/archive/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md`.
 ///
 /// **Whether `patterns` was written down is remembered** (`patterns_explicit`), because
 /// the write-back must not change what the file means. Onboarding and the version
@@ -1270,7 +1270,7 @@ model = "local:test"
         );
     }
 
-    // docs/issues/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md
+    // docs/issues/archive/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md
     //
     // The serde field default on `IgnoredPathsSection::patterns` applies only when the
     // `[ignored_paths]` table is PRESENT; an absent table takes the struct's `Default`,

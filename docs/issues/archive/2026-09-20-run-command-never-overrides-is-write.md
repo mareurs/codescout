@@ -15,7 +15,7 @@ topic: write guard coverage and shell effect classification
 closed: 2026-09-24
 opened: 2026-09-20
 severity: high
-unverified: 'CLEARED 2026-10-16. Was: TRACKED 4d23f609590dea62 — Only the DECLARED effect class is recorded; the OBSERVED one is not. Answered: usage.db now records tool_calls.observed_changed for calls declared `read` (a before/after git status snapshot, recorded as ''tree changed during the call'', not attribution); see docs/issues/2026-09-24-residual-run-command-observed-effect-class.md.'
+unverified: 'CLEARED 2026-10-16. Was: TRACKED 4d23f609590dea62 — Only the DECLARED effect class is recorded; the OBSERVED one is not. Answered: usage.db now records tool_calls.observed_changed for calls declared `read` (a before/after git status snapshot, recorded as ''tree changed during the call'', not attribution); see docs/issues/archive/2026-09-24-residual-run-command-observed-effect-class.md.'
 ---
 
 # BUG: `run_command` never overrides `is_write`, so every shell command is classified as a read
