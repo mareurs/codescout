@@ -1663,6 +1663,552 @@ fn the_hook_script_agrees_on_the_mechanism_basis_scan() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// `Mechanism status:` falsifier rows
+// ---------------------------------------------------------------------------
+
+/// One declared falsifier: ``falsifier: <glob> expect=absent|present`` in a code span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Falsifier {
+    ic: String,
+    glob: String,
+    expect: String,
+}
+
+/// What [`mechanism_falsifier_scan`] found in a ledger: the declarations that parse, and every
+/// span or line that LOOKED like one and did not. `(entry id, offending text, reason)`.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct FalsifierScan {
+    falsifiers: Vec<Falsifier>,
+    malformed: Vec<(String, String, String)>,
+}
+
+/// The `**Label:**` at the start of `line`, if it is a class-entry field label (`Valid`,
+/// `Members`, `Promotes to`, ...): letters and spaces, at most 24, closed by `:**`. A bold
+/// sentence that merely begins a paragraph is not a label, so it does not end a field.
+fn field_label(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("**")?;
+    let end = rest.find(":**")?;
+    let label = &rest[..end];
+    if end == 0 || end > 24 || !label.chars().all(|c| c.is_ascii_alphabetic() || c == ' ') {
+        return None;
+    }
+    Some(label)
+}
+
+/// Single-backtick spans of `line`, and the line with them removed. An unclosed final backtick
+/// opens nothing: its tail stays in the remainder.
+fn backtick_spans(line: &str) -> (Vec<String>, String) {
+    let parts: Vec<&str> = line.split('`').collect();
+    let mut spans = Vec::new();
+    let mut rest = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        if i % 2 == 1 && i < parts.len() - 1 {
+            spans.push((*part).to_owned());
+        } else {
+            rest.push_str(part);
+        }
+    }
+    (spans, rest)
+}
+
+/// Why `glob` cannot be a falsifier glob, if it cannot. Everything refused here would otherwise
+/// be silently read as a literal (`[ab]`), silently widened, or silently match nothing (`..`,
+/// a leading `/`), so the answer is a refusal and not a guess.
+fn glob_error(glob: &str) -> Option<String> {
+    if glob.is_empty() {
+        return Some("the glob is empty".to_owned());
+    }
+    if glob.starts_with('/') {
+        return Some("the glob is absolute; paths are repo-relative".to_owned());
+    }
+    if let Some(c) = glob.chars().find(|c| "[]{}\\".contains(*c)) {
+        return Some(format!(
+            "`{c}` is not glob syntax here (only `*`, `?` and a whole `**` segment are) and \
+             would be read as a literal; a path containing it cannot be declared"
+        ));
+    }
+    for seg in glob.split('/') {
+        if seg.is_empty() {
+            return Some("the glob has an empty segment (`//` or a trailing `/`)".to_owned());
+        }
+        if seg == "." || seg == ".." {
+            return Some(format!(
+                "`{seg}` segment; paths are repo-relative and normalised"
+            ));
+        }
+        if seg.contains("**") && seg != "**" {
+            return Some("`**` is only a whole segment".to_owned());
+        }
+    }
+    None
+}
+
+fn seg_match(pat: &[char], text: &[char]) -> bool {
+    match pat.split_first() {
+        None => text.is_empty(),
+        Some((&'*', rest)) => (0..=text.len()).any(|k| seg_match(rest, &text[k..])),
+        Some((&'?', rest)) => !text.is_empty() && seg_match(rest, &text[1..]),
+        Some((c, rest)) => text.first() == Some(c) && seg_match(rest, &text[1..]),
+    }
+}
+
+fn match_segs(pat: &[&str], path: &[&str]) -> bool {
+    match pat.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => (0..=path.len()).any(|k| match_segs(rest, &path[k..])),
+        Some((seg, rest)) => {
+            let p: Vec<char> = seg.chars().collect();
+            !path.is_empty()
+                && seg_match(&p, &path[0].chars().collect::<Vec<char>>())
+                && match_segs(rest, &path[1..])
+        }
+    }
+}
+
+/// Does `path` (repo-relative, `/`-separated) match `pattern`? `*` and `?` stay inside one
+/// segment, a whole `**` segment matches zero or more segments, nothing else is special, and a
+/// leading `.` is not special either.
+fn glob_match(pattern: &str, path: &str) -> bool {
+    let p: Vec<&str> = pattern.split('/').collect();
+    let s: Vec<&str> = path.split('/').collect();
+    match_segs(&p, &s)
+}
+
+/// The directory a glob is anchored under: the segments before the first wildcard segment,
+/// never counting the last segment (the file part). `scripts/*index*` -> `scripts/`.
+fn glob_dir_prefix(glob: &str) -> String {
+    let segs: Vec<&str> = glob.split('/').collect();
+    let first_wild = segs
+        .iter()
+        .position(|s| s.contains('*') || s.contains('?'))
+        .unwrap_or(segs.len());
+    let n = first_wild.min(segs.len() - 1);
+    if n == 0 {
+        String::new()
+    } else {
+        format!("{}/", segs[..n].join("/"))
+    }
+}
+
+fn mechanism_falsifier_scan(text: &str) -> FalsifierScan {
+    let mut scan = FalsifierScan::default();
+    let mut id: Option<String> = None;
+    let mut in_field = false;
+    let mut fenced = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("## IC-") {
+            id = rest
+                .split_whitespace()
+                .next()
+                .map(|n| format!("IC-{}", n.trim_end_matches(|c: char| !c.is_ascii_digit())));
+            in_field = false;
+            continue;
+        }
+        if line.starts_with('#') {
+            in_field = false;
+            continue;
+        }
+        let body = if let Some(b) = line.strip_prefix("**Mechanism status:**") {
+            in_field = id.is_some();
+            b
+        } else if field_label(line).is_some() {
+            in_field = false;
+            continue;
+        } else if in_field {
+            line
+        } else {
+            continue;
+        };
+        let Some(ic) = id.clone() else { continue };
+        let (spans, rest) = backtick_spans(body);
+        for span in spans {
+            let t = span.trim_start().to_ascii_lowercase();
+            let Some(after) = t.strip_prefix("falsifier") else {
+                continue;
+            };
+            if !after.trim_start().starts_with(':') {
+                continue; // the word in a span is a mention, not a declaration
+            }
+            let parts: Vec<&str> = span.split(' ').collect();
+            if parts.len() != 3
+                || parts[0] != "falsifier:"
+                || !(parts[2] == "expect=absent" || parts[2] == "expect=present")
+            {
+                scan.malformed.push((
+                    ic.clone(),
+                    span.clone(),
+                    "expected exactly `falsifier: <glob> expect=absent|present`, single spaces, \
+                     lower case"
+                        .to_owned(),
+                ));
+                continue;
+            }
+            if let Some(why) = glob_error(parts[1]) {
+                scan.malformed.push((ic.clone(), span.clone(), why));
+                continue;
+            }
+            scan.falsifiers.push(Falsifier {
+                ic: ic.clone(),
+                glob: parts[1].to_owned(),
+                expect: parts[2]["expect=".len()..].to_owned(),
+            });
+        }
+        if rest.contains("expect=absent") || rest.contains("expect=present") {
+            scan.malformed.push((
+                ic,
+                line.trim().to_owned(),
+                "`expect=` outside a `falsifier:` code span declares nothing and would be \
+                 silently ignored"
+                    .to_owned(),
+            ));
+        }
+    }
+    scan
+}
+
+/// Everything wrong with the ledger's falsifiers against `paths`, one line each, in a fixed
+/// order: malformed spans first (scan order), then declarations (scan order). The first word of
+/// each line is the entry id.
+///
+/// Three kinds of finding, and a falsifier that cannot be read is NEVER skipped:
+/// - malformed — see [`mechanism_falsifier_scan`] and [`glob_error`];
+/// - dead — the glob is anchored under a directory no tracked file lives in, so `expect=absent`
+///   would hold for any reason at all (an absence assertion over an empty population);
+/// - violated — the tree contradicts the declared expectation.
+fn falsifier_problems(text: &str, paths: &[String]) -> Vec<String> {
+    let scan = mechanism_falsifier_scan(text);
+    let mut out: Vec<String> = scan
+        .malformed
+        .iter()
+        .map(|(ic, span, why)| format!("{ic} -- malformed `{span}`: {why}"))
+        .collect();
+    for f in &scan.falsifiers {
+        let prefix = glob_dir_prefix(&f.glob);
+        if !prefix.is_empty() && !paths.iter().any(|p| p.starts_with(&prefix)) {
+            out.push(format!(
+                "{} -- dead `falsifier: {} expect={}`: no tracked file lives under `{prefix}`, \
+                 so the glob would hold expect=absent whatever the tree contains",
+                f.ic, f.glob, f.expect
+            ));
+            continue;
+        }
+        let matched: Vec<&String> = paths.iter().filter(|p| glob_match(&f.glob, p)).collect();
+        let holds = (f.expect == "present") == !matched.is_empty();
+        if !holds {
+            let found = if matched.is_empty() {
+                "nothing matches".to_owned()
+            } else {
+                let shown: Vec<&str> = matched.iter().take(3).map(|s| s.as_str()).collect();
+                let more = matched.len().saturating_sub(3);
+                if more > 0 {
+                    format!("matched {} (+{more} more)", shown.join(", "))
+                } else {
+                    format!("matched {}", shown.join(", "))
+                }
+            };
+            out.push(format!(
+                "{} -- violated `falsifier: {} expect={}`: {found}",
+                f.ic, f.glob, f.expect
+            ));
+        }
+    }
+    out
+}
+
+/// Every path the git index tracks, deduplicated and sorted: the tree a falsifier is evaluated
+/// against. The index and not the working tree, for the same reason [`ledger_text_at`] reads
+/// the index: the hook asks the question of the commit being made.
+fn tracked_paths(repo: &std::path::Path) -> Vec<String> {
+    let out = Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(repo)
+        .output()
+        .expect("git ls-files failed to run — this gate needs a git checkout");
+    assert!(
+        out.status.success(),
+        "git ls-files exited {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let set: BTreeSet<String> = String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
+        .collect();
+    set.into_iter().collect()
+}
+
+/// The shared fixture: every arm of the grammar, with known answers.
+const FALSIFIER_FIXTURE: &str = "\
+## IC-1 — three declarations that hold
+**Mechanism status:** partial, `falsifier: scripts/a.sh expect=present` and `falsifier: scripts/*.zzz expect=absent`.
+- a second row, `falsifier: docs/**/*.md expect=present`
+**Valid:** invariant
+
+## IC-2 — one violated, one dead, seven malformed
+**Mechanism status:** none yet.
+- `falsifier: scripts/a.sh expect=absent`
+- `falsifier:  scripts/a.sh expect=absent`
+- `Falsifier: scripts/a.sh expect=absent`
+- `falsifier: scripts/a.sh expect=maybe`
+- `falsifier: scripts/[ab].sh expect=present`
+- `falsifier: nodir/*.sh expect=absent`
+- `falsifier: ../x expect=absent`
+- expect=absent written as bare prose
+- `falsifier:`
+**Valid:** invariant
+
+## IC-3 — a mention is not a declaration, and a fence is the escape
+**Mechanism status:** the word `falsifier` in a span is a mention.
+
+```text
+`falsifier: nodir/x expect=absent`
+```
+**Valid:** invariant
+
+`falsifier: nodir/x expect=absent` after the next field is outside the field.
+
+## IC-4 — a heading ends the field
+**Mechanism status:** x
+## a prose heading
+`falsifier: nodir/x expect=absent`
+";
+
+fn fixture_paths() -> Vec<String> {
+    ["scripts/a.sh", "scripts/b.sh", "docs/x/y.md", "docs/z.md"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+}
+
+/// The scan, the glob and the evaluation each return both answers on a fixture the corpus
+/// cannot hold: the live ledger has one migrated field and it is correct, so its answer is the
+/// empty list and a corpus-driven check is green whether the scan works or is deleted.
+#[test]
+fn the_mechanism_falsifier_scan_discriminates() {
+    // Glob semantics, once: `*` and `?` stay inside a segment, `**` is a whole segment.
+    for (pat, path, want) in [
+        ("scripts/*.sh", "scripts/a.sh", true),
+        ("scripts/*.sh", "scripts/x/a.sh", false),
+        ("scripts/**", "scripts/x/a.sh", true),
+        ("**/a.sh", "a.sh", true),
+        ("docs/**/*.md", "docs/z.md", true),
+        ("a?c", "abc", true),
+        ("a?c", "a/c", false),
+        ("*", ".hidden", true),
+        ("scripts/a.sh", "scripts/a.shx", false),
+    ] {
+        assert_eq!(glob_match(pat, path), want, "glob_match({pat:?}, {path:?})");
+    }
+
+    let scan = mechanism_falsifier_scan(FALSIFIER_FIXTURE);
+    let ics = |ic: &str| scan.falsifiers.iter().filter(|f| f.ic == ic).count();
+    assert_eq!(ics("IC-1"), 3, "{:?}", scan.falsifiers);
+    assert_eq!(ics("IC-2"), 2, "{:?}", scan.falsifiers);
+    assert_eq!(
+        ics("IC-3") + ics("IC-4"),
+        0,
+        "a fenced span, a plain mention, text after the next field and text after a heading \
+         are not declarations: {:?}",
+        scan.falsifiers
+    );
+    assert_eq!(
+        scan.malformed.len(),
+        7,
+        "double space, capital F, bad expect, `[` in the glob, `..`, bare `expect=`, empty \
+         body: {:?}",
+        scan.malformed
+    );
+    assert!(scan.malformed.iter().all(|(ic, _, _)| ic == "IC-2"));
+
+    let problems = falsifier_problems(FALSIFIER_FIXTURE, &fixture_paths());
+    assert_eq!(
+        problems.len(),
+        9,
+        "7 malformed + 1 violated + 1 dead: {problems:#?}"
+    );
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("violated") && p.contains("scripts/a.sh")),
+        "{problems:#?}"
+    );
+    assert!(
+        problems.iter().any(|p| p.contains("nodir/")),
+        "a glob under a directory with no tracked file holds expect=absent whatever the tree \
+         contains, so it must be refused: {problems:#?}"
+    );
+    assert!(
+        problems.iter().all(|p| p.starts_with("IC-2")),
+        "IC-1 holds and IC-3/IC-4 declare nothing: {problems:#?}"
+    );
+}
+
+/// The instance this whole mechanism exists for, replayed on fixture trees.
+///
+/// `0dea2246` wrote "Nothing owns ... the git index" into `IC-17`; `99d5acac`, 64 minutes later,
+/// added four files under `scripts/` that own it, and touched nothing in the ledger. The two
+/// trees below are that history's `scripts/` listing cut down to the names that matter; they
+/// are literals and not a checkout, so the test cannot be broken by a rebase.
+///
+/// `is_unbasised` could not flip here — the original field had a basis (a commit and two
+/// names) — which is why the field survived the basis gate for a day.
+#[test]
+fn a_falsifier_would_have_flipped_on_the_original_stale_field() {
+    let field = "\
+## IC-17 — a shared resource carries no owner
+**Mechanism status:** partial — an outbound `unreviewed-content` gate for the commit path. Nothing owns the working tree, the git index, or `entry_high_water_<PREFIX>`. `falsifier: scripts/*index* expect=absent`
+**Valid:** dated 2026-09-01
+";
+    let before: Vec<String> = [
+        ".pre-commit-config.yaml",
+        "scripts/build-windows.sh",
+        "scripts/install-lsp.sh",
+        "scripts/peer-sessions.sh",
+        "scripts/pre-commit-unreviewed-content.sh",
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    let mut after = before.clone();
+    after.extend(
+        [
+            "scripts/install-hooks.sh",
+            "scripts/post-index-change-stage-log.sh",
+            "scripts/pre-commit-foreign-index.sh",
+            "scripts/prepare-commit-msg-session-id.sh",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned()),
+    );
+
+    let body = &mechanism_statuses(field)[0].1;
+    assert!(
+        !is_unbasised(body),
+        "the original field carried a basis, so the basis gate was blind to it by construction"
+    );
+    assert!(
+        falsifier_problems(field, &before).is_empty(),
+        "at 0dea2246 the claim was true and the falsifier must hold"
+    );
+    let flipped = falsifier_problems(field, &after);
+    assert_eq!(flipped.len(), 1, "{flipped:#?}");
+    assert!(
+        flipped[0].contains("violated")
+            && flipped[0].contains("scripts/post-index-change-stage-log.sh"),
+        "at 99d5acac the falsifier must flip and name what falsified it: {flipped:#?}"
+    );
+}
+
+/// No declared falsifier in the ledger is violated, malformed, or aimed at a directory the tree
+/// does not have.
+///
+/// **What this is not.** It does not prove a `**Mechanism status:**` true. A falsifier is a
+/// tripwire on a NAME the author guessed, and it can only flip when the mechanism that lands
+/// matches that name. A resource nobody declared a falsifier for stays invisible — which is how
+/// the original field went stale — and so does a mechanism built under a name the glob did not
+/// anticipate. Scope is deliberate: new or edited fields, with `IC-17` the first migrated one.
+/// `docs/issues/archive/2026-09-02-a-worklist-field-announcing-an-absence-outlives-the-mechanism.md`
+#[test]
+fn no_mechanism_status_falsifier_is_violated() {
+    let paths = tracked_paths(&repo_root());
+    assert!(
+        paths.len() > 500,
+        "expected the whole tracked tree; got {} paths — an expect=absent falsifier is \
+         satisfied by an empty tree",
+        paths.len()
+    );
+    let text = ledger_text();
+    let scan = mechanism_falsifier_scan(&text);
+    assert!(
+        scan.falsifiers.iter().any(|f| f.ic == "IC-17"),
+        "IC-17 is the first migrated field and declares no falsifier: the scan found {:?}, so \
+         this gate is checking nothing",
+        scan.falsifiers
+    );
+    let problems = falsifier_problems(&text, &paths);
+    assert!(
+        problems.is_empty(),
+        "a `**Mechanism status:**` falsifier fails:\n  {}\n\n\
+         VIOLATED: the claim the field makes about the tree stopped being true. Re-read the \
+         field against the code and correct the sentence, then the falsifier.\n\
+         MALFORMED / DEAD: grammar and semantics are in docs/trackers/issue-clusters.md \
+         § *Falsifier rows*. A falsifier that cannot be read is never skipped.",
+        problems.join("\n  ")
+    );
+}
+
+/// The hook's falsifier scan and evaluation agree with these, on [`FALSIFIER_FIXTURE`].
+///
+/// Compares the full `problems` strings and not only their count: two implementations broken
+/// the same way agree on a count. Mutation that must kill this: in the Python, let `*` cross
+/// `/`, drop the dead-prefix check, or skip the bare-`expect=` line.
+#[test]
+fn the_hook_script_agrees_on_the_mechanism_falsifier_scan() {
+    let mut child = Command::new("python3")
+        .args([
+            "scripts/pre-commit-ledger-counts.py",
+            "--fixture-mechanism-falsifier",
+        ])
+        .current_dir(repo_root())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("python3 failed to spawn");
+    let input = serde_json::json!({ "text": FALSIFIER_FIXTURE, "paths": fixture_paths() });
+    child
+        .stdin
+        .take()
+        .expect("stdin piped")
+        .write_all(input.to_string().as_bytes())
+        .expect("write fixture");
+    let out = child.wait_with_output().expect("hook script failed");
+    assert!(out.status.success(), "script exited non-zero");
+
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        falsifiers: Vec<(String, String, String)>,
+        malformed: Vec<(String, String, String)>,
+        problems: Vec<String>,
+    }
+    let theirs: Reply =
+        serde_json::from_slice(&out.stdout).expect("script must emit a JSON object");
+
+    let scan = mechanism_falsifier_scan(FALSIFIER_FIXTURE);
+    let mine: Vec<(String, String, String)> = scan
+        .falsifiers
+        .iter()
+        .map(|f| (f.ic.clone(), f.glob.clone(), f.expect.clone()))
+        .collect();
+    assert_eq!(
+        mine, theirs.falsifiers,
+        "declarations differ between the gate and the hook"
+    );
+    assert_eq!(
+        scan.malformed, theirs.malformed,
+        "malformed spans differ between the gate and the hook"
+    );
+    assert_eq!(
+        falsifier_problems(FALSIFIER_FIXTURE, &fixture_paths()),
+        theirs.problems,
+        "this gate and scripts/pre-commit-ledger-counts.py disagree about what is wrong"
+    );
+    assert_eq!(
+        theirs.problems.len(),
+        9,
+        "known answer: {:#?}",
+        theirs.problems
+    );
+}
+
 /// No class field states a live bare `n=` — the ledger stores no derived count.
 ///
 /// Renamed from `every_bare_n_in_a_class_field_matches_the_corpus` on 2026-09-02, when the
@@ -2776,6 +3322,7 @@ const HOOK_OWED: &[&str] = &[
     "no_class_field_states_a_bare_n",
     "no_index_row_stores_a_count",
     "no_index_row_stores_a_mechanism",
+    "no_mechanism_status_falsifier_is_violated",
     "no_mechanism_status_is_a_bare_verdict",
     "the_index_file_holds_no_class_sections",
 ];
@@ -2803,6 +3350,21 @@ const HOOK_ONLY: &[(&str, &str)] = &[(
 /// divergence rather than a judgement that the hook does not owe them — the distinction matters,
 /// because an "exempt" entry closes the question and these do not.
 const NOT_HOOK_OWED: &[(&str, &str)] = &[
+    (
+        "a_falsifier_would_have_flipped_on_the_original_stale_field",
+        "replays the incident that motivated the falsifier rule on fixture trees; proves the \
+         hook-owed rule can flip on the case it exists for, and is not itself a rule",
+    ),
+    (
+        "the_mechanism_falsifier_scan_discriminates",
+        "vacuity guard for the falsifier scan, the glob and the evaluation; the live ledger \
+         holds one correct migrated field, so only this fixture can show a non-empty answer",
+    ),
+    (
+        "the_hook_script_agrees_on_the_mechanism_falsifier_scan",
+        "a test OF the hook rather than a rule it owes; feeds one document and one tree \
+         through both implementations of the falsifier scan and evaluation",
+    ),
     (
         "a_cluster_slug_in_prose_is_not_a_declaration",
         "exercises the slug parser against a fixture; the hook shares no code path with it",
