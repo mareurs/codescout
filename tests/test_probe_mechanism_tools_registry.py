@@ -89,7 +89,7 @@ class MissingGuideIsNotNoRules(unittest.TestCase):
     touching the real guides.
     """
 
-    RULED_HEADING = next(iter(probe.SECTION_SIGNATURES))  # a heading some rule is keyed on
+    RULED_HEADING = next(iter(probe.SECTION_SIGNATURES["tracker-conventions"]))  # a heading its rules are keyed on
 
     def setUp(self):
         import tempfile

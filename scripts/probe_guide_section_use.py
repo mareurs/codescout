@@ -366,60 +366,203 @@ def opening_pattern(topic: str) -> "re.Pattern[str]":
 # in the serialized tool input]). Deliberately NARROW -- a rule that fires on ordinary
 # activity would manufacture use where there is none, and this probe's whole value is in
 # its zeros. Each entry names what it misses.
-SECTION_SIGNATURES: dict[str, list[tuple[str | None, list[str]]]] = {
-    # Archive flow, bug-file frontmatter vocabulary, patch-id citation.
-    # MISSES: reading an existing bug file (that is `Querying`), and writing a bug file
-    # via native Write/Edit rather than the artifact tool.
-    "Bug files (docs/issues/)": [
-        (None, ["docs/issues/archive/"]),
-        (None, ["docs/issues/", '"kind": "bug"']),
-        (None, ["patch-id"]),
-        (None, ["unverified"]),
-        (None, ['"status": "fixed"']),
-        (None, ['"status": "mitigated"']),
-    ],
-    # Tracker creation and in-place archival.
-    # MISSES: appending to a tracker (that is `Entry-level standard`).
-    "Tracker artifacts (docs/trackers/)": [
-        (None, ['"kind": "tracker"']),
-        (None, ['"status": "archived"']),
-        (None, ["docs/trackers/archive/"]),
-    ],
-    # Augmentation shape: the sidecar, the export fix, artifact_augment itself.
-    "Declaring an augmentation": [
-        ("artifact_augment", []),
-        (None, ["expects_augmentation"]),
-        (None, ["export_augmentations"]),
-        (None, ["render_template"]),
-        (None, ["params_schema"]),
-    ],
-    # The entry-grain rules: allocation, headings, required fields, the high-water mark.
-    # MISSES, deliberately: `**Valid:**` / `**Rests on:**` written into a body. Those are
-    # real compliance, but they live in prose, and any rule reading prose reopens the
-    # describe-vs-operate leak that costs this probe its zeros. The structural signals
-    # here already cover the section; the marginal extra signal is not worth the trade.
-    "Entry-level standard — the shape INSIDE a tracker": [
-        (None, ["append_entry"]),
-        (None, ["update_entry"]),
-        (None, ["entry_prefix"]),
-        (None, ["id_prefix"]),
-        (None, ["anchor_heading"]),
-        (None, ["entry_high_water"]),
-    ],
-    # Catalog queries: the triage filter, entry-grain filtering, archived visibility.
-    "Querying with the librarian": [
-        (None, ["entry_filter"]),
-        (None, ["include_archived"]),
-        (None, ['"action": "find"', "status"]),
-        (None, ['"action": "get"', "heading"]),
-    ],
-    # The citation graph.
-    "Cross-linking (edges are derived — cite in prose)": [
-        (None, ["link_scan"]),
-        (None, ['"action": "link"']),
-        (None, ["include_links"]),
-        (None, ['"action": "graph"']),
-    ],
+SECTION_SIGNATURES: dict[str, dict[str, list[tuple[str | None, list[str]]]]] = {
+    "tracker-conventions": {
+        # Archive flow, bug-file frontmatter vocabulary, patch-id citation.
+        # MISSES: reading an existing bug file (that is `Querying`), and writing a bug file
+        # via native Write/Edit rather than the artifact tool.
+        "Bug files (docs/issues/)": [
+            (None, ["docs/issues/archive/"]),
+            (None, ["docs/issues/", '"kind": "bug"']),
+            (None, ["patch-id"]),
+            (None, ["unverified"]),
+            (None, ['"status": "fixed"']),
+            (None, ['"status": "mitigated"']),
+        ],
+        # Tracker creation and in-place archival.
+        # MISSES: appending to a tracker (that is `Entry-level standard`).
+        "Tracker artifacts (docs/trackers/)": [
+            (None, ['"kind": "tracker"']),
+            (None, ['"status": "archived"']),
+            (None, ["docs/trackers/archive/"]),
+        ],
+        # Augmentation shape: the sidecar, the export fix, artifact_augment itself.
+        "Declaring an augmentation": [
+            ("artifact_augment", []),
+            (None, ["expects_augmentation"]),
+            (None, ["export_augmentations"]),
+            (None, ["render_template"]),
+            (None, ["params_schema"]),
+        ],
+        # The entry-grain rules: allocation, headings, required fields, the high-water mark.
+        # MISSES, deliberately: `**Valid:**` / `**Rests on:**` written into a body. Those are
+        # real compliance, but they live in prose, and any rule reading prose reopens the
+        # describe-vs-operate leak that costs this probe its zeros. The structural signals
+        # here already cover the section; the marginal extra signal is not worth the trade.
+        "Entry-level standard — the shape INSIDE a tracker": [
+            (None, ["append_entry"]),
+            (None, ["update_entry"]),
+            (None, ["entry_prefix"]),
+            (None, ["id_prefix"]),
+            (None, ["anchor_heading"]),
+            (None, ["entry_high_water"]),
+        ],
+        # Catalog queries: the triage filter, entry-grain filtering, archived visibility.
+        "Querying with the librarian": [
+            (None, ["entry_filter"]),
+            (None, ["include_archived"]),
+            (None, ['"action": "find"', "status"]),
+            (None, ['"action": "get"', "heading"]),
+        ],
+        # The citation graph.
+        "Cross-linking (edges are derived — cite in prose)": [
+            (None, ["link_scan"]),
+            (None, ['"action": "link"']),
+            (None, ["include_links"]),
+            (None, ['"action": "graph"']),
+        ],
+    },
+    # `librarian` rules, keyed at the `##` grain `current_section_bytes` splits on (a `###` child
+    # such as § doctor repairs folds into its parent's bytes and its parent's rules). Each rule
+    # is read off the section's own text and its `serves:` declaration, and each is the
+    # structural call a reader of that section would make -- never a word in a payload.
+    #
+    # HONEST LIMIT, stated once for the whole topic: a `librarian` section is DELIVERED when a
+    # call of the shape it `serves:` arrives, so a LATER call of that same shape scores it
+    # engaged for the rest of the session. That is "the session kept doing this", an upper
+    # bound by this probe's own contract -- the zeros are the evidence, not the non-zeros.
+    "librarian": {
+        # create's required fields; get by id. MISSES: the identifier advice (`id` vs `rel_path`),
+        # which has no structural trace.
+        "Artifact Model": [
+            (None, ['"action": "create"', '"rel_path"']),
+            (None, ['"action": "get"', '"id"']),
+        ],
+        # Entering through the catalog instead of `read_file`. MISSES the thing it forbids
+        # (`read_file` on docs/trackers/, a non-mechanism tool), so a zero here is not compliance.
+        "docs/trackers/ — Backing Store, Not a Docs Folder": [
+            (None, ['"action": "get"', '"heading"']),
+            (None, ['"action": "find"', '"semantic"']),
+        ],
+        # The filter AST and the shortcut params. MISSES a `find` with no filter at all.
+        "Filter Syntax": [
+            (None, ['"action": "find"', '"filter"']),
+            (None, ['"action": "find"', '"scope"']),
+            (None, ['"action": "find"', '"kind"']),
+            (None, ['"action": "find"', '"status"']),
+            (None, ['"entry_filter"']),
+        ],
+        # § Reach for augmentation (a `###` child): rows go in through append_entry, not a table.
+        # The `##` parent is an orientation paragraph pointing at tracker-conventions.
+        "Tracker Workflow": [
+            (None, ['"action": "append_entry"']),
+            (None, ['"action": "augment"']),
+        ],
+        # Attach/merge/refresh, and § Changing ONE entry (a `###` child).
+        "Augmentation Lifecycle": [
+            (None, ['"action": "augment"', '"merge"']),
+            (None, ['"params_path"']),
+            (None, ['"action": "gather"']),
+            (None, ['"action": "list_stale"']),
+            (None, ['"action": "update_entry"']),
+            (None, ['"action": "rekey_prefix"']),
+            (None, ['"commit_refresh"']),
+        ],
+        # The three editing surfaces, § Choosing a mode and § The shrink guard (`###` children).
+        # MISSES `edit_file` on a managed file, the surface it says to avoid.
+        "Body Editing Surfaces": [
+            (None, ['"action": "update"', '"body_edits"']),
+            (None, ['"action": "update"', '"body"']),
+            (None, ['"action": "update"', '"force"']),
+        ],
+        # The reference table and § doctor repairs: any `librarian` call is a call of this table.
+        "librarian(action=...) — Reference": [
+            ("librarian", []),
+        ],
+        "doc — Event Log": [
+            (None, ['"action": "event_create"']),
+            (None, ['"action": "event_list"']),
+        ],
+        'doc(action="graph") — Relationship Map': [
+            (None, ['"action": "graph"']),
+            (None, ['"action": "link"']),
+        ],
+        "Worktree overlay": [
+            ("librarian", ['"merge_worktree"']),
+        ],
+        "Archiving / Moving Trackers": [
+            (None, ['"action": "move"']),
+            (None, ['"action": "delete"']),
+            (None, ['"status": "archived"']),
+        ],
+        # DELIBERATELY UNRULED: `Common Mistakes` is troubleshooting prose spanning every shape and
+        # `Runtime tips` is a two-line pointer to the pull-only `librarian-runtime` topic. Neither has
+        # a structural trace a rule could read without firing on ordinary activity, which is the
+        # failure this probe's zeros cannot survive. The report prints them with 0 engaged and the
+        # "rule-set scope" line names the gap, so the zero reads as a statement about the rules.
+    },
+}
+
+
+# Topics with NO `SECTION_SIGNATURES` entry, each with the reason one cannot honestly be authored.
+# Every registered topic is either in `SECTION_SIGNATURES` or here (`topics_unaccounted_for`), so
+# "unmeasured" is never a silent state. Figures are from `probe_guide_injection.py` run over every
+# transcript on this machine's three profiles on 2026-10-16 (3,094 transcript files, 2,411 unique
+# sessions, 349 of them main sessions); they are a dated snapshot, not a constant.
+#
+# Two reasons recur and are different in kind:
+#   NO POPULATION  -- the topic was never auto-injected, so no signature could be checked against a
+#                     real transcript. A rule nothing can fire against is a guess wearing a
+#                     measurement's name.
+#   OUT OF SCOPE   -- injected, but its rules are carried by tools `scan_transcript` does not count.
+#                     That scope (only doc/librarian/artifact calls) is load-bearing: matching
+#                     signatures against any tool input once scored all six tracker-conventions
+#                     sections at 100% from the single `create_file` that wrote this script.
+#                     Widening it per topic is a design decision, not an authoring task -- it
+#                     needs its own self-trigger control for each tool added.
+UNMEASURABLE_TOPICS: dict[str, str] = {
+    "error-handling": (
+        "NO POPULATION: 0 injections in 2,411 sessions; it is pull-only (PULL_ONLY_GUIDE_TOPICS: "
+        "authoring guidance for a contributor writing a tool, which no caller's tool call implies). "
+        "Its rules (RecoverableError vs anyhow::bail) are code conventions with no call-level trace."
+    ),
+    "iron-laws-detail": (
+        "NO POPULATION: 0 injections in 2,411 sessions; pull-only. Its six laws govern tool CHOICE "
+        "(symbols over read_file, edit_code over edit_file, no pipe on run_command), so engagement "
+        "is the ABSENCE of a forbidden call -- there is no call for a signature to match."
+    ),
+    "librarian-runtime": (
+        "NO POPULATION: 0 injections in 2,411 sessions; pull-only by design (the spill-out half of "
+        "`librarian`, which ends by naming it). Its sections describe catalog runtime behaviour "
+        "(scope defaults, limits, where state lives), not a call a session makes."
+    ),
+    "untrusted-content": (
+        "NO POPULATION: 0 injections in 2,411 sessions, and no trigger exists (PENDING BL-25 in "
+        "PULL_ONLY_GUIDE_TOPICS). Its rules are a judgement about third-party text (a verdict of "
+        "'unverifiable'), which leaves no structural call to match."
+    ),
+    "progressive-disclosure": (
+        "OUT OF SCOPE (decision pending): injected in 57% of all sessions and 78% of main sessions, "
+        "so a population exists. Engagement is following @ref handles through read_file / grep / "
+        "run_command, none of which `scan_transcript` counts. Needs a per-topic tool scope and its "
+        "own self-trigger control; see docs/issues/2026-09-24-residual-section-use-signatures-for-nine-topics.md."
+    ),
+    "symbol-navigation": (
+        "OUT OF SCOPE (decision pending): injected in 62% of all sessions. Engagement is symbols / "
+        "references / call_graph with a name-path, none counted by `scan_transcript`; and its main "
+        "rule (navigate instead of grep) is the ABSENCE of a grep, which no signature can match."
+    ),
+    "workspace-state": (
+        "OUT OF SCOPE (decision pending): injected in 10% of all sessions and 30% of main sessions. "
+        "Engagement is `workspace` calls and the per-call `workspace=` pin, outside the mechanism "
+        "tools `scan_transcript` counts. Needs a per-topic tool scope."
+    ),
+    "project-activation-bootstrap": (
+        "OUT OF SCOPE: injected in 95% of sessions because it is the SESSION OPENER, delivered on the "
+        "first guide-eligible call whatever that call is, so every later mechanism call would credit "
+        "it by construction. Its phases direct memory / semantic_search / symbols work; only one "
+        "fragment (`doc(find, kind=bug, status in [...])`) is a mechanism call."
+    ),
 }
 
 
@@ -468,11 +611,22 @@ def current_section_bytes(topic: str) -> dict[str, int]:
             buf.append(line)
     out[current] = out.get(current, 0) + len("".join(buf).encode())
     return out
-def topics_with_rules() -> list[str]:
-    """Topics whose section headings intersect `SECTION_SIGNATURES`' keys.
+def signatures_for(topic: str) -> dict[str, list[tuple[str | None, list[str]]]]:
+    """The section rules authored for `topic`, keyed by section HEADING.
 
-    DERIVED, never hand-listed. `SECTION_SIGNATURES` is keyed by section HEADING, so the
-    set of topics it can measure is a function of the guides on disk right now. A
+    `SECTION_SIGNATURES` is keyed `topic -> heading`, never by heading alone: headings collide
+    across the ten guides (`Related` appears in four, `Anti-patterns` and `Path-relative
+    annotation` in two, and `(preamble)` in all ten), so a heading-only key credits one topic's
+    rule to another's section. docs/issues/2026-09-24-residual-section-use-signatures-for-nine-topics.md
+    """
+    return SECTION_SIGNATURES.get(topic, {})
+
+
+def topics_with_rules() -> list[str]:
+    """Topics whose section headings intersect THEIR OWN `SECTION_SIGNATURES` entry.
+
+    DERIVED, never hand-listed. `SECTION_SIGNATURES` is keyed by topic and then section HEADING,
+    so the set of topics it can measure is a function of the guides on disk right now. A
     hand-maintained list here would be the same defect this function exists to guard --
     `cluster/selector-narrower-than-its-population`, whose sibling instance in this very
     file was `MECHANISM_TOOLS` going stale across a tool rename.
@@ -487,7 +641,7 @@ def topics_with_rules() -> list[str]:
             sections = current_section_bytes(t)
         except (FileNotFoundError, OSError):
             continue
-        if set(sections) & set(SECTION_SIGNATURES):
+        if set(sections) & set(signatures_for(t)):
             out.append(t)
     return out
 def topics_with_missing_guide() -> list[str]:
@@ -516,6 +670,9 @@ def refusal_for_topic(topic: str) -> str | None:
     first means a registered topic has no file behind it (restore the guide or drop the topic
     from TOPICS); the second means no SECTION_SIGNATURES key matches a heading of a guide that
     is there (author rules). Checked missing-first, because a missing file also has no rules.
+
+    A topic that has no rules because they CANNOT be authored says so, with the reason
+    (`UNMEASURABLE_TOPICS`), rather than reading as work not yet done.
     """
     if topic in topics_with_missing_guide():
         return (
@@ -526,17 +683,32 @@ def refusal_for_topic(topic: str) -> str | None:
         )
     measurable = topics_with_rules()
     if topic not in measurable:
+        why = UNMEASURABLE_TOPICS.get(topic)
         return (
             f"REFUSING to report on `{topic}`: no SECTION_SIGNATURES rule matches "
             f"any section of that topic, so every section would score zero and the run "
             f"would report ~100% never-engaged by construction rather than by "
             f"measurement.\n"
             f"  topics with rules: {', '.join(measurable) if measurable else '(none)'}\n"
-            f"  Authoring rules for `{topic}` is a separate change -- the guard is "
-            f"the fix.\n"
-            f"  docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md"
+            + (
+                f"  why `{topic}` has none, and why that is not an oversight: {why}\n"
+                if why
+                else f"  Authoring rules for `{topic}` is a separate change -- the guard is "
+                f"the fix.\n"
+            )
+            + f"  docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md"
         )
     return None
+
+
+def topics_unaccounted_for() -> list[str]:
+    """Registered topics with neither authored rules NOR a recorded reason they have none.
+
+    The population of this probe is `TOPICS`; each entry must be measurable or say why not.
+    A topic in neither state is the original defect (`cluster/selector-narrower-than-its-population`)
+    re-opening: a new guide registered in TOPICS that the probe silently cannot measure.
+    """
+    return [t for t in TOPICS if not signatures_for(t) and t not in UNMEASURABLE_TOPICS]
 
 
 def iter_transcripts(profiles: list[str], roots: list[str] | None) -> list[tuple[str, Path]]:
@@ -653,7 +825,7 @@ def scan_transcript(path: Path, topic: str, profile: str = "?") -> dict | None:
 
     engaged: dict[str, int] = {}
     evidence: dict[str, list[str]] = {}
-    for section, rules in SECTION_SIGNATURES.items():
+    for section, rules in signatures_for(topic).items():
         hits = 0
         ev: list[str] = []
         for _, name, struct in after:
@@ -714,7 +886,12 @@ def frame_attrition() -> None:
     print("     not the frame. Use a freshly built frame and report it as its own period.")
 
 
-def report(records: list[dict], sizes: dict[str, int], label: str) -> None:
+def report(
+    records: list[dict],
+    sizes: dict[str, int],
+    label: str,
+    ruled: "set[str] | None" = None,
+) -> None:
     """One population's table. NEVER call this on main+subagent blended.
 
     Measured 2026-08-31: blending them yields 71.7% never-engaged, which coincidentally
@@ -723,10 +900,19 @@ def report(records: list[dict], sizes: dict[str, int], label: str) -> None:
     88.7% -- so the "agreement" was an artifact of mixing two populations that behave
     nothing alike. That near-miss is why the split is in the instrument rather than in
     the reader's discipline.
+
+    `ruled` is the set of sections that HAVE signatures. Only those are scored: an unruled
+    section reads 0 engaged whatever the sessions did, so counting its bytes as "never
+    engaged" would put a figure produced by construction into the headline percentage -- the
+    defect the refusal guard exists for, one level down. Unruled sections are named, with their
+    bytes, instead. `None` scores every section (the pre-2026-10-16 behaviour).
     """
     n = len(records)
-    total_bytes = sum(sizes.values())
-    real = [s for s in sizes if s != "(preamble)"]
+    scored = {
+        s: b for s, b in sizes.items() if ruled is None or s in ruled or s == "(preamble)"
+    }
+    total_bytes = sum(scored.values())
+    real = [s for s in scored if s != "(preamble)"]
     print(f"\n=== {label}  (n={n} sessions) ===")
     if n == 0:
         print("  none -- a statement about the scan, not the world. Check --profiles/--since.")
@@ -755,6 +941,18 @@ def report(records: list[dict], sizes: dict[str, int], label: str) -> None:
     dead = [s for s in real if not any(r["engaged"].get(s, 0) for r in records)]
     if dead:
         print(f"  engaged by ZERO sessions: {', '.join(s[:38] for s in dead)}")
+    unscored = [s for s in sizes if s not in scored and s != "(preamble)"]
+    if unscored:
+        print(
+            f"  NOT SCORED (no signature -- a zero would be about the rules, not the sessions): "
+            f"{', '.join(f'{s[:34]} ({sizes[s]:,} B)' for s in unscored)}"
+        )
+    print(
+        "  NOTE: 'delivered' = sessions x scored-section bytes, i.e. it ASSUMES whole-topic delivery. "
+        "A topic delivered by section (`librarian`, `tracker-conventions` since its `serves:` "
+        "declarations) or by pointer received fewer bytes, so 'never engaged' is an upper bound "
+        "on waste, not a measurement of it."
+    )
 
 
 
@@ -825,8 +1023,8 @@ def main() -> int:
             return 2
 
     # REFUSE rather than report. `--topic` accepts all ten registered topics, but
-    # `SECTION_SIGNATURES` is keyed by section HEADING and today only
-    # `tracker-conventions`' headings appear there. For any other topic the two key sets
+    # `SECTION_SIGNATURES` is keyed by topic and then section HEADING, and only
+    # `tracker-conventions` and `librarian` have an entry. For any other topic the two key sets
     # are disjoint, so `r["engaged"].get(section, 0)` returns 0 for every section of
     # every session and the report reads `100.0% never engaged` -- a confident figure
     # produced by CONSTRUCTION rather than by measurement, exit 0, no warning.
@@ -893,7 +1091,7 @@ def main() -> int:
     # suspicious must name the scope examined. An unruled section reports zero
     # engagement whatever the sessions did, so the reader needs the denominator of
     # RULES beside the denominator of bytes.
-    ruled = sorted(set(sizes) & set(SECTION_SIGNATURES))
+    ruled = sorted(set(sizes) & set(signatures_for(args.topic)))
     print(
         f"rule-set scope: {len(ruled)} of {len(sizes)} sections of this topic have "
         f"SECTION_SIGNATURES rules -- a zero on an UNRULED section is a statement "
@@ -928,10 +1126,10 @@ def main() -> int:
     )
     if args.kind in ("main", "all"):
         for rs, lab in slices(mains, "MAIN sessions"):
-            report(rs, sizes, lab)
+            report(rs, sizes, lab, set(ruled))
     if args.kind in ("subagent", "all"):
         for rs, lab in slices(subs, "SUBAGENT sessions"):
-            report(rs, sizes, lab)
+            report(rs, sizes, lab, set(ruled))
     if args.kind == "all":
         print("\n(DIFFERENT POPULATIONS -- do not average them; see report()'s docstring)")
     if cut:
