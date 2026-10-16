@@ -56,6 +56,20 @@ The shell suites under `tests/` build their repos under `mktemp -d`. I read the 
 
 **Diagnostic change, not a fix.** Commit `1e67e8a3` (patch-id `07ed8ad7153c101ba089dd9a97e98a159895c191`, from `git show 1e67e8a3 | git patch-id --stable`) adds `tempdir_with_no_git_above()` to `src/tools/grep.rs`. The three tests use it. When an ancestor holds a `.git`, it panics and names that ancestor and the tempdir. Evidence: `tools::grep::tests` 52 passed, 0 failed. With `TMPDIR` under a throwaway repo, each guarded test now fails with the named-ancestor message. A mutation of the helper from `.exists()` to `.is_dir()` failed only the new helper test. The gate gave `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed`. This does not find the creator of the 2026-09-24 `.git`, and `WalkAudit::git_ignore_in_effect` is unchanged.
 
+### Stress, ancestor watch and a `.jj` gap, 2026-10-16 (second pass) — still no recurrence
+
+**Full-suite run with a private `TMPDIR`.** `TMPDIR=<fresh empty dir> CODESCOUT_SKIP_ONNX_TESTS=1 scripts/with-slot.sh cargo test --lib` (pre-change binary plus the guard commit `1e67e8a3`): `6848 passed; 17 failed`, 701 s. All 54 `tools::grep` tests passed. After the run the private `TMPDIR` held **no `.git` and no `.jj`**: this single execution of the whole lib suite, including the two `set_current_dir` tests (one of which sets the CWD to exactly that directory, the tempdir's parent), planted no marker in the tempdir's parent. The 17 failures are not grep tests (`peer::*`, `lsp::client::tests::*`, `librarian::tools::context::tests::*`); their cause was not investigated, and they ran with a non-default `TMPDIR`.
+
+**Ancestor watch.** A 50 ms poll loop for 25 minutes, during the run above and with about ten peer sessions live, checked `.git` and `.jj` in `/tmp`, `/home`, `~`, `~/.cache`, `~/.cache/cc-tmp`, `~/.cache/cc-tmp/claude-1000` and the private `TMPDIR`. It logged nothing. A 50 ms poll would miss a marker that lives for less than 50 ms; three separate tests failed on 2026-09-24, which suggests a marker present for longer than that, though the timing of those three tests was not recorded.
+
+**Loop with the CWD-changing tests.** 40 consecutive runs of `tools::grep` together with `new_with_relative_path_canonicalizes_home_root`, `write_within_cwd_allowed_even_outside_project_root` and `activate_populates_head_sha`: 40 times `59 passed; 0 failed`.
+
+**Read at the bytes, `ignore` 0.4.25 `src/dir.rs`.** `add_parents` (lines 225-229) and `add_child_path` (266-267) set `has_git` when the directory holds `.git` (file or directory) **or `.jj`**. `matched_ignore` gates `.gitignore`, `.git/info/exclude` and the global ignore file on `has_git`, but not `.ignore` files: an `.ignore` in a tempdir ancestor would hide a file without any `.git` at all. Nobody has found one; `/tmp` held none on 2026-09-24 (measured then) and none held one today.
+
+**One real gap found, fixed.** `WalkAudit::git_ignore_in_effect` and the guard helper looked for `.git` only. A `.jj` directory turns gitignore on in the walk (the new test `a_jj_workspace_applies_gitignore_so_the_widened_zero_names_it` measured `total: 0` with the file ignored), yet the completeness warning stayed silent and the guard would not have named a `.jj` ancestor. Both now share `WalkAudit::nearest_vcs_marker_dir`. Red first: both new tests failed, the second with the bare zero and no warning. This is not shown to be the cause of the 2026-09-24 flake (no `.jj` exists on this machine and `jj` is not installed); it only closes a place where the same symptom could hide.
+
+**State of the root cause.** Still unknown. Narrowed: every `git init` / `.git` writer in the Rust tests targets its own tempdir (audited twice); a full run plants nothing in the tempdir's parent; the CWD-changing tests do not reproduce it in a loop. What remains is a `.git` (or `.jj` / `.ignore`) created by a process outside this test binary, present for the minutes the default lane ran. The 2026-09-24 `/tmp` check may also have looked at the wrong directory: sessions under the Claude harness have `TMPDIR=~/.cache/cc-tmp`, whose ancestors are `~/.cache`, `~`, `/home`, `/`, not `/tmp`.
+
 ## Symptom (Effect)
 
 Gate run 2026-09-24 22:25:50 local, `FMT=0 CLIPPY=0 LEAN=0 DEFAULT=101`, `5812 passed; 3 failed`:
@@ -105,11 +119,13 @@ The gate log above, plus the re-run (3 passed, 0 failed). The lean lane of the s
 
 ## Fix
 
-Not started. The root cause is unknown. Commit `1e67e8a3` only makes the next occurrence self-diagnosing.
+Not started for the flake: the root cause is unknown, so the status stays `open`. Commit `1e67e8a3` only makes the next occurrence self-diagnosing; the second pass (2026-10-16) widened that diagnosis and the completeness warning's gate to `.jj` (`WalkAudit::nearest_vcs_marker_dir` in `src/tools/grep.rs`).
 
 ## Tests added
 
 `an_ancestor_git_is_named_whether_it_is_a_directory_or_a_worktree_link_file` in `src/tools/grep.rs` (commit `1e67e8a3`). It pins the helper that names the ancestor `.git`, for both a directory and a worktree link file. It is not a regression test for the flake itself.
+
+Second pass 2026-10-16: `an_ancestor_jj_marker_is_named_like_a_git_one` and `a_jj_workspace_applies_gitignore_so_the_widened_zero_names_it`, both red before `WalkAudit::nearest_vcs_marker_dir` and green after. They cover the `.jj` gap, not the flake.
 
 ## Workarounds
 
@@ -119,10 +135,10 @@ Re-run the three tests before reading your own diff when a gate reds on them.
 
 On recurrence, read the panic first. If it names an ancestor, the cause is an environment fault: find out what created that `.git`, and when. Also record `TMPDIR` for the gate run. If the old `left: 0 right: 1` appears instead, the premise held and the cause is something else, so also check whether a CWD-changing test ran at that moment (a `--test-threads=1` re-run that passes would point at parallelism).
 
-The audit of this repository's own `git init` sites is done (see above). The cause, if it is an ancestor `.git`, is therefore not in the Rust tests. It may still be in the unread shell files or outside the repository. What is left without a recurrence:
-- read the 30 unread shell and Python matches;
-- stress the `tools::grep` module alongside the `set_current_dir` tests;
-- look for a tool or a peer session that runs `git init` in `~`, `~/.cache` or `/tmp`.
+The audit of this repository's own `git init` sites is done (see above). The cause, if it is an ancestor `.git`, is therefore not in the Rust tests: a full lib run with a private `TMPDIR` left it clean (2026-10-16). It may still be in the unread shell files or outside the repository. What is left without a recurrence:
+- read the 30 unread shell and Python matches (the unscoped `git init` calls in `tests/*.sh` were read again 2026-10-16: each follows a `cd` into its own `mktemp -d`, or is `git -C <dir>`);
+- look for a tool or a peer session that runs `git init` in `~`, `~/.cache`, `~/.cache/cc-tmp` or `/tmp`: a 25-minute poll found none, but the failure was one-off;
+- on recurrence, record `TMPDIR` and `ls -a` of every ancestor of it, `.ignore` included.
 
 ## References
 
