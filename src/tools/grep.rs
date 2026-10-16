@@ -1274,7 +1274,19 @@ impl WalkAudit {
     /// population asserts that population is non-empty, and that is the assertion which fails
     /// green — so the clause claims a mechanism, and a mechanism needs only this.
     fn git_ignore_in_effect(root: &std::path::Path) -> bool {
-        root.ancestors().any(|a| a.join(".git").exists())
+        Self::nearest_vcs_marker_dir(root).is_some()
+    }
+
+    /// The nearest ancestor of `root` (or `root` itself) that makes the `ignore` crate apply
+    /// gitignore rules: one holding a `.git` (directory or worktree link file) or a `.jj`.
+    ///
+    /// `ignore` 0.4.25 checks both names — `add_parents` and `add_child_path` in its `dir.rs`
+    /// — so a check of `.git` alone calls a `.jj` workspace unversioned while its walk applies
+    /// the rules (`a_jj_workspace_applies_gitignore_so_the_widened_zero_names_it`).
+    fn nearest_vcs_marker_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
+        root.ancestors()
+            .find(|a| a.join(".git").exists() || a.join(".jj").exists())
+            .map(std::path::Path::to_path_buf)
     }
 
     /// Whether any admitting glob could land on, or under, a dot-prefixed entry at the walk
@@ -1453,9 +1465,7 @@ mod tests {
     /// The nearest directory at or above `dir` that holds a `.git` (a directory, or the file a linked
     /// worktree leaves), if there is one.
     fn ambient_git_above(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-        dir.ancestors()
-            .find(|a| a.join(".git").exists())
-            .map(std::path::Path::to_path_buf)
+        WalkAudit::nearest_vcs_marker_dir(dir)
     }
 
     /// A tempdir for a test whose premise is that no `.git` sits above it.
@@ -1470,7 +1480,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         if let Some(found) = ambient_git_above(dir.path()) {
             panic!(
-                "this test needs a directory with no `.git` above it, but `{}` holds one (the tempdir is `{}`). \
+                "this test needs a directory with no `.git` or `.jj` above it, but `{}` holds one (the tempdir is `{}`). \
              Another process may have put it there; see docs/issues/2026-09-24-grep-outside-git-repo-tests-flaked-once-in-the-default-lane.md",
                 found.display(),
                 dir.path().display()
@@ -2464,6 +2474,51 @@ mod tests {
             ambient_git_above(&inner).as_deref(),
             Some(outer.path().join("a").as_path()),
             "a `.git` file one level up must be found, and found before any farther one"
+        );
+    }
+    #[test]
+    fn an_ancestor_jj_marker_is_named_like_a_git_one() {
+        // `ignore` 0.4.25 (`dir.rs`, `add_parents` and `add_child_path`) treats a `.jj` directory
+        // exactly like a `.git`: it turns gitignore rules on. So a `.jj` above the tempdir
+        // reproduces `left: 0 right: 1` too, and a helper that only looked for `.git` would let it
+        // fail unexplained.
+        let outer = tempfile::tempdir().unwrap();
+        let inner = outer.path().join("a");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::create_dir(outer.path().join(".jj")).unwrap();
+        assert_eq!(
+            ambient_git_above(&inner).as_deref(),
+            Some(outer.path()),
+            "a `.jj` directory above must be found"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_jj_workspace_applies_gitignore_so_the_widened_zero_names_it() {
+        // Same gate as `a_gitignore_outside_a_git_repo_is_not_applied`, other side: `ignore`
+        // applies `.gitignore` rules inside a `.jj` workspace (no `.git` at all), so the clause
+        // that says a second filter is standing must fire there too.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".jj")).unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "secret.txt\n").unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "TARGET\n").unwrap();
+        let ctx = rooted_ctx(dir.path()).await;
+        let r = Grep
+            .call(
+                json!({ "pattern": "TARGET", "path": dir.path().to_str().unwrap(), "include_hidden": true }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            r["total"].as_u64().unwrap(),
+            0,
+            "premise: gitignore is applied in a .jj workspace: {r}"
+        );
+        let warning = r["completeness_warning"].as_str().unwrap_or("");
+        assert!(
+            warning.contains("Gitignore rules"),
+            "the zero is caused by a gitignore rule and the warning must say so: {r}"
         );
     }
 
