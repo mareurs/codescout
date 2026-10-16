@@ -628,8 +628,11 @@ min_section_chars = 40
     /// - `###` and `#` do not open it, and an indented `## ` is not a heading at all;
     /// - the section ends at the NEXT H1 or H2, and of several same-title sections the largest counts
     ///   (the row with the real one in the middle is the one a "first size wins" mutant fails);
-    /// - a carriage return, trailing spaces and U+2028 do not change the count: Rust's `lines()` does
-    ///   not split on U+2028, which is why the hook uses `split("\n")` and not `splitlines()`.
+    /// - a carriage return and trailing spaces do not change the count, and U+2028 does not start a
+    ///   heading: Rust's `lines()` does not split on it, which is why the hook uses `split("\n")` and
+    ///   not `splitlines()` (the row `intro<U+2028>## Class fit` is the one a `splitlines` mutant fails;
+    ///   a U+2028 in the middle of a counted line changes no count, which is why the first draft's row
+    ///   let that mutant survive).
     #[test]
     fn the_commit_hook_and_the_server_count_a_section_the_same_way() {
         use std::io::Write;
@@ -655,7 +658,7 @@ min_section_chars = 40
             ("## Class fit\r\nabc\r\n", Some(3)),
             ("## Class fit   \nabc\n", Some(3)),
             ("##  Class fit\nabc\n", Some(3)),
-            ("## Class fit\nab\u{2028}cd\n", Some(4)),
+            ("intro\u{2028}## Class fit\nabcdefghij\n", None),
             (
                 "## Class fit\n\u{c5}ngstr\u{f6}m \u{65e5}\u{672c}\u{8a9e} \u{661}\u{662}\u{663}\n",
                 Some(14),
@@ -745,6 +748,104 @@ min_section_chars = 40
             (title, min),
             (bug.sections[0].clone(), bug.min_section_chars),
             "the commit hook and `.codescout/requirements.toml` disagree about the Class fit rule"
+        );
+    }
+    /// The first day on which a bug file must carry its Class fit. Bugs filed earlier on 2026-10-16,
+    /// the day the rule landed, predate it, and so do the hundreds of older ones. The hook is
+    /// prospective by stem and needs no date; this test needs one because it scans files, not commits.
+    const CLASS_FIT_FIRST_DAY: &str = "2026-10-17";
+
+    /// Bug files, open or archived, whose NAME dates them on or after `first_day` and whose body
+    /// breaks the requirement's section rule. The date is the `YYYY-MM-DD-` prefix of the file name:
+    /// it survives an archive move, and `opened:` is a field that a hand-made file may omit.
+    fn bug_files_missing_their_sections(
+        root: &Path,
+        req: &Requirement,
+        first_day: &str,
+    ) -> Vec<String> {
+        fn dated(name: &str) -> Option<&str> {
+            let day = name.get(..10)?;
+            let ok = day.bytes().enumerate().all(|(i, b)| match i {
+                4 | 7 => b == b'-',
+                _ => b.is_ascii_digit(),
+            });
+            (ok && name.ends_with(".md") && name.as_bytes().get(10) == Some(&b'-')).then_some(day)
+        }
+
+        let mut out = Vec::new();
+        for dir in ["docs/issues", "docs/issues/archive"] {
+            let Ok(entries) = std::fs::read_dir(root.join(dir)) else {
+                continue;
+            };
+            let mut names: Vec<String> = entries
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .collect();
+            names.sort();
+            for name in names {
+                if dated(&name).is_none_or(|day| day < first_day) {
+                    continue;
+                }
+                let rel = format!("{dir}/{name}");
+                let body = std::fs::read_to_string(root.join(&rel)).unwrap_or_default();
+                if check_sections(req, &body).is_err() {
+                    out.push(rel);
+                }
+            }
+        }
+        out
+    }
+
+    /// The scan itself, on a tree whose right answer is known. The live test below is EMPTY-POPULATION
+    /// today (no bug is dated on or after the cutoff yet), so on its own it would pass with the scan
+    /// deleted; this one is what makes it mean something. Each file is one reason to flag or not:
+    /// a file before the cutoff, the template, a good one, a short one, a missing one, an archived one.
+    #[test]
+    fn the_class_fit_scan_flags_only_late_files_that_lack_the_section() {
+        let tmp = project();
+        let root = tmp.path();
+        let missing = "# BUG: x\n\n## Summary\n\ns\n";
+        write(root, "docs/issues/2026-10-16-before-the-cutoff.md", missing);
+        write(root, "docs/issues/_TEMPLATE.md", missing);
+        write(root, "docs/issues/2026-10-17-good.md", &fit(GOOD));
+        write(root, "docs/issues/2026-10-17-short.md", &fit("ab"));
+        write(root, "docs/issues/2026-10-17-missing.md", missing);
+        write(root, "docs/issues/archive/2026-10-18-archived.md", missing);
+        write(root, "docs/issues/notes.txt", "not a bug file");
+
+        let reqs = load(root).unwrap();
+        let req = reqs.iter().find(|r| r.kind == "bug").unwrap();
+        assert_eq!(
+            bug_files_missing_their_sections(root, req, "2026-10-17"),
+            [
+                "docs/issues/2026-10-17-missing.md",
+                "docs/issues/2026-10-17-short.md",
+                "docs/issues/archive/2026-10-18-archived.md",
+            ]
+        );
+    }
+
+    /// Every bug file filed since the rule landed carries the section the policy asks for.
+    ///
+    /// This is the check that `--no-verify`, or a clone with no hook installed, cannot skip: CI runs
+    /// it on every push. It reads the policy file, so a change to the floor or the title moves it
+    /// with no edit here. The commit hook is the first line and this is the second; neither replaces
+    /// the other, because the hook sees a commit and this sees the tree.
+    #[test]
+    fn every_bug_filed_since_the_class_fit_rule_carries_one() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let reqs = load(root).expect("the repository's own requirements file must parse");
+        let req = reqs
+            .iter()
+            .find(|r| r.kind == "bug")
+            .expect("the repository must declare a `bug` requirement");
+        let bad = bug_files_missing_their_sections(root, req, CLASS_FIT_FIRST_DAY);
+        assert!(
+            bad.is_empty(),
+            "these bug files are dated {CLASS_FIT_FIRST_DAY} or later and have no usable `## Class fit` \
+             section (at least {} letters or digits, outside a code fence):\n  {}\n\
+             Add the section to each. Do not edit a class's `**Members:**` line.",
+            req.min_section_chars,
+            bad.join("\n  ")
         );
     }
 }
