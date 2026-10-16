@@ -1,5 +1,5 @@
 ---
-id: 3cee1969ae4e9d57
+id: '3cee1969ae4e9d57'
 kind: bug
 status: fixed
 title: 'BUG: run_command never overrides is_write, so every shell command is classified as a read'
@@ -15,7 +15,7 @@ topic: write guard coverage and shell effect classification
 closed: 2026-09-24
 opened: 2026-09-20
 severity: high
-unverified: TRACKED 4d23f609590dea62 — Only the DECLARED effect class is recorded. The OBSERVED one (what a command actually did to the tree) is not, and the Fix section asks for both because only the observation survives a wrong declaration.
+unverified: 'CLEARED 2026-10-16. Was: TRACKED 4d23f609590dea62 — Only the DECLARED effect class is recorded; the OBSERVED one is not. Answered: usage.db now records tool_calls.observed_changed for calls declared `read` (a before/after git status snapshot, recorded as ''tree changed during the call'', not attribution); see docs/issues/2026-09-24-residual-run-command-observed-effect-class.md.'
 ---
 
 # BUG: `run_command` never overrides `is_write`, so every shell command is classified as a read

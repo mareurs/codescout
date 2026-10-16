@@ -4,6 +4,7 @@
 mod attribution;
 mod inner;
 mod interactive;
+mod observe;
 mod output;
 
 use crate::tools::output_buffer::looks_like_ack_handle;
@@ -299,7 +300,9 @@ impl Tool for RunCommand {
              - `run_in_background=true`: detach and return immediately.\n\
              - `interactive=true`: spawn with stdin/stdout for REPLs.\n\
              - `effect`: `\"read\"` or `\"write\"` (default) — what the command does to files. \
-             Recorded in telemetry so reads and writes are separable; it takes no lock.\n\
+             Recorded in telemetry so reads and writes are separable; it takes no lock. A call \
+             declared `read` is also checked afterwards for a changed working tree (recorded, \
+             never enforced), so declare `read` only for commands that do not write.\n\
              - `acknowledge_risk=true`: bypass the dangerous-command gate (use the `@ack_*` \
              handle from the rejection response instead).\n\
              \n\
@@ -350,119 +353,136 @@ impl Tool for RunCommand {
     }
 
     async fn call(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<Value> {
-        use super::output_buffer::OutputBuffer;
+        // Only a call that declared `read` takes a snapshot; everything else pays nothing.
+        // See `observe` for what the resulting `observed_changed` does and does not mean.
+        let observation = observe::begin(&input, ctx).await;
+        // An `async` block, so the body's early `return`s leave the BLOCK and the
+        // observation below still runs for every outcome that reaches it.
+        let result: anyhow::Result<Value> = async {
+            use super::output_buffer::OutputBuffer;
 
-        let command = super::require_str_param(&input, "command")?;
-        if declared_effect(&input).is_none() {
-            return Err(super::RecoverableError::with_hint(
+            let command = super::require_str_param(&input, "command")?;
+            if declared_effect(&input).is_none() {
+                return Err(super::RecoverableError::with_hint(
                 format!("unknown `effect`: {}", input["effect"]),
                 "`effect` is \"read\" or \"write\" (the default when omitted). It is recorded in \
                  telemetry and takes no lock, so declare what the command does to files.",
             )
             .into());
-        }
-        let (timeout_secs, timeout_hint) = parse_timeout_input(&input);
-        let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);
-        let run_in_background = parse_bool_param(&input["run_in_background"]);
-        let interactive = parse_bool_param(&input["interactive"]);
-        let cwd_param = input["cwd"].as_str();
-        let root = ctx
-            .agent
-            .require_project_root_for(ctx.workspace_override.as_deref())
-            .await?;
-        let security = ctx
-            .agent
-            .security_config_for(ctx.workspace_override.as_deref())
-            .await;
+            }
+            let (timeout_secs, timeout_hint) = parse_timeout_input(&input);
+            let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);
+            let run_in_background = parse_bool_param(&input["run_in_background"]);
+            let interactive = parse_bool_param(&input["interactive"]);
+            let cwd_param = input["cwd"].as_str();
+            let root = ctx
+                .agent
+                .require_project_root_for(ctx.workspace_override.as_deref())
+                .await?;
+            let security = ctx
+                .agent
+                .security_config_for(ctx.workspace_override.as_deref())
+                .await;
 
-        // --- Interactive mode: elicitation-driven stdin loop ---
-        if interactive {
-            return run_command_interactive(
-                command,
-                cwd_param,
-                timeout_secs,
-                &root,
-                &security,
-                ctx,
-            )
-            .await;
-        }
-
-        // --- Early dispatch: @ack_* handle ---
-        if looks_like_ack_handle(command) {
-            let stored = ctx.output_buffer.get_dangerous(command).ok_or_else(|| {
-                super::RecoverableError::with_hint(
-                    "ack handle expired or unknown",
-                    "Re-run the original command to get a fresh handle.",
+            // --- Interactive mode: elicitation-driven stdin loop ---
+            if interactive {
+                return run_command_interactive(
+                    command,
+                    cwd_param,
+                    timeout_secs,
+                    &root,
+                    &security,
+                    ctx,
                 )
-            })?;
-            return run_command_inner(
-                &stored.command,
-                &stored.command,
-                stored.timeout_secs,
-                true, // acknowledge_risk
-                stored.cwd.as_deref(),
-                false, // buffer_only
-                stored.run_in_background,
+                .await;
+            }
+
+            // --- Early dispatch: @ack_* handle ---
+            if looks_like_ack_handle(command) {
+                let stored = ctx.output_buffer.get_dangerous(command).ok_or_else(|| {
+                    super::RecoverableError::with_hint(
+                        "ack handle expired or unknown",
+                        "Re-run the original command to get a fresh handle.",
+                    )
+                })?;
+                return run_command_inner(
+                    &stored.command,
+                    &stored.command,
+                    stored.timeout_secs,
+                    true, // acknowledge_risk
+                    stored.cwd.as_deref(),
+                    false, // buffer_only
+                    stored.run_in_background,
+                    &root,
+                    &security,
+                    ctx,
+                    &Default::default(), // an ack replays a stored command, not this input
+                )
+                .await;
+            }
+
+            // --- Step 1: Resolve @cmd_ buffer references ---
+            // IL3 gate runs BEFORE resolve_refs so buffer refs are still visible —
+            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op), but
+            // `cargo test | grep FAILED` is not. See `detect_il3_violation`.
+            if let Some(hint) = crate::util::path_security::detect_il3_violation(command) {
+                return Err(super::RecoverableError::new(hint).into());
+            }
+            let (resolved_command, temp_files, buffer_only, refreshed_handles) =
+                ctx.output_buffer.resolve_refs(command)?;
+
+            // Helper: run inner logic then always clean up temp files.
+            let notes = inner::CallNotes {
+                timeout_hint: timeout_hint.clone(),
+                // Said when any @file_* handle was auto-refreshed. Passed IN, not prepended
+                // afterwards: it goes into `stdout`, and the inline-or-summary gate has to price it.
+                stdout_prefix: refreshed_handles
+                    .iter()
+                    .map(|id| {
+                        format!("↻ {id} refreshed from disk (file changed since last read)\n")
+                    })
+                    .collect(),
+            };
+            let mut result = run_command_inner(
+                command,
+                &resolved_command,
+                timeout_secs,
+                acknowledge_risk,
+                cwd_param,
+                buffer_only,
+                run_in_background,
                 &root,
                 &security,
                 ctx,
-                &Default::default(), // an ack replays a stored command, not this input
+                &notes,
             )
             .await;
-        }
 
-        // --- Step 1: Resolve @cmd_ buffer references ---
-        // IL3 gate runs BEFORE resolve_refs so buffer refs are still visible —
-        // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op), but
-        // `cargo test | grep FAILED` is not. See `detect_il3_violation`.
-        if let Some(hint) = crate::util::path_security::detect_il3_violation(command) {
-            return Err(super::RecoverableError::new(hint).into());
-        }
-        let (resolved_command, temp_files, buffer_only, refreshed_handles) =
-            ctx.output_buffer.resolve_refs(command)?;
+            OutputBuffer::cleanup_temp_files(&temp_files);
 
-        // Helper: run inner logic then always clean up temp files.
-        let notes = inner::CallNotes {
-            timeout_hint: timeout_hint.clone(),
-            // Said when any @file_* handle was auto-refreshed. Passed IN, not prepended
-            // afterwards: it goes into `stdout`, and the inline-or-summary gate has to price it.
-            stdout_prefix: refreshed_handles
-                .iter()
-                .map(|id| format!("↻ {id} refreshed from disk (file changed since last read)\n"))
-                .collect(),
-        };
-        let mut result = run_command_inner(
-            command,
-            &resolved_command,
-            timeout_secs,
-            acknowledge_risk,
-            cwd_param,
-            buffer_only,
-            run_in_background,
-            &root,
-            &security,
-            ctx,
-            &notes,
-        )
+            // The envelope keys (`envelope_keys`) on every response shape. A response built by
+            // `handle_successful_output_with` already carries them, because its inline-or-summary gate
+            // MEASURED them: a key that is present is left exactly as measured, so a value computed
+            // again here (a job that finished meanwhile) cannot change the size of a response that was
+            // judged to fit. The other shapes (background, pending ack, timeout) get them here, and
+            // `shed_envelope_to_fit` measures every shape here, with the keys it carries.
+            let envelope = envelope_keys(ctx, command, timeout_hint.as_deref());
+            if let Ok(Value::Object(obj)) = &mut result {
+                for (key, value) in envelope {
+                    obj.entry(key).or_insert(value);
+                }
+                shed_envelope_to_fit(obj);
+            }
+
+            result
+        }
         .await;
 
-        OutputBuffer::cleanup_temp_files(&temp_files);
-
-        // The envelope keys (`envelope_keys`) on every response shape. A response built by
-        // `handle_successful_output_with` already carries them, because its inline-or-summary gate
-        // MEASURED them: a key that is present is left exactly as measured, so a value computed
-        // again here (a job that finished meanwhile) cannot change the size of a response that was
-        // judged to fit. The other shapes (background, pending ack, timeout) get them here, and
-        // `shed_envelope_to_fit` measures every shape here, with the keys it carries.
-        let envelope = envelope_keys(ctx, command, timeout_hint.as_deref());
-        if let Ok(Value::Object(obj)) = &mut result {
-            for (key, value) in envelope {
-                obj.entry(key).or_insert(value);
-            }
-            shed_envelope_to_fit(obj);
+        // Only a call that returned `Ok` ran a command to the end of its call; an `Err`
+        // (refused, malformed, failed to spawn) records no observation rather than "unchanged".
+        if let (Some(observation), Ok(_)) = (observation, &result) {
+            observation.finish().await;
         }
-
         result
     }
 
