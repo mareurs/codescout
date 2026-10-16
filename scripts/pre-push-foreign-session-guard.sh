@@ -162,6 +162,8 @@ acked() {
 
 foreign_sids=""
 foreign_report=""
+foreign_branch_ref=0         # 1 once a BRANCH ref contributed an unacked foreign commit
+foreign_nonbranch_rows=""    # `<ref>\x1f<tip>` per tag / refs/wip/* ref that did: the remedy names them
 untrailered_report=""
 untrailered_n=0
 # PUBLISH HOLD state (refs/holds/<sid>, written by scripts/hold-publish.sh). All initialised
@@ -250,8 +252,8 @@ held_sid_of() {
 #
 # RANGE: the remote tip is trusted only if it is a commit in the local object store. Otherwise
 # (a new ref, or a force push over a tip never fetched here, or a remote tag that points at a
-# non-commit) the range is everything not on any remote-tracking ref: it can over-refuse and
-# cannot under-refuse.
+# non-commit) the range is everything not on any remote-tracking ref: it can over-refuse, and with
+# several remotes a commit published to a different remote than the pushed one counts as published.
 #
 # THE PUSHED SHA IS PEELED to a commit (an annotated tag points at a tag object). One that does
 # not peel (a tag of a tree or blob) cannot carry a held commit: skipped silently.
@@ -342,8 +344,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
     # RANGE: the remote tip is trusted only if it is a commit in the local object store. For a new
     # ref (zero sha), or a force push over a tip never fetched here, or a remote tag that points
-    # at a non-commit, the range is everything not on any remote-tracking ref: it can over-refuse
-    # and cannot under-refuse. Before 2026-10-16 an unfetched tip made `git log` fail, stderr was
+    # at a non-commit, the range is everything not on any remote-tracking ref. That can over-refuse
+    # (a commit pushed here but never fetched back is still counted). It is NOT a guarantee of
+    # never under-refusing: `--remotes` spans EVERY remote, so with several remotes a commit that
+    # was published to a different remote than the one being pushed to counts as published.
+    # Before 2026-10-16 an unfetched tip made `git log` fail, stderr was
     # discarded and zero commits were listed: the push passed in silence with foreign commits in it.
     # (The same selection as `hold_scan_ref`'s.) An unlistable range with NO hold present still
     # fails open, by decision: the hold check owns the fail-closed case.
@@ -470,6 +475,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # authored by its own subject line. Caught by the T10 case in
     # `tests/pre-push-foreign-session-guard.sh`; keep that case if you touch this line.
     # 0x1F is not whitespace, so empty fields survive.
+    _fr_before=${#foreign_report}
     while IFS=$'\x1f' read -r sha sid subject; do
         [ -n "${sha:-}" ] || continue
         commit_rows="${sha:0:8}"$'\x1f'"${sid:-}"$'\x1f'"${subject}"$'\n'"${commit_rows}"
@@ -490,6 +496,15 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             mine_n=$((mine_n + 1))
         fi
     done < <(git log --format='%H%x1f%(trailers:key=Session-Id,valueonly,separator=%x2C)%x1f%s' "${range[@]}" 2>/dev/null)
+    # Which pushed refs the refusal is ABOUT, so the remedy can name them: one `<ref>\x1f<tip>`
+    # row per NON-BRANCH ref that contributed an unacked foreign commit, and a flag for a branch.
+    if [ "${#foreign_report}" -gt "$_fr_before" ]; then
+        if [ "$is_branch" -eq 1 ]; then
+            foreign_branch_ref=1
+        else
+            foreign_nonbranch_rows="${foreign_nonbranch_rows}${remote_ref}"$'\x1f'"${tip}"$'\n'
+        fi
+    fi
 done
 
 # BEGIN PUBLISH HOLD (refusal)
@@ -803,6 +818,40 @@ EOF
 )"
 fi
 
+# A TAG OR refs/wip/* REFUSAL NAMES THE REF, NOT HEAD'S BRANCH. The branch remedy above ends in
+# `git push origin <your-sha>:$branch`, which for a refused `refs/tags/v9` pointed at the branch
+# HEAD happens to be on and never named the tag (2026-10-16). A tag points at one fixed commit, so
+# it cannot be narrowed to "your prefix" with a refspec: the honest routes are the authors
+# publishing first, or the ack. Text is printf lines (no unquoted heredoc, no backtick hazard).
+publish_name="$branch"
+if [ -n "$foreign_nonbranch_rows" ]; then
+    nb_remedy="  THE REFUSED REF IS NOT A BRANCH. It is a tag or refs/wip/* name and it points at ONE fixed"$'\n'
+    nb_remedy="${nb_remedy}  commit: publishing it publishes EVERY unpublished commit beneath that commit, the foreign"$'\n'
+    nb_remedy="${nb_remedy}  ones listed above included. A refspec cannot narrow it to a prefix of yours -- pushing"$'\n'
+    nb_remedy="${nb_remedy}  your sha under that name would publish a different commit as the ref. The refused ref(s):"$'\n\n'
+    _nb_first=""
+    while IFS=$'\x1f' read -r _nr _nt; do
+        [ -n "${_nr:-}" ] || continue
+        [ -n "$_nb_first" ] || _nb_first="$_nr"
+        nb_remedy="${nb_remedy}    ${_nr}  (at ${_nt:0:8})"$'\n'
+    done <<< "$foreign_nonbranch_rows"
+    nb_remedy="${nb_remedy}"$'\n'"  Two ways forward: the authors above publish their commits (each by its own sha, to its"$'\n'
+    nb_remedy="${nb_remedy}  branch) and you push the ref again, or your operator authorises it and you ack, naming the ref:"$'\n\n'
+    nb_remedy="${nb_remedy}      CODESCOUT_PUSH_ACK=\"$foreign_sids\" git push $push_remote $_nb_first"
+    if [ "$foreign_branch_ref" -eq 0 ]; then
+        # No branch is being refused, so the branch remedy (a refspec onto HEAD's branch) is
+        # dropped; what stays is what is true of the range: who the pusher is to it, and the rung.
+        remedy=""
+        if [ "$mine_n" -eq 0 ]; then
+            remedy="  YOU AUTHOR 0 OF THE $total_n COMMIT(S) IN THIS PUSH."$'\n\n'
+        fi
+        remedy="${remedy}  The lowest foreign rung is"$'\n\n'"    $rung_sha"$'\n'"    $rung_line"$'\n\n'"${nb_remedy}"
+        publish_name="$_nb_first"
+    else
+        remedy="${remedy}"$'\n\n'"${nb_remedy}"
+    fi
+fi
+
 cat >&2 <<EOF
 
   REFUSING THE PUSH: it would publish commits belonging to another session.
@@ -865,7 +914,7 @@ $remedy
 
   AN AUTHORISATION NAMES A SET; A BRANCH PUSH SENDS A PREFIX. They coincide only when nothing
   lands between the decision and the push, which on a shared tree is the unusual case.
-  \`git push origin $branch\` satisfies "push what I authorised" to the letter while sending
+  \`git push origin $publish_name\` satisfies "push what I authorised" to the letter while sending
   whatever arrived since. Re-derive the range, compare it to what was actually decided, then
   send the decided set by sha. Measured window: ninety seconds.
 

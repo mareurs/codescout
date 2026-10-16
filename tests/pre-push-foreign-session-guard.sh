@@ -961,24 +961,24 @@ run "$ALICE" - "refs/heads/main $FIELD_TIP refs/heads/main $FIELD_BASE"
 eq  "refname form: refuses a foreign commit"  "$EC" 1
 has "refname form: names the foreign sid"     "$OUT" "$BOB"
 
-# Row 2 -- sha refspec form. THE DEFECT. Identical range, identical repo; only field 1
-# differs. Before the field-3 fallback: exit 0, 0 bytes.
+# Row 2 -- sha refspec form. Identical range, identical repo; only field 1 differs. Historically
+# THE DEFECT (before the field-3 fallback: exit 0, 0 bytes). Since 2026-10-16 it is NOT a
+# witness for that fallback any more: the foreign scan runs for every ref, so this row is
+# refused whether or not field 3 is consulted (measured: removing the fallback leaves it green).
+# What the fallback gates now is the branch-only ENTRY-ID COLLISION scan; its witness is
+# "a sha-refspec push of a duplicate-id merge" in the entry-id collision section below.
 run "$ALICE" - "$FIELD_TIP $FIELD_TIP refs/heads/main $FIELD_BASE"
 eq  "sha refspec form: refuses too"           "$EC" 1
 has "sha refspec form: names the foreign sid" "$OUT" "$BOB"
 
-# Row 3 -- THE OTHER DIRECTION, and not optional. Rows 1-2 are monotone under a guard that
-# refuses everything, which would also refuse the tag push this guard must ignore.
-# MEASURED, both directions, 2026-09-09: reverting to the one-field filter reds row 2 and
-# leaves row 3 green; widening the fallback to accept ANY field-3 value reds row 3 and
-# leaves row 2 green. Each direction has its own witness, which is the property a
-# single-sided pair cannot have.
-#
-# CHANGED 2026-10-16 (docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-...):
-# a tag push is no longer skipped -- it publishes its commits exactly as a branch push does. The
-# discrimination this row existed for now lives in "the foreign check covers non-branch refs"
-# below, which pairs a refused foreign tag with an allowed own-commits tag and an allowed
-# deletion. What row 3 still pins is that a tag carrying a foreign commit is not waved through.
+# Row 3 -- a tag carrying a foreign commit is refused. Under the old rule this row said "tag push:
+# still skipped" and, with row 2, bracketed the field-3 fallback from both sides (2026-09-09:
+# reverting the filter reds row 2; widening it reds row 3). That bracket is GONE with the skip
+# (CHANGED 2026-10-16, docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-...):
+# a tag publishes its commits exactly as a branch push does. The tag discriminations now live in
+# "the FOREIGN check covers every non-deletion ref" below, which pairs each refusal with a
+# silent twin; the peel of an annotated tag or tag-of-tree is witnessed there and in the hold
+# section ("a tag of a tree carrying a held commit").
 run "$ALICE" - "refs/tags/v1 $FIELD_TIP refs/tags/v1 $FIELD_BASE"
 eq  "tag push carrying a foreign commit: refused (no longer skipped)" "$EC" 1
 has "tag push: names the foreign sid"         "$OUT" "$BOB"
@@ -1268,7 +1268,19 @@ run "$ALICE" - "refs/heads/main $COLLISION_TIP refs/heads/main $COLLISION_BASE"
 eq  "genuine duplicate: refused"                  "$EC" 1
 has "genuine duplicate: names the token"          "$OUT" "R-2"
 has "genuine duplicate: names the file"           "$OUT" "ledger.md"
-has "genuine duplicate: explains the mechanism"   "$OUT" "before either saw the"
+has  "genuine duplicate: explains the mechanism"   "$OUT" "before either saw the"
+# THE WITNESS FOR THE FIELD-3 `is_branch` FALLBACK. A sha-refspec push (`<sha>:main`) sends the BARE
+# SHA in field 1, so only field 3 says this is a branch; without the fallback the branch-only
+# collision scan is skipped and this push passes. (The commits carry no Session-Id, so the foreign
+# scan has nothing to refuse: the collision scan is the only thing that can.)
+run "$ALICE" - "$COLLISION_TIP $COLLISION_TIP refs/heads/main $COLLISION_BASE"
+eq  "sha refspec form, duplicate-id merge: refused"            "$EC" 1
+has "sha refspec form, duplicate-id merge: names the token"    "$OUT" "R-2"
+has "sha refspec form, duplicate-id merge: it is the collision scan" "$OUT" "before either saw the"
+# and the scan is branch-only by decision: the same merge under a TAG is not refused by it
+run "$ALICE" - "refs/tags/dup $COLLISION_TIP refs/tags/dup $ZERO"
+eq  "branch-only: a tag over the duplicate-id merge is not refused" "$EC" 0
+hasnt "branch-only: and the collision scan did not run" "$OUT" "before either saw the"
 
 # CONTROL: the identical shape, but the merge RESOLVED the duplicate (one side
 # renumbered before merging) -- must NOT refuse. Proves the scan reads the merge's
@@ -1786,6 +1798,33 @@ eq    "(d) a branch push over an unfetched remote tip is refused" "$EC" 1
 has   "(d) it names the foreign sid" "$OUT" "$BOB"
 run "$ALICE" - "refs/tags/x $TIP refs/tags/x $UNKNOWN"
 eq    "(d) a tag push over an unfetched remote tag tip is refused" "$EC" 1
+# --- the remedy for a tag / refs/wip/* refusal names THAT ref, not HEAD's branch
+run "$ALICE" - "refs/tags/v9 $TIP refs/tags/v9 $ZERO"
+eq    "remedy (tag): refused" "$EC" 1
+has   "remedy (tag): says the refused ref is not a branch" "$OUT" "THE REFUSED REF IS NOT A BRANCH"
+has   "remedy (tag): names the tag" "$OUT" "    refs/tags/v9  (at ${TIP:0:8})"
+has   "remedy (tag): the ack line names the tag" "$OUT" 'git push origin refs/tags/v9'
+hasnt "remedy (tag): no <your-sha> refspec onto HEAD's branch" "$OUT" "<your-sha>"
+hasnt "remedy (tag): the closing advice does not name HEAD's branch" "$OUT" 'git push origin main`'
+run "$ALICE" - "HEAD $TIP refs/wip/x $ZERO"
+has   "remedy (wip): names refs/wip/x" "$OUT" "    refs/wip/x  (at ${TIP:0:8})"
+hasnt "remedy (wip): no <your-sha> refspec" "$OUT" "<your-sha>"
+run "$CAROL" - "refs/tags/v9 $TIP refs/tags/v9 $ZERO"
+has   "remedy (tag, pusher owns nothing): names the tag" "$OUT" "    refs/tags/v9  (at ${TIP:0:8})"
+has   "remedy (tag, pusher owns nothing): still the zero-ownership text" "$OUT" "YOU AUTHOR 0 OF THE"
+# the annotated tag's row shows the PEELED commit, not the tag object: the witness for the peel
+# (a tag of a tree behaves identically with or without it -- both fail open -- so it cannot be one)
+run "$ALICE" - "refs/tags/v2 $TAGOBJ refs/tags/v2 $ZERO"
+has   "remedy (annotated tag): the row shows the peeled commit" "$OUT" "    refs/tags/v2  (at ${TIP:0:8})"
+hasnt "remedy (annotated tag): not the tag object's sha" "$OUT" "(at ${TAGOBJ:0:8})"
+# controls: a branch refusal keeps its branch remedy and does not claim the ref is not a branch
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+has   "remedy (branch): keeps the refspec advice" "$OUT" "<your-sha>:"
+hasnt "remedy (branch): does not say the ref is not a branch" "$OUT" "THE REFUSED REF IS NOT A BRANCH"
+# a push of both: each remedy is present
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"$'\n'"refs/tags/v9 $TIP refs/tags/v9 $ZERO"
+has   "remedy (branch + tag): the branch refspec advice" "$OUT" "<your-sha>:"
+has   "remedy (branch + tag): and the tag's" "$OUT" "    refs/tags/v9  (at ${TIP:0:8})"
 # the silent twins -- the same shapes with nothing foreign to publish
 new_repo
 commit "$ALICE" "alice base"; BASE=$(sha)

@@ -69,6 +69,13 @@ Applied 2026-10-16 (experiments-only; fix SHA `96d2862b`, patch-id `7dd7d868487b
 
 What is deliberately still fail-open: `git log` failing for the foreign scan with no `refs/holds/` ref present (pinned by a shim case); the hold scan fails closed only when a hold exists, unchanged.
 
+
+Follow-up 2026-10-16 after an Opus review of the integrated branch:
+- The refusal for a tag or `refs/wip/*` push now names that ref (`THE REFUSED REF IS NOT A BRANCH`, `<ref> (at <commit8>)`, an ack line `git push <remote> <ref>`) instead of printing `git push origin <your-sha>:<HEAD's branch>`; a push of both a branch and a tag prints both remedies.
+- Comments on the `--not --remotes` range no longer claim it "cannot under-refuse": with several remotes, a commit published to a different remote than the pushed one counts as published. Behaviour unchanged.
+- Two uncovered lines now have witnesses, each proven by a mutation of the script (revert, red, restore): removing the field-3 `is_branch` fallback reds `sha refspec form, duplicate-id merge` (2 assertions), and replacing the peel with `tip="$local_sha"` reds the annotated-tag remedy row (2 assertions). A tag of a tree cannot witness the peel: it is behaviourally identical with or without it (both fail open), so the annotated tag's displayed commit is the witness. The stale Row-2/Row-3 comments in the test file were corrected (Row 2 no longer discriminates the fallback).
+- Suite: 412 passed, 0 failed.
+
 ## Tests added
 
 `tests/pre-push-foreign-session-guard.sh`, section "the FOREIGN check covers every non-deletion ref and an unfetched remote tip" (391 passed, 0 failed; was 357). Refusals: (a) and (d2) branch controls, (b) lightweight and annotated tag, (c) `refs/wip/*`, (d) branch and tag over an unfetched tip. Silent twins on an own-commits-only history for each of the five push shapes; an already-published foreign commit under a new tag is allowed; a tag of a tree, a deletion and a no-session-id push are skipped; an ack naming the author lets a tag through and one naming someone else does not; an unlistable range with no hold passes (shim). Two older cases whose expectation was the defect were changed and say so (`tag push: allowed`, `the same push with no hold passes as before`). Red first: before the guard change 15 assertions failed and the silent twins passed.
