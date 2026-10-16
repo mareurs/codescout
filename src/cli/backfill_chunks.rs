@@ -103,25 +103,49 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
     )
     .await?;
 
-    crate::cli::format::print(
-        &json!({
-            "artifacts": report.artifacts,
-            "embedded": report.embedded,
-            "skipped_empty": report.skipped_empty,
-            "missing_file": report.missing_file,
-            "unreadable_encoding": report.unreadable_encoding,
-            "unreadable_other": report.unreadable_other,
-            // The report names the population it walked. A count whose scope is not stated
-            // is the defect this run was fixed for: 10 and 2807 were both correct answers to
-            // different questions, and nothing in the output said which was being answered.
-            "scope": match &root_prefix {
-                Some(p) => json!({"kind": "project", "abs_path_like": p}),
-                None => json!({"kind": "catalog-wide", "abs_path_like": null}),
-            },
-        }),
-        &output,
-    )?;
-    Ok(())
+    crate::cli::format::print(&report_json(&report, root_prefix.as_deref()), &output)?;
+    ensure_every_chunk_embedded(&report)
+}
+/// What the run printed: every count, and the scope the counts describe.
+fn report_json(
+    report: &crate::librarian::indexer::BackfillReport,
+    root_prefix: Option<&str>,
+) -> serde_json::Value {
+    json!({
+        "artifacts": report.artifacts,
+        "embedded": report.embedded,
+        "skipped_empty": report.skipped_empty,
+        "missing_file": report.missing_file,
+        "unreadable_encoding": report.unreadable_encoding,
+        "unreadable_other": report.unreadable_other,
+        "embed_failed": report.embed_failed,
+        "embed_errors": report.embed_errors,
+        // The report names the population it walked. A count whose scope is not stated
+        // is the defect this run was fixed for: 10 and 2807 were both correct answers to
+        // different questions, and nothing in the output said which was being answered.
+        "scope": match root_prefix {
+            Some(p) => json!({"kind": "project", "abs_path_like": p}),
+            None => json!({"kind": "catalog-wide", "abs_path_like": null}),
+        },
+    })
+}
+
+/// The run's exit status. It must not be 0 while chunks stay unembedded, as a run that
+/// stopped at its first failure never was; the report is already printed, and what the
+/// run could write is written.
+fn ensure_every_chunk_embedded(report: &crate::librarian::indexer::BackfillReport) -> Result<()> {
+    if report.embed_failed == 0 {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{} chunk(s) could not be embedded and have no vector; the rest of the run is written. \
+         Each failed chunk is retried by the next run on a sqlite-vec host. First failure: {}",
+        report.embed_failed,
+        report
+            .embed_errors
+            .first()
+            .map_or("(not recorded)", String::as_str),
+    )
 }
 
 /// The store this run's search reads, which decides where the run writes
@@ -261,5 +285,57 @@ mod tests {
             backfill_target(ArtifactBackend::SqliteVec, Some("/work/p"), Some(&store)).unwrap(),
             BackfillTarget::SqliteVec
         ));
+    }
+    /// The printed report must carry the failure count and its sample: an exit status alone
+    /// names no chunk, and a count that is not printed cannot be acted on.
+    #[test]
+    fn the_printed_report_carries_the_failed_chunks() {
+        let report = crate::librarian::indexer::BackfillReport {
+            embedded: 4,
+            embed_failed: 2,
+            embed_errors: vec![
+                "chunk-a: embed failed: HTTP 400".to_string(),
+                "chunk-b: embed failed: HTTP 400".to_string(),
+            ],
+            ..Default::default()
+        };
+        let printed = report_json(&report, Some("/work/p%"));
+        assert_eq!(printed["embedded"], 4);
+        assert_eq!(printed["embed_failed"], 2);
+        assert_eq!(
+            printed["embed_errors"],
+            json!([
+                "chunk-a: embed failed: HTTP 400",
+                "chunk-b: embed failed: HTTP 400"
+            ])
+        );
+        assert_eq!(printed["scope"]["abs_path_like"], "/work/p%");
+    }
+
+    /// A run that left chunks without vectors must exit non-zero, naming the count and the
+    /// first failure. A run that embedded everything exits 0.
+    #[test]
+    fn a_run_that_left_chunks_unembedded_exits_with_an_error() {
+        let clean = crate::librarian::indexer::BackfillReport {
+            embedded: 4,
+            ..Default::default()
+        };
+        ensure_every_chunk_embedded(&clean).unwrap();
+
+        let failed = crate::librarian::indexer::BackfillReport {
+            embedded: 4,
+            embed_failed: 2,
+            embed_errors: vec!["chunk-a: embed failed: HTTP 400".to_string()],
+            ..Default::default()
+        };
+        let Err(error) = ensure_every_chunk_embedded(&failed) else {
+            panic!("a run with failed chunks must not exit 0");
+        };
+        let message = format!("{error:#}");
+        assert!(message.contains("2 chunk"), "{message}");
+        assert!(
+            message.contains("chunk-a: embed failed: HTTP 400"),
+            "{message}"
+        );
     }
 }
