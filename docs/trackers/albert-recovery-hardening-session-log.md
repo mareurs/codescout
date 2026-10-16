@@ -14,7 +14,7 @@ entry_prefix:
 - W
 snapshot_anchor: '| ID | Date | Severity | Category | Status | Title |'
 entry_high_water_W: 1
-entry_high_water_F: 1
+entry_high_water_F: 2
 ---
 
 # Albert recovery hardening session log
@@ -29,6 +29,7 @@ Measured verification lessons from the 2026-10-14 reconciliation. See [implement
 |----|------|---------:|----------|--------|-------|
 | W-1 | 2026-10-14 | — | test-design | validated | **Observed survivors expose backup-identity and parent-alias test gaps** |
 | F-1 | 2026-10-14 | med | environment | mitigated | **Reviewer LSP scratch filled tmpfs and invalidated gate evidence** |
+| F-2 | 2026-10-16 | med | tool-scope | mitigated | **An audit-only paths parameter did not narrow reindex** |
 
 ## W-1 — Observed survivors expose backup-identity and parent-alias test gaps
 
@@ -55,6 +56,24 @@ Measured verification lessons from the 2026-10-14 reconciliation. See [implement
 **Rests on:** /tmp/codescout-albert-hardening-gate-20261014.log; /tmp/codescout-albert-hardening-gate-final-20261014.log.
 
 **Remaining limitation:** This mitigates this run; it does not change the general LSP or tmpfs policy.
+
+## F-2 — A reindex cleanup used an audit-only parameter as a scope selector
+
+**Observed:** 2026-10-16, after integrating Albert's memory-history and audit repairs.
+
+**Expected:** Passing five file paths to librarian(reindex) would limit catalog reconciliation to those files.
+
+**Got:** The call reported project scope, 7 updated artifacts, 2077 unchanged, 1562 embedded and an automatic export of191 pending audit rows. It completed with zero embedding/backfill errors. A subsequent schema read showed paths is labeled for audit_doc_refs only (src/librarian/tools/librarian.rs:95-99). This was operator misuse of an action-specific parameter, not evidence of a new product regression.
+
+**Workaround:** Read the parameter's action label before a mutating call. Reindex supports project scope here; use per-file doctor roots for frontmatter repair. Preserve and review the generated audit export instead of reverting its file behind the catalog's export marker.
+
+**Severity:** med — broadened metadata/embedding cleanup beyond the intended five documents; no source/profile/runtime activation was performed by the call.
+
+**Status:** mitigated — schema scope verified, catalog result inspected, original peer source-file hashes preserved.
+
+**Valid:** dated 2026-10-16
+
+**Rests on:** the observed project-scoped response and the input-schema paths label; reassess if reindex gains an explicit file selector.
 
 ## Template for new entries
 

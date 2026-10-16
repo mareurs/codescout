@@ -1,5 +1,5 @@
 ---
-id: e9c57db19df471c2
+id: 6213072fa4bc2d15
 kind: plan
 status: done
 title: Backend memory overwrite protection
@@ -55,3 +55,11 @@ Store-wide locking covers topic aliases and anchor updates without changing clie
 Initial integration tests: 1 pass/8 fail on base86; after implementation all cases pass. Expanded final integration: 15 passed, 0 failed, two ignored helpers explicitly executed by subprocess scenarios. Linux RLIMIT_FSIZE1024 test demonstrated partial final backups RED; unique pending-file publication passed GREEN with EFBIG as the measured failure. Independent review initially killed four of five mutations; nested history permission mutation survived and failed after assertions for all history directories. Parent-directory sync and stale header findings corrected. No power-loss injection or Windows runtime acceptance was performed.
 
 Focused MCP/public-private and dashboard forced-route tests passed with --features dashboard. Fresh final dashboard suite: 7 passed, 0 failed. Independent restored integration: 15 passed, 0 failed, two worker helpers. Initial mutation tally was 4 killed / 1 surviving / 0 inconclusive; only the surviving nested-permission mutation was rerun after the final publication changes, and it was killed. The other four were not rerun. Final full ./scripts/gate.sh --check exited0: FMT=0, CLIPPY=0, LEAN=0, DEFAULT=0, PYTHON_LIGHT=0. Python light: 1223 passed and 424 subtests. Gate does not cover heavy Python, server-stack, real ONNX weights, Windows or laptop activation. No remaining review findings; no deferred minor findings. Only owned feature-branch commits are published, preserving the shared experiments checkout and its uncleared peer commits.
+
+## Integration — 2026-10-16
+
+Backend history commit `a6ec001c31d814856551526504acaecdd1ced549` is now merged into experiments together with the Albert audit repairs: `.mjs` indexing/preflight at `28dc9e855f45c305dd4bb314c2478fb6ae30c9e5`, and SQLite KNN budget/disclosure at `f5f1c6f7d2260515388437a8c2d5bfb5ad7c02a4`. Memory sources and tests remained byte-identical to a6ec001c during this integration.
+
+The final frozen-source `./scripts/gate.sh --check` exited0 for FMT, CLIPPY, LEAN, DEFAULT and PYTHON_LIGHT. Lean library4513passed/8ignored; default library6865passed/9ignored; Python1223passed+424subtests. The extra dashboard/MCP forced-route run passed8tests. These configurations overlap; they are not a unique-test total. Independent review approved the integrated repairs; the final disclosure review applied three mutations and killed all three on its stated snapshot, then verified the corrected-source baseline.
+
+Catalog worktree merge completed without conflicts; its shadow and worktree-born rows were reconciled and frontmatter IDs repaired per file. Source commits and this record are local; no installed binary replacement, client/profile installation, remote laptop activation or publication of the shared checkout's peer prefix is claimed. Gate exclusions remain as recorded above. Native guard/client acceptance remains operator work.
