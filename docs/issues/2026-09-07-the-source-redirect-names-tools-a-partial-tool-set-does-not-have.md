@@ -1,7 +1,7 @@
 ---
 id: '79674d2d77f15d8b'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the source-file redirect names three tools this session does not have, and its breaker cannot stand down because codescout is answering'
 owners:
 - marius
@@ -11,6 +11,8 @@ tags:
 - hooks
 - tool-surface
 topic: guards whose remedy text assumes a tool set the caller does not have
+closed: 2026-10-16
+unverified: No live session with a partial tool set was run against the fixed hooks, and the fix is on claude-plugins branch fix/guide-hooks-20261016 (a6c02d0), not merged. The third option (let the hook learn the tool set) was not attempted.
 ---
 
 ## Summary
@@ -194,34 +196,24 @@ blocked." The same sentence, applied one step further, is this bug.
 
 ## Fix
 
-Not fixed here — it is the companion plugin's repo, and the remedy is a design choice for its
-owner. Three options, cost ascending:
+Fixed 2026-10-16 in the plugin repo, branch `fix/guide-hooks-20261016`, commit `a6c02d0`. Nothing in codescout changed: its side was exonerated at the bytes (`ReadFile`, `CreateFile`, `EditFile`, `EditCode`, `References`, `SymbolAt`, `CallGraph` are all registered in the unconditional vec, `src/server.rs:390-404`, re-read 2026-10-16). The recommendation below was taken, both halves:
 
-- **Say less, accurately.** Replace the footer's asserted cause with the two states the caller can
-  actually distinguish: *"if these tools are not in your list, either codescout is disconnected
-  (run `/mcp`) or this session exposes a subset — in which case `run_command` with
-  `acknowledge_risk: true` is the escape."* Names a route that works in both branches.
-- **Make the breaker key on the right event.** Count a strike per deny and clear it only when a
-  *redirect target* is called, not when any codescout tool answers. Turns proof-of-life into
-  proof-of-reachability, which is the thing being proxied.
-- **Let the hook learn the tool set.** Most work; may not be available from a `PreToolUse`
-  payload at all, which is why the proxy exists.
+- **Footer.** `ESCAPE_FOOTER` no longer asserts disconnection. It names both explanations, tells the caller to call a tool that IS present to find out, and names `run_command` with `acknowledge_risk: true` as the route that works under a partial tool set; `/mcp` and `! <command>` are for the case where NO codescout tool is present. The stand-down and threshold text are reworded likewise.
+- **Breaker.** Each deny records the tools whose answer would prove ITS redirect reachable (`Read` -> `read_file`; `Edit` -> `edit_code`, `edit_file`; `Write` -> `create_file`, `edit_code`) as `<strikes>\t<tool,tool>` in the existing marker file, and `cs-liveness.mjs` clears the counter only when one of those answers. Bash/Grep/Glob redirects name tools a partial exposure did not drop, so they keep the any-answer-clears contract, as does a payload with no `tool_name` or a marker with no probes (an old file).
+- **Matcher.** The `PostToolUse` liveness matcher in `hooks.json` lacked `create_file`, a probe; added.
 
-Recommendation: the first two, together. The first is cheap and removes the misrouting; the
-second restores the rescue the breaker was written to provide.
-
-**Do not "fix" this by dropping the footer.** It is the only sentence in the deny that tells a
-caller the redirect might be unreachable at all; the defect is its confident single cause, not
-its presence.
+Known cost, accepted: a healthy session that is redirected on source `Read`s and answers each with `symbols` (never `read_file`) accrues strikes, and the 4th native `Read` stands the guard down. That is advisory and leaves the user's own permission prompt in force, and a caller who ignored three redirects is the case the breaker is for. The third option (let the hook learn the tool set) was not attempted; a `PreToolUse` payload does not carry it.
 
 ## Tests added
 
-None — the code is in another repo. The assertion shape is worth stating because it is the one
-this corpus keeps getting wrong: **do not pin the footer's prose.** Assert that the message names
-**a route reachable under a partial tool set**, and separately that a deny **increments a strike
-that a non-target codescout call does not clear**. The first reds on a rewrite that drops the
-escape; the second reds on the actual defect. A test that only asserts the deny fires is monotone
-under all of this — it passes today, and it passed throughout.
+Plugin repo, `codescout-companion/hooks/pre-tool-guard.test.sh`, written red first (4 failures on the old code, 68/68 after). The assertions the Fix section asked for, one per direction, none pinning the footer's prose:
+
+- A codescout tool that is NOT the redirect target (`symbols`) answering between three native `Edit` denies does not reset the strikes: the 4th stands down and explains why. Failed before (the guard never stood down).
+- The redirect target (`edit_file`) answering keeps the guard armed over six denies.
+- A Bash deny is still cleared by any answer (the old contract, so a healthy session is not tripped).
+- The footer names `acknowledge_risk` and no longer contains "has disconnected and this redirect points at nothing"; it still names `/mcp` and still avoids `codescout-companion.json`.
+
+Not covered: a live session with a partial tool set; the third fix option.
 
 ## Workarounds
 
@@ -231,7 +223,7 @@ gate, not a hole.
 
 ## Resume
 
-Owner decision on which of the three fixes; then the two assertions above in the plugin repo.
+Merge `fix/guide-hooks-20261016` in claude-plugins (hooks load from the working tree on `main`, so the edit is live there on merge; no version bump, `release.sh` owns it).
 
 ## References
 
