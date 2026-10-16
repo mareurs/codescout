@@ -696,6 +696,64 @@ pub async fn probe_ollama(host: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Ollama not reachable at {}: {}", host, e))?;
     Ok(())
 }
+/// Total time each ceiling-probe request may take.
+///
+/// Tight on purpose: the probe runs in the background at startup and is advisory, so a slow
+/// server must cost a missing log line, never a delayed one that blocks anything.
+pub const CEILING_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Ask an embedding server for the largest input it will accept, without embedding anything.
+///
+/// Two read-only GETs against the server root derived from `embedder_url` (a bare host, a
+/// `/v1` base and a `/v1/embeddings` endpoint all resolve to the same root): `/slots` for the
+/// per-slot context and `/v1/models` for the model's `n_ctx_train`. See [`crate::ceiling`]
+/// for what each means and why `/props` is not used.
+///
+/// **Fail-soft by construction.** The return type has no error arm: an unreachable server,
+/// a non-2xx answer (OpenAI and Ollama have neither endpoint), a body that is not the
+/// expected JSON, and a timeout all come back as the field being `None`. The caller can
+/// therefore not turn a probe failure into a startup failure.
+///
+/// **It costs nothing and sends no credentials.** No API key is attached and nothing is
+/// POSTed — in particular no `/v1/embeddings` request, which is what a binary-search probe
+/// of the ceiling would have to send and which a paid endpoint would bill for.
+pub async fn probe_embed_ceiling(embedder_url: &str) -> crate::ceiling::EmbedCeiling {
+    probe_embed_ceiling_with_timeout(embedder_url, CEILING_PROBE_TIMEOUT).await
+}
+
+/// [`probe_embed_ceiling`] with an explicit per-request timeout, so a test can exercise the
+/// timeout arm in milliseconds rather than waiting out the production bound.
+pub async fn probe_embed_ceiling_with_timeout(
+    embedder_url: &str,
+    timeout: std::time::Duration,
+) -> crate::ceiling::EmbedCeiling {
+    // Same reason as `probe_ollama`: `ClientBuilder::build()` panics without a default
+    // rustls provider, whatever the URL scheme.
+    RemoteEmbedder::install_default_crypto_provider();
+    let Ok(client) = reqwest::Client::builder().timeout(timeout).build() else {
+        return crate::ceiling::EmbedCeiling::default();
+    };
+    let root = crate::normalize_embeddings_base(embedder_url);
+
+    async fn get_json(client: &reqwest::Client, url: String) -> Option<serde_json::Value> {
+        let resp = client.get(url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json().await.ok()
+    }
+
+    let (slots, models) = tokio::join!(
+        get_json(&client, format!("{root}/slots")),
+        get_json(&client, format!("{root}/v1/models")),
+    );
+    crate::ceiling::EmbedCeiling {
+        per_slot_ctx: slots.as_ref().and_then(crate::ceiling::parse_slots_n_ctx),
+        n_ctx_train: models
+            .as_ref()
+            .and_then(crate::ceiling::parse_models_n_ctx_train),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -895,6 +953,151 @@ mod tests {
             "error message should mention 'not reachable'"
         );
     }
+    /// Loopback server answering GETs from a fixed route table (`path -> (status, body)`;
+    /// any other path is a 404) and recording `(method, path, had_authorization_header)` for
+    /// every request. Never contacts anything off-host, so the ceiling probe is tested
+    /// without a real or paid embedding service.
+    async fn spawn_route_server(
+        routes: Vec<(&'static str, u16, &'static str)>,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<Vec<(String, String, bool)>>>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_bg = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let seen = std::sync::Arc::clone(&seen_bg);
+                let routes = routes.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut tmp).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                        }
+                        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&buf).to_string();
+                    let mut first = head.lines().next().unwrap_or("").split_whitespace();
+                    let method = first.next().unwrap_or("").to_string();
+                    let path = first.next().unwrap_or("").to_string();
+                    let authed = head
+                        .lines()
+                        .any(|l| l.to_ascii_lowercase().starts_with("authorization:"));
+                    seen.lock().unwrap().push((method, path.clone(), authed));
+                    let (status, body) = routes
+                        .iter()
+                        .find(|(p, _, _)| *p == path)
+                        .map(|(_, s, b)| (*s, *b))
+                        .unwrap_or((404, "{}"));
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n\
+                                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                body.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    const LIVE_SLOTS: &str = r#"[{"id":0,"n_ctx":4096,"is_processing":false}]"#;
+    const LIVE_MODELS: &str =
+        r#"{"object":"list","data":[{"id":"m","meta":{"n_ctx_train":2048}}]}"#;
+
+    #[tokio::test]
+    async fn the_probe_reads_both_limits_from_a_llama_server_and_sends_no_credentials() {
+        let (url, seen) = spawn_route_server(vec![
+            ("/slots", 200, LIVE_SLOTS),
+            ("/v1/models", 200, LIVE_MODELS),
+        ])
+        .await;
+
+        // A `/v1`-suffixed base is what `CODESCOUT_EMBED_URL` carries; both forms must work.
+        let got = super::probe_embed_ceiling(&format!("{url}/v1")).await;
+
+        assert_eq!(
+            got,
+            crate::ceiling::EmbedCeiling {
+                per_slot_ctx: Some(4096),
+                n_ctx_train: Some(2048),
+            }
+        );
+        let mut seen = seen.lock().unwrap().clone();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                ("GET".to_string(), "/slots".to_string(), false),
+                ("GET".to_string(), "/v1/models".to_string(), false),
+            ],
+            "the probe must issue exactly two credential-free GETs and nothing that could \
+             be billed (no POST /v1/embeddings)"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_with_neither_endpoint_is_unknown_not_an_error() {
+        let (url, _) = spawn_route_server(vec![]).await;
+        assert_eq!(
+            super::probe_embed_ceiling(&url).await,
+            crate::ceiling::EmbedCeiling::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn one_endpoint_answering_still_reports_what_it_knows() {
+        // `/slots` can be disabled (`--no-slots`) while `/v1/models` still answers.
+        let (url, _) = spawn_route_server(vec![("/v1/models", 200, LIVE_MODELS)]).await;
+        let got = super::probe_embed_ceiling(&url).await;
+        assert_eq!(got.per_slot_ctx, None);
+        assert_eq!(got.n_ctx_train, Some(2048));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_is_unknown() {
+        assert_eq!(
+            super::probe_embed_ceiling("http://127.0.0.1:1").await,
+            crate::ceiling::EmbedCeiling::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_accepts_and_never_answers_is_cut_off_by_the_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _hold = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((s, _)) = listener.accept().await {
+                held.push(s); // keep the socket open, never reply
+            }
+        });
+        // The outer bound turns "timeout not applied" into a failure instead of a hang.
+        let got = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            super::probe_embed_ceiling_with_timeout(
+                &format!("http://{addr}"),
+                std::time::Duration::from_millis(150),
+            ),
+        )
+        .await
+        .expect("probe must honour its own timeout");
+        assert_eq!(got, crate::ceiling::EmbedCeiling::default());
+    }
+
     /// A peer that completes the TCP handshake and then goes silent is the shape
     /// of a wedged model server, and it is the failure a *total*-request timeout
     /// handles worst: the 300s bound eventually fires, but only after 300s.

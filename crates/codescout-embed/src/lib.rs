@@ -1,5 +1,6 @@
 //! codescout-embed — shared embedding primitives.
 
+pub mod ceiling;
 pub mod chunker;
 
 mod embedder;
@@ -94,9 +95,10 @@ pub fn bare_model_name(model: &str) -> &str {
 const FASTEMBED_DEFAULT_MAX_TOKENS: usize = 512;
 
 pub fn chunk_size_for_model(model_spec: &str) -> usize {
-    // 85 % of context × 3 chars/token.
+    // 85 % of context × 3 chars/token — the rule `ceiling::judge` checks budgets against,
+    // so it lives in one place.
     fn from_tokens(n: usize) -> usize {
-        (n as f64 * 0.85 * 3.0) as usize
+        ceiling::budget_chars_for_tokens(n)
     }
 
     // Map well-known model name substrings to their published max sequence

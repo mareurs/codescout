@@ -280,6 +280,14 @@ async fn main() -> Result<()> {
         } => {
             let debug = debug || diagnostic;
             tracing::info!("Starting codescout MCP server (transport={})", transport);
+            // Advisory, detached, fail-soft: probes the configured HTTP embedder's
+            // effective per-request ceiling and logs one line. Returns at once.
+            codescout::retrieval::ceiling::spawn_startup_report(
+                project
+                    .clone()
+                    .or_else(|| std::env::current_dir().ok())
+                    .as_deref(),
+            );
             codescout::server::run(
                 project,
                 &transport,
