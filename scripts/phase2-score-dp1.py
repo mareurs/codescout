@@ -236,13 +236,23 @@ def dirty_reasons(config_dir: str) -> list[str]:
     The ~/.claude-kat judge loaded plugins, hooks and the user CLAUDE.md -- 2,778 input
     tokens for "Say OK.", including "ALWAYS VERIFY" rules the judge then applied to the text
     it was grading. A dir holding only the credentials symlink and
-    {"enabledPlugins":{},"hooks":{}} measured 249 tokens with no hook events."""
+    {"enabledPlugins":{},"hooks":{},"syncClaudeAiSkills":false} measured 249 tokens with no hook events.
+
+    The two sync reasons are the fourth way a dir adds context (bug 2026-09-25): left to its default
+    the CLI syncs the account's claude.ai skills into `skills/synced/<org>_<account>/<skill>/` and
+    registers them in every session. They were measured harmless under `--tools ""` (model input
+    identical to a fresh dir), so the reasons are about the channel's state, not a measured input
+    difference. `syncClaudeAiSkills` is off only when it is exactly `false`; a dir that already
+    synced is still dirty after the flag is set, until `skills/synced` is removed."""
     cfg = pathlib.Path(config_dir)
     settings = json.loads((cfg / "settings.json").read_text()) if (cfg / "settings.json").exists() else {}
+    synced = cfg / "skills" / "synced"
     return [w for w, bad in [
         ("CLAUDE.md present", (cfg / "CLAUDE.md").exists()),
         ("plugins enabled", any(settings.get("enabledPlugins", {"?": True}).values())),
         ("hooks configured", bool(settings.get("hooks", {"?": 1}))),
+        ("claude.ai skills synced", synced.is_dir() and any(synced.rglob("SKILL.md"))),
+        ("claude.ai skill sync enabled", settings.get("syncClaudeAiSkills") is not False),
     ] if bad]
 
 
@@ -265,7 +275,8 @@ def main() -> int:
     if dirty and not args.allow_dirty_judge:
         sys.exit(f"judge config {_p.config_dir} is not clean ({', '.join(dirty)}): set "
                  f"JUDGE_CONFIG_DIR to a dir with only .credentials.json and settings.json "
-                 f'{{"enabledPlugins":{{}},"hooks":{{}}}}, or pass --allow-dirty-judge to '
+                 f'{{"enabledPlugins":{{}},"hooks":{{}},"syncClaudeAiSkills":false}} (and no skills/synced), '
+                  f"or pass --allow-dirty-judge to "
                  f"reproduce the pre-2026-09-24 channel on purpose")
     rule = RULES[args.rule]
     q = rule["question"]

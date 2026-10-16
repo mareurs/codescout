@@ -332,7 +332,7 @@ class Labellers(unittest.TestCase):
         # reads as plugins enabled), so only the text separates the unset guard from that one.
         self.assertIn("unset", str(e.exception))
         with tempfile.TemporaryDirectory() as tmp:
-            (pathlib.Path(tmp) / "settings.json").write_text('{"enabledPlugins": {}, "hooks": {}}')
+            (pathlib.Path(tmp) / "settings.json").write_text('{"enabledPlugins": {}, "hooks": {}, "syncClaudeAiSkills": false}')
             rl.check_channel(tmp)                              # clean: no refusal
             (pathlib.Path(tmp) / "CLAUDE.md").write_text("rules")
             with self.assertRaises(SystemExit):
@@ -353,7 +353,7 @@ class LabellerMain(unittest.TestCase):
         (self.d / "menu.json").write_text(json.dumps({"a_rule": {}}))
         self.cfg = self.root / "config"
         self.cfg.mkdir()
-        (self.cfg / "settings.json").write_text('{"enabledPlugins": {}, "hooks": {}}')
+        (self.cfg / "settings.json").write_text('{"enabledPlugins": {}, "hooks": {}, "syncClaudeAiSkills": false}')
 
     def reply(self, prompt):
         items = [json.loads(line) for line in prompt.split("## Items\n\n")[1].splitlines()]

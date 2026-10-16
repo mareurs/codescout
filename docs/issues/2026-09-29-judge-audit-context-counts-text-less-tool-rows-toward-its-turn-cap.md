@@ -45,6 +45,8 @@ with empty text, and they are counted among the 12.
 
 **Reproduced 2026-09-30 (session 00113c9d) on SYNTHETIC rows only** (`join._create_schema` plus inserted `turns` rows, no corpus): a prompt row, one `assistant_text` row ("Running them now."), then 8 tool round-trips (a `tool_use` row and a `tool_result` row each, `text` NULL), then the decision. `judge.build_input(..., "audit")` returned **12 context rows, all `tool_use`/`tool_result`, 0 with text, 0 chars**; the operator prompt and the narration were both outside the window, and `pre_evidence` held only the decision. So a short tool exchange empties the context completely; it does not merely thin it. Text-less kinds are `tool_use`, `tool_result`, `assistant_thinking` (never stored, by design) and `meta`; only the first two carry evidence.
 
+**Reproduced end to end 2026-10-16 (HEAD `f5f1c6f7`), through the real pipeline, not inserted rows.** A fixture corpus (`tests/measure_corpus_fixture.py`: `user_prompt`, `assistant`, `tool_result`, `build_corpus`, plus a `manifest.json`) holding a prompt "run the tests", one assistant message "Running them now." with a `Bash` call, then 8 more round-trips (a `tool_result` "FAILED 3 tests", then a text-less assistant `Bash` call), then the decision "All tests pass.", went through `join.build_events` and `judge.build_input(item, db, [], "audit")`. The `turns` table: `assistant_text` 1, `prompt` 1, `tool_use` 9, `tool_result` 8 (all 8 with `text` NULL). `build_input` returned 12 context rows, `[(tool_use, 0), (tool_result, 0), ...]`, 0 characters each; the prompt, the narration and every "FAILED 3 tests" were outside the window; `pre_evidence` was blank lines followed by `All tests pass.`. This is operator example D with its counter-evidence removed. Note the events db `sid` is `<profile>/<sid>` (here `work/s1`), not the transcript's own sessionId.
+
 ## Environment
 
 `scripts/measure/judge.py` `_session_part` (the `CONTEXT_MAX_TURNS = 12` and
@@ -70,6 +72,8 @@ Open. The packet rule for operator-labelled cases is being redesigned (design se
 and the judge must receive the same packet as the operator. So the fix belongs to that redesign:
 count API messages rather than entries, and include tool calls and truncated tool results. Fix it
 there rather than patching R117 alone.
+
+**Decision 2026-10-16 (the operator, after the options below were put to them): leave this open, spec-deferred.** No code and no test changed. The options, for whoever writes the later judge spec: (A) leave open, taken; (B) apply the 12-row and 20,000-char caps over text-bearing rows only, which stops the cap being wasted and restores narration but still shows no tool evidence, and changes what R117 means; (C) have `_session_part` delegate to `scripts/measure/packet.py` `build_packet`, the packet rule the operator labels use, which fixes the bug but is the new prompt and new gate that spec defers. `tests/test_measure_judge.py` (about L254-283) pins the current 12-newest-rows behaviour. Audit mode has not run on the corpus, so no recorded judge result depends on `_session_part`.
 
 ## Tests added
 

@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
-closed: null
+closed: 2026-10-16
 opened: 2026-09-25
 owner: marius
 related:
@@ -66,16 +66,29 @@ The check enumerates three ways a config dir can add context. The synced-skill p
 
 ## Fix
 
-Not applied. The cheap form:
+Applied 2026-10-16 (the "cheap form" below). `dirty_reasons` in `scripts/phase2-score-dp1.py` now reports two more reasons:
 
-- `dirty_reasons` also reports a non-empty `skills/synced/` or `syncClaudeAiSkills` not set to `false`;
-- the channel's settings set `syncClaudeAiSkills: false`.
+- `claude.ai skills synced`: any `skills/synced/**/SKILL.md` under the config dir. The layout was read from a real profile on 2026-10-16: `skills/synced/<org>_<account>/<skill>/SKILL.md`, beside hidden `.bucket-*` / `.last-complete-round` markers and a `manifest.json`. Markers and a manifest with no `SKILL.md` register nothing and are not dirty; a user skill at `skills/<name>/SKILL.md` is not the sync and is not reported by this check.
+- `claude.ai skill sync enabled`: `syncClaudeAiSkills` is anything but exactly `false`. The CLI's own settings schema (claude 2.1.301, read from the binary) describes it as "Set to false to turn off syncing of the skills you have enabled on claude.ai"; unset therefore means syncing is on.
 
-Applying it now would mark `judge-config-main` dirty mid-campaign, for no change in model input.
+The clean channel is now `settings.json` = `{"enabledPlugins":{},"hooks":{},"syncClaudeAiSkills":false}`, and both refusal messages (`phase2-score-dp1.py`, `phase1-span-selector.py`) say so. Every other caller (`run_labellers.py`, `generate_synthetic.py`, `audit_synthetic.py`, `check_reviews.py`) goes through the same function.
+
+What this does and does not change:
+- Model input is unchanged. The measurement above (412 vs 412 and 457 vs 457 input tokens) stands; the new reasons describe the channel's state, not an input difference, and stay inert only while callers pass `--tools ""`.
+- Recorded rows are untouched. Their `judge_channel: clean` headers were written under the three-condition check, on a channel (`judge-config-main`) that held 8 synced skills, so the word means less there than on a row written after this change. `docs/PROBES.md` says so in the `dirty_reasons` row.
+- A dir that already synced stays dirty after the flag is set, until its `skills/synced` is removed. The judge dirs are session scratch (`<scratchpad>/judge-config-main`, rebuilt each session), so a rebuild is the normal path. A new session that reuses an old dir, or the documented `{"enabledPlugins":{},"hooks":{}}` recipe in the rule-tell scoring doc, is now refused until the flag is added; `--allow-dirty-judge` still runs it and labels the row `dirty: ...`.
 
 ## Tests added
 
-N/A. No fix yet. A fix needs a case in `tests/test_phase2_score_dp1.py` whose config dir passes the three existing checks and holds a synced skill.
+`tests/test_phase2_score_dp1.py::DirtyReasons`, red first (4 failed, 12 passed before the change):
+
+- `test_a_synced_claude_ai_skill_is_dirty`: a config dir that passes the three older checks and holds `skills/synced/org_acct/docx/SKILL.md` (the case this bug asked for);
+- `test_skill_sync_left_unset_is_dirty`: flag unset, and flag `true`;
+- `test_both_sync_reasons_are_reported_together`;
+- `test_a_missing_settings_file_is_dirty_not_clean`: now also lists the sync reason;
+- guards against over-reporting, which passed before and after: `test_hidden_markers_with_no_synced_skill_are_not_dirty`, `test_a_user_skill_outside_synced_is_not_the_synced_check`.
+
+`clean_profile` (that file) and the two clean-dir writes in `tests/test_phase1b_audit.py` now set `syncClaudeAiSkills: false`. The `~/.claude-kat` and `~/.claude-sdd` profiles on this machine report both new reasons, as expected. Python light lane green (1228 passed).
 
 ## Workarounds
 
@@ -83,7 +96,7 @@ Keep `--tools ""` on every channel call. That is what makes the extra registrati
 
 ## Resume
 
-Apply the fix at the next channel rebuild, or earlier if a caller ever enables tools on this channel.
+Done. If a future caller enables tools on this channel, the synced skills stop being inert: measure the model input again before trusting that channel.
 
 ## References
 
