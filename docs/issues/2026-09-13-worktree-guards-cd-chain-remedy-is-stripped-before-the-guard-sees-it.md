@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: zombie
 tags:
 - cluster/gate-keyed-on-unobservable-event
 closed: null
@@ -8,6 +8,8 @@ opened: 2026-09-13
 owner: marius
 related: []
 severity: medium
+last_observed: 2026-09-22
+unverified: "The harness cd-strip was never observed directly: Bash is denied in all three profiles, so the discriminating test (cd to a different worktree) cannot be run. Re-open trigger: Bash re-allowed, or a guard refusal that echoes a Command: with the typed cd missing."
 ---
 
 # The worktree guard's `cd`-chain remedy is stripped before the guard can see it
@@ -40,6 +42,27 @@ so the hook judges a bare `git push` and refuses again.
 - **Unexplained, and not investigated: the 2026-09-22 recurrence below came through `Bash`,** after the 2026-09-20
   deny date `CLAUDE.md` gives. When the deny actually took effect was not established.
 - **If `Bash` is re-allowed,** re-probe the strip before trusting the remedy text.
+
+## Status: zombie (2026-10-16, wave-3 devtools sweep)
+
+Not fixed, and not fixable from this repo. Verified this session:
+
+- **`scripts/mutation-probe.sh` is not involved.** It never prints or follows the `cd … &&` remedy: every worktree
+  operation in it is `git -C "$ROOT"` / `git -C "$TREE"` (e.g. lines 199, 206, 210-211, 240-258), and its only `cd` is
+  inside a subshell (`( cd "$TREE" && "$@" )`, line 312), which is not a guarded git verb. The pool's worktrees
+  inflate the guard's worktree count (26 listed here) but are not the cause.
+- **The only source of the remedy text is `claude-plugins/codescout-companion/hooks/git-worktree-guard.mjs`
+  (lines 148-150, `Chain cd in same call`)**; `grep` finds it nowhere in this repo outside `docs/`. Last touched by
+  `579b9c1` / `7a95dff` (matcher fixes), not the remedy line.
+- **The guard's own half holds.** Synthetic PreToolUse JSON through the hook: `cd <checkout> && git push --dry-run
+  origin x` exits 0 with no output (exempt); bare `git push --dry-run origin x` emits `permissionDecision: deny`.
+- **The strip stays unobservable.** `permissions.deny` is `['Bash','Write','Edit']` in `~/.claude`, `~/.claude-sdd`
+  and `~/.claude-kat` (read with `json.load` this session), and this agent's tool list has no `Bash`. The discriminating
+  test in *What is NOT established* therefore cannot be run, and neither repair (delete the remedy vs add a PWD caveat)
+  is justified by evidence.
+
+**Re-open trigger:** `Bash` is re-allowed, or a refusal again echoes a `Command:` with the typed `cd` missing. Then
+run the discriminating test first, then change the one line in `claude-plugins`.
 
 ## Picked up 2026-10-01 (session `3e2b9cc8`) — still unreachable, so no fix attempted
 
