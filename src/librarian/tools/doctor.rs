@@ -868,7 +868,11 @@ fn scan_rendered_region_drift(
                  longer finds, then overwrites both sides. If the body is the newer one \
                  (typically after a `git pull` of a scan another host wrote), this catalog's \
                  `params` is the stale input; find the host whose catalog holds the newer \
-                 `params` (`scan_meta.last_scan_at`) before re-scanning.",
+                 `params` (`scan_meta.last_scan_at`) before re-scanning. (Only the scan figures and the \
+                 table rows are compared, so reworded template prose never lands here; if \
+                 `render_template.j2`'s ROW layout changed since that scan, every row differs \
+                 and this is the template, not the catalog — a re-scan is then the right \
+                 repair.)",
                 file_says = drift.file_says,
                 params_say = drift.params_say
             ),
@@ -9292,6 +9296,53 @@ mod tests {
         assert!(
             !Check::from_wire(&found[0].check).is_some_and(Check::is_informational),
             "a diverged pair is a defect, not an advisory"
+        );
+    }
+
+    /// The 4be94370 shape at the doctor layer: the template's static wording changed after the
+    /// file was written, the catalog's params are exactly what rendered it. Must be silent — a
+    /// defect here exits the CLI nonzero on every run and sends the reader hunting another
+    /// host's catalog for a difference that is only prose.
+    #[test]
+    fn rendered_region_drift_is_silent_when_only_the_templates_static_text_changed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let params = serde_json::json!({
+            "scan_meta": {"last_scan_at": "2026-10-06", "n_candidates": 0},
+            "candidates": [],
+        });
+        let cat = Catalog::open_in_memory().unwrap();
+        let (_, abs) = seed_legibility_backlog(&cat, tmp.path(), &params, &params);
+        let written = std::fs::read_to_string(&abs).unwrap();
+        let new_heading =
+            "### Retired (detector removed or threshold changed — nothing was repaired)";
+        assert!(
+            written.contains(new_heading),
+            "fixture must carry the current wording"
+        );
+        std::fs::write(
+            &abs,
+            written.replace(
+                new_heading,
+                "### Retired (detector removed — nothing was repaired)",
+            ),
+        )
+        .unwrap();
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: tmp.path().to_path_buf(),
+            git_root: tmp.path().to_path_buf(),
+            main_root: None,
+            umbrella: None,
+        });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .build();
+        let cat = ctx.catalog.lock();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap();
+        let found = scan_rendered_region_drift(&mut ds, &cat.conn).unwrap();
+        assert!(
+            found.is_empty(),
+            "reworded template prose is not params drift: {found:?}"
         );
     }
 
