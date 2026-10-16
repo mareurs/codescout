@@ -15,6 +15,33 @@ This page is the index, not the spec — follow the links for each probe's own
 documentation. Sibling of [`TAXONOMY.md`](TAXONOMY.md), which indexes ID prefixes rather
 than instruments.
 
+## Start here — which instrument answers my question?
+
+Before you write a one-off script that parses `git log`, `.codescout/usage.db` or a transcript,
+find your question in this table. If no row fits, say so in your answer, and add the probe
+(§ *Adding a probe*) instead of leaving a scratch script behind. The cell for each instrument,
+further down, holds its blind spots. Read it before you quote a number.
+
+| Question | Instrument |
+|---|---|
+| How often do agents err or repeat a call, and how do they recover? | `scripts/friction-probe.py`; before/after a change: `--split-at` |
+| Which refusals does the IL-3 gate give, and which guard change would unblock them? | `scripts/probe_il3_refusals.py` |
+| Would a proposed ledger check have refused real past commits? | `scripts/probe-backticked-count.py --replay`. It answers only the backtick question. For another check, copy its denominator discipline. **No general gate-replay instrument exists yet.** |
+| Does a guard detect the defect it names? | `scripts/mutation-probe.sh` (isolated by default) |
+| Who wrote this file? Who holds the uncommitted file a red build names? | `scripts/file-provenance.py`; `scripts/attribute-red.py` |
+| Who staged this blob? | `.git/session-stage-log` |
+| Who shares this checkout right now? | `scripts/peer-sessions.sh` |
+| How many members does a defect class have, and how many carry a caveat? | `scripts/probe-cluster-census.py`; `scripts/probe-caveat-density.py` |
+| Did a ledger lose entries? | `scripts/probe-ledger-entry-loss.py` |
+| What does the tool prompt surface cost per request, and what do guides cost per session? | `scripts/probe_tool_surface.py`; `scripts/probe_guide_injection.py`; `scripts/probe_guide_section_use.py` |
+| Are the docs and the catalog healthy? | `librarian(action="audit_doc_refs")`; `librarian(action="doctor")`; `cargo test --test doc_tool_refs` |
+| Is the semantic index complete? | `index(action="verify")` |
+| Which running servers execute a deleted binary? | `scripts/stale-servers.sh` |
+| What did a past session cost or do? | the `claude-traces` and `analyze-usage` skills |
+| Is retrieval quality holding? | `scripts/run-tc-benchmark.py` |
+
+A gate change has its own order of work: `docs/conventions/changing-an-enforcement-gate.md`.
+
 ## What counts as a probe
 
 A probe **reports on the system's state or history** and is expected to be re-run and
