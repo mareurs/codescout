@@ -247,6 +247,8 @@ prior snapshot.
 - It names the hazard of the obvious repair: `legibility_scan(write=true)` reconciles against `params` (auto-closing prior open rows) and then overwrites both sides.
 - Deliberately scoped to the one artifact whose body a scan renders (`TRACKER_REL_PATH`). A generic "body == render_template(params)" check would fire on every augmented tracker with a hand-written body — most of them — and the `render_template` is a context projection, not a body contract.
 
+**Amended 2026-10-16 after review:** the first version compared the whole managed region, so reworded template prose (4be94370) read as params drift on every committed backlog. It now compares only the param-derived content (the `Scanned · open` figures and the table rows); static template text is ignored, and a row-LAYOUT change is the stated residual (the finding says a re-scan is then the right repair). Tests: `rendered_region_drift_ignores_a_static_template_change_but_not_params_drift` and `rendered_region_drift_is_silent_when_only_the_templates_static_text_changed`. The committed backlog's two static lines were brought to the new template wording (verified by rendering the template and checking every static line against the file).
+
 Not run against the live catalog in this change: the tests reproduce the 2026-09-21 shape with seeded rows. Running `librarian(action="doctor")` on the host that holds the stale `params` is the real-world confirmation still owed.
 
 ## Tests added

@@ -12,7 +12,7 @@ expects_augmentation: docs/augmentations/docs-trackers-legibility-backlog.yaml
 
 ## Backlog (auto-managed)
 
-Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-10-06 · **81 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta; a row whose detector no longer exists is **retired**, not closed. (`—` in tokens/lines = a non-body defect, e.g. an un-mappable file.) The Dzo's verdicts are below.
+Ranked by the legibility engine — **Tier 1** = biting-now (structural defect + observed `usage.db` friction); **Tier 2** = latent (structural only). Scanned 2026-10-06 · **81 open**. Re-run `librarian(action="legibility_scan")` to reconcile — refactored targets auto-close with a before→after delta; a row whose detector no longer exists, or whose budget moved so it stopped qualifying, is **retired**, not closed. (`—` in tokens/lines = a non-body defect, e.g. an un-mappable file.) The Dzo's verdicts are below.
 
 | key | tier | defects | score | tok/budget | lines | tr/ed/se |
 |---|:--:|---|--:|--:|--:|:--:|
@@ -135,7 +135,7 @@ Ranked by the legibility engine — **Tier 1** = biting-now (structural defect +
 |---|---|:--:|
 
 
-### Retired (detector removed — nothing was repaired)
+### Retired (detector removed or threshold changed — nothing was repaired)
 
 | key | defects | retired |
 |---|---|:--:|

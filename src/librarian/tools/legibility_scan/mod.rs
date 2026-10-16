@@ -545,9 +545,19 @@ pub(crate) struct RegionDrift {
     pub params_say: String,
 }
 
-/// Compare the managed region of `file` (the backlog as read from disk) against what
-/// `params` render to. `Ok(None)` = they agree, or the file has no managed region to
-/// compare. Whitespace at line ends is ignored; nothing else is.
+/// Compare the PARAM-DERIVED content of the managed region of `file` (the backlog as read
+/// from disk) against what `params` render to: the `Scanned <date> · <n> open` figures and
+/// every table row (a line opening with ``| ` ``, i.e. a candidate keyed by its backticked
+/// key). `Ok(None)` = they agree, or the file has no managed region to compare. Line-end
+/// whitespace is ignored.
+///
+/// **The template's static text is deliberately NOT compared.** Preamble prose and section
+/// headings are the same for every `params`, so a difference there says the TEMPLATE changed
+/// since the file was written, never that the catalog is behind. Comparing whole regions
+/// made every committed backlog read as params drift the moment `render_template.j2` was
+/// reworded (4be94370), with advice — find another host's catalog — that was wrong for it.
+/// The residual limit: a change to the layout of a ROW (a column added or reordered) still
+/// differs on every row and is reported; the finding says so.
 ///
 /// Two copies of one state — the body travels in git, `params` lives in a gitignored,
 /// machine-local catalog — and nothing else compares them. Both are internally coherent
@@ -563,12 +573,16 @@ pub(crate) fn rendered_region_drift(
     };
     let rendered = render_managed(params)?;
     let expected = rendered.trim_end();
-    let norm = |s: &str| {
-        s.lines()
-            .map(|l| l.trim_end().to_string())
-            .collect::<Vec<_>>()
+    let param_derived = |region: &str| {
+        let rows = region
+            .lines()
+            .map(str::trim_end)
+            .filter(|l| l.starts_with("| `"))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        (scan_summary(region), rows)
     };
-    if norm(on_disk) == norm(expected) {
+    if param_derived(on_disk) == param_derived(expected) {
         return Ok(None);
     }
     let show = |s: Option<(String, String)>| match s {
@@ -1371,5 +1385,74 @@ mod tests {
         assert!(rendered_region_drift("# hand-written\n", &params)
             .unwrap()
             .is_none());
+    }
+
+    /// A change to the template's STATIC text (preamble prose, a section heading) is not a
+    /// change to the catalog's params, and must not read as one. 4be94370 reworded two static
+    /// lines of `render_template.j2`; every committed backlog then differed from the fresh
+    /// render whatever the params were, and the check reported a defect whose advice (find
+    /// another host's catalog) was wrong. The fixture is the writer's own output with those two
+    /// static lines put back to their previous wording — what a file written before the template
+    /// edit looks like.
+    #[tokio::test]
+    async fn rendered_region_drift_ignores_a_static_template_change_but_not_params_drift() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(tmp.path().join("huge.rs"), &src).unwrap();
+        let out = call(&ctx, json!({ "action": "legibility_scan", "write": true }))
+            .await
+            .unwrap();
+        let id = out["tracker_id"].as_str().unwrap().to_string();
+        let file = std::fs::read_to_string(tmp.path().join(TRACKER_REL_PATH)).unwrap();
+        let params: serde_json::Value = {
+            let cat = ctx.catalog.lock();
+            let row = crate::librarian::catalog::augmentation::get(&cat, &id)
+                .unwrap()
+                .unwrap();
+            serde_json::from_str(&row.params).unwrap()
+        };
+
+        let old_preamble = "a row whose detector no longer exists is **retired**, not closed.";
+        let new_preamble =
+            "a row whose detector no longer exists, or whose budget moved so it stopped qualifying, is **retired**, not closed.";
+        let old_heading = "### Retired (detector removed — nothing was repaired)";
+        let new_heading =
+            "### Retired (detector removed or threshold changed — nothing was repaired)";
+        // Validity of the fixture: the current template really renders the new wording, so
+        // putting the old one back is a real edit rather than a no-op replace.
+        assert!(
+            file.contains(new_preamble) && file.contains(new_heading),
+            "{file}"
+        );
+        let older_template = file
+            .replace(new_preamble, old_preamble)
+            .replace(new_heading, old_heading);
+        assert_ne!(older_template, file);
+
+        assert!(
+            rendered_region_drift(&older_template, &params)
+                .unwrap()
+                .is_none(),
+            "static template wording is not params drift"
+        );
+
+        // And params drift is still caught when the file ALSO carries older template text:
+        // the static-text tolerance must not blind the check.
+        let mut older = params.clone();
+        older["scan_meta"]["last_scan_at"] = json!("2026-06-15");
+        older["scan_meta"]["n_candidates"] = json!(17);
+        assert!(rendered_region_drift(&older_template, &older)
+            .unwrap()
+            .is_some());
+        let mut other_rows = params.clone();
+        other_rows["candidates"] = json!([]);
+        assert!(rendered_region_drift(&older_template, &other_rows)
+            .unwrap()
+            .is_some());
     }
 }

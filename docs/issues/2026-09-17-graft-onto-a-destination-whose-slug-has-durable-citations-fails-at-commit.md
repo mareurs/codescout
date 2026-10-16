@@ -96,6 +96,8 @@ changing.
 
 Deliberately NOT done: re-pointing the displaced slug's rows (the `rekey.rs` style handler). Which slug survives a graft between two established artifacts is a product choice, and a refusal loses nothing. The `graft_rows` doc comment was rewritten from "precondition satisfied by accident" to describe the refusal.
 
+**Amended 2026-10-16 after review:** the refusal originally recommended "graft the other way, or move the citations first". Verified at the bytes that no code updates `entry_cite.src_slug` (`rekey` moves `src_local`/`dst_ref` only) and that the reverse direction is refused too when the other slug also owns citations. The text now names the reverse graft only when it works (and spells out that it deletes the row now named `into_id`), and says plainly that neither direction exists when both sides are cited. Test: `graft_refusal_names_only_remedies_that_exist` (also executes the recommended reverse graft). A tool that re-keys `src_slug` would be the real fix for the both-cited case; not built — a product decision.
+
 Fix commit: `1d76c5b0` on `worktree-agent-a14e953bad0fa514c`; patch-id `fb5f31daa6c74ffb1bded8d0c5032326a5def6f0` (survives rebase/cherry-pick). Archive once the gate is green on `experiments`.
 
 ## Tests added

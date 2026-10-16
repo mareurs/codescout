@@ -67,21 +67,42 @@ fn refuse_if_handover_would_strand_citations(
     if from_slug == into_slug {
         return Ok(());
     }
-    let stranded: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM entry_cite WHERE src_slug=?1",
-        [&into_slug],
-        |r| r.get(0),
-    )?;
+    let cites = |slug: &str| -> Result<i64> {
+        Ok(tx.query_row(
+            "SELECT COUNT(*) FROM entry_cite WHERE src_slug=?1",
+            [slug],
+            |r| r.get(0),
+        )?)
+    };
+    let stranded = cites(&into_slug)?;
     if stranded == 0 {
         return Ok(());
     }
+    let from_cited = cites(&from_slug)?;
+    // Name only remedies that exist. No code updates `entry_cite.src_slug` (`rekey` moves
+    // `src_local` and `dst_ref` only), so "move the citations first" is not an option; and the
+    // reverse direction is refused by this same function when the OTHER row's slug is cited.
+    let remedy = if from_cited == 0 {
+        format!(
+            "The reverse graft works, because `{from_slug}` owns no citations: \
+             doc(action=\"graft\", from_id=`{into_id}`, into_id=`{from_id}`). Note what it \
+             does — `{into_id}` is the row that is deleted (its id and abs_path stop \
+             resolving) and `{from_id}` survives carrying `{into_slug}`'s history and slug. If \
+             that is not the row you want to keep, nothing else can be done today."
+        )
+    } else {
+        format!(
+            "`{from_slug}` ALSO owns {from_cited} citation(s), so neither direction can graft \
+             these two rows: the handover overwrites a slug in both. No tool re-keys \
+             `entry_cite.src_slug`, so the citations cannot be moved either. Leave the rows \
+             separate."
+        )
+    };
     Err(LibrarianRecoverableError::new(format!(
         "graft: refused — into_id `{into_id}` already owns slug `{into_slug}` with {stranded} \
          entry-grain citation(s) keyed by it, and from_id `{from_id}` carries slug \
          `{from_slug}`, which the graft would write over it. Those citations would be \
-         stranded (entry_cite.src_slug has no ON UPDATE). Nothing was changed. Graft in the \
-         other direction (so the slug that owns citations survives), or move `{into_slug}`'s \
-         citations first."
+         stranded (entry_cite.src_slug has no ON UPDATE). Nothing was changed. {remedy}"
     )))
 }
 
@@ -805,6 +826,72 @@ mod tests {
             })
             .unwrap();
         assert_eq!(slug.as_deref(), Some("from-ledger"));
+    }
+    /// The refusal names only remedies that exist. "Move the citations first" named a tool
+    /// nothing provides (no code updates `entry_cite.src_slug`; `rekey` moves `src_local` and
+    /// `dst_ref` only), and "graft the other way" fails identically when the OTHER row's slug
+    /// also owns citations. So the text must follow the facts: the reverse direction when it is
+    /// actually available, and an honest "none exists" when both sides are cited.
+    #[test]
+    fn graft_refusal_names_only_remedies_that_exist() {
+        let cite = |cat: &Catalog, slug: &str, local: &str| {
+            entry_cite::insert_with(
+                &cat.conn,
+                &EntryCiteRow {
+                    src_slug: slug.into(),
+                    src_local: local.into(),
+                    dst_ref: "xyz".into(),
+                    rel: "cites".into(),
+                    origin: "write".into(),
+                    created_at: 1,
+                },
+            )
+            .unwrap();
+        };
+        let fresh = || {
+            let cat = Catalog::open_in_memory().unwrap();
+            art(&cat, "from", "/wt/x.md");
+            art(&cat, "into", "/main/x.md");
+            cat.conn
+                .execute("UPDATE artifact SET slug='from-ledger' WHERE id='from'", [])
+                .unwrap();
+            cat.conn
+                .execute("UPDATE artifact SET slug='into-ledger' WHERE id='into'", [])
+                .unwrap();
+            cat
+        };
+
+        // Only the destination is cited: the reverse direction works, and the text says so —
+        // and verifiably does: run it.
+        let mut cat = fresh();
+        cite(&cat, "into-ledger", "F-1");
+        let msg = format!("{:#}", graft_rows(&mut cat, "from", "into").unwrap_err());
+        assert!(
+            !msg.contains("citations first"),
+            "no such tool exists: {msg}"
+        );
+        assert!(
+            msg.contains("from_id=`into`") && msg.contains("into_id=`from`"),
+            "must spell out the direction that works: {msg}"
+        );
+        graft_rows(&mut cat, "into", "from")
+            .expect("the direction the refusal recommends must actually succeed");
+
+        // Both sides cited: neither direction can work, and the text must not pretend one can.
+        let mut cat = fresh();
+        cite(&cat, "into-ledger", "F-1");
+        cite(&cat, "from-ledger", "T-1");
+        let msg = format!("{:#}", graft_rows(&mut cat, "from", "into").unwrap_err());
+        assert!(
+            msg.contains("neither direction") && msg.contains("from-ledger"),
+            "both-cited must say no graft direction is possible: {msg}"
+        );
+        assert!(!msg.contains("citations first"), "{msg}");
+        let rev = format!("{:#}", graft_rows(&mut cat, "into", "from").unwrap_err());
+        assert!(
+            rev.contains("neither direction"),
+            "the reverse call is refused too: {rev}"
+        );
     }
 
     fn reserve(cat: &Catalog, artifact_id: &str, prefix: &str, max_allocated: i64) {
