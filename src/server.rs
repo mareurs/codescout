@@ -14024,6 +14024,97 @@ mod guide_hint_tests {
             "the stale seed must still be consumed, not retried forever"
         );
     }
+    /// Regression for
+    /// docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md.
+    ///
+    /// A `serves:` section reached the caller only inside the RESPONSE of the call it
+    /// informs, so for a destructive call the guidance arrived with the result of
+    /// having made the mistake. `doc(action="move")` mints a new id and dangles every
+    /// citation of the old one, and is not dry-run by default. The first such call in
+    /// a session must NOT execute: it serves the section instead, and the identical
+    /// re-issue then runs. Asserted on the side effect (the file did not move), never
+    /// on the response shape alone — a response that merely carried the section
+    /// alongside a completed move would pass any shape check.
+    #[tokio::test]
+    async fn the_first_destructive_call_is_held_and_serves_its_guide_before_the_side_effect() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let env = ServerEnv {
+            session_id_explicit: Some("conv-A".to_string()),
+            librarian: crate::librarian::LibrarianEnv {
+                db: Some(dir.path().join("librarian.db")),
+                ..Default::default()
+            },
+            ..test_env(dir.path())
+        };
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let server =
+            CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+
+        let created = call_tool_checked(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/specs/gate-fixture.md",
+                "kind": "spec",
+                "title": "gate fixture",
+                "body": "fixture body",
+            }),
+            "create",
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(
+            &created[0].as_text().expect("primary block is text").text,
+        )
+        .unwrap()["id"]
+            .as_str()
+            .expect("create response carries an id")
+            .to_string();
+        let old = dir.path().join("docs/specs/gate-fixture.md");
+        let new = dir.path().join("docs/specs/gate-fixture-moved.md");
+        assert!(old.exists(), "premise: the fixture file was created");
+        let mv = json!({
+            "action": "move", "id": id, "new_rel_path": "docs/specs/gate-fixture-moved.md"
+        });
+
+        // First move: held. Nothing on disk changes; the section is in the response.
+        let held = server
+            .call_tool_by_name("doc", mv.clone())
+            .await
+            .expect("dispatch ok");
+        assert!(
+            old.exists() && !new.exists(),
+            "the first destructive call must NOT execute — the file moved before the \
+             caller could read the section that warns about exactly this"
+        );
+        let held_text = all_text(&held);
+        assert!(
+            held_text.contains("\"executed\":false"),
+            "the response must say the call did not run, got: {held_text}"
+        );
+        assert!(
+            held_text.contains("<!-- auto-injected get_guide('librarian') §"),
+            "the section that informs the call rides in the held response"
+        );
+
+        // The identical re-issue executes, and does not serve the section a second time.
+        let ran = server
+            .call_tool_by_name("doc", mv)
+            .await
+            .expect("dispatch ok");
+        assert!(
+            !old.exists() && new.exists(),
+            "the re-issued call must execute: {}",
+            all_text(&ran)
+        );
+        assert!(
+            !all_text(&ran).contains("<!-- auto-injected get_guide('librarian') § "),
+            "the gate already delivered the section; the post-call path must not repeat it"
+        );
+    }
 
     #[tokio::test]
     /// Regression for
