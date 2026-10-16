@@ -147,6 +147,13 @@ printf '\n```\n## Class fit\n%s\n```\n' "$FIT_LONG" >> "$R/docs/issues/2026-10-1
 git -C "$R" add docs/issues/2026-10-16-new-bug.md
 run "$R"
 eq "5 a Class fit heading inside a code fence does not count" "$RC" "1"
+# The tilde fence is its own branch in the scan, and a mutation that drops it survives case 5 alone.
+R=$(newrepo)
+write_bug "$R/docs/issues/2026-10-16-new-bug.md" demo-a ""
+printf '\n~~~\n## Class fit\n%s\n~~~\n' "$FIT_LONG" >> "$R/docs/issues/2026-10-16-new-bug.md"
+git -C "$R" add docs/issues/2026-10-16-new-bug.md
+run "$R"
+eq "5 a Class fit heading inside a tilde fence does not count either" "$RC" "1"
 
 # ------------------------------------------------------------ 6: the heading level is exact
 # Fails if any heading depth is accepted. `###` and `#` are different documents.
