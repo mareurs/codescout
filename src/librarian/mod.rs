@@ -8,6 +8,7 @@ pub use adapter::{
 
 pub mod classify;
 pub mod filter;
+pub mod requirements;
 
 pub mod catalog;
 
