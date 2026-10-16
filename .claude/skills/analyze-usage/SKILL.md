@@ -252,7 +252,7 @@ Limit top issues to 4–6, ordered by severity.
 
 ## Step 7: Session Drill-Down (when warranted)
 
-usage.db tracks codescout tool calls only. For sessions that look anomalous in query G
+usage.db records codescout MCP calls only; native harness tools (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded (same wording as `usage::RECORDER_SCOPE`, so a zero here means "not recorded", never "none happened"). For sessions that look anomalous in query G
 (high call count, high errors, many overflows), drill into the full picture using
 **claude-traces** (`cc.py` + `lf.py`).
 
@@ -383,4 +383,4 @@ Total removed: X calls
 - **Clearing without confirmation** — always show what will be removed and wait for explicit "yes" before running DELETE.
 - **Deleting the .db file** — use `DELETE + VACUUM`, not `rm`. Deleting the file works but forces codescout to recreate it on next activation; DELETE preserves the schema cleanly.
 - **Trusting `--all` project paths** — cc.py decodes project paths by replacing `-` with `/`, but directory names containing `-` (e.g. `backend-kotlin`) become `backend/kotlin`. Always verify the reconstructed path exists before using it in `--project` flags: `ls <path> 2>/dev/null || echo "path invalid"`. If invalid, use `find ~/.claude/projects -name "<session_prefix>*"` to find the real encoded path.
-- **Stopping at usage.db for session analysis** — usage.db tracks codescout tool calls only. For the full picture (token cost, stop reasons, actual tool sequence including native CC tools), see Step 7.
+- **Stopping at usage.db for session analysis** — usage.db records codescout MCP calls only; native harness tools (Read, Grep, Glob, Bash, Agent, WebFetch) are not recorded (`usage::RECORDER_SCOPE`). For the full picture (token cost, stop reasons, actual tool sequence including native CC tools), see Step 7.

@@ -110,8 +110,16 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     // first axis. NULL here is deliberately AMBIGUOUS between two real states and must
     // not be read as either alone: "recorded before this column existed", and "no agent
     // id was asserted" — which for a stamped client means the session's own parent, and
-    // for an unstamped one means unknown. Disambiguate by `called_at` against the
-    // migration, not by the NULL.
+    // for an unstamped one means unknown. Disambiguate by `started_at`, not by the NULL:
+    // this migration adds both columns together and `UsageRecorder` stamps `started_at`
+    // on EVERY write, so `started_at IS NULL` is exactly "recorded before this
+    // migration" and `agent_id IS NULL AND started_at IS NOT NULL` is exactly "post-
+    // migration, no agent id asserted" (parent of a stamped client, or an unstamped one).
+    // That cross-column dependency is deliberate (a sentinel was weighed and declined:
+    // it would be wrong for unstamped clients, where the state is "unknown", not
+    // "main") and is pinned by `agent_id_null_is_partitioned_by_started_at`; do NOT
+    // backfill `started_at` for old rows without first giving `agent_id` its own era
+    // marker. docs/issues/archive/2026-09-20-agent-id-null-conflates-pre-migration-with-main-session.md
     //
     // `started_at` — `called_at` is written at INSERT time, which is AFTER the tool
     // body returned, so it is a completion instant under a name that states the start.
@@ -140,7 +148,7 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     // NULL means BOTH "recorded before this column existed" AND "this call named no
     // handle", and the two are separable only by whether the row predates the migration.
     // That is the same defect filed for `agent_id` in
-    // docs/issues/2026-09-20-agent-id-null-conflates-pre-migration-with-main-session.md;
+    // docs/issues/archive/2026-09-20-agent-id-null-conflates-pre-migration-with-main-session.md;
     // it is accepted here rather than fixed, because a sentinel for "named none" would
     // write a row for ~92% of all calls to record an absence.
     let has_buffer_linkage: bool = conn
@@ -1705,6 +1713,75 @@ mod tests {
             .unwrap();
         assert!(agent.is_none(), "pre-migration agent_id must read NULL");
         assert!(started.is_none(), "pre-migration started_at must read NULL");
+    }
+    #[test]
+    fn agent_id_null_is_partitioned_by_started_at() {
+        // `agent_id` NULL means both "recorded before the column existed" and "no agent id
+        // asserted" (a stamped client's parent, or an unstamped client). The two are
+        // separable ONLY through `started_at`: the migration adds both columns together and
+        // the recorder stamps `started_at` on every write. This pins that dependency, so a
+        // backfill of `started_at` for old rows — which would silently merge the eras —
+        // turns this red instead of corrupting every "fraction from subagents" figure.
+        // Pairing both directions keeps it from being monotone under "started_at is always
+        // NULL" (the first assertion) or "always set" (the second).
+        let dir = TempDir::new().unwrap();
+        let conn = open_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO tool_calls (tool_name, latency_ms, outcome, session_id)
+         VALUES ('legacy', 10, 'success', 'old-session')",
+            [],
+        )
+        .unwrap();
+        // A main-session write exactly as `UsageRecorder::write_content` makes it:
+        // `started_at` present, `agent_id` absent.
+        let started = now_timestamp();
+        write_record(
+            &conn,
+            "symbols",
+            1,
+            "success",
+            false,
+            None,
+            "unknown",
+            None,
+            "main-session",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(started.as_str()),
+            None,
+            Default::default(),
+            None,
+            Default::default(),
+        )
+        .unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT COUNT(*) FROM tool_calls WHERE agent_id IS NULL"),
+            2,
+            "both the legacy row and the main-session row read NULL on agent_id alone — \
+         the ambiguity this test documents"
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM tool_calls
+             WHERE agent_id IS NULL AND started_at IS NULL AND tool_name = 'legacy'"
+            ),
+            1,
+            "`started_at IS NULL` must select exactly the pre-migration row"
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM tool_calls
+             WHERE agent_id IS NULL AND started_at IS NOT NULL AND tool_name = 'symbols'"
+            ),
+            1,
+            "`started_at IS NOT NULL` must select exactly the post-migration, no-agent row"
+        );
     }
 
     #[test]
