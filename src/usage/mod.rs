@@ -1,5 +1,6 @@
 pub mod db;
 pub(crate) mod deliveries;
+pub(crate) mod observed;
 
 /// What every `tool_calls` reader must say beside a count or a zero.
 ///
@@ -104,10 +105,19 @@ impl UsageRecorder {
         // inline on this task, so `call_content`'s fan-out runs inside the scope. It
         // starts at `None`, never `Some(vec![])`: a call whose fan-out never ran must
         // record NULL, not a claim that it ran and delivered nothing.
-        let (result, delivered) = deliveries::DELIVERY_SINK
+        //
+        // The observed-effect sink (`observed`) is scoped the same way, for the same
+        // reasons: a fresh `None` per call, drained inside the scope. NULL is "nothing was
+        // observed"; only `run_command` calls that declared `read` ever write it.
+        let ((result, delivered), observed_changed) = observed::OBSERVED_SINK
             .scope(std::cell::RefCell::new(None), async {
-                let r = f().await;
-                (r, deliveries::DELIVERY_SINK.with(|s| s.borrow_mut().take()))
+                let out = deliveries::DELIVERY_SINK
+                    .scope(std::cell::RefCell::new(None), async {
+                        let r = f().await;
+                        (r, deliveries::DELIVERY_SINK.with(|s| s.borrow_mut().take()))
+                    })
+                    .await;
+                (out, observed::OBSERVED_SINK.with(|s| *s.borrow()))
             })
             .await;
         let latency_ms = start.elapsed().as_millis() as i64;
@@ -122,12 +132,13 @@ impl UsageRecorder {
                 workspace_override,
                 &result,
                 deliveries_json.as_deref(),
+                observed_changed,
             )
             .await;
         result
     }
 
-    // Eight parameters since `deliveries_json` joined; `db::write_record`, which
+    // Nine parameters since `observed_changed` joined; `db::write_record`, which
     // this feeds, carries the same allow.
     #[allow(clippy::too_many_arguments)]
     async fn write_content(
@@ -139,6 +150,7 @@ impl UsageRecorder {
         workspace_override: Option<&std::path::Path>,
         result: &Result<Vec<Content>>,
         deliveries_json: Option<&str>,
+        observed_changed: Option<bool>,
     ) -> Result<()> {
         let (project_root, head_sha) = self
             .agent
@@ -249,6 +261,7 @@ impl UsageRecorder {
                 // Drained from the task-local sink by `record_content`, never
                 // behind `self.debug`, for the same reason as `tool_use_id`.
                 deliveries_json,
+                observed_changed,
             },
         )?;
         Ok(())
@@ -987,6 +1000,104 @@ mod content_tests {
             vec![Some("write".to_string()), Some("read".to_string()), None],
             "run_command: declared (default write); every other tool: NULL"
         );
+    }
+
+    /// `observed_changed` is the sink's verdict, carried through `record_content`: the
+    /// closure stands in for a tool that observed the tree. `1` and `0` are different
+    /// claims ("changed" / "observed no change") and both differ from NULL ("nothing was
+    /// observed"), which is also what a tool that never touches the sink must record.
+    #[tokio::test]
+    async fn record_content_stores_the_observed_sink_value_and_null_when_unobserved() {
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+        for observed in [Some(true), Some(false), None] {
+            let _ = recorder
+                .record_content(
+                    "run_command",
+                    &json!({"command": "ls", "effect": "read"}),
+                    None,
+                    || async move {
+                        if let Some(changed) = observed {
+                            observed::record(changed);
+                        }
+                        Ok(vec![Content::text("ok")])
+                    },
+                )
+                .await;
+        }
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let got: Vec<Option<i64>> = conn
+            .prepare("SELECT observed_changed FROM tool_calls ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(got, vec![Some(1), Some(0), None]);
+    }
+
+    /// The sink must not leak between calls: a call that records nothing after one that
+    /// recorded `true` has to read NULL, not the previous call's verdict. A sink that was
+    /// a plain static (or scoped outside the per-call future) would carry `1` over.
+    #[tokio::test]
+    async fn the_observed_sink_does_not_leak_into_the_next_call() {
+        use serde_json::json;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let recorder = UsageRecorder::new(
+            agent,
+            false,
+            "test-session".to_string(),
+            "cc-test".to_string(),
+            None,
+            None,
+        );
+        let input = json!({"command": "ls", "effect": "read"});
+        // One enclosing scope across both calls: if `record_content` did not open its own
+        // fresh scope per call, the second call would inherit the first's `Some(true)`.
+        observed::OBSERVED_SINK
+            .scope(std::cell::RefCell::new(None), async {
+                let _ = recorder
+                    .record_content("run_command", &input, None, || async {
+                        observed::record(true);
+                        Ok(vec![Content::text("ok")])
+                    })
+                    .await;
+                let _ = recorder
+                    .record_content("run_command", &input, None, || async {
+                        Ok(vec![Content::text("ok")])
+                    })
+                    .await;
+            })
+            .await;
+
+        let conn = crate::usage::db::open_db(dir.path()).unwrap();
+        let got: Vec<Option<i64>> = conn
+            .prepare("SELECT observed_changed FROM tool_calls ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(got, vec![Some(1), None]);
     }
 
     #[tokio::test]

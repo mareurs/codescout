@@ -214,6 +214,35 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
         conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN deliveries_json TEXT;")?;
     }
 
+    // Migration: the OBSERVED half of a `run_command` call's effect, next to the DECLARED
+    // `effect_class` above — `1` when the git-visible working tree DIFFERED between a
+    // snapshot taken before the command and one taken after, `0` when it did not, NULL
+    // when nothing was observed. It exists so a wrong `read` declaration is detectable
+    // after the fact: only a call that declared `read` is ever observed.
+    //
+    // WHAT A VALUE MEANS, and does not — read this before querying it:
+    //   * `1` is "something under the tree changed during the call", NOT "this command
+    //     wrote". On a checkout shared with other sessions (CLAUDE.md puts ~6 on this one)
+    //     a peer's edit that lands during the call is indistinguishable from the command's
+    //     own. Rank it as a falsifier of "this was quiet", never as attribution.
+    //   * `0` is "the git-visible tree was identical", NOT "the command wrote nothing".
+    //     `git status` cannot see gitignored paths (`target/`, `.codescout/`), and a
+    //     change that was undone before the second snapshot leaves no difference.
+    //   * NULL is "nothing observed" and covers: every other tool; any call that declared
+    //     `write` (or nothing, which means write); a `run_in_background` call (it returns
+    //     before the command finishes, so `0` would be a false reassurance); a command
+    //     that named a buffer handle; an `Err` outcome; a project that is not a git
+    //     checkout; a `git` that failed or exceeded its 2 s budget; AND every row older
+    //     than this column — the NULL ambiguity `read_output_ids` states, separable only
+    //     by `called_at`. It never means "no change": that is `0`.
+    // Mechanism and costs: `src/tools/run_command/observe.rs`.
+    let has_observed_changed: bool = conn
+        .prepare("SELECT observed_changed FROM tool_calls LIMIT 0")
+        .is_ok();
+    if !has_observed_changed {
+        conn.execute_batch("ALTER TABLE tool_calls ADD COLUMN observed_changed INTEGER;")?;
+    }
+
     backfill_legacy_rows(&conn, &project_root.to_string_lossy())?;
 
     Ok(conn)
@@ -304,6 +333,11 @@ pub struct MeasurementLinkage<'a> {
     /// `crate::usage::deliveries::to_column`. Record-only. `None` (NULL) means the
     /// fan-out never ran; `Some("[]")` means it ran and delivered nothing.
     pub deliveries_json: Option<&'a str>,
+    /// Whether the git-visible tree changed during a `run_command` call that declared
+    /// `read` (`true` = changed, `false` = observed no change, `None` = not observed).
+    /// Record-only. See the `observed_changed` migration in `open_db` for what each state
+    /// does and does not mean on a shared checkout — it is NOT "this command wrote".
+    pub observed_changed: Option<bool>,
 }
 
 /// The current UTC instant in the exact textual shape `write_record`'s
@@ -357,8 +391,8 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
         // lexicographic compare against a `datetime()`-shaped literal, and the shared
         // prefix is fixed-width, so a `.SSS` suffix always sorts after the same second
         // and before the next one.
-        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json)
-                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+        "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, error_msg, codescout_sha, codescout_dirty, project_sha, session_id, input_json, output_json, cc_session_id, friction_target, overflow_tokens, err_family, project_root, started_at, agent_id, emitted_output_id, read_output_ids, effect_class, tool_use_id, deliveries_json, observed_changed)
+                 VALUES (?1, strftime('%Y-%m-%d %H:%M:%f','now'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
         params![
             tool_name,
             latency_ms,
@@ -383,6 +417,7 @@ pub fn write_record<'a, B: Into<BuildProvenance<'a>>>(
             effect_class,
             measurement.tool_use_id,
             measurement.deliveries_json,
+            measurement.observed_changed.map(i64::from),
             ],
     )?;
     // `pika_observations` is not codescout's table (a buddy-plugin skill creates it,
@@ -1492,6 +1527,88 @@ mod tests {
             )
             .unwrap();
         assert_eq!(old, None);
+    }
+
+    /// `observed_changed` (the OBSERVED half of a `run_command` call's effect, next to the
+    /// declared `effect_class`): a real pre-migration table gains the column, the old row
+    /// reads NULL, and the three states a new row can hold survive a `write_record`
+    /// round-trip as `1`, `0` and NULL. `0` and NULL must stay distinct — "observed no
+    /// change" and "observed nothing" are different claims.
+    #[test]
+    fn open_db_adds_observed_changed_and_it_round_trips_three_states() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join(".codescout").join("usage.db");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        {
+            let pre = Connection::open(&db_path).unwrap();
+            pre.execute_batch(
+                "CREATE TABLE tool_calls (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tool_name  TEXT NOT NULL,
+                    called_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    latency_ms INTEGER NOT NULL,
+                    outcome    TEXT NOT NULL,
+                    overflowed INTEGER NOT NULL DEFAULT 0,
+                    error_msg  TEXT
+                );
+                INSERT INTO tool_calls (tool_name, latency_ms, outcome)
+                    VALUES ('legacy', 1, 'success');",
+            )
+            .unwrap();
+        }
+
+        let conn = open_db(dir.path()).unwrap();
+
+        for (tool, observed) in [
+            ("changed", Some(true)),
+            ("unchanged", Some(false)),
+            ("unobserved", None),
+        ] {
+            write_record(
+                &conn,
+                tool,
+                1,
+                "success",
+                false,
+                None,
+                "unknown",
+                None,
+                "s",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Default::default(),
+                None,
+                MeasurementLinkage {
+                    observed_changed: observed,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        let got: Vec<(String, Option<i64>)> = conn
+            .prepare("SELECT tool_name, observed_changed FROM tool_calls ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                ("legacy".to_string(), None),
+                ("changed".to_string(), Some(1)),
+                ("unchanged".to_string(), Some(0)),
+                ("unobserved".to_string(), None),
+            ]
+        );
     }
 
     #[test]
