@@ -1,7 +1,7 @@
 ---
 id: b9dcc12ccc143cc7
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the T-set loop in freeze_stage2.py has no twin-in-context_before guard, and the record that deferred it is wrong about which rows are in T'
 tags:
 - evals
@@ -9,6 +9,7 @@ tags:
 - stage2
 - label-leak
 - cluster/guard-narrower-than-its-name
+closed: 2026-10-16
 opened: 2026-10-06
 owner: marius
 related:
@@ -69,16 +70,13 @@ The measurement above, and `freeze_stage2.py:136` against `:168-173`.
 
 ## Fix
 
-Not started. Options:
+Applied (experiments-only, unmerged until the lead ships; fix SHA `fa782967`, patch-id `d12ce21028e12a0124a1af323e1937bba5cc1ea5`): option 1. The T loop moved out of `main()` into `t_mined_rows(rows, split, lab, mp, n)` in `freeze_stage2.py`, which calls `mp.twin_in_context_before(r)` and skips, counting skips on stdout (`mined T rows skipped, twin already in context_before:`) and NOT in `n`, so the manifest bytes cannot move.
 
-- Apply `mp.twin_in_context_before(r)` in the T loop and count the skips on stdout, as the first loop does.
-- Or document why T is exempt, and add an assertion that no frozen T row has its twin in its `context_before`.
-
-Add a freeze-level test either way. The first loop's skip is not unit-tested either (the archived record says so).
+Verified 2026-10-16: the claim reproduced first (flagged `[(267,'T','not-a-violation'), (941,'T','not-a-violation')]`, neither in `frozen/T.jsonl`). After the change `python3 freeze_stage2.py` rewrites `frozen/*` byte-identically (`git status` clean for the data dir; sha256 lines unchanged), skip count 0, as expected while the label filter keeps both rows out.
 
 ## Tests added
 
-N/A — not fixed.
+`tests/test_stage2_synthetic.py::FreezeTSetTwinGuard` (3 cases, run with `python3 -I tests/test_stage2_synthetic.py`): a T row with its twin in `context_before` is skipped and counted; the same row without the twin there is kept as pos+neg (the control: a guard that skips every T row fails it); a leaking row outside T or with a dropped label is not counted as skipped. Mutation probe: deleting the guard from `t_mined_rows` makes the first case fail (rc 1); restored, all 24 + 32 stage2 tests pass.
 
 ## Workarounds
 
@@ -86,7 +84,7 @@ None needed today. Re-run the measurement above after any re-labelling of T rows
 
 ## Resume
 
-Do the first option. It is a two-line change in one loop.
+Done. Archive (`doc(action="move")` to `docs/issues/archive/`) once the gate is green on experiments.
 
 ## References
 
