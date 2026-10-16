@@ -1,13 +1,14 @@
 ---
 id: '63dbc4b5331f356e'
 kind: bug
-status: open
+status: fixed
 title: graft onto a destination whose slug has durable citations fails at COMMIT with a bare FK error
 owners:
 - marius
 tags:
 - cluster/selector-narrower-than-its-population
 opened: 2026-09-17
+closed: 2026-10-16
 related: []
 severity: low
 ---
@@ -77,16 +78,7 @@ changing.
 
 ## Why this is filed and not fixed
 
-Writing the handler would be ~15 lines mirroring `rekey.rs`'s `UPDATE OR IGNORE` +
-drop-stranded discipline. It is deliberately not written, on this repo's own law that
-**loudness is a property of a PATH**: a guard, refusal or repair on a branch no caller
-reaches is decoration however carefully built, and it would carry a test asserting
-behaviour nothing in the system can produce.
-
-The observer who can act is the next person adding a `graft_rows` caller that grafts onto
-an established artifact. The surface they read is the function's doc comment, so the
-precondition was written there in `0370c1ab`'s follow-up rather than encoded as a
-refusal. Promote this to a fix the moment such a caller is proposed.
+**Superseded 2026-10-16: the premise was wrong, so the law it invoked does not apply.** This section argued that no caller reaches the case. That held for the two callers the file enumerated (`mv.rs`, `reseat_one`) and missed a third, `src/librarian/tools/graft.rs` — `doc(action="graft")` — which passes two **caller-supplied** ids straight to `graft_rows`. Any two established artifacts reach it. Verified at the bytes: `graft_rows` called on two rows that each hold a slug, the destination's with `entry_cite` children, returns `FOREIGN KEY constraint failed: Error code 787` (red test `graft_onto_an_established_slug_with_citations_refuses_actionably_and_changes_nothing`, observed failing before the fix). So the guard sits on a reachable path, which is exactly the condition this section set for promoting it.
 
 ## Hypotheses tried
 
@@ -100,16 +92,22 @@ refusal. Promote this to a fix the moment such a caller is proposed.
 
 ## Fix
 
-Not fixed by design — see *Why this is filed and not fixed*. The precondition is documented
-on `graft_rows`.
+`graft_rows` (`src/librarian/catalog/graft.rs`) now calls `refuse_if_handover_would_strand_citations` as step 0, inside the `IMMEDIATE` transaction and before any write. It refuses with a `LibrarianRecoverableError` naming the displaced slug, the count of durable citations it would strand, both ids, and the remedy (graft the other way so the slug that owns citations survives). It refuses **only** the case that failed — both rows hold differing slugs and the destination's slug has `entry_cite` children — so an established destination slug with no children is still overwritten as before (pinned by a control test).
+
+Deliberately NOT done: re-pointing the displaced slug's rows (the `rekey.rs` style handler). Which slug survives a graft between two established artifacts is a product choice, and a refusal loses nothing. The `graft_rows` doc comment was rewritten from "precondition satisfied by accident" to describe the refusal.
+
+Fix commit: `1d76c5b0` on `worktree-agent-a14e953bad0fa514c`; patch-id `fb5f31daa6c74ffb1bded8d0c5032326a5def6f0` (survives rebase/cherry-pick). Archive once the gate is green on `experiments`.
 
 ## Tests added
 
-None, deliberately. A test here would assert against a state no caller can construct.
+In `src/librarian/catalog/graft.rs`:
+
+- `graft_onto_an_established_slug_with_citations_refuses_actionably_and_changes_nothing` — red before the fix (opaque FK error), asserts the message names the slug and count, is a `LibrarianRecoverableError`, and that both rows, the source's events and the citations are untouched.
+- `graft_onto_an_established_slug_without_citations_still_succeeds` — control: the refusal is no wider than its cause.
 
 ## Workarounds
 
-None needed — no reachable path.
+N/A once fixed. Before the fix: graft in the other direction, or only graft onto a destination with no slug / no durable citations.
 
 ## References
 

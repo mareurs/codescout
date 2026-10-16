@@ -234,6 +234,15 @@ impl Check {
     /// condition and never for the one that does not.
     /// (`docs/issues/2026-09-15-a-one-shot-migrations-drop-is-undone-by-an-older-binarys-if-not-exists-bootstrap.md`)
     ///
+    /// `retired_vector_collection_present` fires when a vector collection this build no
+    /// longer reads or writes still exists on the Qdrant daemon. It opens with
+    /// `informational:` and meets the bar on its second half hardest: the only repair is
+    /// deleting a collection in a store shared by every project on the host, and the
+    /// 2026-09-24 measurement in the bug file found it still GROWING with no writer in this
+    /// tree — so the one action that would silence the row may destroy live data from a
+    /// binary or checkout this repo cannot see. There is deliberately no `fix=` for it.
+    /// (`docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`)
+    ///
     /// Adding a variant here silently changes two published numbers (`summary.defects`
     /// and the CLI's exit code), and neither the compiler nor
     /// `summary_total_partitions_by_check` can notice — `total` still partitions
@@ -259,6 +268,7 @@ impl Check {
                 | Check::ClaimUnresolvableHere
                 | Check::OpenBugUnderLiveEdit
                 | Check::RetiredObjectStillPresent
+                | Check::RetiredVectorCollectionPresent
         )
     }
 
@@ -374,6 +384,7 @@ impl Check {
                 | Check::ParamsBehindBody
                 | Check::ParamsStatusDrift
                 | Check::PrematureArchiveCitation
+                | Check::RenderedRegionDrift
                 | Check::RowBehindFile
                 | Check::SidecarShapeDrift
                 | Check::SidecarUnparseable
@@ -420,7 +431,9 @@ declare_checks! {
     ParamsBehindBody => "params_behind_body",
     ParamsStatusDrift => "params_status_drift",
     PrematureArchiveCitation => "premature_archive_citation",
+    RenderedRegionDrift => "rendered_region_drift",
     RetiredObjectStillPresent => "retired_object_still_present",
+    RetiredVectorCollectionPresent => "retired_vector_collection_present",
     RowBehindFile => "row_behind_file",
     SidecarShapeDrift => "sidecar_shape_drift",
     SidecarUnparseable => "sidecar_unparseable",
@@ -620,6 +633,10 @@ const ROW_GRAIN_SCOPED_CHECKS: &[Check] = &[
     Check::BackslashInGitRoot,
     Check::PrematureArchiveCitation,
     Check::SidecarShapeDrift,
+    // Added with the check itself. One finding per artifact, admitted by its own id and
+    // abs_path like every row above; it only ever fires for the legibility backlog, but a
+    // foreign repo's checkout of that file is exactly the row this scoping must refuse.
+    Check::RenderedRegionDrift,
 ];
 
 /// Objects a past migration **retired** — dropped meaning to stay dropped — paired with
@@ -722,6 +739,144 @@ fn scan_retired_objects(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
     Ok(out)
 }
 
+/// Vector collections the artifact store's naming scheme retired that still exist on the
+/// backend, reported with their exact point counts.
+///
+/// **Reports only, and will not grow a `fix=`.** The only repair is deleting a collection in a
+/// store shared by every project on the host, and the bug file's 2026-09-24 re-measurement
+/// found this very collection still GROWING (2425 to 5394 points) with no writer in this
+/// tree. So the row says what exists and tells the reader NOT to delete it until the writer is
+/// identified — the same point at which this check stops being the right instrument, which is
+/// why the destructive half is left out rather than gated.
+/// `docs/issues/2026-09-06-the-legacy-artifacts-qdrant-collection-is-orphaned-not-cleaned-up.md`
+///
+/// Backend-grain, so it is a named `EXEMPT` entry in
+/// `every_declared_check_is_scope_gated_or_a_named_exemption` rather than a row-grain check:
+/// the subject is a collection on the daemon this run is already talking to, with no artifact,
+/// repo or project in the finding for a scope gate to test.
+///
+/// **Must run before the catalog lock is taken** — the store call awaits, and `ToolContext`'s
+/// catalog is a `parking_lot` mutex. A store that cannot answer (no backend, daemon down) yields
+/// no rows and a log line: this is an inventory, and an unreachable daemon is not a finding about
+/// the inventory. The default `ArtifactVectorStore::retired_collections` is empty, so the
+/// sqlite-vec backend and every test store are silent without opting out.
+async fn scan_retired_vector_collections(ctx: &ToolContext) -> Vec<Violation> {
+    let Some(store) = ctx.artifact_store.as_ref() else {
+        return Vec::new();
+    };
+    let found = match store.retired_collections().await {
+        Ok(found) => found,
+        Err(e) => {
+            tracing::warn!("doctor: could not list retired vector collections: {e:#}");
+            return Vec::new();
+        }
+    };
+    found
+        .into_iter()
+        .map(|c| {
+            Violation::new(
+                Check::RetiredVectorCollectionPresent.as_str(),
+                None,
+                format!("qdrant:{}", c.name),
+                format!(
+                    "informational: vector collection `{name}` holds {points} points under a \
+                     naming scheme this build no longer reads or writes — artifact vectors moved \
+                     to per-project `artifact_chunks_*` collections. Search, delete and refile \
+                     cannot reach it. DO NOT delete it on the strength of this row: the same \
+                     collection was measured GROWING on 2026-09-24 (2425 to 5394 points) with no \
+                     writer in this source tree, so a process or checkout this repo cannot see \
+                     may still be writing to it, and a DROP would destroy live data. Identify \
+                     the writer first — re-run this check and compare the count, then look for \
+                     codescout processes on an older binary and for older checkouts \
+                     (`/proc/<pid>/exe`). There is deliberately no `fix=` for this check.",
+                    name = c.name,
+                    points = c.points
+                ),
+            )
+        })
+        .collect()
+}
+
+/// `rendered_region_drift`: the legibility backlog's committed managed region does not match
+/// what its catalog `params` render to.
+///
+/// The backlog body is machine-written from `params` (`render_managed_body`), so the two are
+/// one state held twice: the body travels in git, `params` lives in a gitignored, machine-local
+/// catalog. When they diverge BOTH stay internally coherent, so every instrument aimed at either
+/// one confirms it — `params_behind_body` is id-keyed and structurally silent on this tracker,
+/// whose rows are keyed by source path. Measured 2026-09-21: body `Scanned 2026-08-28 · 47 open`,
+/// `params` `2026-06-15 · 17 open`, with nothing reporting it.
+/// `docs/issues/2026-09-21-augmentation-params-are-older-than-the-body-they-rendered.md`
+///
+/// **Reports the divergence and never claims which side is newer** — from one host that is not
+/// knowable, and the two repairs are opposites. It also names the hazard of the obvious one:
+/// `legibility_scan(write=true)` reconciles against `params` (auto-closing every prior open row
+/// the new scan no longer finds) and then overwrites BOTH sides, so running it first on a
+/// catalog that is the stale one turns stale input into a fresh write.
+///
+/// Scoped to the one artifact whose body is machine-rendered by a scan
+/// (`legibility_scan::TRACKER_REL_PATH`); a generic "body equals `render_template(params)`"
+/// check would fire on every augmented tracker whose body is hand-written, which is most of
+/// them. Reports only; no `fix=`.
+///
+/// Skipped silently, each a different defect with its own check: unparseable `params`, a file
+/// that is gone (`missing_file`), a file with no managed heading (hand-restructured), and a
+/// `params` shape the template cannot render.
+fn scan_rendered_region_drift(
+    scope: &mut scope::DoctorScope,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
+    use super::legibility_scan::{rendered_region_drift, TRACKER_REL_PATH};
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.abs_path, g.params \
+         FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
+         ORDER BY a.abs_path",
+    )?;
+    let rows: Vec<(String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let suffix = format!("/{TRACKER_REL_PATH}");
+    let mut out = Vec::new();
+    for (id, abs_path, params_text) in rows {
+        if !abs_path.replace('\\', "/").ends_with(&suffix) {
+            continue;
+        }
+        let Ok(params) = serde_json::from_str::<serde_json::Value>(&params_text) else {
+            continue;
+        };
+        let Ok(file) = std::fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let Ok(Some(drift)) = rendered_region_drift(&file, &params) else {
+            continue;
+        };
+        if !scope.admit("rendered_region_drift", &id, &abs_path) {
+            continue;
+        }
+        out.push(Violation::new(
+            "rendered_region_drift",
+            Some(id),
+            abs_path,
+            format!(
+                "the committed backlog states `{file_says}` but this catalog's `params` render \
+                 to `{params_say}`. The body is machine-rendered from `params`, so they are one \
+                 state held twice (body in git, `params` in a machine-local catalog) and one of \
+                 them is behind — this check cannot tell which, and from one host nobody can. \
+                 Do NOT run `legibility_scan(write=true)` to make them match before deciding: it \
+                 reconciles against `params`, auto-closes every prior open row the new scan no \
+                 longer finds, then overwrites both sides. If the body is the newer one \
+                 (typically after a `git pull` of a scan another host wrote), this catalog's \
+                 `params` is the stale input; find the host whose catalog holds the newer \
+                 `params` (`scan_meta.last_scan_at`) before re-scanning.",
+                file_says = drift.file_says,
+                params_say = drift.params_say
+            ),
+        ));
+    }
+    Ok(out)
+}
+
 /// MCP entry point. Runs every invariant check and returns a structured
 /// report. Reads-only; safe to invoke against a live catalog.
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -783,6 +938,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // lock. See `scan_unregistered_worktree_dirs`.
     let (unregistered_worktree_violations, unregistered_worktree_health) =
         scan_unregistered_worktree_dirs(ctx);
+    // Backend state, and it AWAITS — so it must run before the `parking_lot` catalog lock below,
+    // never inside it. See `scan_retired_vector_collections`.
+    let retired_vector_violations = scan_retired_vector_collections(ctx).await;
 
     // Task 7 (review round 1, Commit B): `DoctorScope::new` no longer locks
     // `ctx.catalog` internally — its cross-root-cites query takes a `&Connection`
@@ -798,6 +956,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     all_violations.extend(declared_root_violations);
     all_violations.extend(unregistered_worktree_violations);
+    all_violations.extend(retired_vector_violations);
     // Roots that belong to a workspace this machine knows about but is not
     // managing this session — the discriminator that lets the outside-roots check
     // separate "another workspace's row" from "orphan". Needs the connection, so
@@ -856,6 +1015,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // And beside both, the inverse of snapshot_drift: `params` behind a body that ran
     // ahead. Same two sets, subtracted the other way; opposite remedy.
     all_violations.extend(scan_params_behind_body(&mut doctor_scope, &cat.conn)?);
+    // Different question of the same two surfaces for the one tracker whose BODY is rendered
+    // from `params` by a scan: not ids, the whole rendered region. See
+    // `scan_rendered_region_drift`.
+    all_violations.extend(scan_rendered_region_drift(&mut doctor_scope, &cat.conn)?);
     // And the content half of that same drift: the id is on both sides, but the two
     // representations disagree about its STATUS. Its three siblings are id-set
     // comparisons and are silent by construction when every id matches — which is how
@@ -8841,6 +9004,281 @@ mod tests {
         );
     }
 
+    /// A store whose only opinion is which collections its naming scheme retired — every
+    /// other method is inert, because `scan_retired_vector_collections` reads nothing else.
+    struct RetiredOnlyStore(Vec<crate::librarian::artifact_store::RetiredCollection>);
+
+    #[async_trait::async_trait]
+    impl crate::librarian::artifact_store::ArtifactVectorStore for RetiredOnlyStore {
+        async fn upsert(&self, _: &str, _: &str, _: &str, _: &[f32]) -> Result<()> {
+            Ok(())
+        }
+        async fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn refile(&self, _: &str, _: &str) -> Result<u64> {
+            Ok(0)
+        }
+        async fn knn(&self, _: Option<&str>, _: &[f32], _: usize) -> Result<Vec<(String, f32)>> {
+            Ok(Vec::new())
+        }
+        async fn retired_collections(
+            &self,
+        ) -> Result<Vec<crate::librarian::artifact_store::RetiredCollection>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// Reports a retired collection with its exact count, as informational, with no artifact
+    /// id — and says plainly NOT to delete it. The controls run first: no store, and a store
+    /// that keeps the trait's default, must both be silent, or a check that fires for every
+    /// backend would pass the positive assertion just the same.
+    #[tokio::test]
+    async fn a_retired_vector_collection_is_reported_with_its_count_and_a_do_not_delete_warning() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::artifact_store::RetiredCollection;
+
+        let no_store = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build();
+        assert!(
+            scan_retired_vector_collections(&no_store).await.is_empty(),
+            "no vector backend, nothing to report"
+        );
+
+        let default_store = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_artifact_store(std::sync::Arc::new(InMemoryArtifactStore::default()))
+            .build();
+        assert!(
+            scan_retired_vector_collections(&default_store)
+                .await
+                .is_empty(),
+            "a store that keeps ArtifactVectorStore::retired_collections' default has nothing \
+             retired — the sqlite-vec backend must be silent without opting out"
+        );
+
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_artifact_store(std::sync::Arc::new(RetiredOnlyStore(vec![
+                RetiredCollection {
+                    name: "artifacts".into(),
+                    points: 5394,
+                },
+            ])))
+            .build();
+        let found = scan_retired_vector_collections(&ctx).await;
+        assert_eq!(found.len(), 1, "{found:?}");
+        let v = &found[0];
+        assert_eq!(v.check, Check::RetiredVectorCollectionPresent.as_str());
+        assert!(
+            v.artifact_id.is_none(),
+            "backend-grain: no artifact id — the property its EXEMPT entry rests on"
+        );
+        assert_eq!(v.path, "qdrant:artifacts");
+        assert!(v.detail.starts_with("informational:"), "{}", v.detail);
+        assert!(v.detail.contains("5394"), "exact count: {}", v.detail);
+        assert!(
+            v.detail.contains("DO NOT delete"),
+            "the row must say the one thing the evidence supports: {}",
+            v.detail
+        );
+        assert!(
+            Check::from_wire(&v.check).is_some_and(Check::is_informational),
+            "must not count as a defect: the only repair is a destructive one on a shared \
+             store, and the exit code must not demand it"
+        );
+    }
+
+    /// An unreachable backend is not a finding about the inventory: it yields no rows and does
+    /// not fail the whole doctor run.
+    #[tokio::test]
+    async fn a_store_that_cannot_list_collections_yields_no_row_not_a_failed_doctor() {
+        struct Down;
+        #[async_trait::async_trait]
+        impl crate::librarian::artifact_store::ArtifactVectorStore for Down {
+            async fn upsert(&self, _: &str, _: &str, _: &str, _: &[f32]) -> Result<()> {
+                Ok(())
+            }
+            async fn delete(&self, _: &str) -> Result<()> {
+                Ok(())
+            }
+            async fn refile(&self, _: &str, _: &str) -> Result<u64> {
+                Ok(0)
+            }
+            async fn knn(
+                &self,
+                _: Option<&str>,
+                _: &[f32],
+                _: usize,
+            ) -> Result<Vec<(String, f32)>> {
+                Ok(Vec::new())
+            }
+            async fn retired_collections(
+                &self,
+            ) -> Result<Vec<crate::librarian::artifact_store::RetiredCollection>> {
+                anyhow::bail!("connection refused")
+            }
+        }
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_artifact_store(std::sync::Arc::new(Down))
+            .build();
+        assert!(scan_retired_vector_collections(&ctx).await.is_empty());
+    }
+
+    /// Seeds the legibility backlog as it exists on disk (frontmatter, then the managed region
+    /// the writer renders, then the verdicts) with `file_params` rendered into the FILE and
+    /// `catalog_params` stored in the catalog, under `dir/docs/trackers/`.
+    fn seed_legibility_backlog(
+        cat: &Catalog,
+        dir: &std::path::Path,
+        file_params: &serde_json::Value,
+        catalog_params: &serde_json::Value,
+    ) -> (String, String) {
+        let tracker_dir = dir.join("docs/trackers");
+        std::fs::create_dir_all(&tracker_dir).unwrap();
+        let path = tracker_dir.join("legibility-backlog.md");
+        let rendered =
+            crate::librarian::tools::legibility_scan::render_managed(file_params).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "---\nkind: tracker\n---\n{}\n\n---\n\n## Verdicts (Dzo-owned)\n\nprose\n",
+                rendered.trim_end()
+            ),
+        )
+        .unwrap();
+        let abs = crate::util::fs::RepoPath::from(path.as_path()).into_string();
+        seed_artifact(cat, "legib", &abs);
+        augmentation::upsert(
+            cat,
+            &augmentation::AugmentationRow {
+                artifact_id: "legib".into(),
+                prompt: "p".into(),
+                params: catalog_params.to_string(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: Some("candidates".into()),
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+        ("legib".into(), abs)
+    }
+
+    /// The 2026-09-21 shape: the file was rendered from a newer scan than the catalog holds.
+    /// Control first — the same file against the params that rendered it is silent — then the
+    /// stale-catalog case must fire naming both sides, and must warn against the obvious repair.
+    #[test]
+    fn rendered_region_drift_fires_when_catalog_params_are_older_than_the_rendered_body() {
+        let tmp = tempfile::tempdir().unwrap();
+        let params = |date: &str, n: u32| {
+            serde_json::json!({
+                "scan_meta": {"last_scan_at": date, "n_candidates": n},
+                "candidates": [],
+            })
+        };
+        let newer = params("2026-08-28", 47);
+        let older = params("2026-06-15", 17);
+
+        let cat = Catalog::open_in_memory().unwrap();
+        let (id, abs) = seed_legibility_backlog(&cat, tmp.path(), &newer, &newer);
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: tmp.path().to_path_buf(),
+            git_root: tmp.path().to_path_buf(),
+            main_root: None,
+            umbrella: None,
+        });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .build();
+        let cat = ctx.catalog.lock();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap();
+
+        let in_step = scan_rendered_region_drift(&mut ds, &cat.conn).unwrap();
+        assert!(
+            in_step.is_empty(),
+            "a body rendered from exactly the catalog's params is not drift: {in_step:?}"
+        );
+
+        augmentation::upsert(
+            &cat,
+            &augmentation::AugmentationRow {
+                params: older.to_string(),
+                ..augmentation::get(&cat, &id).unwrap().unwrap()
+            },
+        )
+        .unwrap();
+        let found = scan_rendered_region_drift(&mut ds, &cat.conn).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].check, "rendered_region_drift");
+        assert_eq!(found[0].artifact_id.as_deref(), Some(id.as_str()));
+        assert_eq!(found[0].path, abs);
+        let d = &found[0].detail;
+        assert!(
+            d.contains("Scanned 2026-08-28 · 47 open")
+                && d.contains("Scanned 2026-06-15 · 17 open"),
+            "the row must state both sides' scans: {d}"
+        );
+        assert!(
+            d.contains("Do NOT run `legibility_scan(write=true)`"),
+            "the obvious repair overwrites both sides and reconciles against the stale one; \
+             the row must say so: {d}"
+        );
+        assert!(
+            !Check::from_wire(&found[0].check).is_some_and(Check::is_informational),
+            "a diverged pair is a defect, not an advisory"
+        );
+    }
+
+    /// The check is scoped to the one artifact whose body a scan renders, and to the active
+    /// project: another repo's checkout of that file, or any other augmented artifact, is not
+    /// this run's finding.
+    #[test]
+    fn rendered_region_drift_ignores_other_artifacts_and_foreign_checkouts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mine = tmp.path().join("mine");
+        let theirs = tmp.path().join("theirs");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::create_dir_all(&theirs).unwrap();
+        let params = |date: &str| {
+            serde_json::json!({
+                "scan_meta": {"last_scan_at": date, "n_candidates": 1},
+                "candidates": [],
+            })
+        };
+        let cat = Catalog::open_in_memory().unwrap();
+        // A foreign checkout whose file and catalog genuinely diverge.
+        seed_legibility_backlog(&cat, &theirs, &params("2026-08-28"), &params("2026-06-15"));
+        let cp = std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+            abs_path: mine.clone(),
+            git_root: mine.clone(),
+            main_root: None,
+            umbrella: None,
+        });
+        let ctx = TestToolContextBuilder::new(cat)
+            .with_current_project(cp)
+            .build();
+        let cat = ctx.catalog.lock();
+        let mut ds =
+            scope::DoctorScope::new(super::super::scope::Scope::Project, &ctx, &cat.conn).unwrap();
+        let found = scan_rendered_region_drift(&mut ds, &cat.conn).unwrap();
+        assert!(
+            found.is_empty(),
+            "a foreign project's diverged backlog must be scoped out, not reported: {found:?}"
+        );
+        assert!(
+            ds.scoped_out()
+                .get("rendered_region_drift")
+                .is_some_and(|by_root| by_root.values().sum::<usize>() >= 1),
+            "and the refusal must be announced under its own wire name, not silent: {:?}",
+            ds.scoped_out()
+        );
+    }
+
     /// A resurrected object is informational, so `summary.defects` and the CLI exit code do
     /// not move.
     ///
@@ -15132,6 +15570,12 @@ mod tests {
             // foreign-repo row for a scope gate to refuse. Same structural reason as
             // DeclaredRootMissing: there is no other project's tree for it to have read.
             Check::UnregisteredWorktreeDir.as_str(),
+            // scan_retired_vector_collections asks the artifact store which collections its
+            // retired naming scheme left behind and emits id: None with a `qdrant:<name>` path
+            // it just read off the daemon — never a catalogued artifact's abs_path, so there
+            // is no foreign-repo row for a scope gate to refuse. The subject is the shared
+            // backend itself, which no project owns.
+            Check::RetiredVectorCollectionPresent.as_str(),
         ]
         .into_iter()
         .collect();
@@ -15228,9 +15672,15 @@ mod tests {
             "UnregisteredWorktreeDir must stay excluded — it emits id: None for a directory it \
              listed itself, so there is no artifact for relevance to be a property OF"
         );
+        assert!(
+            !Check::RetiredVectorCollectionPresent.admits_relevance_exemption(),
+            "RetiredVectorCollectionPresent must stay excluded — it emits id: None for a \
+             collection on the shared backend, so there is no artifact for relevance to be a \
+             property OF"
+        );
         assert_eq!(
             Check::ALL.len() - allow_listed,
-            4,
+            5,
             "Check::ALL grew or shrank without a matching, deliberate update to \
              admits_relevance_exemption's matches! arms — a new check defaults to \
              EXCLUDED (the safe polarity), but that exclusion must be a choice this \

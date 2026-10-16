@@ -47,6 +47,44 @@ fn row_exists(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
+/// Step 0 of [`graft_rows`]: see the call site for why. Reads only; writes nothing.
+///
+/// Refuses exactly the case that fails today — both rows hold a slug, the slugs differ,
+/// and the destination's slug has `entry_cite` children. An established destination slug
+/// with no children is overwritten without error and still is: the refusal is no wider
+/// than its cause.
+fn refuse_if_handover_would_strand_citations(
+    tx: &rusqlite::Transaction<'_>,
+    from_id: &str,
+    into_id: &str,
+) -> Result<()> {
+    let slug_of = |id: &str| -> Result<Option<String>> {
+        Ok(tx.query_row("SELECT slug FROM artifact WHERE id=?1", [id], |r| r.get(0))?)
+    };
+    let (Some(from_slug), Some(into_slug)) = (slug_of(from_id)?, slug_of(into_id)?) else {
+        return Ok(());
+    };
+    if from_slug == into_slug {
+        return Ok(());
+    }
+    let stranded: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM entry_cite WHERE src_slug=?1",
+        [&into_slug],
+        |r| r.get(0),
+    )?;
+    if stranded == 0 {
+        return Ok(());
+    }
+    Err(LibrarianRecoverableError::new(format!(
+        "graft: refused — into_id `{into_id}` already owns slug `{into_slug}` with {stranded} \
+         entry-grain citation(s) keyed by it, and from_id `{from_id}` carries slug \
+         `{from_slug}`, which the graft would write over it. Those citations would be \
+         stranded (entry_cite.src_slug has no ON UPDATE). Nothing was changed. Graft in the \
+         other direction (so the slug that owns citations survives), or move `{into_slug}`'s \
+         citations first."
+    )))
+}
+
 /// Fold `from_id`'s catalog history onto `into_id`, then delete `from_id`.
 ///
 /// Re-points `events`, `artifact_observation`, `artifact_link`, and
@@ -58,21 +96,15 @@ fn row_exists(conn: &rusqlite::Connection, id: &str) -> Result<bool> {
 /// none of it does, so a mid-graft failure can never leave `from_id` partially
 /// re-pointed and orphaned.
 ///
-/// **Precondition, currently satisfied by accident at every call site:** `into_id` must
-/// not hold a slug that has `entry_cite` children. When `from_id` has a slug it is
-/// written over `into_id`'s, and `entry_cite.src_slug` has no `ON UPDATE` clause, so the
-/// displaced slug's rows reference a value no row holds and the transaction fails at
-/// COMMIT with a bare `FOREIGN KEY constraint failed` naming no table. It rolls back
-/// whole — no data loss — but the message is unactionable.
-///
-/// No caller reaches it today: `mv.rs` and `merge_worktree.rs::reseat_one` both seed the
-/// destination with plain `artifact::upsert`, and `upsert_and_mint_slug` documents that
-/// it is deliberately NOT for `mv`/`graft_rows`, so `into_id` arrives slug-less. That is
-/// a property of those two call sites, not of this function — **if you add a caller that
-/// grafts onto an established artifact, this is the case to handle**, by re-pointing the
-/// displaced slug's rows before the handover. Measured 2026-09-17 at sqlite; stated here
-/// rather than guarded in code because a refusal on an unreachable path is an alarm no
-/// observer arrives at.
+/// **Refusal:** if both rows hold a slug, the slugs differ, and `into_id`'s slug has
+/// `entry_cite` children, the graft refuses before writing anything
+/// ([`refuse_if_handover_would_strand_citations`]). The handover would write `from_id`'s
+/// slug over it, and `entry_cite.src_slug` has no `ON UPDATE` clause, so those rows would
+/// dangle and sqlite would fail at COMMIT with a bare `FOREIGN KEY constraint failed`.
+/// Reachable through `doc(action="graft")`, which takes two arbitrary ids; the in-tree
+/// `mv.rs` and `reseat_one` seed the destination slug-less and never hit it. Re-pointing
+/// the displaced slug's rows instead of refusing is a policy choice (which slug should
+/// survive) and is deliberately not made here.
 pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<GraftReport> {
     if from_id == into_id {
         return Err(LibrarianRecoverableError::new(
@@ -93,6 +125,18 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+    // 0. Refuse, before any write, the one handover the schema cannot perform.
+    //    `into_id` already owns a slug that durable `entry_cite` rows hang off, and
+    //    `from_id` has a slug that step 6 would write over it. `entry_cite.src_slug`
+    //    declares no `ON UPDATE`, so the displaced slug's rows would dangle and sqlite
+    //    fails at COMMIT with a bare `FOREIGN KEY constraint failed` naming nothing.
+    //    `doc(action="graft")` takes two arbitrary ids, so this is reachable — not only
+    //    from the in-tree `mv`/`reseat` callers, which seed the destination slug-less.
+    //    Checked inside the IMMEDIATE transaction so no writer can add a citation
+    //    between the check and the handover; returning drops `tx` and rolls back
+    //    (nothing has been written yet).
+    refuse_if_handover_would_strand_citations(&tx, from_id, into_id)?;
 
     // 1-4. Re-point events / observations / links / event_edges onto `into_id`.
     let mut report = GraftReport::default();
@@ -661,6 +705,106 @@ mod tests {
              inbound-citation block; the outgoing edges had no field at all, so their \
              loss moved no number a caller could read"
         );
+    }
+    /// `doc(action="graft")` takes two arbitrary ids, so `into_id` can be an established
+    /// artifact that already owns a slug with durable outgoing citations. The handover
+    /// would overwrite that slug, and `entry_cite.src_slug` has no `ON UPDATE` clause, so
+    /// the old behaviour was a bare `FOREIGN KEY constraint failed` at COMMIT naming no
+    /// table, column or row. The graft must now refuse BEFORE touching anything, naming the
+    /// slug and the count, and leave both rows and every citation exactly as they were.
+    #[test]
+    fn graft_onto_an_established_slug_with_citations_refuses_actionably_and_changes_nothing() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        cat.conn
+            .execute("UPDATE artifact SET slug='from-ledger' WHERE id='from'", [])
+            .unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='into-ledger' WHERE id='into'", [])
+            .unwrap();
+        for (slug, local) in [("into-ledger", "F-1"), ("into-ledger", "F-2")] {
+            entry_cite::insert_with(
+                &cat.conn,
+                &EntryCiteRow {
+                    src_slug: slug.into(),
+                    src_local: local.into(),
+                    dst_ref: "xyz".into(),
+                    rel: "cites".into(),
+                    origin: "write".into(),
+                    created_at: 1,
+                },
+            )
+            .unwrap();
+        }
+        events::insert(
+            &cat,
+            &TestEventRowBuilder::new("from", "note")
+                .with_id("e1")
+                .build(),
+        )
+        .unwrap();
+
+        let err = graft_rows(&mut cat, "from", "into").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            !msg.contains("FOREIGN KEY constraint failed"),
+            "the opaque sqlite error must not be what the caller reads: {msg}"
+        );
+        assert!(
+            msg.contains("into-ledger") && msg.contains("2"),
+            "the refusal must name the displaced slug and how many durable citations it \
+             would strand: {msg}"
+        );
+        assert!(
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
+            "an expected refusal is a recoverable error, not a bug: {msg}"
+        );
+
+        // Nothing moved: refusal precedes the transaction.
+        let rows: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM artifact WHERE id IN ('from','into')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 2, "neither row may be deleted by a refused graft");
+        let ev: i64 = cat
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE artifact_id='from'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ev, 1, "history stays on the source of a refused graft");
+        assert_eq!(entry_cite::outgoing(&cat, "into-ledger").unwrap().len(), 2);
+    }
+
+    /// Control for the test above: the refusal is scoped to the case that actually fails.
+    /// An established destination slug with NO durable children is overwritten without
+    /// error today, and must stay that way — otherwise the refusal is wider than its cause.
+    #[test]
+    fn graft_onto_an_established_slug_without_citations_still_succeeds() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", "/wt/x.md");
+        art(&cat, "into", "/main/x.md");
+        cat.conn
+            .execute("UPDATE artifact SET slug='from-ledger' WHERE id='from'", [])
+            .unwrap();
+        cat.conn
+            .execute("UPDATE artifact SET slug='into-ledger' WHERE id='into'", [])
+            .unwrap();
+        graft_rows(&mut cat, "from", "into").unwrap();
+        let slug: Option<String> = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id='into'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(slug.as_deref(), Some("from-ledger"));
     }
 
     fn reserve(cat: &Catalog, artifact_id: &str, prefix: &str, max_allocated: i64) {

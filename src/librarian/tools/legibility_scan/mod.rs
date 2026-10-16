@@ -356,7 +356,7 @@ pub fn reconcile(
     rows
 }
 
-const TRACKER_REL_PATH: &str = "docs/trackers/legibility-backlog.md";
+pub(crate) const TRACKER_REL_PATH: &str = "docs/trackers/legibility-backlog.md";
 
 async fn ensure_tracker(ctx: &ToolContext) -> Result<(String, String)> {
     let find_args = json!({
@@ -449,10 +449,7 @@ async fn render_managed_body(
     id: &str,
     params: &serde_json::Value,
 ) -> Result<()> {
-    let managed = crate::librarian::tools::render::render_params(
-        include_str!("./render_template.j2"),
-        params,
-    )?;
+    let managed = render_managed(params)?;
 
     let current_body =
         crate::librarian::tools::get::call(ctx, json!({ "action": "get", "id": id, "full": true }))
@@ -474,6 +471,83 @@ async fn render_managed_body(
     )
     .await?;
     Ok(())
+}
+
+/// Render `params` through the compiled-in backlog template. The ONE place the managed
+/// region is produced: [`render_managed_body`] writes it, and [`rendered_region_drift`]
+/// (read by `doctor`'s `rendered_region_drift` check) re-derives it to compare against
+/// what is on disk — so the writer and the detector cannot disagree about what "rendered
+/// from these params" means.
+pub(crate) fn render_managed(params: &serde_json::Value) -> Result<String> {
+    crate::librarian::tools::render::render_params(include_str!("./render_template.j2"), params)
+}
+
+/// First line of the machine-rendered region (`render_template.j2` line 1).
+const MANAGED_HEADING: &str = "## Backlog (auto-managed)";
+
+/// The machine-rendered region of a backlog FILE: from [`MANAGED_HEADING`] up to the
+/// `---` rule that precedes [`VERDICTS_HEADING`], trailing whitespace trimmed. `None`
+/// when the file has no managed heading (hand-restructured — a different defect, which
+/// this detector does not claim to see).
+fn managed_region(file: &str) -> Option<&str> {
+    let rest = &file[file.find(MANAGED_HEADING)?..];
+    let region = &rest[..rest.find(VERDICTS_HEADING).unwrap_or(rest.len())];
+    let region = region.trim_end();
+    Some(region.strip_suffix("---").unwrap_or(region).trim_end())
+}
+
+/// The two figures the preamble states, `Scanned <date> · **<n> open**`, or `None`.
+fn scan_summary(region: &str) -> Option<(String, String)> {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"Scanned (\S+) · \*\*(\d+) open\*\*").expect("static regex")
+    });
+    let c = RE.captures(region)?;
+    Some((c[1].to_string(), c[2].to_string()))
+}
+
+/// How a backlog file's committed managed region differs from what its catalog `params`
+/// would render.
+pub(crate) struct RegionDrift {
+    /// `Scanned <date> · <n> open` as the FILE states it, or a placeholder when absent.
+    pub file_says: String,
+    /// The same, as RENDERING the current `params` states it.
+    pub params_say: String,
+}
+
+/// Compare the managed region of `file` (the backlog as read from disk) against what
+/// `params` render to. `Ok(None)` = they agree, or the file has no managed region to
+/// compare. Whitespace at line ends is ignored; nothing else is.
+///
+/// Two copies of one state — the body travels in git, `params` lives in a gitignored,
+/// machine-local catalog — and nothing else compares them. Both are internally coherent
+/// whichever is older, so this reports the DIVERGENCE and never says which side is newer:
+/// from one host that is not knowable.
+/// docs/issues/2026-09-21-augmentation-params-are-older-than-the-body-they-rendered.md
+pub(crate) fn rendered_region_drift(
+    file: &str,
+    params: &serde_json::Value,
+) -> Result<Option<RegionDrift>> {
+    let Some(on_disk) = managed_region(file) else {
+        return Ok(None);
+    };
+    let rendered = render_managed(params)?;
+    let expected = rendered.trim_end();
+    let norm = |s: &str| {
+        s.lines()
+            .map(|l| l.trim_end().to_string())
+            .collect::<Vec<_>>()
+    };
+    if norm(on_disk) == norm(expected) {
+        return Ok(None);
+    }
+    let show = |s: Option<(String, String)>| match s {
+        Some((date, n)) => format!("Scanned {date} · {n} open"),
+        None => "no `Scanned … open` preamble".to_string(),
+    };
+    Ok(Some(RegionDrift {
+        file_says: show(scan_summary(on_disk)),
+        params_say: show(scan_summary(expected)),
+    }))
 }
 
 fn now_date() -> String {
@@ -1135,5 +1209,70 @@ mod tests {
             body.contains("do not lose this prose"),
             "verdict body preserved: {body}"
         );
+    }
+
+    /// The writer's own output is the fixture, not a hand-typed body: the detector is only
+    /// worth anything if it recognises what `write_backlog` really produces as "in step", and
+    /// a hand-built file would let the two drift apart while this stayed green. Then the
+    /// params are moved on to an older scan — the 2026-09-21 shape — and the check must fire
+    /// and say what each side states.
+    #[tokio::test]
+    async fn rendered_region_drift_is_silent_after_a_real_write_and_fires_when_params_are_older() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let mut src = String::from("fn huge() {\n");
+        for i in 0..200 {
+            src.push_str(&format!("    let v{i} = \"{}\";\n", "x".repeat(80)));
+        }
+        src.push_str("}\n");
+        std::fs::write(tmp.path().join("huge.rs"), &src).unwrap();
+        let out = call(&ctx, json!({ "action": "legibility_scan", "write": true }))
+            .await
+            .unwrap();
+        let id = out["tracker_id"].as_str().unwrap().to_string();
+
+        let file = std::fs::read_to_string(tmp.path().join(TRACKER_REL_PATH)).unwrap();
+        let params: serde_json::Value = {
+            let cat = ctx.catalog.lock();
+            let row = crate::librarian::catalog::augmentation::get(&cat, &id)
+                .unwrap()
+                .expect("backlog augmentation");
+            serde_json::from_str(&row.params).unwrap()
+        };
+        assert!(
+            rendered_region_drift(&file, &params).unwrap().is_none(),
+            "a body the writer just rendered from these params must read as in step: {file}"
+        );
+
+        // Trailing whitespace is not drift (git and editors disagree about it).
+        let padded = file.replace('\n', "  \n");
+        assert!(rendered_region_drift(&padded, &params).unwrap().is_none());
+
+        let mut older = params.clone();
+        older["scan_meta"]["last_scan_at"] = json!("2026-06-15");
+        older["scan_meta"]["n_candidates"] = json!(17);
+        let drift = rendered_region_drift(&file, &older)
+            .unwrap()
+            .expect("params older than the body must be reported");
+        assert_eq!(drift.params_say, "Scanned 2026-06-15 · 17 open");
+        assert!(
+            drift.file_says.starts_with("Scanned ") && drift.file_says != drift.params_say,
+            "the file side must state its own scan, not the params': {}",
+            drift.file_says
+        );
+
+        // A candidate row that differs while the preamble matches is still drift: the
+        // comparison is of the whole region, not of the two figures it reports.
+        let mut other_rows = params.clone();
+        other_rows["candidates"] = json!([]);
+        assert!(
+            rendered_region_drift(&file, &other_rows).unwrap().is_some(),
+            "same preamble, different rows, must still be reported"
+        );
+
+        // No managed heading = nothing to compare, not a finding.
+        assert!(rendered_region_drift("# hand-written\n", &params)
+            .unwrap()
+            .is_none());
     }
 }
