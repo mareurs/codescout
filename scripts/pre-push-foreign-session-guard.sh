@@ -70,9 +70,9 @@
 #     "mine" to compare against, so the guard has no predicate — a human running the
 #     release flow is exactly this case, and must not be blocked by a guard that cannot
 #     even form its question.
-#   - Non-branch refs (tags, notes), for the FOREIGN-SESSION check. Nothing here is about them.
-#     The HOLD check is the exception: it scans every pushed ref that is not a deletion, because a
-#     tag or refs/wip/x push publishes a commit exactly as a branch push does.
+#   - Non-branch refs (tags, refs/wip/*) are NOT exempt: they are scanned with the same range
+#     logic as `hold_scan_ref` (since 2026-10-16; before that the foreign check skipped them).
+#     A tag of a non-commit and a deletion carry nothing to scan.
 
 set -uo pipefail
 
@@ -239,13 +239,14 @@ held_sid_of() {
 
 # hold_scan_ref <local sha> <remote ref> <remote sha>: records every held commit a push of THIS
 # ref would publish, into held_sids / held_report / held_prefix_rows. Called for EVERY pushed ref
-# that is not a deletion, before the branch filter below, because a tag or refs/wip/x push
-# publishes a commit exactly as a branch push does and the foreign check skips them.
+# that is not a deletion, before the foreign scan below, because a tag or refs/wip/x push
+# publishes a commit exactly as a branch push does.
 #
-# This is a scan of its own, not a clause of the foreign scan's per-commit loop: the foreign
-# scan never sees non-branch refs, and its `git log ... 2>/dev/null` fails OPEN (an unlistable
-# range lists zero commits). A hold must fail closed, so this scan has its own range and its
-# own failure branch, and the foreign check is left exactly as it was.
+# This is a scan of its own, not a clause of the foreign scan's per-commit loop: a hold must
+# fail CLOSED, and the foreign scan's `git log ... 2>/dev/null` fails OPEN (an unlistable range
+# lists zero commits; by decision it stays that way when no hold exists). The foreign scan now
+# uses the same range selection as this one, so an unfetched remote tip is no longer unlistable
+# for it either.
 #
 # RANGE: the remote tip is trusted only if it is a commit in the local object store. Otherwise
 # (a new ref, or a force push over a tip never fetched here, or a remote tag that points at a
@@ -306,8 +307,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     [ "$local_sha" = "$ZERO" ] && continue          # branch deletion
 # BEGIN PUBLISH HOLD
-    # EVERY non-deletion ref, tags and refs/wip/* included: this runs BEFORE the branch filter
-    # below, which skips them for the foreign check.
+    # EVERY non-deletion ref, tags and refs/wip/* included: this runs BEFORE the foreign scan
+    # below and fails closed where that one fails open.
     hold_scan_ref "$local_sha" "$remote_ref" "$remote_sha"
 # END PUBLISH HOLD
     # WHICH FIELD NAMES THE BRANCH DEPENDS ON THE PUSH FORM, and field 1 does not
@@ -319,19 +320,41 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # is the one this guard's OWN remedy text recommends ("use a refspec at EVERY
     # rung"), so following the refusal disarmed the guard that emitted it.
     # Field 3 is the ref being UPDATED and carries the branch in both forms, so it
-    # decides whenever field 1 has no name to give. Tag pushes still fall out
-    # (neither field is refs/heads/*) and deletions are already handled above.
+    # decides whenever field 1 has no name to give.
+    #
+    # NON-BRANCH REFS (tags, refs/wip/*) ARE SCANNED TOO. They were skipped here until
+    # 2026-10-16, and a tag or refs/wip/x push publishes its commits exactly as a branch
+    # push does -- including the second step of docs/RELEASE.md's `git push` + `git push --tags`.
+    # Operator decision (option D) in
+    # docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-and-fails-open-on-an-unlistable-range.md.
+    # Only the branch-shaped ENTRY-ID COLLISION SCAN below stays branch-only: it is about merge
+    # commits resolving a rejected branch push and is not part of that decision.
+    # Deletions are already handled above.
+    is_branch=0
     case "$local_ref" in
-        refs/heads/*) ;;
-        *) case "$remote_ref" in refs/heads/*) ;; *) continue ;; esac ;;
+        refs/heads/*) is_branch=1 ;;
+        *) case "$remote_ref" in refs/heads/*) is_branch=1 ;; esac ;;
     esac
 
-    if [ "$remote_sha" = "$ZERO" ]; then
-        # New remote branch: everything not already on some remote. Without --not this
-        # would enumerate the entire history and refuse on the first ancestor it met.
-        range=("$local_sha" --not --remotes)
+    # THE PUSHED SHA IS PEELED to a commit (an annotated tag points at a tag object). One that
+    # does not peel (a tag of a tree or blob) carries no commit: skipped silently.
+    tip="$(git rev-parse -q --verify "${local_sha}^{commit}" 2>/dev/null </dev/null)" || continue
+
+    # RANGE: the remote tip is trusted only if it is a commit in the local object store. For a new
+    # ref (zero sha), or a force push over a tip never fetched here, or a remote tag that points
+    # at a non-commit, the range is everything not on any remote-tracking ref: it can over-refuse
+    # and cannot under-refuse. Before 2026-10-16 an unfetched tip made `git log` fail, stderr was
+    # discarded and zero commits were listed: the push passed in silence with foreign commits in it.
+    # (The same selection as `hold_scan_ref`'s.) An unlistable range with NO hold present still
+    # fails open, by decision: the hold check owns the fail-closed case.
+    range_trusted=0
+    if [ "$remote_sha" != "$ZERO" ] && git cat-file -e "${remote_sha}^{commit}" 2>/dev/null </dev/null; then
+        range_trusted=1
+        range=("$remote_sha..$tip")
     else
-        range=("$remote_sha..$local_sha")
+        # Without --not this would enumerate the entire history and refuse on the first
+        # ancestor it met.
+        range=("$tip" --not --remotes)
     fi
 
     # --- ENTRY-ID COLLISION SCAN --------------------------------------------------
@@ -376,7 +399,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # Best-effort throughout, matching this script's own contract: any git failure
     # degrades to "found nothing", never to blocking a push this scan cannot judge.
     entry_id_collisions=""
-    if [ "$remote_sha" != "$ZERO" ]; then
+    if [ "$is_branch" -eq 1 ] && [ "$range_trusted" -eq 1 ]; then
         while read -r mc; do
             [ -n "$mc" ] || continue
             # shellcheck disable=SC2207

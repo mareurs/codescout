@@ -380,8 +380,6 @@ eq  "no session id (a human): allowed, silent" "$EC" 0
 eq  "  and truly silent"             "$(printf '%s' "$OUT" | wc -c)" 0
 run "$ALICE" - "refs/heads/main $ZERO refs/heads/main $BASE"
 eq  "branch deletion: allowed"       "$EC" 0
-run "$ALICE" - "refs/tags/v1 $TIP refs/tags/v1 $ZERO"
-eq  "tag push: allowed"              "$EC" 0
 run "$ALICE" - ""
 eq  "empty stdin: allowed"           "$EC" 0
 
@@ -975,8 +973,15 @@ has "sha refspec form: names the foreign sid" "$OUT" "$BOB"
 # leaves row 3 green; widening the fallback to accept ANY field-3 value reds row 3 and
 # leaves row 2 green. Each direction has its own witness, which is the property a
 # single-sided pair cannot have.
+#
+# CHANGED 2026-10-16 (docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-...):
+# a tag push is no longer skipped -- it publishes its commits exactly as a branch push does. The
+# discrimination this row existed for now lives in "the foreign check covers non-branch refs"
+# below, which pairs a refused foreign tag with an allowed own-commits tag and an allowed
+# deletion. What row 3 still pins is that a tag carrying a foreign commit is not waved through.
 run "$ALICE" - "refs/tags/v1 $FIELD_TIP refs/tags/v1 $FIELD_BASE"
-eq  "tag push: still skipped"                 "$EC" 0
+eq  "tag push carrying a foreign commit: refused (no longer skipped)" "$EC" 1
+has "tag push: names the foreign sid"         "$OUT" "$BOB"
 
 # Row 4 IS INERT -- ANNOTATED AS SUCH SO NOBODY CREDITS IT WITH COVERAGE IT DOES NOT HAVE.
 # It discriminates none of the three mutations tried: the one-field revert, the widened
@@ -1720,8 +1725,12 @@ has   "unknown tip: PUBLISH HOLD" "$OUT" "PUBLISH HOLD"
 has   "unknown tip: the held commit is listed" "$(report_rows "$OUT")" "bob held, remote tip unknown"
 git -C "$REPO" update-ref -d "refs/holds/$BOB"
 run "$ALICE" - "refs/heads/main $TIP refs/heads/main $UNKNOWN"
-eq    "the same push with no hold passes as before (positive control)" "$EC" 0
-eq    "(and says nothing)" "$(printf '%s' "$OUT" | wc -c)" 0
+# CHANGED 2026-10-16: this used to pass in silence (the foreign scan's range was unlistable and
+# failed open). The foreign scan now falls back to `<tip> --not --remotes`, so bob's commit is
+# seen and refused as an ordinary foreign commit -- NOT as a hold (the hold is gone).
+eq    "the same push with no hold: refused as an ordinary foreign commit" "$EC" 1
+has   "(it names the foreign sid)" "$OUT" "$BOB"
+hasnt "(and it is not a hold)" "$OUT" "PUBLISH HOLD"
 # a failing `git log` -- with a hold anywhere, refuse; with none, behave as before
 REAL_GIT="$(command -v git)"
 SHIM_DIR="$(mktemp -d "$SUITE_TMP/shim-XXXXXX")"
@@ -1740,6 +1749,92 @@ hasnt "unlistable, no hold: no hold is claimed" "$NOHOLD_OUT" "PUBLISH HOLD"
 eq    "a range that cannot be listed, a hold present: refused" "$HOLD_EC" 1
 has   "unlistable with a hold: PUBLISH HOLD" "$HOLD_OUT" "PUBLISH HOLD"
 has   "unlistable with a hold: says the range could not be listed" "$HOLD_OUT" "could not be listed while holds exist"
+rm -r "$SHIM_DIR"
+
+# --- the FOREIGN check covers every non-deletion ref and an unfetched remote tip
+# docs/issues/2026-10-06-the-foreign-session-check-skips-non-branch-refs-and-fails-open-on-an-unlistable-range.md
+# Policy (operator decision 2026-10-16, option D): scan tags and refs/wip/* with the hold check's range
+# (`<tip> --not --remotes` whenever the remote tip is not a local commit); an unlistable range with
+# no hold present STAYS fail-open. Every refusal below has a silent twin on the same history.
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$BOB"   "bob foreign, tagged"
+commit "$ALICE" "alice on top"; TIP=$(sha)
+UNKNOWN="$(printf 'a sha the foreign scan has never seen' | git -C "$REPO" hash-object --stdin)"
+eq    "fixture: the remote tip is not in the local object store" \
+      "$(git -C "$REPO" cat-file -e "$UNKNOWN" 2>/dev/null && echo present || echo absent)" absent
+git -C "$REPO" tag -a -m annotated v2 "$TIP"; TAGOBJ=$(git -C "$REPO" rev-parse v2)
+# controls first: the branch forms were always refused
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $BASE"
+eq    "control (a): branch push over a known tip is refused" "$EC" 1
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $ZERO"
+eq    "control (d2): a new branch is refused" "$EC" 1
+# the defects
+run "$ALICE" - "refs/tags/x $TIP refs/tags/x $ZERO"
+eq    "(b) a lightweight tag carrying a foreign commit is refused" "$EC" 1
+has   "(b) it names the foreign sid" "$OUT" "$BOB"
+has   "(b) it lists the foreign commit" "$OUT" "bob foreign, tagged"
+hasnt "(b) it is not a hold" "$OUT" "PUBLISH HOLD"
+run "$ALICE" - "refs/tags/v2 $TAGOBJ refs/tags/v2 $ZERO"
+eq    "(b) an annotated tag is peeled and refused too" "$EC" 1
+has   "(b) annotated: names the foreign sid" "$OUT" "$BOB"
+run "$ALICE" - "HEAD $TIP refs/wip/x $ZERO"
+eq    "(c) a refs/wip/* push carrying a foreign commit is refused" "$EC" 1
+has   "(c) it names the foreign sid" "$OUT" "$BOB"
+run "$ALICE" - "refs/heads/main $TIP refs/heads/main $UNKNOWN"
+eq    "(d) a branch push over an unfetched remote tip is refused" "$EC" 1
+has   "(d) it names the foreign sid" "$OUT" "$BOB"
+run "$ALICE" - "refs/tags/x $TIP refs/tags/x $UNKNOWN"
+eq    "(d) a tag push over an unfetched remote tag tip is refused" "$EC" 1
+# the silent twins -- the same shapes with nothing foreign to publish
+new_repo
+commit "$ALICE" "alice base"; BASE=$(sha)
+commit "$ALICE" "alice two"; TIP=$(sha)
+UNKNOWN="$(printf 'a sha the foreign scan has never seen' | git -C "$REPO" hash-object --stdin)"
+git -C "$REPO" tag -a -m annotated v2 "$TIP"; TAGOBJ=$(git -C "$REPO" rev-parse v2)
+for form in "refs/tags/x $TIP refs/tags/x $ZERO" "refs/tags/v2 $TAGOBJ refs/tags/v2 $ZERO" \
+            "HEAD $TIP refs/wip/x $ZERO" "refs/heads/main $TIP refs/heads/main $UNKNOWN" \
+            "refs/tags/x $TIP refs/tags/x $UNKNOWN"; do
+    run "$ALICE" - "$form"
+    eq  "own commits only, silent twin: $(printf '%s' "$form" | cut -d' ' -f3), remote tip $(printf '%s' "$form" | cut -d' ' -f4 | cut -c1-8)" "$EC" 0
+    eq  "  and says nothing" "$(printf '%s' "$OUT" | wc -c)" 0
+done
+# a foreign commit that is ALREADY published is not re-litigated on a tag (range is `--not --remotes`)
+new_repo
+commit "$BOB"   "bob already published"
+git -C "$REPO" update-ref refs/remotes/origin/main HEAD
+commit "$ALICE" "alice new"; TIP=$(sha)
+git -C "$REPO" tag rel "$TIP"
+run "$ALICE" - "refs/tags/rel $TIP refs/tags/rel $ZERO"
+eq    "a tag over an already-published foreign commit: allowed" "$EC" 0
+eq    "  and says nothing" "$(printf '%s' "$OUT" | wc -c)" 0
+# a tag whose target is not a commit, a deletion, and no pusher sid: all still skipped
+new_repo
+commit "$ALICE" "alice base"
+commit "$BOB"   "bob foreign"; TIP=$(sha)
+TREE=$(git -C "$REPO" rev-parse "$TIP^{tree}")
+git -C "$REPO" tag tt "$TREE"
+run "$ALICE" - "refs/tags/tt $TREE refs/tags/tt $ZERO"
+eq    "a tag of a tree carries no commit: skipped" "$EC" 0
+run "$ALICE" - "(delete) $ZERO refs/tags/v1 $TIP"
+eq    "deleting a tag is not a publish: skipped" "$EC" 0
+run "-" - "refs/tags/x $TIP refs/tags/x $ZERO"
+eq    "no pusher session id (a human running the release flow): tag push allowed" "$EC" 0
+eq    "  and says nothing" "$(printf '%s' "$OUT" | wc -c)" 0
+# the ack covers a tag exactly as it covers a branch
+run "$ALICE" "$BOB" "refs/tags/x $TIP refs/tags/x $ZERO"
+eq    "an ack naming the foreign author lets the tag through" "$EC" 0
+run "$ALICE" "$CAROL" "refs/tags/x $TIP refs/tags/x $ZERO"
+eq    "an ack naming someone else does not" "$EC" 1
+# an unlistable range with NO hold stays fail-open (option D); the hold check owns the fail-closed case
+REAL_GIT="$(command -v git)"
+SHIM_DIR="$(mktemp -d "$SUITE_TMP/shim-XXXXXX")"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = log ]; then exit 128; fi\nexec "%s" "$@"\n' "$REAL_GIT" > "$SHIM_DIR/git"
+chmod +x "$SHIM_DIR/git"
+RUN_PATH_PREFIX="$SHIM_DIR"
+run "$ALICE" - "refs/tags/x $TIP refs/tags/x $ZERO"
+RUN_PATH_PREFIX=""
+eq    "an unlistable range, no hold anywhere: stays fail-open (policy D)" "$EC" 0
 rm -r "$SHIM_DIR"
 
 # --- the prefix advice names the remote the hook was given, not a hard-coded origin
