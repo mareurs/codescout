@@ -1,16 +1,16 @@
 ---
 id: '2d08ac68f42a7c3c'
 kind: bug
-status: open
+status: fixed
 title: legibility_scan's auto-close cannot distinguish a repaired defect from a removed detector
 tags:
 - cluster/gate-keyed-on-unobservable-event
-closed: null
+closed: 2026-10-16
 opened: 2026-09-21
 owner: marius
 related: []
 severity: medium
-unverified: 'PARTIAL FIX (820a5d8c): a removed detector now retires a row instead of reporting a repair. NOT fixed: cause 3 (a threshold widening closes a marginal row as refactored). The live-tracker retag and the render_template re-attach were DONE 2026-10-06 (ddc595ca); see ## Partial fix.'
+unverified: 'RESOLVED 2026-10-16. Was: PARTIAL FIX (820a5d8c), cause 3 (a threshold widening closes a marginal row as refactored) not fixed. Cause 3 is fixed at 4be94370. Residual, standing: the live artifact cd886c414f6751b4 still carries the previous render_template wording for the Retired heading until it is re-attached (cosmetic), and rows closed as refactored by a past threshold change cannot be told apart after the fact.'
 ---
 
 # BUG: legibility_scan's auto-close reports a repair for a removed detector — the close predicate is monotone under detector removal
@@ -328,11 +328,24 @@ The tags come from the 2026-06-13 verdict in the tracker's own Verdicts section.
 
 ## Resume
 
-Code fix for causes 1 and 2 is in on `experiments` (local, not pushed at the time of writing). Status stays `open` because the defect is still observable in the live data and cause 3 is unaddressed. Remaining work, and who decides:
+All three causes are now handled in `reconcile` (cause 3 at commit `4be94370` on the worktree branch, not pushed). Nothing is owed in code.
 
-1. Marius (or the integrator on his behalf): retag the live tracker rows per the list above, then re-attach the new `render_template` via `doc(action="augment", merge=true, ...)`. Do the per-row judgement for the closed rows that are neither the seven nor the twelve.
-2. Decide whether cause 3 warrants storing a threshold or detector version on the row, or is accepted as a known limit.
-3. Grep for consumers of `BacklogParams` status values outside `src/librarian/tools/legibility_scan/` for anything that assumes only `open` / `closed`.
+## Resolution (2026-10-16)
+
+- **SHA:** `4be94370` (`worktree-agent-a5fed38c0d80e9499`; the integrator's merge onto `experiments` gets a new SHA)
+- **patch-id:** `694f8e8969715baff34289830196cd040498afae`
+
+Cause 3. The row already stores the budget it was flagged against (`CandidateRow.measure.budget`, refreshed on every scan the row appears in), so no schema change was needed. `over_budget_bodies` flags a body only when `bytes > INLINE_MAX_RESPONSE_LEN`, i.e. `bytes / 4 > MAX_INLINE_TOKENS` (`src/tools/core/types.rs:81`). So in `reconcile` (`src/librarian/tools/legibility_scan/mod.rs`), a live-defect row whose target re-measures with `tokens > row.measure.budget` was not repaired: the budget moved. It settles as `status: retired`, `closed_reason: threshold_changed`, no `after` delta. A re-measure at or under the recorded budget still closes as `closed` / `refactored`. `still_over_recorded_budget` carries the comparison and states its one limit: for an `un_mappable_file` row the byte measure `bytes / 4` cannot express the `bytes > budget * 4` edge, so it errs toward reporting a repair there, never toward calling a repair a budget change.
+
+Decision (main, 2026-10-16): terminal state A, `retired`. The flip to B (`status: closed` plus a new reason, filed under its own render heading) is one line in `reconcile`: change `row.status = "retired".to_string();` in the `still_over_recorded_budget` branch to `"closed"`, and add a matching section to `render_template.j2` and `docs/augmentations/docs-trackers-legibility-backlog.yaml`.
+
+Tests added (same file): `reconcile_does_not_report_a_widened_threshold_as_a_repair` (the boundary pair, `tokens - 1` retires and `tokens` still closes as refactored; red before the fix, failed with `left: "closed" right: "retired"`) and `the_recorded_budget_comparison_matches_the_detectors_edge` (the first body `over_budget_bodies` flags measures `MAX_INLINE_TOKENS + 1`, the last unflagged one `MAX_INLINE_TOKENS`). `scripts/with-slot.sh cargo test --lib legibility_scan` 18 passed, clippy `--workspace --all-targets --features local-embed -D warnings` clean, `cargo test --test doc_tool_refs` 30 passed, the committed-sidecar test passed. The full gate was not run.
+
+Also changed: `render_template.j2` and the sidecar yaml say "Retired (detector removed or threshold changed ...)"; the `CandidateRow.status` / `closed_reason` doc comments list the fourth reason.
+
+Consumers of the `BacklogParams` status values, grepped 2026-10-16 across `src/`, `tests/` and `scripts/`: none outside `src/librarian/tools/legibility_scan/` and the sidecar yaml. Nothing assumes only `open` and `closed`.
+
+Remaining, housekeeping only: re-attach the new template to artifact `cd886c414f6751b4` with `doc(action="augment", merge=true, ...)` so the live render shows the new heading. Rows closed as refactored by a past threshold change cannot be told apart after the fact.
 
 ## References
 
