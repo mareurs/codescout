@@ -22,8 +22,9 @@ tokio::task_local! {
     /// Scoped around exactly one tool call's future by `UsageRecorder::record_content`
     /// and drained there. Inside a scope `None` means no observation was made (the tool
     /// is not `run_command`, the call declared `write`, the snapshot failed, ...), which
-    /// becomes the column's NULL. `Some(false)` is an observation of NO change, and is
-    /// the one value a wrong `read` declaration can never produce.
+    /// becomes the column's NULL. `Some(false)` is an observation of NO CHANGE IN WHAT THE
+    /// SNAPSHOT SEES, which a wrong `read` declaration can still produce (gitignored paths,
+    /// writes outside the repo, a reverted change); see `run_command::observe`.
     pub(crate) static OBSERVED_SINK: RefCell<Option<bool>>;
 }
 

@@ -8,30 +8,42 @@
 //!
 //! # What a value does and does not mean
 //!
-//! - `true` — the git-visible tree differed between the two snapshots. It does NOT say
-//!   the command did it: on a checkout shared with other sessions a peer's edit that lands
-//!   during the call reads identically. It is a falsifier of "this was quiet", not an
-//!   attribution. It also counts codescout's own writes into a `.codescout/` that the
+//! The snapshot sees two things: where HEAD points, and every path `git status` lists
+//! (status letters, size, mtime). A value is a statement about THAT and nothing wider.
+//!
+//! - `true` — HEAD moved, or a listed path differed, between the two snapshots. It does NOT
+//!   say the command did it: on a checkout shared with other sessions a peer's edit or commit
+//!   that lands during the call reads identically. It is a falsifier of "this was quiet", not
+//!   an attribution. It also counts codescout's own writes into a `.codescout/` that the
 //!   project does not gitignore.
-//! - `false` — the git-visible tree was the same. It does NOT say the command wrote
-//!   nothing: gitignored paths (`target/`, `.codescout/`) are invisible to `git status`,
-//!   and a command that undid its own change, or a peer that did, leaves no difference.
+//! - `false` — HEAD and every listed path were the same at both instants. It does NOT say the
+//!   command wrote nothing, and a wrong `read` declaration CAN produce it. Blind spots, each
+//!   pinned or named: gitignored paths (`target/`, `.codescout/`); anything outside the
+//!   repository (a write to `$HOME` or `/tmp`); a change that was undone before the second
+//!   snapshot; a write the command made and a peer session reverted (or the reverse); a
+//!   branch switch to the same commit; and a rewrite of an already-dirty file that leaves
+//!   size and mtime unchanged.
 //! - no value — nothing was observed: the call declared `write`, ran in the background
 //!   (the call returns before the command finishes, so "unchanged" would be a false
 //!   reassurance), named a buffer handle (a query of captured output, not a tree
-//!   operation), refused or failed, or either snapshot could not be taken (not a git
-//!   checkout, `git` missing, the 2 s budget exceeded).
+//!   operation), was refused or failed, was HELD for acknowledgement (it ran nothing; its
+//!   `@ack_*` replay is observed instead, under the replay's own declaration), or either
+//!   snapshot could not be taken (not a git checkout, no commit yet, `git` missing, the 2 s
+//!   budget exceeded).
 //!
 //! # What the snapshot compares
 //!
-//! The porcelain status list alone is not enough: a file already modified and modified
-//! AGAIN keeps the same ` M` entry. Each listed path is therefore fingerprinted with its
-//! status letters, size and mtime, so a second edit of a dirty file is seen.
+//! The porcelain status list alone is not enough, in two ways. A file already modified and
+//! modified AGAIN keeps the same ` M` entry, so each listed path is fingerprinted with its
+//! status letters, size and mtime. And `git status` cannot see HEAD move: on a clean tree
+//! `git checkout other` rewrites tracked files and leaves the list empty on both sides, so
+//! `git rev-parse HEAD` is part of the fingerprint.
 //!
 //! # Cost, and its bound
 //!
-//! One `git rev-parse` before, one `git status` before and one after, only for calls
-//! declared `read`. `GIT_OPTIONAL_LOCKS=0` stops `git status` from refreshing the index —
+//! One `git rev-parse --show-toplevel` before, and a `git rev-parse HEAD` plus a `git status`
+//! before and after, only for calls declared `read`. `GIT_OPTIONAL_LOCKS=0` stops `git status`
+//! from refreshing the index —
 //! otherwise an observation would contend with a peer's `git commit` for `index.lock`.
 //! A snapshot that does not finish in [`SNAPSHOT_TIMEOUT`] is killed and records nothing;
 //! it can never fail the command, only forgo its observation.
@@ -55,9 +67,13 @@ struct Entry {
     stat: Option<(u64, u128)>,
 }
 
-/// The git-visible state of a tree at one instant.
+/// The git-visible state of a tree at one instant: where HEAD points, and every path
+/// `git status` lists. Gitignored paths and anything outside the repository are not in it.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct TreeFingerprint(Vec<Entry>);
+pub(super) struct TreeFingerprint {
+    head: String,
+    entries: Vec<Entry>,
+}
 
 /// A taken "before" snapshot, waiting for its "after".
 pub(super) struct Observation {
@@ -68,12 +84,13 @@ pub(super) struct Observation {
 /// A handle to one of the session's output buffers, anywhere in the command. Such a
 /// command queries captured output (`grep PATTERN @cmd_ab12cd34`) and is by far the most
 /// common `run_command` shape; a snapshot there would cost latency to learn nothing.
+///
+/// `@ack_*` is deliberately NOT here: an acknowledgement replay RUNS the held command, so
+/// it is observed like any other call (see [`begin`]).
 fn names_a_buffer_handle(command: &str) -> bool {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| {
-        regex::Regex::new(r"@(?:cmd|file|tool|bg|ack)_[0-9a-f]{8}").expect("valid regex")
-    })
-    .is_match(command)
+    RE.get_or_init(|| regex::Regex::new(r"@(?:cmd|file|tool|bg)_[0-9a-f]{8}").expect("valid regex"))
+        .is_match(command)
 }
 
 /// Whether this call is one whose tree effect is worth observing: it declared `read`, runs
@@ -116,13 +133,18 @@ async fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
     output_within(cmd, SNAPSHOT_TIMEOUT).await
 }
 
-/// Fingerprint the tree rooted at `top` (a git toplevel), or `None` when `git status`
-/// fails or exceeds [`SNAPSHOT_TIMEOUT`].
+/// Fingerprint the tree rooted at `top` (a git toplevel), or `None` when `git status` or
+/// `git rev-parse HEAD` fails or exceeds [`SNAPSHOT_TIMEOUT`]. A repository with no commit
+/// yet has no HEAD to read, so it is not observed.
 ///
 /// `--no-renames` turns every rename into a plain delete + add, so each `-z` record is
 /// exactly `XY<space>path` and parsing needs no look-ahead.
+///
+/// HEAD is part of the fingerprint because `git status` is blind to it: on a clean tree,
+/// `git checkout other` rewrites tracked files and the porcelain list is empty on both sides.
 pub(super) async fn fingerprint(top: &Path) -> Option<TreeFingerprint> {
     use std::time::UNIX_EPOCH;
+    let head = String::from_utf8(git(top, &["rev-parse", "HEAD"]).await?).ok()?;
     let out = git(
         top,
         &[
@@ -152,7 +174,10 @@ pub(super) async fn fingerprint(top: &Path) -> Option<TreeFingerprint> {
         });
         entries.push(Entry { status, path, stat });
     }
-    Some(TreeFingerprint(entries))
+    Some(TreeFingerprint {
+        head: head.trim().to_string(),
+        entries,
+    })
 }
 
 /// The git toplevel containing `root`, or `None` when it is not inside a checkout. Needed
@@ -168,9 +193,23 @@ async fn toplevel(root: &Path) -> Option<PathBuf> {
 ///
 /// Every failure is `None`, never an error: the observation is a side channel and must not
 /// be able to fail, or noticeably delay, the command it describes.
+///
+/// An `@ack_*` replay runs a command held by the dangerous-command gate, and is observed
+/// under the REPLAY's own declaration (the held command's original `effect` is not stored,
+/// so it cannot be recovered; the replay's is what that row's `effect_class` records). Two
+/// replays are not observed: an unknown or expired handle (it runs nothing), and a held
+/// command stored with `run_in_background`, which replays in the background whatever the
+/// replay's own input says — so "unchanged" would be a false reassurance there too.
 pub(super) async fn begin(input: &Value, ctx: &ToolContext) -> Option<Observation> {
     if !should_observe(input) {
         return None;
+    }
+    let command = input["command"].as_str()?;
+    if crate::tools::output_buffer::looks_like_ack_handle(command) {
+        let held = ctx.output_buffer.get_dangerous(command)?;
+        if held.run_in_background {
+            return None;
+        }
     }
     let root = ctx
         .agent
@@ -343,9 +382,10 @@ mod tests {
             !should_observe(&json!({"command": "grep ERROR @cmd_0123abcd", "effect": "read"})),
             "a buffer query is not a tree operation"
         );
-        assert!(!should_observe(
-            &json!({"command": "@ack_0123abcd", "effect": "read"})
-        ));
+        assert!(
+            should_observe(&json!({"command": "@ack_0123abcd", "effect": "read"})),
+            "an ack replay runs the held command, so it is a candidate; `begin` decides"
+        );
     }
 
     async fn ctx_for(root: &Path) -> ToolContext {
@@ -555,5 +595,140 @@ mod tests {
             })
             .await;
         assert_eq!(seen, None);
+    }
+
+    /// Add `victim/gone.txt` to the repo's history, so `rm -rf victim` is a tracked change.
+    fn commit_victim(p: &Path) {
+        std::fs::create_dir_all(p.join("victim")).unwrap();
+        std::fs::write(p.join("victim/gone.txt"), "x").unwrap();
+        git_sync(p, &["add", "."]);
+        git_sync(p, &["commit", "-q", "-m", "victim"]);
+    }
+
+    /// One `RunCommand::call` against `ctx`, returning its result and what the sink ended
+    /// with. The context is shared across calls so an `@ack_*` handle survives to its replay.
+    async fn call_in(ctx: &ToolContext, input: Value) -> (anyhow::Result<Value>, Option<bool>) {
+        use crate::tools::Tool;
+        crate::usage::observed::OBSERVED_SINK
+            .scope(RefCell::new(None), async {
+                let r = super::super::RunCommand.call(input, ctx).await;
+                (
+                    r,
+                    crate::usage::observed::OBSERVED_SINK.with(|s| *s.borrow()),
+                )
+            })
+            .await
+    }
+
+    /// A dangerous command declared `read` is HELD for acknowledgement and runs nothing, so it
+    /// must not be recorded as "observed, unchanged" (`0`) — it was not observed at all. The
+    /// tree check pairs it: the victim is still there, which is why `Some(false)` would have
+    /// been a claim about a command that never ran.
+    #[tokio::test]
+    async fn a_command_held_for_acknowledgement_records_no_observation() {
+        let dir = repo();
+        commit_victim(dir.path());
+        let ctx = ctx_for(dir.path()).await;
+        let (result, seen) =
+            call_in(&ctx, json!({"command": "rm -rf victim", "effect": "read"})).await;
+        let out = result.unwrap();
+        assert!(
+            out.get("pending_ack").is_some(),
+            "premise: the dangerous-command gate must hold this, got {out}"
+        );
+        assert!(dir.path().join("victim/gone.txt").exists());
+        assert_eq!(seen, None);
+    }
+
+    /// The replay is the call that actually runs the held command, so it is the one whose
+    /// tree effect is observed — under the REPLAY's own declaration, which is also what that
+    /// row's `effect_class` records (the held command's original declaration is not stored,
+    /// so it is not recoverable at replay). Declared `read`: observed, and the removal shows.
+    #[tokio::test]
+    async fn an_ack_replay_declared_read_observes_the_command_it_runs() {
+        let dir = repo();
+        commit_victim(dir.path());
+        let ctx = ctx_for(dir.path()).await;
+        let (held, _) = call_in(&ctx, json!({"command": "rm -rf victim", "effect": "read"})).await;
+        let handle = held.unwrap()["pending_ack"].as_str().unwrap().to_string();
+
+        let (result, seen) = call_in(&ctx, json!({"command": handle, "effect": "read"})).await;
+        result.unwrap();
+        assert!(
+            !dir.path().join("victim").exists(),
+            "premise: the replay ran the command"
+        );
+        assert_eq!(seen, Some(true));
+    }
+
+    /// A replay that declares nothing means `write`, so it is not observed — the same rule
+    /// as any other call.
+    #[tokio::test]
+    async fn an_ack_replay_declaring_write_is_not_observed() {
+        let dir = repo();
+        commit_victim(dir.path());
+        let ctx = ctx_for(dir.path()).await;
+        let (held, _) = call_in(&ctx, json!({"command": "rm -rf victim"})).await;
+        let handle = held.unwrap()["pending_ack"].as_str().unwrap().to_string();
+        let (result, seen) = call_in(&ctx, json!({"command": handle})).await;
+        result.unwrap();
+        assert!(!dir.path().join("victim").exists());
+        assert_eq!(seen, None);
+    }
+
+    /// A held command stored with `run_in_background` replays in the background even though
+    /// the replay's own input says nothing, so "unchanged" would be a false reassurance there
+    /// too: not observed.
+    #[tokio::test]
+    async fn an_ack_replay_of_a_background_command_is_not_observed() {
+        let dir = repo();
+        commit_victim(dir.path());
+        let ctx = ctx_for(dir.path()).await;
+        let (held, _) = call_in(
+            &ctx,
+            json!({"command": "rm -rf victim", "run_in_background": true}),
+        )
+        .await;
+        let handle = held.unwrap()["pending_ack"].as_str().unwrap().to_string();
+        let (result, seen) = call_in(&ctx, json!({"command": handle, "effect": "read"})).await;
+        result.unwrap();
+        assert_eq!(seen, None);
+    }
+
+    /// `git status` cannot see HEAD move: on a clean tree, `git checkout other` rewrites
+    /// tracked files and leaves the porcelain list empty before and after. The fingerprint
+    /// carries HEAD for exactly this, so a declared-`read` checkout reads as changed.
+    #[tokio::test]
+    async fn a_read_declared_checkout_that_moves_head_is_observed_as_changed() {
+        let dir = repo();
+        let p = dir.path();
+        git_sync(p, &["checkout", "-q", "-b", "other"]);
+        std::fs::write(p.join("tracked.txt"), "other\n").unwrap();
+        git_sync(p, &["commit", "-q", "-am", "other"]);
+        git_sync(p, &["checkout", "-q", "-"]);
+        let ctx = ctx_for(p).await;
+        let (result, seen) = call_in(
+            &ctx,
+            json!({"command": "git checkout -q other", "effect": "read"}),
+        )
+        .await;
+        result.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(p.join("tracked.txt")).unwrap(),
+            "other\n",
+            "premise: the checkout ran"
+        );
+        assert_eq!(seen, Some(true));
+    }
+
+    #[tokio::test]
+    async fn moving_head_changes_the_fingerprint() {
+        let dir = repo();
+        let before = snap(dir.path()).await;
+        git_sync(
+            dir.path(),
+            &["commit", "-q", "--allow-empty", "-m", "empty"],
+        );
+        assert_ne!(before, snap(dir.path()).await);
     }
 }

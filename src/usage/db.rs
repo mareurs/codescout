@@ -215,26 +215,34 @@ pub fn open_db(project_root: &Path) -> Result<Connection> {
     }
 
     // Migration: the OBSERVED half of a `run_command` call's effect, next to the DECLARED
-    // `effect_class` above — `1` when the git-visible working tree DIFFERED between a
-    // snapshot taken before the command and one taken after, `0` when it did not, NULL
-    // when nothing was observed. It exists so a wrong `read` declaration is detectable
-    // after the fact: only a call that declared `read` is ever observed.
+    // `effect_class` above — `1` when a before/after snapshot of the repository (where HEAD
+    // points, plus every path `git status` lists with its size and mtime) DIFFERED, `0` when
+    // it did not, NULL when nothing was observed. It exists so a wrong `read` declaration
+    // can be detected after the fact: only a call that declared `read` is ever observed.
     //
     // WHAT A VALUE MEANS, and does not — read this before querying it:
-    //   * `1` is "something under the tree changed during the call", NOT "this command
+    //   * `1` is "HEAD moved or a listed path changed during the call", NOT "this command
     //     wrote". On a checkout shared with other sessions (CLAUDE.md puts ~6 on this one)
-    //     a peer's edit that lands during the call is indistinguishable from the command's
-    //     own. Rank it as a falsifier of "this was quiet", never as attribution.
-    //   * `0` is "the git-visible tree was identical", NOT "the command wrote nothing".
-    //     `git status` cannot see gitignored paths (`target/`, `.codescout/`), and a
-    //     change that was undone before the second snapshot leaves no difference.
+    //     a peer's edit or commit that lands during the call is indistinguishable from the
+    //     command's own. Rank it as a falsifier of "this was quiet", never as attribution.
+    //   * `0` is "the snapshot saw no difference", NOT "the command changed nothing", and a
+    //     wrong `read` declaration CAN read `0`. The snapshot is blind to gitignored paths
+    //     (`target/`, `.codescout/`), to anything outside the repository (a write to $HOME
+    //     or /tmp), to a change undone before the second snapshot or reverted by a peer, to a
+    //     branch switch onto the same commit, and to a rewrite that leaves an already-dirty
+    //     file's size and mtime alone. Trust `1` as evidence; never trust `0` as clearance.
     //   * NULL is "nothing observed" and covers: every other tool; any call that declared
     //     `write` (or nothing, which means write); a `run_in_background` call (it returns
-    //     before the command finishes, so `0` would be a false reassurance); a command
-    //     that named a buffer handle; an `Err` outcome; a project that is not a git
-    //     checkout; a `git` that failed or exceeded its 2 s budget; AND every row older
-    //     than this column — the NULL ambiguity `read_output_ids` states, separable only
-    //     by `called_at`. It never means "no change": that is `0`.
+    //     before the command finishes, so `0` would be a false reassurance); a command that
+    //     named a buffer handle; an `Err` outcome; a command HELD for acknowledgement
+    //     (`pending_ack` — it ran nothing); a repository with no commit, a project that is
+    //     not a git checkout, or a `git` that failed or exceeded its 2 s budget; AND every
+    //     row older than this column — the NULL ambiguity `read_output_ids` states,
+    //     separable only by `called_at`. It never means "no change": that is `0`.
+    //   * An `@ack_*` replay is observed under the REPLAY's own declared effect (the held
+    //     command's original declaration is not stored), so the row that held a dangerous
+    //     command reads NULL and the replay row carries the observation, or NULL if the
+    //     replay declared `write` or the held command was a background job.
     // Mechanism and costs: `src/tools/run_command/observe.rs`.
     let has_observed_changed: bool = conn
         .prepare("SELECT observed_changed FROM tool_calls LIMIT 0")
