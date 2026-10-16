@@ -29,7 +29,7 @@ matter for a gate change:
 
 | Question | Instrument |
 |---|---|
-| Would a proposed check have refused real past commits? | `python3 scripts/probe-backticked-count.py --replay` is the worked example for the ledger; copy its denominator discipline |
+| Would a proposed check have refused real past commits? | `python3 scripts/probe-hook-replay.py --script <hook> --paths <dirs> --since <date> --jobs 16`. The older `python3 scripts/probe-backticked-count.py --replay` is the ledger-specific worked example |
 | Does the guard detect the defect it names? | `./scripts/mutation-probe.sh --file <p> --find '<literal>' --replace '<literal>' -- <test cmd>` |
 | How often does a gate refuse, and what would unblock it? | `python3 scripts/probe_il3_refusals.py` |
 
@@ -61,7 +61,8 @@ skill, and see `docs/conventions/shared-checkout-commit-sequence.md` for the com
 ## 3. Replay the rule over history, with the gate's own firing condition
 
 Count the real events the **old** rule accepted and your rule would refuse. That is the false-refusal
-population.
+population. Use `scripts/probe-hook-replay.py`: it runs the hook itself over each commit, so the firing
+condition is the hook's own and not yours.
 
 - **Derive "the gate would have fired" the way the gate derives it.** The ledger gate fires when a
   bug file gains a cluster tag, not whenever a line changes. The first replay counted every changed
@@ -70,7 +71,9 @@ population.
 - **Subtract the baseline.** Events the old rule also refused are commits made without the hook
   enforcing. Of the 42 refusals in that replay, 13 were that.
 - **Split by period.** A shape that decays is a different decision from one that recurs. Of the 4
-  October events in the false-refusal set, 3 came from one commit on 2026-10-14.
+  October events in the false-refusal set, 3 came from two consecutive `fix(memory)` commits on
+  2026-10-14 (one event in the first, two in the second), which `scripts/probe-hook-replay.py` showed
+  at commit grain; an earlier draft of this page said one commit.
 - **Read the refused text.** The aggregate hides the finding: the refused entries were four real,
   repeated shapes, not noise.
 - **Report the number and its reasons to the owner before you ship.** A rule that refuses real

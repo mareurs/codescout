@@ -242,6 +242,10 @@ jobs:
       # not behind a cargo lane: a case that skips itself for a missing toolchain reports
       # success while testing nothing.
       - run: bash tests/pre-commit-ledger-divergence.sh
+      # The replay probe's own suite, same job and same reason: it builds throwaway git repos and
+      # needs the committer identity above, and it is python3 + git only, so a case cannot skip
+      # itself for a missing toolchain and report success while testing nothing.
+      - run: bash tests/probe-hook-replay.sh
 
   # ITS OWN JOB, same reason as `push-guard-tests` above: `shell-tests` is a known-
   # flaky lane, and this suite's assertions are verdicts about ATTRIBUTION -- the one
