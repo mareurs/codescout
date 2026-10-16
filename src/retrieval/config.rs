@@ -205,14 +205,14 @@ impl RetrievalConfig {
     /// Note the override is kept on top by the 2026-09-17 ruling: every stack
     /// deployment in existence sets it while leaving `[embeddings].model` at the
     /// built-in default, so letting `model` win would silently repoint them at
-    /// the wrong model. The shadow WARNING that would make this visible does not
-    /// exist: it was deferred to Task 5 of
-    /// `docs/plans/2026-09-17-embedding-config-consolidation.md`, and Task 5 landed
-    /// (5a `dotenv_shadowed_fields`, 5b the `CODESCOUT_EMBEDDING_*` family) without
-    /// it. The provenance that landed is `DotenvProvenance` on `EmbedEnv`, which
-    /// covers dotenv-versus-config for `url`/`model`/`api_key` only; this override
-    /// is read outside that path, and `RetrievalConfig` still cannot distinguish a
-    /// chosen `model` from a defaulted one. Re-verified 2026-10-05.
+    /// the wrong model. The shadow WARNING that makes this visible is
+    /// `dotenv_shadowed_fields`'s `"model_name"` entry: provenance for this
+    /// variable rides on `EmbedEnv`/`DotenvProvenance` beside `url`/`model`/`api_key`,
+    /// so a dotenv-supplied value that outranks a configured `model` is named at
+    /// resolution time. An exported (non-dotenv) value stays silent — that is the
+    /// sanctioned escape hatch. `RetrievalConfig` still cannot distinguish a chosen
+    /// `model` from a defaulted one, which is why the check judges the config layers'
+    /// own `[embeddings].model`, not the resolved one.
     // Its only caller, `build_http_embedder`, is `remote-embed`-gated; the lean
     // lane compiles this and reaches it from nowhere.
     #[cfg_attr(not(feature = "remote-embed"), allow(dead_code))]
@@ -236,8 +236,11 @@ impl RetrievalConfig {
     /// is testable end-to-end without mutating real process env — see that
     /// function's doc comment and `merge_tests` below.
     pub fn from_env_and_project(root: Option<&std::path::Path>) -> Result<Self> {
-        let (embedder_url, model, api_key, model_dim) =
-            resolve_embed_fields_with(EmbedEnv::from_real_env(), root)?;
+        let env = EmbedEnv::from_real_env();
+        // Taken from the SAME read the shadowing check judges, so the value that goes
+        // on the wire and the value the warning is about cannot diverge.
+        let dense_model_name_override = env.model_name.clone();
+        let (embedder_url, model, api_key, model_dim) = resolve_embed_fields_with(env, root)?;
         Ok(Self {
             qdrant_url: std::env::var("CODESCOUT_QDRANT_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:6334".into()),
@@ -245,13 +248,8 @@ impl RetrievalConfig {
             model,
             api_key,
             model_dim,
-            // Blank-is-absent, matching `non_empty`'s policy for the sibling
-            // embed fields: an exported-but-empty `FOO=` must not win over a
-            // configured model, which is the same silent-loss class this
-            // override was implicated in.
-            dense_model_name_override: non_empty(
-                std::env::var("CODESCOUT_EMBEDDER_MODEL_NAME").ok(),
-            ),
+            // Blank-is-absent is applied where it is read (`EmbedEnv::from_real_env`).
+            dense_model_name_override,
             sparse_embedder_url: std::env::var("CODESCOUT_SPARSE_EMBEDDER_URL")
                 .unwrap_or_else(|_| DEFAULT_SPARSE_EMBEDDER_URL.into()),
             reranker_url: std::env::var("CODESCOUT_RERANKER_URL")
@@ -435,7 +433,8 @@ fn parse_model_dim(env_val: Option<String>) -> Option<usize> {
 /// Env-side embedding config, resolved once at the edge from real process
 /// env. `EmbedEnv::from_real_env` is the ONLY thing in this module that reads
 /// `CODESCOUT_EMBEDDER_URL`/`CODESCOUT_EMBEDDER_MODEL`/`EMBED_API_KEY`/
-/// `CODESCOUT_MODEL_DIM` — everything downstream (`merge_embed_config`,
+/// `CODESCOUT_MODEL_DIM` (and, outside the alias table, `CODESCOUT_EMBEDDER_MODEL_NAME`,
+/// carried as [`EmbedEnv::model_name`]) — everything downstream (`merge_embed_config`,
 /// `resolve_embed_fields_with`) takes this struct as a plain value, so the
 /// FULL composition (not just an isolated one-line precedence rule) is
 /// testable without ever mutating process env. This is
@@ -450,6 +449,12 @@ struct EmbedEnv {
     model: Option<String>,
     api_key: Option<String>,
     dim: Option<usize>,
+    /// `CODESCOUT_EMBEDDER_MODEL_NAME`, blank-is-absent: the operator override for the
+    /// model name that goes on the `/v1/embeddings` wire. It is NOT an alias of
+    /// `model` (see `RetrievalConfig::dense_model_name`): it outranks the resolved
+    /// `model` and so is carried here beside it, solely so its provenance can be
+    /// tracked and its shadowing of `[embeddings].model` warned about.
+    model_name: Option<String>,
     /// Which of the fields above arrived via the **startup dotenv** rather than an
     /// operator export.
     ///
@@ -469,6 +474,10 @@ struct EmbedEnv {
     from_dotenv: DotenvProvenance,
 }
 
+/// The wire-name override variable. Named once so the edge read and its provenance
+/// lookup in [`EmbedEnv::from_real_env`] cannot drift apart.
+const DENSE_MODEL_NAME_ENV: &str = "CODESCOUT_EMBEDDER_MODEL_NAME";
+
 /// Per-field provenance for [`EmbedEnv`]. `true` means "this value came from the
 /// startup dotenv", which is the only case that warrants a shadowing warning — an
 /// operator export winning is the escape hatch working as designed.
@@ -477,6 +486,8 @@ struct DotenvProvenance {
     url: bool,
     model: bool,
     api_key: bool,
+    /// `CODESCOUT_EMBEDDER_MODEL_NAME` — see [`EmbedEnv::model_name`].
+    model_name: bool,
 }
 
 /// Pure: which `[embeddings]` fields a **dotenv-injected** env value silently
@@ -517,6 +528,17 @@ fn dotenv_shadowed_fields(
     if shadows(env.from_dotenv.model, env.model.as_ref(), p.model.as_ref()) {
         out.push("model");
     }
+    // The wire-name override is judged against the SAME configured field: it wins the
+    // name that goes on the wire over `[embeddings].model` just as `model` does
+    // (`RetrievalConfig::dense_model_name`), so a dotenv value for it shadows a
+    // configured `model` exactly like the other dotenv-supplied variables.
+    if shadows(
+        env.from_dotenv.model_name,
+        env.model_name.as_ref(),
+        p.model.as_ref(),
+    ) {
+        out.push("model_name");
+    }
     let cfg_key = p.api_key.as_ref().map(|k| k.as_str().to_string());
     if shadows(
         env.from_dotenv.api_key,
@@ -526,6 +548,43 @@ fn dotenv_shadowed_fields(
         out.push("api_key");
     }
     out
+}
+
+/// The warning text for one field named by [`dotenv_shadowed_fields`]. Pure, so the
+/// wording for the `model_name` special case is an ordinary string assertion.
+///
+/// `model_name` is not an `[embeddings]` key — it is the `CODESCOUT_EMBEDDER_MODEL_NAME`
+/// variable shadowing `[embeddings].model` — so it must not be printed as
+/// `[embeddings].model_name`, a key the user cannot find in their config.
+fn dotenv_shadow_warning(field: &str) -> String {
+    let (what, remedy) = if field == "model_name" {
+        (
+            format!(
+                "[embeddings].model is set in your config but the model name sent to the \
+                 embedder was overridden by {DENSE_MODEL_NAME_ENV} from the startup dotenv"
+            ),
+            // The override stays on top by the 2026-09-17 ruling, so the remedy cannot be
+            // "move it to config.toml" — a config `model` would not carry the same
+            // wire-name semantics. Name the two things the reader can actually do.
+            "Unset it in the dotenv if [embeddings].model was meant to win, or export it \
+             in the MCP server's env block to make the override intentional.",
+        )
+    } else {
+        (
+            format!(
+                "[embeddings].{field} is set in your config but was overridden by the \
+                 startup dotenv"
+            ),
+            "Move it to ~/.config/codescout/config.toml to make it a default the project \
+             can override, or unset it there if the override was intended for one run.",
+        )
+    };
+    format!(
+        "{what} (CODESCOUT_ENV_FILE, else ~/.config/codescout/.env). \
+         Environment wins over both config layers by design — but a dotenv is \
+         read on every start, so a machine-wide DEFAULT written there silently \
+         outranks every project. {remedy}"
+    )
 }
 
 impl EmbedEnv {
@@ -547,10 +606,16 @@ impl EmbedEnv {
             model: envs::read(&envs::MODEL),
             api_key: envs::read(&envs::API_KEY),
             dim: parse_model_dim(envs::read(&envs::DIM)),
+            // Blank-is-absent, matching `non_empty`'s policy for the sibling embed
+            // fields: an exported-but-empty `FOO=` must not win over a configured
+            // model, which is the same silent-loss class this override was
+            // implicated in.
+            model_name: non_empty(std::env::var(DENSE_MODEL_NAME_ENV).ok()),
             from_dotenv: DotenvProvenance {
                 url: any_injected(&envs::URL),
                 model: any_injected(&envs::MODEL),
                 api_key: any_injected(&envs::API_KEY),
+                model_name: injected.contains(DENSE_MODEL_NAME_ENV),
             },
         }
     }
@@ -704,15 +769,7 @@ fn resolve_embed_fields_from(
 ) -> ResolvedEmbedFields {
     let section = project_config.map(|c| c.embeddings);
     for field in dotenv_shadowed_fields(&env, section.as_ref()) {
-        tracing::warn!(
-            "[embeddings].{field} is set in your config but was overridden by the \
-                 startup dotenv (CODESCOUT_ENV_FILE, else ~/.config/codescout/.env). \
-                 Environment wins over both config layers by design — but a dotenv is \
-                 read on every start, so a machine-wide DEFAULT written there silently \
-                 outranks every project. Move it to ~/.config/codescout/config.toml to \
-                 make it a default the project can override, or unset it there if the \
-                 override was intended for one run."
-        );
+        tracing::warn!("{}", dotenv_shadow_warning(field));
     }
     merge_embed_config(env, section)
 }
@@ -991,6 +1048,7 @@ mod merge_tests {
                 url: true,
                 model: false,
                 api_key: true,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1027,6 +1085,122 @@ mod merge_tests {
             ..Default::default()
         };
         assert!(dotenv_shadowed_fields(&env, Some(&project)).is_empty());
+    }
+
+    // ── CODESCOUT_EMBEDDER_MODEL_NAME ────────────────────────────────────────────
+    //
+    // The wire-name override outranks the resolved `model`, so a dotenv-supplied value
+    // for it shadows a configured `[embeddings].model` exactly like the variables above
+    // — and used to do so with no warning, because its provenance was never recorded.
+    // `docs/issues/2026-10-06-a-dotenv-supplied-embedder-model-name-shadows-embeddings-model-with-no-warning.md`
+    // Each test below flips ONE of the three conditions, so dropping any of them from
+    // the predicate turns exactly one of them red.
+
+    fn project_with_model() -> EmbeddingsSection {
+        EmbeddingsSection {
+            model: Some("model-b".into()),
+            ..Default::default()
+        }
+    }
+
+    fn env_with_model_name(value: &str, from_dotenv: bool) -> EmbedEnv {
+        EmbedEnv {
+            model_name: Some(value.into()),
+            from_dotenv: DotenvProvenance {
+                model_name: from_dotenv,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_dotenv_model_name_that_overrides_a_configured_model_is_named() {
+        let env = env_with_model_name("model-a", true);
+        assert_eq!(
+            dotenv_shadowed_fields(&env, Some(&project_with_model())),
+            vec!["model_name"]
+        );
+    }
+
+    #[test]
+    fn an_exported_model_name_is_silent() {
+        // Condition 1: provenance. Identical to the test above except `from_dotenv`.
+        let env = env_with_model_name("model-a", false);
+        assert!(dotenv_shadowed_fields(&env, Some(&project_with_model())).is_empty());
+    }
+
+    #[test]
+    fn a_dotenv_model_name_with_no_configured_model_is_silent() {
+        // Condition 3: nothing is being shadowed — the ordinary case on a machine
+        // configured entirely through `.env`, which is this repo's own setup.
+        let env = env_with_model_name("model-a", true);
+        assert!(dotenv_shadowed_fields(&env, Some(&EmbeddingsSection::default())).is_empty());
+        assert!(dotenv_shadowed_fields(&env, None).is_empty());
+        // A blank configured model is not a configured model either.
+        let blank = EmbeddingsSection {
+            model: Some("  ".into()),
+            ..Default::default()
+        };
+        assert!(dotenv_shadowed_fields(&env, Some(&blank)).is_empty());
+    }
+
+    #[test]
+    fn a_blank_dotenv_model_name_shadows_nothing() {
+        // Condition 2: a blank override is read as absent and never wins.
+        let env = env_with_model_name("   ", true);
+        assert!(dotenv_shadowed_fields(&env, Some(&project_with_model())).is_empty());
+    }
+
+    #[test]
+    fn model_name_provenance_is_independent_of_model_provenance() {
+        // `model` came from a dotenv; `model_name` was exported. Only `model` is named.
+        let env = EmbedEnv {
+            model: Some("model-from-dotenv".into()),
+            model_name: Some("name-from-export".into()),
+            from_dotenv: DotenvProvenance {
+                model: true,
+                model_name: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            dotenv_shadowed_fields(&env, Some(&project_with_model())),
+            vec!["model"]
+        );
+        // And the reverse, plus both together (order is url, model, model_name, api_key).
+        let env = EmbedEnv {
+            model: Some("model-from-dotenv".into()),
+            model_name: Some("name-from-dotenv".into()),
+            from_dotenv: DotenvProvenance {
+                model: true,
+                model_name: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            dotenv_shadowed_fields(&env, Some(&project_with_model())),
+            vec!["model", "model_name"]
+        );
+    }
+
+    #[test]
+    fn the_model_name_warning_names_the_variable_not_a_config_key_that_does_not_exist() {
+        let msg = dotenv_shadow_warning("model_name");
+        assert!(msg.contains("CODESCOUT_EMBEDDER_MODEL_NAME"), "{msg}");
+        assert!(msg.contains("[embeddings].model "), "{msg}");
+        assert!(
+            !msg.contains("[embeddings].model_name"),
+            "`model_name` is not an [embeddings] key and must not be printed as one: {msg}"
+        );
+        // The ordinary fields keep their original wording.
+        let url = dotenv_shadow_warning("url");
+        assert!(
+            url.contains("[embeddings].url is set in your config"),
+            "{url}"
+        );
     }
 
     /// The global layer supplies `url` and `api_key` when the project sets
