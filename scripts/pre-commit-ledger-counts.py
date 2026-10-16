@@ -1004,7 +1004,7 @@ def main() -> int:
             # CONSTRUCTION: `str(p)` and `p.as_posix()` are byte-identical on Linux and
             # macOS, so no assertion over real `class_files` output can discriminate
             # there, and the Rust test that caught this in CI
-            # (`the_growth_refusal_names_the_file_holding_the_members_field`) is green on
+            # (`the_growth_refusal_names_the_file_that_defines_the_class`) is green on
             # every developer machine in this project while being red on Windows.
             # `PureWindowsPath` carries the foreign flavour without needing the foreign
             # OS, so the Linux gate can red on the mutation that shipped.

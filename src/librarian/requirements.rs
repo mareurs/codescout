@@ -617,4 +617,134 @@ min_section_chars = 40
             "the server and the commit hook disagree about the declared cluster values"
         );
     }
+    /// The server and the commit hook count a section the same way, on a table of bodies whose answers
+    /// are written out by hand.
+    ///
+    /// Both are judged against the literal, not only against each other: two parsers that share one
+    /// mistake agree perfectly. Each row is a shape that one real mutation of the scan gets wrong, so
+    /// the table is also what keeps the Python copy honest after an edit to either:
+    ///
+    /// - a heading inside a backtick fence or a tilde fence is not a section;
+    /// - `###` and `#` do not open it, and an indented `## ` is not a heading at all;
+    /// - the section ends at the NEXT H1 or H2, and of several same-title sections the largest counts
+    ///   (the row with the real one in the middle is the one a "first size wins" mutant fails);
+    /// - a carriage return, trailing spaces and U+2028 do not change the count: Rust's `lines()` does
+    ///   not split on U+2028, which is why the hook uses `split("\n")` and not `splitlines()`.
+    #[test]
+    fn the_commit_hook_and_the_server_count_a_section_the_same_way() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let table: &[(&str, Option<usize>)] = &[
+            ("", None),
+            ("## Class fit\n", Some(0)),
+            ("## Class fit\nabc def 123\n", Some(9)),
+            ("```\n## Class fit\nabcdefghij\n```\n", None),
+            ("~~~\n## Class fit\nabcdefghij\n~~~\n", None),
+            ("  ```\n## Class fit\nabcd\n  ```\n", None),
+            ("### Class fit\nabc\n", None),
+            ("# Class fit\nabc\n", None),
+            ("  ## Class fit\nabc\n", None),
+            ("## Class fit\nab\n## Other\nabcdefgh\n", Some(2)),
+            ("## Class fit\n\n## Class fit\nabcd\n", Some(4)),
+            ("## Class fit\nabcd\n## X\nz\n## Class fit\n\n", Some(4)),
+            (
+                "## Class fit\n\n## Class fit\nabcd\n\n## Root cause\nx\n",
+                Some(4),
+            ),
+            ("## Class fit\r\nabc\r\n", Some(3)),
+            ("## Class fit   \nabc\n", Some(3)),
+            ("##  Class fit\nabc\n", Some(3)),
+            ("## Class fit\nab\u{2028}cd\n", Some(4)),
+            (
+                "## Class fit\n\u{c5}ngstr\u{f6}m \u{65e5}\u{672c}\u{8a9e} \u{661}\u{662}\u{663}\n",
+                Some(14),
+            ),
+            ("## Class fit\n...---!!!\n", Some(0)),
+        ];
+        for (body, want) in table {
+            assert_eq!(
+                section_text_len(body, "Class fit"),
+                *want,
+                "the server miscounts {body:?}"
+            );
+        }
+
+        let bodies: Vec<&str> = table.iter().map(|(b, _)| *b).collect();
+        let mut child = Command::new("python3")
+            .args([
+                "-I",
+                "-c",
+                "import importlib.util, json, sys\n\
+                 s = importlib.util.spec_from_file_location('hook', 'scripts/pre-commit-ledger-counts.py')\n\
+                 m = importlib.util.module_from_spec(s)\n\
+                 s.loader.exec_module(m)\n\
+                 print(json.dumps([m.section_text_len(b, m.CLASS_FIT_TITLE) for b in json.load(sys.stdin)]))",
+            ])
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("python3 failed to spawn");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(serde_json::to_string(&bodies).unwrap().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "the hook's section_text_len failed to run"
+        );
+        let hook: Vec<Option<usize>> = serde_json::from_slice(&out.stdout).unwrap();
+        let want: Vec<Option<usize>> = table.iter().map(|(_, w)| *w).collect();
+        assert_eq!(
+            hook, want,
+            "the commit hook counts a section differently from the server"
+        );
+    }
+
+    /// The commit hook holds the section title and the floor as constants, and this repository's
+    /// policy file holds them as data. They are one policy read by two programs, and a value changed
+    /// on one side only makes `doc(create)` accept what the commit refuses, or the reverse.
+    ///
+    /// Compared on the LIVE policy file, and guarded against vacuity: a file that declares no `bug`
+    /// requirement would make "the hook agrees with nothing" pass.
+    #[test]
+    fn the_commit_hook_and_the_requirements_file_agree_on_the_class_fit_policy() {
+        use std::process::Command;
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let reqs = load(root).expect("the repository's own requirements file must parse");
+        let bug = reqs.iter().find(|r| r.kind == "bug").expect(
+            "the repository must declare a `bug` requirement; the comparison would be vacuous",
+        );
+        assert_eq!(
+            bug.sections.len(),
+            1,
+            "the hook enforces ONE section; a second would be enforced at `doc(create)` only"
+        );
+
+        let out = Command::new("python3")
+            .args([
+                "-I",
+                "-c",
+                "import importlib.util, json\n\
+                 s = importlib.util.spec_from_file_location('hook', 'scripts/pre-commit-ledger-counts.py')\n\
+                 m = importlib.util.module_from_spec(s)\n\
+                 s.loader.exec_module(m)\n\
+                 print(json.dumps([m.CLASS_FIT_TITLE, m.CLASS_FIT_MIN]))",
+            ])
+            .current_dir(root)
+            .output()
+            .expect("python3 failed to spawn");
+        assert!(out.status.success(), "the hook failed to load");
+        let (title, min): (String, usize) = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            (title, min),
+            (bug.sections[0].clone(), bug.min_section_chars),
+            "the commit hook and `.codescout/requirements.toml` disagree about the Class fit rule"
+        );
+    }
 }

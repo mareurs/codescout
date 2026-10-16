@@ -18,13 +18,19 @@ To open a bug:
   2. Replace this comment block with the bug content.
   3. Replace the `cluster/<slug>` placeholder above with EXACTLY ONE reserved
      slug from the closed set. The slugs are listed in
-     docs/trackers/issue-clusters.md (the roster); each class's definition,
-     and the `**Members:**` field you must also append a derivation to, lives
-     in its own file under docs/trackers/issue-clusters/.
-     Two gates enforce this and BOTH refuse the commit, not the edit:
-       - a bug file with no cluster/ tag, two of them, or an unknown slug
-       - a class that GAINS a member without `**Members:**` naming that
-         file's dateless stem
+     docs/trackers/issue-clusters.md (the roster); each class's definition
+     lives in its own file under docs/trackers/issue-clusters/.
+     Then fill the Class fit section below: which trait of the class this bug
+     shows, and one way it differs from the class's other members. Write at
+     least 40 letters or digits, outside any code fence. The reasoning lives
+     in THIS file. Do not edit the class's `**Members:**` line: those lines
+     are frozen, and nothing reads them any more.
+     Two checks enforce this:
+       - doc(action="create") refuses a bug with no cluster/ tag, two of them,
+         an unknown slug, or a Class fit section that is missing or too short.
+         The refusal names the fix.
+       - the commit hook refuses the same for a file that arrived another way
+         (create_file, a copy of this template) and for a retag.
      Set the tag through the catalog --
        doc(action="update", id=..., patch={tags: [...]})
      -- never by hand-editing frontmatter: a direct edit does not reach the
@@ -131,6 +137,9 @@ added without justification means the bug isn't really closed.
 
 ## Summary
 *1–3 sentences. What's broken, who's affected, the elevator pitch.*
+
+## Class fit
+*Which class trait does this bug show?*
 
 ## Symptom (Effect)
 *Capture the EXACT observable behavior. Verbatim error string in a code

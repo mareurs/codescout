@@ -1,0 +1,26 @@
+# Write-time requirements for artifacts, enforced by `doc(action="create")`.
+# Mechanism: `src/librarian/requirements.rs`. Why the rule is here and not in a document:
+# `docs/adrs/2026-10-16-a-rule-lives-where-the-agent-already-acts.md`.
+#
+# This file is deliberately NOT part of `librarian.toml`. That file is parsed with
+# `deny_unknown_fields`, so a new table in it would break every session on an older server binary.
+#
+# Two readers apply the `bug` policy below, and they must agree:
+#   - the server, at `doc(create)`, which reads this file;
+#   - the commit hook `scripts/pre-commit-ledger-counts.py` (CHECK 3), which covers the files that
+#     never pass through `doc(create)` (`create_file` into `docs/issues/`, a retag). It holds the
+#     section title and the floor as constants, and `src/librarian/requirements.rs`
+#     (`the_commit_hook_and_the_requirements_file_agree_on_the_class_fit_policy`) fails if they
+#     differ from the values here. Change a value here and in the hook in the same commit.
+
+[[require]]
+kind = "bug"
+# Exactly one `cluster/<slug>` tag, and the slug must be one that a class file declares.
+tag_prefix = "cluster/"
+tag_values_from = ["docs/trackers/issue-clusters.md", "docs/trackers/issue-clusters"]
+tag_declared_by = "**Slug:**"
+# The reasoning for the fit lives in the bug's own file, not on the class's shared `**Members:**`
+# line. The floor is a count of letters and digits: it shows that something was written there.
+sections = ["Class fit"]
+min_section_chars = 40
+section_hint = "Add a `## Class fit` heading at the top level of the body, outside any code fence, with at least 40 letters or digits under it. Say which trait of the class this bug shows, and one way it differs from the class's other members. The class definitions are in docs/trackers/issue-clusters/. Do not edit a class's `**Members:**` line: those lines are frozen."

@@ -1190,11 +1190,15 @@ fn the_hook_script_agrees_on_both_yaml_tag_styles() {
 // The growth refusal must ROUTE, not just refuse
 // ---------------------------------------------------------------------------
 
-/// The refusal must name the file holding the `**Members:**` field it demands.
+/// The refusal must name the file that DEFINES the class the bug joined.
 ///
 /// Guards `docs/issues/archive/2026-09-08-the-cluster-refusal-names-a-field-not-a-file-and-the-index-confirms-it.md`.
 /// The predicate was always right; the message said "the ledger", which stopped denoting one
-/// file at the per-class split, and routed two sessions to the Index in one morning.
+/// file at the per-class split, and routed two sessions to the Index in one morning. Since
+/// 2026-10-16 the refusal asks for a `## Class fit` in the bug file, and the class file is where
+/// the author reads the class's definition, so the routing question is the same one. (This test
+/// was named `..._names_the_file_holding_the_members_field` until then; archived records cite
+/// it by that name.)
 ///
 /// LOAD-BEARING, and it is why this asserts on the DIRECTORY and not on "a path": the refusal
 /// already names `docs/conventions/gate-ordering.md` and
@@ -1205,9 +1209,9 @@ fn the_hook_script_agrees_on_both_yaml_tag_styles() {
 ///
 /// The `unclassified` case is the CONTROL, not a second example. Without it the pair is
 /// monotone under a change that makes every row name the class directory — which would be the
-/// same defect inverted, since `cluster/unclassified`'s field genuinely is in the Index.
+/// same defect inverted, since `cluster/unclassified` is defined in the Index file.
 #[test]
-fn the_growth_refusal_names_the_file_holding_the_members_field() {
+fn the_growth_refusal_names_the_file_that_defines_the_class() {
     let mut child = Command::new("python3")
         .args([
             "scripts/pre-commit-ledger-counts.py",
@@ -1228,22 +1232,29 @@ fn the_growth_refusal_names_the_file_holding_the_members_field() {
     let text = String::from_utf8_lossy(&out.stderr);
 
     assert!(
-        text.contains("docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md"),
-        "the refusal must name the per-class file holding the `**Members:**` field, not just \
-         say \"the ledger\". Got:\n{text}"
+        text.contains(
+            "the class is defined in `docs/trackers/issue-clusters/IC-7-lazy-warmup-bills-the-first-caller.md`"
+        ),
+        "the refusal must name the per-class file that defines the class, not just say \
+         \"the ledger\". Got:\n{text}"
     );
     assert!(
-        text.contains("cluster/unclassified -- the field is in `docs/trackers/issue-clusters.md`"),
-        "control: a slug with no per-class file must route to the Index, whose `**Members:**` \
-         really does own it. If this fails while the assertion above passes, every slug is \
-         being sent to the class directory — the same misrouting, inverted. Got:\n{text}"
+        text.contains("the class is defined in `docs/trackers/issue-clusters.md`"),
+        "control: a slug with no per-class file must route to the Index, which really does \
+         define `cluster/unclassified`. If this fails while the assertion above passes, every \
+         slug is being sent to the class directory — the same misrouting, inverted. Got:\n{text}"
+    );
+    assert!(
+        text.contains("docs/issues/2026-01-01-fixture-stem.md"),
+        "the refusal must name the BUG FILE that needs the section, which is where the edit goes. \
+         Got:\n{text}"
     );
 }
 
 /// A repo path must render POSIX on every platform, including Windows.
 ///
 /// **This is the test the one above could not be.**
-/// `the_growth_refusal_names_the_file_holding_the_members_field` asserts a hardcoded
+/// `the_growth_refusal_names_the_file_that_defines_the_class` asserts a hardcoded
 /// POSIX form, so it is green on Linux and macOS and RED ON WINDOWS by construction: the
 /// worktree branch of `class_files` rendered its `Path` objects with `str()`, i.e. with
 /// the native separator. CI run `34221968837` on `579a2085` failed both Windows lanes on
@@ -2844,7 +2855,7 @@ const NOT_HOOK_OWED: &[(&str, &str)] = &[
         "a scope property of `actual_counts`, not an invariant a commit can violate",
     ),
     (
-        "the_growth_refusal_names_the_file_holding_the_members_field",
+        "the_growth_refusal_names_the_file_that_defines_the_class",
         "asserts where the hook's refusal SENDS the reader — remedy text, which by construction \
          the hook cannot check about itself",
     ),

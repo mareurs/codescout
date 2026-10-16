@@ -265,6 +265,9 @@ eq "16 a staged Class fit is judged even when the disk copy lost it" "$RC" "0"
 # CRLF here, on purpose: a whole-file CRLF bug is refused earlier by the one-tag rule, because
 # `frontmatter` wants a literal `---\n` (measured 2026-10-16: "no cluster/ tag"). That is an older
 # rule with its own behavior, and mixing it in would make this case test it instead of the scan.
+# HONEST LIMIT: the mutant that stops stripping the `\r` SURVIVES this case, and it is equivalent,
+# not missed: the heading is compared after `.strip()` and the count skips non-alphanumerics, so
+# a retained `\r` changes nothing today. The case guards a future change that compares exactly.
 R=$(newrepo)
 write_bug "$R/docs/issues/2026-10-16-new-bug.md" demo-a "$FIT_LONG"
 awk '/^---$/ && n < 2 { n++; print; next } n >= 2 { printf "%s\r\n", $0; next } { print }' \
@@ -279,14 +282,37 @@ eq "17 a CRLF bug file with a Class fit is accepted" "$RC" "0"
 [ "$RC" -eq 0 ] || printf '  output: %s\n' "$OUT"
 
 # ------------------------------------------------------------ 18: the largest section counts
-# Fails if the FIRST section with the title is the one judged. A stray empty heading must not mask
-# the real one (and the server judges the same way).
+# Fails if the FIRST section with the title is judged, or if a later section's size is dropped when
+# an earlier one closes. The order empty, real, other-heading matters: a mutant that keeps the first
+# recorded size instead of the largest survived the two-section form of this case (measured
+# 2026-10-16), because the final `max` rescued it. A real bug file always has a heading after Class
+# fit, and the server judges the same way.
 R=$(newrepo)
 write_bug "$R/docs/issues/2026-10-16-new-bug.md" demo-a ""
-printf '\n## Class fit\n\n## Class fit\n%s\n' "$FIT_LONG" >> "$R/docs/issues/2026-10-16-new-bug.md"
+printf '\n## Class fit\n\n## Class fit\n%s\n\n## Root cause\nx\n' "$FIT_LONG" >> "$R/docs/issues/2026-10-16-new-bug.md"
 git -C "$R" add docs/issues/2026-10-16-new-bug.md
 run "$R"
 eq "18 an empty Class fit above a real one does not mask it" "$RC" "0"
+
+# ------------------------------------------------------------ 19, 20: the REAL template
+# Fails if an untouched copy of docs/issues/_TEMPLATE.md passes. The placeholder under Class fit
+# must stay below the floor, or the template teaches the author that the section is decoration.
+# Case 20 is the other direction: the same copy with the placeholder replaced is accepted, so the
+# template's own structure (its HTML comment, its headings) is not what trips the scan.
+TEMPLATE="$SELF_ROOT/docs/issues/_TEMPLATE.md"
+R=$(newrepo)
+sed 's#^- cluster/<slug>.*#- cluster/demo-a#' "$TEMPLATE" > "$R/docs/issues/2026-10-16-new-bug.md"
+git -C "$R" add docs/issues/2026-10-16-new-bug.md
+run "$R"
+eq "19 an untouched copy of the template is refused" "$RC" "1"
+has "19 ...for the Class fit, not for the tag it was given" "$OUT" "letters or digits"
+R=$(newrepo)
+sed -e 's#^- cluster/<slug>.*#- cluster/demo-a#' -e "s#^\*Which class trait does this bug show?\*\$#$FIT_LONG#" \
+    "$TEMPLATE" > "$R/docs/issues/2026-10-16-new-bug.md"
+git -C "$R" add docs/issues/2026-10-16-new-bug.md
+run "$R"
+eq "20 the template with only the placeholder replaced is accepted" "$RC" "0"
+[ "$RC" -eq 0 ] || printf '  output: %s\n' "$OUT"
 
 echo
 echo "passed=$PASS failed=$FAIL"
