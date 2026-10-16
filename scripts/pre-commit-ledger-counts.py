@@ -74,7 +74,9 @@ for _stream in (sys.stdin, sys.stdout, sys.stderr):
 # `#[test]` functions that actually exist, so a rename cannot silently exempt a rule.
 #
 # `a_class_gaining_a_member_names_it` has no Rust twin and is declared HOOK-ONLY on the Rust
-# side: it compares the INDEX against HEAD, a question no working-tree test can pose.
+# side: it compares the INDEX against HEAD, a question no working-tree test can pose. Its id is
+# kept although the rule changed on 2026-10-16: archived bug files cite it by this name, and
+# "names it" now means the member's own `## Class fit` section, not the class's `**Members:**`.
 HOOK_RULES = [
     "a_class_gaining_a_member_names_it",
     "every_open_bug_file_declares_one_known_defect_class",
@@ -817,18 +819,6 @@ def _emit_sequence_tail() -> None:
     except OSError:
         pass
 
-def members_fields(ledger: str, valid: set[str]) -> dict[str, str]:
-    """slug -> its `**Members:**` line, keyed by the `**Slug:**` its own section declares."""
-    out: dict[str, str] = {}
-    cur: str | None = None
-    for line in ledger.splitlines():
-        if line.startswith("## IC-"):
-            cur = None
-        elif line.startswith("**Slug:**"):
-            cur = backticked_cluster_slug(line[len("**Slug:**"):])
-        elif line.startswith("**Members:**") and cur is not None and cur in valid:
-            out[cur] = line
-    return out
 
 
 def _stem(rel: str) -> str:
@@ -867,6 +857,45 @@ def tags_by_stem(source: str) -> dict[str, set[str]]:
     return out
 
 
+# The section a bug file must carry, and how much text it must hold. These two values are the
+# PROJECT's policy in `.codescout/requirements.toml`. The server enforces them on `doc(create)`
+# and this hook enforces them at commit, for the files that never pass through `doc(create)`.
+# Two readers of one policy drift, so
+# `the_commit_hook_and_the_requirements_file_agree_on_the_class_fit_policy` compares them.
+CLASS_FIT_TITLE = "Class fit"
+CLASS_FIT_MIN = 40
+
+
+def section_text_len(body: str, title: str) -> int | None:
+    """Mirrors `section_text_len` in `src/librarian/requirements.rs`.
+
+    Letters and digits under the H2 `## <title>`, outside code fences, up to the next H1 or H2.
+    `None` means no such section. Several sections with the same title count by the largest, so a
+    stray empty one cannot mask a real one. Rust splits with `str::lines`, which drops one trailing
+    `\r` per line, so this does the same and not `splitlines`, which splits on more separators.
+    """
+    fenced = False
+    current: int | None = None
+    best: int | None = None
+    for raw in body.split("\n"):
+        line = raw[:-1] if raw.endswith("\r") else raw
+        t = line.lstrip()
+        if t.startswith("```") or t.startswith("~~~"):
+            fenced = not fenced
+            continue
+        if not fenced and (line.startswith("# ") or line.startswith("## ")):
+            if current is not None:
+                best = current if best is None else max(best, current)
+                current = None
+            if line.startswith("## ") and line[len("## ") :].strip() == title:
+                current = 0
+            continue
+        if current is not None:
+            current += sum(1 for c in line if c.isalnum())
+    if current is not None:
+        best = current if best is None else max(best, current)
+    return best
+
 def added_member_stems(source: str) -> dict[str, set[str]]:
     """slug -> dateless stems of bug files carrying it now that did not carry it at HEAD."""
     now, was = tags_by_stem(source), tags_by_stem("head")
@@ -880,48 +909,44 @@ def added_member_stems(source: str) -> dict[str, set[str]]:
 def emit_growth_refusal(undocumented: list) -> int:
     """Compose and print the growth refusal. Extracted from `main` so it is REACHABLE.
 
-    The refusal's job is to route the author to the `**Members:**` field, and the field moved
-    when the ledger split per class. Triggering this from a test would mean staging a bug file
-    into a shared index, so the composer is separated from the detection and driven directly by
-    `--fixture-growth-refusal`. Detection is already covered; what was untested is the routing.
+    Triggering this from a test would mean staging a bug file into a shared index, so the composer
+    is separated from the detection and driven directly by `--fixture-growth-refusal`. Detection is
+    covered by `tests/pre-commit-ledger-growth.sh`; what the fixture pins is the routing.
+
+    Each row is `(slug, bug_path, have, class_path)`: `have` is the letters and digits found under
+    `## Class fit`, or None when the section is absent, and `class_path` is the file that DEFINES
+    the class, which is what an author reads to decide the fit.
 
     Returns 1: this is a refusal, and the caller returns it.
     """
     print(
-        "a class gained a member and its `**Members:**` does not name it:\n  "
+        "a class gained a member and its bug file does not say why it fits:\n  "
         + "\n  ".join(
-            f"cluster/{slug} -- the field is in `{path}`\n      "
-            "expected it to change and to contain one of: "
-            + (", ".join(f"`{x}`" for x in stems) or "(any change)")
-            for slug, stems, path in undocumented
+            f"cluster/{slug} -- `{bug}`\n      "
+            + (
+                f"has no `## {CLASS_FIT_TITLE}` section"
+                if have is None
+                else f"its `## {CLASS_FIT_TITLE}` section has {have} letters or digits"
+            )
+            + f", and it needs at least {CLASS_FIT_MIN}\n      "
+            f"the class is defined in `{path}`"
+            for slug, bug, have, path in undocumented
         )
         + "\n\n"
-        "THE PATH ABOVE IS THE POINT -- do not go to the Index looking for the field.\n"
-        "Since the per-class split, `docs/trackers/issue-clusters.md` is the ROSTER: it lists\n"
-        "every slug and carries a `**Members:**` for exactly ONE of them\n"
-        "(`cluster/unclassified`). Grepping your slug there returns 0, and that zero means\n"
-        "WRONG FILE, not `no such class` -- while a generic `cluster/` grep returns dozens,\n"
-        "which is what makes the wrong file look like the right one.\n\n"
-        "The count used to force this edit. It no longer exists, so this asks for the half that\n"
-        "was always the valuable one: WHY this instance belongs to this class. The ledger's own\n"
-        "shape is `+1: `<slug-without-the-date>`` followed by the derivation.\n\n"
-        "This is deliberately NOT `did the line change` -- a trailing space would satisfy that,\n"
-        "and the count gate it replaces could not be satisfied by accident.\n\n"
-        "If the class gained a member by RETAG rather than by a new file, changing the line is\n"
-        "enough and this passes.\n\n"
-        "BOTH SIDES OF THIS ARE NAMED ABOVE, and that is deliberate -- the corpus side is your\n"
-        "bug file, the ledger side is the `**Members:**` line, and they must land in ONE commit\n"
-        "or the gate is red in one direction or the other. If the ledger is contended right now:\n"
-        "  - It is a WAIT, not a re-derivation. The edit is a one-line append carrying no number,\n"
-        "    so no peer's commit can invalidate it between your writing it and your committing\n"
-        "    it. That was not true of the count this replaced.\n"
-        "  - A peer mid-archive-move does NOT cause this. This check reads the INDEX\n"
-        "    (`git show :path`), never the worktree, so a file deleted from the worktree but\n"
-        "    still tracked is read normally. If you are here, a class really did gain a member.\n"
-        "  - If you genuinely cannot land both, leaving your bug file UNSTAGED is a legal state\n"
-        "    and the gate will pass -- `git ls-files` is the population, so an untracked file is\n"
-        "    invisible to it. Said out loud because it is lossy: the evidence stays off the\n"
-        "    corpus until you stage it, and nothing will remind you.",
+        f"WHAT TO DO: add a `## {CLASS_FIT_TITLE}` section to the bug file named above. Put it at\n"
+        "the top level of the file, outside any code fence. Say which trait of the class this bug\n"
+        "shows, and one way it differs from the class's other members. Read the class definition\n"
+        "first: the path above is the file to open.\n\n"
+        "THE `**Members:**` LINE IS NOT PART OF THIS ANY MORE. Those lines are frozen. Do not edit\n"
+        "one to satisfy this refusal, because nothing reads it for this rule.\n\n"
+        "If you filed the bug through `doc(action=\"create\")`, the server checks the same rule at\n"
+        "creation and would have refused it there. You are here because the file came another way\n"
+        "(`create_file`, a copy of the template) or because the class was changed by a retag.\n\n"
+        "The floor is a count of letters and digits. It proves you wrote something under the\n"
+        "heading. It cannot prove the text is true, so write what you checked.\n\n"
+        "If you cannot write it now, leaving the bug file UNSTAGED is a legal state and the gate\n"
+        "passes: `git ls-files` is the population, so an untracked file is invisible to it. That\n"
+        "is lossy, because the evidence stays off the corpus until you stage it.",
         file=sys.stderr,
     )
     _emit_sequence_tail()
@@ -961,12 +986,12 @@ def main() -> int:
             ))
             return 0
         elif arg == "--fixture-growth-refusal":
-            # Pure over stdin: one slug per line, composed with a synthetic stem. The LIVE
+            # Pure over stdin: one slug per line, composed with a synthetic bug path. The LIVE
             # corpus cannot exercise this branch -- reaching it needs a bug file STAGED into
             # the index, and a test that stages into a shared checkout's index is a defect of
             # its own. So detection stays corpus-driven and ROUTING is driven from here.
             rows = [
-                (s, ["fixture-stem"], class_file_for(s, "worktree"))
+                (s, "docs/issues/2026-01-01-fixture-stem.md", None, class_file_for(s, "worktree"))
                 for s in sys.stdin.read().split()
             ]
             emit_growth_refusal(rows)
@@ -1321,26 +1346,27 @@ def main() -> int:
         _emit_sequence_tail()
         return 1
 
-    # CHECK 3 -- a defect class that GAINS a member must say something about it.
+    # CHECK 3 -- a bug that JOINS a defect class must say, in its own file, why it fits.
     #
-    # This replaces the forcing function check 1 used to be, and the replacement is the point.
-    # The old count gate made a ledger edit MANDATORY, and that is why per-member derivations
-    # exist at all: authors wrote them while satisfying the refusal. Measured on `1b92a7de` --
-    # one bug filing added 1,508 characters of hand-authored, non-derivable prose across the
-    # three lines it had to touch for the number. Remove the number and nothing asks; a
-    # `**Members:**` with 22 members and no derivations reads identically to one with full
-    # derivations, to every query. Raised by codescout-17 (sessionId 9716a130), which measured
-    # its own commit rather than accepting the premise it was handed.
+    # Until 2026-10-16 this asked for a `+1: `<stem>`` entry on the class's shared `**Members:**`
+    # line. That put per-member prose on a single contended field, and the friction around it
+    # (a peer-owned line, `scripts/commit-mine.sh`, 4 entry shapes) came from that one choice.
+    # The decision and its measurements: `docs/adrs/2026-10-16-the-reasoning-for-a-class-member-lives-in-the-members-own-bug-file.md`.
+    # The reasoning now lives in the member's own `## Class fit` section. The legacy `**Members:**`
+    # lines are FROZEN: nothing reads them for this rule, and nothing asks anyone to edit one.
     #
-    # "Did the line change?" was the first form and is REJECTED: a trailing space satisfies it.
-    # That is `cluster/assertion-satisfiable-by-accident`, and it would be a real regression --
-    # the count gate was not satisfiable by accident, because the number had to equal a derived
-    # value. So the assertion is that the field NAMES the new member, in the ledger's own
-    # `+1: `<dateless-slug>`` shape. Whitespace cannot satisfy that, and a filer who names it
-    # differently gets a refusal saying which stem was looked for, recoverable by reading.
-    # Measured 2026-09-02: 7 of 22 classes already cite members this way -- a boundary, not a
-    # universal convention -- but this is PROSPECTIVE, firing only on a class that gains a
-    # member, so the other 15 are untouched until they do.
+    # The rule is the same one the server applies when the bug is created through `doc(create)`
+    # (`.codescout/requirements.toml`, enforced in `src/librarian/requirements.rs`). This is the
+    # backstop for the other door -- `create_file` is 42% of bug filings -- and for a retag, which
+    # never passes through `doc(create)` at all.
+    #
+    # The test is a TEXT FLOOR, not "did anything change": a trailing space cannot satisfy 40
+    # letters or digits under the right heading. It is still only a floor. It proves the author
+    # wrote something there, not that the something is true, and `docs/conventions/changing-an-enforcement-gate.md`
+    # says what to do when a floor like this is found to pass the wrong thing.
+    #
+    # PROSPECTIVE: it fires on a stem that carries a slug now and did not at HEAD, so an old bug
+    # file with no `## Class fit` is untouched until someone retags it.
     head_ledger = read_ledger("head")
     if head_ledger is None:
         return 0
@@ -1354,17 +1380,18 @@ def main() -> int:
     if not gained:
         return 0
 
-    members = members_fields(ledger, valid)
-    head_members = members_fields(head_ledger, valid)
-
+    # stem -> path, over the INDEX population. A stem in `new_stems` came from that population, so
+    # the lookup cannot miss; `read` returning None would mean the blob vanished between two reads
+    # of one index, and an empty body then fails the floor, which is the safe direction.
+    paths = {_stem(p): p for p in bug_files()}
     undocumented = []
     for slug in gained:
-        line = members.get(slug, "")
-        changed = line != head_members.get(slug, "")
-        stems = new_stems.get(slug, set())
-        if changed and (not stems or any(st in line for st in stems)):
-            continue
-        undocumented.append((slug, sorted(stems), class_file_for(slug, source)))
+        for stem in sorted(new_stems[slug]):
+            rel = paths.get(stem, stem)
+            have = section_text_len(read(rel, source) or "", CLASS_FIT_TITLE)
+            if have is not None and have >= CLASS_FIT_MIN:
+                continue
+            undocumented.append((slug, rel, have, class_file_for(slug, source)))
     if not undocumented:
         return 0
 
