@@ -7246,7 +7246,7 @@ mod tests {
     /// `docs/superpowers/plans/2026-08-27-get-guide-section-grain.md` Task 9).
     ///
     /// Scoped to topics that have opted into section grain via
-    /// `GUIDE_INDEX.declares(topic)` — only `librarian` today — so it is
+    /// `GUIDE_INDEX.declares(topic)` — `librarian` and `tracker-conventions` today — so it is
     /// meaningful in Phase 1 and widens automatically as later phases land
     /// declarations on other topics.
     #[cfg(feature = "librarian")]
@@ -8168,12 +8168,13 @@ mod tests {
     ///
     /// **Two caveats a reader of this gate needs, both from peer sessions on 2026-09-01.**
     ///
-    /// Its live population is **one file**: `grep -l 'serves:' src/prompts/guides/*.md`
-    /// returns only `librarian.md`. So the configuration this gate refuses is currently
-    /// unreachable on eight of the nine topics — cheap to hold, and *thinly exercised*. A
-    /// bug in the declaring path has almost nothing testing it, and a second declaring
-    /// member is a deliberate act rather than something the corpus will supply. The
-    /// `verified >= 1` floor below is honest about that; it is not a claim of coverage.
+    /// Its live population is **two files**: `grep -l 'serves:' src/prompts/guides/*.md`
+    /// returns `librarian.md` and, since the `tracker-conventions` decomposition,
+    /// `tracker-conventions.md` — so the configuration this gate refuses is still
+    /// unreachable on eight of the ten topics. Cheap to hold, and *thinly exercised*: a
+    /// bug in the declaring path has little testing it, and a further declaring member is a
+    /// deliberate act rather than something the corpus will supply. The `verified >= 1`
+    /// floor below is honest about that; it is not a claim of coverage.
     ///
     /// And the reason this gate is a separate one rather than a stronger Gate 6:
     /// `reconnaissance-patterns:R-159` — *verifying a MECHANISM is not verifying its
@@ -14302,11 +14303,13 @@ mod guide_hint_tests {
     #[tokio::test]
     async fn append_entry_receives_only_the_entry_sections_not_the_whole_librarian_guide() {
         let (_dir, server) = make_server().await;
-        // Deliberately NOT under docs/trackers/ or docs/issues/: `names_tracker_path`
-        // (src/librarian/adapter.rs) would route every subsequent call naming this
-        // artifact to the `tracker-conventions` topic instead of `librarian` —
-        // `tracker-conventions` declares no sections in Phase 1, so the
-        // `artifact.append_entry` section this test targets would never fire.
+        // Deliberately NOT under docs/trackers/ or docs/issues/. `names_tracker_path`
+        // (src/librarian/adapter.rs) routes a result naming such a path to the
+        // `tracker-conventions` topic instead of `librarian`, and what that topic
+        // serves for `create`/`get`/`find` is its own section set. (Measured
+        // 2026-10-16: an `append_entry` result names no path, so it would reach
+        // `librarian` either way; the fixture stays under `docs/specs/` so this
+        // test measures only the librarian section it targets.)
         let id = create_tracker(&server, "docs/specs/fixture-a.md").await;
         let out = call_tool(
             &server,
@@ -14376,13 +14379,18 @@ mod guide_hint_tests {
     ///
     /// The two topic sources disagree for any librarian call touching
     /// `docs/trackers/` or `docs/issues/`: `names_tracker_path` sends it to
-    /// `tracker-conventions` (which declares nothing, so it takes the whole-topic path:
-    /// a one-line pointer while its body is over `MAX_AUTO_INJECT_GUIDE_BYTES`, as it
-    /// is today), while
+    /// `tracker-conventions` (which declares `path~`-qualified sections for the shapes
+    /// that route to it, and before it declared any took the whole-topic path: a
+    /// one-line pointer, its body being over `MAX_AUTO_INJECT_GUIDE_BYTES`), while
     /// the call's shape is declared by a `librarian.md` section. Before the
     /// fallthrough only the first source was ever consulted, so once
     /// `tracker-conventions` was spent such calls delivered **nothing at all**
     /// and their sections were unreachable for the rest of the session.
+    ///
+    /// **Spent means every section it has for THIS shape, not the topic.** With
+    /// section grain `get` on a tracker is served `tracker-conventions` § Resume and
+    /// § Querying the first time, so the fallthrough is reached on the SECOND `get`,
+    /// which is why half 2 calls it twice.
     ///
     /// That is not a hypothetical: two tests above route around it explicitly,
     /// putting their fixtures under `docs/specs/` with the comment *"a
@@ -14404,12 +14412,10 @@ mod guide_hint_tests {
         let (_dir, server) = make_server().await;
 
         // 1 — a create under docs/trackers/ must still route to the tracker guide
-        //     first. `tracker-conventions` is over the auto-inject bound, so what
-        //     arrives is its POINTER (the body would be 59 KB the harness may
-        //     save to disk unread — see
-        //     `an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped`),
-        //     but the result-based topic still goes first and still claims the
-        //     call. This is the behaviour `32736ca0` bought and
+        //     first. What arrives is a SECTION of it (the topic is 59 KB, over the
+        //     auto-inject bound the harness may save to disk unread), but the
+        //     result-based topic still goes first and still claims the call. This is
+        //     the behaviour `32736ca0` bought and
         //     `an_artifact_call_naming_a_tracker_path_delivers_the_tracker_guide`
         //     protects; the fallthrough must not cost it.
         let created = call_tool(
@@ -14427,8 +14433,10 @@ mod guide_hint_tests {
         assert!(
             guide_blocks(&created)
                 .join("")
-                .contains("get_guide(\"tracker-conventions\")"),
-            "the result-based topic must still go first and still claim the call, got: {}",
+                .contains("Trackers are living state"),
+            "the result-based topic must still go first and still claim the call, with its \
+             § Tracker artifacts BODY (not a marker, which an empty section would satisfy), \
+             got: {}",
             guide_blocks(&created)
                 .join("")
                 .chars()
@@ -14441,9 +14449,23 @@ mod guide_hint_tests {
             .expect("create returns an id")
             .to_string();
 
-        // 2 — a `get` on that same tracker. Same result-based topic, now spent,
-        //     so this call used to deliver nothing. `artifact.get` is declared by
-        //     librarian.md § Artifact Model, which should now arrive.
+        // 2 — a `get` on that same tracker. The first one is claimed by the
+        //     result-based topic, which has sections for `get` on a tracker that
+        //     `create` did not spend. The SECOND finds them spent, so this call used
+        //     to deliver nothing. `artifact.get` is declared by librarian.md §
+        //     Artifact Model, which should now arrive.
+        let first_get = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
+        assert!(
+            guide_blocks(&first_get)
+                .join("")
+                .contains("A tracker that accumulates review passes by *appending*"),
+            "the first `get` of a tracker is claimed by tracker-conventions § Resume, got: {}",
+            guide_blocks(&first_get)
+                .join("")
+                .chars()
+                .take(300)
+                .collect::<String>()
+        );
         let out = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
         let guide = guide_blocks(&out).join("");
         assert!(
@@ -14460,25 +14482,115 @@ mod guide_hint_tests {
             "one topic per call — the spent pointer must not ride along again"
         );
     }
-    /// A guide too large to auto-inject is pointed at, not delivered and not
-    /// stamped as delivered.
+    /// The first call of each shape that routes to `tracker-conventions` ships a
+    /// section of it, with the section's BODY, and never the pointer the whole-topic
+    /// path sent while the guide was over the auto-inject bound.
+    ///
+    /// This is the residual of the parent bug
+    /// (`docs/issues/archive/2026-08-31-a-served-section-can-be-unreachable-via-topic-routing.md`):
+    /// a session's first tracker-path call used to ship the whole guide, then a pointer.
+    /// Driven through real `doc` calls, because what routes to the topic is the
+    /// RESULT's content and a `match_sections` probe bypasses exactly that gate.
+    ///
+    /// Each step asserts body text unique to the section it expects, and the three
+    /// steps are chosen so every one finds the previous steps' sections spent — so a
+    /// step that passes proves its OWN section arrived, not a repeat:
+    ///   1. `create` under `docs/issues/` → Bug files, Bug frontmatter, Trigger rules
+    ///   2. `get` of that bug             → Claiming, The unverified caveat
+    ///   3. `find` of bugs                → Querying
+    #[tokio::test]
+    async fn the_first_call_of_each_routed_shape_ships_a_tracker_conventions_section() {
+        let (_dir, server) = make_server().await;
+        let pointer = "NOT auto-injected";
+
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-10-16-section-grain-probe.md",
+                "kind": "bug",
+                "title": "section grain probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let guide = guide_blocks(&created).join("");
+        for want in [
+            "One file per bug.",
+            "**Frontmatter:** every bug file has `kind: bug`",
+            "**Trigger rules \u{2014} open a bug file for ANY bug noticed during work:**",
+        ] {
+            assert!(
+                guide.contains(want),
+                "create under docs/issues/ must ship `{want}`, got {} B: {}",
+                guide.len(),
+                guide.chars().take(300).collect::<String>()
+            );
+        }
+        assert!(!guide.contains(pointer), "a section set is not a pointer");
+        assert!(
+            !guide.contains("Never suffix an id"),
+            "the whole guide must not ship on a create"
+        );
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+
+        let got = call_tool(&server, "doc", json!({"action": "get", "id": id})).await;
+        let guide = guide_blocks(&got).join("");
+        for want in [
+            "**Claiming a bug.**",
+            "**`unverified:` \u{2014} the caveat, made queryable.**",
+        ] {
+            assert!(
+                guide.contains(want),
+                "get of a bug must ship `{want}`, got {} B: {}",
+                guide.len(),
+                guide.chars().take(300).collect::<String>()
+            );
+        }
+        assert!(
+            !guide.contains("**Frontmatter:** every bug file"),
+            "\u{a7} Bug frontmatter was spent by the create and must not ship again"
+        );
+
+        let found = call_tool(&server, "doc", json!({"action": "find", "kind": "bug"})).await;
+        let guide = guide_blocks(&found).join("");
+        assert!(
+            guide.contains("The canonical"),
+            "find of bugs must ship \u{a7} Querying, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(!guide.contains(pointer));
+    }
+
+    /// A guide too large to auto-inject is delivered by SECTION, never whole, and the
+    /// bare topic is stamped only by a deliberate explicit fetch.
     ///
     /// The harness may save an oversized tool result to disk and show the model
     /// only a ~2 KB preview of block 0; the guide is always a later block, so a
     /// 59 KB `tracker-conventions` shipped whole could be marked delivered while
     /// the model never saw a byte of it
     /// (`docs/issues/archive/2026-09-24-a-guide-in-a-result-the-harness-saves-to-disk-is-marked-delivered-unread.md`).
+    /// Until `tracker-conventions` declared `serves:` sections this was the pointer
+    /// path end to end; that path now has no live guide to run on and is pinned by
+    /// `guide_emit::tests::an_oversize_whole_topic_guide_ships_a_pointer_and_does_not_stamp_the_topic`
+    /// with a small bound.
     ///
     /// Asserted on the LEDGER as well as the blocks: a response-shape check alone
     /// is satisfied by a block that is stamped and then dropped by the client.
-    /// The explicit fetch is asserted too, so the pointer is shown to lead
-    /// somewhere: `get_guide` must still return the full body, and stamping on
-    /// that deliberate read is what retires the topic.
+    /// The explicit fetch is asserted too: `get_guide` must still return the full
+    /// body, and stamping on that deliberate read is what retires the topic.
     ///
     /// Positive twin (a small whole-topic guide still ships whole and stamps):
     /// `guide_emit::tests::a_non_declaring_topic_ships_whole_and_stamps_the_bare_topic`.
     #[tokio::test]
-    async fn an_oversize_whole_topic_guide_ships_a_pointer_and_is_not_stamped() {
+    async fn an_oversize_guide_ships_sections_not_its_body_and_only_an_explicit_fetch_stamps_the_topic(
+    ) {
         let (_dir, server) = make_server().await;
         let ledger = server.live_ledger();
 
@@ -14495,33 +14607,40 @@ mod guide_hint_tests {
         )
         .await;
 
-        assert!(
-            !content_carries_guide_body(&created, "tracker-conventions"),
-            "a guide over the auto-inject bound must not ship its body inline"
-        );
+        // The corpus has no oversize NON-declaring topic left, so the pointer path
+        // itself is pinned in `guide_emit::tests`, driven with a small bound. What
+        // this asserts is the half only a live server can: the 59 KB guide is not
+        // shipped whole, and shipping its sections does not stamp the bare topic.
         let guide = guide_blocks(&created).join("");
         assert!(
-            guide.contains("get_guide(\"tracker-conventions\")"),
-            "the pointer must name the explicit fetch, got: {guide}"
+            guide.len() < crate::tools::guide_emit::MAX_AUTO_INJECT_GUIDE_BYTES,
+            "a section set must stay under the auto-inject bound, got {} B",
+            guide.len()
         );
         assert!(
-            guide.len() < 1_024,
-            "a pointer is a line, not a body — got {} B",
-            guide.len()
+            !guide.contains("Never suffix an id"),
+            "a create must not ship the guide's whole body (§ Entry ids is in it)"
         );
         let hint = extract_hint(&created).unwrap_or_default();
         assert!(
-            hint.contains("get_guide(\"tracker-conventions\")") && !hint.contains("do not re-call"),
-            "the _guide_hint must not promise a body that did not ship, got: {hint}"
+            hint.contains("Section(s) of 'tracker-conventions'")
+                && !hint.contains("do not re-call"),
+            "the _guide_hint must say a slice shipped, not the full guide, got: {hint}"
         );
         assert!(
             !ledger.lock().contains("tracker-conventions"),
-            "an undelivered guide must not be marked delivered — it is what \
-             suppresses the guide for the rest of the session"
+            "a section delivery must not stamp the BARE topic — that stamp means the model \
+             has the whole guide and is what suppresses the rest of it for the session"
+        );
+        assert!(
+            ledger
+                .lock()
+                .contains("tracker-conventions#Tracker artifacts (docs/trackers/)"),
+            "each delivered section is stamped under its own key"
         );
 
-        // The pointer leads somewhere: an explicit fetch returns the whole body,
-        // and that deliberate read is what stamps the topic.
+        // An explicit fetch returns the whole body, and that deliberate read is what
+        // stamps the topic.
         let fetched = call_tool(
             &server,
             "get_guide",

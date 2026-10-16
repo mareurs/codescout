@@ -11,6 +11,7 @@ and read them with `doc(action="get", id=...)`. Never edit a
 tracker file by raw path lookup — go through the catalog.
 
 ## Bug files (docs/issues/)
+<!-- serves: doc.create(path~docs/issues/) -->
 
 One file per bug.
 
@@ -19,6 +20,9 @@ One file per bug.
   reaching `master` is NOT required.
 - **Slug:** short kebab-case noun-phrase (3–6 words), e.g.
   `edit-code-insert-mid-function`.
+
+### Bug frontmatter and status vocabulary
+<!-- serves: doc.create(path~docs/issues/), doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
 
 **Frontmatter:** every bug file has `kind: bug` plus a `status:` field.
 The librarian classifier auto-recognizes the file on next reindex.
@@ -34,6 +38,9 @@ The librarian classifier auto-recognizes the file on next reindex.
 | `mitigated` | Workaround in place; root cause not addressed |
 | `wontfix` | Intentionally not fixing; justification in the file |
 | `zombie` | No longer observed but root cause unconfirmed. Pair with `last_observed:` and a re-open trigger |
+
+### Claiming and releasing a bug
+<!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
 
 **Claiming a bug.** Set `taken` together with your own sessionId, through the catalog —
 a raw frontmatter edit does not reach it (BL-48):
@@ -63,6 +70,9 @@ the age of the claim.
 `closed:` stays empty at creation — fill in `YYYY-MM-DD` only when
 status flips to `fixed` / `mitigated` / `wontfix`.
 
+### The unverified caveat, made queryable
+<!-- serves: doc.get(path~docs/issues/), doc.find(path~docs/issues/) -->
+
 **`unverified:` — the caveat, made queryable.** Add it whenever the `status` overstates
 what was actually established: no regression test, root cause not addressed, a claim not
 re-checked since a rebuild, a fix applied only to a gitignored file, or a blocker that has
@@ -84,6 +94,8 @@ use a marker to record an ESCALATION** — a caveat that got worse must keep rep
 is why `MEASURED` is deliberately not one. An unmarked caveat behaves exactly as it always
 has, so nothing written before this convention changes meaning.
 
+### Settled caveats — STANDING and TRACKED
+
 **Two more first words, and they are opposites.** `STANDING` marks a limit NO action can
 settle — a property no test can observe, a cause that will never be established — and
 silences the record like the four verbs: this check is a worklist, and a permanent limit is
@@ -104,6 +116,9 @@ per-project memory write into the wrong repo with no review able to catch it.
 
 The system's scarce resource is not candour; it is **legibility**. Authors already write
 the caveat. Write it where a query can read it.
+
+### Trigger rules and capture discipline
+<!-- serves: doc.create(path~docs/issues/) -->
 
 **Trigger rules — open a bug file for ANY bug noticed during work:**
 
@@ -131,6 +146,8 @@ ever surfaces (`doc(action="find", kind="bug", status="open")` filters on
 The file MUST carry the fix SHA when archived experiments-only, because nothing
 re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orphans on
 rebase and an unlabelled one in `archive/` becomes an untraceable string.
+
+### Closing a bug — patch-id, fix provenance and the archive flow
 
 **And record a `patch-id` next to it, because the sentence above describes a wound with
 no remedy.** `git show <sha> | git patch-id --stable` is a content hash of the commit's
@@ -371,6 +388,7 @@ So the finding exists and the gate is silent by design — which is exactly why 
 the check.
 
 ## Tracker artifacts (docs/trackers/)
+<!-- serves: doc.create(path~docs/trackers/) -->
 
 Trackers are living state — multi-entry tables, observation logs, ADR
 indexes — that grow across many sessions. They are full librarian
@@ -422,6 +440,8 @@ way only, tracker → plan, so the plan is the row a query returns and the track
 that would have corrected it. **Before reading a `draft` as "not started", check whether a
 `resume-*` tracker names it.**
 
+### Archiving a tracker
+
 **Archiving a tracker:** preferred path is in-place archival via the
 catalog:
 
@@ -435,6 +455,7 @@ id="<id>", new_rel_path="docs/trackers/archive/foo.md")` — never a bare
 
 
 ### A `## Resume` states its own currency
+<!-- serves: doc.get(path~docs/trackers/) -->
 
 A tracker that accumulates review passes by *appending* leaves its oldest navigational
 section — the one saying "start here / do this next" — at the **bottom**, below every
@@ -548,6 +569,7 @@ enforced by the citation resolver, and violating them silently breaks the link
 graph. Every figure below was measured on this repo on 2026-08-17.
 
 ### Declaring a ledger
+<!-- serves: doc.create(path~docs/trackers/) -->
 
 A **ledger** is an artifact that owns an id namespace. It is a much narrower thing
 than a tracker: measured 2026-08-17, 27 unaugmented trackers under
@@ -581,6 +603,7 @@ prose is not a namespace, and inferring one from content would make every such d
 allocatable.
 
 ### A prefix has one owner per repository
+<!-- serves: doc.create(path~docs/trackers/) -->
 
 A bare `PREFIX-N` citation resolves to whichever ledger defines `PREFIX-N`, so two
 ledgers owning one prefix bind each other's citations **silently**. `T` did exactly that:
@@ -912,6 +935,7 @@ The ladder is **live body → archived section (heading kept) → nothing furthe
   definitions and creates ambiguous tokens.
 
 ### Make the tracker guarded
+<!-- serves: doc.create(path~docs/trackers/) -->
 
 **Declare `entry_prefix`.** A ledger is guarded by that declaration alone — the guard
 treats a declared `entry_prefix` as one of three independent reasons a file is
@@ -940,6 +964,7 @@ needs no guard**: a convention doc, an ADR, a finished session log has nothing a
 can corrupt, and guarding it only makes routine edits ceremony.
 
 ## Querying with the librarian
+<!-- serves: doc.find(path~docs/trackers/), doc.find(path~docs/issues/), doc.get(path~docs/trackers/) -->
 
 The canonical "what's live right now" query — archived rows are hidden
 by the default scope:

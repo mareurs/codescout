@@ -556,7 +556,127 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
          scope for Phase 1) into smaller declaring sub-sections, which is the fix \
          that would make it reachable without raising the ceiling.",
     ),
+    (
+        "tracker-conventions",
+        "Settled caveats — STANDING and TRACKED",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Closing a bug — patch-id, fix provenance and the archive flow",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Archiving a tracker",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Declaring an augmentation",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Entry-level standard — the shape INSIDE a tracker",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Entry ids",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Entry headings — the definition rule",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Citing an entry — bare, or qualified",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "One entry format, never two",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Required fields",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Detecting these fields",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Compaction and archival",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Cross-linking (edges are derived — cite in prose)",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "(librarian call shapes)",
+        TRACKER_LIBRARIAN_SHAPES_UNSERVED,
+    ),
 ];
+
+/// Why a `tracker-conventions` section carries no `serves:` declaration: the call that
+/// needs it is a write, and no write's result can route to this topic.
+///
+/// `LibrarianAdapter::relevant_guide_topic` reads the RESULT, and only for a path under
+/// `docs/issues/` or `docs/trackers/` (`names_path_containing`: top-level
+/// `abs_path`/`rel_path`, `items[].rel_path`, `violations[].path`). Measured 2026-10-16 by
+/// making every `doc` action against a `docs/trackers/` artifact and reading which
+/// results name such a path: `create`, `get` and `find` do; `update` (`{id, updated}`),
+/// `append_entry`, `move` (`old_abs_path`/`new_abs_path`, keys the scan does not read),
+/// `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` and `augment` do not. Those
+/// calls route to `librarian`, so a `path~`-qualified section here could never be chosen
+/// for them — a declaration nothing reaches, which is the failure section grain exists to
+/// prevent. Until the router is widened (scan `new_abs_path`, or route on the selector)
+/// the section is pull-only via `get_guide("tracker-conventions")`; before section grain
+/// the same bytes reached nobody either, because the whole topic was over the
+/// auto-inject bound and shipped a pointer.
+/// docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md
+const TRACKER_SECTION_NEEDS_A_WRITE: &str =
+    "Unreachable by auto-injection, not unimportant: the call \
+     that needs this section is a write (doc.update, append_entry, update_entry, move, delete, \
+     augment, link), and no write's result names a path the router reads — measured \
+     2026-10-16 by making each call against a docs/trackers/ artifact. Such a call routes to \
+     `librarian`, so a path-qualified `serves:` here could never be chosen for it. Needs the \
+     router widened (scan new_abs_path, or route on the selector); until then it is pull-only \
+     via get_guide(\"tracker-conventions\"). See \
+     docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md.";
+
+/// The `librarian.*` census shapes `every_observed_shape_of_a_declaring_topic_has_a_section`
+/// pairs with `tracker-conventions` (a result naming a tracker path routes there), none of
+/// which has a section: this reason names each one, which is how that gate resolves a
+/// shape-level waiver.
+///
+/// `librarian.doctor` is the one with a real argument. Its result routes here
+/// (`violations[].path`), but the checks it reports are remediated by different sections,
+/// and `Shape` can only qualify on a path, not on the violation class: serving every
+/// section that names a doctor check would ship them all to a call whose report names
+/// one or two. Each check's home is one section, but the home of
+/// `terminal_status_without_fix_anchor` is the 15 KB `Closing a bug` section. A
+/// `check~<name>` predicate is a grammar amendment ("widening it requires amending the
+/// spec", `guide_index::Shape`), so it is left to a decision rather than made here.
+const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes route to \
+     tracker-conventions when their result names a tracker or bug path, and none has a \
+     section here: librarian.doctor (its violations are remediated by different sections and \
+     Shape cannot qualify on the violation class — serving every check-named section would \
+     ship them all, the largest being 15 KB), librarian.link_scan, librarian.reindex, \
+     librarian.audit_doc_refs, librarian.tracker_design, librarian.context, \
+     librarian.legibility_scan, librarian.merge_worktree, librarian.find (not an action; a \
+     mistyped doc(action=\"find\")). Those that librarian.md declares are served from it on \
+     the fallthrough once the tracker-conventions preamble is spent.";
 
 /// The guide that opens a session.
 ///
