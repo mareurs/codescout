@@ -25,6 +25,7 @@ import argparse
 import collections
 import json
 import os
+import re
 import statistics as st
 import sys
 
@@ -134,6 +135,25 @@ def scan_transcript(path: str) -> dict | None:
     }
 
 
+_UUID_JSONL = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$")
+
+
+def session_key(projects_root: str, path: str) -> str:
+    """The identity under which copies of one transcript collapse.
+
+    `<uuid>.jsonl` and `agent-<id>.jsonl` name their session wherever they sit, so the basename
+    is the key. Any other name (the prompt-test harness writes a `session.jsonl` into each of
+    573 directories) names nothing: keying those by basename merges distinct sessions into one.
+    They key on the path under the profile's `projects/` dir, which is the same across the
+    profile dirs that hold copies of one another.
+    """
+    base = os.path.basename(path)
+    if _UUID_JSONL.match(base) or (base.startswith("agent-") and base.endswith(".jsonl")):
+        return base
+    return os.path.relpath(path, projects_root)
+
+
 def collect(profiles: list[str]) -> list[dict]:
     rows, walked = [], 0
     for prof in profiles:
@@ -143,15 +163,32 @@ def collect(profiles: list[str]) -> list[dict]:
                 if not f.endswith(".jsonl"):
                     continue
                 walked += 1
-                if (r := scan_transcript(os.path.join(dirpath, f))):
+                full = os.path.join(dirpath, f)
+                if (r := scan_transcript(full)):
+                    r["key"] = session_key(root, full)
+                    try:
+                        r["size"] = os.path.getsize(full)
+                    except OSError:
+                        r["size"] = -1
                     rows.append(r)
-    # Same session-id can exist under more than one profile (49 of 1703 at baseline).
-    # Keep the largest copy so the corpus is not double-counted.
+    # The same session can exist under more than one profile dir as separate byte-identical
+    # copies (docs/issues/2026-09-11-subagent-transcripts-are-byte-identical-across-profile-dirs.md).
+    # Keep the copy with the most injections so the corpus is not multiple-counted, and say how
+    # many copies were dropped and how many of those differ in size from the one kept: raw
+    # per-profile counts include this duplication and nothing else tells a reader.
     best: dict[str, dict] = {}
+    differing = 0
     for r in rows:
-        if r["sid"] not in best or len(r["injections"]) > len(best[r["sid"]]["injections"]):
-            best[r["sid"]] = r
-    print(f"# transcripts walked: {walked}  parsed: {len(rows)}  unique sessions: {len(best)}",
+        kept = best.get(r["key"])
+        if kept is None:
+            best[r["key"]] = r
+            continue
+        if r["size"] != kept["size"]:
+            differing += 1
+        if len(r["injections"]) > len(kept["injections"]):
+            best[r["key"]] = r
+    print(f"# transcripts walked: {walked}  parsed: {len(rows)}  unique sessions: {len(best)}"
+          f"  duplicate copies collapsed: {len(rows) - len(best)} ({differing} differ in size)",
           file=sys.stderr)
     return [r for r in best.values() if r["injections"]]
 

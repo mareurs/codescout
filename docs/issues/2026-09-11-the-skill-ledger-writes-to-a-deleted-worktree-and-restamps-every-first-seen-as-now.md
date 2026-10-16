@@ -160,15 +160,31 @@ against a path string.
 
 ## Fix
 
-Not attempted. The change belongs in the `claude-plugins` repo, not this one, and the
-right shape is a judgement call this bug does not make for the owner: either both sites
-resolve through one shared helper, or the ledger writer refuses to create a directory
-that does not already exist — the latter also removes the resurrection half, since a
-`mkdir -p` against a deleted tree is never the intended write.
+Not attempted in this repo — the code is in the sibling `claude-plugins` repo
+(`buddy/scripts/skill_ledger.py`, `buddy/scripts/statusline.py`; neither file exists in
+codescout, `git ls-files | grep -E "skill_ledger|statusline"` is empty). Re-verified
+2026-10-16 against `/home/marius/work/claude/claude-plugins` (branch `effort-routing-r1`,
+checkout dirty with unrelated work, so not touched): the defect lines are unchanged —
+`skill_ledger.py:43` `def load_ledger`, `:58` `path.parent.mkdir(parents=True, exist_ok=True)`,
+`:181` `cwd = event.get("cwd")`, `:187` `ledger_path(Path(cwd), sid)`; the last commit touching
+either file is `b4f68ce` (2026-06-16), so no fix has landed.
 
-The fabricated-`first_ts` half wants its own answer regardless of which path rule wins:
-`load_ledger` cannot currently distinguish "no skills loaded yet" from "wrong directory",
-and both produce the same empty dict.
+Proposed fix (awaiting the owner's go-ahead for a `claude-plugins` change):
+
+1. **Writer refuses a missing root.** Before `path.parent.mkdir(parents=True, ...)`, require
+   `project_root` itself to exist and be a directory; otherwise return without writing. Only
+   `.buddy/<sid>/` may be created beneath an existing root. This ends the resurrection of a
+   deleted worktree, since a `mkdir -p` against a deleted tree is never the intended write.
+2. **One resolver at both sites.** Add one helper (for example in `buddy_paths.py`) that
+   resolves the project root as `workspace.current_dir or cwd` from the event payload; have
+   `skill_ledger.py:181-187` and `statusline.py:268-269` both call it, so writer and reader
+   cannot address different directories.
+3. **`load_ledger` distinguishes absent from empty.** Return a sentinel (or raise a
+   dedicated `LedgerAbsent`) for a missing file; the caller that would stamp `first_ts = now`
+   for every skill seen in the transcript must, on absence, either skip stamping or derive
+   `first_ts` from the transcript's own timestamps, never from the write instant.
+
+Left undecided here: whether (3) skips or back-fills from transcript timestamps.
 
 ## Tests added
 
@@ -187,10 +203,22 @@ session are wrong and there is no user-facing way to correct them.
 
 ## Resume
 
-Decide in the `claude-plugins` repo whether the ledger writer should refuse a
-non-existent directory or share a resolver with the statusline, then make `load_ledger`
-distinguish absent-file from empty-ledger so a mislocated read cannot silently re-stamp
-`first_ts`. The two path expressions to reconcile are cited under **Root cause** above.
+Status stays `open`: the fix lives in another repo and needs the user's go-ahead for a
+`claude-plugins` change (2026-10-16, routed through the coordinating session).
+
+Outline of the pytest test to add in `claude-plugins` (no fixture beyond `tmp_path`):
+
+- `test_writer_does_not_recreate_a_deleted_root`: build `root = tmp_path/"wt"`, delete it,
+  feed `skill_ledger.main` an event with `cwd=str(root)` and a transcript containing a skill
+  load; assert `not root.exists()`.
+- `test_writer_and_statusline_resolve_the_same_root`: payload with `workspace.current_dir=A`
+  and `cwd=B`; assert both call sites return `A`.
+- `test_missing_ledger_does_not_restamp_first_ts`: transcript with skills loaded at distinct
+  timestamps, no ledger file; assert the written `first_ts` values are not all equal to the
+  write instant.
+
+Then make `load_ledger` distinguish absent-file from empty-ledger. The two path expressions
+to reconcile are cited under **Root cause** above.
 
 ## References
 
