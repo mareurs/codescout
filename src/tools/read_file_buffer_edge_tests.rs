@@ -3100,8 +3100,16 @@ async fn a_breadcrumb_that_costs_the_first_line_is_dropped() {
 /// sibling keys and a 290-byte key beside a first line swept across the edge:
 /// - `breadcrumb` is never dropped while `siblings` stay;
 /// - where dropping `siblings` alone shows the line whole, `breadcrumb` stays;
-/// - where only dropping BOTH shows it whole (8,600 to 8,800 B, measured in review), both go.
-///   Judged one key at a time, both were kept there and the line was cut.
+/// - where only dropping BOTH shows it whole, both go. Judged one key at a time, both were kept
+///   there and the line was cut.
+///
+/// The region where only dropping both shows the line whole is FOUND by the sweep, not pinned to
+/// literal widths. The response echoes the file's absolute path several times, so the edge sits
+/// at a different first-line width under every `TMPDIR` (8,600 to 8,800 B under `/tmp`, measured
+/// in review, and lower under a longer temp path): a literal window made this test pass or fail
+/// with the host's temp directory rather than with the code. What stays pinned is that the
+/// region exists, lies inside the sweep, and that the line is whole exactly up to its end and cut
+/// after it.
 #[tokio::test]
 async fn siblings_go_before_breadcrumb_and_the_pair_is_judged_together() {
     let ctx = ctx50().await;
@@ -3110,8 +3118,13 @@ async fn siblings_go_before_breadcrumb_and_the_pair_is_judged_together() {
     let siblings: String = (0..4)
         .map(|i| format!("s{i}{}: 1\n", "n".repeat(120)))
         .collect();
+    let (lo, hi, step) = (7_000usize, 9_200usize, 5usize);
     let (mut siblings_only, mut both) = (0, 0);
-    for w in (7_000..9_200).step_by(5) {
+    // First-line widths at which the line came back whole / cut, whatever was dropped.
+    let (mut last_whole, mut first_cut) = (0usize, usize::MAX);
+    // Widths at which ONLY dropping both showed it whole (siblings and breadcrumb both gone).
+    let mut both_whole: Vec<usize> = Vec::new();
+    for w in (lo..hi).step_by(step) {
         let p = dir.path().join(format!("o{w}.yaml"));
         std::fs::write(&p, wide_first_line_yaml(&key, w, &siblings)).unwrap();
         let v = ReadFile
@@ -3123,17 +3136,20 @@ async fn siblings_go_before_breadcrumb_and_the_pair_is_judged_together() {
             .unwrap();
         let s = v["siblings_omitted"] == json!(true);
         let b = v["breadcrumb_omitted"] == json!(true);
+        let cut = v.get("line_truncated").is_some();
         assert!(
             !b || s,
             "w={w}: breadcrumb dropped while siblings stayed: {v:.200}"
         );
         siblings_only += usize::from(s && !b);
         both += usize::from(s && b);
-        if (8_600..=8_800).contains(&w) {
-            assert!(
-                v.get("line_truncated").is_none() && s && b,
-                "w={w}: only dropping both shows the line whole: {v:.300}"
-            );
+        if cut {
+            first_cut = first_cut.min(w);
+        } else {
+            last_whole = last_whole.max(w);
+            if s && b {
+                both_whole.push(w);
+            }
         }
     }
     assert!(
@@ -3141,6 +3157,32 @@ async fn siblings_go_before_breadcrumb_and_the_pair_is_judged_together() {
         "fixture: no width dropped siblings alone"
     );
     assert!(both > 0, "fixture: no width dropped both");
+    // The line is whole up to an edge and cut after it: a cut width below a whole one means a
+    // width was cut that a wider one was not.
+    assert!(
+        last_whole < first_cut,
+        "a width was cut below one that showed whole: whole up to {last_whole}, first cut {first_cut}"
+    );
+    // The region the test is about: whole only because both keys went. Judged one key at a time
+    // it is empty (the line is cut there), and so this fails.
+    assert!(
+        !both_whole.is_empty(),
+        "no width showed the line whole only by dropping both siblings and breadcrumb \
+         (whole up to {last_whole}, first cut {first_cut})"
+    );
+    // ...and the whole sweep saw it: the edge lies inside it, not past its end.
+    assert!(
+        both_whole.iter().min().unwrap() > &lo && last_whole + step < hi,
+        "fixture: the edge is not inside the sweep {lo}..{hi}: whole up to {last_whole}"
+    );
+    // Both go for the whole of it: every width in the region, from its first to its last, shows
+    // the line whole with both dropped. A width in between that kept either would be the
+    // one-key-at-a-time failure.
+    let (first, last) = (*both_whole.first().unwrap(), *both_whole.last().unwrap());
+    assert!(
+        both_whole.len() == (last - first) / step + 1,
+        "widths {first}..={last} are not all whole with both dropped: {both_whole:?}"
+    );
 }
 
 /// The clamp hint on a page of a real file's value names the FILE and says `grep -o` searches it
