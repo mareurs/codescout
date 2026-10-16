@@ -135,6 +135,41 @@ class FreezeMenuGuard(unittest.TestCase):
     def test_off_menu_positives_do_not_count(self):
         with self.assertRaises(AssertionError):
             fz.check_menu_positives(_rows("a", 49) + _rows("z", 10), ["a"])
+class FreezeTSetTwinGuard(unittest.TestCase):
+    """t_mined_rows skips a T row whose twin already sits in its own context_before.
+
+    docs/issues/2026-10-06-freeze-stage2-t-set-loop-has-no-twin-in-context-before-guard.md: the
+    train/val/cal loop has the guard; the T loop did not, so a re-label of one of the two flagged
+    T rows to a menu rule would have put a leaking positive into the held-out set.
+    """
+    RULE = sorted(fz.gs.mp.sel.RULES)[0]
+    POS = "The retry loop cannot leak handles on any platform."
+    TWIN = "The retry loop released every handle in the four Linux runs we traced."
+
+    def _run(self, before, label=None, split="T"):
+        row = {"positive": self.POS, "twin": self.TWIN, "context_before": before,
+               "context_after": f"Next we look at timers. {self.TWIN} Then we stop."}
+        n = {}
+        out, skipped = fz.t_mined_rows([row], {0: split}, {0: label or self.RULE}, fz.gs.mp, n)
+        return out, skipped, n
+
+    def test_a_t_row_with_its_twin_in_context_before_is_skipped(self):
+        out, skipped, _ = self._run(f"First we count sockets. {self.POS} {self.TWIN} Then we stop.")
+        self.assertEqual((out, skipped), ([], 1))
+
+    def test_the_same_row_without_the_twin_in_context_before_is_kept(self):
+        # Twin of the case above: only the twin's presence in context_before differs, so a guard
+        # that skips every T row cannot pass both.
+        out, skipped, n = self._run(f"First we count sockets. {self.POS} Then we stop.")
+        self.assertEqual([x["id"] for x in out], ["mined-0:pos", "mined-0:neg"])
+        self.assertEqual((skipped, n), (0, {}))
+
+    def test_a_leaking_row_outside_t_or_with_a_dropped_label_is_not_counted_as_skipped(self):
+        leak = f"First we count sockets. {self.POS} {self.TWIN} Then we stop."
+        self.assertEqual(self._run(leak, split="rest")[:2], ([], 0))
+        self.assertEqual(self._run(leak, label="not-a-violation")[:2], ([], 0))
+
+
 
 
 # Last, after every TestCase: a direct run stops defining tests at this line

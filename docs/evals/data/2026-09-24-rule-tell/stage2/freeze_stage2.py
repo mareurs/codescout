@@ -60,6 +60,29 @@ def check_menu_positives(train_rows: list[dict], menu: list[str], target: int = 
     if short:
         raise AssertionError(f"menu rules under {target} positive train rows: {short}")
     return pos
+def t_mined_rows(rows, split, lab, mp, n):
+    """The held-out T set's mined rows, and how many were skipped for leaking the label.
+
+    The twin guard of the train/val/cal loop applies here too: a row whose twin already sits in
+    its own `context_before` shows the model the correction inside the positive's window
+    (docs/issues/2026-10-06-freeze-stage2-t-set-loop-has-no-twin-in-context-before-guard.md).
+    Today the two such T rows are labelled not-a-violation and never reach this point; the check
+    is for a re-label. The skip count goes back to the caller, not into `n`, so the manifest
+    bytes cannot move."""
+    out, skipped = [], 0
+    for i, r in enumerate(rows):
+        if split[i] != "T" or lab[i] not in mp.sel.RULES:
+            continue
+        if mp.twin_in_context_before(r):
+            skipped += 1
+            continue
+        out.extend(x for x in (
+            row("T", "T", "mined", "mined", lab[i], r["context_before"], r["positive"], 1, f"mined-{i}:pos", n),
+            row("T", "T", "mined", "mined", lab[i], r["context_after"], r["twin"], 0, f"mined-{i}:neg", n)
+            if r.get("twin") else None) if x)
+    return out, skipped
+
+
 
 def paras(p):
     """A synthetic pair's two paragraphs: as generated, and with the fix substituted."""
@@ -165,12 +188,8 @@ def main() -> int:
             pos_dropped[rule] += 1
         sets[f].extend(x for x in pair if x)
 
-    for i, r in enumerate(rows):
-        if split[i] == "T" and lab[i] in mp.sel.RULES:
-            sets["T"].extend(x for x in (
-                row("T", "T", "mined", "mined", lab[i], r["context_before"], r["positive"], 1, f"mined-{i}:pos", n),
-                row("T", "T", "mined", "mined", lab[i], r["context_after"], r["twin"], 0, f"mined-{i}:neg", n)
-                if r.get("twin") else None) if x)
+    t_rows, t_twin_leak_skipped = t_mined_rows(rows, split, lab, mp, n)
+    sets["T"].extend(t_rows)
     for p in tsyn:
         if not p["ok"] or not cell_kept(p, 1, "tsyn") or p["pair_id"] in quarantine:   # T-syn cells are round 1 only
             continue
@@ -203,6 +222,7 @@ def main() -> int:
         print(f"{name:11} rows {v['rows']:5}  positives {v['positives']:5}  sha256 {v['sha256'][:16]}")
     print("dropped:", dict(n))
     print("mined rows skipped, twin already in context_before:", twin_leak_skipped)
+    print("mined T rows skipped, twin already in context_before:", t_twin_leak_skipped)
     print(f"menu {len(menu)} rules; Haiku-only {len(frozen['haiku_only'])}")
     return 0
 

@@ -1,9 +1,9 @@
 ---
 kind: bug
-status: open
+status: fixed
 tags:
 - cluster/guard-narrower-than-its-name
-closed: null
+closed: 2026-10-16
 opened: 2026-10-06
 owner: marius
 related:
@@ -61,16 +61,24 @@ measured 2026-10-06: cases (a)-(d2) above against the live script; the line numb
 2. **Hypothesis:** a remote sha absent from the local store makes the foreign scan list nothing. **Test:** case (d) with a made-up 40-hex remote sha, against the case (d2) control. **Verdict:** confirmed. **Evidence:** Symptom block.
 
 ## Fix
-Not applied. Not decided: whether to apply it at all (see Resume).
+
+Applied 2026-10-16 (experiments-only; fix SHA `96d2862b`, patch-id `7dd7d868487bec06ed01bb27630dd72fc37aed1c`) under the operator's ruling, **option D**: scan every non-deletion ref with the hold check's range logic; an unlistable range with no hold present stays fail-open.
+
+- `scripts/pre-push-foreign-session-guard.sh`: the branch-only `continue` filter is gone (`is_branch` is computed instead). The pushed sha is peeled to a commit (a tag of a tree or blob is skipped). The range is `<remote>..<tip>` only when the remote tip is a commit in the local store, else `<tip> --not --remotes` (the `hold_scan_ref` selection), so an unfetched tip no longer makes `git log` list nothing. The entry-id collision scan stays branch-only and trusted-range-only, exactly as before.
+- `docs/RELEASE.md`: a note after the release steps says step 6's `git push --tags` is silent when the tag is already published and refuses when a tag reaches another session's unpublished commits.
+
+What is deliberately still fail-open: `git log` failing for the foreign scan with no `refs/holds/` ref present (pinned by a shim case); the hold scan fails closed only when a hold exists, unchanged.
 
 ## Tests added
-N/A - nothing changed. If the foreign check is changed, the discrimination cases belong in `tests/pre-push-foreign-session-guard.sh` next to the existing hold cases for the same two paths (each asserting refusal on the tag / `refs/wip` / unlistable form AND silence on a tag that carries only the pusher's own commits).
+
+`tests/pre-push-foreign-session-guard.sh`, section "the FOREIGN check covers every non-deletion ref and an unfetched remote tip" (391 passed, 0 failed; was 357). Refusals: (a) and (d2) branch controls, (b) lightweight and annotated tag, (c) `refs/wip/*`, (d) branch and tag over an unfetched tip. Silent twins on an own-commits-only history for each of the five push shapes; an already-published foreign commit under a new tag is allowed; a tag of a tree, a deletion and a no-session-id push are skipped; an ack naming the author lets a tag through and one naming someone else does not; an unlistable range with no hold passes (shim). Two older cases whose expectation was the defect were changed and say so (`tag push: allowed`, `the same push with no hold passes as before`). Red first: before the guard change 15 assertions failed and the silent twins passed.
 
 ## Workarounds
 Before any tag or `refs/wip` push, or a force push over a tip you have not fetched, run the range yourself: `git log --format='%h %(trailers:key=Session-Id,valueonly) %s' <tag-or-sha> --not --remotes` and read the session ids. For releases, push the branch by refspec first (that path IS guarded), then the tag.
 
 ## Resume
-Operator decision, not an implementation task: should the foreign check adopt the hold check's range logic? Concretely, `hold_scan_ref`'s range selection (`scripts/pre-push-foreign-session-guard.sh` lines 250-253) and its fail-closed branch (257-261, 457-461) would be applied to the foreign scan, and the branch-only filter at lines 306-307 would be dropped or narrowed. What it would newly refuse: (1) a tag or `refs/wip/*` push whose reachable-but-unpublished commits include another session's, including the second step of `docs/RELEASE.md:60-61`; (2) a branch push over an unfetched remote tip, which the guard would now scan over `<tip> --not --remotes` (it can over-refuse, never under-refuse); (3) with no holds in play, an unlistable range would need its own decision, since the hold check only fails closed when a hold exists. Each of these is a refusal that does not exist today for anyone. Check `tests/pre-push-foreign-session-guard.sh` for the cases that would change before touching the script.
+
+Done. Archive (`doc(action="move")` to `docs/issues/archive/`) once the gate is green on experiments.
 
 ## References
 - `scripts/pre-push-foreign-session-guard.sh` (foreign check, `hold_scan_ref`), `tests/pre-push-foreign-session-guard.sh`, `docs/RELEASE.md:60-61`.
