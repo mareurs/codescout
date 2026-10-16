@@ -22,6 +22,10 @@ call() {
     local tool="$1" params="$2"
     STEPS=$((STEPS + 1))
     RESULT=$(mcp call "$tool" -p "$params" ce-kt-test 2>/dev/null) || RESULT=""
+    # See tests/mcp-smoke-rust.sh: the reply is plain text and carries the injected guide
+    # body after an `<!-- auto-injected` marker, which would satisfy a string assertion on
+    # its own. RESULT is the tool's reply only.
+    RESULT="${RESULT%%<!-- auto-injected*}"
 }
 
 assert_contains() {
@@ -40,9 +44,11 @@ assert_contains() {
 # (tests/mcp_smoke_scripts_reference_real_tools.rs).
 # docs/issues/archive/2026-09-09-assert-not-contains-cannot-fail-when-the-call-it-checks-failed.md
 
-assert_json_has() {
-    echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert '$1' in d" 2>/dev/null
-}
+# There is deliberately NO JSON helper either (`assert_json_has`): `mcp call` prints plain
+# text, so `json.load(sys.stdin)` over RESULT never succeeds, and with `-f json` a
+# `"content"` key is present on every reply, errors included. Assert on the text the
+# server prints. Re-adding one reds `no_smoke_script_parses_the_reply_as_json`
+# (tests/mcp_smoke_scripts_reference_real_tools.rs).
 
 pass() {
     local steps="$1" name="$2"
@@ -76,27 +82,13 @@ trap cleanup EXIT
 
 echo "=== Tool Access Control ==="
 
-test_read_file_blocks_kt() {
-    call read_file '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
-    if assert_contains "error" && assert_contains "source code"; then
-        pass 1 "read_file blocks .kt files"
-    else
-        fail 1 "read_file blocks .kt files" "expected RecoverableError for source code"
-    fi
-}
-
-test_read_file_blocks_kts() {
-    call read_file '{"path": "build.gradle.kts"}'
-    if assert_contains "error" && assert_contains "source code"; then
-        pass 1 "read_file blocks .kts files"
-    else
-        fail 1 "read_file blocks .kts files" "expected RecoverableError for source code"
-    fi
-}
-
+# read_file no longer refuses source files (the `debug_enforce_symbol_tools` gate was
+# retired; `is_source_path` now gates only multi-line edit_file edits), so the former
+# "read_file blocks .kt/.kts" and "blocked error has hints" steps asserted a refusal the
+# server does not make. tests/mcp-smoke-rust.sh covers the outline behaviour.
 test_read_file_allows_properties() {
     call read_file '{"path": "gradle.properties"}'
-    if assert_contains "kotlin.code.style" && assert_json_has "content"; then
+    if assert_contains "kotlin.code.style"; then
         pass 1 "read_file allows .properties files"
     else
         fail 1 "read_file allows .properties files" "content not returned"
@@ -105,7 +97,7 @@ test_read_file_allows_properties() {
 
 test_read_file_allows_md() {
     call read_file '{"path": "README.md"}'
-    if assert_json_has "content"; then
+    if assert_contains "^# "; then
         pass 1 "read_file allows .md files"
     else
         fail 1 "read_file allows .md files" "blocked or error"
@@ -114,28 +106,16 @@ test_read_file_allows_md() {
 
 test_read_file_allows_yml() {
     call read_file '{"path": "docker-compose.yml"}'
-    if assert_contains "services" && assert_json_has "content"; then
+    if assert_contains "services"; then
         pass 1 "read_file allows .yml files"
     else
         fail 1 "read_file allows .yml files" "blocked or error"
     fi
 }
 
-test_blocked_error_has_hints() {
-    call read_file '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
-    if assert_contains "symbols(path)" && assert_contains "symbols(name="; then
-        pass 1 "blocked error includes symbol tool hints"
-    else
-        fail 1 "blocked error includes symbol tool hints" "missing tool suggestions"
-    fi
-}
-
-test_read_file_blocks_kt
-test_read_file_blocks_kts
 test_read_file_allows_properties
 test_read_file_allows_md
 test_read_file_allows_yml
-test_blocked_error_has_hints
 
 # ── Category 2: Symbol Navigation ───────────────────────────────────────────
 
@@ -238,7 +218,7 @@ echo "=== Non-code Files ==="
 
 test_read_gradle_properties() {
     call read_file '{"path": "gradle.properties"}'
-    if assert_contains "kotlin.code.style" && assert_json_has "content"; then
+    if assert_contains "kotlin.code.style"; then
         pass 1 "read_file returns gradle.properties content"
     else
         fail 1 "read_file returns gradle.properties content" "content not returned"
@@ -247,7 +227,7 @@ test_read_gradle_properties() {
 
 test_read_readme() {
     call read_file '{"path": "README.md"}'
-    if assert_contains "EDU-Planner" && assert_json_has "content"; then
+    if assert_contains "EDU-Planner"; then
         pass 1 "read_file returns README.md with project name"
     else
         fail 1 "read_file returns README.md with project name" "blocked or error"
