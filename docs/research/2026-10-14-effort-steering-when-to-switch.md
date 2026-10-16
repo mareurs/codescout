@@ -39,6 +39,7 @@
 7. The termination gate was built and tested on `cs-p20` (section below): `low` with a `Stop` hook that type-checks all targets passed 5 of 5 for $1.26, against 0 of 10 without it in the earlier batches. One task, a compile-class failure, references from other batches. The next step, if any, is the operator's.
 8. Stage A (2026-10-16, section below): a grounded critic used as a gate for plans and design docs found 18 of 20 (`low`) and 17 of 20 (`high`) planted defects as blocking and blocked no clean original without a real defect; its effort made no difference (paired −1) at half the cost for `low`. It also blocked 16 to 19 of 20 originals for real defects. Not shown: that a producer fixes what it reports, the cost of that round, or results on defects not planted by me (Stage B).
 9. Stage C (2026-10-16, section below): with the critic as a `Stop` hook in a plan-writing loop, verified defects in the final plans were `low` 5, gated `low` 4, `xhigh` 0 (6 plans each); the gate blocked once in 6 runs and passed plans with real defects. No help shown; gated `low` does not match `xhigh` ($0.54 vs $1.92 per run). For plans, producer effort mattered and a cheap critic did not replace it.
+10. Stage D (2026-10-16, section below): the same 6 plans written at `medium` and `high` without a gate. Verified defects in the final plans were `low` 5, `medium` 5, `high` 3, `xhigh` 0, at $0.35, $0.47, $0.81 and $1.92 per run. By the pre-registered rules neither new level matches `xhigh`. Open confound: plan length rises with effort, and the audit may look less closely at a long plan.
 
 ## Our own evidence (R1 V2, Sonnet 5.5, CLI 2.1.296)
 
@@ -204,6 +205,28 @@ Pre-registered in `/home/marius/work/claude/es-stage0/critic-c/prereg-c.md` (wit
 What this means for "when to change effort": for plan writing on this material, producer effort mattered and a cheap `low` critic did not substitute for it. This is the opposite of the code result (`cargo check` closed the gap), and the difference is the check: a compiler is a complete oracle for its class of defect; a `low` LLM critic is not, on defects nobody planted.
 
 Limits: 6 items, one run per cell; the audit's depth per line is not constant (an Opus `high` audit of a 1,240-line plan may look less closely than of a 140-line one, so `X`'s zero may be optimistic); the auditor used the gate's rubric; nothing here shows whether a plan leads to working code.
+
+## Stage D (2026-10-16): where is the knee — `medium` and `high` plan writers do not match `xhigh`
+
+Pre-registered in `/home/marius/work/claude/es-stage0/critic-d/prereg-d.md`, with input hashes taken before the batch. Phase 1 ran 12 producer runs and 12 audits. It used the same 6 specs, code trees and prompt as Stage C, with no gate. Arms `M` (`medium`) and `H` (`high`) are new. Arms `L` and `X` are the Stage C runs, not rerun. Grading is as in Stage C: an Opus 5.5 `high` audit of each final plan with the arm unseen, then an Opus verifier on every blocking audit finding (codes only).
+
+| arm | verified blocking defects D (6 plans) | per item | mean producer cost | mean plan length |
+|---|---|---|---|---|
+| `L` | **5** | p02 2, p09 3 | $0.35 | 206 lines |
+| `M` | **5** | p02 2, p09 2, p10 1 | $0.47 | 255 lines |
+| `H` | **3** | p03 1, p09 1, p10 1 | $0.81 | 475 lines |
+| `X` | **0** | none | $1.92 | 984 lines |
+
+- Only p02 and p09 can discriminate. `L` had D = 0 on the other four items, so they show a floor effect. The rules were fixed before the batch: a level "clears" if D = 0 on both p02 and p09, "holds" if D = 0 on at least 3 of the 4 other items, and "matches `xhigh`" if it does both.
+- `M` clears neither p02 (2) nor p09 (2). `H` clears p02 but not p09 (1), and it holds on only 2 of 4 (p01, p08). **Verdict: no tested level below `xhigh` matched; `xhigh` remains the only level shown to clear.**
+- `medium` equals `low` in total (5 against 5) at 34 percent more producer cost. `high` leaves 3 defects at 42 percent of the cost of `xhigh`.
+- Totals fall as effort rises, but single items are noisy: `high` has defects on p03 and p10, where `low` had none.
+- The verifier labelled 8 of 9 audit findings `true`. The one `false` (D005, on p02 `M`) does not change D for that run, which stays 2.
+- Spend: $18.93 ($7.70 producers, $11.23 audits). The verifier subagent is not in this figure. The conditional phase 2 was not approved and not triggered.
+
+Limits: one run per cell and 6 items. Plan length rises with effort (206 lines at `low`, 984 at `xhigh`), and an audit may look less closely at a long plan. So the zero for `xhigh` may be optimistic, and these data cannot separate better plans from less closely audited plans. `L` and `X` come from the Stage C batch, not from the same randomised batch as `M` and `H`. The auditor used the gate's rubric. Nothing here shows that a plan leads to working code.
+
+What this adds to "when to change effort": for plan writing on this material, no cheaper level reached the `xhigh` result. The cheapest working design so far is `low` plus a mechanical gate for code, and `xhigh` for plans.
 
 ## Defects filed from Stage A (2026-10-16)
 
