@@ -1,7 +1,7 @@
 ---
 id: '3b4fce62b0289f20'
 kind: bug
-status: mitigated
+status: fixed
 title: 'RESIDUAL: Take option 2 (document unpinned-concurrent activation as unsupported) and/or option 3 (code guard against a subagent activate displacing the home default, blocked on per-caller identity)'
 tags:
 - cluster/shared-resource-carries-no-owner
@@ -41,7 +41,7 @@ Option 2 is documentation; no test pins prose. The soft form of option 3 is test
 
 ## Resume
 
-Only if the hard guard is wanted: pick (A) or (B) above. For (A) the refusal belongs in `ActivateProject::call` (`src/tools/config/mod.rs`), keyed on a stamped principal (`session_key::current_caller()` containing `/`), as a `RecoverableError` whose hint is the per-call `workspace=` pin; test it through `call_tool_inner` like `a_subagent_moving_the_default_is_reported_to_the_parent_via_the_stamped_principal`, and add a non-stamped control. For (B) design first (`buddy:architecture-snow-lion`): `AgentInner.default_workspace_root` becomes a per-principal map with the shared default as fallback.
+N/A. Decision recorded 2026-10-16: the lead chose option C (notice plus documentation, no hard guard). Options A (refuse subagent `activate`) and B (per-principal default) were declined, not deferred. Should the soft form prove insufficient, the design notes for A and B are in this file's § Fix.
 
 ## References
 
