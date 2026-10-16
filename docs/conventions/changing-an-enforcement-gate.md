@@ -112,7 +112,9 @@ Every refusal prints the exact remedy and the valid values.
 - Tightening at commit time only: fires late, spans two files, can be skipped, and is not run in CI.
 - A rule whose shape lives only in a refusal message.
 - Measuring with a scratch script when `docs/PROBES.md` has an instrument.
-- A fixture helper copied into a third test file. The shared traps (the hook refuses on
-  `len(index_rows) <= 10`, and a slug with a digit is silently not a slug) are then explained again
-  in each header. Extract one.
+- A fixture helper copied into another test file. The corpus writers and their three traps (the hook
+  refuses on `len(index_rows) <= 10`, a slug with a digit is silently not a slug, and the roster and the
+  class files are separate surfaces) live once, in `tests/lib/ledger-corpus.sh`. `source` it. It was
+  copied twice before it was extracted, and the third suite written on 2026-10-16 would have been the
+  third copy.
 - Leaving a gate edit uncommitted in the shared tree.

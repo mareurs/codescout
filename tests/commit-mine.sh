@@ -65,33 +65,23 @@ trap 'rm -rf "$WORK"' EXIT
 
 A=aaaaaaaa-0000-4000-8000-00000000000a
 B=bbbbbbbb-0000-4000-8000-00000000000b
-CLASSES=11
-SLUGS=(demo-a demo-b demo-c demo-d demo-e demo-f demo-g demo-h demo-i demo-j demo-k)
+# The corpus writers and the three fixture traps (ELEVEN classes, LETTERED slugs, roster and
+# per-class files kept apart) live in one place, shared with the divergence suite.
+# shellcheck source=lib/ledger-corpus.sh
+source "$SELF_ROOT/tests/lib/ledger-corpus.sh"
 IC1=docs/trackers/issue-clusters/IC-1-demo-a.md
 BUG=docs/issues/2026-09-24-new-bug.md
 
 # The corpus is committed BEFORE the hooks are installed, so the stage log starts absent and
 # every row in it is written by a case below. F8 depends on that: it is the no-log case.
 new_repo() {
-    local p="$WORK/repo$RANDOM$RANDOM" i s
+    local p="$WORK/repo$RANDOM$RANDOM"
     mkdir -p "$p/docs/trackers/issue-clusters" "$p/docs/issues" "$p/scripts"
     git -C "$p" init -q
     git -C "$p" config user.email t@t
     git -C "$p" config user.name t
-    {
-        echo "# Issue clusters"
-        echo
-        echo "| id | class | slug | promotes to |"
-        echo "|---|---|---|---|"
-        for i in $(seq 1 "$CLASSES"); do
-            printf '| IC-%s | a demo class | `%s` | not yet |\n' "$i" "${SLUGS[$((i - 1))]}"
-        done
-    } > "$p/docs/trackers/issue-clusters.md"
-    for i in $(seq 1 "$CLASSES"); do
-        s="${SLUGS[$((i - 1))]}"
-        printf '# IC-%s — demo class %s\n\n**Slug:** `cluster/%s`\n\n**Members:** none yet.\n' \
-            "$i" "$i" "$s" > "$p/docs/trackers/issue-clusters/IC-$i-$s.md"
-    done
+    ledger_write_roster "$p"
+    ledger_write_classes "$p"
     echo "same content" > "$p/old.txt"
     for f in pre-commit-foreign-index.sh pre-commit-unreviewed-content.sh \
              pre-commit-ledger-counts.py post-index-change-stage-log.sh \
