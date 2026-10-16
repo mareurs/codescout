@@ -1,11 +1,13 @@
 ---
-id: '0ca7439866e8f2b6'
+id: 39c6b3b95f6b9b82
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: the deep-agent observation window is declared in CLAUDE.md and nothing executes it — zero prospective samples in its first two days'
 tags:
 - cluster/declared-not-wired
 topic: deep-agent-observation
+closed: 2026-10-16
+no_fix_commit: 'superseded: capture window ended 2026-10-02 and the declaration left CLAUDE.md in 2edf6486; no code defect, nothing committed to fix'
 ---
 
 # BUG: the deep-agent observation window is declared in CLAUDE.md and nothing executes it — zero prospective samples in its first two days
@@ -97,20 +99,19 @@ Recorded here as corroboration that the class is live in two places at once. **N
 
 ## Fix
 
-**Not implemented. Candidate direction only, recorded so the 2026-09-25 review has something to decide between rather than a blank.**
+**Closed 2026-10-16 as superseded (wontfix) — user decision via coordinator, option A. No code change.**
 
-The window's *question* — when does context help, arrive too late, mislead, or add nothing — is sound and worth keeping. Its *instrument* is the defect. Two directions, neither costed:
+Verified at the bytes before closing:
 
-1. **Derive rather than collect.** Reconstruct per-session call sequences from the existing `usage.db` capture, which already holds arguments and results on 97.63% of calls and requires no one to remember. Hand-written DCX/DWF entries then stop being the dataset and become adjudication labels for cases the query surfaces — far fewer entries, each worth more.
-2. **Give the protocol a call site.** A hook or gate that performs (or refuses to proceed without) the capture, so compliance is the default path rather than an act of memory.
+- The declaration this defect is about no longer exists. `grep -n "Deep-agent|observation window" CLAUDE.md` returns 0 matches on `experiments` @ `f5f1c6f7`; the section was moved out of `CLAUDE.md` by `2edf6486` (`docs(claude-md): stage 2g`).
+- The capture window itself ended at 00:00 UTC 2026-10-02 (stated in this file's own `## Environment`), 14 days before this closure, and the 2026-09-25 review date has passed.
+- The defect is a process one (a protocol with no call site), and its subject is not in `src/usage/mod.rs`, which the file cites only as the unattended *substrate* (`UsageRecorder` capture of `input_json`/`output_json`). Nothing in that file is wrong.
 
-**The bound on direction 1, stated because it is the thing that makes it partial rather than a replacement:** `usage.db` records **MCP calls only**. Native `Bash`, `Read` and `Edit`, the host's own prompts and reasoning, and task outcomes are all invisible to it. A zero there is evidence about the instrumentation, not about work performed — the baseline's own § *Interpretation limits* says so. So a derived corpus answers the retrieval and timing questions far better than the current instrument and still cannot answer the outcome question without something else supplying it.
-
-Choosing between these, or extending the window, is a decision for the review date, not for this file.
+What survives, deliberately not acted on here: the two candidate directions above (derive a corpus from `usage.db`; give a protocol a hook call site) remain valid *design* options for any future observation instrument, and the lesson — "a trigger the model must notice is a policy, not a mechanism" (`issue-clusters:IC-3`) — is already recorded in the cluster ledgers. If a new window is opened, build its instrument first.
 
 ## Tests added
 
-N/A — nothing was changed. A regression test is not meaningful for a defect whose subject is a documented protocol with no executable component; the check that would catch a recurrence is a count of prospective entries against elapsed window time, which is a review-time question rather than a suite-time one. If direction 2 is taken, the hook that lands is what becomes testable.
+N/A — closed as superseded; nothing was changed. The window ended and its declaration was removed from `CLAUDE.md`, so there is no executable component left to test.
 
 ## Workarounds
 
@@ -118,7 +119,7 @@ None that survive the class. Asking sessions to try harder is the policy that al
 
 ## Resume
 
-Before the 2026-09-25 review: re-derive the three counts with the commands in § Reproduction, recording the fresh instant and tree, and check whether any prospective entry has landed since 2026-09-20T10:37:36Z. If the count is still zero, the review's question is not "is the data good enough yet" but "which of the two directions in § Fix do we take" — say so explicitly in the review note so elapsed calendar time is not read as collection effort. Do not extend the capture window as a first move: the window's length was never the binding constraint.
+Nothing outstanding. Re-open only if a new observation window is declared without an instrument.
 
 ## References
 

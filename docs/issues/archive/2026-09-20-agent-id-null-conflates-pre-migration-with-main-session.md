@@ -1,10 +1,11 @@
 ---
-id: '82973a1e83aa069f'
+id: 35fae90eda3d068b
 kind: bug
-status: open
+status: fixed
 title: 'BUG: agent_id NULL means both "pre-migration" and "main session", and the test comment names the distinction the column cannot express'
 tags:
 - cluster/addressing-without-an-escape-hatch
+closed: 2026-10-16
 opened: 2026-09-20
 severity: low
 ---
@@ -105,18 +106,18 @@ That is the problem rather than the mitigation: the meaning of one column now de
 
 ## Fix
 
-Not implemented. Candidate: write an explicit sentinel rather than NULL for a principal with no agent axis — `"main"`, or the session's own id — so NULL retains the single meaning the test comment asserts for it.
+**Resolved 2026-10-16 as option B (user decision via coordinator): no schema change, no backfill.**
 
-Two costs to weigh before doing it:
+- SHA: `6c53c7f3` (branch `worktree-agent-a43cf6b80307f2cc5`, to be merged into `experiments`)
+- patch-id: `e6929c830d8328f0fe93d0958acfab6e790007e8`
 
-- **The 8 existing post-migration rows would need backfilling**, or the ambiguity simply persists for a bounded set. Backfill is safe here precisely because `started_at IS NULL` still separates the eras — but only until the sentinel lands, so the two changes are ordered.
-- **A sentinel is a value in the namespace**, so it inherits the question the class is named for: what happens if a real agent id is ever the literal string `main`? Agent ids observed so far are 17-hex (`aeb644d29c1979f64`), which does not collide, but that is a property of today's generator, not a guarantee.
+The sentinel candidate was declined for a reason the filing did not weigh: `UsageRecorder` documents (`src/usage/mod.rs:49-53`) that for a client **without the companion plugin** a NULL `agent_id` means *unknown*, not *main session*. A `"main"` sentinel would therefore be wrong for every unstamped client, and would still leave NULL two-valued (pre-migration vs unstamped). The partition by `started_at` is exact at the bytes: both columns arrive in one migration and `UsageRecorder::write_content` stamps `started_at` (`Some(started_at)`, `src/usage/mod.rs:229`) on every write, so `started_at IS NULL` is precisely "pre-migration".
 
-The 30-day retention sweep in `write_record` bounds the problem's lifetime for the pre-migration half: those rows age out. It does not touch the ongoing main-session-writes-NULL half.
+What changed: the `open_db` comment on the `agent_id` probe (`src/usage/db.rs` ~108-122) said to disambiguate "by `called_at` against the migration", which is wrong (`called_at` is stamped by SQLite on every row, including pre-migration ones). It now names `started_at`, states the exact partition, records why the sentinel was declined, and forbids backfilling `started_at` without first giving `agent_id` its own era marker. The sibling `read_output_ids` comment now cites this record's archive path.
 
 ## Tests added
 
-None — this record opens the defect; it does not close it. A fix would want a test asserting that a main-session write and a pre-migration row are distinguishable **on the `agent_id` column alone**, without consulting `started_at`. The existing `open_db_migrates_principal_and_start_columns` cannot serve: it asserts the pre-migration row reads NULL, which the buggy and fixed code both satisfy.
+`usage::db::tests::agent_id_null_is_partitioned_by_started_at` (`src/usage/db.rs`): a legacy row and a production-shaped main-session write (`started_at` present, `agent_id` absent) both read NULL on `agent_id` alone, and `started_at IS NULL` / `IS NOT NULL` each select exactly one of them. Verified red under a mutation that dropped the `started_at` binding in `write_record` (assertion `started_at IS NOT NULL must select exactly the post-migration, no-agent row`, left 0 / right 1), green after reverting. It will also turn red if a backfill of `started_at` merges the eras. Run: `scripts/with-slot.sh cargo test --lib agent_id_null_is_partitioned_by_started_at` (plus `usage::` with `--features dashboard`: 91 passed).
 
 ## Workarounds
 
@@ -124,7 +125,12 @@ Partition on `started_at IS NULL` to separate the eras. Valid at `906813f8`; inv
 
 ## Resume
 
-Decide whether the sentinel is worth the backfill. If the answer is no, the honest alternative is to document the cross-column dependency where a query author reads it — a comment on the column in `open_db` — rather than leaving it to be rediscovered.
+Nothing outstanding. If a future change wants to backfill `started_at` for historical rows, first add a dedicated era marker for `agent_id`; the test above is the tripwire.
+
+## Fix provenance
+
+- **SHA:** `6c53c7f3` (`experiments`)
+- **patch-id:** `e6929c830d8328f0fe93d0958acfab6e790007e8`
 
 ## References
 
