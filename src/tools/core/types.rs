@@ -1726,10 +1726,12 @@ pub trait Tool: Send + Sync {
         // consumes `input`.
         // docs/issues/2026-08-31-served-guide-sections-arrive-after-the-call-they-inform.md
         if self.is_destructive(&input) {
+            let digest = crate::tools::core::guide_emit::input_digest(&input);
             let held = {
                 let mut emitted = ctx.guide_hints_emitted.lock();
                 crate::tools::core::guide_emit::first_use_guide_gate(
                     selector.as_deref(),
+                    &digest,
                     &mut emitted,
                 )
             };

@@ -210,6 +210,21 @@ Decision (user, via main): gate on a property of the CALL, not a new `blocks:` d
 
 **OPEN EVAL NEED, not built here:** the block degrades to a reflexive re-issue if callers learn to ack without reading. Whether the section is read is unmeasured and wants an eval arm (`prompt-engineering` can measure read vs reflexive). Until then the gate is two shapes wide on purpose.
 
+### Amendment 2026-10-16 (review of the integrated branch)
+
+An Opus review found four defects in the first cut; each was confirmed at the bytes and fixed test-first.
+
+- **Parallel first calls got past the gate (MED).** The gate was keyed on the SECTION, so of two parallel `doc(move)` calls one was held and the other ran. A batch is composed before any response is read, so every call in it is a first call. Fix, the simplest that closes it: the ledger now also records a digest of every HELD input (`GuideLedger::hold`, in memory, cleared on rekey/adopt/clear). A call runs only when a call with its digest was held; the first such re-issue acknowledges the section for everyone; any other call is held in its turn and shown the text again. A held call never waits forever: its own identical re-issue always runs. Digest = sha256 of the normalised input (`input_digest`).
+- **A forced delete was not gated (MED).** `is_destructive` returned false for `delete`/`graft`/`update` even with `force: true`. It now decides on the effect: `force == true` holds `delete`, `graft`, `rekey_prefix` and `update`; unforced calls (dry runs / shrink-guarded) are still not held. `graft` and `rekey_prefix` have no declared section, so the gate runs them (it never holds without text to show). A dry run's ordinary post-call delivery counts as the caller having read the section, so a forced delete after a dry run runs at once.
+- **A caller who read the whole guide was held (LOW).** The gate now treats a stamped bare topic (`get_guide("librarian")`, or a fork seed holding only that key) as covering all its sections.
+- **Fork seeded from the wrong ledger (MED, hook side).** See `docs/issues/2026-09-24-a-fork-child-is-re-served-every-guide-it-inherited.md`.
+
+**Limits, recorded as such and not fixed:**
+
+- The gate sees no result, so a section whose `serves:` shape needs one (`path~`, i.e. `path_contains`) can never gate: it is unreachable before the call by construction.
+- The relaxed section-overlap check (a section may share a shape with another when routing tells them apart by path) would also let a FUTURE overlap pass on a tool whose routing ignores paths; the gate resolves its topic with a null result and would then pick one of the overlapping topics arbitrarily.
+- The held digest lives in memory: a server restart between the held call and its re-issue holds it once more (never a skipped hold).
+
 ## Tests added
 
 Written red first, one assertion on the SIDE EFFECT, not the response shape:
@@ -230,7 +245,7 @@ or a dry run, it can move.
 
 ## Resume
 
-Gate is implemented for two shapes (see `### Implemented 2026-10-16`). Remaining: (1) the ack-reflex eval; (2) widen shape by shape only on evidence that a first call damaged something; (3) a live reproduction on a rebuilt binary (`doc(action="move", ...)` first call in a fresh session must answer `executed:false`).
+Gate is implemented for `doc` `move`, forced `doc` `delete`/`graft`/`rekey_prefix`/`update`, and a non-dry-run `librarian` `merge_worktree` (see `### Implemented 2026-10-16` and its amendment). Remaining: (1) the ack-reflex eval; (2) widen shape by shape only on evidence that a first call damaged something; (3) a live reproduction on a rebuilt binary (`doc(action="move", ...)` first call in a fresh session must answer `executed:false`); (4) the limits listed in the amendment, which are design boundaries rather than defects of this change.
 
 ## References
 
