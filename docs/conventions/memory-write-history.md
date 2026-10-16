@@ -22,3 +22,7 @@ Existing content must be readable, regular and valid UTF-8. A history failure re
 A store-wide advisory lock covers reading, shrink evaluation, backup publication, topic replacement and anchor stamping. Other cooperating CodeScout writers wait up to five seconds; contention beyond that is a retryable save failure. Deletions participate in the lease and retain their existing deletion semantics; they do not create history. Every overwrite remains a whole-document replacement. Concurrent writers preserve each intermediate predecessor, but do not merge edits or detect stale reads. External programs that ignore this lock are outside the serialization guarantee.
 
 Topic replacement uses a unique sibling temporary file, then an atomic rename. A failure before publication leaves the previous topic intact. Anchor failures after publication are returned as warnings. This is topic-level recovery, not a coordinated database/configuration backup or authorization to activate a laptop update.
+
+## Client-side guards
+
+What a harness-side guard may and may not assume of this contract, including that delete keeps no history: [`memory-write-client-overlap.md`](memory-write-client-overlap.md).
