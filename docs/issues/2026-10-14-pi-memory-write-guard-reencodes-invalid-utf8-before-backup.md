@@ -50,6 +50,15 @@ Guard source: the old-content read in its default export; saveBackup writes oldC
 Local evidence is retained in /tmp/codescout-albert-pi-guard-review-20261014 and the Albert transition handoff package.
 The 14-test harness includes genuine BOM/Unicode byte preservation. Three applied mutations were killed: HOME-only protection, removal of workspace pinning, and restoration of lossy UTF-8 decoding. No candidate survived. These are hook/filesystem checks, not native SDK execution.
 
+
+**Re-verified 2026-10-16** (Node 26.10.0, copies of both files in a scratch directory; the repository holds neither, they live in `~/Downloads/albert-codescout-transition-2026-10-14/`):
+
+- SHA256 of the received guard `9eaed629...d02f` and of the proposed one `bb098737...27ff` match this record. `diff` of the two is exactly one line (123): `fs.readFileSync(file, "utf-8")` against `new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(fs.readFileSync(file))`.
+- Direct probe: topic bytes `61ff620a`, override marker in content, `force: true`. Received guard: hook returns `undefined` (write permitted), backup bytes `61efbfbd620a`. Proposed guard: hook returns `{block: true, reason: "...the existing topic cannot be read safely; write refused."}`, no backup file written.
+- `guard-contract.test.mjs` against the received guard: 14 tests, 13 pass, 1 fail (`invalid existing UTF-8 refuses before any lossy backup or overwrite`). Against the proposed guard: 14 pass, 0 fail.
+
+Still not established: the native Pi SDK / adapter run, and where the guard is to live. No file in this repository contains `saveBackup` or the guard (grep over `*.ts *.mjs *.js *.sh *.py`, 0 hits), so there is nothing in-repo to patch until the guard is imported.
+
 ## Hypotheses tried
 
 Invalid UTF-8 was decoded with replacement rather than rejected: reproduced with exact original/backup bytes.
