@@ -68,7 +68,7 @@ const NEIGHBOUR_EXCERPT_BYTES: usize = 1000;
 /// UNDERCOUNTS — only ledger entries produce `entry_cite` rows, so a spec or bug file
 /// citing the Statement is invisible here — and undercounting is the conservative
 /// direction for an obligation.
-// cap-class: RESULT_CAP context.attestation_exposure — probed
+// cap-class: NOT_A_CAP — a floor that gates the `verification` advisory block only: the neighbourhood is returned whole either way, so no row of the result is withheld (the shape of `LINE_SOFT_CAP`); classified 2026-10-16 after it was a `RESULT_CAP` row certified `Probed`+`Killed`
 const ATTESTATION_EXPOSURE_THRESHOLD: usize = 5;
 
 const ANCHOR_MARKER: &str = "\n\n… [anchor truncated — reserved half the budget for its \

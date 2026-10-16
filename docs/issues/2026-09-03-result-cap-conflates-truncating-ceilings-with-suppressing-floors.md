@@ -1,13 +1,14 @@
 ---
 id: aa1110786cd2a8a4
 kind: bug
-status: open
+status: fixed
 title: RESULT_CAP conflates truncating ceilings with suppressing floors, and two structurally identical rows got opposite dispositions
 owners:
 - marius
 tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-09-03
+closed: 2026-10-16
 severity: medium
 ---
 
@@ -79,11 +80,17 @@ armed = exposure >= ATTESTATION_EXPOSURE_THRESHOLD && …
 
 ## Fix
 
-Not designed. Candidate directions: (a) split `RESULT_CAP` into two sub-vocabularies (a truncating-ceiling shape and a suppressing-floor shape) with contract text specific to each; (b) reclassify `context.attestation_exposure` to `Deferred` for consistency with `doctor.exposure_threshold`, which would move the branch's published tally from 18 Probed/17 mutation-verified to 17 Probed/16 mutation-verified; (c) add a companion probe specifically for the below-floor case (does the marker correctly stay absent, and is there a field that discloses "data may exist below the disclosure floor"?).
+Chosen with the lead's go-ahead (2026-10-16): none of (a)/(b)/(c) as filed, but the rule they were all missing, which decides each row on the evidence rather than adding vocabulary.
+
+**A floor is a `RESULT_CAP` iff what it suppresses is rows of the result.**
+
+- `doctor.exposure_threshold` (`doctor.rs:4553`, `:4699`, `:4828`: `if exposure < EXPOSURE_THRESHOLD { continue; }`) skips worklist rows, so the caller gets a partial result and cannot tell. It stays a `RESULT_CAP` and is now `Coverage::NoMarker`, with its defect filed in `docs/issues/2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md`.
+- `context.attestation_exposure` (`context.rs:355`, `:376`) only gates the `verification` advisory block; the neighbourhood is returned whole either way (read at the bytes), exactly the shape `LINE_SOFT_CAP` (`types.rs:38`) records as `NOT_A_CAP`. Its annotation is now `NOT_A_CAP` with that reason and its probe row is removed, so it can no longer inflate the mutation-verified count. The existing tests stay as ordinary coverage of the tap, including the below-floor one the filing overlooked (`the_tap_stays_silent_one_citation_below_the_floor`).
+- The mutation-verified tally moves 36 -> 35 (the filing's 18/17 figures were stale): live figure now 85 total, 36 probed, 40 untested, 9 no-marker, 35 mutation-verified. A note in `cap_probe.rs`'s sweep header records the amendment and the sweep population (16 of 17 killed).
 
 ## Tests added
 
-None yet.
+`a_floor_is_a_result_cap_only_when_it_drops_rows_of_the_result` in `src/tools/core/cap_probe_tests.rs`: asserts doctor's floor is a `NoMarker` row, that no `context.attestation_exposure` row exists, and (reading `context.rs` as text) that the line above `ATTESTATION_EXPOSURE_THRESHOLD` is `cap-class: NOT_A_CAP`. Seen RED before the row was removed. `tests/result_caps.rs` passes in full (71 tests), including the both-directions annotation/row correspondence that pins the removal.
 
 ## Workarounds
 
@@ -91,9 +98,7 @@ A reader triaging the `result-cap-marker-gate` gate's `Probed`/`Killed` count sh
 
 ## Resume
 
-1. Decide the direction (a/b/c above) once the branch merges and this file's severity can be weighed against the branch's other findings.
-2. Grep the merged `cap_probe.rs` for other `RESULT_CAP` rows whose use site is a `>=`/`<` threshold rather than a length/byte/count ceiling — this pair may not be the only instance.
-3. If (b) is chosen, update the branch's tally documentation (`IC-13`'s tracker body, `tests/result_caps.rs`'s header) to the corrected numbers.
+Resume step 2 (other `RESULT_CAP` rows whose use site is a threshold) was run 2026-10-16 as a scripted scan of every `RESULT_CAP` const's use sites for a strict `<` against the const (or a `>=` followed by `continue`). It found the two floors named here and one more that the filing did not: `read_file.json_path_route_room` (`JSON_PATH_ROUTE_ROOM_FLOOR`, `read_file.rs:669,685`), a floor on page room that chooses between a literal route and a prose form of `next`. It is `Probed`+`Killed` and was NOT reclassified here: both branches deliver a complete continuation, so by the rule above it looks like `NOT_A_CAP` too, but it is a judgement on a row this issue did not name, so it is left for the owner (and flagged to the lead). The other hits of the scan were ceilings or counters (`agent_build_check.rendered_diagnostics`, `preview.plan_open_next`, `tracker_design.existing_trackers`, `tool_output.largest_array_depth`). The scan reads use sites by pattern; it does not prove no floor is written another way.
 
 ## References
 

@@ -69,6 +69,67 @@ fn missing_cited_tests(rows: &[super::cap_probe::ProbeRow]) -> Vec<&'static str>
         })
         .collect()
 }
+/// Returns the id of every `NoMarker` row whose `bug` does not name an existing issue
+/// file: empty, not a `docs/issues/<name>.md` path, or absent under `root`. A `NoMarker`
+/// row asserts "this is a production defect", and the assertion is only as good as the
+/// filing behind it — without this check the variant would be a second place to park
+/// an unescalated finding, one with a more alarming name.
+fn bugs_without_a_file(
+    rows: &[super::cap_probe::ProbeRow],
+    root: &std::path::Path,
+) -> Vec<&'static str> {
+    use super::cap_probe::Coverage;
+
+    rows.iter()
+        .filter_map(|row| match &row.coverage {
+            Coverage::NoMarker { bug, .. } => {
+                let bug = bug.trim();
+                let in_issues = bug.starts_with("docs/issues/") && bug.ends_with(".md");
+                (!in_issues || !root.join(bug).is_file()).then_some(row.id)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Phrases that say, in a reason's own words, that the cap discloses nothing.
+/// Lowercase; matched as substrings of the lowercased reason.
+const NO_MARKER_PHRASES: &[&str] = &[
+    "no marker",
+    "emits no",
+    "appends no",
+    "silently",
+    "no companion field",
+    "no field reports",
+    "no field discloses",
+    "nothing marking",
+    "indistinguishable from",
+];
+
+/// Returns the id of every `Untested` row whose reason describes a cap that discloses
+/// nothing. Such a row is mis-filed: `Untested` is a worklist item ("write the test"),
+/// and a cap with no marker has nothing a test could assert on — it is `IC-13`
+/// membership and belongs in `NoMarker`. This is a text scan, so it is a backstop for the
+/// next row's author reading their own reason, not a proof that no other row discloses
+/// nothing: it cannot see a use site the reason never mentions.
+fn untested_rows_that_describe_a_missing_marker(
+    rows: &[super::cap_probe::ProbeRow],
+) -> Vec<&'static str> {
+    use super::cap_probe::Coverage;
+
+    rows.iter()
+        .filter_map(|row| match &row.coverage {
+            Coverage::Untested(reason) => {
+                let lower = reason.to_lowercase();
+                NO_MARKER_PHRASES
+                    .iter()
+                    .any(|p| lower.contains(p))
+                    .then_some(row.id)
+            }
+            _ => None,
+        })
+        .collect()
+}
 
 /// Every row is internally consistent: a unique, non-empty id in the id
 /// grammar `RESULT_CAP` annotations use, a `Deferred`/`NotYet` reason that is
@@ -100,6 +161,8 @@ fn probe_rows_are_well_formed() {
     let mut bad_ids = vec![];
     let mut bad_reasons = vec![];
     let mut bad_markers = vec![];
+    let bad_bugs =
+        bugs_without_a_file(PROBE_ROWS, std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
     let mut seen_ids = HashSet::new();
     let mut duplicate_ids = vec![];
 
@@ -111,7 +174,12 @@ fn probe_rows_are_well_formed() {
             duplicate_ids.push(row.id);
         }
         match &row.coverage {
-            Coverage::Deferred(reason) => {
+            Coverage::Untested(reason) => {
+                if is_placeholder(reason) {
+                    bad_reasons.push(row.id);
+                }
+            }
+            Coverage::NoMarker { reason, .. } => {
                 if is_placeholder(reason) {
                     bad_reasons.push(row.id);
                 }
@@ -154,6 +222,12 @@ fn probe_rows_are_well_formed() {
         "Probed ProbeRow ids with an empty cited_test — probed_rows_cite_a_real_test cannot \
          check a citation that names no test at all: {bad_cited_tests:?}"
     );
+    assert!(
+        bad_bugs.is_empty(),
+        "NoMarker ProbeRow ids whose `bug` is not an existing docs/issues/ file — a row is a \
+         production defect only once the defect has been filed, and an unfiled one is the \
+         silent backlog item this variant exists to prevent: {bad_bugs:?}"
+    );
 }
 
 /// Negative-direction check for [`missing_cited_tests`]: a `Probed` row with
@@ -186,11 +260,142 @@ fn missing_cited_tests_flags_only_probed_rows_with_an_empty_cited_test() {
         },
         ProbeRow {
             id: "fixture.deferred",
-            coverage: Coverage::Deferred("no test drives this cap past its bound"),
+            coverage: Coverage::Untested("no test drives this cap past its bound"),
         },
     ];
 
     assert_eq!(missing_cited_tests(&rows), vec!["fixture.empty"]);
+}
+
+/// No `Untested` row may describe, in its own reason, a cap that discloses nothing.
+///
+/// This is the regression for `docs/issues/2026-09-03-deferred-conflates-untested-with-no-marker-exists.md`:
+/// the old single `Deferred` variant held 43 "write a test" rows beside 5 (later 8, now 9) rows
+/// whose reason said no marker exists, and three of those five stated `IC-13`'s defining
+/// property in their own text while sitting in the backlog. The assertion reads the REAL
+/// table so a new row filed under the wrong variant reds here, in the author's own diff.
+#[test]
+fn no_untested_row_describes_a_cap_that_discloses_nothing() {
+    use super::cap_probe::PROBE_ROWS;
+
+    let misfiled = untested_rows_that_describe_a_missing_marker(PROBE_ROWS);
+    assert!(
+        misfiled.is_empty(),
+        "Untested rows whose own reason says the cap discloses nothing — that is not a missing \
+         test, it is a production defect (IC-13). File it under docs/issues/ and use \
+         Coverage::NoMarker {{ reason, bug }}: {misfiled:?}"
+    );
+}
+
+/// The detector and the bug-file check each need a RED case independent of the live table:
+/// with every misfiled row fixed, `no_untested_row_describes_a_cap_that_discloses_nothing`
+/// passes on the table alone whether or not the scan works.
+#[test]
+fn the_classification_guards_flag_what_they_exist_to_flag() {
+    use super::cap_probe::{Coverage, ProbeRow};
+
+    let rows = [
+        ProbeRow {
+            id: "fixture.silent",
+            coverage: Coverage::Untested("the helper emits no marker when the cap fires"),
+        },
+        ProbeRow {
+            id: "fixture.honest",
+            coverage: Coverage::Untested("no test seeds more items than the cap"),
+        },
+        ProbeRow {
+            id: "fixture.filed",
+            coverage: Coverage::NoMarker {
+                reason: "drops rows with no count",
+                bug: "docs/issues/_TEMPLATE.md",
+            },
+        },
+        ProbeRow {
+            id: "fixture.unfiled",
+            coverage: Coverage::NoMarker {
+                reason: "drops rows with no count",
+                bug: "docs/issues/2000-01-01-no-such-bug.md",
+            },
+        },
+        ProbeRow {
+            id: "fixture.empty_bug",
+            coverage: Coverage::NoMarker {
+                reason: "drops rows with no count",
+                bug: "  ",
+            },
+        },
+        ProbeRow {
+            id: "fixture.wrong_dir",
+            coverage: Coverage::NoMarker {
+                reason: "drops rows with no count",
+                bug: "Cargo.toml",
+            },
+        },
+    ];
+
+    assert_eq!(
+        untested_rows_that_describe_a_missing_marker(&rows),
+        vec!["fixture.silent"],
+        "only an Untested row whose reason says nothing is disclosed is mis-filed"
+    );
+    assert_eq!(
+        bugs_without_a_file(&rows, std::path::Path::new(env!("CARGO_MANIFEST_DIR"))),
+        vec!["fixture.unfiled", "fixture.empty_bug", "fixture.wrong_dir"],
+        "a NoMarker row must cite a real file under docs/issues/; an existing file elsewhere \
+         does not count, and an Untested row has no bug to check"
+    );
+}
+
+/// A floor is a `RESULT_CAP` iff what it suppresses is ROWS OF THE RESULT.
+///
+/// Regression for `docs/issues/2026-09-03-result-cap-conflates-truncating-ceilings-with-suppressing-floors.md`:
+/// `doctor.exposure_threshold` and `context.attestation_exposure` are both `>=`/`<` floors
+/// over the same constant value, and were classified oppositely — the doctor one `Deferred`,
+/// the context one `Probed` + `Mutation::Killed`, inside the branch's own "17 mutation-verified".
+/// They differ in the one respect that decides the class. `doctor`'s floor `continue`s past
+/// worklist rows, so the caller receives a partial result and cannot tell. `context`'s floor only
+/// gates the `verification` advisory block beside a neighbourhood that is returned whole either
+/// way, so nothing is withheld from the result — the same shape as `LINE_SOFT_CAP`, which is
+/// `NOT_A_CAP`.
+///
+/// The context side reads its production annotation as TEXT rather than trusting the table:
+/// the table can only say "no row", and a row deleted while the annotation still read
+/// `RESULT_CAP` would be red in `tests/result_caps.rs`, but a row that quietly returns would
+/// pass every other check.
+#[test]
+fn a_floor_is_a_result_cap_only_when_it_drops_rows_of_the_result() {
+    use super::cap_probe::{Coverage, PROBE_ROWS};
+
+    let doctor = PROBE_ROWS
+        .iter()
+        .find(|r| r.id == "doctor.exposure_threshold")
+        .expect("doctor's floor drops worklist rows, so it keeps a RESULT_CAP row");
+    assert!(
+        matches!(doctor.coverage, Coverage::NoMarker { .. }),
+        "doctor's floor drops rows and reports no count of them — a NoMarker row, not an untested one"
+    );
+
+    assert!(
+        PROBE_ROWS
+            .iter()
+            .all(|r| r.id != "context.attestation_exposure"),
+        "context's floor gates an advisory block and withholds no row of the result; it is \
+         NOT_A_CAP and carries no probe row, so it cannot inflate the mutation-verified count"
+    );
+
+    let src = include_str!("../../librarian/tools/context.rs");
+    let above = src
+        .lines()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find(|w| w[1].contains("const ATTESTATION_EXPOSURE_THRESHOLD"))
+        .map(|w| w[0].to_string())
+        .expect("the const is declared in context.rs");
+    assert!(
+        above.contains("cap-class: NOT_A_CAP"),
+        "ATTESTATION_EXPOSURE_THRESHOLD must be annotated NOT_A_CAP (it gates an advisory, \
+         it withholds no row); the line above it reads: {above:?}"
+    );
 }
 
 /// Prints the tally this convention lives and dies by. Asserts nothing
@@ -203,8 +408,8 @@ fn print_mutation_tally() {
     let t = tally(PROBE_ROWS);
 
     println!(
-        "IC-13 probe rows: {} total, {} probed, {} deferred, {} mutation-verified",
-        t.total, t.probed, t.deferred, t.mutation_verified
+        "IC-13 probe rows: {} total, {} probed, {} untested (worklist), {} no-marker (production defects), {} mutation-verified",
+        t.total, t.probed, t.untested, t.no_marker, t.mutation_verified
     );
 }
 
@@ -243,15 +448,44 @@ fn tally_distinguishes_killed_from_not_yet_and_deferred() {
         },
         ProbeRow {
             id: "fixture.deferred",
-            coverage: Coverage::Deferred("no test drives this cap past its bound"),
+            coverage: Coverage::Untested("no test drives this cap past its bound"),
+        },
+        ProbeRow {
+            id: "fixture.no_marker",
+            coverage: Coverage::NoMarker {
+                reason: "the cap drops items and nothing discloses how many",
+                bug: "docs/issues/fixture.md",
+            },
+        },
+        ProbeRow {
+            id: "fixture.no_marker_too",
+            coverage: Coverage::NoMarker {
+                reason: "a second silent cap, so a count of 1 cannot pass by accident",
+                bug: "docs/issues/fixture.md",
+            },
         },
     ];
 
     let t = tally(&rows);
 
+    assert_eq!(t.total, 5);
     assert_eq!(t.probed, 2, "both Probed rows should count as probed");
     assert_eq!(
         t.mutation_verified, 1,
         "only the Killed row should count as mutation-verified"
+    );
+    assert_eq!(
+        t.untested, 1,
+        "the Untested row is a worklist item and counts once"
+    );
+    assert_eq!(
+        t.no_marker, 2,
+        "NoMarker rows are production defects, counted apart from the Untested worklist \
+         — folding them into one `deferred` figure is the defect this split exists to prevent"
+    );
+    assert_eq!(
+        t.probed + t.untested + t.no_marker,
+        t.total,
+        "every row lands in exactly one bucket"
     );
 }

@@ -13,8 +13,9 @@
 //! Every row's `id` matches exactly one `cap-class: RESULT_CAP <id>`
 //! annotation in tracked `src/`. A row records what evidence exists for
 //! that cap TODAY, not what evidence a probe test could in principle
-//! provide — `Coverage::Deferred` names why no behavioural test yet drives
-//! the cap past its bound, and that reason must be specific enough to act
+//! provide — `Coverage::Untested` names why no behavioural test yet drives
+//! the cap past its bound, and `Coverage::NoMarker` names the defect that makes
+//! one unwritable (the cap discloses nothing); either reason must be specific enough to act
 //! on: "the constant's use site was read until the reason could be stated
 //! truthfully" is the bar, not "not got to it yet".
 
@@ -69,9 +70,34 @@ pub(crate) enum Coverage {
         /// a reference, not a note.
         cited_test: &'static str,
     },
-    /// No behavioural test. The string says WHY — and "not got to it" is
-    /// not a why.
-    Deferred(&'static str),
+    /// No behavioural test YET, **and a marker exists to test for**: the cap discloses
+    /// its bite somewhere the caller reads, and nothing yet drives it past its bound
+    /// and asserts that. A worklist item — the remedy is a test. The string says WHY
+    /// none exists — and "not got to it" is not a why.
+    ///
+    /// Not for a cap that truncates or suppresses and discloses nothing: that has no
+    /// marker to assert, so no test can be written for it, and listing it here as a
+    /// coverage gap hides a production defect behind a backlog item. Use
+    /// [`Coverage::NoMarker`].
+    Untested(&'static str),
+    /// The cap truncates or suppresses and **no marker exists** — a caller cannot tell
+    /// a bitten result from a complete one. This is `IC-13` membership, a production
+    /// defect, not a coverage gap: no test can be written until the cap discloses
+    /// itself, so the remedy is a code change, and a worklist of "write a test" would
+    /// send a reader at an unwritable one.
+    ///
+    /// `bug` is the repo-relative path of the `docs/issues/` file (or its `archive/`
+    /// twin) that tracks the defect — checked to exist by `probe_rows_are_well_formed`,
+    /// so a row cannot be classified here without the escalation having happened.
+    /// Several rows may cite one bug when they share a remedy.
+    ///
+    /// A floor counts only when what it suppresses is ROWS OF THE RESULT: a threshold
+    /// that merely gates an advisory beside a whole result withholds nothing from it
+    /// (`NOT_A_CAP`, as `LINE_SOFT_CAP`'s annotation says of itself).
+    NoMarker {
+        reason: &'static str,
+        bug: &'static str,
+    },
 }
 
 /// One `RESULT_CAP` id and what's known about its probe coverage.
@@ -83,11 +109,16 @@ pub(crate) struct ProbeRow {
 
 /// Aggregate counts over a set of [`ProbeRow`]s, computed once so the report line
 /// and its own regression test can never drift into disagreement with each other.
+///
+/// `untested` is a worklist (write the test); `no_marker` is a list of production
+/// defects (the cap discloses nothing). Reported as two numbers because they need
+/// opposite remedies — one "deferred" figure read as a single backlog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Tally {
     pub total: usize,
     pub probed: usize,
-    pub deferred: usize,
+    pub untested: usize,
+    pub no_marker: usize,
     pub mutation_verified: usize,
 }
 
@@ -97,30 +128,26 @@ pub(crate) struct Tally {
 /// function rather than each keeping their own copy of the `matches!` pair, so
 /// a mutation to the counting logic itself has one site to break, not two that
 /// can silently diverge.
+///
+/// `untested` and `no_marker` are each counted from their own variant, never derived
+/// as `total - probed`: the subtraction is how the two populations used to read as one
+/// number, and it would silently absorb any variant added later.
 pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
-    let total = rows.len();
-    let probed = rows
-        .iter()
-        .filter(|r| matches!(r.coverage, Coverage::Probed { .. }))
-        .count();
-    let deferred = total - probed;
-    let mutation_verified = rows
-        .iter()
-        .filter(|r| {
+    let count = |pred: fn(&Coverage) -> bool| rows.iter().filter(|r| pred(&r.coverage)).count();
+    Tally {
+        total: rows.len(),
+        probed: count(|c| matches!(c, Coverage::Probed { .. })),
+        untested: count(|c| matches!(c, Coverage::Untested(_))),
+        no_marker: count(|c| matches!(c, Coverage::NoMarker { .. })),
+        mutation_verified: count(|c| {
             matches!(
-                r.coverage,
+                c,
                 Coverage::Probed {
                     mutation: Mutation::Killed,
                     ..
                 }
             )
-        })
-        .count();
-    Tally {
-        total,
-        probed,
-        deferred,
-        mutation_verified,
+        }),
     }
 }
 
@@ -187,6 +214,21 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 //   observed `left: Null / right: Number(4)`, message "14 roots seeded, 10 shown, 4 elided".
 //   The truncation itself was left standing — the mutated tree still `take(10)`s and simply
 //   stops saying that it did, which is `IC-13` exactly.
+//
+// ---- AMENDED 2026-10-16 (floor/ceiling classification) ----
+//
+// `context.attestation_exposure` is struck from the sweep table above and from `PROBE_ROWS`:
+// it is not a `RESULT_CAP`. Its floor gates the `verification` advisory block beside a
+// neighbourhood that is returned whole either way, so no row of the result is withheld — the
+// shape `LINE_SOFT_CAP` already records as `NOT_A_CAP`. The sweep's census of that row (cited
+// test red when `context.rs:570` is suppressed) was correct and is left standing as a fact
+// about that test; what changed is the claim that the row belongs in a table of result caps.
+// The sweep's own population is therefore 17 rows, of which 16 were killed (the 17th is
+// `index_state.skipped_sample`, still NOT KILLED), where it read 17 of 18. The same sweep's
+// `doctor.exposure_threshold` — a floor that DOES drop rows of the result — is now
+// `Coverage::NoMarker`, with its bug filed.
+//
+// The rule, once: a floor is a `RESULT_CAP` iff what it suppresses is rows of the result.
 
 /// One row per `RESULT_CAP` id declared in tracked `src/` — 66 as of the
 /// 2026-09-02 census. The id list is derived from
@@ -201,7 +243,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/core/guide_emit.rs --
     ProbeRow {
         id: "guide_emit.auto_inject_bound",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "behavioural tests drive an oversize guide past the bound and assert a pointer \
              ships and the topic stays unstamped (guide_emit.rs and server.rs guide_hint_tests), \
              but no row has been certified against this table's marker grammar and the bound \
@@ -266,10 +308,10 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // headings against HEADINGS_HARD_CAP=40 and ~14 KB against the
         // MAX_INLINE_TOKENS*4=10000-byte oversized threshold, so its MAP-shape escalation
         // is driven by the byte-size path, not the headings-count path — confounded
-        // evidence for a different cap. Reclassifying to `Deferred` rather than inventing
+        // evidence for a different cap. Reclassifying to `Untested` rather than inventing
         // a citation for a claim no single test backs.
         id: "markdown.headings_hard_cap",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "Task 5a's Probed claim (marker TextContains(\"@file_\")) cited a composed \
              pair of tests, neither of which alone drives HEADINGS_HARD_CAP past its \
              bound AND asserts the \"@file_\" marker in the same body; see the comment \
@@ -279,7 +321,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "tool_output.compact_summary_bytes",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the two candidate fixtures each drive content past both the soft cap and its \
              sibling hard cap in the same call, so no assertion isolates the soft cap \
              specifically from tool_output.compact_summary_hard_bytes",
@@ -298,7 +340,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "tool_output.largest_array_depth",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only candidate test (nested_payload_beats_a_shallow_but_smaller_array) \
              nests to depth 3; MAX_DEPTH is 4, so the cap's own threshold is never reached",
         ),
@@ -323,7 +365,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/symbol/symbols.rs --
     ProbeRow {
         id: "symbols.find_results",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "FIND_SYMBOL_MAX_RESULTS has no test seeding more than 50 matching symbols to \
              a name search; existing find-by-name tests use small fixture corpora",
         ),
@@ -348,7 +390,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "symbols.per_lang_budget",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the per-language time budget in search_project_symbols has no test reference; \
              reaching it needs a multi-second multi-language fixture no test in the suite \
              pays for",
@@ -356,14 +398,14 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "symbols.body_cap",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the symbol-body truncation cap in finalize_search_results \
              or drives a returned body past it",
         ),
     },
     ProbeRow {
         id: "symbols.container_inline_lines",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references focus_single_symbol's container-inline-lines cap or drives \
              a container past it",
         ),
@@ -371,13 +413,13 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/symbol/list_overview.rs --
     ProbeRow {
         id: "symbols.overview_files",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no directory-overview test seeds enough files to reach LIST_SYMBOLS_MAX_FILES",
         ),
     },
     ProbeRow {
         id: "symbols.overview_single_file",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only related test declares its own local SINGLE_FILE_CAP fixture constant \
              and calls OutputGuard::cap_items directly rather than list_overview, so it \
              tests a decoupled fixture, not the shipped constant",
@@ -385,7 +427,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "symbols.overview_single_file_flat",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "two related tests exist, and neither exercises the shipped list_overview \
              capping path: symbols_overview_flat_cap_triggers_on_symbol_with_many_children \
              re-implements the greedy-capping loop locally instead of calling \
@@ -396,7 +438,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "symbols.overview_subdirs",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no directory-overview test seeds enough subdirectories to reach \
              LIST_SYMBOLS_MAX_SUBDIRS",
         ),
@@ -404,21 +446,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/adapter.rs --
     ProbeRow {
         id: "librarian.summary_items",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references matched_items_summary's item cap or seeds enough matched \
              items to reach it",
         ),
     },
     ProbeRow {
         id: "librarian.summary_title",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only related assertion is a substring check that is monotone under \
              widening — it would pass identically if the title-length cap were removed",
         ),
     },
     ProbeRow {
         id: "librarian.summary_headings",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references section_headings_summary's heading cap or drives a \
              section list past it",
         ),
@@ -430,14 +472,14 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // `probed_rows_cite_a_real_test` now refuses an ambiguous `cited_test` outright
         // (`IC-6`'s *no disambiguator* half) rather than taking the first match.
         id: "preview.plan_headings",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "`MAX_HEADINGS` is exercised past its bound by `heading_truncation_is_signaled` \
              (`src/librarian/preview/plan.rs:168`, 25 headings vs 20), which asserts the \
              marker on production output from `headings::stamp_truncation`. It is not \
              citable: that function name is declared identically in \
              `preview/default.rs:57`, `preview/plan.rs:168` and `preview/spec.rs:76`, and \
              the gate resolves a `cited_test` by first match in `git ls-files src` order, \
-             so the citation would silently bind to `default.rs:57` — the test for the \
+             so the citation would bind to `default.rs:57` — the test for the \
              sibling `preview.default_headings` row. Citable as soon as one of the three \
              is given a distinguishing name.",
         ),
@@ -446,16 +488,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // A cap that truncates and emits NO marker at all. Flagged to the whole-branch
         // review as arguably an `IC-13` MEMBER rather than a coverage gap.
         id: "preview.plan_open_next",
-        coverage: Coverage::Deferred(
-            "`OPEN_NEXT_LIMIT` (3) truncates the `open_next` vector at \
-             `src/librarian/preview/plan.rs:41` and no companion field discloses the drop, \
-             so the only observable is the array's own length. Every test in tracked \
-             `src/` therefore reads the field into a `let` and asserts on that length \
+        coverage: Coverage::NoMarker {
+            reason: "`OPEN_NEXT_LIMIT` (3) truncates the `open_next` vector at \
+             `src/librarian/preview/plan.rs:41` and no companion field discloses the drop \
+             (the true open count is derivable as `tasks.total - tasks.done`, but nothing \
+             says to), so the only observable is the array's own length. Every test in \
+             tracked `src/` therefore reads the field into a `let` and asserts on that length \
              (`open_next_returns_first_three_unchecked`, `plan.rs:108`, drives 4 tasks \
              past the cap but asserts `open.len(), 3`), while the one assertion naming \
              `[\"tasks\"][\"open_next\"]` inline (`plan.rs:130`) seeds zero tasks. Uncitable \
              until the cap emits a marker of its own.",
-        ),
+            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        },
     },
     ProbeRow {
         // Corrected: task_text_truncated_to_limit (plan.rs) seeds "x".repeat(150) against
@@ -465,38 +509,42 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // marker at the caller-visible surface, so a genuinely-cut task and a genuinely-
         // short one are indistinguishable to the caller reading the result.
         id: "preview.plan_task_text",
-        coverage: Coverage::Deferred(
-            "truncate_task_text appends no ellipsis or other marker at the caller's \
+        coverage: Coverage::NoMarker {
+            reason: "truncate_task_text appends no ellipsis or other marker at the caller's \
              surface, so a caller cannot tell a cut task from a genuinely short one; the \
              length-cap itself is tested (task_text_truncated_to_limit), but that is \
              orthogonal to the marker gap IC-13 is about",
-        ),
+            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        },
     },
     // -- src/librarian/tools/doctor.rs --
     ProbeRow {
         id: "doctor.listed_roots",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "none of the outside_managed_roots_* tests seed more than the 5-root \
              MAX_LISTED cap; the closest fixture seeds a single no-root row, an \
              unrelated case",
         ),
     },
     ProbeRow {
-        // A suppression FLOOR, not a truncating ceiling. Flagged to the whole-branch
-        // review: `RESULT_CAP` currently conflates ceilings that truncate with floors
-        // that suppress, and "the marker arrives" means a different thing under each.
+        // A suppression FLOOR that drops ROWS OF THE RESULT (doctor's worklist entries below
+        // it), which is what makes it a `RESULT_CAP` at all: a floor that merely gates an
+        // advisory beside a whole result withholds nothing from it (see
+        // `context.attestation_exposure`, `NOT_A_CAP`). The floor is deliberate; the defect
+        // is that nothing counts what it dropped.
         id: "doctor.exposure_threshold",
-        coverage: Coverage::Deferred(
-            "`EXPOSURE_THRESHOLD` (5) is a suppression floor, not a truncating ceiling: \
-             `src/librarian/tools/doctor.rs:2947` drops rows *below* it and no field \
-             reports how many were dropped, while the marker \
+        coverage: Coverage::NoMarker {
+            reason: "`EXPOSURE_THRESHOLD` (5) is a suppression floor, not a truncating ceiling: \
+             `src/librarian/tools/doctor.rs:4553` (and `:4699`, `:4828`) drops rows *below* it \
+             and no field reports how many were dropped, while the marker \
              `$.summary.by_check.entry_conditional_past_due` counts rows that survived. \
              The marker is therefore observable non-zero only when the cap did not bite. \
              The one test that drives exposure below the floor \
              (`conditional_past_due_fires_exactly_at_the_exposure_threshold`, \
-             `doctor.rs:11267`) calls `scan_conditional_past_due` directly rather than \
+             `doctor.rs:18868`) calls `scan_conditional_past_due` directly rather than \
              `call()`, so no `summary.by_check` object exists in its output at all.",
-        ),
+            bug: "docs/issues/2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md",
+        },
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
@@ -531,7 +579,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/format.rs --
     ProbeRow {
         id: "format.shape_keys",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references describe_payload_shape's key-count cap or seeds an object \
              with enough keys to reach it",
         ),
@@ -548,44 +596,55 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // behavioural test... asserts the marker arrives" — a positive, present signal.
         // This cap's only real test evidence is an ABSENCE assertion, which does not fit;
         // inventing a `TextContains` value here would claim something never arrives as
-        // though it does. Reclassifying to `Deferred` with the honest reason, not `Probed`.
+        // though it does. Classified `NoMarker` (it was `Deferred` until the 2026-10-16 split),
+        // with the honest reason, not `Probed`.
         id: "format.shape_scalar_len",
-        coverage: Coverage::Deferred(
-            "the_generic_fallback_describes_the_payload_instead_of_the_envelope drives a \
+        coverage: Coverage::NoMarker {
+            reason: "the_generic_fallback_describes_the_payload_instead_of_the_envelope drives a \
              20,000-char scalar past MAX_SCALAR_LEN=60 and asserts the raw value is never \
              inlined, but describe_payload_shape emits no marker that arrives when the cap \
-             fires (an over-length scalar is silently dropped from the scalars: line, \
+             fires (an over-length scalar is dropped from the scalars: line with no count, \
              unlike MAX_KEYS's '… +N more'); the only test evidence is an absence \
              assertion, which Coverage::Probed's marker contract does not cover",
-        ),
+            bug: "docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md",
+        },
     },
     ProbeRow {
+        // Reclassified from `Untested` on a use-site read, 2026-10-16: the reason this row
+        // carried named only the missing test, but `describe_payload_shape` applies
+        // `.take(MAX_SCALARS)` to its scalar line (`format.rs:213-217`) and appends no count
+        // — the same non-disclosure as `format.shape_scalar_len`, which the key line does not
+        // share (it ends `… +N more`). No test can assert a marker that is not emitted.
         id: "format.shape_scalars",
-        coverage: Coverage::Deferred(
-            "no test references describe_payload_shape's scalar-count cap or seeds enough \
-             scalars to reach it",
-        ),
+        coverage: Coverage::NoMarker {
+            reason: "`.take(MAX_SCALARS)` on describe_payload_shape's scalar line drops every \
+             scalar past the eighth and nothing says so (the key line, by contrast, ends \
+             '… +N more'); no test seeds more than the cap, and none could assert a marker \
+             that is not emitted",
+            bug: "docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md",
+        },
     },
     // -- src/tools/symbol/references.rs --
     ProbeRow {
         id: "references.probe_positions",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references resolve_binding_by_position's position-probe cap by name \
              or drives it past its threshold",
         ),
     },
     ProbeRow {
         id: "references.corroborate_files_scan",
-        coverage: Coverage::Deferred(
-            "bounds a workspace file SCAN inside corroborate_zero_references; exceeding it \
-             silently under-scans rather than reporting a smaller number, so a false zero \
+        coverage: Coverage::NoMarker {
+            reason: "bounds a workspace file SCAN inside corroborate_zero_references; exceeding it \
+             under-scans rather than reporting a smaller number, so a false zero \
              (\"no references\") is indistinguishable from \"scan stopped early\" — no \
              fixture currently isolates the two",
-        ),
+            bug: "docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md",
+        },
     },
     ProbeRow {
         id: "references.corroborate_hits",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references corroborate_zero_references's hit cap or seeds enough \
              corroborating hits to reach it",
         ),
@@ -611,24 +670,25 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "audit_doc_refs.basename_index",
-        coverage: Coverage::Deferred(
-            "bounds build_basename_index's own scan; an index that stopped early \
-             silently resolves fewer refs rather than warning indexing was incomplete — \
+        coverage: Coverage::NoMarker {
+            reason: "bounds build_basename_index's own scan; an index that stopped early \
+             resolves fewer refs rather than warning indexing was incomplete — \
              a false zero on a truncated index reads as 'no such basename', not 'index \
              incomplete', and no fixture currently drives it past the cap",
-        ),
+            bug: "docs/issues/2026-10-16-audit-doc-refs-basename-index-cap-reports-existing-files-missing.md",
+        },
     },
     // -- src/librarian/tools/audit_log.rs --
     ProbeRow {
         id: "audit_log.default_limit",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test omits limit while seeding more rows than the default; the largest \
              seeded corpus in any audit_log test is a handful of rows",
         ),
     },
     ProbeRow {
         id: "audit_log.max_limit",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test requests a limit anywhere near the max; limit-testing tests use \
              small explicit overrides",
         ),
@@ -663,22 +723,10 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "a_neighbourhood_that_does_not_fit_whole_is_excerpted_rather_than_dropped",
         },
     },
-    ProbeRow {
-        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
-        // test seeds 5 citers against a threshold of 5 — this cap is a `>=` FLOOR, so 5
-        // is past its bound, and the test brackets it with a negative control at 4.
-        // Marker written by production at `src/librarian/tools/context.rs:568-574`.
-        id: "context.attestation_exposure",
-        coverage: Coverage::Probed {
-            marker: Marker::JsonPath("$.verification.verification_state"),
-            mutation: Mutation::Killed,
-            cited_test: "a_load_bearing_statement_arms_the_tap_and_says_what_would_discharge_it",
-        },
-    },
     // -- src/librarian/tools/find.rs --
     ProbeRow {
         id: "artifact.find_limit",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only related test (clamps_oversized_limit) seeds a single row, which \
              cannot discriminate a working clamp from none; a sibling test drives a \
              different, smaller-granularity overflow signal on a 3-row corpus, not this \
@@ -687,7 +735,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "artifact.find_offset",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the offset cap by name; only the definition and one \
              production use site exist",
         ),
@@ -706,7 +754,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "artifact.get_overflow_headings",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test drives the top-level-heading list inside the overflow hint past its \
              own cap; existing overflow tests use a three-heading fixture",
         ),
@@ -714,7 +762,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/tools/link_scan/mod.rs --
     ProbeRow {
         id: "link_scan.artifacts",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the artifact-scan cap by name; only the definition and \
              one production use site exist",
         ),
@@ -733,7 +781,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/tools/refresh_stale.rs --
     ProbeRow {
         id: "refresh_stale.max_limit",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only related test calls augmentation::list_stale directly, bypassing the \
              tool's call() surface, and uses an explicit limit override far below either \
              constant's value",
@@ -741,7 +789,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "refresh_stale.default_limit",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the same test as refresh_stale.max_limit exercises an explicit override, \
              never the shipped default, and bypasses call()",
         ),
@@ -795,7 +843,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // it live is annotated at the segment site (`build_project_status_segments` in
         // `src/prompts/mod.rs`), not here — that is where someone would fire it.
         id: "prompts.trim_note_names",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "`MAX_NAMED_DROPS` (3) caps the labels `trim_note` lists \
              (`src/prompts/mod.rs:405-412`), but its only production caller \
              `fit_dynamic_block` draws labels from non-`Anchor`, non-`Substitutable` \
@@ -822,7 +870,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "grep.total_bytes",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only candidate test's total stays under budget from the sibling \
              per-match MAX_MATCH_BYTES clamp alone (5×~2KB≈10KB), never approaching the \
              60KB total cap — it cannot prove MAX_TOTAL_MATCH_BYTES itself engages",
@@ -831,7 +879,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/workspace.rs --
     ProbeRow {
         id: "workspace.scan_depth",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only related test (max_depth_limits_discovery) drives discover_projects's \
              own externally-parameterized max_depth argument, a different function from \
              scan_languages_by_dominance whose internal constant is not injectable",
@@ -839,7 +887,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         id: "workspace.scan_files",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test constructs more than a handful of files; existing \
              workspace-discovery tests use small fixture trees, far under this scan's \
              file-count cap",
@@ -848,7 +896,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/catalog/find.rs --
     ProbeRow {
         id: "catalog.semantic_k",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only related test asserts a zero-widenings result over a tiny seeded \
              corpus and never drives the candidate pool near the K_CAP threshold",
         ),
@@ -886,7 +934,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/preview/spec.rs --
     ProbeRow {
         id: "preview.spec_headings",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "the only test for this module (extracts_headings_and_summary) seeds 2 \
              headings, far under the 20-item cap — never proven the cap engages, unlike \
              its sibling preview.default_headings/preview.plan_headings",
@@ -895,7 +943,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/preview/summary.rs --
     ProbeRow {
         id: "preview.summary_chars",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the summary character cap or seeds a summary paragraph \
              long enough to reach it",
         ),
@@ -903,7 +951,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/tools/link_scan/resolve.rs --
     ProbeRow {
         id: "link_scan.ambiguous_candidates",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the ambiguous-candidate cap by name or drives a \
              resolution past it",
         ),
@@ -927,7 +975,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // never opens a block on it. A test change would make this citable — which is
         // not the same thing as an existing citation, and 5c does not write tests.
         id: "workspace_state_at.rows",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "`MAX_ROWS` (200) bounds the `find` call at \
              `src/librarian/tools/workspace_state_at.rs:152` and the overflow signal is \
              written at `:231`. `cap_returns_hint` (`:339`) seeds 250 artifacts and \
@@ -942,7 +990,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/lsp/client.rs --
     ProbeRow {
         id: "lsp.did_open_size",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the did_open payload-size cap by name or drives a \
              document body past it",
         ),
@@ -958,9 +1006,9 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // the same gap `markdown.headings_hard_cap` has above: a marker-rendering test
         // standing in for a cap-driving one. `Coverage::Probed` requires a test that
         // drives the cap past its bound AND asserts the marker; this one only does the
-        // latter, against a synthetic already-tripped input. Reclassifying to `Deferred`.
+        // latter, against a synthetic already-tripped input. Reclassifying to `Untested`.
         id: "lsp.first_call_budget",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "Task 5a's Probed claim (marker TextContains(\"[lsp warming]\")) cited \
              format_overview_symbols_file_mode_warming_marker, which asserts the renderer \
              embeds the marker given an already-synthetic `\"lsp\": \"warming\"` input — \
@@ -1014,7 +1062,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/symbol/edit.rs --
     ProbeRow {
         id: "rename.text_sweep_file_bytes",
-        coverage: Coverage::Deferred(
+        coverage: Coverage::Untested(
             "no test references the text-sweep file-size cap by name or drives a \
              matched file past it",
         ),
@@ -1268,12 +1316,13 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
         id: "call_graph.workspace_files_scan",
-        coverage: Coverage::Deferred(
-            "bounds CachedResolver::lookup_pos_via_ts_workspace's own file-scan; \
-             exceeding it silently returns fewer or no candidate positions rather than \
+        coverage: Coverage::NoMarker {
+            reason: "bounds CachedResolver::lookup_pos_via_ts_workspace's own file-scan; \
+             exceeding it returns fewer or no candidate positions rather than \
              reporting an incomplete scan — a false zero indistinguishable from 'no \
              callers exist', and no fixture currently isolates the two",
-        ),
+            bug: "docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md",
+        },
     },
     // -- src/agent/build_check.rs --
     ProbeRow {
@@ -1293,8 +1342,8 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/librarian/tools/doctor.rs --
     ProbeRow {
         id: "doctor.recently_touched_walk",
-        coverage: Coverage::Deferred(
-            "the ceiling IS reached on every call in this repo — 5,582 commits against \
+        coverage: Coverage::NoMarker {
+            reason: "the ceiling IS reached on every call in this repo — 5,582 commits against \
              a 4,000 walk, measured 2026-09-09 — and `paths_touched_since` returns a \
              bare HashSet, breaking at the bound with nothing marking the set partial. \
              What blocks a probe is reachability of the DEFECT, not of the cap: the walk \
@@ -1304,7 +1353,8 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
              of >4,000 commits whose committer-time order is non-monotonic across the \
              boundary — precisely the condition the ceiling exists to tolerate, per \
              `paths_touched_since`'s own doc comment",
-        ),
+            bug: "docs/issues/2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md",
+        },
     },
     // -- src/tools/memory/mod.rs --
     ProbeRow {

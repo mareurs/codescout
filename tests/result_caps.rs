@@ -170,7 +170,7 @@
 //! - malformed marker, BOTH sites: `JsonPath("truncated")` (no `$.`) →
 //!   `… malformed Marker: ["run_command.inline_bytes"]`; `TextContains("   ")`
 //!   → `… malformed Marker: ["tool_output.inline_tokens"]`.
-//! - placeholder reason, BOTH sites: `Deferred("TODO")` → `… placeholder (not a
+//! - placeholder reason, BOTH sites: `Untested("TODO")` → `… placeholder (not a
 //!   real) reason: ["grep.total_bytes"]`; `NotYet("tbd")` → `… placeholder (not
 //!   a real) reason: ["index_state.skipped_sample"]`.
 //! - `Probed` row with empty `cited_test` → `cited_test: ""` → `Probed ProbeRow
@@ -1373,7 +1373,7 @@ fn probe_row_ids_reads_a_quoted_id_field_and_ignores_everything_else() {
         pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             ProbeRow {
                 id: "a.b",
-                coverage: Coverage::Deferred("x"),
+                coverage: Coverage::Untested("x"),
             },
             ProbeRow {
                 id: "c.d",
@@ -1625,7 +1625,7 @@ fn probed_citations_reads_marker_and_cited_test_alongside_id_and_skips_deferred_
         pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             ProbeRow {
                 id: "a.b",
-                coverage: Coverage::Deferred("no test yet"),
+                coverage: Coverage::Untested("no test yet"),
             },
             ProbeRow {
                 id: "c.d",
@@ -1660,7 +1660,7 @@ fn probed_citations_reads_marker_and_cited_test_alongside_id_and_skips_deferred_
                 cited_test: "another_test_fn".to_string(),
             },
         ],
-        "the Deferred row a.b must not appear, and both Probed rows must carry their own \
+        "the Untested row a.b must not appear, and both Probed rows must carry their own \
          marker and cited_test, not the other's"
     );
     // The struct-tail chunk mirrors cap_probe.rs's own real shape: a `tally()`-style
@@ -3046,7 +3046,7 @@ fn resolve_cited_test_refuses_two_declarations_inside_one_file() {
 /// is the mechanism Task 5b adds: before it, a `cited_test`-shaped claim
 /// was a prose comment nobody checked, and two of the original 25 `Probed`
 /// rows had already drifted from what their cited test actually asserts —
-/// both reclassified to `Deferred` rather than left citing evidence that
+/// both reclassified to `Untested` rather than left citing evidence that
 /// does not hold up (see `cap_probe.rs`'s row comments for
 /// `markdown.headings_hard_cap` and `lsp.first_call_budget`).
 ///
@@ -3099,7 +3099,7 @@ fn probed_rows_cite_a_real_test() {
     assert!(
         !citations.is_empty(),
         "probed_citations found zero Coverage::Probed rows in cap_probe.rs — either every row \
-         really is Deferred (check by hand before trusting this), or the parser's anchors \
+         really is Untested or NoMarker (check by hand before trusting this), or the parser's anchors \
          (\"ProbeRow {{\", \"Coverage::Probed {{\", \"id:\", \"cited_test:\") have drifted from \
          the file's actual formatting"
     );
