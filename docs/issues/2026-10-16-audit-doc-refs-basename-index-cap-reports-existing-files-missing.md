@@ -38,7 +38,10 @@ The index type was a bare `HashMap`; there was no slot for "built from a truncat
 - `build_basename_index(repo_root, max_files)` returns `(index, truncated)`. `truncated` is true only when the walk reached a *file* it did not index; a walk that ends exactly at the cap, or whose trailing entries are directories, is complete.
 - `ResolveCtx.basename_index_truncated` carries it. The verdict lives in ONE place, `try_basename_fallback`, so all four ref kinds inherit it: a bare basename (no `/`, after the `./` strip) that misses a truncated index becomes `Verdict::Unknown`, `Severity::Low`, new `SeverityReason::BasenameIndexTruncated` (`basename_index_truncated`), with notes naming the scope examined and the env override. A ref with a `/` never reaches the index and keeps `Missing`; a hit in the indexed portion still resolves; a complete index keeps `Missing` (silence on a trustworthy negative, ADR 2026-08-27).
 - The cap is `MAX_INDEXED_FILES_DEFAULT` (50,000, annotated `RESULT_CAP audit_doc_refs.basename_index`), overridable with `LIBRARIAN_AUDIT_MAX_INDEXED_FILES`, read only in `call`. `call_with_index_cap` is the seam a test drives, so no `set_var` (UB in a parallel test binary).
-- `scan_meta.basename_index_truncated: bool` is the marker, carried on `Degradation` but deliberately not folded into `is_degraded()` (that flag reports the LSP).
+- `scan_meta.basename_index_truncated: bool` is the marker in the response, carried on `Degradation` but deliberately not folded into `is_degraded()` (that flag reports the LSP).
+- The persisted tracker records it too: `ScanMeta.basename_index_truncated` (`#[serde(default)]`), set in `upsert_tracker` and rendered in the tracker header by `render_template.j2`. This matters because the merger never opens an issue from an `unknown` verdict, so on a truncated scan a newly broken bare-basename ref is absent from the tracker and the header flag is the only signal.
+- A LINK ref was the only `missing`/`high` kind on this path (path/line/symbol refs were already capped to `low` as inferred paths), so a truncated-index link miss is `Unknown` at `med` (never above what the `Missing` would have carried after archive/memory drops), keeping it visible under `--fail-on med` per the band convention in `severity::default_severity`. This is a trade-off: `--fail-on high` no longer fails on it.
+- The walk is name-sorted (`sort_by_file_name`), so the indexed prefix of a capped walk is identical on every machine.
 - `cap_probe.rs` row `audit_doc_refs.basename_index` moved `NoMarker` -> `Probed` (marker `$.scan_meta.basename_index_truncated`, mutation `Killed`).
 
 ## Tests added
@@ -56,11 +59,15 @@ In `src/librarian/tools/audit_doc_refs/resolver.rs`:
 - `resolver_slash_ref_stays_missing_on_truncated_index`
 - `resolver_basename_hit_on_truncated_index_still_resolves`
 
+Added in the review round: `truncated_link_ref_is_unknown_med_and_gates_at_med_but_not_high`, `genuinely_absent_link_stays_missing_high_when_index_is_complete`, `truncation_reaches_the_persisted_tracker_and_its_rendering`, `resolver_truncated_link_severity_never_exceeds_the_missing_it_replaces`.
+
 Mutation-verified 2026-10-17: with the truncated arm of `try_basename_fallback` disabled, the resolver test and the end-to-end test red; with the marker key dropped from `build_response`, the end-to-end test reds.
 
 ## Resume
 
-Not covered, left as is: a basename that is UNIQUE in a truncated index may have a second copy in the un-indexed tail, so `resolved_basename` can still claim "exactly one file" when there are two. That is a different claim (uniqueness, not existence) and a smaller defect; not filed separately.
+Not covered, left as is, and filed separately: `docs/issues/2026-10-17-audit-doc-refs-unique-basename-in-truncated-index-gives-false-line-oob.md`. A basename with ONE indexed copy and a twin in the un-indexed tail is taken as unique by `unique_basename_path`, so `file_line`/`file_symbol` can report a false `line_oob`/`symbol_missing` (`med`) — a false claim, not only a uniqueness claim (observed 2026-10-17).
+
+Checked and NOT a bug: `build_basename_index` skips walk errors (`flatten`) without marking truncation, but `collect_markdown_files` walks the same tree with the same defaults and `?`-propagates walk errors first. A mode-000 subdirectory aborts the whole audit (`IO error ... Permission denied`) before the index is built, so no silent un-indexed tail results. The coupling is now documented on `build_basename_index`.
 
 ## References
 

@@ -277,10 +277,11 @@ pub struct ScanMeta {
     pub last_scan_commit: Option<String>,
     pub n_files_scanned: u32,
     pub n_refs_found: u32,
-    /// Coverage was incomplete. Accurate as-is, and deliberately unchanged: a mid-index
+    /// LSP coverage was incomplete. Accurate as-is, and deliberately unchanged: a mid-index
     /// server really does cost resolutions, which is why
     /// `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md` made
-    /// this true for that case.
+    /// this true for that case. It covers the LSP ONLY: a truncated basename index is
+    /// reported by [`ScanMeta::basename_index_truncated`], not folded in here.
     pub degraded: bool,
     /// Languages whose resolutions were incomplete.
     ///
@@ -300,6 +301,15 @@ pub struct ScanMeta {
     /// had to guess — and guessed wrong.
     #[serde(default)]
     pub degraded_causes: std::collections::BTreeMap<String, Vec<String>>,
+    /// The basename index stopped at its file cap, so a bare-basename ref that found
+    /// nothing was reported `unknown`, not `missing`.
+    ///
+    /// This must reach the PERSISTED tracker, not only the call response: the merger never
+    /// opens an issue from an `unknown` verdict, so on a truncated scan a newly broken
+    /// bare-basename ref is simply absent from the tracker, and without this flag the
+    /// tracker header would read as a complete scan.
+    #[serde(default)]
+    pub basename_index_truncated: bool,
 }
 
 /// A scan's degradation state: which languages came back incomplete, and why.
@@ -322,7 +332,8 @@ pub struct Degradation {
 }
 
 impl Degradation {
-    /// Whether coverage was incomplete — the `scan_meta.degraded` flag.
+    /// Whether the LSP left resolutions incomplete — the `scan_meta.degraded` flag. LSP
+    /// only: a truncated basename index is [`Degradation::basename_index_truncated`].
     pub fn is_degraded(&self) -> bool {
         !self.languages.is_empty()
     }
@@ -791,6 +802,12 @@ fn git_head_commit(repo_root: &std::path::Path) -> Option<String> {
 /// into a `Verdict::Missing` (`resolver::try_basename_fallback` reports
 /// `Unknown` instead). A walk that ends exactly at the cap, or whose trailing
 /// entries are directories, is complete (`false`).
+///
+/// Walk ERRORS are skipped (`flatten`), not counted as truncation. That is sound only
+/// because `collect_markdown_files` walks the same tree with the same ignore defaults and
+/// `?`-propagates a walk error first, so an unreadable directory aborts the whole audit
+/// before this function runs (verified 2026-10-17 with a mode-000 subdirectory). If the
+/// two walks ever diverge, this skip becomes a silent un-indexed tail again.
 fn build_basename_index(
     repo_root: &std::path::Path,
     max_files: usize,
@@ -803,6 +820,9 @@ fn build_basename_index(
     let walker = ignore::WalkBuilder::new(repo_root)
         .hidden(true)
         .git_ignore(true)
+        // Sorted, so the indexed prefix of a capped walk is the same on every machine and
+        // filesystem. Unsorted, readdir order decided WHICH files fell in the un-indexed tail.
+        .sort_by_file_name(|a, b| a.cmp(b))
         .build();
 
     let mut count = 0usize;
@@ -1019,6 +1039,7 @@ async fn upsert_tracker(
     new_params.scan_meta.degraded = degradation.is_degraded();
     new_params.scan_meta.lsp_languages_degraded = degradation.languages;
     new_params.scan_meta.degraded_causes = degradation.causes;
+    new_params.scan_meta.basename_index_truncated = degradation.basename_index_truncated;
     new_params.parse_warnings = warnings;
 
     write_tracker_params(ctx, &tracker_id, &new_params).await?;
@@ -2163,9 +2184,12 @@ mod tests {
     fn basename_index_trailing_directories_do_not_count_as_truncation() {
         // The walk may yield directory entries after the cap is reached; only a
         // FILE left out makes the index incomplete.
+        // Directories named to sort AFTER the file: with the walk sorted, the entries following
+        // the cap-th file are exactly these, so a cap check placed before the `is_file` filter
+        // would trip on the first one and report a truncation that never happened.
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("only.txt"), "x").unwrap();
-        for d in ["d1", "d2", "d3"] {
+        for d in ["z1", "z2", "z3"] {
             std::fs::create_dir_all(tmp.path().join(d)).unwrap();
         }
         let (_, truncated) = build_basename_index(tmp.path(), 1);
@@ -2210,7 +2234,6 @@ mod tests {
             capped["n_refs_broken"], 0,
             "an existing file must never become a Missing finding: {capped}"
         );
-        assert_eq!(capped["exit_code"], 0, "{capped}");
         assert!(
             capped["n_refs_unknown"].as_u64().unwrap() >= 2,
             "un-indexed refs are Unknown, not Missing: {capped}"
@@ -2248,6 +2271,113 @@ mod tests {
         .unwrap();
         assert_eq!(r["n_refs_broken"], 1, "{r}");
         assert_eq!(r["scan_meta"]["basename_index_truncated"], false, "{r}");
+    }
+    #[tokio::test]
+    async fn truncated_link_ref_is_unknown_med_and_gates_at_med_but_not_high() {
+        // The link kind was the only `missing`/`high` kind on this path (path/line/symbol refs
+        // were already capped to `low` as inferred paths), so it is the one the truncation must
+        // not let slip under `--fail-on med`. Sorted walk + cap 1: only `docs/spec.md` (the
+        // first file) is indexed, so `b.md` falls in the un-indexed tail.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("y")).unwrap();
+        std::fs::write(tmp.path().join("y/b.md"), "# b\n").unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See [b](b.md).\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = |fail_on: &str| serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"], "fail_on": fail_on});
+
+        let med = call_with_index_cap(&ctx, args("med"), 1).await.unwrap();
+        let finding = &med["findings"][0];
+        assert_eq!(finding["ref_kind"], "link", "{med}");
+        assert_eq!(finding["verdict"], "unknown", "{med}");
+        assert_eq!(finding["severity"], "med", "{med}");
+        assert_eq!(med["n_refs_broken"], 0, "{med}");
+        assert_eq!(
+            med["exit_code"], 1,
+            "a truncated link must still trip fail_on=med: {med}"
+        );
+
+        let high = call_with_index_cap(&ctx, args("high"), 1).await.unwrap();
+        assert_eq!(
+            high["exit_code"], 0,
+            "unproven absence must not gate at high: {high}"
+        );
+
+        // Control: the same ref against a complete index resolves by basename.
+        let full = call_with_index_cap(&ctx, args("med"), MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        assert_eq!(
+            full["findings"][0]["verdict"], "resolved_basename",
+            "{full}"
+        );
+        assert_eq!(full["exit_code"], 0, "{full}");
+    }
+
+    #[tokio::test]
+    async fn genuinely_absent_link_stays_missing_high_when_index_is_complete() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See [g](gone.md).\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let r = call_with_index_cap(
+            &ctx,
+            serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"], "fail_on": "high"}),
+            MAX_INDEXED_FILES_DEFAULT,
+        )
+        .await
+        .unwrap();
+        let finding = &r["findings"][0];
+        assert_eq!(finding["verdict"], "missing", "{r}");
+        assert_eq!(finding["severity"], "high", "{r}");
+        assert_eq!(r["exit_code"], 1, "{r}");
+    }
+
+    #[tokio::test]
+    async fn truncation_reaches_the_persisted_tracker_and_its_rendering() {
+        // The merger never opens an issue from an `unknown` verdict, so on a truncated scan a
+        // newly broken bare-basename ref is ABSENT from the tracker. The only thing that tells a
+        // reader of the tracker is `scan_meta.basename_index_truncated`, rendered in its header.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("y")).unwrap();
+        std::fs::write(tmp.path().join("y/b.py"), "x = 1\n").unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See `b.py`.\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = serde_json::json!({"emit_tracker": true, "paths": ["docs/**/*.md"]});
+        let render = |p: &TrackerParams| {
+            crate::librarian::tools::render::render_params(
+                include_str!("./render_template.j2"),
+                &serde_json::to_value(p).unwrap(),
+            )
+            .unwrap()
+        };
+
+        let capped = call_with_index_cap(&ctx, args.clone(), 1).await.unwrap();
+        let id = capped["tracker_id"].as_str().unwrap().to_string();
+        let params = load_tracker_params(&ctx, &id).await.unwrap();
+        assert!(
+            params.scan_meta.basename_index_truncated,
+            "the persisted scan_meta must record the truncation: {params:?}"
+        );
+        assert!(!params.scan_meta.degraded, "`degraded` stays LSP-only");
+        assert!(
+            params.issues.is_empty(),
+            "no issue is opened from an unknown verdict, which is why the flag matters"
+        );
+        assert!(
+            render(&params).contains("basename index truncated"),
+            "the tracker header must say the scan was incomplete: {}",
+            render(&params)
+        );
+
+        // A later complete scan overwrites the flag, so the warning does not outlive its cause.
+        call_with_index_cap(&ctx, args, MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        let params = load_tracker_params(&ctx, &id).await.unwrap();
+        assert!(!params.scan_meta.basename_index_truncated);
+        assert!(!render(&params).contains("basename index truncated"));
     }
 
     #[tokio::test]

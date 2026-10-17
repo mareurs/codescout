@@ -77,8 +77,8 @@ pub struct ResolveCtx<'a> {
     /// Basename → list of relative paths in the workspace. Used by
     /// `resolve_file_path` as a fallback when a bare basename (no `/`) doesn't
     /// literally exist at the repo root. Built once per audit run in
-    /// `mod.rs::call`. Empty disables the fallback (treat misses as
-    /// `Verdict::Missing` exactly as before).
+    /// `mod.rs::call`. Empty disables the fallback: a miss is `Verdict::Missing`, unless
+    /// `basename_index_truncated` is set, in which case a bare-basename miss is `Unknown`.
     pub basename_index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
     /// `true` when `basename_index` was built from a walk that hit its file cap, so
     /// it is a prefix of the workspace. A basename absent from it is then "not
@@ -242,7 +242,7 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
                 severity: Severity::Low,
                 severity_reason: SeverityReason::BasenameIndexTruncated,
                 notes: Some(
-                    "not found at the repo root or in the basename index, but the index \
+                    "not found on disk or in the basename index, but the index \
                      was truncated at its file cap, so the file may exist in the \
                      un-indexed part of the tree; cite it by path to verify \
                      (LIBRARIAN_AUDIT_MAX_INDEXED_FILES raises the cap)"
@@ -496,7 +496,24 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // leading `./` — before that, such a ref fell out of the fallback on its own slash,
     // so the guard restates the old behaviour explicitly rather than changing it.
     if !path_part.starts_with("./") && !path_part.starts_with("../") {
-        if let Some(r) = try_basename_fallback(path_part, ctx) {
+        if let Some(mut r) = try_basename_fallback(path_part, ctx) {
+            if r.severity_reason == SeverityReason::BasenameIndexTruncated {
+                // A link target is explicit intent to point at a local file, so its miss was
+                // `high`. On a truncated index it is unproven, not absent: `Unknown`, and by
+                // the band convention `default_severity` documents for a non-deterministic
+                // answer, `med` — "keeps the report and takes the non-determinism out of the
+                // exit code" for `--fail-on high`, while a `--fail-on med` gate still sees it.
+                // Never above what the `Missing` would have carried (an archived or memory
+                // document's link was already dropped).
+                let would_be =
+                    verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
+                        .severity;
+                r.severity = if would_be == Severity::High {
+                    Severity::Med
+                } else {
+                    would_be
+                };
+            }
             return r;
         }
     }
@@ -545,8 +562,10 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         // returns None for BOTH zero matches and two-or-more — which meant this branch
         // claimed `FileMissing` for a file that exists twice. `try_basename_fallback`
         // answers "what verdict?", and is the same helper `resolve_file_path` and
-        // `resolve_file_line` use to tell the two apart. Here it can only return
-        // `AmbiguousBasename`: a single match would already have been taken above.
+        // `resolve_file_line` use to tell the two apart. Here it returns
+        // `AmbiguousBasename` for a twin (a single match would already have been taken
+        // above), or `Unknown`/`BasenameIndexTruncated` when the index was cut off and
+        // this ref's file may sit in the un-indexed tail.
         return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
             verdict_with_drops_for_ref(
                 Verdict::FileMissing,
@@ -745,7 +764,9 @@ fn path_evidence(raw_ref: &str, ctx: &ResolveCtx<'_>) -> severity::PathEvidence 
 /// Used only on the two path-classification paths (`file_path`, `file_line`).
 /// A markdown link target is deliberately NOT routed through here: `[x](y.md)`
 /// is explicit author intent to point at a local file, so a missing link target
-/// stays `high` even without a slash.
+/// stays `high` even without a slash — with one exception, in `resolve_link`: when the
+/// basename index was truncated, the miss is `Unknown` and capped at `med` (it was
+/// never proven absent, but it must stay visible under `--fail-on med`).
 fn verdict_with_drops_for_ref(
     verdict: Verdict,
     raw_ref: &str,
@@ -2511,7 +2532,14 @@ mod tests {
         ] {
             let r = resolve_ref(&cand(raw, "docs/spec.md", kind), &ctx);
             assert_eq!(r.verdict, Verdict::Unknown, "{kind:?}");
-            assert_eq!(r.severity, Severity::Low, "{kind:?}");
+            // A path/line/symbol ref was already `low` (inferred path); a LINK target was
+            // `high`, and keeps `med` so a `--fail-on med` gate still sees it.
+            let want = if kind == RefKind::Link {
+                Severity::Med
+            } else {
+                Severity::Low
+            };
+            assert_eq!(r.severity, want, "{kind:?}");
             assert_eq!(r.severity_reason.as_str(), "basename_index_truncated");
             let notes = r.notes.expect("truncation must be named in the notes");
             assert!(
@@ -2519,6 +2547,33 @@ mod tests {
                 "notes must name the scope: {notes}"
             );
         }
+    }
+    /// The truncated-index link verdict is never stronger than the `Missing` it replaces:
+    /// a link in a memory file was already dropped two bands (`high` -> `low`), and the
+    /// truncation cap must not lift it back to `med`.
+    #[test]
+    fn resolver_truncated_link_severity_never_exceeds_the_missing_it_replaces() {
+        let tmp = TempDir::new().unwrap();
+        let memory_globs: Vec<globset::Glob> = severity::DEFAULT_MEMORY_GLOBS
+            .iter()
+            .map(|g| globset::Glob::new(g).unwrap())
+            .collect();
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &memory_globs,
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("tail_file.md", ".buddy/memory/m.md", RefKind::Link),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::Unknown);
+        assert_eq!(r.severity, Severity::Low, "memory drop must survive");
     }
 
     /// A path-prefixed ref never consults the basename index, so truncation is not
