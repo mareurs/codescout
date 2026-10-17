@@ -30,7 +30,7 @@
 **Spend in this segment** (measured where the harness prints it): rerun of the three losses $6.62, paragraph test $1.11. Stage 0 (14 runs) and the calibration (12 runs) used text output and have no recorded cost.
 
 **Decisions that are the operator's.**
-1. The R1 ruling: record `not_shown_safe` as a no-ship for the static rule.
+1. The R1 ruling: RULED 2026-10-17 by the operator: `not_shown_safe` is a no-ship for the static rule (stack trace → `low`). `core/rules.json` stays empty and G4 stays held. It is recorded in the R1 spec of `claude-plugins`, commit `b3a2580` on the local branch `effort-routing-r1`. The ruling covers this static rule only, not routing in general.
 2. The branch `effort-routing-r1` (never pushed; it holds a foreign commit `f17afad`): how to integrate (cherry-pick the R1 commits, not a merge).
 3. The four `docs/research/2026-10-14-effort-steering-when-to-switch*.md` files and `.codescout/memories/research/effort-steering.md` were committed on 2026-10-16 by pathspec at the operator's request, after the Stage A results (not pushed).
 4. Tracker updates ES-22 / ES-23 in `claude-plugins`: DONE 2026-10-17 at the operator's choice, commit `090b6bb` on the local branch `effort-routing-r1` (not pushed; that checkout is shared with other sessions, and only the tracker file was committed).
