@@ -518,8 +518,8 @@ SECTION_SIGNATURES: dict[str, dict[str, list[tuple[str | None, list[str]]]]] = {
 #                     That scope (only doc/librarian/artifact calls) is load-bearing: matching
 #                     signatures against any tool input once scored all six tracker-conventions
 #                     sections at 100% from the single `create_file` that wrote this script.
-#                     Widening it per topic is a design decision, not an authoring task -- it
-#                     needs its own self-trigger control for each tool added.
+#                     Widening it per topic was decided against on 2026-10-17: each tool added
+#                     needs its own self-trigger control, and that work is not staffed.
 UNMEASURABLE_TOPICS: dict[str, str] = {
     "error-handling": (
         "NO POPULATION: 0 injections in 2,411 sessions; it is pull-only (PULL_ONLY_GUIDE_TOPICS: "
@@ -542,20 +542,20 @@ UNMEASURABLE_TOPICS: dict[str, str] = {
         "'unverifiable'), which leaves no structural call to match."
     ),
     "progressive-disclosure": (
-        "OUT OF SCOPE (decision pending): injected in 57% of all sessions and 78% of main sessions, "
+        "OUT OF SCOPE (decided 2026-10-17: widening the tool scope needs its own self-trigger control per tool; not staffed): injected in 57% of all sessions and 78% of main sessions, "
         "so a population exists. Engagement is following @ref handles through read_file / grep / "
-        "run_command, none of which `scan_transcript` counts. Needs a per-topic tool scope and its "
+        "run_command, none of which `scan_transcript` counts. Would need a per-topic tool scope and its "
         "own self-trigger control; see docs/issues/2026-09-24-residual-section-use-signatures-for-nine-topics.md."
     ),
     "symbol-navigation": (
-        "OUT OF SCOPE (decision pending): injected in 62% of all sessions. Engagement is symbols / "
+        "OUT OF SCOPE (decided 2026-10-17: widening the tool scope needs its own self-trigger control per tool; not staffed): injected in 62% of all sessions. Engagement is symbols / "
         "references / call_graph with a name-path, none counted by `scan_transcript`; and its main "
         "rule (navigate instead of grep) is the ABSENCE of a grep, which no signature can match."
     ),
     "workspace-state": (
-        "OUT OF SCOPE (decision pending): injected in 10% of all sessions and 30% of main sessions. "
+        "OUT OF SCOPE (decided 2026-10-17: widening the tool scope needs its own self-trigger control per tool; not staffed): injected in 10% of all sessions and 30% of main sessions. "
         "Engagement is `workspace` calls and the per-call `workspace=` pin, outside the mechanism "
-        "tools `scan_transcript` counts. Needs a per-topic tool scope."
+        "tools `scan_transcript` counts. Would need a per-topic tool scope."
     ),
     "project-activation-bootstrap": (
         "OUT OF SCOPE: injected in 95% of sessions because it is the SESSION OPENER, delivered on the "

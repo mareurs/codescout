@@ -93,6 +93,23 @@ class EveryRegisteredTopicIsAccountedFor(unittest.TestCase):
                 f"{topic}: a reason must open with its kind, got {why[:40]!r}",
             )
             self.assertGreater(len(why), 80, topic)
+    DECIDED = (
+        "OUT OF SCOPE (decided 2026-10-17: widening the tool scope needs its own "
+        "self-trigger control per tool; not staffed)"
+    )
+
+    def test_the_three_tool_scope_topics_carry_the_decided_reason_not_a_pending_one(self):
+        # The user decided 2026-10-17 not to widen scan_transcript's tool scope. A reason that
+        # still reads "decision pending" would send the next reader to wait on a decision that
+        # was made. Per topic, so a topic left on the old text fails by name.
+        for topic in ("progressive-disclosure", "symbol-navigation", "workspace-state"):
+            why = probe.UNMEASURABLE_TOPICS[topic]
+            self.assertTrue(why.startswith(self.DECIDED), f"{topic}: got {why[:60]!r}")
+            # ... and the reader of a refusal sees it, not only the table.
+            self.assertIn(self.DECIDED, probe.refusal_for_topic(topic))
+        for topic, why in probe.UNMEASURABLE_TOPICS.items():
+            self.assertNotIn("decision pending", why, topic)
+
 
     def test_the_refusal_carries_the_reason_for_an_unmeasurable_topic_only(self):
         with_reason = probe.refusal_for_topic("iron-laws-detail")
