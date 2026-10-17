@@ -115,6 +115,109 @@ class Q4Linkage(unittest.TestCase):
         self.assertEqual(blk["linkable_overflows"], 0)
 
 
+class Q4Headline(unittest.TestCase):
+    """User decision 2026-10-17: the headline eventual-retrieval figure is the NEXT CALL (horizon 1).
+
+    `headline` is an additive key inside `own_handle_referenced_later`; every other key is untouched
+    (the recorded 32.1% and the 1/3/10/session-end side-by-side stay reproducible).
+    """
+
+    def test_headline_is_horizon_one_and_names_what_it_measures_and_its_limit(self):
+        rows = [
+            row("read_file", {"path": "a.rs"}, sec=0, overflowed=1, emitted="@tool_aaa"),
+            row("read_file", {"path": "@tool_aaa"}, sec=1, read_ids=["@tool_aaa"]),
+            row("read_file", {"path": "b.rs"}, sec=2, overflowed=1, emitted="@tool_bbb"),
+            row("grep", {"pattern": "x"}, sec=3),
+            row("read_file", {"path": "@tool_bbb"}, sec=4, read_ids=["@tool_bbb"]),
+        ]
+        blk = probe.q4(rows)["own_handle_referenced_later"]
+        head = blk["headline"]
+        self.assertEqual(head["horizon_calls"], 1)
+        self.assertEqual(head["count"], 1)  # only the first overflow was read at the NEXT call
+        self.assertEqual(head["of_linkable_overflows"], 2)
+        self.assertEqual(head["pct"], 50.0)
+        self.assertEqual(head["count"], blk["within_1_calls"])
+        self.assertEqual(head["pct"], blk["within_1_calls_pct"])
+        self.assertIn("own handle referenced at the next call", head["measures"])
+        self.assertIn("a mention in read_output_ids, not proof the content was needed", head["limit"])
+
+    def test_headline_is_not_the_wider_horizons(self):
+        # read 2 calls later: counts at horizon 3 and session end, NOT at the headline horizon.
+        rows = [
+            row("read_file", {"path": "a.rs"}, sec=0, overflowed=1, emitted="@tool_aaa"),
+            row("grep", {"pattern": "x"}, sec=1),
+            row("read_file", {"path": "@tool_aaa"}, sec=2, read_ids=["@tool_aaa"]),
+        ]
+        blk = probe.q4(rows)["own_handle_referenced_later"]
+        self.assertEqual(blk["within_3_calls"], 1)
+        self.assertEqual(blk["headline"]["count"], 0)
+        self.assertEqual(blk["headline"]["pct"], 0.0)
+
+    def test_headline_on_empty_input(self):
+        head = probe.q4([])["own_handle_referenced_later"]["headline"]
+        self.assertEqual((head["count"], head["of_linkable_overflows"], head["pct"]), (0, 0, 0.0))
+
+    def test_every_pre_existing_key_is_still_present(self):
+        blk = probe.q4([])["own_handle_referenced_later"]
+        for k in ("overflowed_calls_without_handle", "linkable_overflows", "within_1_calls",
+                  "within_3_calls", "within_10_calls", "by_session_end",
+                  "next_call_queried_other_buffer", "within_1_calls_pct", "within_3_calls_pct",
+                  "within_10_calls_pct", "by_session_end_pct"):
+            self.assertIn(k, blk)
+
+    def _run_main(self, *argv):
+        import contextlib
+        import io
+        import sqlite3
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "usage.db"
+            conn = sqlite3.connect(db)
+            conn.execute(
+                "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, tool_name TEXT, called_at TEXT, "
+                "latency_ms INTEGER, outcome TEXT, overflowed INTEGER, session_id TEXT, "
+                "project_root TEXT, input_json TEXT, output_json TEXT, "
+                "emitted_output_id TEXT, read_output_ids TEXT)"
+            )
+            calls = [
+                ("read_file", "2026-10-01T00:00:00", 1, '{"path": "a.rs"}', "@tool_aaa", None),
+                ("read_file", "2026-10-01T00:00:01", 0, '{"path": "@tool_aaa"}', None, '["@tool_aaa"]'),
+            ]
+            for tool, at, ovf, inp, emitted, read_ids in calls:
+                conn.execute(
+                    "INSERT INTO tool_calls (tool_name, called_at, latency_ms, outcome, overflowed, "
+                    "session_id, project_root, input_json, output_json, emitted_output_id, "
+                    "read_output_ids) VALUES (?, ?, 1, 'success', ?, 's1', '/p', ?, NULL, ?, ?)",
+                    (tool, at, ovf, inp, emitted, read_ids),
+                )
+            conn.commit()
+            conn.close()
+            buf = io.StringIO()
+            old_argv = sys.argv
+            sys.argv = ["probe", "--db", str(db), *argv]
+            try:
+                with contextlib.redirect_stdout(buf):
+                    rc = probe.main()
+            finally:
+                sys.argv = old_argv
+        self.assertEqual(rc, 0)
+        return buf.getvalue()
+
+    def test_human_readable_report_prints_the_labelled_headline_first(self):
+        out = self._run_main()
+        first = out.splitlines()[0]
+        self.assertIn("own handle referenced at the next call", first)
+        self.assertIn("a mention in read_output_ids, not proof the content was needed", first)
+        self.assertIn("1 of 1", first)
+        self.assertIn("100.0%", first)
+
+    def test_json_mode_stays_pure_json_and_carries_the_headline(self):
+        rep = json.loads(self._run_main("--json"))
+        head = rep["q4_overflow_economics"]["own_handle_referenced_later"]["headline"]
+        self.assertEqual(head["count"], 1)
+
+
 class Q2Redundancy(unittest.TestCase):
     def test_reread_after_an_edit_of_the_same_path_is_not_a_no_edit_repeat(self):
         rows = [
