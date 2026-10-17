@@ -169,8 +169,12 @@ async fn resolve_via_ts(
     match direction {
         Direction::Callees => {
             // LIMIT-001 fix: walk the AST descendants of the enclosing
-            // function and collect every direct call expression.
-            resolve_callees_via_ts(sym_name, sym_path, sym_line, sym_col, ast_lang)
+            // function and collect every direct call expression. Parsed with the grammar of
+            // the symbol's OWN file (the seed's id only decides when the path says nothing):
+            // Phase B places a `.tsx` seed's callee in a `.ts` file and the reverse, and the
+            // wrong grammar silently yields a partial edge set.
+            let node_lang = crate::ast::detect_language(sym_path).unwrap_or(ast_lang);
+            resolve_callees_via_ts(sym_name, sym_path, sym_line, sym_col, node_lang)
         }
         Direction::Callers => {
             let refs = client
@@ -995,6 +999,96 @@ mod tests {
                 end: lsp_types::Position {
                     line: 0,
                     character: 20,
+                },
+            },
+        };
+        let mock = MockLspClient::new();
+        mock.references_results
+            .lock()
+            .unwrap()
+            .insert(fixture.clone(), vec![ref_loc]);
+
+        let edges = resolve_one_hop(
+            &mock,
+            "foo",
+            &fixture,
+            1,
+            9,
+            "typescriptreact",
+            Direction::Callers,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(edges.len(), 1, "expected the call site in bar: {edges:?}");
+        assert_eq!(edges[0].caller_sym, "bar");
+    }
+    /// Phase B places a `.tsx` seed's callee in a `.ts` module and a `.ts` seed's callee in a
+    /// `.tsx` file, so the node being resolved is not in the seed's language. Parsed with the
+    /// seed's grammar, a `.ts` file's type assertion `<string>x` is a JSX tag and the call
+    /// after it is lost (reviewer PROBE_A: `Ok([])`), and a `.tsx` file's JSX parsed as
+    /// TypeScript loses the calls inside it (PROBE_B: `["format"]`, `track` missing). Both
+    /// came back as a quiet, partial edge set.
+    #[tokio::test]
+    async fn resolve_callees_via_ts_uses_the_grammar_of_the_symbols_own_file() {
+        for (file, seed_id, src, expected) in [
+            (
+                "util.ts",
+                "typescriptreact",
+                "export function outer() { const y = <string>x; return inner(y); }\nfunction inner(a: string) { return a; }\n",
+                vec!["inner"],
+            ),
+            (
+                "view.tsx",
+                "typescript",
+                "export function view() { return <div onClick={() => track()}>{format(1)}</div>; }\n",
+                vec!["format", "track"],
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let fixture = dir.path().join(file);
+            std::fs::write(&fixture, src).unwrap();
+            let name = if file == "util.ts" { "outer" } else { "view" };
+            let mock = MockLspClient::new();
+
+            let edges = resolve_one_hop(&mock, name, &fixture, 0, 16, seed_id, Direction::Callees)
+                .await
+                .unwrap_or_else(|e| panic!("{file} via {seed_id}: {e}"));
+
+            let mut callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+            callees.sort_unstable();
+            assert_eq!(
+                callees, expected,
+                "{file} resolved with the seed's id {seed_id} lost calls: {edges:?}"
+            );
+        }
+    }
+
+    /// The callers fallback already parsed each reference with its own file's language; this
+    /// pins it. The reference sits in a `.ts` file after a type assertion, which the TSX
+    /// grammar (the seed's) cannot parse as TypeScript.
+    #[tokio::test]
+    async fn resolve_callers_via_ts_uses_the_grammar_of_the_references_own_file() {
+        let src = "function bar() { const y = <string>x; foo(y); }\nfunction foo(a: string) {}\n";
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("a.ts");
+        std::fs::write(&fixture, src).unwrap();
+        let uri: lsp_types::Uri = url::Url::from_file_path(&fixture)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        // `foo(y)` inside `bar`: line 0, column 38.
+        let ref_loc = lsp_types::Location {
+            uri,
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 38,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 41,
                 },
             },
         };

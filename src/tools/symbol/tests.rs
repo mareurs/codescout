@@ -6117,14 +6117,13 @@ fn corroborate_scan_does_not_spend_its_budget_on_vendored_directories() {
     );
 }
 
-/// The exclusion applies to the path BELOW the project root. `path_in_excluded_dir` tests
-/// every component, so handed the absolute path it would exclude every file of a project
-/// that merely lives under a directory called `build` or `out`.
+/// The prune applies to the path BELOW the project root: a project that merely lives under a
+/// directory called `node_modules` must still be scanned.
 #[test]
 fn corroborate_scan_filters_below_the_project_root_not_above_it() {
     use crate::tools::symbol::references::corroborate_with_cap;
     let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path().join("build").join("proj");
+    let root = tmp.path().join("node_modules").join("proj");
     std::fs::create_dir_all(&root).unwrap();
     let def = root.join("def.rs");
     std::fs::write(&def, "pub fn target() {}").unwrap();
@@ -6135,12 +6134,93 @@ fn corroborate_scan_filters_below_the_project_root_not_above_it() {
     assert_eq!(
         scan.hits.len(),
         1,
-        "a project under a `build/` parent directory must still be scanned: {scan:?}"
+        "a project under a `node_modules/` parent directory must still be scanned: {scan:?}"
+    );
+}
+
+/// The prune is deliberately short: `build/`, `out/`, `dist/`, `vendor/` and `target/` are
+/// legitimate source directories in some ecosystems, and a pruned directory is invisible
+/// to the coverage, so a use living only there would leave a clean zero.
+#[test]
+fn corroborate_scan_reads_a_use_living_in_a_build_directory() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    for dir_name in ["build", "out", "dist", "vendor", "target"] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let def = root.join("def.rs");
+        std::fs::write(&def, "pub fn target() {}").unwrap();
+        std::fs::create_dir(root.join(dir_name)).unwrap();
+        std::fs::write(root.join(dir_name).join("ci.rs"), "fn c() { target(); }").unwrap();
+
+        let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
+
+        assert_eq!(scan.hits.len(), 1, "a use under {dir_name}/ must be found");
+    }
+}
+
+/// `tsc` writes `foo.js` next to `foo.ts` and nothing gitignores it. The twin contains the
+/// identifier it was compiled from, so a family-wide scan found a "use" of every `.ts`
+/// symbol in its own build output and raised a false "index may still be warming" warning
+/// on every zero-reference TypeScript symbol; it also spent the file budget twice.
+#[test]
+fn corroborate_scan_ignores_a_compiled_twin_of_the_definition_file() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("foo.ts");
+    std::fs::write(&def, "export function foo() {}").unwrap();
+    std::fs::write(
+        root.join("foo.js"),
+        "function foo() {}\nexports.foo = foo;\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("bar.tsx"), "export const bar = 1;").unwrap();
+    std::fs::write(root.join("bar.jsx"), "export const bar = 1;").unwrap();
+
+    let scan = corroborate_with_cap(root, &def, "foo", "typescript", 2);
+
+    assert!(scan.hits.is_empty(), "the twin is not a use: {scan:?}");
+    assert!(
+        scan.coverage.is_complete(),
+        "and the twins must not spend the file budget (cap 2, one real candidate): {scan:?}"
+    );
+    // A `.js` with no `.ts` source is real source and still corroborates.
+    std::fs::write(root.join("lone.js"), "foo();").unwrap();
+    let scan = corroborate_with_cap(root, &def, "foo", "typescript", 10);
+    assert_eq!(scan.hits.len(), 1, "{scan:?}");
+}
+
+/// A symlink to a file outside the project is not followed (the repo's other walkers do not
+/// either) and not silent: a bare zero would hide the use behind it.
+#[cfg(unix)]
+#[test]
+fn corroborate_scan_counts_a_symlinked_candidate_outside_the_project() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("user.rs"), "fn c() { target(); }").unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    std::os::unix::fs::symlink(outside.path().join("user.rs"), root.join("user.rs")).unwrap();
+    // A link whose target is inside the project is reached by its own path: no gap.
+    std::fs::write(root.join("real.rs"), "fn other() {}").unwrap();
+    std::os::unix::fs::symlink(root.join("real.rs"), root.join("alias.rs")).unwrap();
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
+
+    assert!(scan.hits.is_empty(), "the link is not followed: {scan:?}");
+    assert_eq!(
+        scan.coverage.symlinks, 1,
+        "the outward link counts, the inward one does not: {scan:?}"
     );
 }
 /// The file cap must still BOUND the scan, not merely disclose that it bit (the disclosure
-/// lives in `ScanBudget::admit`): three files name the identifier, cap 2, so exactly two
-/// are read and the third is never opened.
+/// lives in `ScanBudget::admit`): a walk that read on, or `continue`d past each refused file
+/// instead of stopping, would still report a cut-short walk. Six files name the identifier,
+/// cap 2: exactly two are read, and once the third is refused the walk stops pulling
+/// entries (the root, the definition file and three files at most; all eight if it kept
+/// going).
 #[test]
 fn corroborate_scan_stops_reading_at_its_file_cap() {
     use crate::tools::symbol::references::corroborate_with_cap;
@@ -6148,7 +6228,7 @@ fn corroborate_scan_stops_reading_at_its_file_cap() {
     let root = tmp.path();
     let def = root.join("def.rs");
     std::fs::write(&def, "pub fn target() {}").unwrap();
-    for name in ["a.rs", "b.rs", "c.rs"] {
+    for name in ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs"] {
         std::fs::write(root.join(name), "fn x() { target(); }").unwrap();
     }
 
@@ -6156,6 +6236,13 @@ fn corroborate_scan_stops_reading_at_its_file_cap() {
 
     assert_eq!(scan.hits.len(), 2, "a cap of 2 admits exactly two files");
     assert_eq!(scan.coverage.cut_short_at, Some(2));
+    assert!(
+        (4..=5).contains(&scan.coverage.entries_visited),
+        "the walk pulls the root, three candidates up to the refusal and the definition file \
+         only if it came first, then stops; more means it kept going after the cap, fewer \
+         that the counter is dead: visited {}",
+        scan.coverage.entries_visited
+    );
 }
 
 /// TypeScript, TSX, JavaScript and JSX are one population for the corroboration scan, for
@@ -6189,8 +6276,9 @@ fn corroborate_scan_treats_the_typescript_family_as_one_population() {
 }
 
 /// The family is not "every language": a Rust definition is not corroborated by a
-/// TypeScript file that happens to name the identifier, and that file is not an
-/// unexamined candidate either.
+/// TypeScript file that happens to name the identifier, and files of other languages
+/// (TypeScript, Markdown, Python) are not unexamined candidates either — they were never
+/// candidates, so the walk is COMPLETE and a bare zero stays bare.
 #[test]
 fn corroborate_scan_does_not_cross_into_another_language_family() {
     use crate::tools::symbol::references::corroborate_with_cap;
@@ -6199,10 +6287,18 @@ fn corroborate_scan_does_not_cross_into_another_language_family() {
     let def = root.join("def.rs");
     std::fs::write(&def, "pub fn target() {}").unwrap();
     std::fs::write(root.join("user.ts"), "target();").unwrap();
+    std::fs::write(root.join("notes.md"), "target\n").unwrap();
+    std::fs::write(root.join("script.py"), "target()\n").unwrap();
 
     let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
 
     assert!(scan.hits.is_empty(), "{scan:?}");
+    assert!(
+        scan.coverage.is_complete(),
+        "other-language files are not unexamined candidates, so nothing is left unexamined: \
+         {scan:?}"
+    );
+    assert_eq!(scan.coverage.describe(), None, "and no warning is produced");
 }
 
 /// ADR 2026-08-27: a candidate file the scan could not read is a file nobody looked at, so
@@ -6232,29 +6328,29 @@ async fn references_zero_with_an_unreadable_candidate_file_is_warned() {
     );
 }
 
-/// A directory the walker cannot enter is a part of the tree nobody looked at. Skipped on
-/// root, which can read anything.
+/// A directory the walker cannot enter is a part of the tree nobody looked at. Says so on
+/// stderr and returns when the process can read a `chmod 000` directory anyway (root), and
+/// restores the mode even if an assertion fails.
 #[cfg(unix)]
 #[tokio::test]
 async fn references_zero_with_an_unenterable_directory_is_warned() {
     use crate::tools::symbol::references::References;
-    use std::os::unix::fs::PermissionsExt;
 
     let (dir, ctx) = declaration_only_ctx(3, 0).await;
     let locked = dir.path().join("src").join("locked");
     std::fs::create_dir(&locked).unwrap();
     std::fs::write(locked.join("user.rs"), "fn c() { helper(); }\n").unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    if std::fs::read_dir(&locked).is_ok() {
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let Some(_guard) = crate::tools::symbol::scan_budget::test_support::lock(
+        &locked,
+        "references_zero_with_an_unenterable_directory_is_warned",
+    ) else {
         return;
-    }
+    };
 
     let result = References
         .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
         .await
         .unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let warning = result["completeness_warning"].as_str().unwrap_or_default();
     assert!(

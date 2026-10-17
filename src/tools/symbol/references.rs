@@ -193,8 +193,11 @@ pub(crate) struct CorroborationScan {
 ///
 /// The population is the files of `lang`'s language FAMILY (`ast::language_family`: the
 /// TypeScript/TSX/JavaScript/JSX languages are one), because a symbol defined in a `.ts`
-/// file is routinely used only from `.tsx` files. `lang` must be an AST language name
-/// (`ast::detect_language`'s vocabulary), not an LSP languageId.
+/// file is routinely used only from `.tsx` files; a `.js` that `tsc` compiled from a `.ts`
+/// sibling is not a candidate (`scan_budget::is_compiled_twin`), since it carries the very
+/// identifier it was compiled from and would corroborate every symbol with its own build
+/// output. `lang` must be an AST language name (`ast::detect_language`'s vocabulary), not
+/// an LSP languageId. A text scan needs no parser, so there is no pre-flight refusal here.
 pub(crate) fn corroborate_with_cap(
     root: &std::path::Path,
     def_file: &std::path::Path,
@@ -202,12 +205,16 @@ pub(crate) fn corroborate_with_cap(
     lang: &str,
     max_files: usize,
 ) -> CorroborationScan {
-    use crate::tools::symbol::scan_budget::{scan_walk, ScanBudget};
+    use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget};
     // cap-class: RESULT_CAP references.corroborate_hits — probed
     const MAX_HITS: usize = 5;
     let mut hits: Vec<std::path::PathBuf> = Vec::new();
     let mut budget = ScanBudget::new(max_files);
     let family = crate::ast::language_family(lang);
+    let in_family = |p: &std::path::Path| {
+        crate::ast::detect_language(p)
+            .is_some_and(|file_lang| crate::ast::language_family(file_lang) == family)
+    };
     for item in scan_walk(root) {
         let Some(entry) = budget.entry(item) else {
             continue;
@@ -215,16 +222,17 @@ pub(crate) fn corroborate_with_cap(
         if hits.len() >= MAX_HITS {
             break;
         }
+        let path = entry.path();
+        if entry.file_type().is_some_and(|t| t.is_symlink()) {
+            // Not followed, like the repo's other walkers; counted when it leads outside.
+            budget.note_symlink(path, root, in_family);
+            continue;
+        }
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
-        let path = entry.path();
-        if path == def_file {
+        if path == def_file || !in_family(path) || is_compiled_twin(path) {
             continue;
-        }
-        match crate::ast::detect_language(path) {
-            Some(file_lang) if crate::ast::language_family(file_lang) == family => {}
-            _ => continue,
         }
         if !budget.admit() {
             break;

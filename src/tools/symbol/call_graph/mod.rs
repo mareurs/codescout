@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::tools::symbol::call_edges::cache::EdgeCache;
 use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
 use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
-use crate::tools::symbol::scan_budget::{scan_walk, ScanBudget, ScanCoverage};
+use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget, ScanCoverage};
 use crate::tools::{OutputForm, Tool, ToolContext};
 
 /// Cache-checking one-hop resolver.
@@ -260,6 +260,12 @@ impl CachedResolver {
     /// JSX are one population (BUG 2026-10-17
     /// call-graph-phase-b-compares-the-lsp-language-id-to-the-ast-language).
     ///
+    /// A seed language with no definition parser (`ast::parser::supports_symbol_extraction`:
+    /// C, C++, Ruby, HTML, CSS, ...) is refused BEFORE walking: the walk could open every
+    /// file of that language and read a definition out of none, and would then name an I/O
+    /// cause for a gap that has none. The refusal returns [`WorkspaceScan::Incomplete`]
+    /// with [`ScanCoverage::no_parser`], which says so once and touches no file.
+    ///
     /// Caps file count at `self.workspace_scan_cap` ([`MAX_WORKSPACE_FILES_SCAN`]
     /// in production) so a monorepo with 100k source files doesn't burn the BFS
     /// budget on one missing symbol. The caller's `not_found` cache ensures this
@@ -268,31 +274,39 @@ impl CachedResolver {
     /// A walk that did not cover the project returns [`WorkspaceScan::Incomplete`], never
     /// `NotFound`: the cap stopped it with candidates left (BUG 2026-10-16
     /// call-graph-workspace-scan-cap-returns-a-false-no-callers), a candidate could not be
-    /// read or parsed or has no grammar, or a directory could not be entered (BUG
-    /// 2026-10-17 scan-walks-skip-unreadable-files-and-report-a-clean-miss). Vendored
-    /// directories are pruned and not counted (see `scan_budget::scan_walk`).
+    /// read or parsed, a symlink to outside the project was not followed, or a directory
+    /// could not be entered (BUG 2026-10-17
+    /// scan-walks-skip-unreadable-files-and-report-a-clean-miss). The seed's own file is a
+    /// candidate, so a walk that admitted none is incomplete too: it did not look where it
+    /// believes it did. `node_modules/` is pruned and a compiled twin of a TypeScript file
+    /// is not a candidate (see `scan_budget`).
     fn lookup_pos_via_ts_workspace(&self, symbol: &str) -> WorkspaceScan {
+        let seed_lang = crate::lsp::servers::ast_language_for_lsp_id(&self.lang);
+        if !crate::ast::parser::supports_symbol_extraction(seed_lang) {
+            return WorkspaceScan::Incomplete(ScanCoverage::no_parser(seed_lang));
+        }
         let mut budget = ScanBudget::new(self.workspace_scan_cap);
-        let family =
-            crate::ast::language_family(crate::lsp::servers::ast_language_for_lsp_id(&self.lang));
+        let family = crate::ast::language_family(seed_lang);
+        let in_family = |p: &std::path::Path| {
+            crate::ast::detect_language(p)
+                .is_some_and(|file_lang| crate::ast::language_family(file_lang) == family)
+        };
         for item in scan_walk(&self.root) {
             let Some(entry) = budget.entry(item) else {
                 continue;
             };
+            let path = entry.path();
+            if entry.file_type().is_some_and(|t| t.is_symlink()) {
+                budget.note_symlink(path, &self.root, in_family);
+                continue;
+            }
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
-            let path = entry.path();
             let Some(file_lang) = crate::ast::detect_language(path) else {
                 continue;
             };
-            if crate::ast::language_family(file_lang) != family {
-                continue;
-            }
-            if crate::ast::get_ts_language(file_lang).is_none() {
-                // A same-language file this walk can never parse: counted, not skipped
-                // silently, or a seed language with no grammar ends on a clean miss.
-                budget.record_unexamined();
+            if crate::ast::language_family(file_lang) != family || is_compiled_twin(path) {
                 continue;
             }
             if !budget.admit() {
@@ -315,7 +329,7 @@ impl CachedResolver {
                 ));
             }
         }
-        let coverage = budget.coverage();
+        let coverage = budget.coverage_requiring_a_candidate();
         if coverage.is_complete() {
             WorkspaceScan::NotFound
         } else {
@@ -328,7 +342,7 @@ impl CachedResolver {
     /// `None` when every walk was complete.
     fn incomplete(&self) -> Option<(std::collections::BTreeSet<String>, ScanCoverage)> {
         let symbols = self.scan_incomplete.lock().unwrap().clone();
-        (!symbols.is_empty()).then(|| (symbols, *self.scan_coverage.lock().unwrap()))
+        (!symbols.is_empty()).then(|| (symbols, self.scan_coverage.lock().unwrap().clone()))
     }
 }
 
@@ -375,13 +389,22 @@ impl OneHopResolver for CachedResolver {
             }
         };
 
+        // Each node is parsed, and its file opened by the language server, with the language
+        // of ITS OWN file, not the seed's: Phase B places a `.tsx` seed's callee in a `.ts`
+        // module and the reverse, and the seed's grammar mis-parses the other one (a type
+        // assertion `<string>x` is a JSX tag to the TSX grammar, JSX is no TypeScript at all),
+        // silently yielding a partial edge set that `upsert` below would then persist.
+        let node_language_id = crate::lsp::servers::lsp_language_id(
+            crate::ast::detect_language(&path)
+                .unwrap_or_else(|| crate::lsp::servers::ast_language_for_lsp_id(&self.lang)),
+        );
         let edges = match resolve_one_hop(
             self.client.as_ref(),
             symbol,
             &path,
             line,
             col,
-            &self.lang,
+            node_language_id,
             direction,
         )
         .await
@@ -1098,29 +1121,28 @@ mod tests {
     }
 
     /// The cap is a performance guard and must still BOUND the work, not merely disclose that
-    /// it bit: the disclosure lives in `ScanBudget::admit`, so a walk that ignored `admit`'s
-    /// refusal would keep reporting a cut-short walk while reading the whole tree. Three files
-    /// each define one symbol; with cap 2 a walk examines two of them, so the three lookups
-    /// cannot all succeed.
+    /// it bit. The disclosure lives in `ScanBudget::admit`, so a walk that ignored `admit`'s
+    /// refusal — by reading on (`let _ = admit()`) or by `continue`-ing past each refused
+    /// file instead of `break`-ing — would keep reporting a cut-short walk while pulling every
+    /// entry of the tree. Six candidates, cap 2: once the third is refused the walk stops, so
+    /// it pulls at most the root entry and three files; a walk that kept going pulls all seven.
     #[tokio::test]
     async fn the_cap_stops_the_walk_instead_of_only_reporting_it() {
         let dir = tempfile::tempdir().unwrap();
-        for (file, def) in [
-            ("a.rs", "fn s_a() {}\n"),
-            ("b.rs", "fn s_b() {}\n"),
-            ("c.rs", "fn s_c() {}\n"),
-        ] {
-            std::fs::write(dir.path().join(file), def).unwrap();
+        for name in ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs"] {
+            std::fs::write(dir.path().join(name), "fn x() {}\n").unwrap();
         }
-        let mut found = 0;
-        for symbol in ["s_a", "s_b", "s_c"] {
-            let r = resolver_over(dir.path(), 2);
-            if r.lookup_pos(symbol).await.is_some() {
-                found += 1;
-            }
-        }
+        let r = resolver_over(dir.path(), 2);
 
-        assert!(found < 3, "a cap of 2 let a walk examine all 3 files");
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (_, coverage) = r.incomplete().expect("the cap bit");
+        assert_eq!(coverage.cut_short_at, Some(2));
+        assert_eq!(
+            coverage.entries_visited, 4,
+            "the walk pulls the root and exactly the three candidates up to the refusal, then \
+             stops; more means it kept going after the cap, fewer that the counter is dead"
+        );
     }
 
     /// ADR 2026-08-27 clause 2: a walk that examined every file and found nothing is a
@@ -1408,10 +1430,13 @@ mod tests {
     }
 
     /// The family is not "every language": a Rust walk does not look in TypeScript files, and
-    /// those files are not counted as unexamined candidates either (they were never candidates).
+    /// those files are not counted as unexamined candidates either (they were never
+    /// candidates). `a.rs` is there because the seed's own file is always a candidate — a walk
+    /// that admitted none would be reported as such.
     #[tokio::test]
     async fn a_rust_walk_does_not_examine_typescript_files() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn other() {}\n").unwrap();
         std::fs::write(
             dir.path().join("x.ts"),
             "export function ghost() { return 1; }\n",
@@ -1422,7 +1447,8 @@ mod tests {
         assert!(r.lookup_pos("ghost").await.is_none());
         assert!(
             r.incomplete().is_none(),
-            "files of another language are not unexamined candidates"
+            "files of another language are not unexamined candidates: {:?}",
+            r.incomplete()
         );
     }
 
@@ -1448,31 +1474,47 @@ mod tests {
         );
     }
 
-    /// A seed language with no tree-sitter grammar (C here) has same-language files the walk
-    /// can never parse. They used to be skipped before being counted, so the walk ended on a
-    /// clean `NotFound` having examined nothing.
+    /// A seed language with no definition parser (C++ here: LSP config, no tree-sitter grammar)
+    /// has same-language files the walk can never read a definition from. The first fix counted
+    /// each of them as "could not read or parse" — a cause that was never checked (no file was
+    /// opened), a count that is every file of the language, and an uncapped walk per unplaced
+    /// symbol. The pre-flight refusal says the one true thing, once, and walks nothing.
     #[tokio::test]
-    async fn a_seed_language_with_no_grammar_reports_the_files_it_could_not_parse() {
+    async fn a_seed_language_with_no_definition_parser_is_refused_before_walking() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("x.c"), "int ghost(void) { return 1; }\n").unwrap();
-        std::fs::write(dir.path().join("y.c"), "int other(void) { return 2; }\n").unwrap();
+        for name in ["x.cpp", "y.cpp", "z.cpp"] {
+            std::fs::write(dir.path().join(name), "int ghost() { return 1; }\n").unwrap();
+        }
         let mut r = resolver_over(dir.path(), 100);
-        r.lang = "c".to_string();
+        r.lang = "cpp".to_string();
 
         assert!(r.lookup_pos("ghost").await.is_none());
 
+        let (symbols, coverage) = r.incomplete().expect("a refused walk is incomplete");
+        assert_eq!(coverage.no_parser.as_deref(), Some("cpp"), "{coverage:?}");
+        assert_eq!(
+            coverage.entries_visited, 0,
+            "the walk must not start: {coverage:?}"
+        );
+        assert_eq!(coverage.unexamined, 0, "no file was opened: {coverage:?}");
+        let warning = scan_incomplete_warning(&symbols, &coverage).unwrap();
         assert!(
-            r.incomplete().is_some(),
-            "two same-language files were never parsed; that is not a clean miss"
+            warning.contains("has no definition parser for cpp, so it looked in no file"),
+            "{warning}"
+        );
+        assert!(
+            !warning.contains("read or parse") && !warning.contains("same-language file"),
+            "no I/O cause and no file count for a walk that never opened a file: {warning}"
         );
     }
 
-    /// A project whose `node_modules/` (or `target/`, `vendor/`, ...) is not gitignored must
-    /// not spend the file budget on vendored files — the `references` walk already prunes them,
-    /// and this walk burned its whole cap there. Cap 2 over three vendored files.
+    /// A project whose `node_modules/` is not gitignored must not spend the file budget on
+    /// dependencies — the `references` walk and this one burned their whole cap there. Cap 2
+    /// over three vendored files and one real file (the seed's own file is always a candidate).
     #[tokio::test]
     async fn the_walk_does_not_spend_its_budget_on_vendored_directories() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
         let vendored = dir.path().join("node_modules").join("pkg");
         std::fs::create_dir_all(&vendored).unwrap();
         for name in ["a.rs", "b.rs", "c.rs"] {
@@ -1483,55 +1525,71 @@ mod tests {
         assert!(r.lookup_pos("ghost").await.is_none());
         assert!(
             r.incomplete().is_none(),
-            "vendored files are not candidates, so nothing was left unexamined"
+            "vendored files are not candidates, so nothing was left unexamined: {:?}",
+            r.incomplete()
         );
     }
 
-    /// The exclusion applies to the path BELOW the project root: `path_in_excluded_dir` tests
-    /// every component, so the absolute path would exclude every file of a project that merely
-    /// lives under a directory called `build` or `out`.
+    /// The prune applies to the path BELOW the project root: a project that merely lives under
+    /// a directory called `node_modules` must still be walked.
     #[tokio::test]
     async fn the_walk_prunes_below_the_project_root_not_above_it() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("build").join("proj");
+        let root = tmp.path().join("node_modules").join("proj");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("a.rs"), "fn ghost() {}\n").unwrap();
         let r = resolver_over(&root, 100);
 
         assert!(
             r.lookup_pos("ghost").await.is_some(),
-            "a project under a `build/` parent directory must still be walked"
+            "a project under a `node_modules/` parent directory must still be walked"
         );
     }
 
-    /// A directory the walker cannot enter is a part of the tree nobody looked at. Skipped on
-    /// root (which can read anything, so the fixture cannot make a directory unreadable).
+    /// The prune is deliberately short: `build/`, `out/`, `dist/`, `vendor/` and `target/` are
+    /// legitimate source directories in some ecosystems (go-ethereum's `build/ci.go`, Go's
+    /// `go/build`), and a pruned directory is invisible to the coverage, so a definition living
+    /// only there would be a clean miss. Before the prune was narrowed this was `NotFound`.
+    #[tokio::test]
+    async fn a_definition_living_in_a_build_directory_is_found() {
+        for dir_name in ["build", "out", "dist", "vendor", "target"] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("a.rs"), "fn other() {}\n").unwrap();
+            std::fs::create_dir(dir.path().join(dir_name)).unwrap();
+            std::fs::write(dir.path().join(dir_name).join("ci.rs"), "fn ghost() {}\n").unwrap();
+            let r = resolver_over(dir.path(), 100);
+
+            assert!(
+                r.lookup_pos("ghost").await.is_some(),
+                "a definition under {dir_name}/ must be found"
+            );
+        }
+    }
+
+    /// A directory the walker cannot enter is a part of the tree nobody looked at. Reports a
+    /// skip on stderr, and restores the mode even when an assertion fails, when the process can
+    /// read a `chmod 000` directory anyway (root).
     #[cfg(unix)]
     #[tokio::test]
     async fn an_unenterable_directory_makes_a_miss_incomplete() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let locked = dir.path().join("locked");
         std::fs::create_dir(&locked).unwrap();
         std::fs::write(locked.join("hidden.rs"), "fn ghost() {}\n").unwrap();
         std::fs::write(dir.path().join("b.rs"), "fn x() {}\n").unwrap();
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let restore = || {
-            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let Some(_guard) = crate::tools::symbol::scan_budget::test_support::lock(
+            &locked,
+            "an_unenterable_directory_makes_a_miss_incomplete",
+        ) else {
+            return;
         };
-        if std::fs::read_dir(&locked).is_ok() {
-            restore();
-            return; // running with privileges that read it anyway
-        }
         let r = resolver_over(dir.path(), 100);
 
         let found = r.lookup_pos("ghost").await;
-        let incomplete = r.incomplete();
-        restore();
 
         assert!(found.is_none());
         assert!(
-            incomplete.is_some(),
+            r.incomplete().is_some(),
             "a directory that could not be entered is unexamined, not empty"
         );
     }
@@ -1563,6 +1621,197 @@ mod tests {
             compact.contains("could not read or parse 1 same-language file"),
             "{compact}"
         );
+    }
+
+    /// HTML and CSS have a tree-sitter grammar but no definition extractor
+    /// (`ast::parser::supports_symbol_extraction`): the walk parses every file and can never
+    /// find a definition in one. Same pre-flight refusal as a language with no grammar at all.
+    #[tokio::test]
+    async fn a_seed_language_with_a_grammar_but_no_extractor_is_refused_too() {
+        for (ast_lang, file) in [("html", "a.html"), ("css", "a.css"), ("scss", "a.scss")] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(file), "x\n").unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            r.lang = crate::lsp::servers::lsp_language_id(ast_lang).to_string();
+
+            assert!(r.lookup_pos("ghost").await.is_none());
+
+            let (_, coverage) = r
+                .incomplete()
+                .unwrap_or_else(|| panic!("{ast_lang} walked"));
+            assert_eq!(coverage.no_parser.as_deref(), Some(ast_lang));
+            assert_eq!(coverage.entries_visited, 0, "{ast_lang} must not be walked");
+        }
+    }
+
+    /// The seed's own file is a candidate, so a walk that admitted none did not look where it
+    /// believes it did: it is incomplete, not a complete empty one. This is the check that
+    /// would have caught the original vocabulary mismatch, where a React seed matched no file.
+    #[tokio::test]
+    async fn a_walk_that_admitted_no_candidate_at_all_is_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "fn ghost() {}\n").unwrap();
+        std::fs::write(dir.path().join("x.ts"), "export function ghost() {}\n").unwrap();
+        let r = resolver_over(dir.path(), 100); // a Rust seed over a tree with no Rust file
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (symbols, coverage) = r.incomplete().expect("zero candidates is not a clean miss");
+        assert!(coverage.empty_walk, "{coverage:?}");
+        let warning = scan_incomplete_warning(&symbols, &coverage).unwrap();
+        assert!(
+            warning.contains("found no same-language file to look in"),
+            "{warning}"
+        );
+    }
+
+    /// A symlink to a file outside the project is not followed (the repo's other walkers do
+    /// not either) and not silent: the definition behind it is a clean miss otherwise.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlinked_candidate_outside_the_project_is_counted_not_followed() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("ext.rs"), "fn ghost() {}\n").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("ext.rs"), dir.path().join("def.rs"))
+            .unwrap();
+        let r = resolver_over(dir.path(), 100);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        let (symbols, coverage) = r
+            .incomplete()
+            .expect("a followed-nothing miss is not clean");
+        assert_eq!(coverage.symlinks, 1, "{coverage:?}");
+        let warning = scan_incomplete_warning(&symbols, &coverage).unwrap();
+        assert!(
+            warning.contains("did not follow 1 symlink(s) that lead outside the project"),
+            "{warning}"
+        );
+    }
+
+    /// A symlinked directory is a subtree nobody entered; a link whose target is inside the
+    /// project costs nothing, because the walk reaches the target by its own path.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn only_a_symlink_that_leads_outside_the_project_is_a_gap_for_the_walk() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("ext.rs"), "fn x() {}\n").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("a.rs"), dir.path().join("alias.rs")).unwrap();
+        let inward = resolver_over(dir.path(), 100);
+        assert!(inward.lookup_pos("ghost").await.is_none());
+        assert!(
+            inward.incomplete().is_none(),
+            "an inward link is reached by its own path: {:?}",
+            inward.incomplete()
+        );
+
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("extdir")).unwrap();
+        let outward = resolver_over(dir.path(), 100);
+        assert!(outward.lookup_pos("ghost").await.is_none());
+        let (_, coverage) = outward
+            .incomplete()
+            .expect("an unentered directory is a gap");
+        assert_eq!(coverage.symlinks, 1, "{coverage:?}");
+    }
+
+    /// `tsc` writes `util.js` next to `util.ts` and nothing gitignores it. The twin carries the
+    /// same definitions, so as a candidate it would place a symbol in build output and spend the
+    /// file budget twice. Only the twin defines `inner` here, so a walk that reads it finds
+    /// `inner` and one that skips it does not — deterministic whatever order the walker uses.
+    #[tokio::test]
+    async fn a_compiled_twin_of_a_typescript_file_is_not_a_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("util.ts"), "export {};\n").unwrap();
+        std::fs::write(
+            dir.path().join("util.js"),
+            "function inner() { return 1; }\nexports.inner = inner;\n",
+        )
+        .unwrap();
+        let mut r = resolver_over(dir.path(), 100);
+        r.lang = "typescript".to_string();
+        assert!(
+            r.lookup_pos("inner").await.is_none(),
+            "the compiled twin must not place a symbol"
+        );
+
+        // A `.js` with no `.ts` source is real source and stays a candidate.
+        let lone = tempfile::tempdir().unwrap();
+        std::fs::write(
+            lone.path().join("lib.js"),
+            "function inner() { return 1; }\n",
+        )
+        .unwrap();
+        let mut r = resolver_over(lone.path(), 100);
+        r.lang = "javascript".to_string();
+        assert!(r.lookup_pos("inner").await.is_some());
+    }
+
+    /// `one_hop` resolves each node with the language of the node's OWN file. A `.tsx` seed's
+    /// callee lives in a `.ts` module and the reverse; parsed with the seed's grammar the
+    /// call after `<string>x` (or inside the JSX) is lost, and `upsert` persists the partial
+    /// set so every later query is served it. Asserts the returned edges, the cache, and the
+    /// languageId the language server was asked under: `did_open` keeps the first id a file was
+    /// opened with for the whole session, and typescript-language-server maps it to a script
+    /// kind, so opening `util.ts` as `typescriptreact` is a lasting mis-parse on that side too.
+    #[tokio::test]
+    async fn one_hop_parses_each_node_with_its_own_files_grammar_and_caches_the_full_set() {
+        for (file, seed_ast_lang, src, symbol, expected, expected_id) in [
+            (
+                "util.ts",
+                "tsx",
+                "export function outer() { const y = <string>x; return inner(y); }\nfunction inner(a: string) { return a; }\n",
+                "outer",
+                vec!["inner"],
+                "typescript",
+            ),
+            (
+                "view.tsx",
+                "typescript",
+                "export function view() { return <div onClick={() => track()}>{format(1)}</div>; }\n",
+                "view",
+                vec!["format", "track"],
+                "typescriptreact",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(file);
+            std::fs::write(&path, src).unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            let mock = Arc::new(MockLspClient::new());
+            r.client = mock.clone();
+            r.lang = crate::lsp::servers::lsp_language_id(seed_ast_lang).to_string();
+            r.positions
+                .lock()
+                .unwrap()
+                .insert(symbol.to_string(), (path.clone(), 0, 16));
+
+            let edges = r.one_hop(symbol, Direction::Callees).await.unwrap();
+
+            let mut callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+            callees.sort_unstable();
+            assert_eq!(
+                callees, expected,
+                "{file} resolved under a {seed_ast_lang} seed lost calls"
+            );
+            let cached = {
+                let conn = r.conn.lock().unwrap();
+                EdgeCache::new(&conn, &r.project_id)
+                    .lookup_callees(symbol)
+                    .unwrap()
+            };
+            let mut cached: Vec<&str> = cached.iter().map(|e| e.callee_sym.as_str()).collect();
+            cached.sort_unstable();
+            assert_eq!(cached, expected, "the cache must hold the full edge set");
+            assert_eq!(
+                *mock.prepare_call_hierarchy_calls.lock().unwrap(),
+                vec![(path.clone(), expected_id.to_string())],
+                "{file} must be opened under its own languageId, not the {seed_ast_lang} seed's"
+            );
+        }
     }
 } // mod tests
 
