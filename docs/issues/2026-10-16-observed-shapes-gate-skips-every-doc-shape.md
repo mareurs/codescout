@@ -137,6 +137,21 @@ Each strengthened assertion was observed red with `scripts/mutation-probe.sh` (2
   (`doc`, `librarian`); making the helper `contains` instead → `waiver_reason_names_a_shape_as_a_whole_word_not_a_substring`
   red (Gate 2 itself stays green there, which is why the helper has its own test).
 
+Gate 2's own decision was a survivor (found by a peer's mutation probe, reproduced here 2026-10-17): with the
+inline predicate `if !(covered || shape_is_waived(topic, shape))` in the gate, forcing it to `if false`, forcing
+`covered` true, and forcing `shape_is_waived` true all left `cargo test --lib -- every_observed_shape census
+section_waivers prompts:: guide_index::` green (118 passed each); only `||` to `&&` was killed, by the gate
+itself on the real corpus. Fixed by extracting `shape_is_served_or_waived(topic, shape, probe)` (real coverage
+lookup and real waiver matcher, not booleans) and `judge_shape` (counter plus decision in one function), pinned by
+`gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape`, `judge_shape_counts_every_pair_and_records_only_the_gaps`
+and `the_waiver_matcher_does_not_read_a_neighbour_or_a_path_as_the_shape`. Each mutant now red, one at a time:
+
+- `judge_shape`'s `if !shape_is_served_or_waived(..)` to `if false` → `judge_shape_counts_every_pair_and_records_only_the_gaps` ("the gap must be recorded").
+- the decision with `served` forced true, and with the waiver forced true → `gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape` ("coverage must read the probe") and the `judge_shape` test.
+- `||` to `&&` → `gate_two_...`, `judge_shape_...` and Gate 2 itself.
+- waiver match as `contains` → `waiver_reason_names_a_shape_as_a_whole_word_not_a_substring`, `the_waiver_matcher_...` and `gate_two_...` ("a waiver that merely contains the shape as a substring must not waive it").
+- the `judged` counter increment dropped → `judge_shape_...` and Gate 2 ("judged no `doc` census shape against `librarian`").
+
 ## Workarounds
 
 For `tracker-conventions`, a table-driven test over the real routed shapes

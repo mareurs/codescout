@@ -7372,17 +7372,7 @@ mod tests {
                 if !GUIDE_INDEX.declares(topic) {
                     continue;
                 }
-                *judged
-                    .entry((tool_name.to_string(), topic.to_string()))
-                    .or_default() += 1;
-                let covered = !GUIDE_INDEX
-                    .match_sections(topic, Some(shape), probe)
-                    .is_empty();
-                if !(covered || crate::prompts::shape_is_waived(topic, shape)) {
-                    uncovered.push(format!(
-                        "`{shape}` -> `{topic}` on a result shaped like {probe}"
-                    ));
-                }
+                judge_shape(tool_name, topic, shape, probe, &mut judged, &mut uncovered);
             }
         }
         assert!(
@@ -7412,6 +7402,51 @@ mod tests {
             );
         }
     }
+    /// The (tool, topic) pairs Gate 2 has judged, with how many probes each took.
+    #[cfg(feature = "librarian")]
+    type JudgedPairs = std::collections::BTreeMap<(String, String), usize>;
+
+    /// Gate 2's decision, on its own so it can be tested: a call shape that routes to declaring
+    /// `topic` on a result shaped like `probe` is acceptable when some section there serves it
+    /// (`GUIDE_INDEX`) or a `SECTION_WAIVERS` row for the topic names it as a whole word
+    /// (`prompts::shape_is_waived`). It takes the real inputs rather than two booleans, so a test
+    /// of it exercises the real coverage lookup and the real waiver matcher.
+    ///
+    /// Inline in the gate this was `if !(covered || shape_is_waived(..))`, and nothing read that
+    /// condition but the gate: forcing it to `false`, or either operand to `true`, left every test
+    /// green, so the gate could not fail on a coverage gap. Measured 2026-10-17 by mutation.
+    /// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
+    #[cfg(feature = "librarian")]
+    fn shape_is_served_or_waived(topic: &str, shape: &str, probe: &serde_json::Value) -> bool {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let served = !GUIDE_INDEX
+            .match_sections(topic, Some(shape), probe)
+            .is_empty();
+        served || crate::prompts::shape_is_waived(topic, shape)
+    }
+
+    /// Judge one (shape, topic, probe) the router reached: count the pair as judged, and record the
+    /// shape in `uncovered` when [`shape_is_served_or_waived`] refuses it. The counter and the
+    /// decision live in this one function, so a pair can never be counted without being decided.
+    #[cfg(feature = "librarian")]
+    fn judge_shape(
+        tool_name: &str,
+        topic: &str,
+        shape: &str,
+        probe: &serde_json::Value,
+        judged: &mut JudgedPairs,
+        uncovered: &mut Vec<String>,
+    ) {
+        *judged
+            .entry((tool_name.to_string(), topic.to_string()))
+            .or_default() += 1;
+        if !shape_is_served_or_waived(topic, shape, probe) {
+            uncovered.push(format!(
+                "`{shape}` -> `{topic}` on a result shaped like {probe}"
+            ));
+        }
+    }
+
     /// The result shape a real call of `shape` returns, given a generic probe that names a path.
     ///
     /// Only `doc.list_stale` differs: its result carries `threshold_hours` (a key no other
@@ -7700,6 +7735,15 @@ mod tests {
             CensusRow::Live("doc.event_create".to_string())
         );
         assert_eq!(
+            resolve_census_row("artifact_augment", &fixed),
+            CensusRow::Live("doc.augment".to_string()),
+            "a whole-shape rename (tool AND action) resolves through CENSUS_RENAMED_SHAPES"
+        );
+        assert_eq!(
+            resolve_census_row("artifact_refresh.list_stale", &fixed),
+            CensusRow::Live("doc.list_stale".to_string())
+        );
+        assert_eq!(
             resolve_census_row("no_such_tool.x", &fixed),
             CensusRow::Unresolved,
             "an unknown tool must be Unresolved (a failure), never skipped"
@@ -7724,6 +7768,162 @@ mod tests {
             resolve_census_row("read_markdown", &fixed),
             CensusRow::Retired(from_table)
         );
+    }
+    /// Gate 2's decision is pinned here, because the gate cannot be: it reads the real corpus, which
+    /// is green, so a decision that always said yes would leave it green too. Each case below is one a
+    /// mutation of the decision (`false`, an operand forced true, `||` to `&&`, a `contains` waiver
+    /// match) gets wrong.
+    ///
+    /// The precondition asserts matter as much as the verdicts: "served without a waiver" is only a
+    /// test of the served arm if no waiver names the shape, and likewise the other way round.
+    #[cfg(feature = "librarian")]
+    #[test]
+    fn gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape() {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let tracker = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let served_by = |topic: &str, shape: &str, probe: &serde_json::Value| {
+            !GUIDE_INDEX
+                .match_sections(topic, Some(shape), probe)
+                .is_empty()
+        };
+
+        // Served, not waived: accepted on the section alone.
+        assert!(served_by("tracker-conventions", "doc.get", &tracker));
+        assert!(!crate::prompts::shape_is_waived(
+            "tracker-conventions",
+            "doc.get"
+        ));
+        assert!(
+            shape_is_served_or_waived("tracker-conventions", "doc.get", &tracker),
+            "a shape a section serves needs no waiver"
+        );
+        // The same shape on a result that names no path is not served (`path~` reads the probe).
+        assert!(!served_by(
+            "tracker-conventions",
+            "doc.get",
+            &serde_json::json!({})
+        ));
+        assert!(
+            !shape_is_served_or_waived("tracker-conventions", "doc.get", &serde_json::json!({})),
+            "coverage must read the probe, not only the shape"
+        );
+
+        // Waived, not served: accepted on the waiver alone.
+        assert!(!served_by("tracker-conventions", "doc.graph", &tracker));
+        assert!(crate::prompts::shape_is_waived(
+            "tracker-conventions",
+            "doc.graph"
+        ));
+        assert!(
+            shape_is_served_or_waived("tracker-conventions", "doc.graph", &tracker),
+            "a shape a waiver names needs no section"
+        );
+
+        // Neither: REFUSED, on both declaring topics. This is the case that fails when the decision
+        // is forced to accept.
+        for topic in ["librarian", "tracker-conventions"] {
+            assert!(!served_by(topic, "doc.no_such_action", &tracker));
+            assert!(!crate::prompts::shape_is_waived(
+                topic,
+                "doc.no_such_action"
+            ));
+            assert!(
+                !shape_is_served_or_waived(topic, "doc.no_such_action", &tracker),
+                "a shape nothing serves and no waiver names must be refused on `{topic}`"
+            );
+        }
+
+        // A waiver naming a LONGER shape does not waive a prefix of it: `tracker-conventions` names
+        // `doc.update_entry`, and `doc.update_ent` is a substring of that.
+        assert!(crate::prompts::shape_is_waived(
+            "tracker-conventions",
+            "doc.update_entry"
+        ));
+        assert!(!served_by(
+            "tracker-conventions",
+            "doc.update_ent",
+            &tracker
+        ));
+        assert!(
+            !shape_is_served_or_waived("tracker-conventions", "doc.update_ent", &tracker),
+            "a waiver that merely contains the shape as a substring must not waive it"
+        );
+    }
+
+    /// The same decision through the gate's own loop body: a gap is recorded as uncovered and the pair
+    /// is counted either way, in the one function the gate calls. Fails if the recording is dropped
+    /// (`if false`), if the count is dropped, or if the verdict is not the one above.
+    #[cfg(feature = "librarian")]
+    #[test]
+    fn judge_shape_counts_every_pair_and_records_only_the_gaps() {
+        let tracker = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let mut judged = JudgedPairs::default();
+        let mut uncovered = Vec::new();
+
+        judge_shape(
+            "doc",
+            "tracker-conventions",
+            "doc.get",
+            &tracker,
+            &mut judged,
+            &mut uncovered,
+        );
+        assert!(uncovered.is_empty(), "served: {uncovered:?}");
+        judge_shape(
+            "doc",
+            "tracker-conventions",
+            "doc.graph",
+            &tracker,
+            &mut judged,
+            &mut uncovered,
+        );
+        assert!(uncovered.is_empty(), "waived: {uncovered:?}");
+        judge_shape(
+            "doc",
+            "tracker-conventions",
+            "doc.no_such_action",
+            &tracker,
+            &mut judged,
+            &mut uncovered,
+        );
+        assert_eq!(
+            uncovered.len(),
+            1,
+            "the gap must be recorded: {uncovered:?}"
+        );
+        assert!(
+            uncovered[0].starts_with("`doc.no_such_action` -> `tracker-conventions`"),
+            "{uncovered:?}"
+        );
+        assert_eq!(
+            judged.get(&("doc".to_string(), "tracker-conventions".to_string())),
+            Some(&3),
+            "every pair is counted, gap or not: {judged:?}"
+        );
+    }
+
+    /// The whole-word waiver matcher at the boundaries a `contains` gets wrong, and the ones a too
+    /// strict boundary would. `waiver_reason_names_a_shape_as_a_whole_word_not_a_substring` (in
+    /// `prompts`) holds the first group; these are the neighbour and punctuation cases a peer branch
+    /// pinned for its own matcher, checked here against ours.
+    #[test]
+    fn the_waiver_matcher_does_not_read_a_neighbour_or_a_path_as_the_shape() {
+        use crate::prompts::waiver_reason_names_shape as names;
+        // A longer token that begins or ends with the shape is not the shape.
+        assert!(!names("covers doc.update_entry only", "doc.update"));
+        assert!(!names("covers undoc.update", "doc.update"));
+        assert!(!names("covers x.doc.update", "doc.update"));
+        assert!(!names("covers doc.update.x", "doc.update"));
+        assert!(!names("see docs/issues/doc.update.md", "doc.update"));
+        // A sentence's full stop, a comma, a backtick or a parenthesis does not hide it.
+        assert!(names("ends a sentence with doc.graph.", "doc.graph"));
+        assert!(names("covers doc.graph, doc.link", "doc.graph"));
+        assert!(names("(doc.graph)", "doc.graph"));
+        assert!(names("`doc.graph`", "doc.graph"));
+        assert!(names("doc.graph", "doc.graph"));
+        // Shapes joined by a slash are one word to this matcher, so a waiver must separate them with
+        // a space or a comma (a boundary-scanning matcher would read both halves).
+        assert!(!names("covers doc.update/doc.move", "doc.move"));
     }
 
     /// Every DECLARED shape must name a real tool, and a real action on that tool.
