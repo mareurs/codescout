@@ -358,6 +358,31 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
     insert_below_header(out, &overflow_head(val))
 }
 
+/// What a symbol row carries beyond its name and range, printed under the row: the rest of its
+/// docstring (the first line is the row's own `// summary`) and its body. A
+/// single-file overview is `symbols(path, include_body=true, include_docs=true)`'s only
+/// rendering on the inline path, so a flag the caller set must show up here.
+fn push_symbol_extras(out: &mut String, sym: &Value, indent: usize, with_body: bool) {
+    let pad = " ".repeat(indent);
+    if let Some(docs) = sym["docs"].as_str() {
+        let mut lines = docs.lines().skip_while(|l| l.trim().is_empty());
+        lines.next(); // the summary, already on the row
+        for line in lines.filter(|l| !l.trim().is_empty()) {
+            out.push('\n');
+            out.push_str(&pad);
+            out.push_str("// ");
+            out.push_str(line.trim());
+        }
+    }
+    if let Some(body) = sym["body"].as_str().filter(|_| with_body) {
+        for line in body.lines() {
+            out.push('\n');
+            out.push_str(&pad);
+            out.push_str(line);
+        }
+    }
+}
+
 fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
     let max_kind_len = symbols
         .iter()
@@ -379,7 +404,7 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
     let pad = " ".repeat(indent);
 
     // First non-empty line of a docstring — overview shows a one-line summary
-    // per symbol; the full text lives in the symbol's `docs` JSON field.
+    // per symbol; the rest of the text follows under the row (`push_symbol_extras`).
     let doc_summary = |v: &Value| -> Option<String> {
         v["docs"]
             .as_str()
@@ -412,10 +437,15 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
         }
         out.push_str("  ");
         out.push_str(&line_range);
+        if let Some(sig) = sym["signature"].as_str() {
+            out.push_str("  ");
+            out.push_str(sig);
+        }
         if let Some(doc) = doc_summary(sym) {
             out.push_str("  // ");
             out.push_str(&doc);
         }
+        push_symbol_extras(out, sym, indent + 4, true);
 
         if let Some(children) = sym["children"].as_array() {
             let child_indent = indent + 5;
@@ -452,10 +482,16 @@ fn format_symbol_tree(out: &mut String, symbols: &[Value], indent: usize) {
                 }
                 out.push_str("  ");
                 out.push_str(&child_lr);
+                if let Some(sig) = child["signature"].as_str() {
+                    out.push_str("  ");
+                    out.push_str(sig);
+                }
                 if let Some(doc) = doc_summary(child) {
                     out.push_str("  // ");
                     out.push_str(&doc);
                 }
+                // A container's own body already contains its members' bodies.
+                push_symbol_extras(out, child, child_indent + 4, sym["body"].is_null());
             }
         }
     }

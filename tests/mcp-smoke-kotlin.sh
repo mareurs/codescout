@@ -58,25 +58,18 @@ trap cleanup EXIT
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 call() {
-    local tool="$1" params="$2" tries=0
+    local tool="$1" params="$2"
     STEPS=$((STEPS + 1))
-    while :; do
-        RESULT=$(mcp call "$tool" -p "$params" "$KOTLIN_ALIAS" 2>/dev/null) || RESULT=""
-        # See tests/mcp-smoke-rust.sh: the reply is plain text and carries the injected guide
-        # body after an `<!-- auto-injected` marker, which would satisfy a string assertion on
-        # its own. RESULT is the tool's reply only.
-        RESULT="${RESULT%%<!-- auto-injected*}"
-        # A `0 matches` reply is retried (see the note above Category 2).
-        case "$RESULT" in
-            *"0 matches"*) ;;
-            *) break ;;
-        esac
-        if [ "$tries" -ge 5 ]; then
-            break
-        fi
-        tries=$((tries + 1))
-        sleep 3
-    done
+    RESULT=$(mcp call "$tool" -p "$params" "$KOTLIN_ALIAS" 2>/dev/null) || RESULT=""
+    # See tests/mcp-smoke-rust.sh: the reply is plain text and carries the injected guide
+    # body after an `<!-- auto-injected` marker, which would satisfy a string assertion on
+    # its own. RESULT is the tool's reply only.
+    # The marker follows the tool's last line WITHOUT a newline, so this parameter expansion
+    # is the only safe way to cut it: a line-oriented strip (`sed '/auto-injected/,$d'`, `grep -v`)
+    # drops that last line along with it. Doing that is how a body, and an overview, once
+    # looked one line short.
+    # docs/issues/2026-10-17-symbols-include-body-on-kotlin-lsp-results-is-shifted-up-one-line.md
+    RESULT="${RESULT%%<!-- auto-injected*}"
 }
 
 assert_contains() {
@@ -180,23 +173,26 @@ test_read_file_allows_yml
 echo ""
 echo "=== Symbol Navigation ==="
 
-# kotlin-lsp answers a name lookup with `0 matches` when it has not settled, and each
-# `mcp call` is a fresh client: measured 2026-10-17 on this fixture, a `symbols name=search`
-# issued right after another call said `0 matches` and the same call 3s later found
-# `Catalog/search`. docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md
-# `call()` retries a `0 matches` reply a few times so the steps measure the tools and not the
-# server's warm-up. No step here expects a `0 matches` answer, so the retry hides nothing a
-# step asserts; the last reply is what the assertion sees.
+# Each `mcp call` starts a fresh codescout, and the first call against a project can reach it
+# while its Kotlin mux is still starting; that used to answer `0 matches`, and this script
+# retried it. The client now waits for a mux another process is starting
+# (docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md),
+# so a `0 matches` here is a real failure and is not retried.
 
-# Pass criteria below are what the LIVE output of this fixture contains (2026-10-17), and
-# are written so a wrong answer cannot satisfy them: `Catalog/search` is a member name-path
-# that appears nowhere in the request, where `search` and `Catalog` are in the request itself.
+# Pass criteria below are what the LIVE output of this fixture contains, and are written so a
+# wrong answer cannot satisfy them: each is a member or function name (with its line range)
+# that appears nowhere in the request. A single-file overview prints `<Kind>  <name>  L<a>-<b>`;
+# the top-level functions are asserted too, since a fixture whose KDoc held an unterminated
+# nested comment once listed none of them.
+# docs/issues/2026-10-17-symbols-overview-of-a-kotlin-file-omits-members-and-top-level-functions.md
 test_symbols_overview_catalog() {
     call symbols '{"path": "src/main/kotlin/library/services/Catalog.kt"}'
-    if assert_contains "Catalog/add" && assert_contains "Catalog/search"; then
-        pass 1 "symbols overview finds Catalog members in Catalog.kt"
+    if assert_contains "add  *L15-17" && assert_contains "search  *L20-21" \
+        && assert_contains "stats  *L24" \
+        && assert_contains "createNamedCatalog  *L41-44" && assert_contains "toSearchText  *L51"; then
+        pass 1 "symbols overview finds Catalog members and top-level functions in Catalog.kt"
     else
-        fail 1 "symbols overview finds Catalog members in Catalog.kt" "missing expected symbols"
+        fail 1 "symbols overview finds Catalog members and top-level functions in Catalog.kt" "missing expected symbols"
     fi
 }
 
@@ -210,15 +206,17 @@ test_symbols_search() {
     fi
 }
 
-# `Catalog/add`, not `search`: the body of an expression-bodied member comes back without
-# its last line (docs/issues/2026-10-17-symbols-include-body-on-kotlin-lsp-results-is-shifted-up-one-line.md),
-# so the only assertion that stays true when that is fixed is the member's own text.
+# `search` is an expression-bodied member (`fun search(...) =` then the expression on the next
+# line); the body must reach the LAST line, `items.filter { it.searchText()... }`, which is the
+# line an off-by-one at the end of the slice drops.
+# docs/issues/2026-10-17-symbols-include-body-on-kotlin-lsp-results-is-shifted-up-one-line.md
 test_symbols_with_body() {
-    call symbols '{"name": "Catalog/add", "path": "src/main/kotlin/library/services/Catalog.kt", "include_body": true}'
-    if assert_contains "fun add(item: T)" && assert_contains "items.add(item)"; then
-        pass 1 "symbols with include_body returns the add source"
+    call symbols '{"name": "Catalog/search", "path": "src/main/kotlin/library/services/Catalog.kt", "include_body": true}'
+    if assert_contains "fun search(query: String)" && assert_contains "items.filter" \
+        && assert_contains "searchText"; then
+        pass 1 "symbols with include_body returns the whole search source"
     else
-        fail 1 "symbols with include_body returns the add source" "body not returned or missing expected code"
+        fail 1 "symbols with include_body returns the whole search source" "body not returned or missing expected code"
     fi
 }
 
@@ -233,7 +231,7 @@ test_symbols_sealed_class() {
 
 test_symbols_book() {
     call symbols '{"path": "src/main/kotlin/library/models/Book.kt"}'
-    if assert_contains "Book/isAvailable"; then
+    if assert_contains "isAvailable"; then
         pass 1 "symbols returns Book members"
     else
         fail 1 "symbols returns Book members" "missing expected members"
@@ -320,7 +318,7 @@ echo "=== Multi-step Exploration ==="
 test_explore_search_flow() {
     # Step 1: Find the Catalog class
     call symbols '{"path": "src/main/kotlin/library/services/Catalog.kt"}'
-    if ! assert_contains "Catalog/add" || ! assert_contains "Catalog/search"; then
+    if ! assert_contains "add  *L15-17" || ! assert_contains "search  *L20-21"; then
         fail 1 "explore search: find Catalog structure" "class or methods not found"
         return
     fi
@@ -342,7 +340,7 @@ test_explore_model_layer() {
     fi
     # Step 2: Overview a specific model
     call symbols '{"path": "src/main/kotlin/library/models/Genre.kt"}'
-    if assert_contains "Genre/label"; then
+    if assert_contains "label"; then
         pass 2 "explore models: discover model layer (find files → symbols)"
     else
         fail 2 "explore models: discover model layer (find files → list functions)" "functions not found"

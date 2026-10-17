@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: wontfix
 title: 'BUG: symbols(include_body=true) on a Kotlin member returns the lines shifted up by its KDoc length, so an expression-bodied member loses its last line'
 tags:
 - cluster/unclassified
@@ -9,6 +9,7 @@ owner: marius
 related:
 - docs/issues/2026-10-16-mcp-smoke-kotlin-targets-a-project-layout-that-no-longer-exists.md
 severity: low
+closed: 2026-10-17
 ---
 
 # BUG: symbols(include_body=true) on a Kotlin member returns the lines shifted up by its KDoc length, so an expression-bodied member loses its last line
@@ -57,31 +58,46 @@ This machine, `kotlin-lsp` at `/usr/bin/kotlin-lsp`, release build of branch `wo
 
 ## Root cause
 
-Not investigated. The observation fits a body slice that starts at the KDoc line while its length is taken from the LSP range, which does not include the KDoc; this was not checked in the source.
+Not a codescout defect. The bodies codescout returns are complete; what dropped the last line was the capture of the reply.
+
+`mcp call` (and Claude Code: its tool results show `}<!-- auto-injected get_guide(...)` the same way) prints the tool's text block and the injected guide block (`<!-- auto-injected get_guide(...)`) back to back with no newline between them, so the tool's last line and the marker share one line. codescout emits the guide as a SEPARATE content block (`src/tools/guide_emit.rs`, confirmed in review 2026-10-17); the join is made by the consuming client. measured 2026-10-17 (`repro5.sh`, plain `mcp call` output of `symbols name=Catalog/add include_body=true`, `grep -o` around the marker): `          }<!-- auto-injected`. Any line-oriented strip of the guide block (`sed '/auto-injected/,$d'`, `grep -v`, `head`) deletes that line together with the marker, which is exactly one line off the end of every reply. The smoke script's own `RESULT="${RESULT%%<!-- auto-injected*}"` cuts at the marker and keeps the line.
+
+The reported numbers fit this and not a shifted slice: for each case the body had `end - start + 1` lines because the header's `start` is the NAME line (`selectionRange`) while the body starts at the KDoc (`range.start`), so a body that is correct in both ends is one line longer than the header's range and loses exactly its last line when the last line is cut.
+
+Verified three ways, measured 2026-10-17:
+
+1. The same calls with `mcp call -f json` and `content[0].text` (no line stripping): `Catalog/add` returned all 4 lines including `}`, `search` all 3 including `items.filter { it.searchText().contains(query) }`, `stats` both lines.
+2. The raw `textDocument/documentSymbol` bytes for `Catalog.kt` (`tests/fixtures/lsp-replies/kotlin-lsp-catalog-document-symbol.json`): `add` `range` 14–17 / `selectionRange` 15, `search` 19–21 / 20, `stats` 23–24 / 24. `range` includes the KDoc and ends on the last line; kotlin-lsp is right.
+3. `symbol_to_json` (`src/symbol/query.rs`) slices `lines[range_start..=end_line]` and `body_start_line` names the KDoc line. Replayed through `MockLspClient`, the 4 characterisation tests below pass on unmodified code and go red when the end of the slice is cut by one line (`add` body loses `    }`).
 
 ## Evidence
 
-The three replies above, each read from a live `mcp call` on 2026-10-17.
+- `repro.sh` (capture with `sed '/<!-- auto-injected/,$d'`): reproduces the issue's three bodies exactly, `Catalog/stats` printing only `/** Get catalog statistics. */`.
+- `repro4.sh` (capture with `-f json` + `content[0].text`): the same calls, complete bodies.
+- `repro5.sh`: `6:          }<!-- auto-injected` in the plain output.
 
 ## Hypotheses tried
 
-None.
+1. **Hypothesis:** the body slice starts at the KDoc while its length comes from the LSP range. **Test:** read `symbol_to_json` and `editing_start_line`; replay the real reply. **Verdict:** rejected; start and end are both taken from `range`.
+2. **Hypothesis:** the capture lost the last line. **Test:** `-f json`, plain bytes. **Verdict:** confirmed.
 
 ## Fix
 
-Unknown.
+None needed in codescout. Status `wontfix`: there is no defect to fix. The two consequences are in the Kotlin smoke script, fixed on branch `worktree-agent-af85b780928eaa450` at `b451979a` (patch-id `a2068783a60e078be34de6abcabd136703aec224`): its `include_body` step targets `Catalog/search` again and asserts the expression-bodied member's last line, and `call()` documents why the marker must be cut by parameter expansion.
+
+Open suggestion, filed rather than done: start the guide block with a newline so no line-oriented reader loses the line before it. It changes emission bytes and the byte-pin test `a_non_declaring_topic_is_byte_identical_to_today`, so it is a proposal: `docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md`. The join is made by clients (`mcp` CLI and Claude Code both), not by codescout's server.
 
 ## Tests added
 
-N/A: open. `tests/mcp-smoke-kotlin.sh` asserts only text that survives a fix (`fun add(item: T)` and `items.add(item)`), and its comment cites this file.
+Characterisation tests in `src/tools/symbol/kotlin_lsp_tests.rs`, green on unmodified code and red under an end-of-slice off-by-one (mutation measured 2026-10-17: `add` body lost `    }`, `createNamedCatalog` lost its closing `}`): `include_body_on_a_kotlin_lsp_member_spans_the_kdoc_through_the_last_line` (`add`, `search`, `stats`, `body`, `body_start_line`, `start_line`, `end_line`, and the rendered text), `include_body_on_a_kotlin_lsp_function_with_a_long_kdoc_spans_all_of_it`, and `include_body_on_the_last_declaration_of_the_file_keeps_the_file_s_last_line` (`toSearchText`, the fixture's last line L51; red when the slice end is clamped to `lines.len() - 1`). The Kotlin smoke's `include_body` step now asserts `search`'s last line.
 
 ## Workarounds
 
-Read the range with `read_file(start_line, end_line, force=true)`.
+When capturing `mcp call` text output, cut the guide block with `${RESULT%%<!-- auto-injected*}` or use `-f json`.
 
 ## Resume
 
-1. Reproduce `Catalog/stats`. 2. Find where the body slice start is chosen for LSP rows and where the KDoc is added.
+N/A: closed as not a defect.
 
 ## References
 

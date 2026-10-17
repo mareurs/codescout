@@ -102,6 +102,11 @@ pub struct LspManager {
     /// toward the circuit-breaker — the server may still be indexing (e.g. Gradle import)
     /// and transient crashes during that window should not trip the breaker prematurely.
     cold_start_until: StdMutex<HashMap<LspKey, Instant>>,
+    /// When a mux another process owns last stayed unreachable for a FULL peer-startup wait.
+    /// Two callers loop `get_or_start` per file, so without this every file paid the whole
+    /// wait; within `MUX_WEDGED_MEMORY` later attempts make one connect attempt and fail fast
+    /// (a mux that has come up since still connects). Cleared on a successful connect.
+    mux_wedged_at: StdMutex<HashMap<LspKey, tokio::time::Instant>>,
     /// Project root for test-only DB writes. Set by new_for_test_with_root.
     #[cfg(test)]
     project_root_for_test: Option<std::path::PathBuf>,
@@ -519,6 +524,93 @@ fn mux_socket_unreachable_error(
     )
     .into()
 }
+/// How long a client keeps retrying a mux socket it did NOT just start itself.
+///
+/// The mux takes its ownership flock FIRST and binds its socket only after the language server
+/// has answered `initialize` (`src/lsp/mux/process.rs`, steps 1 and 4) — seconds for kotlin-lsp's
+/// JVM. A second process arriving in that window sees a held lock and no socket, which is a mux
+/// that is STARTING, not one that is wedged. Measured 2026-10-17 on kotlin-lsp: a `symbols` call
+/// 1 s after the call that spawned the mux failed with "holds its lock … socket … is
+/// unreachable" and the next call, a second later, succeeded.
+// cap-class: NOT_A_CAP — bound on how long a client waits for another process's startup; it picks when the wedged-mux error is raised, never what an answer contains
+#[cfg(unix)]
+const MUX_PEER_STARTUP_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a full peer-startup wait that ended unreachable is remembered (see
+/// `LspManager::mux_wedged_at`): within it, later attempts for the same workspace make one
+/// connect attempt and fail fast.
+///
+/// Why the wait is 30 s and not the 120 s a SPAWNING client allows its own mux: the wait is paid
+/// inside one tool call, and the server's tool timeout is 60 s (its message tells the caller to
+/// raise `tool_timeout_secs`). One wait must leave room for the rest of the call, and the
+/// error it ends in says to retry, which now connects at once if the mux has finished starting.
+// cap-class: NOT_A_CAP — how long a failed wait is remembered; it picks whether a later call re-serves the wait, never what an answer contains
+#[cfg(unix)]
+const MUX_WEDGED_MEMORY: Duration = Duration::from_secs(60);
+
+/// Retry window after WE spawned the mux and saw its `ready` line: the socket is already bound,
+/// so this only absorbs the accept race.
+#[cfg(unix)]
+const MUX_SPAWNED_CONNECT_WINDOW: Duration = Duration::from_millis(800);
+
+/// Pause between two connect attempts.
+#[cfg(unix)]
+const MUX_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Why [`connect_to_mux`] gave up: the last connect error, and whether it stopped because the
+/// holder of the mux lock turned out to be gone (the lock was found free) rather than because the
+/// whole window passed. Only the second is evidence of a wedged mux.
+#[cfg(unix)]
+#[derive(Debug)]
+struct MuxConnectFailure {
+    source: anyhow::Error,
+    holder_gone: bool,
+}
+
+#[cfg(unix)]
+impl std::fmt::Display for MuxConnectFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.source)
+    }
+}
+
+/// Connect to a mux socket, retrying for up to `window`.
+///
+/// `holder_lock` is the mux's ownership lock when the caller is waiting on ANOTHER process's mux:
+/// once that lock is free its holder has died, no socket will ever appear, and the wait ends at
+/// once so the caller can respawn instead of sitting out the window.
+#[cfg(unix)]
+async fn connect_to_mux(
+    socket_path: &std::path::Path,
+    workspace_root: &Path,
+    window: Duration,
+    holder_lock: Option<&std::path::Path>,
+) -> std::result::Result<LspClient, MuxConnectFailure> {
+    // tokio's clock, so a test can serve the production window on a paused clock.
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let err = match LspClient::connect(socket_path, workspace_root.to_path_buf()).await {
+            Ok(client) => return Ok(client),
+            Err(e) => e,
+        };
+        if tokio::time::Instant::now() >= deadline {
+            return Err(MuxConnectFailure {
+                source: err,
+                holder_gone: false,
+            });
+        }
+        // A free lock means the holder is gone: stop waiting, the caller re-arbitrates.
+        if let Some(lock) = holder_lock {
+            if matches!(claim_mux_lock(lock), Ok(Some(_))) {
+                return Err(MuxConnectFailure {
+                    source: err,
+                    holder_gone: true,
+                });
+            }
+        }
+        tokio::time::sleep(MUX_CONNECT_RETRY_INTERVAL).await;
+    }
+}
 
 impl LspManager {
     /// Maximum consecutive startup failures before the circuit-breaker trips.
@@ -550,6 +642,7 @@ impl LspManager {
             project_root: None,
             startup_failures: StdMutex::new(HashMap::new()),
             cold_start_until: StdMutex::new(HashMap::new()),
+            mux_wedged_at: StdMutex::new(HashMap::new()),
             #[cfg(test)]
             project_root_for_test: None,
         }
@@ -895,13 +988,29 @@ impl LspManager {
     /// The mux process is a detached codescout child that owns the real LSP
     /// server and multiplexes connections over a Unix socket.  If no mux is
     /// running for this workspace we spawn one and wait for its "ready" line
-    /// on stdout before connecting.
+    /// on stdout before connecting.  A mux that ANOTHER process owns and is
+    /// still starting is waited for up to `MUX_PEER_STARTUP_WAIT`.
     #[cfg(unix)]
     async fn get_or_start_via_mux(
         &self,
         language: &str,
         workspace_root: &Path,
         config: LspServerConfig,
+    ) -> Result<Arc<LspClient>> {
+        self.get_or_start_via_mux_waiting(language, workspace_root, config, MUX_PEER_STARTUP_WAIT)
+            .await
+    }
+
+    /// [`Self::get_or_start_via_mux`] with the wait for another process's still-starting mux
+    /// (`MUX_PEER_STARTUP_WAIT`) as a parameter, so a test can drive the wedged case in
+    /// milliseconds instead of sitting out the production window.
+    #[cfg(unix)]
+    async fn get_or_start_via_mux_waiting(
+        &self,
+        language: &str,
+        workspace_root: &Path,
+        config: LspServerConfig,
+        peer_startup_wait: Duration,
     ) -> Result<Arc<LspClient>> {
         use anyhow::Context;
 
@@ -1056,29 +1165,52 @@ impl LspManager {
             }
 
             // Connect as client, with retries. The socket — not the flock — is the
-            // real liveness signal.
-            let mut connect_err = None;
-            let mut connected = None;
-            for attempt in 0..5u32 {
-                if attempt > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            // real liveness signal. A mux another process owns may still be starting
+            // (flock held, socket not bound yet), so that case waits for it.
+            let wedge_key = LspKey::new(language, workspace_root);
+            let remembered_wedge = self
+                .mux_wedged_at
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&wedge_key)
+                .is_some_and(|at| at.elapsed() < MUX_WEDGED_MEMORY);
+            let (window, holder_lock) = if need_spawn {
+                (MUX_SPAWNED_CONNECT_WINDOW, None)
+            } else if remembered_wedge {
+                // This mux just stayed unreachable for a whole wait: one attempt, so a mux
+                // that has come up since still connects, but no second wait (a directory
+                // of files calls this once per file).
+                (Duration::ZERO, Some(lock_path.as_path()))
+            } else {
+                (peer_startup_wait, Some(lock_path.as_path()))
+            };
+            match connect_to_mux(&socket_path, workspace_root, window, holder_lock).await {
+                Ok(client) => {
+                    self.mux_wedged_at
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&wedge_key);
+                    return Ok(Arc::new(client));
                 }
-                match LspClient::connect(&socket_path, workspace_root.to_path_buf()).await {
-                    Ok(client) => {
-                        connected = Some(client);
-                        break;
-                    }
-                    Err(e) => connect_err = Some(e),
-                }
-            }
-            match connected {
-                Some(client) => return Ok(Arc::new(client)),
-                None => {
-                    let e = connect_err.expect("connect loop ran at least once");
+                Err(failure) => {
+                    let MuxConnectFailure {
+                        source: e,
+                        holder_gone,
+                    } = failure;
                     if need_spawn {
                         // We spawned the mux and saw its "ready", yet cannot connect
                         // — a genuine startup/connect failure, not a stale-lock case.
                         return Err(e);
+                    }
+                    if !remembered_wedge && !holder_gone {
+                        // The WHOLE wait was served and the holder is still alive: the next
+                        // callers need not serve it again. A wait that stopped early because
+                        // the lock turned free found nothing wedged (its holder died), so
+                        // nothing is recorded and round 1 takes over.
+                        self.mux_wedged_at
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(wedge_key, tokio::time::Instant::now());
                     }
                     // Round 0: flock held but socket unreachable. Loop to round 1 to
                     // re-arbitrate (respawn if the holder is gone, else error).
@@ -2540,7 +2672,9 @@ mod tests {
             env: vec![],
             idle_timeout_secs: None,
         };
-        let result = mgr.get_or_start_via_mux("rust", ws, config).await;
+        let result = mgr
+            .get_or_start_via_mux_waiting("rust", ws, config, Duration::from_millis(300))
+            .await;
 
         let _ = holder.kill();
         let _ = holder.wait();
@@ -2556,6 +2690,368 @@ mod tests {
         assert!(
             msg.contains("fuser"),
             "must route the human to the lock holder, got: {msg}"
+        );
+    }
+    /// A mux another process owns takes its flock first and binds its socket only after the
+    /// language server answered `initialize` — seconds, for kotlin-lsp. A client that connects in
+    /// that window must wait for the socket, not call the mux wedged. This stands in for the
+    /// mux: it holds the lock, then binds the socket late and sends the init message
+    /// `LspClient::connect` reads.
+    /// docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_to_mux_waits_for_a_peer_mux_that_binds_its_socket_late() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("mux.lock");
+        let sock_path = dir.path().join("mux.sock");
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+
+        let bind_at = sock_path.clone();
+        let peer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1200)).await;
+            let listener = tokio::net::UnixListener::bind(&bind_at).unwrap();
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+            stream
+                .write_all(format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes())
+                .await
+                .unwrap();
+            // Hold the connection open until the test is done with the client.
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let connected = super::connect_to_mux(
+            &sock_path,
+            dir.path(),
+            Duration::from_secs(10),
+            Some(&lock_path),
+        )
+        .await;
+        peer.abort();
+        assert!(
+            connected.is_ok(),
+            "a mux that binds its socket 1.2 s after taking its lock is starting, not wedged: {:?}",
+            connected.err().map(|e| format!("{e:#}"))
+        );
+    }
+
+    /// The wait is for a LIVE holder. When the lock turns free the holder died and no socket will
+    /// ever appear, so the wait ends at once and the caller respawns, instead of sitting out the
+    /// whole window.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_to_mux_stops_waiting_when_the_lock_holder_dies() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("mux.lock");
+        let sock_path = dir.path().join("mux.sock");
+        let owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            drop(owner); // the holder died: its flock is released
+        });
+
+        // Real clock on purpose: the lock is released by closing a file descriptor, which a child
+        // forked by a concurrent test can briefly keep open; a paused clock would race ahead of
+        // that and misreport. The 5 s bound has 15 s of slack against the 20 s window.
+        let started = Instant::now();
+        let connected = super::connect_to_mux(
+            &sock_path,
+            dir.path(),
+            Duration::from_secs(20),
+            Some(&lock_path),
+        )
+        .await;
+        assert!(connected.is_err(), "no socket ever appeared");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "a dead holder must end the wait early, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// A holder that never binds is still reported as wedged — after the wait, and without a
+    /// respawn (the held flock blocks it). The same contract as
+    /// `get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent`, held in
+    /// process so it runs everywhere.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn a_peer_mux_that_never_binds_is_reported_wedged_after_the_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let started = tokio::time::Instant::now();
+        let result = LspManager::new()
+            .get_or_start_via_mux_waiting("rust", ws, config, Duration::from_millis(1500))
+            .await;
+        let elapsed = started.elapsed();
+        let _ = std::fs::remove_file(&lock_path);
+
+        let msg = match result {
+            Ok(_) => panic!("held lock + absent socket must error, not connect or spawn"),
+            Err(e) => e.to_string(),
+        };
+        assert!(msg.contains("wedged or mid-restart"), "{msg}");
+        // 1500 ms is longer than the spawned-client window (800 ms), so a call site that passed
+        // that window instead of the caller's wait would end early.
+        assert!(
+            elapsed >= Duration::from_millis(1500) && elapsed < Duration::from_millis(3000),
+            "the whole wait must be served, and no more than it, took {elapsed:?}"
+        );
+    }
+    /// Two loops call `get_or_start` once PER FILE (`search_files_restricted`, the directory
+    /// overview). With a peer mux that holds its lock and never binds, every file paid the whole
+    /// wait, so a name search over a few Kotlin files outran the 60 s tool timeout. The wait is
+    /// paid once; the files after it fail fast with the same wedged error.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn a_peer_mux_that_never_binds_costs_one_wait_not_one_per_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        let wait = Duration::from_millis(600);
+        let started = tokio::time::Instant::now();
+        for file in 0..6 {
+            let err = mgr
+                .get_or_start_via_mux_waiting("rust", ws, config(), wait)
+                .await
+                .err()
+                .unwrap_or_else(|| panic!("file {file}: a mux that never binds must error"));
+            assert!(
+                err.to_string().contains("wedged or mid-restart"),
+                "file {file}: {err}"
+            );
+        }
+        let elapsed = started.elapsed();
+        let _ = std::fs::remove_file(&lock_path);
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "6 files must cost about one {wait:?} wait, took {elapsed:?}"
+        );
+    }
+    /// The wait `get_or_start` really serves for another process's mux is 30 s: the constant and
+    /// its wiring through `get_or_start_via_mux`, on a paused clock so it costs no real time.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn the_production_peer_wait_is_thirty_seconds() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let started = tokio::time::Instant::now();
+        let result = LspManager::new()
+            .get_or_start_via_mux("rust", ws, config)
+            .await;
+        let waited = started.elapsed();
+        let _ = std::fs::remove_file(&lock_path);
+
+        assert!(result.is_err(), "a mux that never binds must error");
+        assert!(
+            waited >= Duration::from_secs(30) && waited < Duration::from_secs(31),
+            "the production wait for another process's mux must be 30 s, was {waited:?}"
+        );
+    }
+    /// The memory is for a mux that was waited on for the WHOLE window and still never bound. A
+    /// wait that stopped early because the lock turned free means its holder DIED: nothing was
+    /// found wedged, round 1 takes over, and a recorded "wedged" would deny the next 60 s of calls
+    /// the wait against whatever mux starts next (docs/issues/2026-10-17-mux-connect-path-lock-races.md).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_early_stop_because_the_holder_died_is_not_remembered_as_a_wedged_mux() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            drop(owner); // the holder died
+        });
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        // Round 1 finds the lock free and tries to spawn a mux, which fails in a test binary;
+        // what matters is what was recorded about the wait that ended early.
+        let _ = mgr
+            .get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(10))
+            .await;
+        let _ = std::fs::remove_file(&lock_path);
+
+        assert!(
+            mgr.mux_wedged_at.lock().unwrap().is_empty(),
+            "a holder that died is not a wedged mux and must not be remembered as one"
+        );
+    }
+
+    /// The memory has an edge at `MUX_WEDGED_MEMORY` (60 s): inside it a call makes one attempt,
+    /// past it the call serves the full wait again. Paused clock, so both sides cost no real time.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn the_wedge_memory_lasts_sixty_seconds_and_not_longer() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let mgr = LspManager::new();
+        let wait = Duration::from_secs(2);
+        macro_rules! timed {
+            () => {{
+                let started = tokio::time::Instant::now();
+                assert!(mgr
+                    .get_or_start_via_mux_waiting("rust", ws, config(), wait)
+                    .await
+                    .is_err());
+                started.elapsed()
+            }};
+        }
+
+        assert!(timed!() >= wait, "the first call serves the wait");
+
+        tokio::time::advance(Duration::from_secs(59)).await;
+        let inside = timed!();
+        assert!(
+            inside < Duration::from_secs(1),
+            "59 s after the failure the memory still holds: one attempt, took {inside:?}"
+        );
+
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let past = timed!();
+        let _ = std::fs::remove_file(&lock_path);
+        assert!(
+            past >= wait,
+            "61 s after the failure the memory has expired and the wait is served again, took {past:?}"
+        );
+    }
+
+    /// The remembered failure never blocks a mux that has come up since: the next call still
+    /// makes its one connect attempt, and a success clears the memory.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        let wait = Duration::from_millis(300);
+        assert!(mgr
+            .get_or_start_via_mux_waiting("rust", ws, config(), wait)
+            .await
+            .is_err());
+
+        // The mux finishes starting after the failure was recorded.
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+            stream
+                .write_all(format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        });
+        let connected = mgr
+            .get_or_start_via_mux_waiting("rust", ws, config(), wait)
+            .await;
+        peer.abort();
+        let _ = std::fs::remove_file(&lock_path);
+        let _ = std::fs::remove_file(&sock_path);
+        assert!(
+            connected.is_ok(),
+            "a mux that is up must be connected to even after a recorded failure: {:?}",
+            connected.err().map(|e| e.to_string())
+        );
+        assert!(
+            mgr.mux_wedged_at.lock().unwrap().is_empty(),
+            "a successful connect must clear the remembered failure"
         );
     }
 

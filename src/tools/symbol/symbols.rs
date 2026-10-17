@@ -390,10 +390,18 @@ impl Tool for Symbols {
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         // Overview-mode responses use `directory` or `pattern` keys, or have a
-        // `files` array. Search-mode responses are `{ symbols: [...] }`.
+        // `files` array. A SINGLE-FILE overview has none of those: it is
+        // `{ file, symbols, … }`, and tells itself from a search by carrying no
+        // `files_count` — a search always sets it (`finalize_search_results`), and also
+        // hoists `file` to the top level when every match shares one, so `file` alone
+        // cannot mean "overview". Routed to the search renderer, a single-file overview
+        // lost its `lsp: warming` marker: tree-sitter output from a cold language server
+        // read as a complete LSP answer.
+        // docs/issues/2026-10-17-symbols-overview-of-a-kotlin-file-omits-members-and-top-level-functions.md
         let is_overview = result.get("directory").is_some()
             || result.get("pattern").is_some()
-            || result.get("files").is_some();
+            || result.get("files").is_some()
+            || (result.get("file").is_some() && result.get("files_count").is_none());
         if is_overview {
             Some(format_overview_symbols(result))
         } else {
