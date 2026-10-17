@@ -40,6 +40,7 @@
 8. Stage A (2026-10-16, section below): a grounded critic used as a gate for plans and design docs found 18 of 20 (`low`) and 17 of 20 (`high`) planted defects as blocking and blocked no clean original without a real defect; its effort made no difference (paired −1) at half the cost for `low`. It also blocked 16 to 19 of 20 originals for real defects. Not shown: that a producer fixes what it reports, the cost of that round, or results on defects not planted by me (Stage B).
 9. Stage C (2026-10-16, section below): with the critic as a `Stop` hook in a plan-writing loop, verified defects in the final plans were `low` 5, gated `low` 4, `xhigh` 0 (6 plans each); the gate blocked once in 6 runs and passed plans with real defects. No help shown; gated `low` does not match `xhigh` ($0.54 vs $1.92 per run). For plans, producer effort mattered and a cheap critic did not replace it.
 10. Stage D (2026-10-16, section below): the same 6 plans written at `medium` and `high` without a gate. Verified defects in the final plans were `low` 5, `medium` 5, `high` 3, `xhigh` 0, at $0.35, $0.47, $0.81 and $1.92 per run. By the pre-registered rules neither new level matches `xhigh`. Open confound: plan length rises with effort, and the audit may look less closely at a long plan.
+11. Stage E (2026-10-17, section below): the audit alone, on 8 clean plans (4 `low`, 4 `xhigh`) with 2 planted defects each. It named all 16 planted defects, and 5 of 8 as blocking in each arm; by the pre-registered rule, no length effect shown. This is a ceiling result on planted defects of the rubric's classes. It does not cover natural defects.
 
 ## Our own evidence (R1 V2, Sonnet 5.5, CLI 2.1.296)
 
@@ -227,6 +228,24 @@ Pre-registered in `/home/marius/work/claude/es-stage0/critic-d/prereg-d.md`, wit
 Limits: one run per cell and 6 items. Plan length rises with effort (206 lines at `low`, 984 at `xhigh`), and an audit may look less closely at a long plan. So the zero for `xhigh` may be optimistic, and these data cannot separate better plans from less closely audited plans. `L` and `X` come from the Stage C batch, not from the same randomised batch as `M` and `H`. The auditor used the gate's rubric. Nothing here shows that a plan leads to working code.
 
 What this adds to "when to change effort": for plan writing on this material, no cheaper level reached the `xhigh` result. The cheapest working design so far is `low` plus a mechanical gate for code, and `xhigh` for plans.
+
+## Stage E (2026-10-17): does the audit look less closely at long plans? — no difference shown on planted defects
+
+Pre-registered in `/home/marius/work/claude/es-stage0/critic-e/prereg-e.md`, with input hashes taken before the first call. Stage D left one confound open: plan length rises with effort, so the audit might look less closely at a long plan. Stage E tests the audit alone. It used 8 clean plans from Stage C: items p01, p03, p08 and p10, in arm `L` (139 to 241 lines) and arm `X` (612 to 1,240 lines). None had a verified blocking defect. I planted 2 defects in each plan, 16 in all. The classes were drawn by seed before I read any plan: P1 dropped spec requirement, P2 spec value changed, P3 internal inconsistency, P4 cited symbol that does not exist. Each plan got one audit: Opus 5.5 at `high`, the Stage D audit script, the arm hidden behind a random code. An Opus judge labelled each defect without seeing the arm. I read all 16 matched findings myself and checked each label against the finding's severity.
+
+| arm | planted defects named by some finding | named by a blocking finding | other blocking findings |
+|---|---|---|---|
+| `L` (4 plans) | 8 of 8 | 5 of 8 | 0 |
+| `X` (4 plans) | 8 of 8 | 5 of 8 | 0 |
+
+- The rule was fixed before the run: gap = R_L − R_X, "supported" if gap >= 3, "no length effect shown" if gap <= 1. Here R_L = 5 and R_X = 5, so **no length effect shown at this size**.
+- The audit named every planted defect in all 8 plans, including the ones in the 1,240-line plan.
+- The blocking counts are the same by class in both arms: P1 2 of 2, P3 2 of 2, P2 1 of 2, P4 0 of 2. All four P4 findings (a symbol that does not exist) were rated `minor`, because the auditor named the real symbol. So the blocking count measures the auditor's severity choice, not detection.
+- Spend: $6.06 for the 8 audits ($3.92 for the `X` plans, $2.16 for the `L` plans). The estimate was $8.2. The judge subagent is not in this figure.
+
+Limits: the test is at a ceiling (all 16 found), so it cannot show a small loss. The planted defects are local edits in classes the rubric names; Stage C showed that a critic can miss natural defects that planted ones do not predict. So this result does not show that natural defects in a long plan are found as often. There are 8 defects per arm and one audit per plan. The `X` plans differ from the `L` plans in content and redundancy, not only in length. The mean position of the planted edits is earlier in the `X` plans (0.33) than in the `L` plans (0.44). The judge used 2 tool calls, so I did not rely on its labels alone.
+
+What this adds to Stage D: on planted defects of the rubric's classes, the audit is not less sensitive on a long plan. So "the audit looked less closely" is not supported as the reason for `xhigh` = 0. The same question for natural defects stays open, and nothing was run for it.
 
 ## Defects filed from Stage A (2026-10-16)
 
