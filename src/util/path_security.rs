@@ -2890,6 +2890,14 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    // `#[serial_test::serial]` marks the tests that read the process cwd through
+    // `WriteEnv::ambient()` (the ambient `classify_write_path` / `validate_write_path`) or through
+    // `std::env::current_dir()`: `agent::tests::new_with_relative_path_canonicalizes_home_root`
+    // CHANGES the cwd, and `#[serial]` is what keeps the two groups apart. It excludes only the
+    // tests that opt in, so a test elsewhere that reaches the ambient classifier through a tool is
+    // not covered (`docs/conventions/test-env-isolation.md`); everything that CAN take an injected
+    // `WriteEnv` does (`classify_write_path_in`, `env_of`) and needs no attribute.
+
     fn default_config() -> PathSecurityConfig {
         PathSecurityConfig::default()
     }
@@ -2998,6 +3006,7 @@ mod tests {
     // ── Write validation ─────────────────────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn write_empty_path_rejected() {
         let dir = tempdir().unwrap();
         let result =
@@ -3006,6 +3015,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_null_byte_rejected() {
         let dir = tempdir().unwrap();
         let result = validate_write_path(
@@ -3018,6 +3028,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_within_project_allowed() {
         let dir = tempdir().unwrap();
         // Create the target directory so canonicalize resolves properly
@@ -3036,6 +3047,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_outside_project_rejected() {
         let project = tempdir().unwrap();
         // Use a hardcoded path outside both the project root and /tmp so the
@@ -3056,6 +3068,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_traversal_outside_project_rejected() {
         let project = tempdir().unwrap();
         std::fs::create_dir_all(project.path().join("src")).unwrap();
@@ -3072,6 +3085,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_traversal_via_nonexistent_dir_rejected() {
         // Regression test for: when an intermediate directory does not exist,
         // best_effort_canonicalize falls back to the raw path (with `..`).
@@ -3105,6 +3119,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_extra_root_allowed() {
         let project = tempdir().unwrap();
         let extra = tempdir().unwrap();
@@ -3130,6 +3145,7 @@ mod tests {
         ignore = "Windows lacks /tmp; absolute Unix-path test inputs need a portable rewrite. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
     )]
     #[test]
+    #[serial_test::serial]
     fn write_to_tmp_allowed() {
         let project = tempdir().unwrap();
         // The allowlist holds the PLATFORM temp dir (`platform::temp_dir()`, which is `$TMPDIR`
@@ -3193,6 +3209,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_to_ssh_denied_even_if_under_project() {
         // If somehow ~/.ssh were under the project root, it should still be denied
         if let Some(home) = home_dir() {
@@ -3266,6 +3283,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn symlink_write_escape_caught() {
         #[cfg(unix)]
         let project = tempdir().unwrap();
@@ -5492,6 +5510,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn root_profile_bypasses_write_boundary() {
         let dir = tempdir().unwrap();
         let outside = dir.path().join("outside_project");
@@ -5516,6 +5535,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_outside_root_mentions_approve_write() {
         let dir = tempdir().unwrap();
         // Use /var — outside both the project root and /tmp, so the boundary check
@@ -5535,6 +5555,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_allows_session_approved_root() {
         let dir = tempdir().unwrap();
         let other = tempdir().unwrap();
@@ -5554,6 +5575,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_session_root_still_respects_deny_list() {
         let dir = tempdir().unwrap();
         let home = crate::platform::home_dir().unwrap();
@@ -6663,6 +6685,7 @@ EOF"#;
     // ── classify_write_path tests ──────────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn classify_in_project_is_allowed() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -7459,6 +7482,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn a_relative_temp_dir_admits_no_write_through_classification() {
         // Only the temp dir is injected as ".": it would resolve against the process cwd. The
         // target is built from that same cwd, so the old behaviour admitted it.
@@ -7832,6 +7856,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn a_relative_extra_write_root_admits_nothing() {
         // `.` is resolved against the process cwd; the target is built from that same cwd.
         let cwd = std::env::current_dir().unwrap();
@@ -7874,6 +7899,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn classify_outside_root_is_outsideroot() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -7891,6 +7917,7 @@ EOF"#;
     /// certain to be refused as too broad: a dead end (`F8b`), found for hosts whose `$HOME` is
     /// their temp dir. The denial must not name that call, and must say what is true instead.
     #[test]
+    #[serial_test::serial]
     fn a_denial_does_not_name_an_approve_write_call_that_is_certain_to_be_refused() {
         let tmp = tempdir().unwrap();
         let msg = validate_write_path("/ce_probe_x.rs", tmp.path(), &default_config(), &[])
@@ -8016,6 +8043,7 @@ EOF"#;
     ///
     /// See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
     #[test]
+    #[serial_test::serial]
     fn write_denial_names_an_approve_write_call_that_can_be_run_verbatim() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -8055,6 +8083,7 @@ EOF"#;
     /// the test builds no file.
     #[cfg(unix)]
     #[test]
+    #[serial_test::serial]
     fn the_approve_write_call_of_a_denial_reads_back_to_the_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -8097,6 +8126,7 @@ EOF"#;
     /// and the sibling below pins the difference instead of leaving it implicit.
     #[cfg(not(windows))]
     #[test]
+    #[serial_test::serial]
     fn hard_denials_say_that_approve_write_will_not_help() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -8138,6 +8168,7 @@ EOF"#;
     /// this test fails, and that is the signal to re-unify the two rather than a mystery.
     #[cfg(windows)]
     #[test]
+    #[serial_test::serial]
     fn windows_resolves_dotdot_lexically_so_the_unresolved_arm_is_unreachable() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -8150,6 +8181,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn classify_empty_is_denied() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -8161,6 +8193,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_still_bails_outside_with_unchanged_message() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
