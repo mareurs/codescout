@@ -1037,3 +1037,89 @@ async fn doctor_export_refuses_an_artifact_below_a_link_directory_before_writing
     );
     assert_eq!(applied["totals"]["exported"], 0, "{applied}");
 }
+
+/// The managed root is registered under its CANONICAL path (`current_project` is canonicalized at
+/// the adapter boundary) while a row keeps the SPELLING it was catalogued under
+/// (`home/proj/x.md`), so no root contains the spelling. Before falling back to the nearest `.git`
+/// (`home`, which would refuse), the door accepts a path whose RESOLUTION lies under a managed
+/// root.
+#[tokio::test]
+async fn a_row_spelled_through_a_link_to_a_canonically_registered_project_is_writable() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    std::fs::write(data.join("proj/x.md"), DOC).unwrap();
+    let canonical = std::fs::canonicalize(data.join("proj")).unwrap();
+    let ctx = mk_ctx(&canonical);
+    let id = catalog_row(&ctx, &home.join("proj/x.md"));
+
+    update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect("the resolution lies inside the managed project");
+
+    assert!(std::fs::read_to_string(data.join("proj/x.md"))
+        .unwrap()
+        .contains("status: fixed"));
+}
+
+/// The catalog-level writers get their root from `Catalog::write_roots`, armed by the TOOL. A
+/// prose-ledger `append_entry` in a project reached through a link under another repository is
+/// the H3 shape at that wiring: unarmed, the door falls back to the spelled `home/.git` and
+/// refuses the project's own ledger.
+#[tokio::test]
+async fn append_entry_in_a_project_reached_through_a_link_allocates_an_id() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    let project = home.join("proj");
+    std::fs::write(
+        project.join("ledger.md"),
+        "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("ledger.md"));
+
+    let out = super::append_entry::call(&ctx, json!({"id": id, "id_prefix": "F"}))
+        .await
+        .expect("the project's own ledger is not 'outside the repository'");
+
+    assert!(out.to_string().contains("F-1"), "{out}");
+}
+
+/// The control for the relative-link refusal: moving the link within its OWN directory keeps the
+/// relative target valid, so it is allowed (the test `doc_move_refuses_a_relative_leaf_link…` is
+/// for a different directory).
+#[tokio::test]
+async fn doc_move_still_renames_a_relative_leaf_link_within_its_own_directory() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(base.path().join("elsewhere.md"), DOC).unwrap();
+    std::os::unix::fs::symlink("../elsewhere.md", root.join("outward.md")).unwrap();
+    let ctx = mk_ctx(&root);
+    let (report, _) = crate::librarian::indexer::index_repo_sync(
+        &ctx.catalog.lock(),
+        &md_rules(),
+        &root,
+        &globset::GlobSet::empty(),
+        false,
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(report.added, 1);
+    let id = crate::librarian::ids::artifact_id_from_abs(&root.join("outward.md"));
+
+    mv::call(&ctx, json!({"id": id, "new_rel_path": "renamed.md"}))
+        .await
+        .expect("a rename inside the same directory leaves the relative target valid");
+
+    assert!(std::fs::read_to_string(root.join("renamed.md")).is_ok());
+}
