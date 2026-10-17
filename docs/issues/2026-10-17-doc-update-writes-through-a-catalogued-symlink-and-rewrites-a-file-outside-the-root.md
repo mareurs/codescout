@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-ca
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Round 2 reproduced each parent-directory form, but the containment half needs a repository root (a non-link ancestor holding .git): without one only the LEAF rule applies. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). Both checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue.'
+unverified: 'Parent-directory forms reproduced and fixed through round 3; the write door judges against the caller managed roots. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). Two round-3 mutants survive by redundancy (the LIKE escape behind the starts_with filter; the write-through re-arm behind the preflight arm in the same call). Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue.'
 ---
 
 # BUG: `doc(update)` writes with `std::fs::write(row.abs_path)`, so a catalogued in-root symlink to a file outside the root has that file rewritten
@@ -131,13 +131,13 @@ row below is re-derived and the changed ones are marked **R2**.
 
 The rule now has two halves, both in `util::write_catalogued_file`: the LEAF must not be a link
 (`refuse_write_through_symlink`), and the whole path must resolve inside the repository it spells
-(`refuse_catalogued_path_outside_repo`, via `spelled_repo_root`, which skips ancestors that are themselves links, so a
-link to ANOTHER repository is not taken for the root). A directory link whose target stays INSIDE the repo works: a
+(`refuse_catalogued_path_outside_repo`, judged against the caller's MANAGED roots since round 3: see "Round 3"). A directory link whose target stays INSIDE the repo works: a
 symlinked tracker directory is a legitimate layout (controls: update, move, augment, force_include, reclamation).
 **What "unless the row is a catalogued outward FILE link" means given the leaf rule:** such a row stays catalogued and
-readable and is refused by every writer; there is no exception. Limits: with no non-link ancestor holding a `.git` (a
-workspace that is not a git checkout, or a repository root reached through a link) the containment half has nothing to
-compare against and only the leaf rule applies.
+readable and is refused by every writer; there is no exception. Limits (round 3): a caller that arms no roots (a test, a
+direct catalog call) falls back to a root whose resolution contains the path, then to the repository the path spells
+(`spelled_repo_root`, which skips ancestors that are themselves links); with none of those only the leaf rule applies.
+The tools that reach a writer arm the managed roots, so a project without a `.git` IS confined.
 
 | site | path comes from | leaf link | parent link | decision |
 |---|---|---|---|---|
@@ -172,6 +172,70 @@ already use `atomic_write`). The sweep covered `src/librarian` and `src/tools` a
 **Duplication, noted so the unification is a follow-up:** `util::resolve_through_existing_ancestor` is the same walk as
 `canonicalize_through_existing_ancestor` in `src/util/path_security.rs`, which is private there and which this work was
 forbidden to edit. A shared public form would let both call one implementation.
+
+## Round 3 (Opus review of `caa7c46e`): one root, a sibling-safe reclaim, and a stated reason for every reclaim
+
+Commits `c933d47a` (patch-id `27ea7e3364970050da6f3fcd4dd37ea1cd2f7a25`), tests `5df73f73`
+(`57b8c29ee65d26a2a414543c0e3e9b220ac86a24`), `da0c4516` (`a9266d3e638d574f5c1d015c925e313a61a240c2`) and `14db742a`
+(`0e7601f5bcad00c36b62b4d772d3be1ae1412a92`). Every item below was reproduced red first in `link_dir_tests.rs` (12 of the new tests
+failed before the fix, e.g. `removed=…`, `updated: true` through a link, a refused write inside the managed project,
+`escaping row … must survive`); the controls passed throughout.
+
+- **H1, reclaim deleted sibling rows (measured):** the candidate query was `abs_path LIKE '<root>/%'` with no `ESCAPE`, and SQLite
+  `LIKE` ignores ASCII case, so reindexing `b/my_app` selected the rows of `b/myXapp` and `b/MY_APP`, and round 2's escape test
+  deleted them with their augmentation while the files sat on disk. Now `escape_like_pattern` + `ESCAPE '\'`, then a
+  `Path::starts_with(abs_root)` filter (the only thing that handles case). The same pattern fed the vectorless count. The
+  pre-existing apostrophe bug is fixed too: the prefix was SQL-quoted (`'` -> `''`) and then BOUND, so a root containing `'`
+  matched nothing and its rows could never be reclaimed.
+- **H2, three roots for "outside":** the walk and reclaim now judge against the GIT root of the walk root (resolved), as `doc(move)`
+  and `doc(delete)` do via the managed roots, so a row legitimately moved to `pkg/docs/x.md` (a link to `../shared/docs`, inside the
+  repo) survives a reindex of `pkg`, and `force_include` through such a link is catalogued instead of skipped-and-reclaimed. The
+  monorepo probe is `a_row_moved_below_an_in_repo_link_survives_a_reindex_of_the_project`.
+- **H3, the write door's root:** it used the nearest `.git` ancestor of the SPELLED path, which cannot tell "a link to another
+  repository" (outside; the round-2 test) from "my own project reached through a link" (inside): the same input. It now takes the
+  caller's MANAGED roots: `update` and `write_field_to_frontmatter` pass `managed_roots(ctx)`; the catalog-level writers
+  (`allocate_entry_id`, `append_entry`, `update_entry`, `rekey_prefix_rows`, the sidecar write-through) read
+  `Catalog::write_roots`, which the tool arms under the catalog lock (`arm_write_roots`). Order: the first managed root that
+  contains the spelling (strict check), else a managed root whose RESOLUTION contains the path (a project registered under its
+  canonical path while rows keep the spelled one), else the spelled repository. A project without a `.git` is therefore confined.
+  `doc(move)`'s id repair takes the same roots, so it no longer fails after its rename in such a project.
+- **M1, a refusal after the upsert:** preflight and door now share the root, so the refusal comes before the catalog moves; if one
+  still follows the upsert (a link planted in between) its text says "the augmentation WAS updated in the catalog, but its committed
+  sidecar was NOT written" instead of the "Nothing was changed" the first test locked in.
+- **M2, a reason for every reclaim:** `reclaimed_escaping` (count) and `reclaimed_escaping_ids` (cap 50) in the reindex response, an
+  `escaping_note`, and rows that carry an augmentation or events are KEPT and listed in `escaping_kept_ids` on every run until the
+  link is removed or re-pointed (the file is then gone and the row goes as an ordinary vanished one). The cap is 50 ids; the counts
+  are exact.
+- **LOW 1:** the walk's escape test is on the PARENT chain for every kind of leaf (a leaf link inside an outward `force_include`
+  anchor is no longer catalogued, so no row is stuck behind a refused delete). The old exemption comment was false for that shape.
+- **LOW 2:** `doc(move)` refuses, up front, a relative leaf link moved to another directory (a rename does not retarget it; the id
+  repair then read a dangling link after the rename). The round-2 table's "fine" was wrong for that case; a same-directory rename
+  is the control.
+- **LOW 3:** a refused declared sidecar is reported as a refusal ("not opened … do not edit or delete the file behind the link"),
+  not as `sidecar_unparseable` with "Repair the YAML … or delete it"; `augmentation_declared_but_absent` confines its check and no
+  longer advises `reindex` for a path `reindex` refuses.
+- **LOW 4:** the heading-addressed markdown grammar is tested against a deny-listed leaf link again (in the fake-HOME child).
+- **LOW 5:** the export's own containment call is now load-bearing in a test (no `.git`, no managed root at the door), and the
+  export refuses an artifact below a link directory BEFORE writing its sidecar (no orphan sidecar, no stamp outside the repo).
+- **LOW 6:** the refusal hint no longer says "READ-ONLY"; it says the librarian refuses to write this path and that move and delete
+  still act on the link itself.
+- **LOW 7:** both fake-HOME children refuse to run unless `HOME` is the throwaway directory the parent test created.
+
+**Decisions of round 2 that changed:** (1) the write door's root is the managed root, not the spelled `.git` ancestor, so the
+round-2 limit "a repository root reached through a link is not covered" is gone, and projects without `.git` are covered;
+(2) reclamation judged against the walk root and exempted leaf links: now git root and parent chain; (3) reclamation deleted every
+escaping row: it now keeps and reports the ones with history; (4) "a relative outward leaf link moves fine": it does not, now
+refused. Unchanged: refuse any leaf link; no exception for an outward FILE link.
+
+**Mutation probe, round 3** (189-194 tests per run): killed — the door ignoring managed roots; the resolution shortcut; the
+confinement root; the arm doing nothing; `update` and the field writer's roots; arming in `append_entry` (prose and params paths),
+`update_entry`, `rekey_prefix`, `doc(augment)`'s preflight; `doc(augment)` wrapping the refusal; `declared_target`'s and the
+write-through door's roots; the sidecar containment; the relative-link refusal and its same-directory control; the id repair's
+roots; the `starts_with` filter; the apostrophe doubling; the walk using the walk root instead of the git root; keeping rows with
+history; the walk keeping an escaping row; judging the leaf instead of the parent; the export's artifact precheck and sidecar
+confinement; the refusal worded as a parse failure. **Survived, by redundancy:** the LIKE escape (the `starts_with` filter
+protects the same rows; the escape is a cost and defence-in-depth measure) and `doc(augment)`'s second arm inside
+`sidecar_write_through` (the roots persist on the catalog from the preflight arm of the same call).
 
 ## Tests added
 
