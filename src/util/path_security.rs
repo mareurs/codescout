@@ -663,7 +663,24 @@ pub fn validate_write_path(
     config: &PathSecurityConfig,
     session_roots: &[PathBuf],
 ) -> Result<PathBuf> {
-    match classify_write_path(raw, project_root, config, session_roots) {
+    validate_write_path_in(
+        raw,
+        project_root,
+        config,
+        session_roots,
+        &WriteEnv::ambient(),
+    )
+}
+
+/// `validate_write_path` over an explicit environment, so a test can inject the homes.
+fn validate_write_path_in(
+    raw: &str,
+    project_root: &Path,
+    config: &PathSecurityConfig,
+    session_roots: &[PathBuf],
+    env: &WriteEnv,
+) -> Result<PathBuf> {
+    match classify_write_path_in(raw, project_root, config, session_roots, env) {
         WritePathDecision::Allowed(p) => Ok(p),
         // The directory to approve is derivable right here — `OutsideRoot` carries
         // `resolved` — and this arm used to match `{ .. }` and throw it away, printing a
@@ -680,6 +697,18 @@ pub fn validate_write_path(
         // See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
         WritePathDecision::OutsideRoot { resolved } => {
             let dir = resolved.parent().unwrap_or(resolved.as_path());
+            // `approve_write` refuses a directory that is too broad, and a call the next step is
+            // certain to refuse is a dead end (`F8b`). So when it WOULD refuse, do not name it:
+            // say which refusal applies and what is actually true of this file. The deny-list
+            // refusal of `validate_approve_path_in` gets no branch of its own: a directory it
+            // refuses lies under a deny entry, and `classify_write_path_in` checks the same
+            // entries (in two resolved forms, a superset of the approval's one) before it can
+            // answer `OutsideRoot`. Read from the two code paths and exercised by the
+            // `deny_list_holds_*` tests, not proven for every filesystem shape; a mutant that
+            // deleted such a branch could not be killed, so it was left out.
+            if let Some(why) = too_broad(dir, &env.homes) {
+                bail!("{}", too_broad_write_denial(raw, dir, &why));
+            }
             // The directory is text a caller pastes into the call, so it is a JSON string
             // literal: a `"` or `\` in a directory name (or a Windows separator) would otherwise
             // end the literal early or start an escape.
@@ -717,6 +746,67 @@ pub fn validate_approve_path(
     validate_approve_path_in(raw, project_root, &protected_homes())
 }
 
+/// Why a directory is too broad to approve.
+#[derive(Debug, PartialEq, Eq)]
+enum TooBroad {
+    /// A filesystem root (`/`, `C:\`).
+    FilesystemRoot,
+    /// The directory is, or contains, this protected home (canonical form).
+    Home(PathBuf),
+}
+
+/// Whether `dir` is too broad for `approve_write` over the protected `homes`, and why. Both
+/// sides are compared in canonical form (`canonicalize_through_existing_ancestor`): a directory
+/// or a home that does not exist yet, behind a symlinked ancestor, is still seen where it really
+/// is. The single source of the rule for `validate_approve_path_in` and for the denial text of
+/// `validate_write_path_in`, so the call a denial names is never one the approval refuses.
+fn too_broad(dir: &Path, homes: &[PathBuf]) -> Option<TooBroad> {
+    let broad = canonicalize_through_existing_ancestor(dir);
+    // `parent().is_none()` is "is a filesystem root" on every platform (`/`, `C:\`), and also
+    // true of the empty path.
+    if broad.parent().is_none() {
+        return Some(TooBroad::FilesystemRoot);
+    }
+    // A protected home, or any directory above one: `home.starts_with(broad)` is true for both.
+    // A home that IS the directory is named in preference to one it merely contains.
+    let homes = canonical_homes(homes);
+    homes
+        .iter()
+        .find(|h| **h == broad)
+        .or_else(|| homes.iter().find(|h| h.starts_with(&broad)))
+        .cloned()
+        .map(TooBroad::Home)
+}
+
+/// The denial for a write whose directory `approve_write` would refuse as too broad: it says why,
+/// and what is true of THIS file. A file directly in such a directory cannot be made writable by
+/// any approval (every directory that contains it is refused too), so "write into a subdirectory"
+/// is not an option for it; only a file inside a subdirectory can be approved.
+fn too_broad_write_denial(raw: &str, dir: &Path, why: &TooBroad) -> String {
+    match why {
+        TooBroad::FilesystemRoot => format!(
+            "write denied: '{raw}' is directly in the filesystem root, outside the project root. \
+             approve_write refuses a filesystem root as too broad, so no approval can make this \
+             write possible; only a file inside a subdirectory of it can be approved."
+        ),
+        TooBroad::Home(home) if canonicalize_through_existing_ancestor(dir) == *home => format!(
+            "write denied: '{raw}' is directly in the home directory '{}', outside the project \
+             root. approve_write refuses a home directory as too broad, so no approval can make \
+             this write possible; only a file inside a subdirectory of the home can be approved.",
+            home.display()
+        ),
+        TooBroad::Home(home) => format!(
+            "write denied: '{raw}' is directly in '{}', which contains the home directory '{}', \
+             outside the project root. approve_write refuses any directory that contains a home, \
+             so no approval can make this write possible; only a file inside a subdirectory of \
+             '{}' that does not contain the home can be approved.",
+            dir.display(),
+            home.display(),
+            dir.display()
+        ),
+    }
+}
+
 /// `validate_approve_path` over an explicit list of protected homes, so a test can inject them.
 fn validate_approve_path_in(raw: &str, project_root: &Path, homes: &[PathBuf]) -> Result<PathBuf> {
     if raw.is_empty() {
@@ -733,28 +823,19 @@ fn validate_approve_path_in(raw: &str, project_root: &Path, homes: &[PathBuf]) -
         best_effort_canonicalize(&project_root.join(raw))
     };
 
-    // Breadth guard, on the form every protected home is held in (`resolved` stays literal when
-    // it does not exist yet, which a home behind a symlinked ancestor would never match).
-    let broad = canonicalize_through_existing_ancestor(&resolved);
-    // `parent().is_none()` is "is a filesystem root" on every platform (`/`, `C:\`), and also
-    // true of the empty path.
-    if broad.parent().is_none() {
-        bail!(
+    // Breadth guard (`too_broad`): a filesystem root, a protected home, or a directory above one.
+    match too_broad(&resolved, homes) {
+        Some(TooBroad::FilesystemRoot) => bail!(
             "approve_write: '{}' is too broad — specify a subdirectory",
             resolved.display()
-        );
-    }
-    // A protected home, or any directory above one: `home.starts_with(broad)` is true for both.
-    if let Some(home) = canonical_homes(homes)
-        .iter()
-        .find(|h| h.starts_with(&broad))
-    {
-        bail!(
+        ),
+        Some(TooBroad::Home(home)) => bail!(
             "approve_write: '{}' is too broad — it is, or contains, the home directory '{}'. \
              Approve a subdirectory that does not contain it.",
             resolved.display(),
             home.display()
-        );
+        ),
+        None => {}
     }
 
     // Deny-list: protected paths can never be approved
@@ -7723,6 +7804,124 @@ EOF"#;
         assert!(
             matches!(decision, WritePathDecision::OutsideRoot { .. }),
             "got: {decision:?}"
+        );
+    }
+
+    /// A file directly in a directory `approve_write` refuses (`/`, a home, a directory above a
+    /// home) used to be answered with "Call approve_write(path=<that directory>) first", a call
+    /// certain to be refused as too broad: a dead end (`F8b`), found for hosts whose `$HOME` is
+    /// their temp dir. The denial must not name that call, and must say what is true instead.
+    #[test]
+    fn a_denial_does_not_name_an_approve_write_call_that_is_certain_to_be_refused() {
+        let tmp = tempdir().unwrap();
+        let msg = validate_write_path("/ce_probe_x.rs", tmp.path(), &default_config(), &[])
+            .expect_err("a path outside the project root must be denied")
+            .to_string();
+
+        assert!(
+            !msg.contains("approve_write(path="),
+            "that call is refused for `/`: {msg}"
+        );
+        assert!(
+            msg.contains("filesystem root") && msg.contains("subdirectory"),
+            "say why, and what can work: {msg}"
+        );
+    }
+
+    /// What is true for each refused case, with injected homes: a file directly in the filesystem
+    /// root, in a protected home, or in a directory above one cannot be approved at all, and the
+    /// denial must say so instead of naming `approve_write` or telling the reader to "write into a
+    /// subdirectory of it" (wrong for `~/.bashrc`, which IS the file). A file in a subdirectory
+    /// that approve_write accepts still gets the callable `approve_write(path=...)`.
+    #[test]
+    fn a_denial_says_what_is_true_for_each_directory_approve_write_refuses() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/b/home");
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let denial = |target: &Path| {
+            validate_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &default_config(),
+                &[],
+                &env,
+            )
+            .expect_err("outside every root, so denied")
+            .to_string()
+        };
+
+        // A file directly in the filesystem root.
+        let msg = denial(Path::new("/ce_probe_x.rs"));
+        assert!(
+            !msg.contains("approve_write(path="),
+            "names a refused call: {msg}"
+        );
+        assert!(msg.contains("filesystem root"), "{msg}");
+        assert!(msg.contains("only a file inside a subdirectory"), "{msg}");
+
+        // A file directly in the home: `~/.bashrc`.
+        let msg = denial(&home.join(".bashrc"));
+        assert!(
+            !msg.contains("approve_write(path="),
+            "names a refused call: {msg}"
+        );
+        assert!(msg.contains("directly in the home directory"), "{msg}");
+        assert!(
+            !msg.contains("Write into a subdirectory of it"),
+            "`~/.bashrc` is the file itself; that advice is wrong for it: {msg}"
+        );
+
+        // A file directly in a directory above the home.
+        let above = base.join("a");
+        let msg = denial(&above.join("x.txt"));
+        assert!(
+            !msg.contains("approve_write(path="),
+            "names a refused call: {msg}"
+        );
+        assert!(msg.contains("which contains the home directory"), "{msg}");
+
+        // A file in a subdirectory of the home: approvable, so the callable form is named.
+        let target = home.join("projects/x.txt");
+        let msg = denial(&target);
+        assert!(
+            msg.contains(&format!(
+                "approve_write(path={})",
+                crate::util::text::json_quote(&home.join("projects").display().to_string())
+            )),
+            "an approvable directory must still be named: {msg}"
+        );
+    }
+
+    /// With two homes, one of them the very directory the file is in and the other somewhere below
+    /// it (`$HOME` set wrong, F2e), the denial names the home the file is directly in.
+    #[test]
+    fn a_denial_names_the_home_the_file_is_directly_in_when_there_are_two() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let below = base.join("real-home/deeper/wrong-home");
+        let real_home = base.join("real-home");
+        std::fs::create_dir_all(&below).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_with_homes(&base.join("no-temp"), &[&below, &real_home], None);
+        let target = real_home.join(".bashrc");
+        let msg = validate_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        )
+        .expect_err("outside every root, so denied")
+        .to_string();
+        assert!(
+            msg.contains(&format!(
+                "directly in the home directory '{}'",
+                real_home.display()
+            )),
+            "{msg}"
         );
     }
 
