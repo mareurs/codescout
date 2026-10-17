@@ -740,34 +740,27 @@ mod tests {
         let home = PathBuf::from(std::env::var("HOME").unwrap());
         let key = home.join(".ssh/id_rsa");
         assert!(key.is_file(), "the parent must have planted the fake key");
-        let proj = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(proj.path().join(".codescout")).unwrap();
-        let harmless_dir = tempfile::tempdir().unwrap();
-        std::fs::write(harmless_dir.path().join("ok.txt"), "fine\n").unwrap();
-        // The RELATIVE spelling a repository ships: up to the filesystem root, then down. It
-        // resolves against the link's own directory, so the link below sits in a SUBdirectory of
-        // the project: a resolver that took `read_link` at face value and joined it to the project
-        // root (or the cwd) would land one level off and miss the deny-list. (A link in the project
-        // root itself cannot tell the two apart.)
-        let up = |dir: &Path, p: &Path| -> PathBuf {
-            std::iter::repeat_n("..", dir.components().count() - 1)
-                .collect::<PathBuf>()
-                .join(p.strip_prefix("/").unwrap())
-        };
-        let proj_path = proj.path();
+        // Siblings of the fake home, inside the directory the parent test created, so the whole
+        // fixture is removed with it and the RELATIVE targets below climb only to the common
+        // ancestor (a target that climbs past `/` is immune to being resolved from the wrong
+        // directory, because `/..` is `/`, which is why the earlier all-the-way-up form could not
+        // tell a correct resolver from a broken one).
+        let base = home.parent().unwrap().to_path_buf();
+        let proj_path = base.join("proj");
+        std::fs::create_dir_all(proj_path.join(".codescout")).unwrap();
         std::fs::create_dir_all(proj_path.join("sub")).unwrap();
+        std::fs::create_dir_all(base.join("harmless")).unwrap();
+        std::fs::write(base.join("harmless/ok.txt"), "fine\n").unwrap();
+        let proj_path = proj_path.as_path();
+        // The link in `sub/` resolves its target against `proj/sub`: a resolver that took
+        // `read_link` at face value and joined it to the project root (or the cwd) would land one
+        // level off and miss the deny-list.
         std::os::unix::fs::symlink(&key, proj_path.join("abs.txt")).unwrap();
-        std::os::unix::fs::symlink(up(proj_path, &key), proj_path.join("rel.txt")).unwrap();
-        std::os::unix::fs::symlink(
-            up(&proj_path.join("sub"), &key),
-            proj_path.join("sub/rel.txt"),
-        )
-        .unwrap();
-        std::os::unix::fs::symlink(
-            up(&proj_path.join("sub"), &harmless_dir.path().join("ok.txt")),
-            proj_path.join("sub/harmless.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink("../home/.ssh/id_rsa", proj_path.join("rel.txt")).unwrap();
+        std::os::unix::fs::symlink("../../home/.ssh/id_rsa", proj_path.join("sub/rel.txt"))
+            .unwrap();
+        std::os::unix::fs::symlink("../../harmless/ok.txt", proj_path.join("sub/harmless.txt"))
+            .unwrap();
         for n in ["abs.txt", "rel.txt", "sub/rel.txt", "sub/harmless.txt"] {
             assert!(
                 std::fs::read_to_string(proj_path.join(n)).is_ok(),
