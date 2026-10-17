@@ -304,8 +304,10 @@ impl std::fmt::Display for DirRefusal {
 /// first — the check is the trust, the name is not.
 ///
 /// Unix only beyond the symlink check: owner and mode bits do not exist elsewhere, and a
-/// Windows `%TEMP%` is per-user to begin with. (Not compiled or run on Windows from here;
-/// only the `cfg(not(unix))` arm is different, and it is a subset.)
+/// Windows `%TEMP%` is per-user to begin with. The `cfg(not(unix))` arm is a subset of the
+/// unix one for TYPES, not for LINTS: the Windows cross-clippy
+/// (`scripts/build-windows.sh clippy --all-targets -- -D warnings`) is what finds the second
+/// kind, and found an `unused_mut` in [`create_private_dir`]. Run it after touching this.
 fn verify_private_dir(dir: &Path, uid: Uid) -> Result<(), DirRefusal> {
     let meta = std::fs::symlink_metadata(dir).map_err(|_| DirRefusal::NotARealDirectory)?;
     if !meta.file_type().is_dir() {
