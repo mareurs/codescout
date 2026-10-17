@@ -22001,7 +22001,10 @@ root = "work/elsewhere/ghost"
                 "`{decl}` leaked file content: {rendered}"
             );
             assert_eq!(v.len(), 1, "the refusal is itself a finding: {rendered}");
-            assert!(rendered.contains("leaves the repository"), "{rendered}");
+            assert!(
+                rendered.contains("an absolute path or a `..` segment"),
+                "the LEXICAL refusal, not just any containment message: {rendered}"
+            );
         }
     }
 

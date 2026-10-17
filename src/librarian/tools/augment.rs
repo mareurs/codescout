@@ -1340,6 +1340,65 @@ mod tests {
         );
     }
 
+    /// What the agent sees when the refusal comes from `write_through` itself, i.e. after the
+    /// preflight passed and the filesystem changed underneath it (a link planted in between). The
+    /// refusal must keep its RECOVERABLE type and its own remedy: wrapping it in a plain `anyhow!`
+    /// made it fatal (`isError: true`) and told the caller to "re-run once the path is writable".
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_from_write_through_stays_recoverable_and_keeps_its_own_remedy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let sidecar = seed_declared_on_disk(&ctx, tmp.path(), "art1");
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("t.yaml"), "prompt: OUTSIDE\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join("docs/augmentations")).unwrap();
+        assert!(
+            sidecar.is_file(),
+            "precondition: the declared sidecar resolves to the file"
+        );
+        let cat = ctx.catalog.lock();
+        augmentation::upsert(
+            &cat,
+            &augmentation::AugmentationRow {
+                artifact_id: "art1".into(),
+                prompt: "p".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-08-01T00:00:00Z".into(),
+                updated_at: "2026-08-01T00:00:00Z".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+
+        let err = sidecar_write_through(
+            &cat,
+            "art1",
+            crate::librarian::augmentation_sidecar::Authored::All,
+        )
+        .expect_err("the sidecar resolves outside the repository");
+
+        assert!(
+            err.downcast_ref::<LibrarianRecoverableError>().is_some(),
+            "a refusal must stay recoverable: {err:?}"
+        );
+        let text = format!("{err:#}");
+        assert!(text.contains("outside the repository root"), "{text}");
+        assert!(!text.contains("re-run once the path is writable"), "{text}");
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("t.yaml")).unwrap(),
+            "prompt: OUTSIDE\n"
+        );
+    }
+
     /// A merge call must not silently republish a shape field it did not set.
     ///
     /// The write-through stands in front of `sidecar_shape_drift`, whose entire design

@@ -745,22 +745,30 @@ mod tests {
         let harmless_dir = tempfile::tempdir().unwrap();
         std::fs::write(harmless_dir.path().join("ok.txt"), "fine\n").unwrap();
         // The RELATIVE spelling a repository ships: up to the filesystem root, then down. It
-        // resolves against the link's own directory; a resolver that took `read_link` at face
-        // value would look for it relative to the process cwd and find nothing.
-        let up = |p: &Path| -> PathBuf {
-            std::iter::repeat_n("..", proj.path().components().count() - 1)
+        // resolves against the link's own directory, so the link below sits in a SUBdirectory of
+        // the project: a resolver that took `read_link` at face value and joined it to the project
+        // root (or the cwd) would land one level off and miss the deny-list. (A link in the project
+        // root itself cannot tell the two apart.)
+        let up = |dir: &Path, p: &Path| -> PathBuf {
+            std::iter::repeat_n("..", dir.components().count() - 1)
                 .collect::<PathBuf>()
                 .join(p.strip_prefix("/").unwrap())
         };
         let proj_path = proj.path();
+        std::fs::create_dir_all(proj_path.join("sub")).unwrap();
         std::os::unix::fs::symlink(&key, proj_path.join("abs.txt")).unwrap();
-        std::os::unix::fs::symlink(up(&key), proj_path.join("rel.txt")).unwrap();
+        std::os::unix::fs::symlink(up(proj_path, &key), proj_path.join("rel.txt")).unwrap();
         std::os::unix::fs::symlink(
-            up(&harmless_dir.path().join("ok.txt")),
-            proj_path.join("harmless.txt"),
+            up(&proj_path.join("sub"), &key),
+            proj_path.join("sub/rel.txt"),
         )
         .unwrap();
-        for n in ["abs.txt", "rel.txt", "harmless.txt"] {
+        std::os::unix::fs::symlink(
+            up(&proj_path.join("sub"), &harmless_dir.path().join("ok.txt")),
+            proj_path.join("sub/harmless.txt"),
+        )
+        .unwrap();
+        for n in ["abs.txt", "rel.txt", "sub/rel.txt", "sub/harmless.txt"] {
             assert!(
                 std::fs::read_to_string(proj_path.join(n)).is_ok(),
                 "precondition: {n} must resolve"
@@ -769,7 +777,7 @@ mod tests {
         let agent = Agent::new(Some(proj_path.to_path_buf())).await.unwrap();
         let security = agent.security_config_for(None).await;
 
-        for name in ["abs.txt", "rel.txt"] {
+        for name in ["abs.txt", "rel.txt", "sub/rel.txt"] {
             let link = proj_path.join(name);
             for policy in [LinkTarget::ReadableByTools, LinkTarget::Writable] {
                 let err = validate_leaf_link_target(&link, proj_path, &security, &[], policy)
@@ -795,14 +803,14 @@ mod tests {
         // Control: a RELATIVE link to a harmless file is not refused by the read policy, and the
         // resolver still hands the path back.
         validate_leaf_link_target(
-            &proj_path.join("harmless.txt"),
+            &proj_path.join("sub/harmless.txt"),
             proj_path,
             &security,
             &[],
             LinkTarget::ReadableByTools,
         )
         .expect("a harmless relative link is not a deny-list hit");
-        resolve_write_path_for(&agent, None, "harmless.txt")
+        resolve_write_path_for(&agent, None, "sub/harmless.txt")
             .await
             .expect("control: a harmless relative link still resolves");
     }
