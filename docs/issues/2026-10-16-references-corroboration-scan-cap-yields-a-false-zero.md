@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: references' zero-result corroboration stops scanning at 5,000 source files and a stopped scan reads as "no other references"
 owners:
 - marius
@@ -8,6 +8,7 @@ tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-10-16
 severity: medium
+closed: 2026-10-17
 ---
 
 ## Summary
@@ -32,16 +33,30 @@ Bound and result share one return value: the `Vec` carries hits and nothing abou
 
 ## Fix
 
-Not designed. Candidate: return `(hits, scan_complete: bool)` and, when incomplete with no hits, set a `completeness_warning` saying the corroboration scan stopped at the cap. The warning path already exists at `:466-477`.
+Verified real at runtime before changing the code (2026-10-17): `references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned` (5,001 same-language files, none naming the symbol, LSP answering the declaration only) FAILED against the pre-fix code with no `completeness_warning`.
+
+The cap stays (performance guard); the fix is disclosure.
+
+- `src/tools/symbol/scan_budget.rs` (new): `ScanBudget`, shared with the `call_graph` fix. `cut_short_at()` is `Some(cap)` only when a candidate file was actually left unexamined, so a walk ending exactly on the cap, or stopping early on the hit cap, is not flagged.
+- `src/tools/symbol/references.rs`: `corroborate_zero_references` now returns `CorroborationScan { hits, cut_short_at }` via `corroborate_with_cap` (cap injectable); `corroboration_cut_short_warning` builds the text, and `References::call` sets `completeness_warning` from it when the hit list is empty and the walk was cut short. A finished empty scan stays bare (ADR 2026-08-27 clause 2).
+- `src/tools/core/cap_probe.rs`: `references.corroborate_files_scan` moved from `NoMarker` to `Probed`.
+
+Fix commit: SHA and patch-id recorded below once committed.
 
 ## Tests added
 
-None — filing only. The existing test (`tools/symbol/tests.rs` ~`:5890`) covers hits within the cap.
+In `src/tools/symbol/tests.rs`:
+
+- `references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned` (the cited probe test; red before the fix, green after)
+- `references_zero_from_a_completed_corroboration_scan_stays_bare`
+- `corroborate_scan_reports_cut_short_only_when_a_candidate_was_left_unexamined` (cap 3 over 3 candidates vs cap 2)
+- `corroborate_zero_references_finds_callers_via_text_scan` (existing; adapted to the new return type)
+
+Plus the three `ScanBudget` boundary tests in `src/tools/symbol/scan_budget.rs`.
 
 ## Resume
 
-1. Make the return carry completeness; surface it through the existing `completeness_warning`.
-2. Move `references.corroborate_files_scan` to `Probed` (a fixture can lower the cap via an injectable bound, or generate >5,000 files).
+N/A once fixed.
 
 ## References
 

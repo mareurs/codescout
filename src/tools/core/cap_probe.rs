@@ -640,13 +640,16 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // Reclassified from `NoMarker`: `corroborate_with_cap` now reports a walk the cap
+        // stopped with candidates left (`CorroborationScan::cut_short_at`) and `References`
+        // turns an empty-but-unfinished scan into a `completeness_warning`. Driven red
+        // against the pre-fix code by the cited test (5,001 files, one past the cap).
+        // docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md
         id: "references.corroborate_files_scan",
-        coverage: Coverage::NoMarker {
-            reason: "bounds a workspace file SCAN inside corroborate_zero_references; exceeding it \
-             under-scans rather than reporting a smaller number, so a false zero \
-             (\"no references\") is indistinguishable from \"scan stopped early\" — no \
-             fixture currently isolates the two",
-            bug: "docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("stopped after 5000"),
+            mutation: Mutation::Killed,
+            cited_test: "references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned",
         },
     },
     ProbeRow {
@@ -1302,13 +1305,16 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
+        // Reclassified from `NoMarker`: `lookup_pos_via_ts_workspace` now returns
+        // `WorkspaceScan::CutShort` for a walk the cap stopped with candidates left,
+        // `lookup_pos` records the symbol in `scan_cut_short`, and `CallGraph::call` puts a
+        // `completeness_warning` in the result (and `format_compact` renders it).
+        // docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md
         id: "call_graph.workspace_files_scan",
-        coverage: Coverage::NoMarker {
-            reason: "bounds CachedResolver::lookup_pos_via_ts_workspace's own file-scan; \
-             exceeding it returns fewer or no candidate positions rather than \
-             reporting an incomplete scan — a false zero indistinguishable from 'no \
-             callers exist', and no fixture currently isolates the two",
-            bug: "docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("stopped after 2"),
+            mutation: Mutation::Killed,
+            cited_test: "a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol",
         },
     },
     // -- src/agent/build_check.rs --

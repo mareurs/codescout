@@ -159,25 +159,53 @@ async fn resolve_binding_by_position(
 /// project for same-language source files (mirroring call_graph Phase B bounds)
 /// and returns up to a few files OTHER than `def_file` where `ident` appears as
 /// a whole word. A non-empty result proves the empty LSP set is incomplete.
+///
+/// An EMPTY result proves nothing unless the walk finished: see
+/// [`CorroborationScan::cut_short_at`] and [`corroboration_cut_short_warning`]
+/// (BUG 2026-10-16 references-corroboration-scan-cap-yields-a-false-zero).
 pub(crate) fn corroborate_zero_references(
     root: &std::path::Path,
     def_file: &std::path::Path,
     ident: &str,
     lang: &str,
-) -> Vec<std::path::PathBuf> {
+) -> CorroborationScan {
     // cap-class: RESULT_CAP references.corroborate_files_scan — probed
     const MAX_FILES_SCAN: usize = 5_000;
+    corroborate_with_cap(root, def_file, ident, lang, MAX_FILES_SCAN)
+}
+
+/// What a corroboration walk found, and whether it finished.
+#[derive(Debug)]
+pub(crate) struct CorroborationScan {
+    /// Files other than the definition file naming the identifier (at most a few).
+    pub hits: Vec<std::path::PathBuf>,
+    /// `Some(cap)` when a same-language file was left unexamined because the walk hit its
+    /// file cap, so an empty `hits` is "not reached" rather than "not present". `None`
+    /// when every candidate was examined, or when the walk stopped early on its hit cap
+    /// (then `hits` is non-empty and already proves the point).
+    pub cut_short_at: Option<usize>,
+}
+
+/// [`corroborate_zero_references`] with the file cap as a parameter, so the boundary is
+/// testable without generating thousands of files.
+pub(crate) fn corroborate_with_cap(
+    root: &std::path::Path,
+    def_file: &std::path::Path,
+    ident: &str,
+    lang: &str,
+    max_files: usize,
+) -> CorroborationScan {
     // cap-class: RESULT_CAP references.corroborate_hits — probed
     const MAX_HITS: usize = 5;
     let mut hits: Vec<std::path::PathBuf> = Vec::new();
-    let mut scanned = 0usize;
+    let mut budget = crate::tools::symbol::scan_budget::ScanBudget::new(max_files);
     for entry in ignore::WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
         .build()
         .flatten()
     {
-        if hits.len() >= MAX_HITS || scanned >= MAX_FILES_SCAN {
+        if hits.len() >= MAX_HITS {
             break;
         }
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
@@ -190,7 +218,9 @@ pub(crate) fn corroborate_zero_references(
         if crate::ast::detect_language(path) != Some(lang) {
             continue;
         }
-        scanned += 1;
+        if !budget.admit() {
+            break;
+        }
         let Ok(src) = std::fs::read_to_string(path) else {
             continue;
         };
@@ -198,7 +228,29 @@ pub(crate) fn corroborate_zero_references(
             hits.push(path.to_path_buf());
         }
     }
-    hits
+    CorroborationScan {
+        hits,
+        cut_short_at: budget.cut_short_at(),
+    }
+}
+
+/// The `completeness_warning` for a zero-reference result whose corroboration walk
+/// found nothing but did not finish. `None` when the walk was exhaustive: that zero is
+/// trustworthy and stays bare (ADR 2026-08-27 clause 2).
+///
+/// States what is proven — the walk examined `cap` files and stopped with more
+/// remaining — not why the LSP answered zero.
+pub(crate) fn corroboration_cut_short_warning(
+    ident: &str,
+    scan: &CorroborationScan,
+) -> Option<String> {
+    if !scan.hits.is_empty() {
+        return None;
+    }
+    let cap = scan.cut_short_at?;
+    Some(format!(
+        "LSP returned 0 references outside the definition file, and the text-scan cross-check for `{ident}` stopped after {cap} same-language source files with more left unexamined — so this zero is unconfirmed, not a proven absence. Corroborate with grep / call_graph(direction='callers') before treating this symbol as unused."
+    ))
 }
 
 #[async_trait::async_trait]
@@ -466,7 +518,8 @@ impl Tool for References {
             result["completeness_warning"] = json!("LSP returned no locations at all — not even the symbol's own declaration, which this request asks it to include — so the reference index is not ready yet (a cold or reloading language server answers this way). Re-run shortly, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.");
         } else if external_refs == 0 && result.get("completeness_warning").is_none() {
             let ident = name_path.rsplit('/').next().unwrap_or(name_path);
-            let others = corroborate_zero_references(&root, &full_path, ident, raw_lang);
+            let scan = corroborate_zero_references(&root, &full_path, ident, raw_lang);
+            let others = &scan.hits;
             if !others.is_empty() {
                 let sample = others
                     .iter()
@@ -475,6 +528,11 @@ impl Tool for References {
                     .collect::<Vec<_>>()
                     .join(", ");
                 result["completeness_warning"] = json!(format!("LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex. Re-run, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.", n = others.len()));
+            } else if let Some(w) = corroboration_cut_short_warning(ident, &scan) {
+                // The walk hit its file cap before covering the project: an empty hit
+                // list is "not reached", not "not present" (BUG 2026-10-16
+                // references-corroboration-scan-cap-yields-a-false-zero).
+                result["completeness_warning"] = json!(w);
             }
         }
 

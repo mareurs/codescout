@@ -34,6 +34,64 @@ struct CachedResolver {
     /// tree-sitter fallback. Cached so BFS doesn't re-scan the workspace
     /// for the same unresolvable identifier on every hop.
     not_found: Mutex<std::collections::HashSet<String>>,
+    /// File cap for the Phase B workspace walk. [`MAX_WORKSPACE_FILES_SCAN`] in
+    /// production; a field so the boundary can be driven without thousands of files.
+    workspace_scan_cap: usize,
+    /// Symbols whose Phase B walk stopped at the cap with candidate files left
+    /// unexamined. Such a symbol is also in `not_found`, but that set means "no file
+    /// defines it" only for symbols NOT listed here: for these the definition may exist
+    /// past the cap, and the edges beyond them are missing from the graph, not absent.
+    scan_cut_short: Mutex<std::collections::BTreeSet<String>>,
+}
+
+/// Hard cap on files the Phase B workspace walk examines before giving up. Set so a
+/// typical project (1k–10k files) completes well under the MCP 60 s ceiling while a
+/// monorepo stops short instead of stalling the call. The cap is a performance guard and
+/// stays; what a walk it stops must do is say so ([`WorkspaceScan::CutShort`]).
+// cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
+const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
+
+/// Outcome of the Phase B workspace walk. The walk used to return `Option`, whose `None`
+/// carried both "no file defines it" and "the walk stopped before reaching the file that
+/// does".
+enum WorkspaceScan {
+    Found((PathBuf, u32, u32)),
+    /// Every candidate file was examined and none defines the symbol.
+    NotFound,
+    /// The walk hit its file cap with candidates left unexamined.
+    CutShort,
+}
+
+/// The `completeness_warning` for a graph in which some node's definition could not be
+/// located because the fallback source walk stopped at its cap. `None` when no walk was
+/// cut short (a trustworthy "unresolvable" stays unremarked — ADR 2026-08-27 clause 2).
+///
+/// States what is proven: for these symbols the walk stopped with files unexamined and
+/// their edges were not followed — not that the symbols are defined past the cap.
+fn scan_cut_short_warning(
+    symbols: &std::collections::BTreeSet<String>,
+    cap: usize,
+) -> Option<String> {
+    if symbols.is_empty() {
+        return None;
+    }
+    const SHOWN: usize = 5;
+    let named: Vec<String> = symbols
+        .iter()
+        .take(SHOWN)
+        .map(|s| format!("`{s}`"))
+        .collect();
+    let more = symbols.len().saturating_sub(SHOWN);
+    let more = if more > 0 {
+        format!(" (+{more} more)")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "the language server could not place {} symbol(s) — {}{more} — and the fallback source walk stopped after {cap} same-language files with more left unexamined, so their edges were not followed and this graph may be incomplete. Corroborate with `references` or grep before treating a missing caller/callee as absent.",
+        symbols.len(),
+        named.join(", "),
+    ))
 }
 
 impl CachedResolver {
@@ -90,13 +148,24 @@ impl CachedResolver {
         // Phase B fallback: bounded tree-sitter walk of the project root.
         // Picks up cross-file definitions when LSP is down. The not_found
         // cache below ensures we pay the walk cost at most once per missing
-        // symbol per resolver lifetime.
-        if let Some(pos) = self.lookup_pos_via_ts_workspace(symbol) {
-            self.positions
-                .lock()
-                .unwrap()
-                .insert(symbol.to_string(), pos.clone());
-            return Some(pos);
+        // symbol per resolver lifetime. A walk the cap cut short is recorded in
+        // `scan_cut_short` so the result can say "not reached" instead of letting the
+        // miss pass for "no such symbol".
+        match self.lookup_pos_via_ts_workspace(symbol) {
+            WorkspaceScan::Found(pos) => {
+                self.positions
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_string(), pos.clone());
+                return Some(pos);
+            }
+            WorkspaceScan::CutShort => {
+                self.scan_cut_short
+                    .lock()
+                    .unwrap()
+                    .insert(symbol.to_string());
+            }
+            WorkspaceScan::NotFound => {}
         }
 
         self.not_found.lock().unwrap().insert(symbol.to_string());
@@ -151,27 +220,22 @@ impl CachedResolver {
     /// with tree-sitter (`extract_symbols_from_source`), and returns the first
     /// top-level / impl-method definition whose name matches `symbol`.
     ///
-    /// Caps file count at [`MAX_WORKSPACE_FILES_SCAN`] so a monorepo with
-    /// 100k source files doesn't burn the BFS budget on one missing symbol.
-    /// The caller's `not_found` cache ensures this walk runs at most once per
-    /// missing symbol per resolver lifetime.
-    fn lookup_pos_via_ts_workspace(&self, symbol: &str) -> Option<(PathBuf, u32, u32)> {
-        /// Hard cap on files walked before giving up. Set so a typical
-        /// project (1k–10k files) completes well under the MCP 60 s ceiling
-        /// while a monorepo stops short instead of stalling the call.
-        // cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
-        const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
-
+    /// Caps file count at `self.workspace_scan_cap` ([`MAX_WORKSPACE_FILES_SCAN`]
+    /// in production) so a monorepo with 100k source files doesn't burn the BFS
+    /// budget on one missing symbol. The caller's `not_found` cache ensures this
+    /// walk runs at most once per missing symbol per resolver lifetime. A walk
+    /// the cap stops with candidates left returns [`WorkspaceScan::CutShort`],
+    /// never `NotFound` (BUG 2026-10-16
+    /// call-graph-workspace-scan-cap-returns-a-false-no-callers).
+    fn lookup_pos_via_ts_workspace(&self, symbol: &str) -> WorkspaceScan {
         let walker = ignore::WalkBuilder::new(&self.root)
             .hidden(true)
             .git_ignore(true)
             .build();
 
-        let mut scanned = 0usize;
+        let mut budget =
+            crate::tools::symbol::scan_budget::ScanBudget::new(self.workspace_scan_cap);
         for entry in walker.flatten() {
-            if scanned >= MAX_WORKSPACE_FILES_SCAN {
-                break;
-            }
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
@@ -185,7 +249,9 @@ impl CachedResolver {
             if crate::ast::get_ts_language(file_lang).is_none() {
                 continue;
             }
-            scanned += 1;
+            if !budget.admit() {
+                break;
+            }
             let Ok(source) = std::fs::read_to_string(path) else {
                 continue;
             };
@@ -195,10 +261,17 @@ impl CachedResolver {
                 continue;
             };
             if let Some(found) = find_named_def(&syms, symbol) {
-                return Some((found.file.clone(), found.start_line, found.start_col));
+                return WorkspaceScan::Found((
+                    found.file.clone(),
+                    found.start_line,
+                    found.start_col,
+                ));
             }
         }
-        None
+        match budget.cut_short_at() {
+            Some(_) => WorkspaceScan::CutShort,
+            None => WorkspaceScan::NotFound,
+        }
     }
 }
 
@@ -467,6 +540,8 @@ impl Tool for CallGraph {
         };
 
         let mut by_dir: HashMap<&str, TraversalResult> = HashMap::new();
+        // Symbols whose definition the fallback walk gave up looking for at its cap.
+        let mut cut_short: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for direction in &directions {
             let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
@@ -480,9 +555,12 @@ impl Tool for CallGraph {
                 root: root.clone(),
                 positions: Mutex::new(positions),
                 not_found: Mutex::new(std::collections::HashSet::new()),
+                workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
+                scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
             };
 
             let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
+            cut_short.extend(resolver.scan_cut_short.lock().unwrap().iter().cloned());
             let key = match direction {
                 Direction::Callers => "callers",
                 Direction::Callees => "callees",
@@ -494,7 +572,12 @@ impl Tool for CallGraph {
         let auto_promote = total_edges <= 30;
         let render_full = detail_full || auto_promote;
 
-        Ok(format_output(symbol, &by_dir, render_full, auto_promote))
+        let mut out = format_output(symbol, &by_dir, render_full, auto_promote);
+        if let Some(warning) = scan_cut_short_warning(&cut_short, MAX_WORKSPACE_FILES_SCAN) {
+            out["completeness_warning"] = json!(warning);
+            out["scan_cut_short_symbols"] = json!(cut_short);
+        }
+        Ok(out)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -579,6 +662,9 @@ impl Tool for CallGraph {
         }
         if let Some(d) = result.get("max_depth_reached").and_then(|v| v.as_u64()) {
             out.push_str(&format!("\n  max_depth_reached: {d}"));
+        }
+        if let Some(w) = result.get("completeness_warning").and_then(|v| v.as_str()) {
+            out.push_str(&format!("\n\nwarning: {w}"));
         }
         Some(out)
     }
@@ -816,6 +902,8 @@ mod tests {
             root: dir.path().to_path_buf(),
             positions: Mutex::new(positions),
             not_found: Mutex::new(std::collections::HashSet::new()),
+            workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
+            scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -863,6 +951,8 @@ mod tests {
             root: dir.path().to_path_buf(),
             positions: Mutex::new(positions),
             not_found: Mutex::new(std::collections::HashSet::new()),
+            workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
+            scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -886,6 +976,100 @@ mod tests {
                 .unwrap()
                 .contains("nonexistent_symbol_xyz"),
             "missing symbol must be recorded in the not_found cache"
+        );
+    }
+    /// A resolver with no LSP knowledge and no seeded positions, so every lookup reaches
+    /// the Phase B workspace walk, with its file cap set to `cap`.
+    fn resolver_over(root: &std::path::Path, cap: usize) -> CachedResolver {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::tools::symbol::call_edges::cache::apply_schema(&conn);
+        let client: Arc<dyn crate::lsp::ops::LspClientOps> = Arc::new(MockLspClient::new());
+        CachedResolver {
+            conn: Arc::new(Mutex::new(conn)),
+            project_id: "test".to_string(),
+            client,
+            lang: "rust".to_string(),
+            root: root.to_path_buf(),
+            positions: Mutex::new(HashMap::new()),
+            not_found: Mutex::new(std::collections::HashSet::new()),
+            workspace_scan_cap: cap,
+            scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
+        }
+    }
+
+    /// BUG 2026-10-16 call-graph-workspace-scan-cap-returns-a-false-no-callers: a Phase B walk
+    /// the file cap stopped early used to return the same `None` as one that examined every
+    /// file, and the caller cached either as "no such symbol". Three same-language files, none
+    /// defining `ghost`, cap 2: one candidate is left unexamined, so the miss must be recorded
+    /// as cut short and the warning must say so.
+    #[tokio::test]
+    async fn a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(dir.path().join(name), "fn x() {}\n").unwrap();
+        }
+        let resolver = resolver_over(dir.path(), 2);
+
+        assert!(resolver.lookup_pos("ghost").await.is_none());
+
+        let cut_short = resolver.scan_cut_short.lock().unwrap().clone();
+        assert!(
+            cut_short.contains("ghost"),
+            "a walk stopped at its cap must be recorded, not left as a plain miss: {cut_short:?}"
+        );
+        let warning = scan_cut_short_warning(&cut_short, 2).expect("a cut-short walk must warn");
+        assert!(warning.contains("stopped after 2"), "{warning}");
+        assert!(warning.contains("`ghost`"), "{warning}");
+    }
+
+    /// ADR 2026-08-27 clause 2: a walk that examined every file and found nothing is a
+    /// trustworthy "no such symbol" and stays unremarked. Three candidates and a cap of
+    /// three leave nothing unexamined.
+    #[tokio::test]
+    async fn a_workspace_walk_that_ends_exactly_on_its_cap_is_a_real_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(dir.path().join(name), "fn x() {}\n").unwrap();
+        }
+        let resolver = resolver_over(dir.path(), 3);
+
+        assert!(resolver.lookup_pos("ghost").await.is_none());
+
+        let cut_short = resolver.scan_cut_short.lock().unwrap().clone();
+        assert!(
+            cut_short.is_empty(),
+            "every file was examined: {cut_short:?}"
+        );
+        assert!(scan_cut_short_warning(&cut_short, 3).is_none());
+        assert!(resolver.not_found.lock().unwrap().contains("ghost"));
+    }
+
+    /// A definition found inside the cap is an answer, not a cut-short walk.
+    #[tokio::test]
+    async fn a_definition_found_within_the_cap_is_not_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn x() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn target() {}\n").unwrap();
+        let resolver = resolver_over(dir.path(), 2);
+
+        assert!(resolver.lookup_pos("target").await.is_some());
+        assert!(resolver.scan_cut_short.lock().unwrap().is_empty());
+    }
+
+    /// `call_graph` is `OutputForm::Text`, so `format_compact` is what the caller reads: the
+    /// warning must survive it.
+    #[test]
+    fn format_compact_carries_the_completeness_warning() {
+        let result = json!({
+            "symbol": "my_fn",
+            "callers": { "count": 0, "by_file": {}, "by_depth": {} },
+            "max_depth_reached": 0,
+            "completeness_warning": "the fallback source walk stopped after 5000 same-language files",
+        });
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(
+            compact.contains("warning: the fallback source walk stopped after 5000"),
+            "{compact}"
         );
     }
 } // mod tests

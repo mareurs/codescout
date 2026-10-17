@@ -5901,7 +5901,7 @@ fn corroborate_zero_references_finds_callers_via_text_scan() {
     .unwrap();
     std::fs::write(root.join("c.rs"), "fn z() { getStudentGroupLabelExtra(); }").unwrap();
     let def = root.join("def.rs");
-    let hits = corroborate_zero_references(root, &def, "getStudentGroupLabel", "rust");
+    let hits = corroborate_zero_references(root, &def, "getStudentGroupLabel", "rust").hits;
     let names: std::collections::HashSet<String> = hits
         .iter()
         .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
@@ -5922,6 +5922,120 @@ fn corroborate_zero_references_finds_callers_via_text_scan() {
         !names.contains("c.rs"),
         "must not match superstring; got {names:?}"
     );
+}
+/// Build a `references` call whose LSP answer is the declaration alone, over a project
+/// of `filler` same-language files none of which names `helper`. The shared fixture for
+/// the scan-cap tests below.
+async fn declaration_only_references(filler: usize) -> serde_json::Value {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+    use crate::lsp::{SymbolInfo, SymbolKind};
+    use crate::tools::symbol::references::References;
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let src = std::fs::canonicalize(dir.path()).unwrap().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    let file = src.join("lib.rs");
+    std::fs::write(&file, "fn helper() {}\n").unwrap();
+    for i in 0..filler {
+        std::fs::write(src.join(format!("filler_{i}.rs")), "fn other() {}\n").unwrap();
+    }
+    let helper = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let declaration = lsp_types::Location {
+        uri: url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
+            .parse::<lsp_types::Uri>()
+            .unwrap(),
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 3,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 9,
+            },
+        },
+    };
+    let mock = MockLspClient::new().with_symbols(&file, vec![helper]);
+    mock.references_results
+        .lock()
+        .unwrap()
+        .insert(file.clone(), vec![declaration]);
+    let ctx = path_scoped_ctx(dir.path(), MockLspProvider::with_client(mock)).await;
+    References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap()
+}
+
+/// BUG 2026-10-16 references-corroboration-scan-cap-yields-a-false-zero: the corroboration
+/// scan exists to refuse a bare zero, and past its 5,000-file cap it used to manufacture
+/// one — an empty hit list from a stopped walk looked the same as one from a finished
+/// walk, so the warning was withheld. One file more than the cap leaves exactly one
+/// candidate unexamined; none of the files names `helper`, so the hit list is empty either
+/// way and only the cut-short marker can tell the caller the zero is unproven.
+#[tokio::test]
+async fn references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned() {
+    // The cap is 5,000 same-language files other than the definition file.
+    let result = declaration_only_references(5_001).await;
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("stopped after 5000"),
+        "a zero from a walk that never reached every file must say so: {result}"
+    );
+}
+
+/// The other half of the contract (ADR 2026-08-27 clause 2): a walk that covered every
+/// file and found nothing is a trustworthy zero and stays bare, so the warning above is
+/// not noise on every empty result.
+#[tokio::test]
+async fn references_zero_from_a_completed_corroboration_scan_stays_bare() {
+    let result = declaration_only_references(3).await;
+
+    assert!(
+        result.get("completeness_warning").is_none(),
+        "a finished scan that found nothing is a real zero: {result}"
+    );
+}
+
+/// The cap is a parameter of the primitive so the boundary can be driven without
+/// thousands of files: a walk that ends exactly on its cap examined everything and is
+/// not cut short; one candidate more and it is.
+#[test]
+fn corroborate_scan_reports_cut_short_only_when_a_candidate_was_left_unexamined() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        std::fs::write(root.join(name), "fn x() {}").unwrap();
+    }
+
+    let exact = corroborate_with_cap(root, &def, "target", "rust", 3);
+    assert!(exact.hits.is_empty());
+    assert_eq!(
+        exact.cut_short_at, None,
+        "3 candidates, cap 3: all examined"
+    );
+
+    let short = corroborate_with_cap(root, &def, "target", "rust", 2);
+    assert!(short.hits.is_empty());
+    assert_eq!(short.cut_short_at, Some(2), "3 candidates, cap 2: one left");
 }
 
 #[test]
