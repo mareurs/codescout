@@ -626,6 +626,11 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
         "(librarian call shapes)",
         TRACKER_LIBRARIAN_SHAPES_UNSERVED,
     ),
+    (
+        "tracker-conventions",
+        "(doc call shapes)",
+        TRACKER_DOC_SHAPES_UNSERVED,
+    ),
 ];
 
 /// Why a `tracker-conventions` section carries no `serves:` declaration: the call that
@@ -677,6 +682,34 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
      librarian.legibility_scan, librarian.merge_worktree, librarian.find (not an action; a \
      mistyped doc(action=\"find\")). Those that librarian.md declares are served from it on \
      the fallthrough once the tracker-conventions preamble is spent.";
+/// The `doc.*` census shapes `every_observed_shape_of_a_declaring_topic_has_a_section`
+/// pairs with `tracker-conventions`, none of which has a section.
+///
+/// Until 2026-10-17 that gate never saw them: the census spelled the document tool
+/// `artifact`, the registry says `doc`, and the gate `continue`d past every row whose tool
+/// resolved to nothing, so it verified only the `librarian.*` rows (about 830 calls against
+/// about 10,100 `artifact.*` ones). With the rows mapped to today's name it asks about each
+/// `doc.*` shape, and this reason answers for the ones that no `tracker-conventions`
+/// section serves, naming each verbatim as the gate requires.
+///
+/// What this records and what it does not. The gate's probes are synthetic results that
+/// name a tracker path; they route every shape below to `tracker-conventions`. For the
+/// writes (`doc.append_entry`, `doc.update_entry`, `doc.move`, `doc.delete`, `doc.link`,
+/// `doc.augment`) the real result names no path the router reads, measured 2026-10-16 (see
+/// `TRACKER_SECTION_NEEDS_A_WRITE`), so those reach `librarian`, not here. The event and
+/// read-side shapes (`doc.event_create`, `doc.event_list`, `doc.gather`, `doc.list_stale`,
+/// `doc.graph`) were NOT measured per result shape: the waiver says no section serves
+/// them, not that none ever should.
+/// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
+const TRACKER_DOC_SHAPES_UNSERVED: &str = "These doc.* call shapes route to \
+     tracker-conventions in the gate's probes (a result naming a tracker or bug path), and no \
+     section here serves them: doc.append_entry, doc.update_entry, doc.move, doc.delete, \
+     doc.link, doc.augment (the real result of each names no path the router reads, so the \
+     call reaches librarian instead — measured 2026-10-16, see TRACKER_SECTION_NEEDS_A_WRITE) \
+     and doc.event_create, doc.event_list, doc.gather, doc.list_stale, doc.graph (their real \
+     result shapes were not measured; unserved, not judged unneeded). Surfaced 2026-10-17 \
+     when the gate began resolving census rows renamed from artifact.* to doc.*. See \
+     docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md.";
 
 /// The guide that opens a session.
 ///
