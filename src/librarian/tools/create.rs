@@ -35,78 +35,6 @@ fn validate_rel_path(rel: &str) -> Result<()> {
     Ok(())
 }
 
-/// Refuse a CREATE whose target would land outside `root` because a parent component is a
-/// symbolic link.
-///
-/// [`validate_rel_path`] checks the SPELLING of `rel_path` (no `..`, not absolute) and nothing
-/// else, so `esc/new.md` with `esc` an in-root link to a directory outside the root passes it,
-/// and `create_dir_all` + `fs::write` then build and fill the directory outside. The leaf check
-/// (`util::refuse_write_through_symlink`) cannot see this: it inspects the leaf only.
-///
-/// The deepest EXISTING ancestor of `path` is canonicalized and the not-yet-existing components
-/// below it are appended verbatim; the result must be under `root` resolved the same way. Call
-/// it BEFORE `create_dir_all`, which would otherwise create the escaping directories before
-/// anything is refused. `validate_rel_path` rejects `..`, but if one reaches here the result is
-/// refused rather than trusted: `starts_with` is component-wise and would match a root the `..`
-/// escapes.
-///
-/// Why not `validate_write_path`: it also admits the system temp dir and the server's working
-/// directory as write roots, so a link into either would pass, and the librarian holds no
-/// `PathSecurityConfig`. The question here is narrower: stay inside this repo root.
-///
-/// Limit, stated so it is not read as a guarantee: the check and the write are separate
-/// syscalls, so a link planted between them still wins.
-fn refuse_create_outside_root(path: &std::path::Path, root: &std::path::Path) -> Result<()> {
-    use std::path::Component;
-    let resolved = resolve_through_existing_ancestor(path);
-    // The root gets the same resolution as the target, not a bare `canonicalize`: a root that
-    // does not exist yet, under a symlinked ancestor (`/tmp` -> `/private/tmp`), must still match
-    // the files created below it.
-    let root_resolved = resolve_through_existing_ancestor(root);
-    let unresolved_dotdot = resolved
-        .components()
-        .any(|c| matches!(c, Component::ParentDir));
-    if unresolved_dotdot || !resolved.starts_with(&root_resolved) {
-        return Err(LibrarianRecoverableError::with_hint(
-            format!(
-                "refusing to create `{}`: it resolves to `{}`, outside the repository root `{}` \
-                 (a directory on the path is a symbolic link)",
-                path.display(),
-                resolved.display(),
-                root_resolved.display()
-            ),
-            "Nothing was created. Pick a rel_path that does not pass through a symlinked \
-             directory, or replace the link with a real directory.",
-        ));
-    }
-    Ok(())
-}
-
-/// `path` canonicalized as far as it exists: the deepest ancestor `fs::canonicalize` accepts is
-/// resolved and the components below it are appended verbatim, `..` included.
-///
-/// Limit: `canonicalize` also fails for a dangling link or an unreadable component, and the walk
-/// then stops ABOVE it and keeps it as written, so such a link is not followed here.
-fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::path::PathBuf {
-    use std::path::Component;
-    let mut below: Vec<std::ffi::OsString> = Vec::new();
-    let mut cur = path;
-    loop {
-        if let Ok(canon) = std::fs::canonicalize(cur) {
-            return below.iter().rev().fold(canon, |acc, c| acc.join(c));
-        }
-        let Some(up) = cur.parent() else {
-            return path.to_path_buf();
-        };
-        match cur.components().next_back() {
-            Some(Component::Normal(n)) => below.push(n.to_os_string()),
-            Some(Component::ParentDir) => below.push("..".into()),
-            _ => return path.to_path_buf(),
-        }
-        cur = up;
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 /// The augmentation an artifact is created with. Mirrors `doc(action="augment")`'s
@@ -452,8 +380,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &ctx.temp_guard,
     )?;
 
-    validate_rel_path(&a.rel_path)?;
+    // Normalise FIRST: the validator must see the path that will be joined. It used to run on the
+    // raw string, and on Unix `a\..\..\escaped.md` (a backslash is an ordinary name character)
+    // passed it and became `a/../../escaped.md` one line later.
     a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
+    validate_rel_path(&a.rel_path)?;
     let full = base_dir.join(&a.rel_path);
     if full.exists() {
         return Err(LibrarianRecoverableError::new(format!(
@@ -471,7 +402,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // spelling of `rel_path`, so `esc/new.md` with `esc` an in-root link to a directory outside
     // the root passes it, and `create_dir_all` + `fs::write` would then build and fill the
     // directory outside. Before `create_dir_all`, which would create it before any refusal.
-    refuse_create_outside_root(&full, &base_dir)?;
+    crate::librarian::util::refuse_path_outside_root(&full, &base_dir, "create")?;
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -809,6 +740,32 @@ mod tests {
         assert!(real.path().join("docs/new/a.md").is_file());
     }
 
+    /// `validate_rel_path` ran on the RAW string and `normalize_rel_path` after it, so on Unix
+    /// `a\..\..\escaped.md` (a backslash is an ordinary name character there) passed validation
+    /// and became `a/../../escaped.md`. The containment check refused it, but with a message that
+    /// blamed a symlink that does not exist. Normalise first, so the validator sees the path
+    /// that will be used and the refusal names the real cause.
+    #[tokio::test]
+    async fn create_validates_the_rel_path_it_will_actually_use() {
+        let root = TempDir::new().unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "a\\..\\..\\escaped.md", "kind": "spec",
+                   "title": "T", "body": "b"}),
+        )
+        .await
+        .expect_err("a backslash-spelled `..` is still a `..`");
+
+        let text = format!("{err:#}");
+        assert!(text.contains("must not contain `..`"), "{text}");
+        assert!(
+            !text.contains("symbolic link"),
+            "no link is involved, so the refusal must not claim one: {text}"
+        );
+    }
+
     /// `validate_rel_path` rejects `..`, so this is defence in depth, but the property is the
     /// reason the check exists at all: below an existing ancestor, `missing/../../x` is KEPT
     /// as written, and `starts_with` is component-wise, so it still matches the root while the
@@ -818,11 +775,17 @@ mod tests {
         let root = TempDir::new().unwrap();
         let escaping = root.path().join("missing/../../escaped.md");
         assert!(
-            refuse_create_outside_root(&escaping, root.path()).is_err(),
+            crate::librarian::util::refuse_path_outside_root(&escaping, root.path(), "create")
+                .is_err(),
             "a path whose `..` could not be resolved must be refused"
         );
         // Control: a plain nested path that does not exist yet is inside the root.
-        assert!(refuse_create_outside_root(&root.path().join("a/b/c.md"), root.path()).is_ok());
+        assert!(crate::librarian::util::refuse_path_outside_root(
+            &root.path().join("a/b/c.md"),
+            root.path(),
+            "create"
+        )
+        .is_ok());
     }
 
     #[tokio::test]

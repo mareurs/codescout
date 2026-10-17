@@ -2014,6 +2014,12 @@ fn export_augmentation_sidecars(
             failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
             continue;
         }
+        // The sidecar is CREATED below `scope_root/docs/augmentations`; with that directory a
+        // link out of the repository the file (and the directory) would land outside it.
+        if let Err(e) = sidecar::confined_path(scope_root, &sidecar_rel, "write") {
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
         if let Err(e) = sidecar::write(&sidecar_abs, &doc) {
             // One unwritable file must not abandon the rest of the sweep — the same
             // reasoning as `repair_frontmatter_id`, and it matters more here because the
@@ -6927,7 +6933,7 @@ fn scan_sidecar_shape_drift(
             continue;
         }
 
-        let committed = match sidecar::read(&path) {
+        let committed = match sidecar::read_in(&root, &rel) {
             Ok(s) => s,
             Err(e) => {
                 if !scope.admit("sidecar_shape_drift", id, abs_path) {
@@ -21945,6 +21951,90 @@ root = "work/elsewhere/ghost"
         assert_eq!(
             v[0].check, "sidecar_unparseable",
             "a corrupt sidecar is a different finding from drift, and needs different advice"
+        );
+    }
+
+    /// The READ side of `expects_augmentation:`. The declared string is the document's own text,
+    /// extension-gated only, so `sidecar_shape_drift` opened `../secret.yaml` or an absolute path
+    /// and `serde_yml`'s error echoed the value it could not parse (`invalid type: string
+    /// "ghp_…"`), which reached the agent verbatim in `sidecar_unparseable`'s detail.
+    ///
+    /// The control is the first assertion: reading the file directly DOES echo the token, so a
+    /// green result below is the containment's doing and not a parser that never echoes.
+    #[test]
+    fn a_sidecar_declared_outside_the_repo_is_refused_and_its_content_never_echoed() {
+        use crate::librarian::augmentation_sidecar as sc;
+        const TOKEN: &str = "ghp_FAKE_TOKEN_DO_NOT_ECHO";
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let secret = base.path().join("secret.yaml");
+        std::fs::write(&secret, format!("{TOKEN}\n")).unwrap();
+        let direct = format!("{:#}", sc::read(&secret).unwrap_err());
+        assert!(
+            direct.contains(TOKEN),
+            "control: the parser echoes it: {direct}"
+        );
+
+        for decl in [
+            "../secret.yaml".to_string(),
+            secret.to_string_lossy().to_string(),
+        ] {
+            let cat = Catalog::open_in_memory().unwrap();
+            seed_declared(&cat, &repo, "t", Some(&decl), true);
+            assert!(
+                repo.join(&decl).is_file(),
+                "precondition: `{decl}` resolves to the file"
+            );
+            let mut ds = scope::DoctorScope::new(
+                super::super::scope::Scope::All,
+                &unscoped_ctx(),
+                &unscoped_conn(),
+            )
+            .unwrap();
+
+            let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
+
+            let rendered = format!("{v:#?}");
+            assert!(
+                !rendered.contains(TOKEN),
+                "`{decl}` leaked file content: {rendered}"
+            );
+            assert_eq!(v.len(), 1, "the refusal is itself a finding: {rendered}");
+            assert!(rendered.contains("leaves the repository"), "{rendered}");
+        }
+    }
+
+    /// Same refusal for a declared path that passes through a symlinked directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_sidecar_behind_a_directory_link_out_of_the_repo_is_refused_and_never_echoed() {
+        const TOKEN: &str = "ghp_FAKE_TOKEN_DO_NOT_ECHO";
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        let outside = base.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("t.yaml"), format!("{TOKEN}\n")).unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("docs/augmentations")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, &repo, "t", Some("docs/augmentations/t.yaml"), true);
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
+
+        let rendered = format!("{v:#?}");
+        assert!(!rendered.contains(TOKEN), "leaked file content: {rendered}");
+        assert_eq!(v.len(), 1, "{rendered}");
+        assert!(
+            rendered.contains("outside the repository root"),
+            "{rendered}"
         );
     }
 

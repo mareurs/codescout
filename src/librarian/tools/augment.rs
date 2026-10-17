@@ -69,6 +69,13 @@ fn sidecar_write_through(
 ) -> Result<()> {
     let outcome = crate::librarian::augmentation_sidecar::write_through(cat, id, authored)
         .map_err(|e| {
+            // A REFUSAL is the caller's input, not a failed write: keep its type so it reaches
+            // the agent as recoverable (`isError: false`), with its own remedy text. Wrapping it
+            // in a plain `anyhow!` made it fatal and told the caller to "re-run once the path is
+            // writable", which is wrong for a path that was refused on purpose.
+            if e.downcast_ref::<LibrarianRecoverableError>().is_some() {
+                return e;
+            }
             anyhow::anyhow!(
                 "the augmentation WAS updated, but its committed sidecar could not be written: \
                  {e:#}. The catalog and docs/augmentations now disagree; re-run once the path is \
@@ -330,6 +337,10 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     {
         let mut cat = ctx.catalog.lock();
         a.id = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
+        // BEFORE any row moves: `sidecar_write_through` runs after the upsert (it renders the new
+        // row), so a refusal found only there left the catalog ahead of the repository. A declared
+        // sidecar that leaves the repository, or is a link, is refused here with nothing written.
+        crate::librarian::augmentation_sidecar::preflight_write_through(&cat, &a.id)?;
     }
 
     // D11: when the gate ran and passed, capture evidence to emit a

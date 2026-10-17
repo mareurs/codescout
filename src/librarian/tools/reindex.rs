@@ -106,8 +106,7 @@ fn restore_declared_augmentations(
         let Some(root) = crate::librarian::current_project::lookup_git_root(path) else {
             continue;
         };
-        let sidecar_path = root.join(&rel);
-        match sidecar::read(&sidecar_path) {
+        match sidecar::read_in(&root, &rel) {
             Ok(s) => {
                 let row = s.to_row(&id);
                 match crate::librarian::catalog::augmentation::upsert(catalog, &row) {
@@ -1387,6 +1386,69 @@ mod tests {
             v["unknown_count"].as_u64().unwrap(),
             1,
             "README.md should be unknown"
+        );
+    }
+
+    /// `restore_declared_augmentations` attaches a shape from the sidecar a document DECLARES. A
+    /// declared `../outside.yaml` was opened and its `prompt:` became a catalog row; and a parse
+    /// failure echoed the file's content into `errors`. Refused now, naming the declared path and
+    /// not the content. The control: an in-repo declared sidecar is still restored.
+    #[test]
+    fn a_declared_sidecar_outside_the_repo_is_neither_attached_nor_echoed() {
+        use crate::librarian::catalog::artifact::{self, TestArtifactRowBuilder};
+        const TOKEN: &str = "ghp_FAKE_TOKEN_DO_NOT_ECHO";
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs/augmentations")).unwrap();
+        std::fs::write(base.path().join("secret.yaml"), format!("{TOKEN}\n")).unwrap();
+        std::fs::write(base.path().join("shape.yaml"), "prompt: OUTSIDE-PROMPT\n").unwrap();
+        std::fs::write(repo.join("docs/augmentations/ok.yaml"), "prompt: IN-REPO\n").unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        for (name, decl) in [
+            ("bad1", "../secret.yaml"),
+            ("bad2", "../shape.yaml"),
+            ("good", "docs/augmentations/ok.yaml"),
+        ] {
+            let p = repo.join(format!("{name}.md"));
+            std::fs::write(
+                &p,
+                format!("---\nkind: tracker\nexpects_augmentation: {decl}\n---\n\n# {name}\n"),
+            )
+            .unwrap();
+            artifact::upsert(
+                &cat,
+                &TestArtifactRowBuilder::new(name)
+                    .with_abs_path(&p)
+                    .with_kind("tracker")
+                    .build(),
+            )
+            .unwrap();
+        }
+
+        let (restored, errors) = restore_declared_augmentations(&cat, &[repo.clone()]);
+
+        assert_eq!(
+            restored, 1,
+            "only the in-repo sidecar is attached: {errors:?}"
+        );
+        let joined = errors.join("\n");
+        assert!(!joined.contains(TOKEN), "leaked file content: {joined}");
+        assert_eq!(
+            errors.len(),
+            2,
+            "both outside declarations are reported: {joined}"
+        );
+        let attached = |id: &str| {
+            crate::librarian::catalog::augmentation::get(&cat, id)
+                .unwrap()
+                .map(|r| r.prompt)
+        };
+        assert_eq!(attached("good").as_deref(), Some("IN-REPO"));
+        assert_eq!(
+            attached("bad2"),
+            None,
+            "an outside shape must not become a row"
         );
     }
 

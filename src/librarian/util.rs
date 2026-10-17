@@ -42,9 +42,10 @@ pub fn normalize_rel_path(rel: &str) -> String {
 /// `Ok` (a create has nothing to refuse until it exists), and so is an `lstat` that fails for any
 /// other reason: the write that follows will fail by itself and say why.
 ///
-/// Limit, stated so it is not read as a guarantee: this checks the LEAF only. A link in a parent
-/// directory component is not detected, and the check and the write are two syscalls, so a link
-/// planted between them still wins. `fs::write` has no `O_NOFOLLOW` form in `std`.
+/// Limit, stated so it is not read as a guarantee: this checks the LEAF only (a link in a parent
+/// directory is [`refuse_path_outside_root`]'s question, asked by [`write_catalogued_file`]), and
+/// the check and the write are two syscalls, so a link planted between them still wins.
+/// `fs::write` has no `O_NOFOLLOW` form in `std`.
 pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Result<()> {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -62,15 +63,18 @@ pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Re
              modify a file the link points at rather than this path",
             path.display()
         ),
-            "Nothing was written. Update the file the link points at under its own path (it is \
-         catalogued there when it lives in this repository), or replace the link with a regular \
-         file if this path should hold its own content.",
+            "Nothing was written. The librarian never writes through a link, so a document \
+         catalogued through one is READ-ONLY here. If the link points at a file inside this \
+         repository, update that file under its own id; if it points outside, edit the target \
+         directly with your file tools, or replace the link with a regular file if this path \
+         should hold its own content.",
         ),
     )
 }
 
 /// Write `contents` to `path` — a path the CATALOG (or a document's frontmatter) supplied — unless
-/// the path is a symbolic link ([`refuse_write_through_symlink`]).
+/// the path is a symbolic link ([`refuse_write_through_symlink`]) or resolves outside the
+/// repository that holds it ([`refuse_catalogued_path_outside_repo`]).
 ///
 /// The one door the librarian's "rewrite a catalogued file in place" writers go through, so a
 /// fourth writer added later takes the guard by calling this rather than by remembering it.
@@ -81,8 +85,126 @@ pub(crate) fn write_catalogued_file(
     contents: impl AsRef<[u8]>,
 ) -> anyhow::Result<()> {
     refuse_write_through_symlink(path)?;
+    refuse_catalogued_path_outside_repo(path, "write")?;
     std::fs::write(path, contents)?;
     Ok(())
+}
+
+/// The repository root a catalogued path SPELLS: the nearest ancestor that holds a `.git` and is
+/// not itself a symbolic link.
+///
+/// Lexical on purpose, and the link exclusion is load-bearing. A row below a link directory is
+/// exactly the case this exists for, and `lookup_git_root` would stop at the LINK when the link's
+/// target is itself a repository (`docs -> ~/other-repo`): the "root" would then be the outside
+/// repository and every path below it would read as inside. `None` when no ancestor qualifies
+/// (a workspace that is not a git checkout, or a repository root reached through a link): the
+/// containment checks then have nothing to compare against and the LEAF rule alone applies.
+pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut cur = path.parent()?;
+    loop {
+        let is_link = std::fs::symlink_metadata(cur)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        if !is_link && cur.join(".git").exists() {
+            return Some(cur.to_path_buf());
+        }
+        cur = cur.parent()?;
+    }
+}
+
+/// [`refuse_path_outside_root`] for a catalog-supplied path, against the repository it spells
+/// ([`spelled_repo_root`]); a path with no such repository is not checked.
+///
+/// This is the question the LEAF rule cannot ask: a row whose parent directory is a link out of
+/// the repository. The indexer can mint one two ways, both shippable by a repository
+/// (`force_include` walks a symlinked anchor directory; a directory swapped for a link after
+/// indexing keeps its rows because reclamation asks `Path::exists()`), and every writer that
+/// takes `row.abs_path` would then write, move or delete a file the repository does not own.
+/// A link whose target stays INSIDE the repository is untouched: a symlinked tracker directory
+/// is a legitimate setup.
+pub(crate) fn refuse_catalogued_path_outside_repo(
+    path: &std::path::Path,
+    verb: &str,
+) -> anyhow::Result<()> {
+    match spelled_repo_root(path) {
+        Some(root) => refuse_path_outside_root(path, &root, verb),
+        None => Ok(()),
+    }
+}
+
+/// Refuse a `path` that does not resolve to somewhere under `root`.
+///
+/// The deepest EXISTING ancestor of `path` is canonicalized and the not-yet-existing components
+/// below it are appended verbatim; the result must be under `root` resolved the same way (a root
+/// that does not exist yet, under a symlinked ancestor such as `/tmp` -> `/private/tmp`, must
+/// still match what is created below it). An unresolved `..` is refused rather than trusted:
+/// `starts_with` is component-wise and would match a root the `..` escapes. Call it BEFORE
+/// `create_dir_all`, which would otherwise build the escaping directories before anything is
+/// refused. `verb` names the operation in the message ("create", "write", "move", "delete").
+///
+/// Why not `validate_write_path`: it also admits the system temp dir and the server's working
+/// directory as write roots, so a link into either would pass, and the librarian holds no
+/// `PathSecurityConfig`. The question here is narrower: stay inside this repo root.
+///
+/// DUPLICATION, noted so the unification is a follow-up: [`resolve_through_existing_ancestor`]
+/// is the same walk as `canonicalize_through_existing_ancestor` in `src/util/path_security.rs`,
+/// which is private there and was off limits to the change that added this. A shared, public
+/// form would let both call one implementation.
+///
+/// Limit: the check and the later write are separate syscalls, so a link planted between them
+/// still wins.
+pub(crate) fn refuse_path_outside_root(
+    path: &std::path::Path,
+    root: &std::path::Path,
+    verb: &str,
+) -> anyhow::Result<()> {
+    use std::path::Component;
+    let resolved = resolve_through_existing_ancestor(path);
+    let root_resolved = resolve_through_existing_ancestor(root);
+    let unresolved_dotdot = resolved
+        .components()
+        .any(|c| matches!(c, Component::ParentDir));
+    if unresolved_dotdot || !resolved.starts_with(&root_resolved) {
+        return Err(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                format!(
+                    "refusing to {verb} `{}`: it resolves to `{}`, outside the repository root `{}`",
+                    path.display(),
+                    resolved.display(),
+                    root_resolved.display()
+                ),
+                "Nothing was changed. The path passes through a symbolic link, or a `..` that \
+                 could not be resolved, that leaves the repository root. Use a path that stays \
+                 inside it, or replace the link with a real directory.",
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// `path` canonicalized as far as it exists: the deepest ancestor `fs::canonicalize` accepts is
+/// resolved and the components below it are appended verbatim, `..` included.
+///
+/// Limit: `canonicalize` also fails for a dangling link or an unreadable component, and the walk
+/// then stops ABOVE it and keeps it as written, so such a link is not followed here.
+fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut below: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(canon) = std::fs::canonicalize(cur) {
+            return below.iter().rev().fold(canon, |acc, c| acc.join(c));
+        }
+        let Some(up) = cur.parent() else {
+            return path.to_path_buf();
+        };
+        match cur.components().next_back() {
+            Some(Component::Normal(n)) => below.push(n.to_os_string()),
+            Some(Component::ParentDir) => below.push("..".into()),
+            _ => return path.to_path_buf(),
+        }
+        cur = up;
+    }
 }
 
 /// Escape SQL `LIKE` wildcard characters (`%`, `_`) and the escape character

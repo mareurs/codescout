@@ -86,12 +86,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // `[[roots]]` entry or the active project. See `super::managed_roots`.
         let abs_path = row.abs_path.clone();
         let roots = super::managed_roots(ctx);
-        if super::containing_root(&roots, &abs_path).is_none() {
+        let Some(managed_root) = super::containing_root(&roots, &abs_path) else {
             return Err(super::LibrarianRecoverableError::new(format!(
                 "artifact '{}' is outside every managed root — refusing to delete {}",
                 a.id,
                 abs_path.display()
             )));
+        };
+        // `remove_file` on a path whose PARENT is a link out of the managed root deletes the
+        // OUTSIDE file, and the guard above is lexical, so it cannot see that. A row born through
+        // `force_include` on a symlinked anchor, or a directory swapped for a link after indexing,
+        // is exactly this shape. The check is on the parent so that a LEAF link (an outward-link
+        // row) still deletes: unlinking drops the link and never touches its target.
+        if let Some(parent) = abs_path.parent() {
+            crate::librarian::util::refuse_path_outside_root(parent, &managed_root, "delete from")?;
         }
 
         // Dry-run gate. The catalog delete cascades to this artifact's augmentation, links,

@@ -482,6 +482,10 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
 #[cfg(test)]
 mod link_write_tests;
 
+/// The parent-directory forms of the same rule (see the module doc).
+#[cfg(test)]
+mod link_dir_tests;
+
 #[cfg(test)]
 mod containing_root_tests {
     use super::containing_root;

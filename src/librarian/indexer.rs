@@ -396,15 +396,22 @@ pub fn index_repo_sync(
         //
         // A link pointing OUTSIDE the root is deliberately KEPT: it is the only path by
         // which this walk reaches those bytes, so skipping it would trade a silent
-        // duplicate for a silent omission, which is the worse direction. Only FILE links reach
-        // here: a symlinked directory is never descended (see
-        // `a_symlinked_directory_is_not_descended_into_by_the_walk`), so this repo's
-        // `.claude/skills/claude-traces`, which IS a directory link, catalogs nothing. The
-        // predicate is "resolves inside", not "is a symlink", because of the outward FILE links.
+        // duplicate for a silent omission, which is the worse direction. The main walk never
+        // descends a symlinked directory (see `a_symlinked_directory_is_not_descended_into_by_the_walk`),
+        // so this repo's `.claude/skills/claude-traces`, which IS a directory link, catalogs
+        // nothing, and only FILE links reach here from it. The predicate is "resolves inside", not
+        // "is a symlink", because of the outward FILE links.
+        //
+        // The main walk is not the only walk, though: `force_include_candidates` runs
+        // `WalkBuilder::new(<anchor>)`, and a walker follows a symlinked ROOT, so a repository that
+        // ships `docs/trackers -> <outside>` plus `force_include = ["docs/trackers/**"]` reaches
+        // files whose PARENT is the link. Those are refused by the next block, which is the
+        // other half of the same rule: an outward FILE link is kept; an outward DIRECTORY link is
+        // never a way into the catalog.
         //
         // A catalogued outward link is a row whose `abs_path` names a file the repository does
-        // not own, so every writer that takes its path from the catalog must refuse a link
-        // (`util::write_catalogued_file`).
+        // not own, so every writer that takes its path from the catalog refuses a link
+        // (`util::write_catalogued_file`) and so does a path that resolves outside the repository.
         //
         // BOTH SIDES ARE CANONICALIZED, and that is load-bearing rather than defensive.
         // `abs_root` is whatever the caller held, while `canonicalize` always returns a
@@ -432,6 +439,16 @@ pub fn index_repo_sync(
         let rel = crate::librarian::util::normalize_rel_path(
             &path.strip_prefix(abs_root)?.to_string_lossy(),
         );
+        if !path.is_symlink() {
+            if let (Ok(real), Some(root)) = (std::fs::canonicalize(path), &canonical_root) {
+                if !real.starts_with(root) {
+                    // Recorded like a skipped duplicate, for the same reason: a row may already
+                    // exist for this path and reclamation cannot re-derive why it was skipped.
+                    skipped_duplicate_ids.insert(crate::librarian::ids::artifact_id_from_abs(path));
+                    continue;
+                }
+            }
+        }
         if ignore.is_match(&rel) {
             continue;
         }
@@ -665,12 +682,29 @@ pub fn index_repo_sync(
     };
 
     let mut removed = 0usize;
+    // A row whose path resolves OUTSIDE the root through a link in a parent directory: the main
+    // walk does not descend a link directory, so a directory swapped for a link after indexing
+    // leaves its rows unseen, and `exists()` follows the link and answers `true` for the outside
+    // file. A LEAF link is exempt: an outward file link is the one thing the walk keeps on
+    // purpose, and the walk does see it, so it is never an unseen candidate for this reason.
+    let escapes_root = |p: &str| -> bool {
+        let p = std::path::Path::new(p);
+        if p.is_symlink() {
+            return false;
+        }
+        match (std::fs::canonicalize(p), &canonical_root) {
+            (Ok(real), Some(root)) => !real.starts_with(root),
+            _ => false,
+        }
+    };
     for (cand_id, cand_abs_path) in &candidates {
         // Two disjoint reasons a row must go, and `exists()` can only see the first:
         // the file is gone, or this walk deliberately skipped the path as a duplicate
         // (where `exists()` answers `true` via the symlink's target). Neither subsumes
         // the other; `skipped_duplicate_ids` says why the second is not a re-derivation.
-        if !std::path::Path::new(cand_abs_path).exists() || skipped_duplicate_ids.contains(cand_id)
+        if !std::path::Path::new(cand_abs_path).exists()
+            || skipped_duplicate_ids.contains(cand_id)
+            || escapes_root(cand_abs_path)
         {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE id = ?1",
