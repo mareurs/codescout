@@ -15723,6 +15723,87 @@ mod guide_hint_tests {
         );
     }
 
+    /// A real `doc(action="list_stale")` against an augmented tracker is served the
+    /// librarian refresh-cycle section, not the `tracker-conventions` preamble.
+    ///
+    /// The result's `items[].abs_path` names a `docs/trackers/` file, which used to route
+    /// the call to `tracker-conventions`; no section there declares `doc.list_stale`, so the
+    /// caller got the preamble and the next-action text (gather, synthesize, update with
+    /// `commit_refresh=true`) stayed unserved on that call. Driven through real `doc` calls
+    /// because what routes is the RESULT's content. The tracker is created WITH its
+    /// augmentation so no earlier call has already spent `librarian` § Augmentation
+    /// Lifecycle (which `doc.augment` also declares).
+    /// docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md
+    #[tokio::test]
+    async fn list_stale_on_an_augmented_tracker_ships_the_refresh_cycle_not_a_preamble() {
+        let (_dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/trackers/stale-probe.md",
+                "kind": "tracker",
+                "title": "stale probe",
+                "body": "probe body",
+                "augment": {"prompt": "keep the probe"}
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+
+        let listed = call_tool(
+            &server,
+            "doc",
+            json!({"action": "list_stale", "threshold_hours": 0}),
+        )
+        .await;
+        let primary: Value =
+            serde_json::from_str(&listed[0].as_text().unwrap().text).expect("primary is JSON");
+        let items = primary["items"]
+            .as_array()
+            .expect("list_stale returns items");
+        assert!(
+            items.iter().any(|i| i["id"] == json!(id)
+                && i["abs_path"]
+                    .as_str()
+                    .is_some_and(|p| p.replace('\\', "/").contains("docs/trackers/"))),
+            "premise: the result names the augmented tracker under docs/trackers/, got {primary}"
+        );
+
+        let guide = guide_blocks(&listed).join("");
+        assert!(
+            guide.contains("**Refresh cycle** (run by the agent, not automatic)"),
+            "list_stale must ship the refresh cycle, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(
+            !guide.contains("no section declares this call's shape"),
+            "list_stale must not be served a tracker-conventions preamble"
+        );
+
+        let again = call_tool(
+            &server,
+            "doc",
+            json!({"action": "list_stale", "threshold_hours": 0}),
+        )
+        .await;
+        assert!(
+            guide_blocks(&again).is_empty(),
+            "the spent section must not ship again, got {:?}",
+            guide_blocks(&again)
+                .join("")
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
+    }
+
     /// A guide too large to auto-inject is delivered by SECTION, never whole, and the
     /// bare topic is stamped only by a deliberate explicit fetch.
     ///

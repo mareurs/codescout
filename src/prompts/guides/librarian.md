@@ -204,6 +204,9 @@ The wholesale replace is still available for a genuine bulk rewrite. It now repo
 `warning` when the collection shrank — so a mistaken replace is visible in the response
 that performed it.
 
+### Refreshing an augmented artifact — the cycle and the stale check
+<!-- serves: doc.list_stale -->
+
 **Refresh cycle** (run by the agent, not automatic):
 1. `doc(action="gather", id="...")` — collects context; does NOT write
 2. Synthesize the new body from the gathered context

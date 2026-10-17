@@ -700,6 +700,14 @@ impl LibrarianAdapter {
 /// under wine 2026-08-26, once Git Bash was available there to separate this from the eight
 /// no-POSIX-shell failures it had been hiding behind.
 fn names_tracker_path(result: &Value) -> bool {
+    // `list_stale` reuses `find`'s `items[].abs_path` shape, so the scan below matches it by
+    // coincidence, and its caller needs the refresh cycle in `librarian` § Augmentation
+    // Lifecycle (declared for `doc.list_stale`), not tracker conventions. `threshold_hours`
+    // is carried by no other librarian result. See
+    // `docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md`.
+    if result.get("threshold_hours").is_some() {
+        return false;
+    }
     names_path_containing(result, "docs/issues/") || names_path_containing(result, "docs/trackers/")
 }
 
@@ -2312,6 +2320,31 @@ mod tests {
         assert!(!names_tracker_path(&json!({
             "path": "docs/trackers/x.md"
         })));
+    }
+
+    /// `doc(action="list_stale")` reuses the `items[].abs_path` shape `find` returns, so the
+    /// path scan matched it by coincidence and sent a call about AUGMENTATION REFRESH to
+    /// `tracker-conventions`, which declares nothing for it and shipped only its preamble.
+    /// What the caller needs (the gather / update `commit_refresh` cycle) is
+    /// `librarian` § Augmentation Lifecycle, which declares `doc.list_stale`. The result is
+    /// told apart by `threshold_hours`, a key no other librarian result carries.
+    /// docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md
+    #[test]
+    fn a_list_stale_result_is_not_a_tracker_operation_even_though_its_items_name_trackers() {
+        let list_stale = json!({
+            "count": 1,
+            "threshold_hours": 24,
+            "items": [{"id": "0123456789abcdef", "abs_path": "/r/docs/trackers/t.md"}],
+            "has_more": false,
+            "next_step": "Call doc(action=\"gather\", id=...) on each item",
+        });
+        assert!(!names_tracker_path(&list_stale));
+        // The same `items` without `threshold_hours` is a `find` and still routes.
+        let find = json!({
+            "count": 1,
+            "items": [{"id": "0123456789abcdef", "abs_path": "/r/docs/trackers/t.md"}],
+        });
+        assert!(names_tracker_path(&find));
     }
 
     #[test]
