@@ -122,13 +122,21 @@ classifier should still name the resolved leaf.
 Other follow-ups from the review of this branch, none fixed here:
 
 - `validate_approve_path` still compares the approved directory with `$HOME` by equality
-  (`best_effort_canonicalize(&h) == resolved`), so `approve_write` accepts a directory ABOVE the home
-  such as `/home` or `/`. The temp and cwd roots now refuse an ancestor of the canonical home;
-  `validate_approve_path` does not.
+  (`best_effort_canonicalize(&h) == resolved`). It rejects `/` and `$HOME` themselves, but accepts a
+  directory ABOVE the home such as `/home`, and `approve_write` of `/home` then admits `$HOME/.bashrc`
+  (the deny list still holds; read from the code, not run). The cwd root refuses an ancestor of the canonical home;
+  `validate_approve_path` does not, so that gap remains. For the TEMP root the gap is closed from the other
+  side: the temp root is kept even above the home but admits nothing inside it (`temp_root_admits`), so
+  `write_ack`'s suggestion of the temp dir's parent no longer undoes anything for the temp case. It does
+  for the cwd/approve case.
 - A path with a DANGLING symlink or an unreadable (EACCES) component is not followed by
   `canonicalize_through_existing_ancestor`: `fs::canonicalize` fails for it, the walk stops above it and
   keeps it as written. Measured for a dangling directory link with `create_dir_all`: it returned
   `AlreadyExists` and created nothing outside, so no escape came of it; the EACCES case was not run.
+- A deny entry that is itself a symlink (`~/.kube/config -> config-prod`, a symlinked `~/.npmrc`) was
+  not denied under its own name once its directory was approved, because the entry resolved through its
+  last component while the target keeps its leaf as written. Pre-existing; fixed in `97401a1b` by holding
+  each entry in two forms (fully resolved, and parent resolved with the leaf as written).
 - Separate, pre-existing and independent of the allowlist: `atomic_write` follows a planted
   `<target>.tmp` symlink. See
   `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`.

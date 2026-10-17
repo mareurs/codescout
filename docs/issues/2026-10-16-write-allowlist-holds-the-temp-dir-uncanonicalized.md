@@ -89,16 +89,35 @@ SHAs and change if the commits are rebased or cherry-picked, so re-cite after la
   - **L2**: project, extra, session and cwd roots that do not exist yet under a symlinked ancestor stayed
     literal while the target was canonical (`approve_write` on a new directory, then a write below it, went
     Allowed -> OutsideRoot). Every root now resolves like the target.
-  - **L1**: the temp root and the cwd root are also refused when they are an ANCESTOR of the canonical
-    `$HOME`, not only equal to it. `validate_approve_path` is NOT changed (it still tests equality with
-    `$HOME` alone): follow-up, see `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`.
-  - **L1 consequence, measured**: it refuses a root that was legitimately allowed before whenever `$HOME`
-    lives under the temp dir. Run the `path_security` tests with `HOME=<s>/homelink` (symlink to
-    `<s>/T/realhome`) and `TMPDIR=<s>/T`: `write_to_tmp_allowed` fails because `<s>/T` is above the home.
-    A sandbox or CI job that sets `HOME=$TMPDIR/home` therefore loses scratch writes (they fail closed
-    with an `approve_write` prompt). Nothing else that was allowed before is refused: a temp dir or cwd
-    that is not `/`, not `$HOME` and not above it is unaffected, including the normal case of a temp dir
-    below `$HOME`. If that sandbox shape matters, apply the ancestor rule to the cwd root only.
+  - **L1** (superseded for the temp site by MED-3 below): `abdb0b03` refused the temp root and the cwd
+    root when they are an ANCESTOR of the canonical `$HOME`, not only equal to it. `validate_approve_path`
+    is NOT changed (it still tests equality with `$HOME` alone): follow-up, see
+    `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`.
+  - **L1 consequence at `abdb0b03`, measured and then reversed for the temp site**: refusing a temp root
+    above `$HOME` failed `write_to_tmp_allowed` with `HOME=<s>/homelink` (symlink to `<s>/T/realhome`) and
+    `TMPDIR=<s>/T`, and a sandbox with `HOME=$TMPDIR/home` lost scratch writes. It was also undone by
+    `approve_write`'s own remedy: `write_ack` suggests the parent directory, `validate_approve_path`
+    approves it, and `$HOME/.bashrc` was then Allowed.
+  - **MED-3 (`97401a1b`)**: the TEMP site keeps its root even above `$HOME` but admits nothing inside the
+    canonical `$HOME` (`temp_root_admits`); a temp root below `$HOME`, the usual case, is untouched. Run
+    with `HOME=$TMPDIR/home` the whole `path_security` module (293 tests) and `write_to_tmp_allowed` pass.
+    The CWD site is unchanged: a cwd that is `/`, `$HOME` or above it is still refused. For the temp case the
+    approve remedy no longer undoes anything; for the cwd/approve case the equality-only guard remains.
+  - **MED-1 (`97401a1b`, pre-existing)**: a deny entry that is itself a symlink (`~/.kube/config -> config-prod`,
+    a symlinked `~/.npmrc`) resolved away from its own name, so a write to that name matched nothing once its
+    directory was approved. Each entry is held in two forms: fully resolved, and parent resolved with the leaf
+    as written.
+  - **LOW-1 (`97401a1b`)**: `$HOME` is resolved with `canonicalize_through_existing_ancestor`, so a missing
+    home behind a symlinked ancestor is seen below the temp and cwd roots.
+  - **LOW-2 (`97401a1b`)**: the test helper no longer reads the ambient cwd and home, so results do not
+    depend on where `TMPDIR` sits (four tests went red with `TMPDIR` under the package root before); the
+    cwd test uses the injected cwd instead of `set_current_dir`.
+  - **Behaviour change beyond the temp dir, listed because "nothing else changes" was wrong**: with
+    `~/.config -> <project>/config` and `gh` missing, a write to `<project>/config/gh/hosts.yml` is now
+    Denied (measured at `97401a1b` with an injected home). At `299395e5` the entry stayed literal
+    (`~/.config/gh`, missing) and the write was Allowed; the new answer is the correct one. More generally a
+    deny entry reached through a symlink is now matched by its resolved location, which is stricter. A
+    temp dir or cwd that is not `/`, not `$HOME` and not above it behaves as before.
   - **L4**: the session-root deny-list test asserted `is_err()`, which `OutsideRoot` also satisfies; it
     now asserts the deny-list refusal.
   - `c9680518` pins the cwd root's resolution (the mutation probe found it unpinned).
@@ -106,25 +125,34 @@ SHAs and change if the commits are rebased or cherry-picked, so re-cite after la
 ## Tests added
 
 All in `src/util/path_security.rs`, none mutating `TMPDIR`, `HOME` or the cwd (they are injected through
-`WriteEnv`):
+`WriteEnv`; the shared helper `classify_write_path_with_temp` injects a null home and cwd):
 
 - Temp root: `symlinked_temp_dir_allows_a_write_inside_it`,
   `symlink_inside_temp_dir_pointing_outside_is_still_refused`, `nonexistent_temp_dir_fails_closed`,
   `dotdot_traversal_out_of_the_temp_dir_is_still_refused`,
   `temp_dir_symlinked_to_filesystem_root_adds_no_allowlist_root`,
-  `temp_dir_symlinked_to_home_adds_no_allowlist_root` (its home is injected; it used to return silently
-  when `$HOME` was unset), `canonical_temp_write_root_is_the_canonical_path_of_an_existing_dir`.
+  `canonical_temp_write_root_is_the_canonical_path_of_an_existing_dir`.
 - Missing subdirectory: `symlink_out_of_the_temp_dir_is_refused_even_below_a_missing_subdirectory`,
   `symlinked_temp_dir_allows_a_write_below_a_missing_subdirectory`,
   `project_root_behind_a_symlink_allows_a_write_below_a_missing_subdirectory`.
-- Review follow-ups (red at `9bad4fac`, green at `abdb0b03`; `deny_list_holds_for_a_missing_entry_behind_a_symlinked_home`,
+- First review (red at `9bad4fac`, green at `abdb0b03`): `deny_list_holds_for_a_missing_entry_behind_a_symlinked_home`,
   `session_root_not_yet_created_under_a_symlinked_ancestor_admits_its_files`,
   `extra_write_root_not_yet_created_under_a_symlinked_ancestor_admits_its_files`,
-  `project_root_not_yet_created_under_a_symlinked_ancestor_admits_its_files`,
-  `temp_dir_that_is_an_ancestor_of_home_adds_no_root`, `cwd_that_is_an_ancestor_of_home_adds_no_root`);
-  pinned by mutation: `home_behind_a_symlink_is_refused_as_a_temp_root`, `a_cwd_of_the_filesystem_root_adds_no_root`,
+  `project_root_not_yet_created_under_a_symlinked_ancestor_admits_its_files`, `cwd_that_is_an_ancestor_of_home_adds_no_root`;
+  pinned by mutation: `a_cwd_of_the_filesystem_root_adds_no_root`,
   `a_cwd_that_is_home_behind_a_symlink_adds_no_root`, `cwd_not_yet_created_under_a_symlinked_ancestor_admits_its_files`.
-- `validate_write_path_session_root_still_respects_deny_list` now asserts the deny-list refusal.
+  Two of its tests, `temp_dir_that_is_an_ancestor_of_home_adds_no_root` and
+  `home_behind_a_symlink_is_refused_as_a_temp_root` (with `temp_dir_symlinked_to_home_adds_no_allowlist_root`),
+  asserted the temp-root refusal MED-3 removed and were replaced.
+- Second review (`97401a1b`; red at `abdb0b03`+helper change: `deny_list_holds_for_a_deny_entry_that_is_itself_a_symlink`,
+  `a_temp_root_above_home_admits_files_outside_home_but_not_inside_it`,
+  `a_missing_home_behind_a_symlink_is_still_seen_under_the_temp_and_cwd_roots`; pinned by mutation, green before:
+  `deny_list_holds_for_two_level_entries_whose_middle_directory_is_missing`,
+  `deny_list_holds_under_both_spellings_when_ssh_is_a_symlinked_directory`,
+  `roots_two_levels_below_a_symlinked_ancestor_admit_their_files`, `a_temp_root_below_home_admits_everything_in_it`,
+  `a_temp_dir_that_is_home_behind_a_symlink_admits_nothing_in_it`).
+- `validate_write_path_session_root_still_respects_deny_list` asserts the deny-list refusal.
+  `write_within_cwd_allowed_even_outside_project_root` uses the injected cwd instead of `set_current_dir`.
   `write_to_tmp_allowed` asserts the canonical target and runs on macOS (not run there).
 
 ## Verified
