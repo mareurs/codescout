@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: symbols(path) on a Kotlin file lists only some members and no top-level functions (Catalog.kt shows 4 of 5 members and none of 4 top-level functions)'
 tags:
 - cluster/unclassified
@@ -9,6 +9,7 @@ owner: marius
 related:
 - docs/issues/2026-10-16-mcp-smoke-kotlin-targets-a-project-layout-that-no-longer-exists.md
 severity: low
+closed: 2026-10-17
 ---
 
 # BUG: symbols(path) on a Kotlin file lists only some members and no top-level functions (Catalog.kt shows 4 of 5 members and none of 4 top-level functions)
@@ -46,31 +47,44 @@ This machine, `kotlin-lsp` at `/usr/bin/kotlin-lsp`, release build of branch `wo
 
 ## Root cause
 
-Not investigated. Whether `kotlin-lsp` returns a partial `documentSymbol` for a project it has not imported, or codescout drops rows, was not checked.
+Three separate things, none of them a partial `documentSymbol` from kotlin-lsp for a Gradle-unimported project.
+
+**1. The fixture hid its own functions.** `tests/fixtures/kotlin-library/src/main/kotlin/library/services/Catalog.kt` had `(from the opening /**)` inside the KDoc of `createNamedCatalog`. Kotlin block comments nest, so that `/**` opens a second comment that nothing closes and the rest of the file is comment text. measured 2026-10-17: kotlin-lsp returned 2 top-level symbols (`Catalog`, `createDefaultCatalog`) for the file as committed and 5 once that phrase was reworded (`lspdrive.py`, raw replies); tree-sitter (`ast::extract_symbols`) returned only `Catalog` as committed and all 5 after. `createNamedCatalog`, `searchAsync`, `toSearchText` were never visible to any tool. Fixed by rewording the phrase on its own line (no line numbers move).
+
+**2. The "missing `stats`" was the capture, not the tool.** Same cause as `docs/issues/2026-10-17-symbols-include-body-on-kotlin-lsp-results-is-shifted-up-one-line.md`: the guide block follows the last row with no newline, so a line-oriented strip removed the last row. With `-f json` the overview ends with `Method  24  Catalog/stats`.
+
+**3. A single-file overview was rendered by the search renderer, which dropped the `lsp: warming` marker.** `Symbols::format_compact` (`src/tools/symbol/symbols.rs`) chose the overview renderer on `directory` / `pattern` / `files`; a single-file overview is `{file, symbols, ...}` and has none, so it went to `format_search_symbols`, which prints neither `lsp` nor `hint`. The live overviews in this issue were tree-sitter output from a cold server (kinds `Class CatalogStats`, not LSP's `Struct`; reproduced in-process: test `a_cold_language_server_overview_says_it_was_served_from_tree_sitter` printed exactly the issue's rows before the fix) and nothing in them said so. The dispatch was written that way in `47af2676` (2026-05-01, merge of find_symbol + list_symbols) and `format_overview_symbols`'s file mode, tested directly, was unreachable from the tool since.
 
 ## Evidence
 
-The reply above; and a `symbols(name="Catalog", include_body=true)` reply in the same sessions that came back from the tree-sitter path (rows typed `Struct` and `Constructor`) and did list `Function 28 createDefaultCatalog`.
+- `lspdrive.py` against the committed fixture: `[('Catalog', 6, 25, 7), ('createDefaultCatalog', 27, 28, 28)]`; against the reworded one: `... ('createNamedCatalog', 30, 44, 41), ('searchAsync', 46, 48, 47), ('toSearchText', 50, 51, 51)`.
+- Red run of `kotlin_lsp_tests` on the unfixed tree: `the_kotlin_catalog_fixture_parses_to_every_top_level_symbol_it_declares` left `["Catalog"]`; `a_cold_language_server_overview_says_it_was_served_from_tree_sitter` printed `Catalog.kt (1)` / `Class 7-25 Catalog` / `Property 9 Catalog/items` / `Class 12 Catalog/CatalogStats` / `Method 15-17 ...` / `20-21` / `24`.
+- After the fix, live (`repro6.sh`): `Catalog.kt — 5 symbols`, `[lsp warming] Language server is starting; symbols served from tree-sitter. ...`, and `Function  createNamedCatalog  L41-44`.
 
 ## Hypotheses tried
 
-None.
+1. **Hypothesis:** kotlin-lsp returns a partial `documentSymbol` for an unimported project. **Test:** raw reply. **Verdict:** rejected for `Catalog`'s members (all 7 children plus `stats`); the top-level shortfall was the fixture's comment.
+2. **Hypothesis:** codescout drops rows. **Test:** replay the raw reply through `MockLspClient`. **Verdict:** rejected, all rows pass through (`a_kotlin_lsp_reply_overview_lists_every_member_and_top_level_function`).
+3. **Hypothesis:** the reply is tree-sitter's. **Verdict:** confirmed (cause 3).
 
 ## Fix
 
-Unknown.
+- `Catalog.kt` fixture reworded (cause 1).
+- `Symbols::format_compact` now treats a result with `file` and no `files_count` as an overview (cause 3): a search always sets `files_count` and also hoists `file`, so `file` alone cannot decide. Single-file overview text therefore changes from the search renderer's `<file> (N)` / `Class  7-25  Catalog` / `Property  9  Catalog/items` to the overview renderer's `<file> — N symbols` / `Class   Catalog  L7-25` / `Property  items  L9`: member rows print the member's name, not its name-path (this is the format `docs/superpowers/plans/2026-03-01-dual-audience-output-design.md` specifies and the format before `47af2676`). The Kotlin smoke's overview assertions were moved to the new shape.
+
+Fix commit on branch `worktree-agent-af85b780928eaa450` (not on experiments): `b451979a`, patch-id `a2068783a60e078be34de6abcabd136703aec224`.
 
 ## Tests added
 
-N/A: open. `tests/mcp-smoke-kotlin.sh` asserts only `Catalog/add` and `Catalog/search` from this overview, and a fix that lists more members keeps it green.
+`src/tools/symbol/kotlin_lsp_tests.rs`: `the_kotlin_catalog_fixture_parses_to_every_top_level_symbol_it_declares` (red before), `a_single_file_overview_is_rendered_as_an_overview_with_its_warming_marker` (red before), `a_cold_language_server_overview_says_it_was_served_from_tree_sitter` (red before), `a_search_that_hoists_its_file_is_still_rendered_as_a_search` (guard), `a_kotlin_lsp_reply_overview_lists_every_member_and_top_level_function`. The raw reply is `tests/fixtures/lsp-replies/kotlin-lsp-catalog-document-symbol.json`.
 
 ## Workarounds
 
-`grep` for the declaration, or `symbols(name=...)` when the tree-sitter path answers.
+N/A once fixed.
 
 ## Resume
 
-1. Capture the raw `textDocument/documentSymbol` reply for `Catalog.kt` from the mux log. 2. Compare with the rows `symbols` prints.
+N/A: fixed. Open question for a human, not blocking: whether overview member rows should print name-paths (`Catalog/add`), which the search renderer did and the overview renderer does not.
 
 ## References
 
