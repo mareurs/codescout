@@ -660,6 +660,107 @@ mod tests {
             "no body snapshot means nothing can be behind, got: {result}"
         );
     }
+    /// docs/issues/2026-09-24-residual-append-entry-keeps-rendered-snapshot-in-sync.md
+    ///
+    /// The advisory is for ledgers that KEEP a rendered table. A ledger whose entries are
+    /// `## T-N — title` sections keeps none (the `tool-usage-patterns` shape: defining
+    /// headings, 0 table rows), so `snapshot_stale` has no table to be about and its remedy
+    /// ("update the row in the table") names something that does not exist.
+    ///
+    /// **The control is the second half and is what makes the first evidence.** Same ids,
+    /// same params, same patch; the only change is that the ids are rows of a table instead
+    /// of headings. `snapshot_stale` is `None` for a ledger with no table AND for a broken
+    /// check, so the absence assertion alone is monotone under removal and would stay green
+    /// with the whole advisory deleted.
+    #[tokio::test]
+    async fn patching_a_headings_only_ledger_says_no_snapshot_exists_to_be_behind() {
+        let patch = json!({"id": "art1", "entry_collection": "tasks",
+                           "entry_id": "T-1", "fields": {"status": "done"}});
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &tmp.path().join("log.md"),
+            "# L\n\n## T-1 — first\n\nbody\n\n## T-2 — second\n\nbody\n\n## T-3 — third\n\nbody\n",
+            &["T-1", "T-2", "T-3"],
+        );
+        let result = call(&ctx, patch.clone()).await.unwrap();
+        assert_eq!(result["changed_fields"], json!(["status"]));
+        assert!(
+            result.get("snapshot_stale").is_none(),
+            "no table rows means no rendered snapshot, so nothing can be stale: {result}"
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &tmp.path().join("log.md"),
+            "# L\n\n| ID | status |\n|---|---|\n| T-1 | open |\n| T-2 | open |\n| T-3 | open |\n",
+            &["T-1", "T-2", "T-3"],
+        );
+        let control = call(&ctx, patch).await.unwrap();
+        assert!(
+            control["snapshot_stale"].is_string(),
+            "CONTROL: the same ids as table rows ARE a snapshot and must still be flagged: {control}"
+        );
+    }
+
+    /// The `system-retrospective-improvements` shape: 5 defining headings and two ids
+    /// (`T-1`, `T-2`) cited as the first cell of an unrelated table. The advisory is keyed on
+    /// the table covering a MAJORITY of the ledger's ids; a minority is a citation.
+    ///
+    /// Control inside the test for the reason the sibling gives: a loosened gate and a
+    /// fixture the check never reaches are indistinguishable by silence alone. The control
+    /// covers 3 of the 5 ids, one over the majority line, so it fails if the gate is pushed
+    /// UP past a real snapshot as well as if it is dropped.
+    #[tokio::test]
+    async fn patching_a_heading_ledger_that_cites_two_ids_in_a_table_stays_silent() {
+        let headings = "## T-1 — one\n\nb\n\n## T-2 — two\n\nb\n\n## T-3 — three\n\nb\n\n\
+                        ## T-4 — four\n\nb\n\n## T-5 — five\n\nb\n\n";
+        let rows = &["T-1", "T-2", "T-3", "T-4", "T-5"];
+        let patch = json!({"id": "art1", "entry_collection": "tasks",
+                           "entry_id": "T-4", "fields": {"status": "done"}});
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &tmp.path().join("log.md"),
+            // Load-bearing: the ids are the FIRST cell of each row. In any later cell they
+            // would not be counted at all and this would be a heading-only body again.
+            &format!("# L\n\n{headings}| Finding | Cause |\n|---|---|\n| T-1 | x |\n| T-2 | y |\n"),
+            rows,
+        );
+        let result = call(&ctx, patch.clone()).await.unwrap();
+        assert!(
+            result.get("snapshot_stale").is_none(),
+            "2 of 5 ids cited in a table is a citation, not a snapshot: {result}"
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &tmp.path().join("log.md"),
+            &format!(
+                "# L\n\n{headings}| ID | status |\n|---|---|\n| T-1 | x |\n| T-2 | y |\n| T-3 | z |\n"
+            ),
+            rows,
+        );
+        let control = call(&ctx, patch).await.unwrap();
+        assert!(
+            control["snapshot_stale"]
+                .as_str()
+                .is_some_and(|n| n.contains("not in it at all")),
+            "CONTROL: 3 of 5 ids as rows is a snapshot, and T-4 is absent from it: {control}"
+        );
+    }
 
     /// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
     ///

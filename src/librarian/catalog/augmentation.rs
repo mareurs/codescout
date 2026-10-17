@@ -4185,6 +4185,69 @@ mod tests {
             "F-4 has no `## F-4 — title` heading yet; that is the real advisory"
         );
     }
+    /// docs/issues/2026-09-24-residual-append-entry-keeps-rendered-snapshot-in-sync.md
+    ///
+    /// The shape of `system-retrospective-improvements` (SRI: 17 defining headings and **2**
+    /// table rows, `SRI-11` and `SRI-12`, sitting in an unrelated findings table): a ledger
+    /// whose entries are SECTIONS and which merely cites two of its ids in a table that is
+    /// not a snapshot of anything. It keeps no rendered table, so it is owed no
+    /// `snapshot_missing` — and with no declared anchor there is nothing it could be told to
+    /// fix, because the row advisory's remedy is "add the row to the table".
+    ///
+    /// **The contract that decides this is the majority gate in `body_keeps_snapshot`**, and
+    /// it holds because a stray citation covers a MINORITY of the ids (here 2 of 6), where a
+    /// snapshot that lags at its tail still covers most of them.
+    ///
+    /// **The control is inside the test and it is what makes the silence evidence.** An
+    /// `is_empty()` assertion is monotone under removal: a dead mechanism, or a fixture whose
+    /// rows never matched, produces exactly the same silence. The second half runs the SAME
+    /// params against a table that covers 4 of the 6 ids and demands the advisory, so a
+    /// fixture that cannot be reached by the check fails there instead of passing here.
+    ///
+    /// Mutations probed with `./scripts/mutation-probe.sh` against these three tests alone, all
+    /// KILLED: the heading alternation added to `body_snapshot_row_indices`; the majority gate
+    /// loosened to "any row at all"; the gate raised past any snapshot (kills the controls).
+    #[test]
+    fn append_entry_stays_silent_for_a_heading_ledger_that_cites_two_ids_in_a_table() {
+        let params =
+            r#"{"failures":[{"id":"F-1"},{"id":"F-2"},{"id":"F-3"},{"id":"F-4"},{"id":"F-5"}]}"#;
+        let headings = "## F-1 — one\nprose\n\n## F-2 — two\nprose\n\n## F-3 — three\nprose\n\n\
+                        ## F-4 — four\nprose\n\n## F-5 — five\nprose\n\n";
+        let run = |table: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("tracker.md");
+            std::fs::write(&path, format!("# Tracker\n\n{headings}{table}")).unwrap();
+            let mut cat = Catalog::open_in_memory().unwrap();
+            let mut art = sample_art("art1");
+            art.abs_path = path.clone();
+            art_upsert(&cat, &art).unwrap();
+            let mut a = aug("art1");
+            a.entry_collection = Some("failures".to_string());
+            a.params = params.to_string();
+            upsert(&cat, &a).unwrap();
+            append_entry(&mut cat, "art1", "failures", "F", json!({}), &[], None).unwrap()
+        };
+
+        // Load-bearing: `F-1`/`F-2` are the FIRST CELL of a `|` row, which is the only shape
+        // `body_snapshot_row_indices` counts. Moving them to a later cell would make this
+        // fixture a heading-only body and the test would stop discriminating the gate.
+        let stray =
+            run("| Finding | Cause |\n|---|---|\n| F-1 | cited here |\n| F-2 | and here |\n");
+        assert_eq!(stray.id, "F-6");
+        assert!(
+            stray.snapshot_missing.is_empty(),
+            "2 of 6 ids cited in a table is a citation, not a snapshot: {:?}",
+            stray.snapshot_missing
+        );
+
+        let kept =
+            run("| ID | T |\n|---|---|\n| F-1 | a |\n| F-2 | b |\n| F-3 | c |\n| F-4 | d |\n");
+        assert_eq!(
+            kept.snapshot_missing,
+            vec!["F-5".to_string(), "F-6".to_string()],
+            "CONTROL: the same params against a table covering 4 of 6 ids IS a lagging snapshot"
+        );
+    }
 
     /// The guard against over-correcting: a body that really does render a table
     /// must still be told when the table is behind. Same params as the test
