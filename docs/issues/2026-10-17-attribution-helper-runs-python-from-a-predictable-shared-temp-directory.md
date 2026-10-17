@@ -14,7 +14,7 @@ kind: bug
 
 ## Summary
 
-`materialize_into` (`src/tools/run_command/attribution.rs:247-273`) extracts the embedded scripts into
+`materialize_into` (`src/tools/run_command/attribution.rs:247-271`) extracts the embedded scripts into
 `$TMPDIR/codescout-attribution-<DefaultHasher of the contents>`. `DefaultHasher::new()` has fixed keys, so the name
 is computable; `create_dir_all` accepts an existing directory (or a symlink to one) whatever its owner; a script
 whose bytes already match is skipped; and the engine is started as `python3 <script>`
@@ -45,7 +45,7 @@ ImportError: planted   # from File ".../dir/json.py", line 3, imported at attrib
 ```
 
 The Rust half (an attacker-created or foreign-owned directory being reused, no owner or mode check) is READ from
-`attribution.rs:247-273`, not run: a cross-user reproduction needs a second account.
+`attribution.rs:247-271`, not run: a cross-user reproduction needs a second account.
 
 ## Environment
 

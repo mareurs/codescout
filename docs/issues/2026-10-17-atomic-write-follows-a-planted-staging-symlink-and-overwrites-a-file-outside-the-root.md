@@ -68,8 +68,10 @@ was read from the callers, not run.
 ## Fix
 
 FIXED on the review branch `worktree-agent-a26646b8b970ff11a` (`b493599d` fix and tests, `7b1d719a` a test,
-`417c4d3e` private staging, mode and name-closure tests, doc corrections). patch-ids (`git show <sha> | git patch-id --stable`):
-`b493599d` -> `4c9425528fab3aae53dac1ce079719843750e93c`, `7b1d719a` -> `e9aaed1e8092c028f27e12bc8edde9a86bceb9f3`.
+`417c4d3e` private staging, mode and name-closure tests, doc corrections, `133ac224` umask-proof and skip-loud tests,
+real-closure staging tests, fchmod and mode-read-race documentation). patch-ids (`git show <sha> | git patch-id --stable`):
+`b493599d` -> `4c9425528fab3aae53dac1ce079719843750e93c`, `7b1d719a` -> `e9aaed1e8092c028f27e12bc8edde9a86bceb9f3`,
+`417c4d3e` -> `06f4bdffd22d16002c71813738fc714978f04462`, `133ac224` -> `ff43af64c8b312ef9c1893a287490be649a11925`.
 
 `src/util/fs.rs`:
 
@@ -101,11 +103,19 @@ FIXED on the review branch `worktree-agent-a26646b8b970ff11a` (`b493599d` fix an
   1), so leftovers show in `git status`; not embedded (`retrieval/sync.rs`), not catalogued (`indexer.rs` takes
   `.md` only). No reaper built.
 - Staging is `0600` while the content is written when the target exists, and takes the target's mode afterwards;
-  a new file keeps `0666 & !umask`. The final mode is unchanged in every case (existing incl. setuid, new,
-  symlink target, dangling), pinned by `the_final_mode_is_unchanged_for_every_kind_of_target`. Before, a `0600`
-  target's new content sat in a `0644` staging file for the length of the write. Red first:
+  a new file keeps `0666 & !umask`. **The final mode is unchanged in every case where `fchmod` succeeds** (existing
+  incl. setuid, new, symlink target, dangling), pinned by `the_final_mode_is_unchanged_for_every_kind_of_target`.
+  A failing `fchmod` is ignored, as before, and now leaves an existing target at `0600 & !umask` instead of
+  `0666 & !umask`: it fails closed (a `0644`/`0755` file narrows to `0600`, the write still succeeds). Plausible
+  hosts: sshfs with an sftp-server started `-P setstat,fsetstat`, an LSM (SELinux) denying `setattr`, sticky/setgid
+  rules on macOS/FreeBSD; not run on any of them. Documented in `atomic_write`'s doc, behaviour not changed.
+  Reading the mode BEFORE the create widens the documented same-target race; measured by the reviewer against the
+  old order: a target created `0600` during our write ends `0644` (old: `0600`); a `chmod 0644 -> 0755` during the
+  write is lost (old: `0755`); a target deleted during the write keeps `0600` (old: `0644`). Also documented there.
+  Before, a `0600` target's new content sat in a `0644` staging file for the length of the write. Red first:
   `the_staging_file_of_a_private_target_is_private_while_it_is_written` saw mode `0o044` in group/other.
-  (Commit `417c4d3e`.)
+  (Commit `417c4d3e`.) A leaf link to a setuid file yields a setuid regular file: see
+  `2026-10-17-atomic-write-replace-keeps-setuid-and-takes-the-pointed-at-files-mode.md`.
 - Not changed: no fsync (the code never had one), the rename-over-target semantics.
 
 **A target that is itself a symlink is replaced, not written through** (decision, pinned by test): the
@@ -153,12 +163,19 @@ opened, so they pass against any implementation that merely renames its staging 
 carried by the seam tests, which offer the planted entries as the FIRST candidate names
 (`every_kind_of_planted_entry_at_a_candidate_name_is_refused_and_left_alone`,
 `staging_gives_up_after_a_bounded_number_of_collisions_and_changes_nothing`). The seam is `atomic_write_with`; the
-real write closure is not driven with an injected fault. The real name closure IS covered without a seam by
-`the_real_staging_file_is_created_on_the_targets_filesystem` (target on `/dev/shm` or `/var/tmp`; staging in
-`temp_dir()` would fail the rename with EXDEV; killed by a mutant that stages in `temp_dir()`; it asserts, rather
-than skips, that such a directory exists). A seam-free fault for the real write closure needs an `RLIMIT_FSIZE`
-child or a thread-only seccomp filter; both are heavy and fragile on CI, so they were not adopted and the seam
-test pins it.
+real write closure is not driven with an injected fault. The real NAME closure is covered without a seam, in three
+parts, none of which alone is enough: `the_real_staging_file_is_created_on_the_targets_filesystem` catches staging
+on a different device (target on `/dev/shm` or `/var/tmp`, staging in `temp_dir()` fails the rename with EXDEV);
+`the_real_staging_file_is_beside_its_target_not_in_its_parent` catches staging in an ancestor on the same
+filesystem (the target's parent is read-only, so a create one level up fails; it skips loudly as root);
+`concurrent_writers_to_one_target_never_collide_on_a_staging_name` catches a reused nonce (8 writers, 512 KiB
+each: a constant name makes concurrent creates collide and exhaust their 16 attempts). The free function
+`staging_path` is tested directly by `real_staging_names_are_unpredictable_and_not_the_legacy_name`; that test
+does not exercise the closure inside `atomic_write`. The cross-device test SKIPS, printing each candidate's
+finding and re-checking it, on a host where neither `/dev/shm` nor `/var/tmp` is on a different device than
+`temp_dir()` (a container without its own `/dev/shm`); where one exists it asserts. A seam-free fault for the
+real write closure needs an `RLIMIT_FSIZE` child or a thread-only seccomp filter; both are heavy and fragile on
+CI, so they were not adopted and the seam test pins it.
 
 - `a_planted_staging_symlink_is_not_followed_and_the_victim_is_untouched` RED (`victim` held `WRITTEN`).
 - `a_planted_dangling_staging_symlink_does_not_create_the_file_it_points_at` RED (the outside file was created).
@@ -177,8 +194,11 @@ test pins it.
 - Mode work (`417c4d3e`): `the_staging_file_of_a_private_target_is_private_while_it_is_written` (RED before,
   group/other bits `0o044`), `the_final_mode_is_unchanged_for_every_kind_of_target` (existing `0600/0640/0755/04755`,
   new file, symlink target takes the pointed-at mode, dangling; green before and after),
-  `the_real_staging_file_is_created_on_the_targets_filesystem` (green before and after). The window test asserts
-  the environment's umask can discriminate (it fails loudly under `umask 077`).
+  `the_real_staging_file_is_created_on_the_targets_filesystem` (green before and after). The window test needs a
+  umask that leaves group/other read open; under any other umask (077, 066, 067, 076) it re-runs itself in a
+  child under `umask 022` and fails only if that child fails or cannot establish 022, so a host's umask never
+  reds it. Run under `umask 077` once: all `util::fs::tests` passed, and the child path was exercised (a mutant
+  disabling private staging was killed by the parent and by the child).
 
 `src/tools/run_command/attribution.rs`: `materialize_does_not_follow_a_planted_staging_symlink` (RED before the fix).
 
@@ -195,6 +215,10 @@ tool-level leaf tests).
 Second round, all KILLED: private staging disabled (window test); `metadata` -> `symlink_metadata` for the mode
 (the final-mode test, via the symlink row); mode application removed (2: exec bit and final-mode); real name
 closure staged in `temp_dir()` (cross-filesystem test); staging mode `0600` -> `0666` (window test).
+Third round (`133ac224`), all KILLED: real closure staged in the grandparent on the same filesystem
+(`the_real_staging_file_is_beside_its_target_not_in_its_parent`); real closure with a constant nonce
+(`concurrent_writers_to_one_target_never_collide_on_a_staging_name`); private staging disabled, run under
+`umask 077` (the window test, in the parent and in its umask-022 child).
 
 ## Workarounds
 
@@ -207,9 +231,11 @@ was not run: only `cargo test` on Linux. Related findings from the review, filed
 `2026-10-17-attribution-helper-runs-python-from-a-predictable-shared-temp-directory.md`. The zombie
 `2026-08-14-atomic-write-rename-not-detected-by-file-watchers.md` cites `atomic_write`'s old shape and line range;
 it carries a one-line note, status unchanged. After it reaches `experiments`, archive this file
-(`doc(action="move")`), keeping the SHA and patch-ids above. Not run: an end-to-end plant against
-`edit_file`, `edit_markdown`, a memory write; they route through `atomic_write` (read from the callers),
-and `create_file` and `edit_code` were run only for the leaf-symlink case.
+(`doc(action="move")`), keeping the SHAs and patch-ids above. Not run: an end-to-end plant against
+`edit_file`, `edit_markdown`, a memory write. `edit_file`, `edit_markdown`, anchors and `.gitignore` writes
+reach `atomic_write` (read from the callers); memory TOPIC writes do not (they use `NamedTempFile::persist` in
+`src/memory/write_transaction.rs`, which is exclusive and random, covered by
+`tests/memory_write_history.rs`). `create_file` and `edit_code` were run only for the leaf-symlink case.
 
 ## References
 

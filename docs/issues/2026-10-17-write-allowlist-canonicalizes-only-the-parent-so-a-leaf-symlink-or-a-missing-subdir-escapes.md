@@ -19,9 +19,11 @@ immediate parent only, then joined the file name. Two shapes therefore kept thei
 in-root spelling while the OS would resolve them outside the root. Measured at the classifier, and
 for the second shape at a write tool (it wrote outside the root). **Shape 2 is fixed (`2c71a473`);
 shape 1, a leaf that is itself a symlink, is classified in-root. The write tools that reach `atomic_write`
-(`edit_file`, `create_file`, `edit_code`) do not write through it. The librarian's writes DO, and `edit_file`
-on a link to a deny-listed path discloses that file; both measured 2026-10-17 and filed as their own issues
-(see Resume). The issue stays open, at medium.**
+(`edit_file`, `create_file`, `edit_code`) do not write through it. `edit_file` on a link to a deny-listed path
+discloses that file (the one behaviour of shape 1 that belongs to THIS issue: the classifier is what judges it, and
+it alone justifies medium). The librarian's `doc(update)` and `doc(create)` also followed a link, but they consult
+no write classifier, so fixing the classifier fixes neither; they are separate issues (see Resume). The issue stays
+open, at medium.**
 
 ## Class fit
 
@@ -145,11 +147,14 @@ and do not keep `.md` links that point outside the root in a repository that use
 ## Resume
 
 Shape 1: measured 2026-10-17. `edit_file`, `create_file` (overwrite) and `edit_code` do not write through a leaf
-link (they reach `atomic_write`); severity stays medium because three other behaviours did escape and are filed:
+link (they reach `atomic_write`). Severity stays medium on the strength of the `edit_file` deny-list case alone,
+which is a classifier question and so belongs here. Two further behaviours escaped but are NOT classifier
+faults (each states in its own Class fit that no write classifier is consulted), so they do not count toward
+this issue's severity and were filed on their own:
 
 - `docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-and-rewrites-a-file-outside-the-root.md` (high)
 - `docs/issues/2026-10-17-doc-create-on-a-dangling-symlink-creates-a-file-outside-the-root.md` (medium)
-- `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md` (high)
+- `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md` (high; the one that belongs to this issue)
 
 Still open here: whether the classifier should resolve the leaf (the deny-list case wants it), and the other
 tools that write (`edit_markdown`, memory writes) were not run against a leaf link; `edit_markdown` reaches
@@ -173,8 +178,8 @@ Other follow-ups from the review of this branch, none fixed here:
   not denied under its own name once its directory was approved, because the entry resolved through its
   last component while the target keeps its leaf as written. Pre-existing; fixed in `97401a1b` by holding
   each entry in two forms (fully resolved, and parent resolved with the leaf as written).
-- Separate, pre-existing and independent of the allowlist: `atomic_write` follows a planted
-  `<target>.tmp` symlink. See
+- `atomic_write` USED TO follow a planted `<target>.tmp` symlink (pre-existing, independent of the allowlist);
+  fixed in `b493599d`. See
   `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`.
 
 ## References
