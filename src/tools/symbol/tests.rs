@@ -9998,6 +9998,70 @@ fn format_overview_symbols_renders_per_symbol_doc() {
         "the rest of the docstring must follow under the row:\n{text}"
     );
 }
+/// What a single-file overview row carries under `include_body` / `include_docs`, asserted on
+/// synthetic rows whose text appears NOWHERE else, so no other part of the output can satisfy it.
+#[test]
+fn overview_rows_render_signature_docs_and_body_each_from_its_own_field() {
+    use crate::tools::symbol::display::format_overview_symbols;
+    let val = json!({
+        "file": "lib.rs",
+        "symbols": [{
+            "name": "top", "symbol": "top", "kind": "Function",
+            "start_line": 2, "end_line": 4,
+            "signature": "SIG-OF-TOP(x: i32)",
+            "docs": "Summary line.\n\nSECOND-DOC-LINE\nTHIRD-DOC-LINE",
+            "body": "BODY-OF-TOP"
+        }, {
+            "name": "Holder", "symbol": "Holder", "kind": "Class",
+            "start_line": 10, "end_line": 30,
+            "body": "BODY-OF-HOLDER",
+            "children": [{
+                "name": "member", "symbol": "Holder/member", "kind": "Method",
+                "start_line": 12, "end_line": 14,
+                "signature": "SIG-OF-MEMBER()",
+                "docs": "Member summary.\nMEMBER-SECOND-LINE",
+                "body": "BODY-OF-MEMBER-ONLY"
+            }]
+        }]
+    });
+    let text = format_overview_symbols(&val);
+
+    let row = |needle: &str| {
+        text.lines()
+            .find(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("no line with `{needle}` in:\n{text}"))
+            .to_string()
+    };
+    // Signatures sit on their own row, top-level and member.
+    assert!(row("L2-4").contains("SIG-OF-TOP(x: i32)"), "{text}");
+    assert!(row("member ").contains("SIG-OF-MEMBER()"), "{text}");
+    // The first doc line is the row's summary; the rest follow as comment lines, blanks skipped.
+    assert!(row("L2-4").contains("// Summary line."), "{text}");
+    assert!(text.contains("// SECOND-DOC-LINE"), "{text}");
+    assert!(text.contains("// THIRD-DOC-LINE"), "{text}");
+    assert!(text.contains("// MEMBER-SECOND-LINE"), "{text}");
+    assert!(
+        !text.contains("// \n"),
+        "an empty doc line must not render:\n{text}"
+    );
+    // A body is printed under its row.
+    assert!(text.contains("BODY-OF-TOP"), "{text}");
+    assert!(text.contains("BODY-OF-HOLDER"), "{text}");
+    // A container's own body already contains its members', so a member's is not repeated...
+    assert!(
+        !text.contains("BODY-OF-MEMBER-ONLY"),
+        "a member body must not repeat under a container that shows its own:\n{text}"
+    );
+    // ...but when the container carries no body, the member's is shown.
+    let mut no_container_body = val.clone();
+    no_container_body["symbols"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("body");
+    let text = format_overview_symbols(&no_container_body);
+    assert!(text.contains("BODY-OF-MEMBER-ONLY"), "{text}");
+    assert!(!text.contains("BODY-OF-HOLDER"), "{text}");
+}
 
 // ---------- auto_inline_small_bodies ----------
 

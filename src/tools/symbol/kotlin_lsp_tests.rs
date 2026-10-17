@@ -333,7 +333,7 @@ async fn a_single_file_overview_with_include_body_and_include_docs_shows_both() 
     }
     // A docstring line that is not the first one.
     assert!(
-        text.contains("@param maxItems Maximum number of items allowed"),
+        text.contains("// @param maxItems Maximum number of items allowed"),
         "docstring beyond its first line missing from:\n{text}"
     );
 }

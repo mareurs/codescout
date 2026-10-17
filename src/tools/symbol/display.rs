@@ -359,7 +359,7 @@ pub(super) fn format_overview_symbols(val: &Value) -> String {
 }
 
 /// What a symbol row carries beyond its name and range, printed under the row: the rest of its
-/// docstring (the first line is the row's own `// summary`), its body, and a drill-in hint. A
+/// docstring (the first line is the row's own `// summary`) and its body. A
 /// single-file overview is `symbols(path, include_body=true, include_docs=true)`'s only
 /// rendering on the inline path, so a flag the caller set must show up here.
 fn push_symbol_extras(out: &mut String, sym: &Value, indent: usize, with_body: bool) {
@@ -380,12 +380,6 @@ fn push_symbol_extras(out: &mut String, sym: &Value, indent: usize, with_body: b
             out.push_str(&pad);
             out.push_str(line);
         }
-    }
-    if let Some(hint) = sym["members_hint"].as_str() {
-        out.push('\n');
-        out.push_str(&pad);
-        out.push_str("-> ");
-        out.push_str(hint);
     }
 }
 
