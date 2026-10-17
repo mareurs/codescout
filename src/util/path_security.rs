@@ -179,12 +179,12 @@ fn home_dir() -> Option<PathBuf> {
     crate::platform::home_dir()
 }
 
-/// Expand a leading `~` to `$HOME`.
-fn expand_home(pattern: &str) -> Option<PathBuf> {
+/// Expand a leading `~` to `home`.
+fn expand_home_with(pattern: &str, home: Option<&Path>) -> Option<PathBuf> {
     if let Some(rest) = pattern.strip_prefix("~/") {
-        home_dir().map(|h| h.join(rest))
+        home.map(|h| h.join(rest))
     } else if pattern == "~" {
-        home_dir()
+        home.map(Path::to_path_buf)
     } else {
         Some(PathBuf::from(pattern))
     }
@@ -199,13 +199,20 @@ fn expand_home(pattern: &str) -> Option<PathBuf> {
 /// `starts_with` check compares a resolved input against an unresolved
 /// prefix and silently passes.
 fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
+    denied_paths_with(home_dir().as_deref(), best_effort_canonicalize)
+}
+
+/// The deny list with `$HOME` and the entry resolver supplied. The resolver must be the one the
+/// caller applies to the path it compares against: a resolver that leaves a missing entry literal
+/// beside a target resolved through its existing ancestors lets a symlinked home slip past.
+fn denied_paths_with(home: Option<&Path>, resolve: fn(&Path) -> PathBuf) -> Vec<PathBuf> {
     let mut denied = Vec::new();
     for p in crate::platform::denied_read_prefixes()
         .iter()
         .chain(DEFAULT_DENIED_EXACT.iter())
     {
-        if let Some(expanded) = expand_home(p) {
-            denied.push(best_effort_canonicalize(&expanded));
+        if let Some(expanded) = expand_home_with(p, home) {
+            denied.push(resolve(&expanded));
         }
     }
     // Windows-specific system paths
@@ -213,7 +220,7 @@ fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
     {
         if let Ok(sysroot) = std::env::var("SYSTEMROOT") {
             let p = PathBuf::from(&sysroot).join("System32").join("config");
-            denied.push(best_effort_canonicalize(&p));
+            denied.push(resolve(&p));
         }
     }
     denied
@@ -376,12 +383,12 @@ pub fn classify_write_path(
     config: &PathSecurityConfig,
     session_roots: &[PathBuf],
 ) -> WritePathDecision {
-    classify_write_path_with_temp(
+    classify_write_path_in(
         raw,
         project_root,
         config,
         session_roots,
-        &crate::platform::temp_dir(),
+        &WriteEnv::ambient(),
     )
 }
 
@@ -395,33 +402,54 @@ pub fn classify_write_path(
 /// **Fails closed.** This uses `fs::canonicalize` directly, NOT `best_effort_canonicalize`, which
 /// falls back to the literal path on error: a temp dir that cannot be resolved (missing, or a
 /// permission error on an ancestor) yields no root at all, so no write is allowed under it.
-/// A canonical root that is `/` or `$HOME` is refused as well, for the reason the cwd root is: a
-/// `TMPDIR` symlink must not turn "scratch space" into "the whole filesystem".
-fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
+/// A canonical root that is too broad (`is_overly_broad_write_root`) is refused as well, for the
+/// reason the cwd root is: a `TMPDIR` symlink must not turn "scratch space" into "the whole
+/// filesystem".
+fn canonical_temp_write_root(temp_dir: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let canon = std::fs::canonicalize(temp_dir).ok()?;
-    if is_overly_broad_write_root(&canon) {
+    if is_overly_broad_write_root(&canon, home) {
         return None;
     }
     Some(canon)
 }
 
-/// `/` and `$HOME` are never acceptable implicit write roots: either would allow writes anywhere
+/// `/` and `home` are never acceptable implicit write roots: either would allow writes anywhere
 /// on the filesystem, or inside the whole home directory. `canon` must already be canonical, so
-/// `$HOME` is canonicalized too (a symlinked home would otherwise never equal it). A home that
+/// `home` is canonicalized too (a symlinked home would otherwise never equal it). A home that
 /// cannot be canonicalized falls back to its literal form, which is the best that can be compared.
-fn is_overly_broad_write_root(canon: &Path) -> bool {
-    canon == Path::new("/") || home_dir().is_some_and(|h| canon == best_effort_canonicalize(&h))
+fn is_overly_broad_write_root(canon: &Path, home: Option<&Path>) -> bool {
+    canon == Path::new("/") || home.is_some_and(|h| canon == best_effort_canonicalize(h))
 }
 
-/// `classify_write_path` with the temp directory supplied, so tests can exercise a symlinked or
-/// missing one without mutating the process-global `TMPDIR`
-/// (`docs/conventions/test-env-isolation.md`).
-fn classify_write_path_with_temp(
+/// The ambient facts the write allowlist depends on, gathered at one edge so a test can inject
+/// each of them instead of mutating process-global state (`TMPDIR`, `HOME`, the cwd;
+/// `docs/conventions/test-env-isolation.md`).
+struct WriteEnv {
+    /// The system temp directory (`platform::temp_dir()`).
+    temp_dir: PathBuf,
+    /// `$HOME`, which both the deny list and the broad-root guard read.
+    home: Option<PathBuf>,
+    /// The server's working directory.
+    cwd: Option<PathBuf>,
+}
+
+impl WriteEnv {
+    fn ambient() -> Self {
+        Self {
+            temp_dir: crate::platform::temp_dir(),
+            home: home_dir(),
+            cwd: std::env::current_dir().ok(),
+        }
+    }
+}
+
+/// `classify_write_path` over an explicit environment.
+fn classify_write_path_in(
     raw: &str,
     project_root: &Path,
     config: &PathSecurityConfig,
     session_roots: &[PathBuf],
-    temp_dir: &Path,
+    env: &WriteEnv,
 ) -> WritePathDecision {
     if raw.is_empty() {
         return WritePathDecision::Denied("path must not be empty".to_string());
@@ -473,7 +501,7 @@ fn classify_write_path_with_temp(
 
     // Check deny-list first (blocks writes to ~/.ssh even if somehow under
     // an extra_write_root).
-    let denied = denied_read_paths(config);
+    let denied = denied_paths_with(env.home.as_deref(), best_effort_canonicalize);
     if is_denied(&resolved, &denied) {
         return WritePathDecision::Denied(format!(
             "write denied: '{}' is in a protected location. approve_write cannot grant \
@@ -489,7 +517,10 @@ fn classify_write_path_with_temp(
     // intermediate output, and cross-process coordination without polluting
     // the project root. Held CANONICALIZED (the target above is), and absent when it cannot
     // be canonicalized — see `canonical_temp_write_root`.
-    allowed.extend(canonical_temp_write_root(temp_dir));
+    allowed.extend(canonical_temp_write_root(
+        &env.temp_dir,
+        env.home.as_deref(),
+    ));
     // CWD at server startup — Claude Code launches MCP servers from the
     // project directory, so this covers the case where an absolute path
     // targets the user's working directory even when --project points
@@ -498,9 +529,9 @@ fn classify_write_path_with_temp(
     // Guard: skip overly broad roots (`/` and `$HOME`).  If CWD happens to be
     // one of these, adding it as a write root would allow writes anywhere on
     // the filesystem or inside the entire home directory.
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_canon = best_effort_canonicalize(&cwd);
-        if !is_overly_broad_write_root(&cwd_canon) {
+    if let Some(cwd) = &env.cwd {
+        let cwd_canon = best_effort_canonicalize(cwd);
+        if !is_overly_broad_write_root(&cwd_canon, env.home.as_deref()) {
             allowed.push(cwd_canon);
         }
     }
@@ -6302,6 +6333,21 @@ EOF"#;
     // `project` and every other tempdir below sit as siblings in the real temp dir, so none of them
     // is covered by another allowlist root: the only root that can admit a write is the injected one.
 
+    /// `classify_write_path` with only the temp directory replaced; home and cwd stay ambient.
+    fn classify_write_path_with_temp(
+        raw: &str,
+        project_root: &Path,
+        config: &PathSecurityConfig,
+        session_roots: &[PathBuf],
+        temp_dir: &Path,
+    ) -> WritePathDecision {
+        let env = WriteEnv {
+            temp_dir: temp_dir.to_path_buf(),
+            ..WriteEnv::ambient()
+        };
+        classify_write_path_in(raw, project_root, config, session_roots, &env)
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinked_temp_dir_allows_a_write_inside_it() {
@@ -6372,7 +6418,7 @@ EOF"#;
             matches!(decision, WritePathDecision::OutsideRoot { .. }),
             "a temp dir that cannot be canonicalized must allow nothing, got: {decision:?}"
         );
-        assert_eq!(canonical_temp_write_root(&missing), None);
+        assert_eq!(canonical_temp_write_root(&missing, None), None);
     }
 
     #[test]
@@ -6496,7 +6542,7 @@ EOF"#;
         let link = holder.path().join("rootlink");
         std::os::unix::fs::symlink("/", &link).unwrap();
         assert_eq!(
-            canonical_temp_write_root(&link),
+            canonical_temp_write_root(&link, None),
             None,
             "a TMPDIR symlink to `/` must not turn scratch space into the whole filesystem"
         );
@@ -6513,7 +6559,7 @@ EOF"#;
         let link = holder.path().join("homelink");
         std::os::unix::fs::symlink(&home, &link).unwrap();
         assert_eq!(
-            canonical_temp_write_root(&link),
+            canonical_temp_write_root(&link, Some(&home)),
             None,
             "a TMPDIR symlink to $HOME must not make the home directory scratch space"
         );
@@ -6523,7 +6569,7 @@ EOF"#;
     fn canonical_temp_write_root_is_the_canonical_path_of_an_existing_dir() {
         let dir = tempdir().unwrap();
         assert_eq!(
-            canonical_temp_write_root(dir.path()),
+            canonical_temp_write_root(dir.path(), None),
             Some(std::fs::canonicalize(dir.path()).unwrap())
         );
     }
