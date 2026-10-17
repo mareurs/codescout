@@ -2,7 +2,7 @@
 status: open
 opened: 2026-10-17
 closed:
-severity: medium
+severity: low
 owner: marius
 related: [docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md]
 tags:
@@ -18,7 +18,9 @@ kind: bug
 immediate parent only, then joined the file name. Two shapes therefore kept their literal,
 in-root spelling while the OS would resolve them outside the root. Measured at the classifier, and
 for the second shape at a write tool (it wrote outside the root). **Shape 2 is fixed (`2c71a473`);
-shape 1, a leaf that is itself a symlink, is still open.**
+shape 1, a leaf that is itself a symlink, is classified in-root but did not escape through any write tool
+run against it (`edit_file`, `create_file` overwrite, `edit_code`): the issue stays open for the classifier
+question and the follow-ups below.**
 
 ## Class fit
 
@@ -45,8 +47,13 @@ under `$HOME/.cache`, all removed afterwards:
   directory outside the project, returned `ok` and wrote `<outside>/newdir/x.txt` containing the
   content, creating `newdir` outside the root.
 - Shape 1 did NOT escape through `edit_file`: the link was replaced by a regular file and the
-  victim kept its content, so that tool's atomic write does not follow a leaf link. Other write
-  paths (`create_file` with `overwrite`, `edit_code`) were not run against a leaf link.
+  victim kept its content, so that tool's atomic write does not follow a leaf link.
+- Shape 1, measured 2026-10-17 on branch `worktree-agent-a26646b8b970ff11a` (see Fix): `create_file` with
+  `overwrite` and `edit_code` (replace) against an in-project leaf link to an outside file ALSO do not
+  escape. Both reach `atomic_write`, whose rename replaces the link with a regular file; the victim keeps its
+  bytes. A DANGLING leaf link did not make `create_file` create the file it names. So shape 1 is not an
+  escape through any write tool that routes through `atomic_write`; the classifier still reports the in-root
+  spelling for the leaf.
 
 ## Reproduction
 
@@ -96,9 +103,15 @@ subdirectory of a symlinked temp dir or project root was refused, which went gre
 `299395e5` for `classify_in_project_is_allowed` and `create_text_file_creates_parent_dirs` with a
 symlinked TMPDIR.
 
-Shape 1 (a leaf that is itself a symlink) is NOT changed and stays open. Candidate: `symlink_metadata`
-the leaf, and refuse or resolve it when it is a symlink. Resolving it changes what the write tools
-write to for an in-root link, so it needs its own decision.
+Shape 1 (a leaf that is itself a symlink): classifier NOT changed. Measured instead of fixed: no write tool
+writes through the leaf (see Symptom), because `atomic_write` renames over the link. Decision, written into
+`atomic_write`'s doc and pinned by tests (`b493599d`, patch-id `4c9425528fab3aae53dac1ce079719843750e93c`, which
+also fixes `2026-10-17-atomic-write-follows-a-planted-staging-symlink...`): a target that is a symlink is
+replaced, never written through. The classifier answering `Allowed(<root>/leaf)` is therefore safe today, but
+it is safe only because of that property of the writer, not because the classifier resolved the link. A
+future writer that opens the target directly (`OpenOptions::open(path)`, `fs::write(path)`) would reopen it.
+The candidate `symlink_metadata` check in the classifier is still the defence in depth; not done, not needed
+for an escape that was not found.
 
 ## Tests added
 
@@ -106,18 +119,23 @@ Shape 2, all in `src/util/path_security.rs` (unix):
 `symlink_out_of_the_temp_dir_is_refused_even_below_a_missing_subdirectory`,
 `symlinked_temp_dir_allows_a_write_below_a_missing_subdirectory`,
 `project_root_behind_a_symlink_allows_a_write_below_a_missing_subdirectory`.
-None for shape 1.
+Shape 1, characterization (green before and after the atomic_write fix; they pin the property the safety rests on):
+`a_target_that_is_a_symlink_is_replaced_not_written_through` (`src/util/fs.rs`, also a dangling leaf),
+`create_file_overwrite_on_a_leaf_symlink_replaces_the_link_and_spares_the_victim` (`src/tools/edit_file/tests.rs`,
+also a dangling leaf), `edit_code_replace_on_a_leaf_symlink_replaces_the_link_and_spares_the_victim`
+(`src/tools/symbol/tests.rs`). A mutation replacing `rename` with `copy` in `atomic_write` (which writes through
+the link) killed all three (mutation-probe, 7 tests red in total).
 
 ## Workarounds
 
-Shape 1: do not leave symlinks to outside files inside a project root.
+Shape 1: none needed for the write tools measured; a writer that bypasses `atomic_write` is not covered.
 
 ## Resume
 
-Shape 1: measure a leaf symlink against `create_file` with `overwrite` and `edit_code` (only
-`edit_file` was run, and it did not follow the link). If any follows it, this is an escape and shape
-1 needs the leaf check above plus a red test. Otherwise lower the severity and decide whether the
-classifier should still name the resolved leaf.
+Shape 1: DONE 2026-10-17, none of `edit_file`, `create_file` (overwrite), `edit_code` follows a leaf link, so
+severity is lowered to low. Open: decide whether the classifier should still name the resolved leaf (defence
+in depth), and the other tools that write (`edit_markdown`, memory writes, the librarian) were not run against
+a leaf link; they route through `atomic_write` (read from the callers, not run). The follow-ups below stay open.
 
 Other follow-ups from the review of this branch, none fixed here:
 
