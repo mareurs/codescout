@@ -157,8 +157,10 @@ All in `src/util/path_security.rs`, none mutating `TMPDIR`, `HOME` or the cwd (t
 
 ## Verified
 
-- `./scripts/gate.sh` with `TMPDIR=/home/marius/.cache/cc-tmp`, on `c9680518`: exit 0, FMT=0 CLIPPY=0
-  LEAN=0 (4629 passed) DEFAULT=0 (7014 passed), Python light 1266 passed.
+- `./scripts/gate.sh` with `TMPDIR=/home/marius/.cache/cc-tmp`, on `aa7d334a` (code identical to the final
+  branch; later commits are docs): exit 0, FMT=0 CLIPPY=0 LEAN=0 (4634 passed) DEFAULT=0 (7019 passed),
+  Python light 1266 passed. A first run at `97401a1b` failed CLIPPY on a test-only
+  `cloned_ref_to_slice_refs` (fixed in `aa7d334a`).
 - The same gate with `TMPDIR` a symlink to a real directory: FMT=0 CLIPPY=0; LEAN, DEFAULT and Python light
   are red, and every red test also fails on `299395e5` under the same symlinked `TMPDIR` (checked there):
   7 Rust tests, `tools::core::tests::worktree_read_notice_activate_remedy_names_the_main_repo_not_a_worktree`,
@@ -170,15 +172,16 @@ All in `src/util/path_security.rs`, none mutating `TMPDIR`, `HOME` or the cwd (t
   `librarian::adapter::tests::an_overflowing_librarian_context_hints_the_markdown_and_it_returns_it`
   (DEFAULT only), plus 2 Python tests (`test_a_vote_goes_on_stdin_inside_the_jail_with_three_paths_bound`,
   `test_racing_writer_cannot_be_overwritten_after_preflight`). They are other fixtures that compare a
-  literal and a canonical temp path. None is in `path_security`; the two that the temp-root fix alone had
-  turned red (`classify_in_project_is_allowed`, `create_text_file_creates_parent_dirs`) pass.
-- Mutation probe (`scripts/mutation-probe.sh`, isolated, on the committed bytes of `abdb0b03` plus
-  `c9680518`): on the review-fix surface 13 mutations, 12 killed at first; the one survivor (cwd root
-  resolved with `best_effort_canonicalize`) is now killed after `c9680518`, so 13 of 13. Killed: deny
-  resolver literal; project, extra, session and cwd roots literal; ancestor rule reduced to equality;
-  canonical home compare replaced by literal; home clause off; `/` clause off; cwd broad-root guard off;
-  cwd guard ignoring home; temp guard ignoring home; deny list ignoring home. The earlier two survivors
-  (M4d canonical-home compare, M5 cwd guard) are now killed through the injected-home and injected-cwd seams.
+  literal and a canonical temp path. None is in `path_security`.
+- The `path_security` module (293 tests) also passes with `TMPDIR` under the package root, with
+  `HOME=$TMPDIR/home`, and with `HOME` a symlink to a directory under `TMPDIR`.
+- Mutation probe (`scripts/mutation-probe.sh`, isolated, on the committed bytes): over the allowlist surface
+  as it stands at `97401a1b`, 16 mutations, 16 killed: deny resolver parent-only (the reviewer's O), deny
+  resolver the write-target form (Q), the leaf-as-written form dropped, session / extra / project / cwd root
+  parent-only (P and three siblings), temp exclusion off, exclusion ignoring the root, exclusion ignoring the
+  target, home resolved literally, `/` temp refusal off, cwd guard ignoring home, `/` clause off, equality
+  instead of ancestor, cwd guard off. Earlier rounds: 13 of 13 on the first review-fix surface, and 12 of
+  14 before that (the two survivors, M4d and M5, are now killed).
 
 ## Workarounds
 
