@@ -4,6 +4,19 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE").map(PathBuf::from)
 }
 
+/// The user's profile directory as `std::env::home_dir` reports it: `USERPROFILE` when set and
+/// non-empty, otherwise `GetUserProfileDirectoryW` for the process token. The fallback is what
+/// makes an unset or empty `USERPROFILE` recoverable, which returning `None` here would not.
+///
+/// Unlike the unix lookup this is NOT independent of the environment (a usable `USERPROFILE`
+/// wins), so a WRONG `USERPROFILE` is not detected on Windows; only an unset or empty one is.
+/// `std::env::home_dir` is not deprecated on this crate's MSRV (1.88, checked against the 1.88.0
+/// docs) and has used `USERPROFILE`/`GetUserProfileDirectoryW` rather than `HOME` since 1.85.
+/// Not cached: no NSS-style lookup here, and the answer follows `USERPROFILE`.
+pub fn account_home_dir() -> Option<PathBuf> {
+    std::env::home_dir().filter(|h| h.is_absolute())
+}
+
 pub fn temp_dir() -> PathBuf {
     std::env::temp_dir()
 }

@@ -55,7 +55,8 @@ const ROOTS: [&str; 3] = ["src", "crates", "tests"];
 ///
 /// Adding an entry is a real decision. The first three are production startup paths that
 /// run before any second thread exists; the fourth is the single test in the workspace
-/// whose SUBJECT is ambient-environment behaviour, which cannot be tested without it.
+/// whose SUBJECT is ambient-environment behaviour, which cannot be tested without it; the
+/// fifth is the same kind of subject, confined to a child process.
 const ALLOWED: &[(&str, &str)] = &[
     (
         "src/cli/mod.rs",
@@ -76,6 +77,14 @@ const ALLOWED: &[(&str, &str)] = &[
          variable has to be set while it runs, so the mutation is the subject rather than a \
          knob. Separate crate, so a separate test binary and process. Every other site here \
          was a knob and now passes a value to custom_with instead",
+    ),
+    (
+        "src/platform/mod.rs",
+        "resolved_home_dir_is_not_stale_after_home_changes: its SUBJECT is that a changed $HOME is \
+         seen by the next call even after the account lookup is cached, which needs $HOME to \
+         change inside one process. The mutation runs only in a CHILD re-executed on that single \
+         test (platform::test_child, --exact, one thread, marker variable), where no second \
+         thread reads the environment; the shared test process never mutates it",
     ),
 ];
 

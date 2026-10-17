@@ -175,8 +175,12 @@ impl Default for PathSecurityConfig {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// The home directory for security decisions: `$HOME` when it is an absolute path, else the
+/// account's home (`platform::resolved_home_dir`). Never `None` merely because `$HOME` is unset,
+/// empty or relative: those used to switch the `$HOME` breadth guard off and empty the `~`
+/// entries of the deny list.
 fn home_dir() -> Option<PathBuf> {
-    crate::platform::home_dir()
+    crate::platform::resolved_home_dir()
 }
 
 /// Expand a leading `~` to `home`.
@@ -7195,6 +7199,79 @@ EOF"#;
         assert!(
             matches!(&decision, WritePathDecision::OutsideRoot { .. }),
             "an empty TMPDIR must add no root, got: {decision:?}"
+        );
+    }
+
+    // ── `$HOME` unset, empty or relative: the account's home must still be protected ─────────────
+    //
+    // `validate_read_path`, `validate_approve_path` and `classify_write_path` read `$HOME` from the
+    // process, and the process cannot be mutated here, so each case runs in a CHILD with its own
+    // environment (`platform::test_child`). Before `resolved_home_dir`, the three cases below
+    // returned `Ok` for `~/.ssh/id_probe` and for the home itself (F2a-F2d in
+    // `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`).
+
+    /// The body run inside the child: with the child's unusable `$HOME`, the ACCOUNT's home still
+    /// gets its deny-list entries and its breadth guard. A host whose uid has no passwd entry has
+    /// no account home to protect, and the body says nothing there.
+    #[cfg(unix)]
+    fn assert_the_accounts_home_is_protected() {
+        let Some(account) = crate::platform::account_home_dir() else {
+            return;
+        };
+        let project = tempdir().unwrap();
+        let config = default_config();
+        let key = account.join(".ssh/id_probe");
+        let read = validate_read_path(key.to_str().unwrap(), Some(project.path()), &config);
+        assert!(
+            read.as_ref()
+                .is_err_and(|e| e.to_string().contains("protected location")),
+            "reading {key:?} must be refused, got: {read:?}"
+        );
+        let approve = validate_approve_path(account.to_str().unwrap(), project.path(), &config);
+        assert!(
+            approve
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "approving {account:?} must be refused as too broad, got: {approve:?}"
+        );
+        let target = account.join(".ssh/authorized_keys");
+        let decision = classify_write_path(target.to_str().unwrap(), project.path(), &config, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+            "writing {target:?} must be a deny-list refusal, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unset_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "an_unset_home_still_protects_the_accounts_home",
+            &[("HOME", None)],
+            assert_the_accounts_home_is_protected,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "an_empty_home_still_protects_the_accounts_home",
+            &[("HOME", Some(""))],
+            assert_the_accounts_home_is_protected,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "a_relative_home_still_protects_the_accounts_home",
+            &[("HOME", Some("not/absolute"))],
+            assert_the_accounts_home_is_protected,
         );
     }
 
