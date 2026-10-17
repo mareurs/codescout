@@ -1075,6 +1075,8 @@ impl LspClient {
                 // Dropping the task drops its read half and its clone of the writer.
                 handle.abort();
                 let _ = handle.await;
+                // The aborted reader never reaches its own end-of-task drain.
+                Self::drain_pending_disconnect(&self.pending, "LSP client shut down");
                 // Then end our write half: the mux reads EOF and releases this client.
                 let mut w = self.writer.lock().await;
                 let _ = tokio::io::AsyncWriteExt::shutdown(&mut *w).await;
@@ -1085,6 +1087,9 @@ impl LspClient {
                 // A dropped JoinHandle DETACHES its task; abort it so the reader (and the
                 // child it owns) does not outlive a shutdown that gave up waiting.
                 handle.abort();
+                let _ = handle.await;
+                // Same as the socket path: the aborted reader's own drain never runs.
+                Self::drain_pending_disconnect(&self.pending, "LSP client shut down");
             }
         }
 
@@ -2230,6 +2235,83 @@ struct Point {
             "empty string detail should collapse to None"
         );
     }
+    /// An `LspClient` built by hand around a reader task the test controls.
+    fn bare_client(transport: LspTransport, reader: Option<JoinHandle<()>>) -> LspClient {
+        LspClient {
+            writer: Arc::new(Mutex::new(
+                Box::new(tokio::io::sink()) as Box<dyn AsyncWrite + Unpin + Send>
+            )),
+            next_id: AtomicI64::new(1),
+            pending: Arc::new(StdMutex::new(HashMap::new())),
+            alive: Arc::new(AtomicBool::new(true)),
+            reader_handle: StdMutex::new(reader),
+            workspace_root: std::path::PathBuf::from("/"),
+            capabilities: StdMutex::new(lsp_types::ServerCapabilities::default()),
+            transport,
+            init_timeout: std::time::Duration::from_secs(30),
+            open_files: StdMutex::new(HashMap::new()),
+            synced_sigs: SyncedSignatures::default(),
+            stderr_lines: Arc::new(StdMutex::new(Vec::new())),
+            started_at: std::time::Instant::now(),
+            init_completed_at: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Registers a request that is waiting for an answer, as `request()` does.
+    fn park_request(client: &LspClient) -> oneshot::Receiver<Result<Value>> {
+        let (tx, rx) = oneshot::channel();
+        client.pending.lock().unwrap().insert(99, tx);
+        rx
+    }
+
+    /// `shutdown` aborts the reader task, which is the one place a disconnect resolves the
+    /// requests still waiting (`drain_pending_disconnect` runs at the END of the reader task, and
+    /// an aborted task never gets there). Another tool call holding the same `Arc<LspClient>`
+    /// mid-request — an LRU or idle eviction, `shutdown_all` — then waited out its whole 30 s
+    /// timeout and failed, which `symbols` turns into `0 matches`.
+    #[tokio::test(start_paused = true)]
+    async fn socket_shutdown_resolves_a_request_still_in_flight() {
+        let reader = tokio::spawn(std::future::pending::<()>());
+        let client = bare_client(
+            LspTransport::Socket {
+                socket_path: "/unused.sock".into(),
+            },
+            Some(reader),
+        );
+        let in_flight = park_request(&client);
+
+        client.shutdown().await.unwrap();
+
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(1), in_flight)
+            .await
+            .expect("a request in flight must be resolved by shutdown, not left to its timeout")
+            .expect("answered, not dropped");
+        assert!(
+            answer.is_err(),
+            "the in-flight request fails as disconnected"
+        );
+    }
+
+    /// The direct client's timed-out wait (a child that ignores `exit` and keeps stdout open)
+    /// aborts the reader too, with the same consequence for requests still waiting.
+    #[tokio::test(start_paused = true)]
+    async fn direct_shutdown_that_times_out_resolves_a_request_still_in_flight() {
+        let reader = tokio::spawn(std::future::pending::<()>());
+        let client = bare_client(LspTransport::Process { child_pid: None }, Some(reader));
+        let in_flight = park_request(&client);
+
+        client.shutdown().await.unwrap();
+
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(1), in_flight)
+            .await
+            .expect("a request in flight must be resolved by shutdown, not left to its timeout")
+            .expect("answered, not dropped");
+        assert!(
+            answer.is_err(),
+            "the in-flight request fails as disconnected"
+        );
+    }
+
     /// A mux never hangs up on a client, so a socket client that waited for its reader task
     /// (which ends only on EOF) burned the whole 5 s, dropped the handle — which DETACHES the
     /// task — and kept the connection open: the mux's idle timer never started while the
@@ -2255,6 +2337,9 @@ struct Point {
                     let mut got = Vec::new();
                     let _ = stream.read_to_end(&mut got).await;
                     let _ = tx.send(got);
+                    // Keep our end OPEN past the client's hang-up: a reader task that was merely
+                    // detached would stay blocked on this socket instead of ending by itself.
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 });
             }
         });
@@ -2281,13 +2366,18 @@ struct Point {
                 !text.contains("shutdown") && !text.contains("\"exit\""),
                 "a shared server must not be asked to stop, got: {text}"
             );
-            assert!(
-                client
-                    .reader_handle
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .is_none(),
-                "no reader task may survive shutdown"
+            // The reader task (and the writer clone it holds) is GONE, not detached: a task that
+            // is still alive keeps a clone of each Arc. Observed right after `shutdown` returns,
+            // with the peer still holding its end open.
+            assert_eq!(
+                Arc::strong_count(&client.pending),
+                1,
+                "cycle {cycle}: the reader task must not survive shutdown"
+            );
+            assert_eq!(
+                Arc::strong_count(&client.writer),
+                1,
+                "cycle {cycle}: the reader task's writer clone must not survive shutdown"
             );
         }
     }
