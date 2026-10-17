@@ -481,10 +481,10 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "preview.plan_headings",
         coverage: Coverage::Untested(
             "`MAX_HEADINGS` is exercised past its bound by `heading_truncation_is_signaled` \
-             (`src/librarian/preview/plan.rs:168`, 25 headings vs 20), which asserts the \
+             (`src/librarian/preview/plan.rs`, its `tests` module, 25 headings vs 20), which asserts the \
              marker on production output from `headings::stamp_truncation`. It is not \
              citable: that function name is declared identically in \
-             `preview/default.rs:57`, `preview/plan.rs:168` and `preview/spec.rs:76`, and \
+             `preview/default.rs:57`, `preview/plan.rs` (`tests` module) and `preview/spec.rs:76`, and \
              the gate resolves a `cited_test` by first match in `git ls-files src` order, \
              so the citation would bind to `default.rs:57` — the test for the \
              sibling `preview.default_headings` row. Citable as soon as one of the three \
@@ -492,36 +492,33 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
-        // A cap that truncates and emits NO marker at all. Flagged to the whole-branch
-        // review as arguably an `IC-13` MEMBER rather than a coverage gap.
+        // Was `NoMarker` (docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md):
+        // the cut now stamps `tasks.open_next_truncated` + `tasks.open_total` in `extract`,
+        // `src/librarian/preview/plan.rs`.
+        //
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 5 open tasks against `OPEN_NEXT_LIMIT` 3; the one-over boundary is
+        // pinned by `open_next_cut_by_exactly_one_task_is_still_signaled`.
         id: "preview.plan_open_next",
-        coverage: Coverage::NoMarker {
-            reason: "`OPEN_NEXT_LIMIT` (3) truncates the `open_next` vector at \
-             `src/librarian/preview/plan.rs:41` and no companion field discloses the drop \
-             (the true open count is derivable as `tasks.total - tasks.done`, but nothing \
-             says to), so the only observable is the array's own length. Every test in \
-             tracked `src/` therefore reads the field into a `let` and asserts on that length \
-             (`open_next_returns_first_three_unchecked`, `plan.rs:108`, drives 4 tasks \
-             past the cap but asserts `open.len(), 3`), while the one assertion naming \
-             `[\"tasks\"][\"open_next\"]` inline (`plan.rs:130`) seeds zero tasks. Uncitable \
-             until the cap emits a marker of its own.",
-            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.tasks.open_next_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "open_next_cut_is_signaled_with_the_true_open_count",
         },
     },
     ProbeRow {
-        // Corrected: task_text_truncated_to_limit (plan.rs) seeds "x".repeat(150) against
-        // TASK_TEXT_MAX=100 and asserts <=, which DOES red if truncation is removed
-        // outright — it is monotone under TIGHTENING (over-truncation), not removal. The
-        // real IC-13 gap is different: truncate_task_text appends no ellipsis or other
-        // marker at the caller-visible surface, so a genuinely-cut task and a genuinely-
-        // short one are indistinguishable to the caller reading the result.
+        // Was `NoMarker` (same issue file): `truncate_task_text` now appends `…` to a cut
+        // task, `src/librarian/preview/plan.rs`.
+        //
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds a task of `TASK_TEXT_MAX` + 50 characters; the character-vs-byte and
+        // one-over boundaries are pinned by `a_task_one_character_over_the_limit_is_cut_and_marked`
+        // and `a_multibyte_task_within_the_character_limit_is_not_marked_as_cut`.
         id: "preview.plan_task_text",
-        coverage: Coverage::NoMarker {
-            reason: "truncate_task_text appends no ellipsis or other marker at the caller's \
-             surface, so a caller cannot tell a cut task from a genuinely short one; the \
-             length-cap itself is tested (task_text_truncated_to_limit), but that is \
-             orthogonal to the marker gap IC-13 is about",
-            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("…"),
+            mutation: Mutation::Killed,
+            cited_test: "a_cut_task_text_ends_with_an_ellipsis",
         },
     },
     // -- src/librarian/tools/doctor.rs --
@@ -916,7 +913,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         //
         // UNIQUENESS: the semantically obvious citation here is
         // `heading_truncation_is_signaled`, which is declared THREE times in tracked
-        // `src/` (`preview/default.rs:57`, `plan.rs:168`, `spec.rs:76`). The uniquely
+        // `src/` (`preview/default.rs:57`, `plan.rs` `tests` module, `spec.rs:76`). The uniquely
         // named sibling below is cited instead; see the `preview.plan_headings` row for
         // why the collision is disqualifying rather than merely untidy.
         id: "preview.default_headings",
