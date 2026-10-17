@@ -61,8 +61,11 @@ pub struct IndexReport {
     pub removed_ids: Vec<String>,
     /// Rows this walk reclaimed because the path they name RESOLVES OUTSIDE the repository
     /// (a directory in its parent chain is a link out), as opposed to a file that vanished. A
-    /// policy deletion, so it is counted and named: the ids are capped at [`ESCAPING_ID_CAP`]
-    /// and `reclaimed_escaping` is the true count. Also included in `removed` / `removed_ids`.
+    /// policy deletion, so it is counted and NAMED. The id list is deliberately NOT capped: it
+    /// names exactly what was deleted (a subset of `removed_ids`, which is already unbounded),
+    /// and a silent cap would hide ids from the one report that explains the deletion; a large
+    /// response is already buffered by the progressive-disclosure layer. Also included in
+    /// `removed` / `removed_ids`.
     pub reclaimed_escaping: usize,
     pub reclaimed_escaping_ids: Vec<String>,
     /// Escaping rows that were KEPT because they carry an augmentation or events, which exist
@@ -70,9 +73,6 @@ pub struct IndexReport {
     /// then no longer exists and the row is reclaimed as an ordinary vanished one).
     pub escaping_kept_ids: Vec<String>,
 }
-
-/// How many ids a report carries for the escaping-row fields; the counts are exact.
-pub const ESCAPING_ID_CAP: usize = 50;
 
 /// One item queued for embedding — one per CHUNK, not per artifact.
 ///
@@ -744,9 +744,7 @@ pub fn index_repo_sync(
         // the link is removed or re-pointed, after which the file is gone and it goes as an
         // ordinary vanished row); one that carries none is reclaimed and reported.
         if escaping && has_history(cand_id) {
-            if report.escaping_kept_ids.len() < ESCAPING_ID_CAP {
-                report.escaping_kept_ids.push(cand_id.clone());
-            }
+            report.escaping_kept_ids.push(cand_id.clone());
             continue;
         }
         // Two disjoint reasons a row must go, and `exists()` can only see the first:
@@ -765,9 +763,7 @@ pub fn index_repo_sync(
             report.removed_ids.push(cand_id.clone());
             if escaping {
                 report.reclaimed_escaping += 1;
-                if report.reclaimed_escaping_ids.len() < ESCAPING_ID_CAP {
-                    report.reclaimed_escaping_ids.push(cand_id.clone());
-                }
+                report.reclaimed_escaping_ids.push(cand_id.clone());
             }
             removed += 1;
         }

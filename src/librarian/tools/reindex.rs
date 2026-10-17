@@ -655,14 +655,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "updated": total_updated,
         "removed": total_removed,
         "reclaimed_escaping": total_reclaimed_escaping,
-        "reclaimed_escaping_ids": reclaimed_escaping_ids
-            .iter()
-            .take(indexer::ESCAPING_ID_CAP)
-            .collect::<Vec<_>>(),
-        "escaping_kept_ids": escaping_kept_ids
-            .iter()
-            .take(indexer::ESCAPING_ID_CAP)
-            .collect::<Vec<_>>(),
+        "reclaimed_escaping_ids": reclaimed_escaping_ids,
+        "escaping_kept_ids": escaping_kept_ids,
         "escaping_note": if total_reclaimed_escaping > 0 || !escaping_kept_ids.is_empty() {
             json!("Some catalogued paths resolve OUTSIDE their repository through a symlinked \
                 directory. Rows without an augmentation or events were reclaimed \

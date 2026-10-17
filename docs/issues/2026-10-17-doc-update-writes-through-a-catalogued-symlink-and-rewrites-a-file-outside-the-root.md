@@ -202,10 +202,12 @@ failed before the fix, e.g. `removed=…`, `updated: true` through a link, a ref
 - **M1, a refusal after the upsert:** preflight and door now share the root, so the refusal comes before the catalog moves; if one
   still follows the upsert (a link planted in between) its text says "the augmentation WAS updated in the catalog, but its committed
   sidecar was NOT written" instead of the "Nothing was changed" the first test locked in.
-- **M2, a reason for every reclaim:** `reclaimed_escaping` (count) and `reclaimed_escaping_ids` (cap 50) in the reindex response, an
+- **M2, a reason for every reclaim:** `reclaimed_escaping` (count) and `reclaimed_escaping_ids` in the reindex response, an
   `escaping_note`, and rows that carry an augmentation or events are KEPT and listed in `escaping_kept_ids` on every run until the
-  link is removed or re-pointed (the file is then gone and the row goes as an ordinary vanished one). The cap is 50 ids; the counts
-  are exact.
+  link is removed or re-pointed (the file is then gone and the row goes as an ordinary vanished one). No cap on the id lists, on
+  purpose: they name exactly what was deleted (a subset of `removed_ids`, already unbounded), a silent cap would hide ids from the
+  one report that explains the deletion, and a large response is buffered by the progressive-disclosure layer. (A first version capped
+  them at 50; the `every_cap_constant_is_classified` gate then asked for a probe row for a cap that did not earn one.)
 - **LOW 1:** the walk's escape test is on the PARENT chain for every kind of leaf (a leaf link inside an outward `force_include`
   anchor is no longer catalogued, so no row is stuck behind a refused delete). The old exemption comment was false for that shape.
 - **LOW 2:** `doc(move)` refuses, up front, a relative leaf link moved to another directory (a rename does not retarget it; the id

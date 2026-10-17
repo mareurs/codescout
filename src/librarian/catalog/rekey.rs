@@ -352,6 +352,7 @@ fn rekey_augmentation(
 /// tokens inside what the author wrote as code, destroying the one escape this namespace has
 /// (§ *Parsers Over a Namespace* — the fence IS the escape). Reading a heading you should not
 /// have is recoverable; rewriting a token you should not have is not.
+#[allow(clippy::too_many_arguments)] // one transaction's worth of context; a struct would only rename it
 fn rekey_body(
     tx: &rusqlite::Transaction<'_>,
     roots: &[std::path::PathBuf],
