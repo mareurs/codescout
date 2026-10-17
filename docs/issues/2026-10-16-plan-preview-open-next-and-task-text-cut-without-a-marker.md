@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: Plan preview cuts `open_next` to 3 tasks and each task to 100 chars and stamps neither cut
 owners:
 - marius
@@ -8,6 +8,7 @@ tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-10-16
 severity: low
+closed: 2026-10-17
 ---
 
 ## Summary
@@ -32,16 +33,23 @@ Read `src/librarian/preview/plan.rs`: the cap at `plan.rs:41` (`if open_next.len
 
 ## Fix
 
-Not designed. Candidate: stamp `tasks.open_next_dropped` (count) and mark a cut task with `…`, mirroring `headings::stamp_truncation`. Whether `open_next` is a window by name (a "next 3" is not a claim of completeness) or a defect is a judgement for the owner; the task-text cut has no such reading.
+Fixed in `src/librarian/preview/plan.rs`, judging that a window named `open_next` still needs to say it is one (the task-text cut had no such reading):
+
+- `extract` counts every open task and, only when more exist than `OPEN_NEXT_LIMIT`, stamps `tasks.open_total` (the stated count, not left to `total - done`, which also disagrees for a `[~]`-style marker) and `tasks.open_next_truncated: true`. Absent otherwise, so a small plan's preview stays lean; mirrors `headings::stamp_truncation`. The window itself is unchanged.
+- `truncate_task_text` appends `…` to a cut task (same shape as `memory.rs` `truncate_text`).
+- `src/tools/core/cap_probe.rs`: `preview.plan_open_next` and `preview.plan_task_text` move from `NoMarker` to `Probed` (`Mutation::Killed`).
+
+Fix commit `ae2033c9` on branch `worktree-agent-a56ad6e632040ceff`; patch-id `f11133a15f9b4ce03a63b16ae3177dcf3431782d`.
 
 ## Tests added
 
-None — filing only. Once a marker exists the two `preview.*` rows can become `Probed` (the existing tests read `open_next` through a `let` and `.len()`, which the cap-probe gate cannot certify).
+In `src/librarian/preview/plan.rs`: `open_next_cut_is_signaled_with_the_true_open_count` (5 open tasks vs cap 3, plus a `[~]` task that is neither open nor done), `open_next_within_the_cap_carries_no_truncation_marker`, `a_cut_task_text_ends_with_an_ellipsis`, `a_task_text_exactly_at_the_limit_is_not_marked_as_cut` (boundary). `task_text_truncated_to_limit` now allows the one `…` (`TASK_TEXT_MAX + 1`).
+
+Red first: `open_next_cut_is_signaled_with_the_true_open_count` failed with `left: Null right: true` before the `extract` change. The ellipsis test was written before its fix but the first red build picked up the `truncate_task_text` edit, so its red is evidenced by the pre-existing `task_text_truncated_to_limit` failing on the 101st character and by the mutation run: deleting the `out.push('…')` and the `open_next_truncated` stamp reds both cited tests (`a_cut_task_text_ends_with_an_ellipsis`, `open_next_cut_is_signaled_with_the_true_open_count`).
 
 ## Resume
 
-1. Decide whether a window named `open_next` needs a marker.
-2. If so, add the marker and move `preview.plan_open_next` / `preview.plan_task_text` from `NoMarker` to `Probed` in `src/tools/core/cap_probe.rs`.
+N/A once merged. Not done here: the `tasks.open_next_truncated` / `tasks.open_total` fields are not described in any prompt surface or manual page (none mentions the plan preview's `tasks` shape); `tests/result_caps.rs` passed unchanged.
 
 ## References
 
