@@ -5927,16 +5927,38 @@ fn corroborate_zero_references_finds_callers_via_text_scan() {
 /// of `filler` same-language files none of which names `helper`. The shared fixture for
 /// the scan-cap tests below.
 async fn declaration_only_references(filler: usize) -> serde_json::Value {
+    use crate::tools::symbol::references::References;
+
+    let (_dir, ctx) = declaration_only_ctx(filler, 0).await;
+    References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap()
+}
+
+/// The project behind [`declaration_only_references`]: the language server answers the
+/// declaration of `helper` plus `extra_refs` further references INSIDE the definition
+/// file (so the result is still "no references outside the definition file" but can be
+/// made as large as a test needs).
+async fn declaration_only_ctx(
+    filler: usize,
+    extra_refs: usize,
+) -> (tempfile::TempDir, ToolContext) {
     use crate::lsp::mock::{MockLspClient, MockLspProvider};
     use crate::lsp::{SymbolInfo, SymbolKind};
-    use crate::tools::symbol::references::References;
 
     let dir = tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
     let src = std::fs::canonicalize(dir.path()).unwrap().join("src");
     std::fs::create_dir_all(&src).unwrap();
     let file = src.join("lib.rs");
-    std::fs::write(&file, "fn helper() {}\n").unwrap();
+    let mut body = String::from("fn helper() {}\n");
+    for i in 0..extra_refs {
+        body.push_str(&format!(
+            "// a use of helper, number {i}, padded for size\n"
+        ));
+    }
+    std::fs::write(&file, body).unwrap();
     for i in 0..filler {
         std::fs::write(src.join(format!("filler_{i}.rs")), "fn other() {}\n").unwrap();
     }
@@ -5952,33 +5974,26 @@ async fn declaration_only_references(filler: usize) -> serde_json::Value {
         range_start_line: None,
         detail: None,
     };
-    let declaration = lsp_types::Location {
-        uri: url::Url::from_file_path(&file)
-            .unwrap()
-            .as_str()
-            .parse::<lsp_types::Uri>()
-            .unwrap(),
+    let uri: lsp_types::Uri = url::Url::from_file_path(&file)
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let at = |line: u32| lsp_types::Location {
+        uri: uri.clone(),
         range: lsp_types::Range {
-            start: lsp_types::Position {
-                line: 0,
-                character: 3,
-            },
-            end: lsp_types::Position {
-                line: 0,
-                character: 9,
-            },
+            start: lsp_types::Position { line, character: 3 },
+            end: lsp_types::Position { line, character: 9 },
         },
     };
+    let locations: Vec<lsp_types::Location> = (0..=extra_refs as u32).map(at).collect();
     let mock = MockLspClient::new().with_symbols(&file, vec![helper]);
     mock.references_results
         .lock()
         .unwrap()
-        .insert(file.clone(), vec![declaration]);
+        .insert(file.clone(), locations);
     let ctx = path_scoped_ctx(dir.path(), MockLspProvider::with_client(mock)).await;
-    References
-        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
-        .await
-        .unwrap()
+    (dir, ctx)
 }
 
 /// BUG 2026-10-16 references-corroboration-scan-cap-yields-a-false-zero: the corroboration
@@ -6036,6 +6051,88 @@ fn corroborate_scan_reports_cut_short_only_when_a_candidate_was_left_unexamined(
     let short = corroborate_with_cap(root, &def, "target", "rust", 2);
     assert!(short.hits.is_empty());
     assert_eq!(short.cut_short_at, Some(2), "3 candidates, cap 2: one left");
+}
+/// The warning must survive the overflow path. A result over the inline budget is stored
+/// in a buffer and the caller reads `truncate_compact(format_compact(..), 2000, 3000)`,
+/// which cuts at the last newline in range, so a warning appended as the last line of
+/// `format_compact` is exactly the line a large result loses. "No references outside the
+/// definition file" does not mean a small result: this symbol has 250 uses in its own file.
+#[tokio::test]
+async fn references_warning_survives_the_overflow_summary_of_a_large_result() {
+    use crate::tools::symbol::references::References;
+
+    let (_dir, ctx) = declaration_only_ctx(5_001, 250).await;
+    let blocks = References
+        .call_content(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+    let text = blocks[0].as_text().expect("a text block").text.clone();
+    let envelope: serde_json::Value =
+        serde_json::from_str(&text).expect("the buffered envelope is JSON");
+
+    assert!(
+        envelope.get("output_id").is_some(),
+        "fixture check: the result must be big enough to be buffered, or this test proves \
+         nothing about the overflow path: {text}"
+    );
+    let summary = envelope["summary"].as_str().unwrap_or_default();
+    assert!(
+        summary.contains("(truncated)"),
+        "fixture check: the summary must actually have been truncated: {summary}"
+    );
+    assert!(
+        summary.contains("stopped after 5000"),
+        "the warning must be in what the caller reads, not only in the buffer: {summary}"
+    );
+}
+
+/// A project whose `node_modules/` (or `target/`, `vendor/`, ...) is not gitignored must
+/// not spend the file budget on vendored files: the LSP results `references` returns are
+/// already filtered through `path_in_excluded_dir`, and the corroboration walk used to
+/// count every vendored same-language file toward its 5,000-file cap and then report the
+/// walk as cut short. Cap 2 over three vendored files and nothing else.
+#[test]
+fn corroborate_scan_does_not_spend_its_budget_on_vendored_directories() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    let vendored = root.join("node_modules").join("pkg");
+    std::fs::create_dir_all(&vendored).unwrap();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        std::fs::write(vendored.join(name), "fn x() {}").unwrap();
+    }
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 2);
+
+    assert!(scan.hits.is_empty());
+    assert_eq!(
+        scan.cut_short_at, None,
+        "vendored files are not candidates, so nothing was left unexamined"
+    );
+}
+
+/// The exclusion applies to the path BELOW the project root. `path_in_excluded_dir` tests
+/// every component, so handed the absolute path it would exclude every file of a project
+/// that merely lives under a directory called `build` or `out`.
+#[test]
+fn corroborate_scan_filters_below_the_project_root_not_above_it() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("build").join("proj");
+    std::fs::create_dir_all(&root).unwrap();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    std::fs::write(root.join("user.rs"), "fn caller() { target(); }").unwrap();
+
+    let scan = corroborate_with_cap(&root, &def, "target", "rust", 10);
+
+    assert_eq!(
+        scan.hits.len(),
+        1,
+        "a project under a `build/` parent directory must still be scanned: {scan:?}"
+    );
 }
 
 #[test]

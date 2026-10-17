@@ -56,7 +56,10 @@ const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
 /// does".
 enum WorkspaceScan {
     Found((PathBuf, u32, u32)),
-    /// Every candidate file was examined and none defines the symbol.
+    /// The walk ran to the end of the tree without the cap stopping it and no file
+    /// defines the symbol. Not a proof that every file was READ: an admitted file that
+    /// could not be read or parsed is skipped with nothing recorded
+    /// (docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md).
     NotFound,
     /// The walk hit its file cap with candidates left unexamined.
     CutShort,
@@ -92,6 +95,29 @@ fn scan_cut_short_warning(
         symbols.len(),
         named.join(", "),
     ))
+}
+/// How many unplaced symbols the result lists by name. The full set can be as large as
+/// the graph and counts toward the size that decides whether the result is buffered, so
+/// the list is bounded and the total travels beside it.
+const SCAN_CUT_SHORT_LISTED: usize = 20;
+
+/// Put the cut-short disclosure into a `call_graph` result: the `completeness_warning`
+/// (when any walk was cut short), a bounded list of the symbols, and their total.
+/// Leaves `out` untouched when no walk was cut short.
+fn attach_scan_cut_short(
+    out: &mut Value,
+    cut_short: &std::collections::BTreeSet<String>,
+    cap: usize,
+) {
+    let Some(warning) = scan_cut_short_warning(cut_short, cap) else {
+        return;
+    };
+    out["completeness_warning"] = json!(warning);
+    out["scan_cut_short_symbols"] = json!(cut_short
+        .iter()
+        .take(SCAN_CUT_SHORT_LISTED)
+        .collect::<Vec<_>>());
+    out["scan_cut_short_total"] = json!(cut_short.len());
 }
 
 impl CachedResolver {
@@ -272,6 +298,13 @@ impl CachedResolver {
             Some(_) => WorkspaceScan::CutShort,
             None => WorkspaceScan::NotFound,
         }
+    }
+    /// The symbols whose Phase B walk the cap stopped, with the cap that walk was given.
+    /// `None` when no walk was cut short. The cap comes from the resolver, not from the
+    /// production constant, so the warning names what the walk actually used.
+    fn cut_short(&self) -> Option<(std::collections::BTreeSet<String>, usize)> {
+        let symbols = self.scan_cut_short.lock().unwrap().clone();
+        (!symbols.is_empty()).then_some((symbols, self.workspace_scan_cap))
     }
 }
 
@@ -542,6 +575,9 @@ impl Tool for CallGraph {
         let mut by_dir: HashMap<&str, TraversalResult> = HashMap::new();
         // Symbols whose definition the fallback walk gave up looking for at its cap.
         let mut cut_short: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        // The cap the walk that was cut short ACTUALLY used, so the warning names it
+        // instead of restating a constant the walk may not have been given.
+        let mut cut_short_cap = MAX_WORKSPACE_FILES_SCAN;
 
         for direction in &directions {
             let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
@@ -560,7 +596,10 @@ impl Tool for CallGraph {
             };
 
             let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
-            cut_short.extend(resolver.scan_cut_short.lock().unwrap().iter().cloned());
+            if let Some((walked, walked_cap)) = resolver.cut_short() {
+                cut_short_cap = walked_cap;
+                cut_short.extend(walked);
+            }
             let key = match direction {
                 Direction::Callers => "callers",
                 Direction::Callees => "callees",
@@ -573,16 +612,21 @@ impl Tool for CallGraph {
         let render_full = detail_full || auto_promote;
 
         let mut out = format_output(symbol, &by_dir, render_full, auto_promote);
-        if let Some(warning) = scan_cut_short_warning(&cut_short, MAX_WORKSPACE_FILES_SCAN) {
-            out["completeness_warning"] = json!(warning);
-            out["scan_cut_short_symbols"] = json!(cut_short);
-        }
+        attach_scan_cut_short(&mut out, &cut_short, cut_short_cap);
         Ok(out)
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
         let sym = result.get("symbol")?.as_str()?;
-        let mut out = format!("call_graph for `{sym}`");
+        // The warning goes FIRST. When this text is the summary of a buffered result,
+        // `truncate_compact` cuts at the last newline within its byte budget, so a line
+        // appended last is exactly the line a large result loses; the workspace notice
+        // is prefixed for the same reason (`Tool::call_content`).
+        let mut out = String::new();
+        if let Some(w) = result.get("completeness_warning").and_then(|v| v.as_str()) {
+            out.push_str(&format!("warning: {w}\n\n"));
+        }
+        out.push_str(&format!("call_graph for `{sym}`"));
 
         for key in &["callers", "callees"] {
             let v = match result.get(*key) {
@@ -662,9 +706,6 @@ impl Tool for CallGraph {
         }
         if let Some(d) = result.get("max_depth_reached").and_then(|v| v.as_u64()) {
             out.push_str(&format!("\n  max_depth_reached: {d}"));
-        }
-        if let Some(w) = result.get("completeness_warning").and_then(|v| v.as_str()) {
-            out.push_str(&format!("\n\nwarning: {w}"));
         }
         Some(out)
     }
@@ -1001,7 +1042,9 @@ mod tests {
     /// the file cap stopped early used to return the same `None` as one that examined every
     /// file, and the caller cached either as "no such symbol". Three same-language files, none
     /// defining `ghost`, cap 2: one candidate is left unexamined, so the miss must be recorded
-    /// as cut short and the warning must say so.
+    /// as cut short, together with the cap THIS walk was given (the warning names it). The
+    /// emission into the tool's result is covered end to end by
+    /// `call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap`.
     #[tokio::test]
     async fn a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol() {
         let dir = tempfile::tempdir().unwrap();
@@ -1012,14 +1055,16 @@ mod tests {
 
         assert!(resolver.lookup_pos("ghost").await.is_none());
 
-        let cut_short = resolver.scan_cut_short.lock().unwrap().clone();
-        assert!(
-            cut_short.contains("ghost"),
-            "a walk stopped at its cap must be recorded, not left as a plain miss: {cut_short:?}"
+        let (cut_short, cap) = resolver
+            .cut_short()
+            .expect("a walk stopped at its cap must be recorded, not left as a plain miss");
+        assert!(cut_short.contains("ghost"), "{cut_short:?}");
+        assert_eq!(
+            cap, 2,
+            "the cap the walk was given, not the production constant"
         );
-        let warning = scan_cut_short_warning(&cut_short, 2).expect("a cut-short walk must warn");
+        let warning = scan_cut_short_warning(&cut_short, cap).expect("a cut-short walk must warn");
         assert!(warning.contains("stopped after 2"), "{warning}");
-        assert!(warning.contains("`ghost`"), "{warning}");
     }
 
     /// ADR 2026-08-27 clause 2: a walk that examined every file and found nothing is a
@@ -1070,6 +1115,183 @@ mod tests {
         assert!(
             compact.contains("warning: the fallback source walk stopped after 5000"),
             "{compact}"
+        );
+    }
+    /// A project for driving `CallGraph::call` end to end past the Phase B file cap: a seed
+    /// `seed` (src/lib.rs, line 0) with one incoming caller `ghost` that workspace/symbol
+    /// cannot place — so BFS depth 2 sends it to the Phase B walk — plus `placed_callers`
+    /// further callers that workspace/symbol CAN place (they cost no walk and only widen the
+    /// result), over `filler` same-language files none of which defines `ghost`.
+    async fn ghost_project(
+        filler: usize,
+        placed_callers: usize,
+    ) -> (tempfile::TempDir, ToolContext) {
+        use crate::lsp::{SymbolInfo, SymbolKind};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let src = std::fs::canonicalize(dir.path()).unwrap().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("lib.rs");
+        std::fs::write(&file, "fn seed() {}\n").unwrap();
+        for i in 0..filler {
+            std::fs::write(src.join(format!("filler_{i}.rs")), "fn other() {}\n").unwrap();
+        }
+
+        let sym = |name: &str, line: u32| SymbolInfo {
+            name: name.to_string(),
+            name_path: name.to_string(),
+            kind: SymbolKind::Function,
+            file: file.clone(),
+            start_line: line,
+            end_line: line,
+            start_col: 3,
+            children: vec![],
+            range_start_line: None,
+            detail: None,
+        };
+        let uri: lsp_types::Uri = url::Url::from_file_path(&file)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        let item = |name: &str| lsp_types::CallHierarchyItem {
+            name: name.to_string(),
+            kind: lsp_types::SymbolKind::FUNCTION,
+            tags: None,
+            detail: None,
+            uri: uri.clone(),
+            range: lsp_types::Range::default(),
+            selection_range: lsp_types::Range::default(),
+            data: None,
+        };
+        let call_from = |name: &str, line: u32| lsp_types::CallHierarchyIncomingCall {
+            from: item(name),
+            from_ranges: vec![lsp_types::Range {
+                start: lsp_types::Position { line, character: 0 },
+                end: lsp_types::Position { line, character: 1 },
+            }],
+        };
+
+        let mut incoming = vec![call_from("ghost", 0)];
+        let mut placed = Vec::new();
+        for i in 0..placed_callers {
+            let name = format!("placed_{i}");
+            incoming.push(call_from(&name, i as u32 + 1));
+            // Line 5+: no `prepare_call_hierarchy` entry there, so these end at depth 2.
+            placed.push(sym(&name, 5 + i as u32));
+        }
+        let mock = MockLspClient::new()
+            .with_symbols(&file, vec![sym("seed", 0)])
+            .with_workspace_symbols(placed);
+        mock.prepare_call_hierarchy_results
+            .lock()
+            .unwrap()
+            .insert((file.clone(), 0, 3), Some(item("seed")));
+        mock.incoming_calls_results
+            .lock()
+            .unwrap()
+            .insert("seed".to_string(), incoming);
+
+        let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: mock_lsp_provider(mock),
+            output_buffer: test_buf(),
+            progress: None,
+            peer: None,
+            section_coverage: Arc::new(Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        };
+        (dir, ctx)
+    }
+
+    /// BUG 2026-10-16 call-graph-workspace-scan-cap-returns-a-false-no-callers, through the
+    /// tool's real call surface. `ghost` is a caller the language server reported but could
+    /// not place; the walk that looks for it stops at the 5,000-file cap with candidates
+    /// left, so its edges were never followed. The result must say so — in the JSON and in the
+    /// compact text the caller reads — and name the cap the walk was actually given.
+    #[tokio::test]
+    async fn call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap() {
+        let (_dir, ctx) = ghost_project(5_001, 0).await;
+
+        let result = CallGraph
+            .call(json!({ "symbol": "seed", "path": "src/lib.rs" }), &ctx)
+            .await
+            .unwrap();
+
+        let warning = result["completeness_warning"].as_str().unwrap_or_default();
+        assert!(
+            warning.contains("stopped after 5000") && warning.contains("`ghost`"),
+            "a caller the walk never reached must be named in the result: {result}"
+        );
+        assert_eq!(result["scan_cut_short_total"], json!(1), "{result}");
+        assert_eq!(
+            result["scan_cut_short_symbols"],
+            json!(["ghost"]),
+            "{result}"
+        );
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(
+            compact.contains("stopped after 5000") && compact.contains("`ghost`"),
+            "the compact text is what the caller reads: {compact}"
+        );
+    }
+
+    /// ADR 2026-08-27 clause 2, end to end: the same unplaceable caller over a project the
+    /// walk covers completely is a real "no definition found" and the result stays bare.
+    #[tokio::test]
+    async fn call_graph_stays_bare_when_the_walk_for_an_unplaced_caller_finished() {
+        let (_dir, ctx) = ghost_project(3, 0).await;
+
+        let result = CallGraph
+            .call(json!({ "symbol": "seed", "path": "src/lib.rs" }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(
+            result.get("completeness_warning").is_none(),
+            "a finished walk that found nothing is not a cut-short one: {result}"
+        );
+        assert!(result.get("scan_cut_short_symbols").is_none(), "{result}");
+    }
+
+    /// The warning must survive the overflow path. A result over the inline budget is stored
+    /// in a buffer and the caller reads `truncate_compact(format_compact(..), 2000, 3000)`,
+    /// which cuts at the last newline in range — so a warning that is the last line of
+    /// `format_compact` is exactly the line a big result loses.
+    #[tokio::test]
+    async fn call_graph_warning_survives_the_overflow_summary_of_a_large_result() {
+        let (_dir, ctx) = ghost_project(5_001, 120).await;
+
+        let blocks = CallGraph
+            .call_content(
+                json!({ "symbol": "seed", "path": "src/lib.rs", "detail_level": "full" }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let text = blocks[0].as_text().expect("a text block").text.clone();
+        let envelope: Value = serde_json::from_str(&text).expect("the buffered envelope is JSON");
+
+        assert!(
+            envelope.get("output_id").is_some(),
+            "fixture check: the result must be big enough to be buffered, or this test proves \
+         nothing about the overflow path: {text}"
+        );
+        let summary = envelope["summary"].as_str().unwrap_or_default();
+        assert!(
+            summary.contains("(truncated)"),
+            "fixture check: the summary must actually have been truncated: {summary}"
+        );
+        assert!(
+            summary.contains("stopped after 5000") && summary.contains("`ghost`"),
+            "the warning must be in what the caller reads, not only in the buffer: {summary}"
         );
     }
 } // mod tests

@@ -37,28 +37,38 @@ Verified real at the code before changing it (2026-10-17): `lookup_pos_via_ts_wo
 
 The cap stays (it is a performance guard against the MCP ceiling); the fix is disclosure.
 
-- `src/tools/symbol/scan_budget.rs` (new): `ScanBudget::admit` is the one place a candidate file is refused, and it records that. `cut_short_at()` is `Some(cap)` only when a candidate was actually left unexamined, so a walk that ends exactly on its cap is not flagged (ADR 2026-08-27 clause 2). Shared with the `references` fix.
-- `src/tools/symbol/call_graph/mod.rs`: the walk returns `WorkspaceScan::{Found, NotFound, CutShort}`; `lookup_pos` records a cut-short symbol in a new `scan_cut_short` set; `CallGraph::call` adds `completeness_warning` and `scan_cut_short_symbols` to the result, and `format_compact` renders the warning (the tool is `OutputForm::Text`, so that is what the caller reads). `MAX_WORKSPACE_FILES_SCAN` moved to module level and the resolver carries it as `workspace_scan_cap` so the boundary is testable.
-- `src/tools/core/cap_probe.rs`: `call_graph.workspace_files_scan` moved from `NoMarker` to `Probed`.
+- `src/tools/symbol/scan_budget.rs` (new): `ScanBudget::admit` is where a walk is refused one more candidate file, and it records that. `cut_short_at()` is `Some(cap)` only when a candidate was actually refused, so a walk that ends exactly on its cap is not flagged (ADR 2026-08-27 clause 2). Shared with the `references` fix. It does NOT see an admitted file that then fails to read or parse (see `docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`); its docs say so.
+- `src/tools/symbol/call_graph/mod.rs`: the walk returns `WorkspaceScan::{Found, NotFound, CutShort}`; `lookup_pos` records a cut-short symbol in `scan_cut_short`; `CachedResolver::cut_short()` returns those symbols with the cap the walk was GIVEN (`workspace_scan_cap`); `CallGraph::call` calls `attach_scan_cut_short`, which adds `completeness_warning`, `scan_cut_short_symbols` (bounded to 20) and `scan_cut_short_total`. `MAX_WORKSPACE_FILES_SCAN` moved to module level.
+- Review fix (same file): `format_compact` puts the warning FIRST. On the overflow path the caller reads `truncate_compact(format_compact(val), 2000, 3000)` (`src/tools/core/types.rs`), which cuts at the last newline in range, so the line appended last was exactly the line a large result lost; the workspace notice is prefixed for the same reason. The symbol list is bounded because it counts toward the size that decides buffering.
+- `src/tools/core/cap_probe.rs`: `call_graph.workspace_files_scan` moved from `NoMarker` to `Probed`, citing the end-to-end test below with the production marker `stopped after 5000`.
 
-Fix commit: SHA `a1c101a3` on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5); patch-id `a28d394e0e8e81323224874c5a2ad735ef090d4c`.
+Fix commits: `a1c101a3` (first fix) and the review-fix commit recorded under Resume, both on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5). patch-id of `a1c101a3`: `a28d394e0e8e81323224874c5a2ad735ef090d4c`.
 
 ## Tests added
 
 In `src/tools/symbol/call_graph/mod.rs` (`mod tests`):
 
-- `a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol` (the cited probe test; mutation-killed by removing the `scan_cut_short` insert)
-- `a_workspace_walk_that_ends_exactly_on_its_cap_is_a_real_miss`
-- `a_definition_found_within_the_cap_is_not_flagged`
-- `format_compact_carries_the_completeness_warning`
+- `call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap` (the cited probe test, end to end through `CallGraph::call` over 5,001 files; asserts `completeness_warning`, `scan_cut_short_symbols`, `scan_cut_short_total` and the compact text). RED observed 2026-10-17 by deleting the `attach_scan_cut_short` call: `panicked at mod.rs:1228`.
+- `call_graph_stays_bare_when_the_walk_for_an_unplaced_caller_finished` (ADR clause 2, end to end)
+- `call_graph_warning_survives_the_overflow_summary_of_a_large_result` (through `call_content`: 121 edges, buffered, summary truncated, warning still in what the caller reads). RED observed by moving the warning back to the end of `format_compact`: `panicked at mod.rs:1287` (and, independently, by deleting the emission).
+- `a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol` (resolver level; asserts the cap the walk was given). RED observed by making `cut_short()` return the production constant: `panicked at mod.rs:1067`.
+- `a_workspace_walk_that_ends_exactly_on_its_cap_is_a_real_miss`, `a_definition_found_within_the_cap_is_not_flagged`, `format_compact_carries_the_completeness_warning`
 
-In `src/tools/symbol/scan_budget.rs`: three unit tests on the boundary (`a_walk_that_ends_exactly_on_its_cap_is_not_cut_short`, `the_first_refused_candidate_marks_the_walk_cut_short`, `a_zero_budget_refuses_the_first_candidate`).
-
-Not tested end to end: `CallGraph::call`'s assembly of `completeness_warning` from the per-direction resolvers (needs an LSP mock with call hierarchy and a >5,000-file or injectable-cap fixture through the tool surface); the pieces it composes are each covered.
+In `src/tools/symbol/scan_budget.rs`: three boundary tests.
 
 ## Resume
 
-N/A once fixed. Residual: `call_graph`'s tool-level path has no test that drives a cut-short walk through `CallGraph::call` itself.
+N/A once fixed. Residual and open decisions, none implemented:
+
+**How often does this warning fire (ADR clause 2 noise)?** Measured 2026-10-17.
+
+- This repo has 476 tracked `.rs`, 161 `.py`, 8 `.ts` files, all far below 5,000: the walk always finishes here and the warning never fires.
+- `/home/marius/work/claude/codex` has 5,086 tracked `.rs` files, so a Rust walk there can never finish. `hermes-agent` (4,586 `.py`) is just under the cap.
+- call_graph path: NOT measured at runtime. It needs rust-analyzer on a >5,000-file tree. Structurally, with `direction=callees` and `max_depth >= 2`, every interior node that `workspace/symbol` does not place by exact name goes to the Phase B walk, and in such a tree that walk ends `CutShort`. `resolve_via_lsp` (`src/tools/symbol/call_edges/resolver.rs`) keeps std/dependency callees, which no file under the root defines. Expect the warning on most deep callee queries in a repo over the cap; unmeasured.
+
+Options for the human to decide: (1) skip Phase B for callees whose `to.uri` is outside the project root (no walk can find them); (2) raise the cap, since the references-side scan is a whole-word text match, not a parse (reading all 5,086 `codex` `.rs` files, 72 MB, took 0.85 s warm, `cat` only); (3) leave as is and accept the warning in huge repos, where it is true (the walk did stop) but uninformative.
+
+Not fixed here: the Phase B walk does not apply the vendored-directory prune that the `references` walk now has, so a non-gitignored `node_modules/` spends this walk's budget too. Filed separately: `docs/issues/2026-10-17-call-graph-phase-b-compares-the-lsp-language-id-to-the-ast-language-so-a-tsx-or-jsx-seed-walks-no-files.md` (a `.tsx` or `.jsx` seed examines no file at all) and `docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`.
 
 ## References
 

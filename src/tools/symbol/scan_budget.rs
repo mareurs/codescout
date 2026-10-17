@@ -3,11 +3,18 @@
 //!
 //! Both walks bound themselves by file count so a monorepo cannot stall the call. The
 //! bound is a performance guard and stays; what it must not do is turn "stopped early"
-//! into "nothing there". [`ScanBudget::admit`] is the one place that decides a file is
-//! not going to be examined, and it records that, so a caller can tell an exhausted walk
-//! from one that looked at everything (ADR 2026-08-27, a negative result names its scope).
-//! The disclosure is "cut short" only when an unexamined candidate actually remained: a
-//! walk that ends exactly on its cap has covered the project and reports nothing.
+//! into "nothing there". [`ScanBudget::admit`] is where a walk is told it may not look at
+//! one more candidate file, and it records that, so a caller can tell a walk the CAP
+//! stopped from one that ran out of files (ADR 2026-08-27, a negative result names its
+//! scope). The disclosure is "cut short" only when an unexamined candidate actually
+//! remained: a walk that ends exactly on its cap has covered the project and reports
+//! nothing.
+//!
+//! What this does NOT record: an ADMITTED file can still go unexamined with nothing
+//! noted, because it could not be read (not UTF-8, permissions), could not be parsed, or
+//! the directory walker could not enter it. A walk that is not cut short is therefore
+//! "the cap did not stop it", not "every file was examined"
+//! (docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md).
 
 /// Counts the candidate files a walk has admitted and remembers whether it refused one.
 #[derive(Debug, Clone, Copy)]
@@ -38,8 +45,9 @@ impl ScanBudget {
         true
     }
 
-    /// `Some(cap)` when a candidate file was refused, `None` when the walk covered
-    /// everything it was asked to.
+    /// `Some(cap)` when a candidate file was refused, `None` when the cap never refused
+    /// one. `None` is "the cap did not stop the walk", not "every file was examined":
+    /// see the module doc for what an admitted file can still go through unrecorded.
     pub(crate) fn cut_short_at(&self) -> Option<usize> {
         self.cut_short.then_some(self.cap)
     }

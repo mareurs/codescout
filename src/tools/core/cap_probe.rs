@@ -1307,14 +1307,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     ProbeRow {
         // Reclassified from `NoMarker`: `lookup_pos_via_ts_workspace` now returns
         // `WorkspaceScan::CutShort` for a walk the cap stopped with candidates left,
-        // `lookup_pos` records the symbol in `scan_cut_short`, and `CallGraph::call` puts a
-        // `completeness_warning` in the result (and `format_compact` renders it).
+        // `lookup_pos` records the symbol, `CallGraph::call` puts a `completeness_warning`
+        // in the result and `format_compact` renders it FIRST (so the overflow summary's
+        // `truncate_compact` cannot cut it). The cited test drives `CallGraph::call` over
+        // 5,001 files and asserts the production text ("stopped after 5000") in both the
+        // JSON and the compact rendering. Mutation: deleting `attach_scan_cut_short` from
+        // `CallGraph::call` reds it (observed 2026-10-17).
         // docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md
         id: "call_graph.workspace_files_scan",
         coverage: Coverage::Probed {
-            marker: Marker::TextContains("stopped after 2"),
+            marker: Marker::TextContains("stopped after 5000"),
             mutation: Mutation::Killed,
-            cited_test: "a_workspace_walk_stopped_by_its_cap_is_reported_not_passed_off_as_no_such_symbol",
+            cited_test: "call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap",
         },
     },
     // -- src/agent/build_check.rs --

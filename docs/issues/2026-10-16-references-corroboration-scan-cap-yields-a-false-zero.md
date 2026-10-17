@@ -37,11 +37,13 @@ Verified real at runtime before changing the code (2026-10-17): `references_zero
 
 The cap stays (performance guard); the fix is disclosure.
 
-- `src/tools/symbol/scan_budget.rs` (new): `ScanBudget`, shared with the `call_graph` fix. `cut_short_at()` is `Some(cap)` only when a candidate file was actually left unexamined, so a walk ending exactly on the cap, or stopping early on the hit cap, is not flagged.
-- `src/tools/symbol/references.rs`: `corroborate_zero_references` now returns `CorroborationScan { hits, cut_short_at }` via `corroborate_with_cap` (cap injectable); `corroboration_cut_short_warning` builds the text, and `References::call` sets `completeness_warning` from it when the hit list is empty and the walk was cut short. A finished empty scan stays bare (ADR 2026-08-27 clause 2).
+- `src/tools/symbol/scan_budget.rs` (new): `ScanBudget`, shared with the `call_graph` fix. `cut_short_at()` is `Some(cap)` only when a candidate file was actually refused, so a walk ending exactly on the cap, or stopping early on the hit cap, is not flagged. It does not see an admitted file that then fails to read (`docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`).
+- `src/tools/symbol/references.rs`: `corroborate_zero_references` returns `CorroborationScan { hits, cut_short_at }` via `corroborate_with_cap` (cap injectable); `corroboration_cut_short_warning` builds the text; `References::call` sets `completeness_warning` from it when the hit list is empty and the walk was cut short. A finished empty scan stays bare (ADR 2026-08-27 clause 2).
+- Review fix, overflow: `format_compact` puts `completeness_warning` FIRST (it was appended). The summary of a buffered result is `truncate_compact(format_compact(val), 2000, 3000)`, which cuts at the last newline in range, so an appended warning is the line a large result loses. This applies to references because "no reference outside the definition file" does not mean a small result (250 uses inside the file).
+- Review fix, vendored trees: the walk prunes `path_in_excluded_dir` directories (`target/`, `node_modules/`, `vendor/`, `build/`, `out/`, `dist/`, ...) via `filter_entry`, judged on the path BELOW the project root (the helper tests every component, so the absolute path would exclude a whole project living under a directory named `build`). It matches what the LSP half of `references` already drops. Trade-off to know: a symbol whose ONLY other use is under such a directory (including a legitimate source directory named `build` or `out`) no longer corroborates; the LSP results from there are dropped by the same rule today.
 - `src/tools/core/cap_probe.rs`: `references.corroborate_files_scan` moved from `NoMarker` to `Probed`.
 
-Fix commit: SHA `a1c101a3` on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5); patch-id `a28d394e0e8e81323224874c5a2ad735ef090d4c`.
+Fix commits: `a1c101a3` (first fix) and the review-fix commit recorded under Resume, both on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5). patch-id of `a1c101a3`: `a28d394e0e8e81323224874c5a2ad735ef090d4c`.
 
 ## Tests added
 
@@ -49,6 +51,9 @@ In `src/tools/symbol/tests.rs`:
 
 - `references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned` (the cited probe test; red before the fix, green after)
 - `references_zero_from_a_completed_corroboration_scan_stays_bare`
+- `references_warning_survives_the_overflow_summary_of_a_large_result` (through `call_content`: 250 in-file references, buffered, summary truncated). RED observed 2026-10-17 by appending the warning again: `panicked at tests.rs:6087`.
+- `corroborate_scan_does_not_spend_its_budget_on_vendored_directories`. RED observed against the unpruned walk: `panicked at tests.rs:6114`, then green with the prune.
+- `corroborate_scan_filters_below_the_project_root_not_above_it` (a project under a `build/` parent still gets scanned; guards the root-relative judgement)
 - `corroborate_scan_reports_cut_short_only_when_a_candidate_was_left_unexamined` (cap 3 over 3 candidates vs cap 2)
 - `corroborate_zero_references_finds_callers_via_text_scan` (existing; adapted to the new return type)
 
@@ -56,7 +61,18 @@ Plus the three `ScanBudget` boundary tests in `src/tools/symbol/scan_budget.rs`.
 
 ## Resume
 
-N/A once fixed.
+N/A once fixed. Residual and open decisions, none implemented:
+
+**How often does this warning fire (ADR clause 2 noise)?** Measured 2026-10-17.
+
+- This repo (476 tracked `.rs`, 161 `.py`, 8 `.ts`): never, the walk finishes.
+- `/home/marius/work/claude/codex` (5,086 tracked `.rs` files, over the cap, so the walk can never finish): of 45,464 unique `fn` names, every 40th with length >= 4 was sampled (1,136); `git grep -w -l` finds 779 (68.6%) named by exactly ONE file and 357 by two or more. A name found in one file is a symbol `references` reports with 0 references outside the definition file and the text scan cannot corroborate, so in a repo over the cap roughly two thirds of file-local functions return a zero that now carries the warning. Proxy only: it counts text, not LSP results, and trait-impl methods share names.
+
+It is noise in practice in repos over the cap: the warning is true (the walk did stop) but it fires on every file-local symbol and so stops being read, which is what ADR clause 2 warns about. It is inert below the cap.
+
+Options for the human to decide: (1) raise the cap, since the scan is a whole-word text match and not a parse (reading all 5,086 `codex` `.rs` files, 72 MB, took 0.85 s warm, `cat` only, so a 50,000-file cap is a few seconds worst case); (2) keep the cap and scope the warning to symbols that are not obviously file-local; (3) leave as is.
+
+Not fixed here: a non-UTF-8 file is skipped unrecorded (`docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`).
 
 ## References
 

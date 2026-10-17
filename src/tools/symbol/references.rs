@@ -181,8 +181,9 @@ pub(crate) struct CorroborationScan {
     pub hits: Vec<std::path::PathBuf>,
     /// `Some(cap)` when a same-language file was left unexamined because the walk hit its
     /// file cap, so an empty `hits` is "not reached" rather than "not present". `None`
-    /// when every candidate was examined, or when the walk stopped early on its hit cap
-    /// (then `hits` is non-empty and already proves the point).
+    /// when the cap never stopped the walk (every candidate was ADMITTED — an admitted file
+    /// that could not be read is still skipped unrecorded), or when the walk stopped early
+    /// on its hit cap (then `hits` is non-empty and already proves the point).
     pub cut_short_at: Option<usize>,
 }
 
@@ -199,9 +200,20 @@ pub(crate) fn corroborate_with_cap(
     const MAX_HITS: usize = 5;
     let mut hits: Vec<std::path::PathBuf> = Vec::new();
     let mut budget = crate::tools::symbol::scan_budget::ScanBudget::new(max_files);
+    // Prune what the LSP half of `references` already drops (`path_in_excluded_dir`:
+    // target/, node_modules/, vendor/, ...). Without it a project whose vendored tree is
+    // not gitignored spends the whole file budget there and reports a cut-short walk it
+    // never needed to be. Judged on the path BELOW `root`: the helper tests every
+    // component, so the absolute path would exclude every file of a project that merely
+    // lives under a directory named `build` or `out`.
+    let walk_root = root.to_path_buf();
     for entry in ignore::WalkBuilder::new(root)
         .hidden(true)
         .git_ignore(true)
+        .filter_entry(move |e| {
+            let rel = e.path().strip_prefix(&walk_root).unwrap_or(e.path());
+            !crate::fs::path_in_excluded_dir(rel)
+        })
         .build()
         .flatten()
     {
@@ -546,12 +558,15 @@ impl Tool for References {
         // cross-check found more call sites than references did) in both the
         // zero-refs and the normal branch.
         let warning = result.get("completeness_warning").and_then(|v| v.as_str());
-        let append_warning = |mut out: String| -> String {
-            if let Some(w) = warning {
-                out.push_str("\n\nwarning: ");
-                out.push_str(w);
+        // PREFIXED, not appended: when this text is the summary of a buffered result,
+        // `truncate_compact` cuts at the last newline within its byte budget, so a line
+        // added last is the line a large result loses. The workspace notice is prefixed
+        // for the same reason (`Tool::call_content`).
+        let append_warning = |out: String| -> String {
+            match warning {
+                Some(w) => format!("warning: {w}\n\n{out}"),
+                None => out,
             }
-            out
         };
 
         let file_groups_arr = result["file_groups"].as_array()?;
