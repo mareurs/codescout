@@ -190,6 +190,20 @@ fn create_staging_file(
 /// content of a private file is not readable by other users during the write; a new file keeps
 /// the `0666 & !umask` default.
 ///
+/// **The final mode is unchanged in every case where `fchmod` succeeds.** A failing `fchmod`
+/// is ignored, as it always was, and for an existing target that now leaves the file at
+/// `0600 & !umask` instead of `0666 & !umask` — it fails closed, a `0644`/`0755` file narrows
+/// to `0600`, and the write still succeeds. Plausible hosts: an sshfs mount whose sftp-server
+/// refuses `setstat`/`fsetstat`, an LSM (SELinux) denying `setattr`, sticky/setgid rules on
+/// macOS/FreeBSD. Ignoring is deliberate (the content is written, and refusing the whole edit
+/// over a mode would be worse); it is documented, not changed.
+///
+/// **The mode is read BEFORE the create, which widens the race the next paragraph already
+/// admits.** Measured by the reviewer against the old read-after-write order: a target created
+/// `0600` by someone else during our write ends `0644` (the default) where it used to end
+/// `0600`; a `chmod 0644 -> 0755` during the write is lost where it used to be picked up (old
+/// `0755`); a target deleted during the write keeps `0600` where it used to end `0644`.
+///
 /// Not fsynced, as before: atomic against a concurrent reader and a failed write, not
 /// durable across power loss. Two writers to the *same* target still race (last rename wins).
 pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
@@ -921,18 +935,61 @@ mod tests {
     ///
     /// Observed from inside the write step, which runs after the create and before the final
     /// mode is set, so this is the window itself rather than a before/after comparison.
+    ///
+    /// **Needs a umask that leaves group/other read open, and must not fail a host for lacking
+    /// one.** Under `umask 077` (or 066/067/076) a plain create is already private, so the
+    /// window cannot be seen. Rather than fail there, or pass vacuously, the test re-runs ITSELF
+    /// in a child under `umask 022` (`sh -c 'umask 022; exec ...'`). The child is marked by an
+    /// environment variable and asserts its own precondition, so a child that could not
+    /// establish `022` fails loudly instead of passing.
     #[cfg(unix)]
     #[test]
     fn the_staging_file_of_a_private_target_is_private_while_it_is_written() {
-        use std::os::unix::fs::PermissionsExt;
+        const MARK: &str = "CODESCOUT_FS_WINDOW_TEST_UMASK022_CHILD";
         let dir = tempdir().unwrap();
-        assert_ne!(
-            default_new_file_mode(dir.path()) & 0o077,
-            0,
-            "this environment's umask already hides group/other bits, so the window cannot be \
-             observed — run the test under `umask 022`; that is a harness limit, not a pass"
+        let can_observe = default_new_file_mode(dir.path()) & 0o044 == 0o044;
+        if !can_observe && std::env::var_os(MARK).is_none() {
+            let exe = std::env::current_exe().unwrap();
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(r#"umask 022; exec "$0" "$@""#)
+                .arg(exe)
+                .args([
+                    "--exact",
+                    "util::fs::tests::the_staging_file_of_a_private_target_is_private_while_it_is_written",
+                    "--test-threads=1",
+                ])
+                .env(MARK, "1")
+                .output()
+                .expect("re-run under umask 022");
+            assert!(
+                out.status.success(),
+                "the umask-022 child failed:\n{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            // The child must have RUN the body, not filtered it out.
+            assert!(
+                String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+                "the umask-022 child ran no test:\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            return;
+        }
+        private_window_body(dir.path());
+    }
+
+    /// The body of the window test; asserts its own precondition, so it is loud wherever it runs.
+    #[cfg(unix)]
+    fn private_window_body(dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            default_new_file_mode(dir) & 0o044,
+            0o044,
+            "this process's umask hides group/other read, so the window cannot be observed — \
+             the umask-022 re-run did not establish 022"
         );
-        let target = dir.path().join("secret.txt");
+        let target = dir.join("secret.txt");
         std::fs::write(&target, "old").unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
 
@@ -1013,29 +1070,108 @@ mod tests {
 
     /// The real staging names must stay on the target's filesystem, or the closing `rename`
     /// fails with EXDEV. Seam-free: a target on one device and `std::env::temp_dir()` on
-    /// another means a staging file placed in the temp dir makes the write fail. Linux only
-    /// (`/dev/shm`, `/var/tmp`); the precondition is asserted, not skipped, because a skipped
-    /// check reads as coverage.
+    /// another means a staging file placed in the temp dir makes the write fail.
+    ///
+    /// This catches staging on a DIFFERENT DEVICE and nothing more: a closure that stages in
+    /// the grandparent on the same filesystem, or reuses a nonce, survives it. Those are the
+    /// jobs of `the_real_staging_file_is_beside_its_target_not_in_its_parent` and
+    /// `concurrent_writers_to_one_target_never_collide_on_a_staging_name`.
+    ///
+    /// Linux only (`/dev/shm`, `/var/tmp`). A host where neither is on a different device than
+    /// `temp_dir()` (a container without its own `/dev/shm`, say) cannot run it: it then SKIPS,
+    /// printing each candidate's finding and re-checking that finding independently, instead of
+    /// failing a legitimate host. Where a distinct device exists it asserts as before.
     #[cfg(target_os = "linux")]
     #[test]
     fn the_real_staging_file_is_created_on_the_targets_filesystem() {
         use std::os::unix::fs::MetadataExt;
         let temp_dev = std::fs::metadata(std::env::temp_dir()).unwrap().dev();
-        let other = ["/dev/shm", "/var/tmp"].iter().find_map(|c| {
-            let d = tempfile::tempdir_in(c).ok()?;
-            (std::fs::metadata(d.path()).ok()?.dev() != temp_dev).then_some(d)
-        });
-        let other = other.expect(
-            "no writable directory on a different device than std::env::temp_dir() \
-             (/dev/shm, /var/tmp): this test cannot tell a sibling staging file from one \
-             in the temp dir — that is a harness limit, not a pass",
-        );
+        let mut findings = Vec::new();
+        let mut other = None;
+        for c in ["/dev/shm", "/var/tmp"] {
+            match tempfile::tempdir_in(c) {
+                Err(e) => findings.push(format!("{c}: not writable ({e})")),
+                Ok(d) => {
+                    let dev = std::fs::metadata(d.path()).unwrap().dev();
+                    if dev == temp_dev {
+                        findings.push(format!("{c}: same device as temp_dir() ({dev})"));
+                    } else {
+                        other = Some(d);
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(other) = other else {
+            // The skip reason is asserted, not assumed: every candidate must have been rejected
+            // for one of the two recorded reasons, and re-checking must agree.
+            assert_eq!(findings.len(), 2, "every candidate needs a recorded reason");
+            for c in ["/dev/shm", "/var/tmp"] {
+                let distinct = tempfile::tempdir_in(c)
+                    .ok()
+                    .map(|d| std::fs::metadata(d.path()).unwrap().dev() != temp_dev)
+                    .unwrap_or(false);
+                assert!(!distinct, "{c} is usable after all; the skip is wrong");
+            }
+            eprintln!(
+                "SKIPPED the_real_staging_file_is_created_on_the_targets_filesystem: no writable \
+                 directory on a different device than temp_dir(): {findings:?}"
+            );
+            return;
+        };
         let target = other.path().join("x.txt");
 
         atomic_write(&target, "WRITTEN").unwrap();
 
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "WRITTEN");
         assert_eq!(entry_names_any(other.path()), vec!["x.txt".to_string()]);
+    }
+
+    /// Restores a directory's permissions on drop, so a failed assertion cannot leave a
+    /// read-only directory behind for the tempdir cleanup to trip over.
+    #[cfg(unix)]
+    struct RestoreMode(PathBuf);
+    #[cfg(unix)]
+    impl Drop for RestoreMode {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    /// The staging file must be created in the target's OWN directory, not in an ancestor.
+    /// Seam-free, through the real name closure: the target's directory is writable but its
+    /// PARENT is read-only, so a closure that staged one level up (same filesystem, which the
+    /// cross-device test cannot see) would fail the create with EACCES. A privileged user
+    /// ignores directory modes, so as root the test SKIPS, saying so.
+    #[cfg(unix)]
+    #[test]
+    fn the_real_staging_file_is_beside_its_target_not_in_its_parent() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!(
+                "SKIPPED the_real_staging_file_is_beside_its_target_not_in_its_parent: running as \
+                 root, directory modes do not restrict it"
+            );
+            return;
+        }
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        let own = parent.join("own");
+        std::fs::create_dir_all(&own).unwrap();
+        let _restore = RestoreMode(parent.clone());
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Precondition: the restriction really bites, or this proves nothing.
+        assert!(
+            std::fs::File::create(parent.join("probe")).is_err(),
+            "the read-only parent still accepts a create; the test cannot discriminate"
+        );
+
+        let target = own.join("x.txt");
+        atomic_write(&target, "WRITTEN").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "WRITTEN");
+        assert_eq!(entry_names_any(&own), vec!["x.txt".to_string()]);
     }
 
     /// The test the three above cannot be: with random staging names a planted `x.txt.tmp` is
@@ -1245,6 +1381,35 @@ mod tests {
         let mut want: Vec<String> = names.iter().map(|n| n.to_string()).collect();
         want.sort();
         assert_eq!(entry_names_any(dir.path()), want, "a staging file leaked");
+    }
+
+    /// Many writers to ONE target through the real name closure. Every call must succeed: a
+    /// closure that offered the same staging name to every call (a constant nonce) would make
+    /// concurrent creates collide, burn their 16 attempts on the one occupied name and fail.
+    /// The payload is large so each writer holds its staging file long enough for the others
+    /// to meet it; a correct implementation never fails this, whatever the timing.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_writers_to_one_target_never_collide_on_a_staging_name() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("shared.txt");
+        let payload = "x".repeat(512 * 1024);
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..25 {
+                        atomic_write(&target, &payload)
+                            .expect("a concurrent write must not collide");
+                    }
+                });
+            }
+        });
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), payload);
+        assert_eq!(
+            entry_names_any(dir.path()),
+            vec!["shared.txt".to_string()],
+            "a staging file leaked"
+        );
     }
 
     /// The leak the `rename` guard never covered. `std::fs::write` is
