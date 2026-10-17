@@ -228,6 +228,14 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 // `doctor.exposure_threshold` — a floor that DOES drop rows of the result — is now
 // `Coverage::NoMarker`, with its bug filed.
 //
+// AMENDED 2026-10-17: both `NoMarker` doctor rows filed on 2026-10-16 are fixed and are
+// `Probed` now. `doctor.exposure_threshold` publishes `summary.below_exposure_floor`
+// (per-check counts of the candidates the floor withheld, split in-scope / out-of-scope,
+// the floor itself, and the scope the counts range over), and
+// `doctor.recently_touched_walk` publishes `walk_truncated` (the ceiling bit INSIDE the
+// settle window), `walk_ceiling_reached` and `walk_unavailable` in
+// `catalog_health.open_bug_source_citations`.
+//
 // The rule, once: a floor is a `RESULT_CAP` iff what it suppresses is rows of the result.
 //
 // `read_file.json_path_route_room` was struck by the same rule on 2026-10-16. Its floor only
@@ -534,20 +542,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // A suppression FLOOR that drops ROWS OF THE RESULT (doctor's worklist entries below
         // it), which is what makes it a `RESULT_CAP` at all: a floor that merely gates an
         // advisory beside a whole result withholds nothing from it (see
-        // `context.attestation_exposure`, `NOT_A_CAP`). The floor is deliberate; the defect
-        // is that nothing counts what it dropped.
+        // `context.attestation_exposure`, `NOT_A_CAP`). The floor is deliberate; it now
+        // counts what it dropped, per check and split by whether the active scope would
+        // have shown the candidate, in `summary.below_exposure_floor.{in_scope,out_of_scope}`,
+        // and names the population the count ranges over. The cited test has no active
+        // project (everything in scope); `call_splits_the_withheld_count_by_the_active_scope`
+        // is the project-rooted case that pins the split.
+        // docs/issues/2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md
         id: "doctor.exposure_threshold",
-        coverage: Coverage::NoMarker {
-            reason: "`EXPOSURE_THRESHOLD` (5) is a suppression floor, not a truncating ceiling: \
-             `src/librarian/tools/doctor.rs:4553` (and `:4699`, `:4828`) drops rows *below* it \
-             and no field reports how many were dropped, while the marker \
-             `$.summary.by_check.entry_conditional_past_due` counts rows that survived. \
-             The marker is therefore observable non-zero only when the cap did not bite. \
-             The one test that drives exposure below the floor \
-             (`conditional_past_due_fires_exactly_at_the_exposure_threshold`, \
-             `doctor.rs:18868`) calls `scan_conditional_past_due` directly rather than \
-             `call()`, so no `summary.by_check` object exists in its output at all.",
-            bug: "docs/issues/2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.summary.below_exposure_floor.in_scope"),
+            mutation: Mutation::Killed,
+            cited_test: "call_counts_the_candidates_the_exposure_floor_withheld_and_names_its_scope",
         },
     },
     ProbeRow {
@@ -1330,19 +1336,23 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/tools/doctor.rs --
     ProbeRow {
+        // The walk's ceiling is reached on every call in this repo: measured 2026-10-17,
+        // 7,739 commits against 4,000, and the 4,000th/4,001st commit in `git log
+        // --date-order` is ~51 days older than the 7-day cutoff (the 2026-09-09 figures,
+        // 5,582 commits and a tail ~115 days back, are superseded). So the bare "ceiling
+        // reached" is the ordinary state here and says nothing; the row's marker is
+        // `walk_truncated`, which is `true` only when the ceiling bit while the last commit
+        // read was still INSIDE the window. `walk_ceiling_reached` publishes the ordinary
+        // state beside it. `paths_touched_since` returns a `TouchedWalk`; the cited test
+        // drives `call()` over 4,002 in-window commits against the real 4,000 bound, and
+        // `open_bug_cited_from_source_health_says_when_the_walk_was_truncated` injects a small
+        // ceiling through `scan_open_bug_cited_from_source_walking` for the harmless side.
+        // docs/issues/2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md
         id: "doctor.recently_touched_walk",
-        coverage: Coverage::NoMarker {
-            reason: "the ceiling IS reached on every call in this repo — 5,582 commits against \
-             a 4,000 walk, measured 2026-09-09 — and `paths_touched_since` returns a \
-             bare HashSet, breaking at the bound with nothing marking the set partial. \
-             What blocks a probe is reachability of the DEFECT, not of the cap: the walk \
-             is TIME-sorted, so the truncated tail's newest member is 2026-05-17, ~115 \
-             days behind the 7-day cutoff every caller passes, and no input available \
-             here makes the truncation change an answer. Driving it needs a fixture repo \
-             of >4,000 commits whose committer-time order is non-monotonic across the \
-             boundary — precisely the condition the ceiling exists to tolerate, per \
-             `paths_touched_since`'s own doc comment",
-            bug: "docs/issues/2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.catalog_health.open_bug_source_citations.walk_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "call_publishes_walk_truncated_when_the_production_ceiling_bites_in_the_window",
         },
     },
     // -- src/tools/memory/mod.rs --
