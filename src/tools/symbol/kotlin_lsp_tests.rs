@@ -302,3 +302,129 @@ async fn a_cold_language_server_overview_says_it_was_served_from_tree_sitter() {
         "every top-level function the file declares must be listed:\n{text}"
     );
 }
+/// `include_body` and `include_docs` are promised in overview mode too (the tool's own docs say
+/// so). A single-file overview is rendered by `format_overview_symbols`, whose tree printed
+/// names and ranges only — on the inline path (JSON under 10 KB) there is no buffer to fall back
+/// on, so the bodies, every docstring line past the first, and the signatures the flags asked
+/// for were not reachable at all.
+/// docs/issues/archive/2026-07-18-symbols-overview-include-body-ignored-and-search-flake.md
+#[tokio::test]
+async fn a_single_file_overview_with_include_body_and_include_docs_shows_both() {
+    let (_dir, ctx) = replayed_ctx().await;
+    let result = Symbols
+        .call(
+            json!({"path": CATALOG_REL, "include_body": true, "include_docs": true}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let text = Symbols.format_compact(&result).unwrap();
+    // A member body, last line included, and a top-level function's body.
+    for line in [
+        "fun search(query: String): List<T> =",
+        "items.filter { it.searchText().contains(query) }",
+        "require(maxItems > 0) { \"maxItems must be positive\" }",
+        "fun createDefaultCatalog(): Catalog<Book> = Catalog(\"Main Library\")",
+    ] {
+        assert!(
+            text.contains(line),
+            "body line `{line}` missing from:\n{text}"
+        );
+    }
+    // A docstring line that is not the first one.
+    assert!(
+        text.contains("@param maxItems Maximum number of items allowed"),
+        "docstring beyond its first line missing from:\n{text}"
+    );
+}
+
+/// The cold-server case keeps BOTH: the warming marker and what `include_body` asked for.
+#[tokio::test]
+async fn a_cold_overview_with_include_body_keeps_the_warming_marker_and_the_bodies() {
+    struct NeverReady;
+
+    #[async_trait::async_trait]
+    impl LspProvider for NeverReady {
+        async fn get_or_start(
+            &self,
+            _language: &str,
+            _workspace_root: &Path,
+            _mux_override: Option<bool>,
+        ) -> anyhow::Result<Arc<dyn LspClientOps>> {
+            std::future::pending().await
+        }
+        async fn notify_file_changed(&self, _path: &Path) {}
+        async fn shutdown_all(&self) {}
+    }
+
+    let (_dir, ctx) = ctx_with(|_| Arc::new(NeverReady)).await;
+    let result = Symbols
+        .call(json!({"path": CATALOG_REL, "include_body": true}), &ctx)
+        .await
+        .unwrap();
+    let text = Symbols.format_compact(&result).unwrap();
+    assert!(text.contains("[lsp warming]"), "{text}");
+    assert!(
+        text.contains("items.filter { it.searchText().contains(query) }"),
+        "the body the flag asked for is missing:\n{text}"
+    );
+}
+
+/// The capped single-file overview (`{file, symbols, total, overflow}` — no `files_count`) is an
+/// overview too; the discriminator must not key on `total` or `lsp`.
+#[test]
+fn a_capped_single_file_overview_is_rendered_as_an_overview() {
+    let result = json!({
+        "file": CATALOG_REL,
+        "total": 40,
+        "symbols": [
+            {"name": "Catalog", "symbol": "Catalog", "kind": "Class", "start_line": 7, "end_line": 25}
+        ],
+        "overflow": {"shown": 1, "total": 40, "hint": "File has 40 symbols."},
+        "lsp": "warming",
+        "hint": "Language server is starting; symbols served from tree-sitter. Re-run shortly for LSP-grade detail."
+    });
+    let text = Symbols.format_compact(&result).unwrap();
+    assert!(
+        text.starts_with(&format!("{CATALOG_REL} — 1 symbol\n")),
+        "an overview header expected:\n{text}"
+    );
+    assert!(text.contains("[lsp warming]"), "{text}");
+
+    // The same shape with the language server warm (no `lsp` key) is still an overview.
+    let warm = json!({
+        "file": CATALOG_REL,
+        "total": 40,
+        "symbols": result["symbols"],
+        "overflow": result["overflow"]
+    });
+    let text = Symbols.format_compact(&warm).unwrap();
+    assert!(
+        text.starts_with(&format!("{CATALOG_REL} — 1 symbol\n")),
+        "{text}"
+    );
+}
+
+/// The fixture's LAST line, `toSearchText` (L51), is the end of the file: a body slice whose end
+/// is clamped one line short (`lines.len() - 1`) loses it, and no other body in the fixture ends
+/// on the file's last line.
+#[tokio::test]
+async fn include_body_on_the_last_declaration_of_the_file_keeps_the_file_s_last_line() {
+    let (_dir, ctx) = replayed_ctx().await;
+    let result = Symbols
+        .call(
+            json!({"name": "toSearchText", "path": CATALOG_REL, "include_body": true}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    let sym = &result["symbols"][0];
+    assert_eq!(
+        sym["body"].as_str(),
+        Some(
+            "/** Extension: extension function on Book. */\nfun Book.toSearchText(): String = \"$title ($isbn)\""
+        )
+    );
+    assert_eq!(sym["body_start_line"], 50);
+    assert_eq!(sym["end_line"], 51);
+}

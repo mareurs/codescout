@@ -9991,9 +9991,11 @@ fn format_overview_symbols_renders_per_symbol_doc() {
         text.contains("// Does a thing."),
         "first doc line should render inline:\n{text}"
     );
+    // `include_docs=true` is promised in overview mode; the inline path has no buffer to read the
+    // rest from, so the remaining lines follow under the row.
     assert!(
-        !text.contains("More detail"),
-        "only the first doc line belongs in overview:\n{text}"
+        text.contains("// More detail."),
+        "the rest of the docstring must follow under the row:\n{text}"
     );
 }
 
