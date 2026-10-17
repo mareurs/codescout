@@ -252,7 +252,7 @@ impl SyncedSignatures {
 }
 
 /// Convert hierarchical `DocumentSymbol[]` into our `SymbolInfo` tree.
-fn convert_document_symbols(
+pub(crate) fn convert_document_symbols(
     symbols: &[lsp_types::DocumentSymbol],
     file: &PathBuf,
     parent_path: &str,

@@ -14,6 +14,9 @@ mod symbols;
 mod tests;
 
 #[cfg(test)]
+mod kotlin_lsp_tests;
+
+#[cfg(test)]
 mod route_path_tests;
 
 pub use call_graph::CallGraph;
