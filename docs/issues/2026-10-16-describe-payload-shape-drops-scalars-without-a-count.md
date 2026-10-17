@@ -40,7 +40,7 @@ Landed 2026-10-17 on the worktree branch `worktree-agent-ae50bad7b60f28077` (fix
 
 Both `PROBE_ROWS` rows moved from `NoMarker` to `Probed` (`Marker::TextContains("more entries")`, `Mutation::Killed`).
 
-**Not every bound discloses itself, and the first revision's docstring said so wrongly.** Two silent drops remain and are filed, not fixed here: an array's `item keys:` line is cut at 24 with no count (`docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`; it now has its own constant and `PROBE_ROWS` row `format.shape_item_keys`, `NoMarker`, split from the object key line's `format.shape_keys`), and a nested object's arrays, objects and nulls are named nowhere (`docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`). Both were verified by running them.
+**Not every bound discloses itself, and the first revision's docstring said so wrongly.** Two silent drops were found by review, verified by running them, and filed; both are fixed on the same branch with the same `entry`/`entries` unit: an array's `item keys:` line cut at 24 with no count (`docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`; its own constant and `PROBE_ROWS` row `format.shape_item_keys`, now `Probed`), and a nested object's arrays, objects and nulls named nowhere (`docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`).
 
 ## Tests added
 
@@ -58,9 +58,9 @@ Mutation sweep, one mutation in the tree at a time, each observed red: dropping 
 
 ## Resume
 
-Nothing outstanding for the defect itself. Verified by targeted tests only (`--lib tools::format`, `--lib describe_payload_shape`, `--test result_caps`, `--lib cap_probe`); the full gate was not run. Archive once the gate is green on `experiments`, recording the fix SHA and its patch-id.
+Nothing outstanding for the defect itself. Verified by targeted tests only; the full gate was not run. Archive once the gate is green on `experiments`, recording the fix SHA and its patch-id.
 
-Related open work: the two issues filed above. `format.shape_keys` (the OBJECT key line's own `… +N more`) is still `Untested`; a test seeding an object with more than 24 keys would move that row to `Probed`. The array `item keys:` line is a different cap (`format.shape_item_keys`, `NoMarker`) and needs a code change first.
+Related: the two follow-up issues are fixed on the same branch. `format.shape_keys` (the OBJECT key line's own `… +N more`) is still `Untested`; a test seeding an object with more than 24 keys would move that row to `Probed`. The array `item keys:` cap is a separate row (`format.shape_item_keys`) and is already `Probed`.
 
 ## References
 

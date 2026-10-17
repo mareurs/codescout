@@ -594,19 +594,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
-        // Split from `format.shape_keys` (2026-10-17): the array branch of
-        // `describe_payload_shape` cuts its `item keys:` line at its own constant and, unlike the
-        // object key line, prints no count when it bites — so a marker does not exist to test
-        // for, and `Untested` (whose contract requires one) would hide a production defect
-        // behind a worklist item. Verified by running it: an array whose first item has 30 keys
-        // prints `item keys: k00 … k23` and nothing about the other six.
+        // Split from `format.shape_keys` (2026-10-17) while it still printed no count; fixed
+        // the same day (`docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`):
+        // the array branch's `item keys:` line now ends `, … +N more entries` when the first
+        // item has more than MAX_ITEM_KEYS keys. The cited test seeds THIRTY keys and asserts
+        // the marker on the `item keys:` line itself, and that exactly 24 keys stay silent.
+        // Mutation: deleting the marker emission (the `if first.len() > keys.len()` push)
+        // reds the cited test.
         id: "format.shape_item_keys",
-        coverage: Coverage::NoMarker {
-            reason: "the array branch's `item keys:` line is cut with .take(MAX_ITEM_KEYS) and \
-             prints no count, unlike the object key line's '… +N more'; an array whose first \
-             item has 30 keys names 24 and says nothing of the other six, and no test could \
-             assert a marker that is not emitted",
-            bug: "docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more entries"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_payload_shape_counts_item_keys_past_the_cap",
         },
     },
     ProbeRow {

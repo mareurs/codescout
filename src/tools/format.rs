@@ -126,18 +126,16 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 /// outright (`status`, `title`, a count).
 ///
 /// Bounded on purpose: a wide object must not spend the whole summary budget listing keys.
-/// Two bounds disclose themselves: an object's key line ends `… +N more`, and its scalar
-/// line ends `… +N more entries` — N counts the line's own entries that were held back: an
-/// over-length string filtered, or an entry (a scalar, or a nested object's `k: {…}` group)
-/// cut past `MAX_SCALARS`. The marker is absent when nothing was dropped. See
-/// `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`.
-///
-/// Two things are still silent and are filed, not fixed here: an array's `item keys:` line is
-/// cut at `MAX_ITEM_KEYS` with no count
-/// (`docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`), and the
-/// one-level descent names nothing for a nested object's non-scalar members — arrays, objects,
-/// nulls
-/// (`docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`).
+/// Every bound discloses itself. An object's key line ends `… +N more`; its scalar line, a
+/// nested object's `k: {…}` group and an array's `item keys:` line end `… +N more entries`
+/// (`entry` at one). N counts the list's own entries that were held back: an over-length
+/// string filtered, an entry (a scalar, or a nested object's group) cut past `MAX_SCALARS`, a
+/// key cut past `MAX_ITEM_KEYS`, and — inside a nested object only, where nothing else names
+/// them — its array, object and null members. A cut group is one entry however many scalars
+/// it held. The marker is absent when nothing was dropped. See
+/// `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`,
+/// `docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md` and
+/// `docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`.
 ///
 /// Returns `None` for a payload with no describable shape (a bare scalar), leaving the
 /// caller its own wording.
@@ -158,9 +156,9 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// crowd out the arrays and scalars below, which carry more per byte.
     // cap-class: RESULT_CAP format.shape_keys — probed
     const MAX_KEYS: usize = 24;
-    /// The element-key list of an array's first item. Its own constant, and its own
-    /// `PROBE_ROWS` row, because unlike `MAX_KEYS` it prints no count when it bites.
-    // cap-class: RESULT_CAP format.shape_item_keys — no marker, see the row
+    /// The element-key list of an array's first item. Its own constant and `PROBE_ROWS` row
+    /// from the object key line's, so each cap carries its own evidence.
+    // cap-class: RESULT_CAP format.shape_item_keys — probed
     const MAX_ITEM_KEYS: usize = 24;
     /// Long enough for a title or a status, short enough that a stray blob cannot
     /// monopolise the line.
@@ -177,7 +175,7 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
         TooLong,
         /// Not a scalar (array, null, object). At the top level the key line and `arrays:`
         /// already name it, so it is not a drop and must not inflate the count. Inside
-        /// `flat_scalars` nothing names it at all — it vanishes from the output uncounted
+        /// `flat_scalars` nothing names it, so there it IS counted as an entry held back
         /// (`docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`).
         NotScalar,
     }
@@ -208,12 +206,19 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
         (shown, too_long + cut)
     }
 
+    /// The one marker every list in this description ends with when it held entries back:
+    /// `… +N more entries` (`entry` at one). Used by the scalar line, a nested object's group
+    /// and the array `item keys:` line, so all three read the same and say what they count.
+    fn more_entries(dropped: usize) -> String {
+        let noun = if dropped == 1 { "entry" } else { "entries" };
+        format!("… +{dropped} more {noun}")
+    }
+
     /// Join rendered entries and, when any were dropped, end with `… +N more entries` (`entry`
     /// at one) — the scalar-line counterpart of the key line's `… +N more`. Silent at zero.
     fn join_scalars(mut shown: Vec<String>, dropped: usize) -> String {
         if dropped > 0 {
-            let noun = if dropped == 1 { "entry" } else { "entries" };
-            shown.push(format!("… +{dropped} more {noun}"));
+            shown.push(more_entries(dropped));
         }
         shown.join(", ")
     }
@@ -222,22 +227,23 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// top-level scalar pass is. Used for the one-level descent into an object-valued key —
     /// never called a second level down, which is what keeps the descent narrow rather than
     /// a general recursive walk. Returns the pairs that fit and the number of entries it
-    /// dropped (over-length or past `max_count`).
+    /// held back: over-length strings, entries past `max_count`, and — unlike the top level,
+    /// where `keys:` and `arrays:` name them — the array, object and null members, which
+    /// nothing else in the output names.
     fn flat_scalars(
         map: &serde_json::Map<String, Value>,
         max_len: usize,
         max_count: usize,
     ) -> (Vec<String>, usize) {
         let mut shown = Vec::new();
-        let mut too_long = 0;
+        let mut held_back = 0;
         for (k, v) in map {
             match scalar_cell(k, v, max_len) {
                 ScalarCell::Shown(s) => shown.push(s),
-                ScalarCell::TooLong => too_long += 1,
-                ScalarCell::NotScalar => {}
+                ScalarCell::TooLong | ScalarCell::NotScalar => held_back += 1,
             }
         }
-        cap_scalars(shown, too_long, max_count)
+        cap_scalars(shown, held_back, max_count)
     }
 
     match val {
@@ -300,6 +306,9 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
                     .take(MAX_ITEM_KEYS)
                     .collect();
                 out.push_str(&format!("\n  item keys: {}", keys.join(", ")));
+                if first.len() > keys.len() {
+                    out.push_str(&format!(", {}", more_entries(first.len() - keys.len())));
+                }
             }
             Some(out)
         }
@@ -730,6 +739,85 @@ mod tests {
         assert!(
             line.ends_with("n07=7, … +1 more entry"),
             "one entry (the hints group) was cut, however many scalars it held: {shape}"
+        );
+    }
+
+    /// Regression test for
+    /// `docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`: the
+    /// array branch's `item keys:` line is cut at `MAX_ITEM_KEYS` and must say how many keys
+    /// it held back, as the object key line does. Thirty keys against a cap of 24: the line
+    /// names `k00..k23` and ends `… +6 more entries`.
+    ///
+    /// The marker is asserted on the `item keys:` line itself, so nothing else in the shape
+    /// can satisfy it. An array of exactly 24 keys, below, must stay silent (ADR
+    /// `2026-08-27-negative-results-name-their-scope` clause 2).
+    #[test]
+    fn describe_payload_shape_counts_item_keys_past_the_cap() {
+        let item_of = |n: usize| {
+            let mut item = serde_json::Map::new();
+            for i in 0..n {
+                item.insert(format!("k{i:02}"), serde_json::json!(i));
+            }
+            serde_json::Value::Array(vec![serde_json::Value::Object(item)])
+        };
+
+        let shape = describe_payload_shape(&item_of(30)).expect("an array has a shape");
+        let line = scalar_line(&shape);
+        assert!(
+            line.trim_start().starts_with("item keys:")
+                && line.contains("k23")
+                && !line.contains("k24"),
+            "exactly the first 24 keys are named: {shape}"
+        );
+        assert!(
+            line.ends_with(", … +6 more entries"),
+            "six keys were cut past the cap and the line must say so: {shape}"
+        );
+
+        let at_the_cap = describe_payload_shape(&item_of(24)).expect("an array has a shape");
+        assert!(
+            !at_the_cap.contains("more entr"),
+            "nothing was cut at exactly the cap, so nothing may be claimed: {at_the_cap}"
+        );
+    }
+
+    /// Regression test for
+    /// `docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`:
+    /// inside the one-level descent nothing else names an array, object or null member, so the
+    /// group must count them. At the top level `keys:` and `arrays:` already name them, which
+    /// is why the top level stays silent about them (see the silence test below).
+    #[test]
+    fn describe_payload_shape_counts_a_nested_objects_non_scalar_members() {
+        let val = serde_json::json!({
+            "hints": {"a": 1, "list": [1, 2, 3], "deep": {"x": 1}, "n": null}
+        });
+        let shape = describe_payload_shape(&val).expect("an object has a shape");
+        assert!(
+            scalar_line(&shape).ends_with("hints: {a=1, … +3 more entries}"),
+            "an array, an object and a null were held back and the group must say so: {shape}"
+        );
+
+        // A group with NO scalar member must not vanish: it still has entries to report.
+        let all_non_scalar = serde_json::json!({"id": "x", "meta": {"l": [1], "e": {}}});
+        let shape = describe_payload_shape(&all_non_scalar).expect("an object has a shape");
+        assert!(
+            scalar_line(&shape).ends_with("meta: {… +2 more entries}"),
+            "a nested object holding only non-scalars must not be silently empty: {shape}"
+        );
+
+        // The three removals in one group sum: 9 numbers (cap 8 -> 1 cut), 1 over-length
+        // string, 1 array = 3 entries held back.
+        let mut hints = serde_json::Map::new();
+        for i in 0..9 {
+            hints.insert(format!("h{i:02}"), serde_json::json!(i));
+        }
+        hints.insert("long".into(), serde_json::json!("l".repeat(61)));
+        hints.insert("list".into(), serde_json::json!([1]));
+        let shape =
+            describe_payload_shape(&serde_json::json!({ "hints": hints })).expect("a shape");
+        assert!(
+            scalar_line(&shape).contains("h07=7, … +3 more entries}"),
+            "cut + over-length + non-scalar must sum to 3 inside the braces: {shape}"
         );
     }
 
