@@ -85,16 +85,25 @@ containment check and not a swap.
 ## Fix
 
 Branch `worktree-agent-a66600865e063ffd2`: `0fb7fb68` patch-id `5eee321f8278452f17cc1ea744ec9daeb514de6b`; tests pinned by
-`4efabf2d` patch-id `80aa4cef9351a74a6fc4666bfa0f93ada573ea8e`.
+`4efabf2d` patch-id `80aa4cef9351a74a6fc4666bfa0f93ada573ea8e`. Round 2 (normalise first, shared helper, neutral message):
+`033bf24b` patch-id `b5b500849f73cad3f85234d916eadb5b1f144839`.
 
 - Leaf: after the existing `full.exists()` refusal, `util::refuse_write_through_symlink(&full)` (a dangling link now
   refuses with the link and its target named). The existing `path exists` refusal for a link to an existing file is
   unchanged.
-- Parent chain: `refuse_create_outside_root(&full, &base_dir)` in `create.rs`, run BEFORE `create_dir_all` so nothing is
+- Parent chain: `util::refuse_path_outside_root(&full, &base_dir, "create")` (moved from a private `create.rs` function in round 2
+  so move, delete, write and the sidecars share it), run BEFORE `create_dir_all` so nothing is
   built outside before the refusal. It canonicalizes the deepest EXISTING ancestor of `full` (the same walk as
-  `path_security`'s private `canonicalize_through_existing_ancestor`, which is not public and which I was told not to edit), appends the
+  `path_security`'s private `canonicalize_through_existing_ancestor`, which is not public and which I was told not to edit; the
+  duplication is recorded in the doc(update) issue as a follow-up), appends the
   not-yet-existing components verbatim, resolves the root the same way, and requires `starts_with`. An unresolved `..` is
   refused rather than trusted (`starts_with` is component-wise and would match a root the `..` escapes).
+- Round 2: `rel_path` is normalised BEFORE `validate_rel_path` runs. It was validated raw and normalised after, so on Unix
+  `a\..\..\escaped.md` (a backslash is an ordinary name character there) passed the validator and became `a/../../escaped.md`.
+  Measured by replaying the base steps in a throwaway test: `validator_on_raw_ok=true`, `normalized=a/../../escaped.md`,
+  `full_exists=false`, `landed_outside_root=true` (the file appeared one level above the root). On the first fix the containment
+  check already refused it, but with a message that blamed a symbolic link in every case; the message is now neutral
+  ("a symbolic link, or a `..` that could not be resolved") and the validator catches this one first with its own.
 - A link whose target is INSIDE the root is allowed for a parent directory (`alias/c.md` where `alias -> docs/real`),
   because the file lands in the repo; only the leaf rule is "any link".
 
@@ -106,12 +115,14 @@ Branch `worktree-agent-a66600865e063ffd2`: `0fb7fb68` patch-id `5eee321f8278452f
 row), `create_refuses_a_missing_subdirectory_below_a_symlinked_ancestor_before_building_it` (asserts the outside `sub/` was
 never built), `create_still_works_under_real_directories_and_under_a_link_that_stays_inside` (control: ordinary nested path,
 not-yet-existing nested path, in-root directory link), `create_still_works_when_the_repo_root_is_itself_a_symlink` (control,
-killed the "skip the root's resolution" mutation, which survived the first set), `an_unresolved_dotdot_below_an_existing_ancestor_is_refused_not_trusted`
+killed the "skip the root's resolution" mutation, which survived the first set), `create_validates_the_rel_path_it_will_actually_use` (round 2; red first: the refusal came from the containment check with the
+symlink message), `an_unresolved_dotdot_below_an_existing_ancestor_is_refused_not_trusted`
 (killed the "drop the `..` term" mutation, which survived the first set).
 
 Mutation probe, one run per guard, 72/74 tests each: leaf guard removed KILLED; parent check removed KILLED; containment
 predicate never fires KILLED; unresolved-`..` term dropped KILLED (after the added test); root left unresolved KILLED (after the
-added test).
+added test). Round 2: normalising after validating KILLED (`CR1`); the create call to the shared containment helper dropped KILLED
+(`CR2`); the shared helper's predicate, root resolution and `..` term KILLED (`UA3`-`UA5`).
 
 ## Workarounds
 

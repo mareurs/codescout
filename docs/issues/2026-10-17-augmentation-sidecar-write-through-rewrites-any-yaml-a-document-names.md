@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Fixed for the WRITE (augmentation_sidecar::write_through). Not examined: the READ side of the same declaration (doctor sidecar_shape_drift and sidecar_unparseable open the declared path), which can read an existing .yaml outside the repo and report on it. The fix refuses an absolute or ..-bearing declared path; it does not resolve a declared path that passes through a symlinked directory inside the repo.'
+unverified: 'The check and the write are separate syscalls, so a link planted between them still wins. Containment needs a repository root: with no non-link ancestor holding .git only the lexical and leaf rules apply. The append_entry.rs sidecar reads are a #[cfg(test)] doc gate and were left unchanged.'
 ---
 
 # BUG: `augmentation_sidecar::write_through` rewrites any existing `.yaml` file the document's own frontmatter names, inside or outside the repository
@@ -84,9 +84,38 @@ spelling).
 Do not run `doc(action="augment")` on an artifact from an untrusted repository whose frontmatter declares a sidecar you did
 not write.
 
+## Round 2 (Opus review of `8ff717a8`), all measured red first
+
+The first fix was LEXICAL, and the review found three more ways through the same declaration:
+
+1. **A symlinked directory component.** `docs/augmentations -> <outside dir>` with `expects_augmentation:
+   docs/augmentations/t.yaml`: `write_through` returned success and overwrote the outside YAML (through `doc(augment)` the
+   call returned `"ok"`). A sidecar that does not parse is overwritten by design, so any existing YAML there was exposed.
+   `doctor fix=export_augmentations` created files through the same link (`exported: 1`, a file in the outside directory).
+2. **The READ side.** `sidecar_shape_drift`, `sidecar_unparseable` and `reindex`'s restore opened any declared absolute or
+   `..` path, and `serde_yml`'s error echoed what it could not parse (`invalid type: string "ghp_…"`) into the finding the agent
+   reads. Reindex's restore also turned an outside file's `prompt:` into a catalog row.
+3. **`doc(augment)` surfaced the refusal as FATAL**, after the catalog had moved, with the wrong remedy: it wrapped every
+   `write_through` error in a plain `anyhow!` (`isError: true`), persisted the new prompt first, and said "re-run once the path
+   is writable".
+
+Fix (`033bf24b`, patch-id `b5b500849f73cad3f85234d916eadb5b1f144839`): `augmentation_sidecar::confined_path` (lexical AND
+resolved, `util::refuse_path_outside_root`) is the one gate; `read_in`, `declared_target` (`write_through`), the export and
+`preflight_write_through` all go through it. A refused declared path is never opened, so no parser error can echo content. A
+sidecar directory link whose target stays inside the repo, and a plain one, still work (controls). `doc(augment)` runs the
+preflight BEFORE any row moves and keeps a refusal's recoverable type and its own remedy; the old message stays for a genuine
+IO failure. Tests: `link_dir_tests.rs` (`doc_augment_*`, `doctor_export_does_not_create_sidecars_through_a_directory_link_out_of_the_repo`),
+`doctor.rs` (`a_sidecar_declared_outside_the_repo_is_refused_and_its_content_never_echoed` with a control showing the parser echoes
+the fake token when asked directly, `a_sidecar_behind_a_directory_link_out_of_the_repo_is_refused_and_never_echoed`), `reindex.rs`
+(`a_declared_sidecar_outside_the_repo_is_neither_attached_nor_echoed`), `augment.rs`
+(`a_refusal_from_write_through_stays_recoverable_and_keeps_its_own_remedy`). Mutations of each new guard KILLED; the export's own
+`confined_path` call survives because the write door refuses the same path first (defence in depth). The three read sites in
+`append_entry.rs` sit in `#[cfg(test)] mod taxonomy_recipes` (a doc-to-code gate over this repository), so they are not an agent-reachable
+read and were left alone.
+
 ## Resume
 
-N/A. Follow-up: check the read side (`sidecar_shape_drift`, `sidecar_unparseable`) for the same unconfined declared path.
+N/A. The read side, the directory-link form and the agent-visible error shape are closed (round 2).
 
 ## References
 

@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-s
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'edit_code rename: the new check in the rename plan is unit-tested at validate_leaf_link_target but its call in do_rename is not integration-tested (no mock-LSP rename harness) and survives a mutation. Linux only for the hermetic /etc/shadow tests; macOS and Windows not run. The fix runs the target through the existing validators at the two write resolvers; it does not change path_security.rs, whose classifier still answers "allowed" for <root>/leaf -> ~/.ssh/id_rsa.'
+unverified: 'edit_code rename: the new check in the rename plan is unit-tested at validate_leaf_link_target but its call in do_rename is not integration-tested (no mock-LSP rename harness) and survives a mutation. Unix only (the fake-HOME child tests); macOS and Windows not run. The fix runs the target through the existing validators at the two write resolvers; it does not change path_security.rs, whose classifier still answers "allowed" for <root>/leaf -> ~/.ssh/id_rsa.'
 ---
 
 # BUG: `edit_file` on an in-root leaf symlink to a deny-listed path reads the file the read tools refuse, echoes it in its not-found error, and can copy it into the project
@@ -116,19 +116,26 @@ there is: in `classify_write_path_in`, after the deny-list check on the resolved
 
 ## Tests added
 
-`src/tools/edit_file/tests.rs`: `edit_tools_refuse_a_leaf_link_to_a_deny_listed_file_on_every_grammar` (Linux, `/etc/shadow`,
-single / batch / insert / heading-addressed markdown and `create_file`; asserts the deny-list message, because against the unfixed
-code a non-root read fails with `Permission denied`, an error but not this refusal),
-`edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_nothing` (fake-`$HOME` child process, the measured
-probe), `edit_file_on_a_leaf_link_to_a_harmless_file_still_replaces_the_link_and_spares_it` (control). `src/fs/mod.rs` `tests`:
-`a_leaf_link_to_a_deny_listed_file_is_refused_under_both_policies`, `a_leaf_link_check_leaves_ordinary_targets_alone` (control),
-`writable_policy_refuses_a_link_that_leaves_the_write_roots_and_a_dangling_one`,
-`resolve_write_path_for_refuses_a_leaf_link_to_a_deny_listed_file`.
+`src/tools/edit_file/tests.rs`: `edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_nothing`, the measured
+probe: the test re-executes its own binary with `HOME` set for the child only, over a fake `~/.ssh/id_rsa`, and the child runs
+`edit_file` single / batch / insert and `create_file` over BOTH an absolute and a relative link, asserting the deny-list message
+for each, the link left in place and no copy in the project. (Round 1 had a separate `/etc/shadow` test that FAILED rather than
+skipped on a host without that file, where the link reads as dangling; it was folded into the child in round 2.)
+`edit_file_on_a_leaf_link_to_a_harmless_file_still_replaces_the_link_and_spares_it` (control).
 
-Mutation probe, one run per guard site: predicate never fires KILLED (5 tests); policy forced to read KILLED; policy forced to
-write KILLED; dangling-under-read refused KILLED (by the control); `resolve_write_path_for` unwired KILLED; read validator skipped
-KILLED (4 tests); `write_ack` unwired KILLED (both edit_file tests); **`edit_code` rename plan unwired SURVIVED** (the wiring is not
-integration-tested, see `unverified`).
+`src/fs/mod.rs` `tests`: `a_leaf_link_to_a_deny_listed_file_is_refused_under_both_policies_in_both_spellings` (fake-`$HOME`
+child `fs_leaf_link_probe_child`: absolute link, relative link, relative link in a SUBdirectory, both policies, and
+`resolve_write_path_for`; control: a harmless relative link), `a_leaf_link_check_leaves_ordinary_targets_alone` (control),
+`writable_policy_refuses_a_link_that_leaves_the_write_roots_and_a_dangling_one` (uses `/etc/passwd` and asserts LOUDLY that it
+exists). The relative-link case was made real in round 2: the first fixture climbed past `/`, which resolves identically from any
+directory, so a `read_link`-based resolver survived it (mutation `FS1`); the targets now climb to a common ancestor from a link
+in a subdirectory. Commits `6bfc6f95` patch-id `a95fa19fc6bd3d80ce459d3fc7a9a796ecf3b3c3` and `e3c43bce` patch-id
+`43d92250ecf1c076b35010ced7edcf63c9e51131`.
+
+Mutation probe, one run per guard site: predicate never fires KILLED; policy forced to read KILLED; policy forced to write
+KILLED; dangling-under-read refused KILLED (by the control); `resolve_write_path_for` unwired KILLED; read validator skipped
+KILLED; `write_ack` unwired KILLED; `canonicalize` replaced by `read_link` KILLED (after round 2; by the dangling test only
+before); **`edit_code` rename plan unwired SURVIVED** (the wiring is not integration-tested, see `unverified`).
 
 ## Workarounds
 
