@@ -65,25 +65,38 @@ const PASSWD_EINTR_RETRIES: usize = 8;
 fn lookup_account_home() -> AccountLookup {
     // SAFETY: `geteuid` has no preconditions and cannot fail.
     let uid = unsafe { libc::geteuid() };
-    lookup_account_home_with(&mut |pwd, buf, result| {
-        // SAFETY: `pwd`, `buf` and `result` are exclusive references that outlive the call;
-        // `buf.len()` is the real length of the buffer the pointer addresses; `getpwuid_r` is the
-        // reentrant variant and stores its string fields inside `buf`.
-        unsafe {
-            libc::getpwuid_r(
-                uid,
-                pwd,
-                buf.as_mut_ptr().cast::<libc::c_char>(),
-                buf.len(),
-                result,
-            )
-        }
-    })
+    let mut real_getpwuid_r =
+        |pwd: &mut libc::passwd, buf: &mut [u8], result: &mut *mut libc::passwd| {
+            // SAFETY: `pwd`, `buf` and `result` are exclusive references that outlive the call;
+            // `buf.len()` is the real length of the buffer the pointer addresses; `getpwuid_r` is the
+            // reentrant variant and stores its string fields inside `buf`.
+            unsafe {
+                libc::getpwuid_r(
+                    uid,
+                    pwd,
+                    buf.as_mut_ptr().cast::<libc::c_char>(),
+                    buf.len(),
+                    result,
+                )
+            }
+        };
+    // SAFETY: the closure forwards its own `pwd`, `buf` and `result` to `getpwuid_r`, which honours
+    // the contract `lookup_account_home_with` requires: on success it stores the `pw_dir` string
+    // inside the `buf` it was given, NUL-terminated.
+    unsafe { lookup_account_home_with(&mut real_getpwuid_r) }
 }
 
 /// The retry and interpretation logic of `lookup_account_home`, over a `getpwuid_r`-shaped
 /// call so a test can drive EINTR, ERANGE and the no-entry shapes without a passwd database.
-fn lookup_account_home_with(
+///
+/// # Safety
+///
+/// `call` must honour the `getpwuid_r(3)` contract for the `pwd`, `buf` and `result` it is handed:
+/// when it returns `0` having stored a non-null pointer in `*result`, `pwd.pw_dir` must be null or
+/// point at a NUL-terminated string that lies inside the `buf` passed in the SAME call. This
+/// function reads that string with `CStr::from_ptr` and nothing else checks it; a closure that
+/// stores a dangling, unterminated or foreign pointer is undefined behaviour here.
+unsafe fn lookup_account_home_with(
     call: &mut dyn FnMut(&mut libc::passwd, &mut [u8], &mut *mut libc::passwd) -> libc::c_int,
 ) -> AccountLookup {
     use std::os::unix::ffi::OsStringExt;
@@ -101,8 +114,9 @@ fn lookup_account_home_with(
                     return AccountLookup::NoEntry;
                 }
                 // SAFETY: `pw_dir` is non-null and, because the call returned 0 with a non-null
-                // `result`, points at a NUL-terminated string inside `buf`, which is alive and
-                // not touched again until these bytes are copied out here.
+                // `result`, the caller's contract (this function's `# Safety`) makes it a
+                // NUL-terminated string inside `buf`, which is alive and not touched again until
+                // these bytes are copied out here.
                 let bytes = unsafe { std::ffi::CStr::from_ptr(pwd.pw_dir) }
                     .to_bytes()
                     .to_vec();
@@ -335,10 +349,22 @@ mod tests {
         0
     }
 
+    /// `lookup_account_home_with` is `unsafe`: its closure must honour the `getpwuid_r` contract.
+    /// Every closure in this module does: it reports no entry and leaves `pw_dir` null, or it is
+    /// `fill_entry`, which NUL-terminates the string inside the buffer it was handed and points
+    /// `pw_dir` at it (the "scribbled" case leaves `result` null, so the pointer is never read).
+    fn lookup(
+        call: &mut dyn FnMut(&mut libc::passwd, &mut [u8], &mut *mut libc::passwd) -> libc::c_int,
+    ) -> AccountLookup {
+        // SAFETY: see the doc comment of this helper; no closure passed to it stores a pointer
+        // that is not inside the buffer of the same call.
+        unsafe { lookup_account_home_with(call) }
+    }
+
     #[test]
     fn a_lookup_interrupted_by_a_signal_is_retried() {
         let mut calls = 0;
-        let found = lookup_account_home_with(&mut |pwd, buf, result| {
+        let found = lookup(&mut |pwd, buf, result| {
             calls += 1;
             if calls <= 2 {
                 return libc::EINTR;
@@ -352,7 +378,7 @@ mod tests {
     #[test]
     fn a_lookup_that_is_always_interrupted_gives_up_after_the_retry_bound() {
         let mut calls = 0;
-        let found = lookup_account_home_with(&mut |_, _, _| {
+        let found = lookup(&mut |_, _, _| {
             calls += 1;
             libc::EINTR
         });
@@ -367,7 +393,7 @@ mod tests {
     #[test]
     fn a_too_small_buffer_is_grown_and_the_lookup_retried() {
         let mut sizes = Vec::new();
-        let found = lookup_account_home_with(&mut |pwd, buf, result| {
+        let found = lookup(&mut |pwd, buf, result| {
             sizes.push(buf.len());
             if buf.len() < 4096 {
                 return libc::ERANGE;
@@ -381,7 +407,7 @@ mod tests {
     #[test]
     fn a_buffer_that_never_suffices_stops_growing_at_the_bound() {
         let mut last = 0;
-        let found = lookup_account_home_with(&mut |_, buf, _| {
+        let found = lookup(&mut |_, buf, _| {
             last = buf.len();
             libc::ERANGE
         });
@@ -392,13 +418,10 @@ mod tests {
     #[test]
     fn every_shape_of_no_usable_entry_is_reported_as_none() {
         // `0` with a null result: glibc's spelling of "no such user".
-        assert_eq!(
-            lookup_account_home_with(&mut |_, _, _| 0),
-            AccountLookup::NoEntry
-        );
+        assert_eq!(lookup(&mut |_, _, _| 0), AccountLookup::NoEntry);
         // A result with no `pw_dir`.
         assert_eq!(
-            lookup_account_home_with(&mut |pwd, _, result| {
+            lookup(&mut |pwd, _, result| {
                 *result = pwd;
                 0
             }),
@@ -407,7 +430,7 @@ mod tests {
         // A call that left a `pw_dir` behind but reported no entry (`result` stays null): the
         // pointer is not trusted without the result.
         assert_eq!(
-            lookup_account_home_with(&mut |pwd, buf, _result| {
+            lookup(&mut |pwd, buf, _result| {
                 fill_entry("/home/scribbled", pwd, buf, &mut std::ptr::null_mut());
                 0
             }),
@@ -416,7 +439,7 @@ mod tests {
         // The error-code spellings of "no such user".
         for errno in [libc::ENOENT, libc::ESRCH] {
             assert_eq!(
-                lookup_account_home_with(&mut |_, _, _| errno),
+                lookup(&mut |_, _, _| errno),
                 AccountLookup::NoEntry,
                 "errno {errno}"
             );
@@ -424,16 +447,13 @@ mod tests {
         // An entry whose home is not an absolute path is not a home directory.
         for dir in ["", "rel", "."] {
             assert_eq!(
-                lookup_account_home_with(&mut |pwd, buf, result| fill_entry(dir, pwd, buf, result)),
+                lookup(&mut |pwd, buf, result| fill_entry(dir, pwd, buf, result)),
                 AccountLookup::NoEntry,
                 "pw_dir {dir:?}"
             );
         }
         // An error that says nothing about the entry is a failure, not a verdict.
-        assert_eq!(
-            lookup_account_home_with(&mut |_, _, _| libc::EIO),
-            AccountLookup::Failed
-        );
+        assert_eq!(lookup(&mut |_, _, _| libc::EIO), AccountLookup::Failed);
     }
 
     #[test]

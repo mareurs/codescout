@@ -135,7 +135,10 @@ item 6 in `2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admi
 2. `platform::{account_home_dir, resolve_home, resolved_home_dir}`; `path_security::home_dir`
    now reads `resolved_home_dir`. Unix `account_home_dir` is `getpwuid_r(geteuid())` with the
    `unsafe` narrowed to the `geteuid` call, the `getpwuid_r` call, the `zeroed` struct and the
-   `CStr` read (a SAFETY comment on each), an EINTR retry bounded at 8, an ERANGE-grown buffer
+   `CStr` read (a SAFETY comment on each). `lookup_account_home_with`, which takes the
+   `getpwuid_r`-shaped closure and does the `CStr` read, is an `unsafe fn` with a `# Safety`
+   section (review follow-up: as a safe fn it was sound only if every closure honoured the
+   contract, a promise the type system did not carry). An EINTR retry bounded at 8, an ERANGE-grown buffer
    bounded at 1 MiB, and a `OnceLock` cache of the ACCOUNT lookup only: a definitive answer
    (found, or no entry) is kept, a failed call is not (a transient error must not switch the guard
    off for the life of the process). `$HOME` is read on every call, never cached.
