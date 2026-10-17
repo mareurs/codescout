@@ -61,6 +61,8 @@ Plus the three `ScanBudget` boundary tests in `src/tools/symbol/scan_budget.rs`.
 
 ## Resume
 
+**Review-fix commit:** `824ae416`, patch-id `bd21bcb112d3842380e892c51c053165e026c77c`, same branch.
+
 N/A once fixed. Residual and open decisions, none implemented:
 
 **How often does this warning fire (ADR clause 2 noise)?** Measured 2026-10-17.
