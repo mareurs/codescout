@@ -41,7 +41,7 @@ The cap stays (it is a performance guard against the MCP ceiling); the fix is di
 - `src/tools/symbol/call_graph/mod.rs`: the walk returns `WorkspaceScan::{Found, NotFound, CutShort}`; `lookup_pos` records a cut-short symbol in a new `scan_cut_short` set; `CallGraph::call` adds `completeness_warning` and `scan_cut_short_symbols` to the result, and `format_compact` renders the warning (the tool is `OutputForm::Text`, so that is what the caller reads). `MAX_WORKSPACE_FILES_SCAN` moved to module level and the resolver carries it as `workspace_scan_cap` so the boundary is testable.
 - `src/tools/core/cap_probe.rs`: `call_graph.workspace_files_scan` moved from `NoMarker` to `Probed`.
 
-Fix commit: SHA and patch-id recorded below once committed.
+Fix commit: SHA `a1c101a3` on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5); patch-id `a28d394e0e8e81323224874c5a2ad735ef090d4c`.
 
 ## Tests added
 

@@ -41,7 +41,7 @@ The cap stays (performance guard); the fix is disclosure.
 - `src/tools/symbol/references.rs`: `corroborate_zero_references` now returns `CorroborationScan { hits, cut_short_at }` via `corroborate_with_cap` (cap injectable); `corroboration_cut_short_warning` builds the text, and `References::call` sets `completeness_warning` from it when the hit list is empty and the walk was cut short. A finished empty scan stays bare (ADR 2026-08-27 clause 2).
 - `src/tools/core/cap_probe.rs`: `references.corroborate_files_scan` moved from `NoMarker` to `Probed`.
 
-Fix commit: SHA and patch-id recorded below once committed.
+Fix commit: SHA `a1c101a3` on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5); patch-id `a28d394e0e8e81323224874c5a2ad735ef090d4c`.
 
 ## Tests added
 
