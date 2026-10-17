@@ -526,7 +526,8 @@ mod tests {
         const MAIN: &str = "/repo/docs/trackers/t.md";
         const SHADOW: &str = "/repo/.worktrees/feat/docs/trackers/t.md";
 
-        let cases: [(&str, fn(&str, &str) -> Value); 4] = [
+        type BuildArgs = fn(&str, &str) -> Value;
+        let cases: [(&str, BuildArgs); 4] = [
             ("append_entry", |id, _| {
                 json!({"action": "append_entry", "id": id, "entry_collection": "items",
                        "id_prefix": "F", "entry": {"t": "x"}})

@@ -1375,19 +1375,15 @@ Body Mu.
                 "a measured ceiling of {ceiling} B is over the auto-inject bound"
             );
         }
-        for (call, measured_floor) in [(app_t, WRITE_FLOOR_APPEND_ENTRY)] {
-            // The instrument's own floor: delivered bytes must INCLUDE the wrappers. A measure
-            // that sums section bodies reads ~2.3 KB low for append_entry, which is exactly how
-            // a 16,344 B delivery read as 13.5 KB against a 16,384 B bound.
-            let bytes = delivered(call);
-            assert!(
-                bytes >= measured_floor,
-                "`{}` on {} measures {bytes} B, under the {measured_floor} B floor: the \
-                 delivered-bytes instrument has stopped counting what is injected",
-                call.0,
-                call.1
-            );
-        }
+        // The instrument's own floor: delivered bytes must INCLUDE the wrappers. A measure
+        // that sums section bodies reads ~2.3 KB low for append_entry, which is exactly how
+        // a 16,344 B delivery read as 13.5 KB against a 16,384 B bound.
+        let floor_bytes = delivered(app_t);
+        assert!(
+            floor_bytes >= WRITE_FLOOR_APPEND_ENTRY,
+            "`doc.append_entry` measures {floor_bytes} B, under the {WRITE_FLOOR_APPEND_ENTRY} B \
+             floor: the delivered-bytes instrument has stopped counting what is injected"
+        );
         for (call, measured_ceiling) in [
             (app_t, WRITE_CEILING_APPEND_ENTRY),
             (ue_t, WRITE_CEILING_UPDATE_ENTRY),
