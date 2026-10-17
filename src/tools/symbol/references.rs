@@ -159,46 +159,116 @@ async fn resolve_binding_by_position(
 /// project for same-language source files (mirroring call_graph Phase B bounds)
 /// and returns up to a few files OTHER than `def_file` where `ident` appears as
 /// a whole word. A non-empty result proves the empty LSP set is incomplete.
+///
+/// An EMPTY result proves nothing unless the walk finished: see
+/// [`CorroborationScan::coverage`] and [`corroboration_incomplete_warning`]
+/// (BUG 2026-10-16 references-corroboration-scan-cap-yields-a-false-zero, and
+/// 2026-10-17 scan-walks-skip-unreadable-files-and-report-a-clean-miss).
 pub(crate) fn corroborate_zero_references(
     root: &std::path::Path,
     def_file: &std::path::Path,
     ident: &str,
     lang: &str,
-) -> Vec<std::path::PathBuf> {
+) -> CorroborationScan {
     // cap-class: RESULT_CAP references.corroborate_files_scan — probed
     const MAX_FILES_SCAN: usize = 5_000;
+    corroborate_with_cap(root, def_file, ident, lang, MAX_FILES_SCAN)
+}
+
+/// What a corroboration walk found, and what it covered.
+#[derive(Debug)]
+pub(crate) struct CorroborationScan {
+    /// Files other than the definition file naming the identifier (at most a few).
+    pub hits: Vec<std::path::PathBuf>,
+    /// What the walk looked at. An empty `hits` proves an absence only when this
+    /// [`is_complete`](crate::tools::symbol::scan_budget::ScanCoverage::is_complete): the
+    /// file cap stopped it, a candidate file could not be read, or a directory could not be
+    /// entered, and in each case "not found" is "not reached". (A walk that stopped on its
+    /// hit cap has non-empty `hits`, which prove the point by themselves.)
+    pub coverage: crate::tools::symbol::scan_budget::ScanCoverage,
+}
+
+/// [`corroborate_zero_references`] with the file cap as a parameter, so the boundary is
+/// testable without generating thousands of files.
+///
+/// The population is the files of `lang`'s language FAMILY (`ast::language_family`: the
+/// TypeScript/TSX/JavaScript/JSX languages are one), because a symbol defined in a `.ts`
+/// file is routinely used only from `.tsx` files; a `.js` that `tsc` compiled from a `.ts`
+/// sibling is not a candidate (`scan_budget::is_compiled_twin`), since it carries the very
+/// identifier it was compiled from and would corroborate every symbol with its own build
+/// output. `lang` must be an AST language name (`ast::detect_language`'s vocabulary), not
+/// an LSP languageId. A text scan needs no parser, so there is no pre-flight refusal here.
+pub(crate) fn corroborate_with_cap(
+    root: &std::path::Path,
+    def_file: &std::path::Path,
+    ident: &str,
+    lang: &str,
+    max_files: usize,
+) -> CorroborationScan {
+    use crate::tools::symbol::scan_budget::{is_compiled_twin, scan_walk, ScanBudget};
     // cap-class: RESULT_CAP references.corroborate_hits — probed
     const MAX_HITS: usize = 5;
     let mut hits: Vec<std::path::PathBuf> = Vec::new();
-    let mut scanned = 0usize;
-    for entry in ignore::WalkBuilder::new(root)
-        .hidden(true)
-        .git_ignore(true)
-        .build()
-        .flatten()
-    {
-        if hits.len() >= MAX_HITS || scanned >= MAX_FILES_SCAN {
+    let mut budget = ScanBudget::new(max_files);
+    let family = crate::ast::language_family(lang);
+    let in_family = |p: &std::path::Path| {
+        crate::ast::detect_language(p)
+            .is_some_and(|file_lang| crate::ast::language_family(file_lang) == family)
+    };
+    for item in scan_walk(root) {
+        let Some(entry) = budget.entry(item) else {
+            continue;
+        };
+        if hits.len() >= MAX_HITS {
             break;
+        }
+        let path = entry.path();
+        if entry.file_type().is_some_and(|t| t.is_symlink()) {
+            // Not followed, like the repo's other walkers; counted when it leads outside.
+            budget.note_symlink(path, root, in_family);
+            continue;
         }
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
-        let path = entry.path();
-        if path == def_file {
+        if path == def_file || !in_family(path) || is_compiled_twin(path) {
             continue;
         }
-        if crate::ast::detect_language(path) != Some(lang) {
-            continue;
+        if !budget.admit() {
+            break;
         }
-        scanned += 1;
         let Ok(src) = std::fs::read_to_string(path) else {
+            // Admitted but not read: a file nobody looked at, which a bare zero must not hide.
+            budget.record_unexamined();
             continue;
         };
         if contains_word(&src, ident) {
             hits.push(path.to_path_buf());
         }
     }
-    hits
+    CorroborationScan {
+        hits,
+        coverage: budget.coverage(),
+    }
+}
+
+/// The `completeness_warning` for a zero-reference result whose corroboration walk
+/// found nothing but did not cover everything. `None` when the walk was exhaustive: that
+/// zero is trustworthy and stays bare (ADR 2026-08-27 clause 2).
+///
+/// States what is proven — the walk stopped at a cap, or could not read N files, or could
+/// not enter N paths — not why the LSP answered zero, and not why a given file failed.
+pub(crate) fn corroboration_incomplete_warning(
+    ident: &str,
+    scan: &CorroborationScan,
+) -> Option<String> {
+    if !scan.hits.is_empty() {
+        return None;
+    }
+    let gap = scan.coverage.describe()?;
+    Some(format!(
+        "LSP returned 0 references outside the definition file, and the text-scan cross-check for `{ident}` {gap} — so this zero is unconfirmed, not a proven absence. Corroborate with grep / call_graph(direction='callers') before treating this symbol as unused."
+    ))
 }
 
 #[async_trait::async_trait]
@@ -466,7 +536,8 @@ impl Tool for References {
             result["completeness_warning"] = json!("LSP returned no locations at all — not even the symbol's own declaration, which this request asks it to include — so the reference index is not ready yet (a cold or reloading language server answers this way). Re-run shortly, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.");
         } else if external_refs == 0 && result.get("completeness_warning").is_none() {
             let ident = name_path.rsplit('/').next().unwrap_or(name_path);
-            let others = corroborate_zero_references(&root, &full_path, ident, raw_lang);
+            let scan = corroborate_zero_references(&root, &full_path, ident, raw_lang);
+            let others = &scan.hits;
             if !others.is_empty() {
                 let sample = others
                     .iter()
@@ -475,6 +546,12 @@ impl Tool for References {
                     .collect::<Vec<_>>()
                     .join(", ");
                 result["completeness_warning"] = json!(format!("LSP returned 0 references outside the definition file, but `{ident}` appears as a whole word in {n}+ other source file(s) (e.g. {sample}) — the reference index may still be warming after a reindex. Re-run, or corroborate with grep / call_graph(direction='callers') before treating this symbol as unused.", n = others.len()));
+            } else if let Some(w) = corroboration_incomplete_warning(ident, &scan) {
+                // The walk did not cover the project (file cap, an unreadable candidate,
+                // an unenterable directory): an empty hit list is "not reached", not
+                // "not present" (BUG 2026-10-16
+                // references-corroboration-scan-cap-yields-a-false-zero).
+                result["completeness_warning"] = json!(w);
             }
         }
 
@@ -488,12 +565,15 @@ impl Tool for References {
         // cross-check found more call sites than references did) in both the
         // zero-refs and the normal branch.
         let warning = result.get("completeness_warning").and_then(|v| v.as_str());
-        let append_warning = |mut out: String| -> String {
-            if let Some(w) = warning {
-                out.push_str("\n\nwarning: ");
-                out.push_str(w);
+        // PREFIXED, not appended: when this text is the summary of a buffered result,
+        // `truncate_compact` cuts at the last newline within its byte budget, so a line
+        // added last is the line a large result loses. The workspace notice is prefixed
+        // for the same reason (`Tool::call_content`).
+        let append_warning = |out: String| -> String {
+            match warning {
+                Some(w) => format!("warning: {w}\n\n{out}"),
+                None => out,
             }
-            out
         };
 
         let file_groups_arr = result["file_groups"].as_array()?;

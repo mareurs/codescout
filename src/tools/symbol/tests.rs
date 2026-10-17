@@ -5901,7 +5901,7 @@ fn corroborate_zero_references_finds_callers_via_text_scan() {
     .unwrap();
     std::fs::write(root.join("c.rs"), "fn z() { getStudentGroupLabelExtra(); }").unwrap();
     let def = root.join("def.rs");
-    let hits = corroborate_zero_references(root, &def, "getStudentGroupLabel", "rust");
+    let hits = corroborate_zero_references(root, &def, "getStudentGroupLabel", "rust").hits;
     let names: std::collections::HashSet<String> = hits
         .iter()
         .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
@@ -5921,6 +5921,441 @@ fn corroborate_zero_references_finds_callers_via_text_scan() {
     assert!(
         !names.contains("c.rs"),
         "must not match superstring; got {names:?}"
+    );
+}
+/// Build a `references` call whose LSP answer is the declaration alone, over a project
+/// of `filler` same-language files none of which names `helper`. The shared fixture for
+/// the scan-cap tests below.
+async fn declaration_only_references(filler: usize) -> serde_json::Value {
+    use crate::tools::symbol::references::References;
+
+    let (_dir, ctx) = declaration_only_ctx(filler, 0).await;
+    References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap()
+}
+
+/// The project behind [`declaration_only_references`]: the language server answers the
+/// declaration of `helper` plus `extra_refs` further references INSIDE the definition
+/// file (so the result is still "no references outside the definition file" but can be
+/// made as large as a test needs).
+async fn declaration_only_ctx(
+    filler: usize,
+    extra_refs: usize,
+) -> (tempfile::TempDir, ToolContext) {
+    use crate::lsp::mock::{MockLspClient, MockLspProvider};
+    use crate::lsp::{SymbolInfo, SymbolKind};
+
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let src = std::fs::canonicalize(dir.path()).unwrap().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    let file = src.join("lib.rs");
+    let mut body = String::from("fn helper() {}\n");
+    for i in 0..extra_refs {
+        body.push_str(&format!(
+            "// a use of helper, number {i}, padded for size\n"
+        ));
+    }
+    std::fs::write(&file, body).unwrap();
+    for i in 0..filler {
+        std::fs::write(src.join(format!("filler_{i}.rs")), "fn other() {}\n").unwrap();
+    }
+    let helper = SymbolInfo {
+        name: "helper".to_string(),
+        name_path: "helper".to_string(),
+        kind: SymbolKind::Function,
+        file: file.clone(),
+        start_line: 0,
+        end_line: 0,
+        start_col: 3,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let uri: lsp_types::Uri = url::Url::from_file_path(&file)
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let at = |line: u32| lsp_types::Location {
+        uri: uri.clone(),
+        range: lsp_types::Range {
+            start: lsp_types::Position { line, character: 3 },
+            end: lsp_types::Position { line, character: 9 },
+        },
+    };
+    let locations: Vec<lsp_types::Location> = (0..=extra_refs as u32).map(at).collect();
+    let mock = MockLspClient::new().with_symbols(&file, vec![helper]);
+    mock.references_results
+        .lock()
+        .unwrap()
+        .insert(file.clone(), locations);
+    let ctx = path_scoped_ctx(dir.path(), MockLspProvider::with_client(mock)).await;
+    (dir, ctx)
+}
+
+/// BUG 2026-10-16 references-corroboration-scan-cap-yields-a-false-zero: the corroboration
+/// scan exists to refuse a bare zero, and past its 5,000-file cap it used to manufacture
+/// one — an empty hit list from a stopped walk looked the same as one from a finished
+/// walk, so the warning was withheld. One file more than the cap leaves exactly one
+/// candidate unexamined; none of the files names `helper`, so the hit list is empty either
+/// way and only the cut-short marker can tell the caller the zero is unproven.
+#[tokio::test]
+async fn references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned() {
+    // The cap is 5,000 same-language files other than the definition file.
+    let result = declaration_only_references(5_001).await;
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("stopped after 5000"),
+        "a zero from a walk that never reached every file must say so: {result}"
+    );
+}
+
+/// The other half of the contract (ADR 2026-08-27 clause 2): a walk that covered every
+/// file and found nothing is a trustworthy zero and stays bare, so the warning above is
+/// not noise on every empty result.
+#[tokio::test]
+async fn references_zero_from_a_completed_corroboration_scan_stays_bare() {
+    let result = declaration_only_references(3).await;
+
+    assert!(
+        result.get("completeness_warning").is_none(),
+        "a finished scan that found nothing is a real zero: {result}"
+    );
+}
+
+/// The cap is a parameter of the primitive so the boundary can be driven without
+/// thousands of files: a walk that ends exactly on its cap examined everything and is
+/// not cut short; one candidate more and it is.
+#[test]
+fn corroborate_scan_reports_cut_short_only_when_a_candidate_was_left_unexamined() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        std::fs::write(root.join(name), "fn x() {}").unwrap();
+    }
+
+    let exact = corroborate_with_cap(root, &def, "target", "rust", 3);
+    assert!(exact.hits.is_empty());
+    assert_eq!(
+        exact.coverage.cut_short_at, None,
+        "3 candidates, cap 3: all examined"
+    );
+
+    let short = corroborate_with_cap(root, &def, "target", "rust", 2);
+    assert!(short.hits.is_empty());
+    assert_eq!(
+        short.coverage.cut_short_at,
+        Some(2),
+        "3 candidates, cap 2: one left"
+    );
+}
+/// The warning must survive the overflow path. A result over the inline budget is stored
+/// in a buffer and the caller reads `truncate_compact(format_compact(..), 2000, 3000)`,
+/// which cuts at the last newline in range, so a warning appended as the last line of
+/// `format_compact` is exactly the line a large result loses. "No references outside the
+/// definition file" does not mean a small result: this symbol has 250 uses in its own file.
+#[tokio::test]
+async fn references_warning_survives_the_overflow_summary_of_a_large_result() {
+    use crate::tools::symbol::references::References;
+
+    let (_dir, ctx) = declaration_only_ctx(5_001, 250).await;
+    let blocks = References
+        .call_content(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+    let text = blocks[0].as_text().expect("a text block").text.clone();
+    let envelope: serde_json::Value =
+        serde_json::from_str(&text).expect("the buffered envelope is JSON");
+
+    assert!(
+        envelope.get("output_id").is_some(),
+        "fixture check: the result must be big enough to be buffered, or this test proves \
+         nothing about the overflow path: {text}"
+    );
+    let summary = envelope["summary"].as_str().unwrap_or_default();
+    assert!(
+        summary.contains("(truncated)"),
+        "fixture check: the summary must actually have been truncated: {summary}"
+    );
+    assert!(
+        summary.contains("stopped after 5000"),
+        "the warning must be in what the caller reads, not only in the buffer: {summary}"
+    );
+}
+
+/// A project whose `node_modules/` (or `target/`, `vendor/`, ...) is not gitignored must
+/// not spend the file budget on vendored files: the LSP results `references` returns are
+/// already filtered through `path_in_excluded_dir`, and the corroboration walk used to
+/// count every vendored same-language file toward its 5,000-file cap and then report the
+/// walk as cut short. Cap 2 over three vendored files and nothing else.
+#[test]
+fn corroborate_scan_does_not_spend_its_budget_on_vendored_directories() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    let vendored = root.join("node_modules").join("pkg");
+    std::fs::create_dir_all(&vendored).unwrap();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        std::fs::write(vendored.join(name), "fn x() {}").unwrap();
+    }
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 2);
+
+    assert!(scan.hits.is_empty());
+    assert_eq!(
+        scan.coverage.cut_short_at, None,
+        "vendored files are not candidates, so nothing was left unexamined"
+    );
+}
+
+/// The prune applies to the path BELOW the project root: a project that merely lives under a
+/// directory called `node_modules` must still be scanned.
+#[test]
+fn corroborate_scan_filters_below_the_project_root_not_above_it() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("node_modules").join("proj");
+    std::fs::create_dir_all(&root).unwrap();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    std::fs::write(root.join("user.rs"), "fn caller() { target(); }").unwrap();
+
+    let scan = corroborate_with_cap(&root, &def, "target", "rust", 10);
+
+    assert_eq!(
+        scan.hits.len(),
+        1,
+        "a project under a `node_modules/` parent directory must still be scanned: {scan:?}"
+    );
+}
+
+/// The prune is deliberately short: `build/`, `out/`, `dist/`, `vendor/` and `target/` are
+/// legitimate source directories in some ecosystems, and a pruned directory is invisible
+/// to the coverage, so a use living only there would leave a clean zero.
+#[test]
+fn corroborate_scan_reads_a_use_living_in_a_build_directory() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    for dir_name in ["build", "out", "dist", "vendor", "target"] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let def = root.join("def.rs");
+        std::fs::write(&def, "pub fn target() {}").unwrap();
+        std::fs::create_dir(root.join(dir_name)).unwrap();
+        std::fs::write(root.join(dir_name).join("ci.rs"), "fn c() { target(); }").unwrap();
+
+        let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
+
+        assert_eq!(scan.hits.len(), 1, "a use under {dir_name}/ must be found");
+    }
+}
+
+/// `tsc` writes `foo.js` next to `foo.ts` and nothing gitignores it. The twin contains the
+/// identifier it was compiled from, so a family-wide scan found a "use" of every `.ts`
+/// symbol in its own build output and raised a false "index may still be warming" warning
+/// on every zero-reference TypeScript symbol; it also spent the file budget twice.
+#[test]
+fn corroborate_scan_ignores_a_compiled_twin_of_the_definition_file() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("foo.ts");
+    std::fs::write(&def, "export function foo() {}").unwrap();
+    std::fs::write(
+        root.join("foo.js"),
+        "function foo() {}\nexports.foo = foo;\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("bar.tsx"), "export const bar = 1;").unwrap();
+    std::fs::write(root.join("bar.jsx"), "export const bar = 1;").unwrap();
+
+    let scan = corroborate_with_cap(root, &def, "foo", "typescript", 2);
+
+    assert!(scan.hits.is_empty(), "the twin is not a use: {scan:?}");
+    assert!(
+        scan.coverage.is_complete(),
+        "and the twins must not spend the file budget (cap 2, one real candidate): {scan:?}"
+    );
+    // A `.js` with no `.ts` source is real source and still corroborates.
+    std::fs::write(root.join("lone.js"), "foo();").unwrap();
+    let scan = corroborate_with_cap(root, &def, "foo", "typescript", 10);
+    assert_eq!(scan.hits.len(), 1, "{scan:?}");
+}
+
+/// A symlink to a file outside the project is not followed (the repo's other walkers do not
+/// either) and not silent: a bare zero would hide the use behind it.
+#[cfg(unix)]
+#[test]
+fn corroborate_scan_counts_a_symlinked_candidate_outside_the_project() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let outside = tempfile::TempDir::new().unwrap();
+    std::fs::write(outside.path().join("user.rs"), "fn c() { target(); }").unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    std::os::unix::fs::symlink(outside.path().join("user.rs"), root.join("user.rs")).unwrap();
+    // A link whose target is inside the project is reached by its own path: no gap.
+    std::fs::write(root.join("real.rs"), "fn other() {}").unwrap();
+    std::os::unix::fs::symlink(root.join("real.rs"), root.join("alias.rs")).unwrap();
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
+
+    assert!(scan.hits.is_empty(), "the link is not followed: {scan:?}");
+    assert_eq!(
+        scan.coverage.symlinks, 1,
+        "the outward link counts, the inward one does not: {scan:?}"
+    );
+}
+/// The file cap must still BOUND the scan, not merely disclose that it bit (the disclosure
+/// lives in `ScanBudget::admit`): a walk that read on, or `continue`d past each refused file
+/// instead of stopping, would still report a cut-short walk. Six files name the identifier,
+/// cap 2: exactly two are read, and once the third is refused the walk stops pulling
+/// entries (the root, the definition file and three files at most; all eight if it kept
+/// going).
+#[test]
+fn corroborate_scan_stops_reading_at_its_file_cap() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    for name in ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs"] {
+        std::fs::write(root.join(name), "fn x() { target(); }").unwrap();
+    }
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 2);
+
+    assert_eq!(scan.hits.len(), 2, "a cap of 2 admits exactly two files");
+    assert_eq!(scan.coverage.cut_short_at, Some(2));
+    assert!(
+        (4..=5).contains(&scan.coverage.entries_visited),
+        "the walk pulls the root, three candidates up to the refusal and the definition file \
+         only if it came first, then stops; more means it kept going after the cap, fewer \
+         that the counter is dead: visited {}",
+        scan.coverage.entries_visited
+    );
+}
+
+/// TypeScript, TSX, JavaScript and JSX are one population for the corroboration scan, for
+/// the reason the `call_graph` walk groups them: one language server serves all four and
+/// `.tsx` components import from `.ts` modules. A `.ts` definition used only from a `.tsx`
+/// file is exactly the stale-graph case this scan exists to catch, and a same-extension
+/// filter never looked there.
+#[test]
+fn corroborate_scan_treats_the_typescript_family_as_one_population() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    for (def_name, def_lang, user_name) in [
+        ("def.ts", "typescript", "user.tsx"),
+        ("def.tsx", "tsx", "user.ts"),
+        ("def.js", "javascript", "user.jsx"),
+        ("def.jsx", "jsx", "user.js"),
+    ] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let def = root.join(def_name);
+        std::fs::write(&def, "export function target() {}").unwrap();
+        std::fs::write(root.join(user_name), "target();").unwrap();
+
+        let scan = corroborate_with_cap(root, &def, "target", def_lang, 10);
+
+        assert_eq!(
+            scan.hits.len(),
+            1,
+            "a {def_lang} definition used only from {user_name} must corroborate: {scan:?}"
+        );
+    }
+}
+
+/// The family is not "every language": a Rust definition is not corroborated by a
+/// TypeScript file that happens to name the identifier, and files of other languages
+/// (TypeScript, Markdown, Python) are not unexamined candidates either — they were never
+/// candidates, so the walk is COMPLETE and a bare zero stays bare.
+#[test]
+fn corroborate_scan_does_not_cross_into_another_language_family() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    std::fs::write(root.join("user.ts"), "target();").unwrap();
+    std::fs::write(root.join("notes.md"), "target\n").unwrap();
+    std::fs::write(root.join("script.py"), "target()\n").unwrap();
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
+
+    assert!(scan.hits.is_empty(), "{scan:?}");
+    assert!(
+        scan.coverage.is_complete(),
+        "other-language files are not unexamined candidates, so nothing is left unexamined: \
+         {scan:?}"
+    );
+    assert_eq!(scan.coverage.describe(), None, "and no warning is produced");
+}
+
+/// ADR 2026-08-27: a candidate file the scan could not read is a file nobody looked at, so
+/// "0 references outside the definition file" is unconfirmed. `latin1.rs` is not valid
+/// UTF-8 and is the only other file that could use `helper`. Without the fix the result is
+/// a bare zero, indistinguishable from `references_zero_from_a_completed_corroboration_scan_stays_bare`.
+#[tokio::test]
+async fn references_zero_with_an_unreadable_candidate_file_is_warned() {
+    use crate::tools::symbol::references::References;
+
+    let (dir, ctx) = declaration_only_ctx(3, 0).await;
+    std::fs::write(
+        dir.path().join("src").join("latin1.rs"),
+        b"// caf\xe9\nfn caller() { helper(); }\n".as_slice(),
+    )
+    .unwrap();
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("could not read or parse 1 same-language file"),
+        "an unreadable candidate must not leave a clean zero: {result}"
+    );
+}
+
+/// A directory the walker cannot enter is a part of the tree nobody looked at. Says so on
+/// stderr and returns when the process can read a `chmod 000` directory anyway (root), and
+/// restores the mode even if an assertion fails.
+#[cfg(unix)]
+#[tokio::test]
+async fn references_zero_with_an_unenterable_directory_is_warned() {
+    use crate::tools::symbol::references::References;
+
+    let (dir, ctx) = declaration_only_ctx(3, 0).await;
+    let locked = dir.path().join("src").join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::write(locked.join("user.rs"), "fn c() { helper(); }\n").unwrap();
+    let Some(_guard) = crate::tools::symbol::scan_budget::test_support::lock(
+        &locked,
+        "references_zero_with_an_unenterable_directory_is_warned",
+    ) else {
+        return;
+    };
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("could not enter 1 path"),
+        "a directory that could not be entered must not leave a clean zero: {result}"
     );
 }
 

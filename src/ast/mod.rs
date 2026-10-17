@@ -92,6 +92,26 @@ pub fn detect_language(path: &Path) -> Option<&'static str> {
     }
 }
 
+/// The language *family* a language belongs to, for walks that look for a definition or a
+/// use in files "of the same language" as a seed.
+///
+/// TypeScript, TSX, JavaScript and JSX are one family: a single language server
+/// (`typescript-language-server`, see `lsp::servers`) serves all four, the TS call
+/// classifiers and the structural-edit guard treat them as one, and `.tsx` components
+/// import functions from `.ts` modules and the reverse — so the definition of a symbol one
+/// of them calls routinely lives in a sibling extension. Every other language is its own
+/// family. (The embedding chunker groups `ts`+`tsx` and `js`+`jsx` separately; that serves
+/// chunk labelling, not cross-file symbol lookup.)
+///
+/// Both sides of a comparison must be AST language names (what [`detect_language`]
+/// returns), never an LSP languageId: see `lsp::servers::ast_language_for_lsp_id`.
+pub fn language_family(lang: &str) -> &str {
+    match lang {
+        "typescript" | "tsx" | "javascript" | "jsx" => "typescript",
+        other => other,
+    }
+}
+
 /// Map a language name to its tree-sitter grammar (case-insensitive).
 ///
 /// This is the single source of truth for tree-sitter language resolution.
@@ -120,6 +140,19 @@ pub(crate) fn get_ts_language(lang: &str) -> Option<tree_sitter::Language> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    /// The family is exactly the four languages one TypeScript language server serves;
+    /// every other language is its own family, so a Rust walk never reads `.ts` files.
+    #[test]
+    fn language_family_groups_only_the_typescript_javascript_languages() {
+        for l in ["typescript", "tsx", "javascript", "jsx"] {
+            assert_eq!(language_family(l), language_family("typescript"), "{l}");
+        }
+        for l in ["rust", "python", "go", "java", "kotlin", "c", "cpp", "bash"] {
+            assert_eq!(language_family(l), l, "{l} must be its own family");
+            assert_ne!(language_family(l), language_family("typescript"), "{l}");
+        }
+    }
 
     /// `detect_language` is intentionally broader than `get_ts_language`:
     /// it identifies any source file we recognise (for LSP routing, file

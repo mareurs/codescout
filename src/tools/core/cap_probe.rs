@@ -648,13 +648,16 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // Reclassified from `NoMarker`: `corroborate_with_cap` now reports a walk the cap
+        // stopped with candidates left (`CorroborationScan::cut_short_at`) and `References`
+        // turns an empty-but-unfinished scan into a `completeness_warning`. Driven red
+        // against the pre-fix code by the cited test (5,001 files, one past the cap).
+        // docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md
         id: "references.corroborate_files_scan",
-        coverage: Coverage::NoMarker {
-            reason: "bounds a workspace file SCAN inside corroborate_zero_references; exceeding it \
-             under-scans rather than reporting a smaller number, so a false zero \
-             (\"no references\") is indistinguishable from \"scan stopped early\" — no \
-             fixture currently isolates the two",
-            bug: "docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("stopped after 5000"),
+            mutation: Mutation::Killed,
+            cited_test: "references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned",
         },
     },
     ProbeRow {
@@ -1324,13 +1327,24 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
+        // Reclassified from `NoMarker`: `lookup_pos_via_ts_workspace` now returns
+        // `WorkspaceScan::Incomplete` for a walk the cap stopped with candidates left,
+        // `lookup_pos` records the symbol, `CallGraph::call` puts a `completeness_warning`
+        // in the result and `format_compact` renders it FIRST (so the overflow summary's
+        // `truncate_compact` cannot cut it). The cited test drives `CallGraph::call` over
+        // 5,001 files and asserts the production text ("stopped after 5000") in both the
+        // JSON and the compact rendering. Mutation: deleting `attach_scan_incomplete` from
+        // `CallGraph::call` reds it, as does dropping the `scan_coverage.merge` in
+        // `lookup_pos` (re-observed 2026-10-17 after the coverage rewrite). It does NOT red
+        // when the walk ignores `admit()`'s refusal and reads on: the disclosure lives in
+        // `ScanBudget::admit`, so that bound (the cap as a performance guard) is held by
+        // `the_cap_stops_the_walk_instead_of_only_reporting_it`.
+        // docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md
         id: "call_graph.workspace_files_scan",
-        coverage: Coverage::NoMarker {
-            reason: "bounds CachedResolver::lookup_pos_via_ts_workspace's own file-scan; \
-             exceeding it returns fewer or no candidate positions rather than \
-             reporting an incomplete scan — a false zero indistinguishable from 'no \
-             callers exist', and no fixture currently isolates the two",
-            bug: "docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("stopped after 5000"),
+            mutation: Mutation::Killed,
+            cited_test: "call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap",
         },
     },
     // -- src/agent/build_check.rs --

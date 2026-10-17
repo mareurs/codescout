@@ -46,6 +46,29 @@ pub fn has_syntax_errors(source: &str, lang: &str) -> bool {
         .is_some_and(|tree| tree.root_node().has_error())
 }
 
+/// True when [`extract_symbols_from_source`] has a definition extractor for `lang` — the
+/// languages the `match` there lists. A language can have a tree-sitter grammar
+/// ([`crate::ast::get_ts_language`]) and still no extractor (HTML, CSS, SCSS, Less parse
+/// but yield `Ok(vec![])`), and a walk that parses such files to find a definition can never
+/// find one. Callers ask this before walking, not after (ADR 2026-08-27, pre-flight
+/// predicate). `supports_symbol_extraction_matches_the_extractor` keeps the two in step.
+pub fn supports_symbol_extraction(lang: &str) -> bool {
+    crate::ast::get_ts_language(lang).is_some()
+        && matches!(
+            lang,
+            "rust"
+                | "python"
+                | "go"
+                | "typescript"
+                | "javascript"
+                | "tsx"
+                | "jsx"
+                | "java"
+                | "kotlin"
+                | "bash"
+        )
+}
+
 /// Extract symbols from source text using tree-sitter for the given language.
 pub fn extract_symbols_from_source(
     source: &str,
@@ -3080,6 +3103,63 @@ class Animal {
             "expected 1 symbol from keyword-style function"
         );
         assert_eq!(syms[0].name, "bar");
+    }
+
+    /// `supports_symbol_extraction` is a hand-kept mirror of the `match` in
+    /// `extract_symbols_from_source`; this ties them to observable behaviour. Every language
+    /// the predicate accepts must yield a symbol from a one-definition sample, and every
+    /// language that has a grammar but is refused (HTML, CSS, SCSS, Less) must yield none.
+    #[test]
+    fn supports_symbol_extraction_matches_the_extractor() {
+        use std::path::Path;
+        let samples: &[(&str, &str, bool)] = &[
+            ("rust", "fn a() {}\n", true),
+            ("python", "def a():\n    pass\n", true),
+            ("go", "package p\nfunc a() {}\n", true),
+            ("typescript", "function a() {}\n", true),
+            ("javascript", "function a() {}\n", true),
+            ("tsx", "function a() { return <b/>; }\n", true),
+            ("jsx", "function a() { return <b/>; }\n", true),
+            ("java", "class A {}\n", true),
+            ("kotlin", "fun a() {}\n", true),
+            ("bash", "a() {\n  echo hi\n}\n", true),
+            ("html", "<p id=\"a\">x</p>\n", false),
+            ("css", ".a { color: red; }\n", false),
+            ("scss", ".a { color: red; }\n", false),
+            ("less", ".a { color: red; }\n", false),
+            ("cpp", "int a() { return 1; }\n", false),
+            ("c", "int a(void) { return 1; }\n", false),
+        ];
+        for (lang, src, supported) in samples {
+            assert_eq!(
+                supports_symbol_extraction(lang),
+                *supported,
+                "predicate for {lang}"
+            );
+            let produced = crate::ast::get_ts_language(lang).is_some()
+                && !extract_symbols_from_source(
+                    src,
+                    crate::ast::detect_language(Path::new(&format!(
+                        "x.{}",
+                        match *lang {
+                            "rust" => "rs",
+                            "python" => "py",
+                            "typescript" => "ts",
+                            "javascript" => "js",
+                            "kotlin" => "kt",
+                            "bash" => "sh",
+                            other => other,
+                        }
+                    ))),
+                    Path::new("x"),
+                )
+                .unwrap()
+                .is_empty();
+            assert_eq!(
+                produced, *supported,
+                "{lang}: the extractor and the predicate disagree"
+            );
+        }
     }
 
     #[test]

@@ -212,6 +212,20 @@ pub fn lsp_language_id(lang: &str) -> &str {
     }
 }
 
+/// The inverse of [`lsp_language_id`]: the AST language name (what
+/// `ast::detect_language` returns, and what every tree-sitter helper keys on) for an LSP
+/// `languageId`. `get_lsp_client` hands tools the languageId, so any code that compares
+/// that value with a file's detected language, or feeds it to a tree-sitter helper, must
+/// convert it first: `"typescriptreact"` is not `"tsx"`.
+pub fn ast_language_for_lsp_id(language_id: &str) -> &str {
+    match language_id {
+        "typescriptreact" => "tsx",
+        "javascriptreact" => "jsx",
+        "shellscript" => "bash",
+        other => other,
+    }
+}
+
 /// Returns true if we have a default LSP server config for this language.
 /// Used by `edit_file` to decide whether symbol tools are a viable alternative.
 pub fn has_lsp_config(lang: &str) -> bool {
@@ -287,6 +301,34 @@ pub(crate) fn is_codescout_kotlin_home(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ast_language_for_lsp_id` must undo `lsp_language_id` for every AST language name
+    /// `detect_language` can produce (one probe file per extension it knows). A mapping
+    /// added to one function and not the other would reintroduce the two-vocabulary
+    /// comparison this pair exists to prevent.
+    #[test]
+    fn ast_language_for_lsp_id_inverts_lsp_language_id_for_every_detectable_language() {
+        for ext in [
+            "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "kt", "c", "cpp", "cs", "rb",
+            "html", "css", "scss", "less", "php", "swift", "scala", "ex", "hs", "lua", "sh", "md",
+        ] {
+            let path = std::path::PathBuf::from(format!("probe.{ext}"));
+            let ast = crate::ast::detect_language(&path)
+                .unwrap_or_else(|| panic!("fixture: .{ext} is no longer detected"));
+            assert_eq!(
+                ast_language_for_lsp_id(lsp_language_id(ast)),
+                ast,
+                "round trip lost {ast} (.{ext}) via {}",
+                lsp_language_id(ast)
+            );
+        }
+    }
+
+    #[test]
+    fn react_language_ids_map_to_the_ast_react_languages() {
+        assert_eq!(ast_language_for_lsp_id("typescriptreact"), "tsx");
+        assert_eq!(ast_language_for_lsp_id("javascriptreact"), "jsx");
+    }
 
     #[test]
     fn has_lsp_config_covers_all_configured_languages() {
