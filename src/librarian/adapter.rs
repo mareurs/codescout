@@ -3118,9 +3118,11 @@ mod tests {
     /// The existing gate `every_observed_shape_of_a_declaring_topic_has_a_section`
     /// could not catch this when it was written: it skips non-declaring topics, and
     /// `tracker-conventions` declared no sections at all, so the routing destination was
-    /// invisible to it by construction. It does see the topic now that it declares, but
-    /// only for the `librarian.*` rows of `shape_census.txt` (the `artifact.*` rows name
-    /// no registered tool), and a waiver names each, so this test still owns the claim.
+    /// invisible to it by construction. It sees the topic now that it declares, and since
+    /// 2026-10-17 it reads every pre-collapse census row (`artifact.*`, `artifact_augment`,
+    /// `artifact_event.*`, `artifact_refresh.*`) as the `doc.*` shape it became; before that it
+    /// checked only the `librarian.*` rows. A `SECTION_WAIVERS` reason carries each unserved
+    /// shape as a whole word (the bare `doc` shape included), so this test still owns the claim.
     ///
     /// Mutations that must kill this: move any mode's semantics out of the `fix`
     /// description again; or make `names_tracker_path` ignore `violations[].path`,

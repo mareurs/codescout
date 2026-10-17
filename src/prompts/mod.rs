@@ -497,8 +497,10 @@ pub const PULL_ONLY_GUIDE_TOPICS: &[(&str, &str)] = &[
 ///   `src/prompts/guide_index.rs`) matches on `(topic, heading)` — the section
 ///   itself is orientation prose that no single call shape owns.
 /// - **Gate 2** (`every_observed_shape_of_a_declaring_topic_has_a_section`,
-///   `src/server.rs`) matches on `topic` plus `reason.contains(shape)` — the
-///   reason must name the shape verbatim for a shape-level waiver to resolve.
+///   `src/server.rs`) matches on `topic` plus [`waiver_reason_names_shape`] — the
+///   reason must carry the shape as a whole whitespace-delimited word (surrounding
+///   punctuation and backticks ignored), not as a substring of other prose: a bare
+///   `doc` was once "named" by the `doc(action="find")` inside an unrelated reason.
 ///
 /// Either way the reason must exceed 40 characters — a placeholder turns this
 /// gate back into the silent default it replaced, which is exactly how 7 of 10
@@ -508,17 +510,18 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
     (
         "librarian",
         "Common Mistakes",
-        "Troubleshooting prose spanning nearly every `artifact`/`librarian` shape, not \
+        "Troubleshooting prose spanning nearly every `doc`/`librarian` shape, not \
          one shape in particular: a `requires:` edge from a single section would \
          deliver it to callers who never hit a mistake, and a `serves:` on the bare \
-         `artifact` tool key (no `.action`) is a wildcard that the `Shape` matcher \
-         treats as matching every `artifact.*` call — over-broad by construction, the \
+         tool key (no `.action`) is a wildcard that the `Shape` matcher \
+         treats as matching every `doc.*` call — over-broad by construction, the \
          exact failure this gate exists to catch. Also resolves the census shapes \
-         `artifact` (a call observed missing the required `action` field — no `Shape` \
-         can match only the no-action form without matching every `artifact.*` call \
-         too) and `librarian.find` (an invalid `librarian` action; the caller most \
-         likely meant `doc(action=\"find\")`) — both are exactly the class of \
-         mistake this table exists to catch.",
+         librarian.find (an invalid `librarian` action; the caller most likely meant \
+         `doc(action=\"find\")`) and \
+         doc (the bare tool key: a call observed missing the required `action` field, \
+         recorded in the census under the pre-collapse name `artifact`; no `Shape` can \
+         match only the no-action form without matching every `doc.*` call too) — \
+         both are exactly the class of mistake this table exists to catch.",
     ),
     (
         "librarian",
@@ -631,6 +634,11 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
         "(librarian call shapes)",
         TRACKER_LIBRARIAN_SHAPES_UNSERVED,
     ),
+    (
+        "tracker-conventions",
+        "(doc call shapes)",
+        TRACKER_DOC_SHAPES_UNSERVED,
+    ),
 ];
 
 /// Why a `tracker-conventions` section carries no `serves:` declaration: the call that
@@ -686,6 +694,71 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
      librarian.legibility_scan, librarian.merge_worktree, librarian.find (not an action; a \
      mistyped doc(action=\"find\")). Those that librarian.md declares are served from it on \
      the fallthrough once the tracker-conventions preamble is spent.";
+
+/// The `doc.*` census shapes `every_observed_shape_of_a_declaring_topic_has_a_section`
+/// pairs with `tracker-conventions`, none of which has a section here.
+///
+/// Until 2026-10-17 that gate never saw them: the census spelled the document tool
+/// `artifact`, the registry says `doc`, and the gate `continue`d past every row whose tool
+/// resolved to nothing, so it verified only the `librarian.*` rows (about 830 calls against
+/// about 10,100 `artifact.*` ones). With the rows mapped to today's name it asks about each
+/// `doc.*` shape, and this reason answers for the ones no `tracker-conventions` section
+/// serves, naming each as a whole word, which is how [`waiver_reason_names_shape`] resolves it.
+///
+/// What this records, measured by making the real calls against an augmented
+/// `docs/trackers/` artifact (the gate's probes are synthetic results naming a tracker path,
+/// so they route every shape below here whether or not a real call would):
+///
+/// - `doc.append_entry`, `doc.update_entry`, `doc.move`, `doc.delete`, `doc.link`, `doc.augment`:
+///   the real result names no path the router reads (2026-10-16, see
+///   `TRACKER_SECTION_NEEDS_A_WRITE`), so a real call reaches `librarian`, not here.
+///   Open ledger entry:
+///   `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
+/// - `doc.event_create`, `doc.event_list`, `doc.gather`, `doc.graph`: also measured, 2026-10-16
+///   (`event_*`, `src/librarian/adapter.rs` `names_tracker_path`) and again 2026-10-17
+///   (`gather`, `graph`); their results name no tracker path, and a real call reaches
+///   `librarian`.
+/// - `doc.list_stale`: the one that really routes here. Its result carries `items[].abs_path`,
+///   which the scan reads, so a real call on an augmented tracker is served this topic's
+///   preamble and no section. Open ledger entry:
+///   `docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md`.
+/// - `doc` (bare, no action): the census row for a call missing the required `action`.
+const TRACKER_DOC_SHAPES_UNSERVED: &str = "These doc.* call shapes route to \
+     tracker-conventions in the gate's probes (a result naming a tracker or bug path), and no \
+     section here serves them. Real calls that never reach this topic (their results name no \
+     tracker path, measured 2026-10-16 and 2026-10-17): doc.append_entry, doc.update_entry, \
+     doc.move, doc.delete, doc.link, doc.augment, doc.event_create, doc.event_list, doc.gather, \
+     doc.graph, and doc (the bare tool key, a call missing its action); the write ones are \
+     tracked in docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md. \
+     The one that really routes here and is served only the preamble: doc.list_stale (its \
+     result names items[].abs_path), tracked in \
+     docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md. \
+     Surfaced 2026-10-17 when the gate began reading census rows renamed from artifact.* to \
+     doc.*.";
+
+/// Whether a `SECTION_WAIVERS` reason names `shape` as a whole word.
+///
+/// The reason is split on whitespace and each word stripped of surrounding punctuation and
+/// backticks (`` `doc.move`, `` is `doc.move`; `doc(action="find")` stays that whole word and
+/// is not `doc`). The comparison is equality, not `contains`: a substring test is monotone
+/// under widening (any longer string that happens to contain the shape satisfies it), which
+/// is how a bare `doc` shape read as waived because `doc(action="find")` appeared in an
+/// unrelated reason. docs/conventions/what-green-is-evidence-for.md.
+pub fn waiver_reason_names_shape(reason: &str, shape: &str) -> bool {
+    reason.split_whitespace().any(|word| {
+        word.trim_matches(|c: char| {
+            matches!(c, '`' | ',' | ';' | ':' | '.' | '\'' | '"' | '(' | ')')
+        }) == shape
+    })
+}
+
+/// Whether Gate 2 may treat `shape` as waived for `topic`: some `SECTION_WAIVERS` row for the
+/// topic carries it as a whole word of its reason.
+pub fn shape_is_waived(topic: &str, shape: &str) -> bool {
+    SECTION_WAIVERS
+        .iter()
+        .any(|(t, _, reason)| *t == topic && waiver_reason_names_shape(reason, shape))
+}
 
 /// The guide that opens a session.
 ///
@@ -1953,6 +2026,46 @@ mod tests {
                 );
             }
         }
+    }
+    /// A shape-level waiver resolves on a WHOLE word of its reason, never a substring.
+    /// `contains` is monotone under widening: it read the bare shape `doc` as waived because
+    /// the unrelated `doc(action="find")` sat in another reason, so a waiver nobody wrote for
+    /// `doc` silenced it. Each case below is one the substring form gets wrong or right for
+    /// the wrong reason.
+    #[test]
+    fn waiver_reason_names_a_shape_as_a_whole_word_not_a_substring() {
+        use crate::prompts::waiver_reason_names_shape as names;
+        // Punctuation and backticks around the word do not hide it.
+        assert!(names(
+            "covers doc.move, doc.link and `doc.augment`.",
+            "doc.move"
+        ));
+        assert!(names(
+            "covers doc.move, doc.link and `doc.augment`.",
+            "doc.augment"
+        ));
+        assert!(names("the bare `doc` tool key", "doc"));
+        // A prefix, a suffix and a call form that merely contains the shape do not name it.
+        assert!(!names("covers doc.find_all only", "doc.find"));
+        assert!(!names("covers redoc.find only", "doc.find"));
+        assert!(!names("meant doc(action=\"find\") instead", "doc"));
+        assert!(!names("see docs/issues/x.md for doc.* shapes", "doc"));
+    }
+
+    /// The two real consequences of whole-word matching on the shipped table: the bare `doc`
+    /// shape is named explicitly in the waivers of both declaring topics (so it is not "covered"
+    /// by incidental prose), and a shape no waiver carries is not waived.
+    #[test]
+    fn shape_is_waived_resolves_the_bare_doc_shape_on_an_explicit_mention() {
+        use crate::prompts::shape_is_waived;
+        for topic in ["librarian", "tracker-conventions"] {
+            assert!(
+                shape_is_waived(topic, "doc"),
+                "the bare `doc` shape must be named as a whole word in a `{topic}` waiver"
+            );
+        }
+        assert!(shape_is_waived("tracker-conventions", "doc.list_stale"));
+        assert!(!shape_is_waived("librarian", "doc.no_such_action"));
     }
 
     #[test]
