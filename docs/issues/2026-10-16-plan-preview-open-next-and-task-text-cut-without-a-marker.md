@@ -35,7 +35,7 @@ Read `src/librarian/preview/plan.rs`: the cap at `plan.rs:41` (`if open_next.len
 
 Fixed in `src/librarian/preview/plan.rs`, judging that a window named `open_next` still needs to say it is one (the task-text cut had no such reading):
 
-- `extract` counts every open task and, only when more exist than `OPEN_NEXT_LIMIT`, stamps `tasks.open_total` (the stated count, not left to `total - done`, which also disagrees for a `[~]`-style marker) and `tasks.open_next_truncated: true`. Absent otherwise, so a small plan's preview stays lean; mirrors `headings::stamp_truncation`. The window itself is unchanged.
+- `extract` counts every open task and, only when more exist than `OPEN_NEXT_LIMIT`, stamps `tasks.open_total` (a stated count rather than leaving the reader to compute `total - done`, which is the same number: `total` counts only blank and `x`/`X` markers) and `tasks.open_next_truncated: true`. Absent otherwise, so a small plan's preview stays lean; mirrors `headings::stamp_truncation`. The window itself is unchanged.
 - `truncate_task_text` appends `…` to a cut task (same shape as `memory.rs` `truncate_text`).
 - `src/tools/core/cap_probe.rs`: `preview.plan_open_next` and `preview.plan_task_text` move from `NoMarker` to `Probed` (`Mutation::Killed`).
 
@@ -43,13 +43,34 @@ Fix commit `ae2033c9` on branch `worktree-agent-a56ad6e632040ceff`; patch-id `f1
 
 ## Tests added
 
-In `src/librarian/preview/plan.rs`: `open_next_cut_is_signaled_with_the_true_open_count` (5 open tasks vs cap 3, plus a `[~]` task that is neither open nor done), `open_next_within_the_cap_carries_no_truncation_marker`, `a_cut_task_text_ends_with_an_ellipsis`, `a_task_text_exactly_at_the_limit_is_not_marked_as_cut` (boundary). `task_text_truncated_to_limit` now allows the one `…` (`TASK_TEXT_MAX + 1`).
+In `src/librarian/preview/plan.rs`:
 
-Red first: `open_next_cut_is_signaled_with_the_true_open_count` failed with `left: Null right: true` before the `extract` change. The ellipsis test was written before its fix but the first red build picked up the `truncate_task_text` edit, so its red is evidenced by the pre-existing `task_text_truncated_to_limit` failing on the 101st character and by the mutation run: deleting the `out.push('…')` and the `open_next_truncated` stamp reds both cited tests (`a_cut_task_text_ends_with_an_ellipsis`, `open_next_cut_is_signaled_with_the_true_open_count`).
+- `open_next_cut_is_signaled_with_the_true_open_count`: 5 open tasks vs cap 3. Its `[~]` line is neither open nor done; it is there to kill a mutant that counts an unknown marker as open (`open_total` would read 6).
+- `open_next_cut_by_exactly_one_task_is_still_signaled`: `OPEN_NEXT_LIMIT + 1` open tasks, the smallest cut.
+- `open_next_within_the_cap_carries_no_truncation_marker`.
+- `a_cut_task_text_ends_with_an_ellipsis` (the cited test): a `TASK_TEXT_MAX + 50` character task.
+- `a_task_one_character_over_the_limit_is_cut_and_marked`: exactly 101 characters, ASCII and non-ASCII, asserting the exact cut string.
+- `a_multibyte_task_within_the_character_limit_is_not_marked_as_cut`: 96 characters, 192 bytes, asserting no `…`.
+- `a_task_text_exactly_at_the_limit_is_not_marked_as_cut`: 100 characters.
+- `task_text_truncated_to_limit` now allows the one `…` (`TASK_TEXT_MAX + 1`).
+
+Evidence, each from a mutation of the production path (one mutant in the tree at a time, `cargo test --lib librarian::preview::plan`, 15 tests, baseline `15 passed; 0 failed`):
+
+| mutant | red |
+|---|---|
+| `extract` stamps only when `open_total > open_next.len() + 1` | `open_next_cut_by_exactly_one_task_is_still_signaled` FAILED (only) |
+| `truncate_task_text` guards on bytes, `s.len() <= TASK_TEXT_MAX` | `a_multibyte_task_within_the_character_limit_is_not_marked_as_cut` FAILED (only) |
+| `truncate_task_text` guards on `chars().count() <= TASK_TEXT_MAX + 49` | `a_task_one_character_over_the_limit_is_cut_and_marked` FAILED (only) |
+| `_ => open_total += 1` (unknown marker counted as open) | `open_next_cut_is_signaled_with_the_true_open_count` FAILED (only) |
+| `out.push('…')` deleted | `a_cut_task_text_ends_with_an_ellipsis` and `a_task_one_character_over_the_limit_is_cut_and_marked` FAILED |
+
+The pre-fix `truncate_task_text` (no `…`, the last row) was also run against the ellipsis test alone (`cargo test --lib librarian::preview::plan::tests::a_cut_task_text_ends_with_an_ellipsis`): `0 passed; 1 failed`, panicking at its own assertion with `a cut task must be marked; got: ` followed by 100 `x` and no ellipsis. That red belongs to the new test's assertion, not to the old `<= TASK_TEXT_MAX` check.
+
+`open_next_cut_is_signaled_with_the_true_open_count` was also seen red before the `extract` change (`left: Null right: true`).
 
 ## Resume
 
-N/A once merged. Not done here: the `tasks.open_next_truncated` / `tasks.open_total` fields are not described in any prompt surface or manual page (none mentions the plan preview's `tasks` shape); `tests/result_caps.rs` passed unchanged.
+N/A once merged. Known limit, not a defect to fix here: the `…` marker is not unique. A task of at most 100 characters whose own text ends in `…` reads like a cut task; the only disambiguator is length (a cut task is exactly 101 characters, 100 plus the mark). This is the same convention `memory.rs` `truncate_text` uses, and it is the escape-and-disambiguator trade named in `docs/conventions/parsers-over-a-namespace.md`; a distinct field (as `open_next_truncated` is for the window) would be needed to remove it. Not done here: the `tasks.open_next_truncated` / `tasks.open_total` fields are not described in any prompt surface or manual page (none mentions the plan preview's `tasks` shape); `tests/result_caps.rs` passed unchanged.
 
 ## References
 

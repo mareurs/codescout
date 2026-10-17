@@ -481,10 +481,10 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "preview.plan_headings",
         coverage: Coverage::Untested(
             "`MAX_HEADINGS` is exercised past its bound by `heading_truncation_is_signaled` \
-             (`src/librarian/preview/plan.rs:168`, 25 headings vs 20), which asserts the \
+             (`src/librarian/preview/plan.rs`, its `tests` module, 25 headings vs 20), which asserts the \
              marker on production output from `headings::stamp_truncation`. It is not \
              citable: that function name is declared identically in \
-             `preview/default.rs:57`, `preview/plan.rs:168` and `preview/spec.rs:76`, and \
+             `preview/default.rs:57`, `preview/plan.rs` (`tests` module) and `preview/spec.rs:76`, and \
              the gate resolves a `cited_test` by first match in `git ls-files src` order, \
              so the citation would bind to `default.rs:57` — the test for the \
              sibling `preview.default_headings` row. Citable as soon as one of the three \
@@ -497,7 +497,8 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // `src/librarian/preview/plan.rs`.
         //
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
-        // test seeds 5 open tasks against `OPEN_NEXT_LIMIT` 3.
+        // test seeds 5 open tasks against `OPEN_NEXT_LIMIT` 3; the one-over boundary is
+        // pinned by `open_next_cut_by_exactly_one_task_is_still_signaled`.
         id: "preview.plan_open_next",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.tasks.open_next_truncated"),
@@ -510,7 +511,9 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // task, `src/librarian/preview/plan.rs`.
         //
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
-        // test seeds a task of `TASK_TEXT_MAX` + 50 characters.
+        // test seeds a task of `TASK_TEXT_MAX` + 50 characters; the character-vs-byte and
+        // one-over boundaries are pinned by `a_task_one_character_over_the_limit_is_cut_and_marked`
+        // and `a_multibyte_task_within_the_character_limit_is_not_marked_as_cut`.
         id: "preview.plan_task_text",
         coverage: Coverage::Probed {
             marker: Marker::TextContains("…"),
@@ -910,7 +913,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         //
         // UNIQUENESS: the semantically obvious citation here is
         // `heading_truncation_is_signaled`, which is declared THREE times in tracked
-        // `src/` (`preview/default.rs:57`, `plan.rs:168`, `spec.rs:76`). The uniquely
+        // `src/` (`preview/default.rs:57`, `plan.rs` `tests` module, `spec.rs:76`). The uniquely
         // named sibling below is cited instead; see the `preview.plan_headings` row for
         // why the collision is disqualifying rather than merely untidy.
         id: "preview.default_headings",
