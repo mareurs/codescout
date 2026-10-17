@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: doctor's recently-touched-paths walk breaks at 4,000 commits and returns a bare set with nothing marking it partial
 owners:
 - marius
@@ -8,6 +8,7 @@ tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-10-16
 severity: low
+closed: 2026-10-17
 ---
 
 ## Summary
@@ -32,17 +33,30 @@ The walk's two bounds are documented in the function's doc comment, but the retu
 
 ## Fix
 
-Not designed. Candidate: return `(set, truncated: bool)` and put `walk_truncated: true` in the check's summary `Value` (the check already returns a `Value` alongside its violations, used for notes elsewhere in the same function).
+Decision taken: return the flag and publish it.
+
+- `paths_touched_since` returns `(paths, truncated)`. `truncated` is set only on the `break`, i.e. only when a commit exists beyond the ceiling, so a history of exactly `max_commits` is complete and is not flagged. It means "may be partial", not "is wrong": whether the unread tail could hold a commit newer than the cutoff is not determined (that needs reading the tail, the cost the ceiling avoids).
+- The scan is split into `scan_open_bug_cited_from_source` (a wrapper that pins `MAX_WALK_COMMITS` = 4000 and carries the `cap-class` annotation) and `scan_open_bug_cited_from_source_walking(.., max_walk_commits)`, so a test can inject a small ceiling. The check's doc comment now sits on the `_walking` function.
+- The health block published at `catalog_health.open_bug_source_citations` gains `walk_truncated` (always present, `false` included) and `walk_max_commits`.
+- `src/tools/core/cap_probe.rs`: `doctor.recently_touched_walk` moves `NoMarker` to `Probed` (marker `$.walk_truncated`, mutation `Killed`).
+
+Verified before the fix: the code matched the report (`seen >= max_commits` broke with nothing marking the set partial). The commit count (5,582 vs 4,000) was not re-measured.
 
 ## Tests added
 
-None — filing only. The old row notes why a probe is hard: the fixture needs >4,000 commits with non-monotonic committer time across the boundary; an injectable `max_commits` (already a parameter of `paths_touched_since`) makes a small fixture enough.
+- `paths_touched_since_reports_whether_its_commit_ceiling_cut_the_walk_short` (`doctor.rs`): a 5-commit fixture with ceilings 3 (truncated, newest 3 files only), 5 (exactly the history: not truncated, all 5 files) and 4000 (not truncated).
+- `open_bug_cited_from_source_health_says_when_the_walk_was_truncated` (`doctor.rs`): through the `_walking` seam, `walk_truncated` is `true` with `walk_max_commits` 2 and `false` at 4000.
+
+Mutation: forcing the health field false reds the health test; removing `truncated = true` reds both.
 
 ## Resume
 
-1. Return the truncation flag and surface it in the check's summary.
-2. Drive `paths_touched_since` with a tiny `max_commits` in a fixture repo; move `doctor.recently_touched_walk` to `Probed`.
-3. Shares `doctor.rs` with the catalog owner — coordinate before editing.
+Nothing outstanding. Not archived on purpose; archive when the fix is on the shipping branch.
+
+## Fix provenance
+
+- **SHA:** `426feb369598cd6efc563f9c31a3b9618cc4f125` (branch `worktree-agent-a4845d73e6020762a`; one commit that also fixes `2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md`)
+- **patch-id:** `ab2ff3ec97ecf247f9fa4368d716ae92b4044981` (`git show 426feb36 | git patch-id --stable`)
 
 ## References
 
