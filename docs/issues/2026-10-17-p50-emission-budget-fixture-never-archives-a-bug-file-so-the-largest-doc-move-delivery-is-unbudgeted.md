@@ -7,7 +7,8 @@ tags:
 - guides
 - section-grain-delivery
 opened: 2026-10-17
-closed: 2026-10-17owner: marius
+closed: 2026-10-17
+owner: marius
 severity: low
 related:
 - docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
