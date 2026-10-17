@@ -40,7 +40,9 @@ Inferred from the code, not measured. (1) `get_or_start_via_mux_waiting` round 1
 
 ## Evidence
 
-Source reading only; the second race predates the wait in kind (the round-0 claim probe) and is repeated here once per 200 ms per waiting client.
+Source reading only for race (1) of the original two; the second race predates the wait in kind (the round-0 claim probe) and is repeated here once per 200 ms per waiting client.
+
+Related, REPRODUCED and FIXED on 2026-10-17 (second review): the remembered-wedge memory was also recorded when `connect_to_mux` stopped early because the lock turned free (its holder died), so after race (1) the next 60 s of calls got no wait at all against a mux that was starting. Red test `an_early_stop_because_the_holder_died_is_not_remembered_as_a_wedged_mux` (the memory was non-empty after a holder that died); fixed in `9a5cc0e4` (`MuxConnectFailure.holder_gone`; only a full wait with the holder alive is recorded). Race (1) itself, a third mux taking the lock between the early stop and round 1's claim, is still unreproduced.
 
 ## Hypotheses tried
 
