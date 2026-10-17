@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: scripts/install-lsp.sh and the manual install and troubleshoot kotlin-language-server, but codescout starts kotlin-lsp'
 tags:
 - cluster/doc-contradicted-by-code
@@ -9,6 +9,8 @@ owner: marius
 related:
 - docs/issues/2026-10-16-mcp-smoke-kotlin-targets-a-project-layout-that-no-longer-exists.md
 severity: low
+closed: 2026-10-17
+unverified: "The real download was not exercised: the URL and the archive's internal layout come from the release page and the installed kotlin-lsp-bin package, and the installer was run only against a stub curl and a fabricated archive. macOS is refused with a pointer to the manual, not installed."
 ---
 
 # BUG: scripts/install-lsp.sh and the manual install and troubleshoot kotlin-language-server, but codescout starts kotlin-lsp
@@ -55,11 +57,31 @@ None.
 
 ## Fix
 
-Decision needed: whether `install-lsp.sh` should install JetBrains' `kotlin-lsp` (and from where; `language-support.md:133-135` names its GitHub releases page), and then correct `troubleshooting.md`, `architecture.md` and the install script's header and server map. Not fixed here.
+Decision taken from the code (2026-10-17): codescout starts the binary named in `lsp_binary_name("kotlin-lsp")` (`src/lsp/servers/mod.rs:111`; on Unix `lsp_binary_name` returns the name unchanged, `src/platform/unix.rs:163`) and finds it on `PATH`; the mux command line is `-- kotlin-lsp --stdio --system-path=...`. So the installer must put a `kotlin-lsp` on `PATH`, and `--check` must look for that name. Nothing is read from a configured path.
+
+The installer's source is JetBrains' release, read on 2026-10-17 from `https://api.github.com/repos/Kotlin/kotlin-lsp/releases/latest` and the release page: the GitHub release has no assets (the tag is `kotlin-lsp/v263.6379.0`); the downloads are on `download.jetbrains.com/language-server/kotlin-server/<version>/kotlin-server-<version>[-aarch64].tar.gz` for Linux, `.sit` for macOS and `.win.zip` for Windows. The installed package on this machine (`/usr/share/kotlin/kotlin-lsp`, owned by `kotlin-lsp-bin`) shows the layout: `bin/intellij-server` is the launcher, and `/usr/bin/kotlin-lsp` is a symlink to it; `kotlin-lsp.sh` beside it prints that it is deprecated and execs `bin/intellij-server`.
+
+Changed:
+
+- `scripts/install-lsp.sh`: `binary_for kotlin` is `kotlin-lsp`; `install_kotlin` resolves the version from the `kotlin-lsp/v<version>` tag, downloads the Linux `.tar.gz` for the CPU (`-aarch64` on arm64), unpacks it under `~/.local/share/kotlin-lsp`, finds `bin/intellij-server` (at the root or one directory down), and links it as `~/.local/bin/kotlin-lsp`. On macOS it refuses with a message pointing at the manual, because the archive there is a `.sit` this script does not unpack.
+- `docs/manual/src/troubleshooting.md`: `which kotlin-lsp` (`:110`), the slow-start note (`:125`) and the startup-time table row (`:428`).
+- `docs/manual/src/architecture.md:147`: the Kotlin row names `kotlin-lsp`.
+- `docs/manual/src/language-support.md` (Kotlin section): said the release is an archive on the GitHub releases page and to place "the `kotlin-lsp` script" on `PATH`; now says where the archives are, that the launcher to link is `bin/intellij-server`, that the install script does this on Linux and not on macOS.
+- `contrib/systemd/README.md:115`: named `kotlin-language-server` as the JVM LSP codescout spawns with `-Xmx2g`; it is `kotlin-lsp`. Not in the original list; the same claim.
+
+Not changed: the code comments in `src/symbol/query.rs`, `src/symbol/edit.rs` and `src/tools/symbol/tests.rs`, which record what fwcd's server did when BUG-027 was measured; they are history, not a statement of what codescout uses. `CHANGELOG.md` and archived documents likewise.
 
 ## Tests added
 
-N/A: open.
+`tests/kotlin_server_name_in_installer_and_manual_matches_code.rs`, three tests that derive the started binary from the `"kotlin" =>` arm of `src/lsp/servers/mod.rs` and compare the documents to it:
+
+- no line of `scripts/install-lsp.sh`, `troubleshooting.md`, `architecture.md`, `language-support.md` or `contrib/systemd/README.md` contains `kotlin-language-server` (these files each say which server codescout uses; the ban is deliberately not applied to the changelog, archived issues or code comments);
+- `binary_for kotlin` equals the started binary, and `install_kotlin` has the line `ln -sf "${launcher}" "${INSTALL_DIR}/kotlin-lsp"`;
+- the architecture table's Kotlin row and `troubleshooting.md`'s `which ...` line and startup-time row name the started binary.
+
+RED before the fix, 3 of 3 failed: `binary_for kotlin names a binary codescout does not start (left: kotlin-language-server, right: kotlin-lsp)`, the architecture row, and a list of 17 offending lines in the five files. GREEN after: `3 passed; 0 failed`. Mutants observed RED: linking the launcher as `kotlin-lsp-x` (`install_kotlin does not link the launcher as kotlin-lsp`), and re-adding the old name to `architecture.md` (`architecture.md:148 ... names kotlin-language-server`; the ban is blunt and also rejects a "not kotlin-language-server" note, which these five files do not need).
+
+Also run, not committed as a test: `scripts/install-lsp.sh kotlin` with a stub `curl` (it recorded the two URLs asked for: the `releases/latest` API and `https://download.jetbrains.com/language-server/kotlin-server/263.6379.0/kotlin-server-263.6379.0.tar.gz`), `HOME` and `TMPDIR` in a scratch directory, `PATH` limited to a stub directory, and a fabricated archive with the launcher one directory down: it linked `~/.local/bin/kotlin-lsp` to `bin/intellij-server`, the link ran, and `--check` reported `kotlin  kotlin-lsp  <path>`. Ceiling: no real download was made, so the URL and the archive's internal layout are read from the release page and the installed package, not exercised.
 
 ## Workarounds
 
@@ -67,7 +89,7 @@ Install `kotlin-lsp` by hand as `docs/manual/src/language-support.md` describes.
 
 ## Resume
 
-1. Decide the installer's source for `kotlin-lsp`. 2. Rewrite `install_kotlin` and the `:91` map entry. 3. Fix the three manual pages. 4. Decide separately whether the `kotlin-language-server` code comments should say which server each measurement was made against.
+Done. Optional: run `./scripts/install-lsp.sh kotlin` on a machine without `kotlin-lsp` to exercise the real download (not done here: no network install on the fixing machine). Archive with the fix SHA (labelled experiments) and its patch-id once this reaches experiments.
 
 ## References
 

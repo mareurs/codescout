@@ -144,7 +144,7 @@ Supported language servers:
 | TypeScript/JS/TSX   | `typescript-language-server` |
 | Go                  | `gopls`                      |
 | Java                | `jdtls`                      |
-| Kotlin              | `kotlin-language-server`     |
+| Kotlin              | `kotlin-lsp`                 |
 | C/C++               | `clangd`                     |
 | C#                  | `OmniSharp`                  |
 | Ruby                | `solargraph`                 |
