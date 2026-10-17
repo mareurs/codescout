@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'doc(action="list_stale") on an augmented tracker routes to tracker-conventions and is served only its preamble: the result names the tracker in items[].abs_path and no section declares the shape'
 tags:
 - cluster/declared-not-wired
@@ -8,8 +8,7 @@ tags:
 - section-grain-delivery
 - topic-routing
 opened: 2026-10-17
-closed:
-owner: marius
+closed: 2026-10-17owner: marius
 severity: low
 related:
 - docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
@@ -79,16 +78,50 @@ stands for exactly this routing for `doc.list_stale`.
 
 ## Fix
 
-Not started, and not designed here. The choice is the same one the sibling entry records: serve
-`doc.list_stale` from a `tracker-conventions` section (the sections would have to be written and declared),
-or stop `list_stale`'s `items[].abs_path` from routing here (the router is a decision), or declare the
-`librarian` guide's refresh section as the answer and let the preamble stand. When one is chosen, delete
-`doc.list_stale` from `TRACKER_DOC_SHAPES_UNSERVED` (`src/prompts/mod.rs`).
+Fixed 2026-10-17 by a routing change plus a split, with no new guidance written.
+
+Re-verified first with a real call (in-process test server): `doc(create, docs/trackers/..., augment)`
+then `doc(list_stale, threshold_hours=0)` shipped an 891 B `tracker-conventions` preamble ("no section
+declares this call's shape"), as this entry records.
+
+Of the three options, a section declared in `tracker-conventions` was not taken: that guide holds no
+text about list_stale or the refresh cycle (grep of `list_stale|commit_refresh|gather` finds nothing
+about it), and writing some would be new guidance. The content a list_stale caller needs already
+exists in the `librarian` guide: the refresh cycle (gather, synthesize, update with
+`commit_refresh=true`) and the stale check.
+
+- **Routing:** `names_tracker_path` (`src/librarian/adapter.rs`) returns false for a result carrying
+  `threshold_hours`, a key only `list_stale` emits. `find` returns the same `items[].abs_path` shape
+  without it and still routes to `tracker-conventions`. The exclusion is in the adapter, not in
+  `names_path_containing`, so no `path~` predicate changes meaning.
+- **Mis-homed content:** after the routing change the call was served `librarian` § Augmentation
+  Lifecycle, which declares `doc.list_stale` but holds neither the refresh cycle nor the stale check:
+  both sat under the `### Changing ONE entry` subsection, declared for `doc.update_entry` only (an
+  earlier split left them there). They are now their own section, `### Refreshing an augmented
+  artifact — the cycle and the stale check` (about 0.5 KB, under the 2.5 KB cap), declared
+  `serves: doc.list_stale`. Moved, not duplicated.
+
+Not done: `doc.gather` is declared in § Augmentation Lifecycle but its caller also needs that cycle
+(step 1 is `gather`). Declaring the new section for `doc.gather` as well would change what a `gather`
+call ships, which this entry does not cover; left as a follow-up decision.
+
+Merge note: the observed-shapes branch (`worktree-agent-ab7a7e0e672e14d3a`) waives `doc.list_stale`
+under `tracker-conventions` (`TRACKER_DOC_SHAPES_UNSERVED`) because its Gate 2 probe is
+`{"abs_path": ...}`, which the router now treats differently from a real `list_stale` result. After
+merging, give that probe a real `list_stale` result shape (with `threshold_hours`), and delete the
+waiver token; this branch has neither the gate nor the token, so nothing was edited in `mod.rs`.
 
 ## Tests added
 
-None. `every_observed_shape_of_a_declaring_topic_has_a_section` holds the state open by waiving
-`doc.list_stale` under `tracker-conventions`, with this entry named in the reason.
+Red before the fix, green after:
+
+- `librarian::adapter::tests::a_list_stale_result_is_not_a_tracker_operation_even_though_its_items_name_trackers`
+  (a `list_stale` result does not route; the same `items` without `threshold_hours`, a `find`, still does)
+- `server::guide_hint_tests::list_stale_on_an_augmented_tracker_ships_the_refresh_cycle_not_a_preamble`
+  (real create-with-augment then `list_stale`: RED at first with `got 891 B: <!-- auto-injected
+  get_guide('tracker-conventions') preamble`; RED again after the routing change alone with `got 1725
+  B: ... § Augmentation Lifecycle`, which lacked the cycle; green once the section was split. It also
+  asserts the section does not ship a second time.)
 
 ## Workarounds
 
@@ -96,8 +129,15 @@ None. `every_observed_shape_of_a_declaring_topic_has_a_section` holds the state 
 
 ## Resume
 
-Read `src/librarian/tools/refresh_stale.rs` (the result shape) and `LibrarianAdapter::relevant_guide_topic`
-(`src/librarian/adapter.rs`) first; decide the route, then delete the waiver token.
+Nothing owed here. See the merge note under Fix for the observed-shapes branch's probe and waiver token,
+and the `doc.gather` follow-up.
+
+## Fix provenance
+
+- **SHA:** `40e2a621` (`worktree-agent-a666e4cdd398d0f53`)
+- **patch-id:** `44c3c448d759`
+
+## References
 
 ## References
 
