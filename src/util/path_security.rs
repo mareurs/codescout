@@ -376,11 +376,10 @@ fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
 
 /// `/` and `$HOME` are never acceptable implicit write roots: either would allow writes anywhere
 /// on the filesystem, or inside the whole home directory. `canon` must already be canonical, so
-/// `$HOME` is compared in both its literal and its canonical form (a symlinked home would
-/// otherwise never equal a canonical `canon`).
+/// `$HOME` is canonicalized too (a symlinked home would otherwise never equal it). A home that
+/// cannot be canonicalized falls back to its literal form, which is the best that can be compared.
 fn is_overly_broad_write_root(canon: &Path) -> bool {
-    canon == Path::new("/")
-        || home_dir().is_some_and(|h| canon == h || canon == best_effort_canonicalize(&h))
+    canon == Path::new("/") || home_dir().is_some_and(|h| canon == best_effort_canonicalize(&h))
 }
 
 /// `classify_write_path` with the temp directory supplied, so tests can exercise a symlinked or
