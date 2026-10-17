@@ -683,10 +683,21 @@ impl ProjectConfig {
         // resolved against the server's cwd rather than the project. Refuse, naming the entry.
         // (`classify_write_path_in` skips such entries too: a config can change after this runs.)
         for (i, root) in self.security.extra_write_roots.iter().enumerate() {
-            if !std::path::Path::new(root).is_absolute() {
+            let path = std::path::Path::new(root);
+            if !path.is_absolute() {
                 anyhow::bail!(
                     "security.extra_write_roots entry {i} ({root:?}) is not an absolute path; \
                      use a full path (a leading '~' is not expanded)",
+                );
+            }
+            // `/home/u/work/..` is `/home/u`: the spelling hides how wide the root is.
+            if path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                anyhow::bail!(
+                    "security.extra_write_roots entry {i} ({root:?}) contains a '..' component; \
+                     write the directory out without it",
                 );
             }
         }
@@ -1314,6 +1325,24 @@ model = "local:test"
         // Absolute entries are untouched.
         cfg.security.extra_write_roots = vec![good];
         cfg.validate_list_limits().unwrap();
+    }
+
+    /// An absolute entry with a `..` component hides how wide the root is: `/home/u/work/..` is
+    /// `/home/u`. Refused at load, naming the entry, like a relative one.
+    #[test]
+    fn validate_list_limits_rejects_an_absolute_extra_write_root_with_dotdot() {
+        let mut cfg = ProjectConfig::default_for("x".into());
+        let spelled = std::env::temp_dir().join("work/..").display().to_string();
+        cfg.security.extra_write_roots = vec![spelled.clone()];
+        let err = cfg
+            .validate_list_limits()
+            .expect_err("a `..` entry must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("security.extra_write_roots") && msg.contains("'..'"),
+            "the error must name the field and the `..` rule, got {msg}"
+        );
+        assert!(msg.contains(&spelled), "the entry is named, got {msg}");
     }
 
     // docs/issues/archive/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md

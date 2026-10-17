@@ -634,17 +634,36 @@ fn classify_write_path_in(
         }
     }
     // An entry that is not an absolute path is skipped: `""` is a prefix of EVERY path
-    // (`Path::starts_with`) and a relative one resolves against the server's cwd. The config
-    // refuses them when it loads (`ProjectConfig::validate_list_limits`); this holds when a
-    // config reaches the classifier another way or changes after it was validated.
-    for extra in config.extra_write_roots.iter().filter(|e| e.is_absolute()) {
+    // (`Path::starts_with`) and a relative one resolves against the server's cwd. A `..` is skipped
+    // too: `/home/u/work/..` is `/home/u`, and the spelling hides how wide the root is. The config
+    // refuses both when it loads (`ProjectConfig::validate_list_limits`); this holds when a config
+    // reaches the classifier another way or changes after it was validated.
+    for extra in config
+        .extra_write_roots
+        .iter()
+        .filter(|e| e.is_absolute() && !has_parent_dir(e))
+    {
         allowed.push(canonicalize_through_existing_ancestor(extra));
     }
-    for root in session_roots {
-        allowed.push(canonicalize_through_existing_ancestor(root));
-    }
+    // A session root is a DIRECTORY the user approved, and what it names is re-resolved on every
+    // call. So it is held to the rules approval applied, again, now: a root spelled with `..` is
+    // skipped, and so is one that resolves (today) onto a filesystem root, a protected home or a
+    // directory above one, however it got there (`zz/../..` once `zz` exists, a directory that was
+    // later replaced by a link to the home). Deny still wins over whatever remains.
+    let session_allowed: Vec<PathBuf> = session_roots
+        .iter()
+        .filter(|root| !has_parent_dir(root))
+        .map(|root| canonicalize_through_existing_ancestor(root))
+        .filter(|root| too_broad(root, &env.homes).is_none())
+        .collect();
 
+    // A session root admits what is INSIDE it, never a file named like the root itself:
+    // `approve_write(~/.newrc)` names a directory that does not exist yet, and creating a file
+    // with that name is not what was approved.
     let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root))
+        || session_allowed
+            .iter()
+            .any(|root| resolved != *root && resolved.starts_with(root))
         || temp_root
             .as_deref()
             .is_some_and(|t| temp_root_admits(t, &homes, &resolved));
@@ -750,6 +769,13 @@ pub fn validate_approve_path(
     validate_approve_path_in(raw, project_root, &protected_homes())
 }
 
+/// Whether `path` still has a `..` component as written. A `..` is only meaningful once every
+/// directory before it exists; `starts_with` is component-wise and would match a root the `..`
+/// escapes, or hide how wide a root is.
+fn has_parent_dir(path: &Path) -> bool {
+    path.components().any(|c| matches!(c, Component::ParentDir))
+}
+
 /// Why a directory is too broad to approve.
 #[derive(Debug, PartialEq, Eq)]
 enum TooBroad {
@@ -826,6 +852,25 @@ fn validate_approve_path_in(raw: &str, project_root: &Path, homes: &[PathBuf]) -
     } else {
         best_effort_canonicalize(&project_root.join(raw))
     };
+
+    // A `..` that survived resolution means a directory before it does not exist yet, so the
+    // path names a place nobody has resolved: it could be a home's parent once that directory is
+    // created, and the stored root is re-resolved on every call. Refuse it by name.
+    if has_parent_dir(&resolved) {
+        bail!(
+            "approve_write: '{}' contains '..' that could not be resolved (a directory in it does \
+             not exist yet); pass a path with no unresolved '..' segments",
+            raw
+        );
+    }
+    // Approval is of a DIRECTORY. A file that exists is not one, and approving it would make the
+    // file itself a root.
+    if resolved.exists() && !resolved.is_dir() {
+        bail!(
+            "approve_write: '{}' is not a directory; approve the directory to write into",
+            resolved.display()
+        );
+    }
 
     // Breadth guard (`too_broad`): a filesystem root, a protected home, or a directory above one.
     match too_broad(&resolved, homes) {
@@ -5811,6 +5856,183 @@ mod tests {
                 .as_ref()
                 .is_err_and(|e| e.to_string().contains("protected location")),
             "the deny list must hold for an injected home, got: {result:?}"
+        );
+    }
+
+    // ── review follow-up: `..` through a directory that does not exist yet, files as roots ───────
+    //
+    // `approve_write("zz/../../..")` was accepted while `zz` did not exist: `best_effort_canonicalize`
+    // keeps a literal `..` when a component is missing, and `too_broad` compares components, so the
+    // spelling never looked like an ancestor of the home. The stored session root was re-resolved
+    // on every call, so once `zz` existed it collapsed to the home itself
+    // (`docs/issues/2026-10-17-approve-write-accepts-an-unresolved-dotdot-that-collapses-onto-the-home.md`).
+
+    #[test]
+    fn approve_refuses_an_unresolved_dotdot() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/home");
+        std::fs::create_dir_all(&home).unwrap();
+        // `base/zz` does not exist, so the literal spelling is not an ancestor of the home; with
+        // `zz` created it is `base/a`, which contains it.
+        let spelled = base.join("zz/../a");
+        let result = validate_approve_path_in(spelled.to_str().unwrap(), &base, &[home]);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("'..'")),
+            "an unresolved `..` must be refused by name, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn approve_refuses_an_existing_file() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".bashrc"), "x").unwrap();
+        let result = validate_approve_path_in(
+            home.join(".bashrc").to_str().unwrap(),
+            &base,
+            std::slice::from_ref(&home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("not a directory")),
+            "a file is not a directory to approve, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn a_session_root_spelled_with_dotdot_adds_no_root() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(base.join("zz")).unwrap(); // the `..` now collapses onto `base/a`
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let target = home.join(".bashrc");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[base.join("zz/../a")],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a root that is only a home once its `..` collapses must not admit it, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_session_root_spelled_with_dotdot_adds_no_root_even_when_it_is_narrow() {
+        // Approval refuses a `..`, so a stored root carrying one did not come from approval. It is
+        // skipped whatever it collapses to: a stricter rule than "skip it only if it is broad", and
+        // one that cannot widen anything.
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        std::fs::create_dir_all(base.join("zz")).unwrap();
+        std::fs::create_dir_all(base.join("ok")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), None, None);
+        let target = base.join("ok/x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[base.join("zz/../ok")],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a root spelled with `..` must be skipped even when it is narrow, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_root_that_became_a_link_to_the_home_adds_no_root() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Approved while `lnk` was an ordinary (or missing) directory; later it points at the home.
+        std::os::unix::fs::symlink(&home, base.join("lnk")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let target = home.join(".bashrc");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[base.join("lnk")],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a session root that now resolves onto the home must not admit it, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_session_root_never_admits_a_file_that_is_the_root_itself() {
+        // `approve_write(~/.newrc)` takes a directory that does not exist yet; creating a FILE of that
+        // name is not what was approved, and `~/.newrc` is a file directly in the home.
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let root = home.join(".newrc");
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let itself = classify_write_path_in(
+            root.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&root),
+            &env,
+        );
+        assert!(
+            matches!(&itself, WritePathDecision::OutsideRoot { .. }),
+            "the root itself is not a file inside it, got: {itself:?}"
+        );
+        let below = root.join("x.txt");
+        let inside = classify_write_path_in(
+            below.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&root),
+            &env,
+        );
+        assert!(
+            matches!(&inside, WritePathDecision::Allowed(_)),
+            "a file inside the approved directory stays writable, got: {inside:?}"
+        );
+    }
+
+    #[test]
+    fn an_absolute_extra_write_root_with_dotdot_admits_nothing() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        std::fs::create_dir_all(base.join("work")).unwrap();
+        let project = tempdir().unwrap();
+        // `<base>/work/..` is `<base>`: the spelling hides how wide the root is.
+        let spelled = base.join("work/..");
+        let target = base.join("elsewhere.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &extra_roots_config(&[spelled.to_str().unwrap()]),
+            &[],
+            &env_of(&base.join("no-temp"), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "an extra root spelled with `..` must be skipped, got: {decision:?}"
         );
     }
 
