@@ -2740,6 +2740,37 @@ mod tests {
         );
     }
 
+    /// OPEN BUG, ignored on purpose: a mux that has bound its socket but never sends its init
+    /// message hangs `LspClient::connect` (it reads the init message with no timeout), so the
+    /// window and deadline of `connect_to_mux` are never reached. Run with `--ignored` to see the
+    /// red. docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "open bug: docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md"]
+    async fn connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        tokio::spawn(async move {
+            // Accept and hold, saying nothing.
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let started = Instant::now();
+        let returned = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::connect_to_mux(&sock_path, dir.path(), Duration::from_secs(1), None),
+        )
+        .await
+        .is_ok();
+        assert!(
+            returned,
+            "a 1 s window must end by itself; still waiting after {:?}",
+            started.elapsed()
+        );
+    }
+
     /// The wait's last act is a lock check. A holder that dies after the loop's previous check but
     /// before the deadline used to be reported as "the whole window was served with the holder
     /// alive", which the caller records as a wedged mux for 60 s. Dropped at 0.9 s of a 1 s wait
