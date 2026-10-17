@@ -58,8 +58,16 @@ under test (classification only, nothing written; driver and outputs in the sess
 | F1b/F1c `TMPDIR=link->~/.claude` / `~/.config` | write under the target | ALLOWED | ALLOWED (documented residual) |
 | F1f/F1g `TMPDIR=link->/home` / `/home` | write `/home/otheruser/x` | ALLOWED | ALLOWED (documented residual) |
 
-No row moved towards ALLOWED: every change in the full before/after diff is
-`ALLOWED -> outside`, `ALLOWED -> denied`, `outside -> denied` or `Ok -> Err`.
+No row of THIS table moved towards ALLOWED or `Ok`. That is not the same as "nothing refuses less":
+the review found a shape this table did not probe. With `HOME` a symlink to the real home,
+`validate_read_path("<link>/.aws/credentials")` (the entry missing, so the target cannot be
+resolved and keeps its spelling) was refused on `experiments` and allowed on the first version of
+this branch, because the homes had been canonicalized and the literal spelling dropped. Fixed in a
+follow-up commit: the deny list expands against the home as given AND its canonical form
+(`protected_homes_of`); `a_missing_deny_entry_is_matched_under_the_symlink_spelling_of_the_home`
+and `a_read_through_a_symlinked_home_of_a_missing_deny_entry_is_refused` were red first
+(`Ok(".../link/.aws/credentials")`). Re-measured with the real binary after the fix (scenario C of
+`port/mcp_r.py`).
 
 ## Reproduction
 
@@ -146,7 +154,7 @@ item 6 in `2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admi
    with the reason (the mutation runs only in a child process). That is a repo-policy decision for
    the owner to accept or refuse; the alternative is dropping that one test.
 3. `WriteEnv.home: Option<PathBuf>` became `WriteEnv.homes: Vec<PathBuf>` (`$HOME` resolved plus the
-   account home, canonicalized through the existing ancestor and deduplicated: `protected_homes_of`).
+   account home, the home as given AND its canonical form (through the existing ancestor), deduplicated: `protected_homes_of`).
    `denied_paths_with` expands a `~` entry against every home (`expand_home_all`);
    `is_overly_broad_write_root`, `temp_root_admits` and `validate_approve_path` check every home;
    `validate_read_path` reads the same list (the read deny list is `denied_read_paths`).
@@ -182,7 +190,7 @@ Trade-offs recorded for the owner:
 `an_unset_home_still_protects_the_accounts_home`, `an_empty_home_...`, `a_relative_home_...`,
 `a_wrong_home_still_protects_the_accounts_home` (each runs in a child process with its own `HOME`,
 `platform::test_child`), `protected_homes_are_the_resolved_home_and_the_accounts_deduplicated`,
-`two_spellings_of_one_home_are_one_protected_home`, `tilde_patterns_expand_against_every_home`,
+`two_spellings_of_one_home_are_both_kept_but_collapse_to_one_canonical_home`, `tilde_patterns_expand_against_every_home`,
 `the_write_deny_list_covers_every_protected_home`,
 `the_write_deny_list_covers_a_symlinked_entry_of_every_protected_home`,
 `a_temp_root_admits_nothing_inside_any_protected_home`, `a_cwd_above_any_protected_home_adds_no_root`.
@@ -221,8 +229,8 @@ nothing and its cold isolated build does.
 | 2 | m2l relative `pw_dir` accepted | `every_shape_of_no_usable_entry_is_reported_as_none`: KILLED |
 | 2 | m2m `geteuid` -> `getuid` | none: SURVIVED. Equivalent in any process whose real and effective uid are equal; no test can tell them apart without a setuid binary. Recorded, not killed. |
 | 3 | m3a account home left out | `protected_homes_are_the_resolved_home_and_the_accounts_deduplicated`: KILLED |
-| 3 | m3b no dedupe | same test, `two_spellings_of_one_home_are_one_protected_home`: KILLED |
-| 3 | m3c homes not canonicalized | `two_spellings_of_one_home_are_one_protected_home`: KILLED |
+| 3 | m3b no dedupe | same test, `two_spellings_of_one_home_are_both_kept_but_collapse_to_one_canonical_home`: KILLED |
+| 3 | m3c homes not canonicalized | `two_spellings_of_one_home_are_both_kept_but_collapse_to_one_canonical_home`: KILLED (mutant measured on the version before the follow-up) |
 | 3 | m3d `~/` expanded for the first home only | `tilde_patterns_expand_against_every_home` and 2 more: KILLED |
 | 3 | m3e bare `~` first home only | `tilde_patterns_expand_against_every_home`: KILLED |
 | 3 | m3f1 resolved-form deny list built from the first home only | `the_write_deny_list_covers_a_symlinked_entry_of_every_protected_home`: KILLED |

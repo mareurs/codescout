@@ -192,29 +192,41 @@ fn protected_homes() -> Vec<PathBuf> {
     protected_homes_of(home_dir(), crate::platform::account_home_dir())
 }
 
-/// `protected_homes` over explicit inputs: `resolved` first, then `account`, each held in
-/// canonical form (`canonicalize_through_existing_ancestor`, so a missing home behind a symlinked
-/// ancestor is still seen below its real parent) and deduplicated on that form, so two spellings
-/// of one directory count once.
+/// `protected_homes` over explicit inputs: `resolved` first, then `account`; for each, the home
+/// as it was given AND its canonical form (`canonicalize_through_existing_ancestor`, so a missing
+/// home behind a symlinked ancestor is still seen below its real parent), exact duplicates dropped.
+///
+/// Both spellings are kept on purpose. The canonical one is what breadth checks and resolved
+/// targets compare against (`canonical_homes` collapses the list back to it). The spelling as
+/// given is what a target that cannot be resolved stays in: with `HOME` a symlink and `~/.aws`
+/// missing, `<link>/.aws/credentials` never becomes `<real>/.aws/credentials`, and only a deny entry
+/// expanded against `<link>` matches it. Canonical-only made the read side refuse less than before
+/// (probe C2e of the review).
 fn protected_homes_of(resolved: Option<PathBuf>, account: Option<PathBuf>) -> Vec<PathBuf> {
     let mut homes: Vec<PathBuf> = Vec::new();
     for home in resolved.into_iter().chain(account) {
         let canonical = canonicalize_through_existing_ancestor(&home);
-        if !homes.contains(&canonical) {
-            homes.push(canonical);
+        for spelling in [home, canonical] {
+            if !homes.contains(&spelling) {
+                homes.push(spelling);
+            }
         }
     }
     homes
 }
 
-/// `homes` in canonical form (`canonicalize_through_existing_ancestor`). Idempotent, so it is
-/// safe to apply to homes that `protected_homes_of` already canonicalized and to raw homes a test
-/// injects.
+/// `homes` in canonical form (`canonicalize_through_existing_ancestor`), duplicates dropped (the
+/// two spellings `protected_homes_of` keeps collapse onto one). Idempotent, so it is safe to apply
+/// to raw homes a test injects.
 fn canonical_homes(homes: &[PathBuf]) -> Vec<PathBuf> {
-    homes
-        .iter()
-        .map(|h| canonicalize_through_existing_ancestor(h))
-        .collect()
+    let mut out: Vec<PathBuf> = Vec::new();
+    for home in homes {
+        let canonical = canonicalize_through_existing_ancestor(home);
+        if !out.contains(&canonical) {
+            out.push(canonical);
+        }
+    }
+    out
 }
 
 /// Expand a leading `~` against each of `homes`; a pattern without one expands to itself.
@@ -7898,14 +7910,68 @@ EOF"#;
 
     #[cfg(unix)]
     #[test]
-    fn two_spellings_of_one_home_are_one_protected_home() {
+    fn two_spellings_of_one_home_are_both_kept_but_collapse_to_one_canonical_home() {
         let scratch = tempdir().unwrap();
         let (real, link) = real_and_link(scratch.path());
         let canonical = std::fs::canonicalize(&real).unwrap();
+        // The deny list needs both spellings (see `protected_homes_of`) ...
         assert_eq!(
-            protected_homes_of(Some(link), Some(real)),
-            vec![canonical],
-            "a symlink spelling and the real path are the same directory"
+            protected_homes_of(Some(link.clone()), Some(real)),
+            vec![link.clone(), canonical.clone()],
+            "the spelling as given, then the canonical one, each once"
+        );
+        // ... and every breadth check sees ONE home.
+        let spellings = protected_homes_of(Some(link), None);
+        assert_eq!(canonical_homes(&spellings), vec![canonical]);
+    }
+
+    /// `HOME` is a symlink to the real home and the deny entry is MISSING (`~/.aws` does not
+    /// exist): the target `<link>/.aws/credentials` cannot be resolved, so it stays in the spelling
+    /// the caller wrote, and only a deny entry expanded against that same spelling matches it.
+    /// Canonicalizing the homes alone (as `protected_homes_of` first did) dropped that spelling, so
+    /// the read side refused LESS than before (probe C2e of the review).
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_deny_entry_is_matched_under_the_symlink_spelling_of_the_home() {
+        let scratch = tempdir().unwrap();
+        let (_real, link) = real_and_link(scratch.path());
+        let homes = protected_homes_of(Some(link.clone()), None);
+        let denied = denied_paths_with(&homes, best_effort_canonicalize);
+        let target = link.join(".aws/credentials");
+        assert!(!target.exists(), "fixture: the entry must be missing");
+        assert!(
+            is_denied(&best_effort_canonicalize(&target), &denied),
+            "{target:?} must be denied under the spelling the home was given in"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_through_a_symlinked_home_of_a_missing_deny_entry_is_refused() {
+        // The same through the real `validate_read_path`, with the process `HOME` a symlink.
+        let scratch = tempdir().unwrap();
+        let base = std::fs::canonicalize(scratch.path()).unwrap();
+        let (real, link) = real_and_link(&base);
+        std::fs::create_dir_all(&real).unwrap();
+        crate::platform::test_child::run(
+            module_path!(),
+            "a_read_through_a_symlinked_home_of_a_missing_deny_entry_is_refused",
+            &[("HOME", Some(link.to_str().unwrap()))],
+            || {
+                let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+                let project = tempdir().unwrap();
+                let target = home.join(".aws/credentials");
+                let read = validate_read_path(
+                    target.to_str().unwrap(),
+                    Some(project.path()),
+                    &default_config(),
+                );
+                assert!(
+                    read.as_ref()
+                        .is_err_and(|e| e.to_string().contains("protected location")),
+                    "{target:?} must be refused, got: {read:?}"
+                );
+            },
         );
     }
 
