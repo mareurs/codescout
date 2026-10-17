@@ -258,16 +258,47 @@ fn best_effort_canonicalize(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Canonicalize a write target: the parent must exist (or be canonicalized
-/// best-effort), then append the file name.
+/// Canonicalize a write target: the file may not exist yet, so its parent is resolved through
+/// its deepest EXISTING ancestor (`canonicalize_through_existing_ancestor`) and the file name is
+/// appended unresolved.
 fn canonicalize_write_target(path: &Path) -> PathBuf {
-    if let Some(parent) = path.parent() {
-        let canon_parent = best_effort_canonicalize(parent);
-        if let Some(name) = path.file_name() {
-            return canon_parent.join(name);
-        }
+    if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+        return canonicalize_through_existing_ancestor(parent).join(name);
     }
     best_effort_canonicalize(path)
+}
+
+/// Canonicalize `path` as far as it exists: resolve the deepest existing ancestor with
+/// `fs::canonicalize` (following every symlink in it) and append the components below it
+/// verbatim, `..` included.
+///
+/// Resolving only the immediate parent, as this once did, left a path whose parent is missing in
+/// its literal spelling. That spelling is compared against canonical roots, so under a symlinked
+/// root a legitimate write into a not-yet-created subdirectory was refused, and, worse, a symlink
+/// to an outside directory followed by a not-yet-created subdirectory kept its in-root spelling and
+/// was admitted (`2026-10-17-write-allowlist-canonicalizes-only-the-parent-...`).
+///
+/// An unresolved `..` stays in the result on purpose: the caller rejects it, since
+/// `starts_with` would otherwise match a root the `..` escapes.
+fn canonicalize_through_existing_ancestor(path: &Path) -> PathBuf {
+    let mut below: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(canon) = std::fs::canonicalize(cur) {
+            return below.iter().rev().fold(canon, |acc, c| acc.join(c));
+        }
+        // No ancestor left to resolve: hand the path back as it was.
+        let Some(up) = cur.parent() else {
+            return path.to_path_buf();
+        };
+        match cur.components().next_back() {
+            Some(std::path::Component::Normal(n)) => below.push(n.to_os_string()),
+            Some(std::path::Component::ParentDir) => below.push("..".into()),
+            // A root or a prefix has no existing parent to fall back to.
+            _ => return path.to_path_buf(),
+        }
+        cur = up;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -6377,6 +6408,84 @@ EOF"#;
         assert!(
             matches!(decision, WritePathDecision::Denied(_)),
             "unresolved `..` must be a hard denial, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_out_of_the_temp_dir_is_refused_even_below_a_missing_subdirectory() {
+        // `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-...`: resolving
+        // only the immediate parent left `escape/new/x.txt` in its in-root spelling, because
+        // `escape/new` does not exist yet, so a write through the link was admitted.
+        let project = tempdir().unwrap();
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let escape = temp.path().join("escape");
+        std::os::unix::fs::symlink(outside.path(), &escape).unwrap();
+
+        let target = escape.join("new/deeper/x.txt");
+        let decision = classify_write_path_with_temp(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            temp.path(),
+        );
+        let expected = std::fs::canonicalize(outside.path())
+            .unwrap()
+            .join("new/deeper/x.txt");
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == expected),
+            "a write through a symlink out of the temp dir must resolve and be refused, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_temp_dir_allows_a_write_below_a_missing_subdirectory() {
+        let project = tempdir().unwrap();
+        let real = tempdir().unwrap();
+        let holder = tempdir().unwrap();
+        let link = holder.path().join("tmplink");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+
+        let target = link.join("new/deeper/x.txt");
+        let decision = classify_write_path_with_temp(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            &link,
+        );
+        let expected = std::fs::canonicalize(real.path())
+            .unwrap()
+            .join("new/deeper/x.txt");
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == expected),
+            "a write below a missing subdirectory of a symlinked temp dir must be allowed as {expected:?}, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_root_behind_a_symlink_allows_a_write_below_a_missing_subdirectory() {
+        let real = tempdir().unwrap();
+        let holder = tempdir().unwrap();
+        let link = holder.path().join("projlink");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        // A temp dir that does not exist adds no root, so only the project root can admit this.
+        let no_temp = holder.path().join("no-such-temp");
+
+        let decision = classify_write_path_with_temp(
+            "sub/deeper/file.rs",
+            &link,
+            &default_config(),
+            &default_session_roots(),
+            &no_temp,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "a project reached through a symlink must accept a new nested file, got: {decision:?}"
         );
     }
 
