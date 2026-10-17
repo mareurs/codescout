@@ -202,9 +202,12 @@ fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
     denied_paths_with(home_dir().as_deref(), best_effort_canonicalize)
 }
 
-/// The deny list with `$HOME` and the entry resolver supplied. The resolver must be the one the
-/// caller applies to the path it compares against: a resolver that leaves a missing entry literal
-/// beside a target resolved through its existing ancestors lets a symlinked home slip past.
+/// The deny list with `$HOME` and the entry resolver supplied. A caller that compares a path
+/// resolved one way against entries resolved another can be walked around: behind a symlinked
+/// `$HOME` a missing entry kept literal never matches a target resolved through its existing
+/// ancestors, and an entry that is itself a symlink resolves away from its own name. The write
+/// classifier therefore asks for more than one resolver (see `classify_write_path_in`); this
+/// function does not choose for it.
 fn denied_paths_with(home: Option<&Path>, resolve: fn(&Path) -> PathBuf) -> Vec<PathBuf> {
     let mut denied = Vec::new();
     for p in crate::platform::denied_read_prefixes()
@@ -405,28 +408,43 @@ pub fn classify_write_path(
 ///
 /// **Fails closed.** This uses `fs::canonicalize` directly, NOT `best_effort_canonicalize`, which
 /// falls back to the literal path on error: a temp dir that cannot be resolved (missing, or a
-/// permission error on an ancestor) yields no root at all, so no write is allowed under it.
-/// A canonical root that is too broad (`is_overly_broad_write_root`) is refused as well, for the
-/// reason the cwd root is: a `TMPDIR` symlink must not turn "scratch space" into "the whole
-/// filesystem".
-fn canonical_temp_write_root(temp_dir: &Path, home: Option<&Path>) -> Option<PathBuf> {
+/// permission error on an ancestor) yields no root at all, so no write is allowed under it. A
+/// temp dir that canonicalizes to `/` is refused too: it would admit the whole filesystem.
+///
+/// A temp dir ABOVE `$HOME` (`TMPDIR=/tmp` with `HOME=/tmp/home`) is kept as a root, but see
+/// `temp_root_admits`: it admits nothing inside the home directory.
+fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
     let canon = std::fs::canonicalize(temp_dir).ok()?;
-    if is_overly_broad_write_root(&canon, home) {
+    if canon == Path::new("/") {
         return None;
     }
     Some(canon)
 }
 
-/// `/`, `home` and every directory above `home` are never acceptable implicit write roots: each
-/// would allow writes anywhere on the filesystem, or inside the whole home directory. `canon` must
-/// already be canonical, so `home` is canonicalized too (a symlinked home would otherwise never
-/// compare equal to it). A home that cannot be canonicalized falls back to its literal form, which
-/// is the best that can be compared.
+/// Whether the temp root `root` admits `resolved`. `canonical_home` must already be canonical.
 ///
-/// Used for the temp root and the cwd root only. `validate_approve_path` still tests equality with
-/// `$HOME` alone (follow-up in `docs/issues/2026-10-17-...`).
-fn is_overly_broad_write_root(canon: &Path, home: Option<&Path>) -> bool {
-    canon == Path::new("/") || home.is_some_and(|h| best_effort_canonicalize(h).starts_with(canon))
+/// A root that is `canonical_home` or an ancestor of it would cover the whole home directory, so
+/// it admits nothing under the home: `~/.bashrc` is for another root to decide, never for a temp
+/// dir that merely sits above it. A temp root BELOW the home (the usual case,
+/// `~/.cache/tmp`) is unaffected. The exclusion lives here, not as a refusal of the root, because
+/// refusing the root made `approve_write`'s own suggestion (the temp dir's parent) undo the
+/// refusal and broke sandboxes whose `HOME` lives under `TMPDIR`.
+fn temp_root_admits(root: &Path, canonical_home: Option<&Path>, resolved: &Path) -> bool {
+    resolved.starts_with(root)
+        && !canonical_home.is_some_and(|h| h.starts_with(root) && resolved.starts_with(h))
+}
+
+/// `/`, `canonical_home` and every directory above it are never acceptable implicit CWD roots:
+/// each would allow writes anywhere on the filesystem, or inside the whole home directory.
+/// `canon` and `canonical_home` must both already be canonical
+/// (`canonicalize_through_existing_ancestor`: a missing home behind a symlinked ancestor has to
+/// be seen below its real parent, which a literal path never is).
+///
+/// Used for the cwd root only; the temp root is handled by `temp_root_admits`.
+/// `validate_approve_path` still tests equality with `$HOME` alone, so `approve_write` can accept
+/// a directory above the home (follow-up in `docs/issues/2026-10-17-...`).
+fn is_overly_broad_write_root(canon: &Path, canonical_home: Option<&Path>) -> bool {
+    canon == Path::new("/") || canonical_home.is_some_and(|h| h.starts_with(canon))
 }
 
 /// The ambient facts the write allowlist depends on, gathered at one edge so a test can inject
@@ -508,11 +526,20 @@ fn classify_write_path_in(
     let project_root = canonicalize_through_existing_ancestor(project_root);
 
     // Check deny-list first (blocks writes to ~/.ssh even if somehow under
-    // an extra_write_root). Its entries are resolved EXACTLY as the target was: an entry that
-    // does not exist (a missing `~/.aws`) stays literal under `best_effort_canonicalize`, while
-    // the target resolves through its existing ancestors, so behind a symlinked `$HOME` the two
-    // spellings diverge and the deny never matches.
-    let denied = denied_paths_with(env.home.as_deref(), canonicalize_through_existing_ancestor);
+    // an extra_write_root). Each entry is held in TWO forms, because the target is resolved by
+    // `canonicalize_write_target` (parent resolved, leaf as written) and an entry can be a symlink
+    // or sit under one:
+    // - fully resolved (`canonicalize_through_existing_ancestor`): a symlinked DIRECTORY entry
+    //   (`~/.ssh -> /data/ssh`) matches the target that resolved into it, and a missing entry
+    //   behind a symlinked `$HOME` matches the target that resolved through the same ancestors;
+    // - parent resolved, leaf as written (`canonicalize_write_target`): an entry that is itself a
+    //   symlinked FILE (`~/.kube/config -> config-prod`) matches a write to its own name, which the
+    //   fully resolved form no longer does.
+    let mut denied = denied_paths_with(env.home.as_deref(), canonicalize_through_existing_ancestor);
+    denied.extend(denied_paths_with(
+        env.home.as_deref(),
+        canonicalize_write_target,
+    ));
     if is_denied(&resolved, &denied) {
         return WritePathDecision::Denied(format!(
             "write denied: '{}' is in a protected location. approve_write cannot grant \
@@ -526,14 +553,18 @@ fn classify_write_path_in(
     // (`canonicalize_through_existing_ancestor`), so a root that does not exist yet under a
     // symlinked ancestor still matches the files written below it.
     let mut allowed = vec![project_root];
+    // The home directory in canonical form, resolved like every other root: a MISSING home
+    // behind a symlinked ancestor must still be seen below that ancestor's real path.
+    let canonical_home = env
+        .home
+        .as_deref()
+        .map(canonicalize_through_existing_ancestor);
     // System temp directory is always writable — useful for scratch files,
     // intermediate output, and cross-process coordination without polluting
-    // the project root. Held CANONICALIZED (the target above is), and absent when it cannot
-    // be canonicalized — see `canonical_temp_write_root`.
-    allowed.extend(canonical_temp_write_root(
-        &env.temp_dir,
-        env.home.as_deref(),
-    ));
+    // the project root. Held CANONICALIZED (the target above is), absent when it cannot
+    // be canonicalized (`canonical_temp_write_root`), and never admitting anything inside the
+    // home directory (`temp_root_admits`).
+    let temp_root = canonical_temp_write_root(&env.temp_dir);
     // CWD at server startup — Claude Code launches MCP servers from the
     // project directory, so this covers the case where an absolute path
     // targets the user's working directory even when --project points
@@ -544,7 +575,7 @@ fn classify_write_path_in(
     // the filesystem or inside the entire home directory.
     if let Some(cwd) = &env.cwd {
         let cwd_canon = canonicalize_through_existing_ancestor(cwd);
-        if !is_overly_broad_write_root(&cwd_canon, env.home.as_deref()) {
+        if !is_overly_broad_write_root(&cwd_canon, canonical_home.as_deref()) {
             allowed.push(cwd_canon);
         }
     }
@@ -555,7 +586,10 @@ fn classify_write_path_in(
         allowed.push(canonicalize_through_existing_ancestor(root));
     }
 
-    let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root));
+    let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root))
+        || temp_root
+            .as_deref()
+            .is_some_and(|t| temp_root_admits(t, canonical_home.as_deref(), &resolved));
     if !under_allowed_root {
         return WritePathDecision::OutsideRoot { resolved };
     }
@@ -2969,42 +3003,30 @@ mod tests {
 
     #[test]
     fn write_within_cwd_allowed_even_outside_project_root() {
-        // NOTE: This test changes the process-global CWD via set_current_dir().
-        // It could interfere with parallel tests that depend on current_dir().
-        // If flaky failures occur, consider adding the serial_test crate and
-        // #[serial] attribute.
-
         // Simulate the case where Claude Code launches the MCP server from
         // a project directory different from --project.  The CWD at server
-        // startup should be an additional allowed write root.
+        // startup should be an additional allowed write root. The cwd is injected:
+        // `set_current_dir` is process-global and raced every test that reads it.
         let project = tempdir().unwrap();
         let cwd_project = tempdir().unwrap();
         std::fs::create_dir_all(cwd_project.path().join("src")).unwrap();
 
-        // Temporarily change the process CWD to cwd_project.
-        // We use a guard struct to ensure CWD is restored even on panic.
-        let original_cwd = std::env::current_dir().unwrap();
-        struct CwdGuard(std::path::PathBuf);
-        impl Drop for CwdGuard {
-            fn drop(&mut self) {
-                let _ = std::env::set_current_dir(&self.0);
-            }
-        }
-        let _guard = CwdGuard(original_cwd);
-        std::env::set_current_dir(cwd_project.path()).unwrap();
-
         let target = cwd_project.path().join("src/Routing.kt");
-        let result = validate_write_path(
+        let decision = classify_write_path_in(
             target.to_str().unwrap(),
             project.path(), // active project root is different
             &default_config(),
             &default_session_roots(),
+            &env_of(
+                &cwd_project.path().join("no-temp"),
+                None,
+                Some(cwd_project.path()),
+            ),
         );
 
         assert!(
-            result.is_ok(),
-            "writes to a path under CWD should be allowed even if outside project root: {:?}",
-            result.err()
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "writes to a path under CWD should be allowed even if outside project root: {decision:?}"
         );
     }
 
@@ -6352,7 +6374,9 @@ EOF"#;
     // `project` and every other tempdir below sit as siblings in the real temp dir, so none of them
     // is covered by another allowlist root: the only root that can admit a write is the injected one.
 
-    /// `classify_write_path` with only the temp directory replaced; home and cwd stay ambient.
+    /// `classify_write_path` with only the temp directory chosen; home and cwd are NOT read from the
+    /// process, so a result cannot depend on where the suite runs (a `TMPDIR` under the package
+    /// root made the cwd root admit paths these tests expect to be refused).
     fn classify_write_path_with_temp(
         raw: &str,
         project_root: &Path,
@@ -6360,11 +6384,13 @@ EOF"#;
         session_roots: &[PathBuf],
         temp_dir: &Path,
     ) -> WritePathDecision {
-        let env = WriteEnv {
-            temp_dir: temp_dir.to_path_buf(),
-            ..WriteEnv::ambient()
-        };
-        classify_write_path_in(raw, project_root, config, session_roots, &env)
+        classify_write_path_in(
+            raw,
+            project_root,
+            config,
+            session_roots,
+            &env_of(temp_dir, None, None),
+        )
     }
 
     #[cfg(unix)]
@@ -6438,7 +6464,7 @@ EOF"#;
             matches!(decision, WritePathDecision::OutsideRoot { .. }),
             "a temp dir that cannot be canonicalized must allow nothing, got: {decision:?}"
         );
-        assert_eq!(canonical_temp_write_root(&missing, None), None);
+        assert_eq!(canonical_temp_write_root(&missing), None);
     }
 
     #[test]
@@ -6562,23 +6588,9 @@ EOF"#;
         let link = holder.path().join("rootlink");
         std::os::unix::fs::symlink("/", &link).unwrap();
         assert_eq!(
-            canonical_temp_write_root(&link, None),
+            canonical_temp_write_root(&link),
             None,
             "a TMPDIR symlink to `/` must not turn scratch space into the whole filesystem"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn temp_dir_symlinked_to_home_adds_no_allowlist_root() {
-        // The home is injected, so this asserts on every host (it used to return silently when
-        // `$HOME` was unset, which reads as a pass).
-        let scratch = tempdir().unwrap();
-        let (home, link) = real_and_link(scratch.path());
-        assert_eq!(
-            canonical_temp_write_root(&link, Some(&home)),
-            None,
-            "a TMPDIR symlink to $HOME must not make the home directory scratch space"
         );
     }
 
@@ -6718,20 +6730,6 @@ EOF"#;
     }
 
     #[test]
-    fn temp_dir_that_is_an_ancestor_of_home_adds_no_root() {
-        let scratch = tempdir().unwrap();
-        let home = scratch.path().join("a/b/home");
-        std::fs::create_dir_all(&home).unwrap();
-        // Not equal to home, but a root over it would cover the whole home directory.
-        assert_eq!(
-            canonical_temp_write_root(&scratch.path().join("a"), Some(&home)),
-            None
-        );
-        // The same directory is a fine temp root when it is not above home.
-        assert!(canonical_temp_write_root(&scratch.path().join("a"), None).is_some());
-    }
-
-    #[test]
     fn cwd_that_is_an_ancestor_of_home_adds_no_root() {
         let scratch = tempdir().unwrap();
         let home = scratch.path().join("a/b/home");
@@ -6750,19 +6748,6 @@ EOF"#;
         assert!(
             matches!(decision, WritePathDecision::OutsideRoot { .. }),
             "a cwd above home must not become a write root, got: {decision:?}"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn home_behind_a_symlink_is_refused_as_a_temp_root() {
-        let scratch = tempdir().unwrap();
-        let (real, link) = real_and_link(scratch.path());
-        // `real` is canonical; home is spelled through the link.
-        let canonical_real = std::fs::canonicalize(&real).unwrap();
-        assert_eq!(
-            canonical_temp_write_root(&canonical_real, Some(&link)),
-            None
         );
     }
 
@@ -6805,11 +6790,292 @@ EOF"#;
         );
     }
 
+    // ── second review: leaf symlinks in the deny list, two-level entries, temp root above home ─────
+
+    #[cfg(unix)]
+    #[test]
+    fn deny_list_holds_for_a_deny_entry_that_is_itself_a_symlink() {
+        // `~/.kube/config -> config-prod`, then the directory is approved. The entry resolved
+        // through its last component to `config-prod`, while the target keeps its own leaf as
+        // written, so a write to `~/.kube/config` matched nothing.
+        let scratch = tempdir().unwrap();
+        let home = std::fs::canonicalize(scratch.path()).unwrap().join("home");
+        std::fs::create_dir_all(home.join(".kube")).unwrap();
+        std::fs::write(home.join(".kube/config-prod"), "x").unwrap();
+        std::os::unix::fs::symlink("config-prod", home.join(".kube/config")).unwrap();
+        std::fs::write(home.join(".npmrc-real"), "x").unwrap();
+        std::os::unix::fs::symlink(".npmrc-real", home.join(".npmrc")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&scratch.path().join("no-temp"), Some(&home), None);
+        for (target, root) in [
+            (home.join(".kube/config"), home.join(".kube")),
+            (home.join(".kube/config-prod"), home.join(".kube")),
+            (home.join(".npmrc"), home.clone()),
+        ] {
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &default_config(),
+                &[root],
+                &env,
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+                "{target:?} must be a deny-list refusal, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deny_list_holds_for_two_level_entries_whose_middle_directory_is_missing() {
+        // Each entry sits below a directory that does not exist, behind a symlinked home. Resolving
+        // only the entry's parent leaves it literal (its own parent is the missing one).
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let project = tempdir().unwrap();
+        let env = env_of(&scratch.path().join("no-temp"), Some(&link), None);
+        let session_roots = vec![std::fs::canonicalize(&real).unwrap()];
+        for rel in [
+            ".kube/config",
+            ".config/gh/hosts.yml",
+            ".docker/config.json",
+            ".cargo/credentials",
+            ".local/share/keyrings/login.keyring",
+        ] {
+            let target = link.join(rel);
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &default_config(),
+                &session_roots,
+                &env,
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+                "{rel} behind a symlinked home must be a deny-list refusal, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deny_list_holds_under_both_spellings_when_ssh_is_a_symlinked_directory() {
+        let scratch = tempdir().unwrap();
+        let home = std::fs::canonicalize(scratch.path()).unwrap().join("home");
+        std::fs::create_dir_all(home.join("elsewhere")).unwrap();
+        std::os::unix::fs::symlink(home.join("elsewhere"), home.join(".ssh")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&scratch.path().join("no-temp"), Some(&home), None);
+        for target in [
+            home.join(".ssh/authorized_keys"),
+            home.join("elsewhere/authorized_keys"),
+        ] {
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &default_config(),
+                &[home.clone()],
+                &env,
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+                "{target:?} must be a deny-list refusal, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn roots_two_levels_below_a_symlinked_ancestor_admit_their_files() {
+        // `a` does not exist, so `a/b` has a missing PARENT: resolving only the parent leaves the
+        // root literal while the target resolves through the link.
+        let scratch = tempdir().unwrap();
+        let (_real, link) = real_and_link(scratch.path());
+        let project = tempdir().unwrap();
+        let root = link.join("a/b");
+        let target = root.join("x.txt");
+        let env = env_of(&scratch.path().join("no-temp"), None, None);
+
+        let as_session = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&root),
+            &env,
+        );
+        assert!(
+            matches!(&as_session, WritePathDecision::Allowed(_)),
+            "session root: {as_session:?}"
+        );
+
+        let config = PathSecurityConfig {
+            extra_write_roots: vec![root.clone()],
+            ..Default::default()
+        };
+        let as_extra =
+            classify_write_path_in(target.to_str().unwrap(), project.path(), &config, &[], &env);
+        assert!(
+            matches!(&as_extra, WritePathDecision::Allowed(_)),
+            "extra root: {as_extra:?}"
+        );
+
+        let as_project = classify_write_path_in("x.txt", &root, &default_config(), &[], &env);
+        assert!(
+            matches!(&as_project, WritePathDecision::Allowed(_)),
+            "project root: {as_project:?}"
+        );
+
+        let as_cwd = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), None, Some(&root)),
+        );
+        assert!(
+            matches!(&as_cwd, WritePathDecision::Allowed(_)),
+            "cwd root: {as_cwd:?}"
+        );
+    }
+
+    #[test]
+    fn a_temp_root_above_home_admits_files_outside_home_but_not_inside_it() {
+        // `/tmp` as the temp dir with `$HOME` somewhere below it: scratch writes must keep working,
+        // and the temp root must not become a way into the home directory.
+        let scratch = tempdir().unwrap();
+        let home = scratch.path().join("a/b/home");
+        std::fs::create_dir_all(&home).unwrap();
+        let temp = scratch.path().join("a");
+        let project = tempdir().unwrap();
+        let env = env_of(&temp, Some(&home), None);
+
+        let outside_home = temp.join("f.txt");
+        let decision = classify_write_path_in(
+            outside_home.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "a temp root above home must still admit {outside_home:?}, got: {decision:?}"
+        );
+
+        let inside_home = home.join(".bashrc");
+        let decision = classify_write_path_in(
+            inside_home.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a temp root above home must not admit {inside_home:?}, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_temp_root_below_home_admits_everything_in_it() {
+        // The normal case (`~/.cache/tmp` under `$HOME`): the exclusion must not apply.
+        let scratch = tempdir().unwrap();
+        let home = scratch.path().join("home");
+        let temp = home.join("tmp");
+        std::fs::create_dir_all(&temp).unwrap();
+        let project = tempdir().unwrap();
+        let target = temp.join("f.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&temp, Some(&home), None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "{decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_temp_dir_that_is_home_behind_a_symlink_admits_nothing_in_it() {
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let project = tempdir().unwrap();
+        // The temp dir is the canonical real directory; home is spelled through the link.
+        let canonical_real = std::fs::canonicalize(&real).unwrap();
+        let target = canonical_real.join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&canonical_real, Some(&link), None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a temp dir equal to home must admit nothing in it, got: {decision:?}"
+        );
+        // And reached through a symlinked TMPDIR.
+        let target = link.join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&link, Some(&real), None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a symlinked temp dir equal to home must admit nothing in it, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_home_behind_a_symlink_is_still_seen_under_the_temp_and_cwd_roots() {
+        // HOME = <link>/home does not exist; `link -> real`. Resolved with `best_effort_canonicalize`
+        // it stayed literal and never looked like it was below `real`.
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let project = tempdir().unwrap();
+        let home = link.join("home");
+
+        let bashrc = home.join(".bashrc");
+        let decision = classify_write_path_in(
+            bashrc.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&real, Some(&home), None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "the temp root must not admit a missing home behind a symlink, got: {decision:?}"
+        );
+
+        let other = real.join("f.txt");
+        let decision = classify_write_path_in(
+            other.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), Some(&home), Some(&real)),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a cwd above a missing home behind a symlink must not become a root, got: {decision:?}"
+        );
+    }
+
     #[test]
     fn canonical_temp_write_root_is_the_canonical_path_of_an_existing_dir() {
         let dir = tempdir().unwrap();
         assert_eq!(
-            canonical_temp_write_root(dir.path(), None),
+            canonical_temp_write_root(dir.path()),
             Some(std::fs::canonicalize(dir.path()).unwrap())
         );
     }
