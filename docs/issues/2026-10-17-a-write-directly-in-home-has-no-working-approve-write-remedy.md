@@ -1,7 +1,7 @@
 ---
-status: fixed
+status: open
 opened: 2026-10-17
-closed: 2026-10-17
+closed:
 severity: low
 owner: marius
 related: [docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md, docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md]
@@ -18,9 +18,27 @@ When a write is `OutsideRoot`, both the denial text and the pending-ack flow tol
 `approve_write` the directory the file sits in. `validate_approve_path` refused `/` and `$HOME`
 by equality, so for a file directly in either the named remedy was certain to be refused, and for
 a file directly in a directory ABOVE the home (`/home`) the call was accepted and then admitted
-`~/.bashrc` and every other file in the home that the deny list does not name. Both halves are
-fixed on branch `fix/write-allowlist-port-2026-10-17`. What stays true, deliberately: no approval
-can make a file directly in a home, in a directory above one, or in `/` writable.
+`~/.bashrc` and every other file in the home that the deny list does not name.
+
+Status, narrowed after two independent reviews of branch `fix/write-allowlist-port-2026-10-17`
+(follow-up commits on the same branch):
+
+- The breadth rule (item 4) is the security half. It held on the ack path from the start: base
+  minted an `@ack` for a directory containing the home, the port refuses.
+- The denial text (item 5) reached only `validate_write_path` (so `edit_code`), not the ack path
+  that `create_file`, `edit_file` and `edit_markdown` use (`resolve_write_or_capture`), which kept
+  returning `approve_write`'s own refusal (`approve_write: '<home>' is too broad ... Approve a
+  subdirectory that does not contain it.`). Both paths now route through one function
+  (`too_broad_directory_denial`); measured with the real binary.
+- "No approval can make a file directly in a home, in a directory above one, or in `/` writable"
+  was NOT true when first written. Three bypasses of it existed and are closed on the branch, see
+  `2026-10-17-approve-write-accepts-an-unresolved-dotdot-that-collapses-onto-the-home.md`:
+  a `..` through a directory that does not exist yet, approving the FILE itself (or a name that
+  does not exist yet), and an absolute `extra_write_roots` entry spelled with `..`. The statement
+  holds for `approve_write` now; `extra_write_roots` remains the operator's own explicit choice.
+
+Still open, a design question: whether a file-scoped approval for a file directly in a home should
+exist.
 
 ## Class fit
 
@@ -153,7 +171,19 @@ Same method as in `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.m
 | 5 | m5g3 `too_broad` breadth form not resolved | `approve_sees_a_missing_directory_behind_a_symlink_that_contains_the_home`: KILLED |
 
 The m5 mutants other than m5b were re-run on the squashed commit after the unreachable code branch
-was removed; the first run (before the removal) gave the same verdicts. m4c was predicted to survive the first
+was removed; the first run (before the removal) gave the same verdicts.
+
+Review follow-up (the ack path, `resolve_write_or_capture`), 2026-10-17:
+
+| mutant | killed by |
+|---|---|
+| mB1 the ack path skips `too_broad_directory_denial` | `the_ack_path_says_what_is_true_for_a_file_in_a_directory_approve_write_refuses` (real `create_file` / `edit_file`): KILLED |
+| mB2 `too_broad_directory_denial_in` returns none | the same test and `a_denial_does_not_name_an_approve_write_call_that_is_certain_to_be_refused`: KILLED |
+
+Before the follow-up the ack test was red: `create_file(<home>/.bashrc2)` returned `approve_write:
+'<home>' is too broad — it is, or contains, the home directory '<home>'. Approve a subdirectory that
+does not contain it.` and `create_file("/probe-review-x")` returned `approve_write: '/' is too broad
+— specify a subdirectory`. m4c was predicted to survive the first
 symlink test and got its own test before being run, so it was not observed surviving.
 
 ## Workarounds
@@ -163,6 +193,8 @@ Write into a subdirectory (with `$TMPDIR` a directory that is not `$HOME` or an 
 ## Resume
 
 Decide whether a file-scoped approval is wanted for the broad-directory case; nothing else is open.
+The issue was set back to `open` for that question after the review follow-up, not because the
+refusals regressed.
 
 ## References
 

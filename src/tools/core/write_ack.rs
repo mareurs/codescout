@@ -13,7 +13,9 @@ use serde_json::{json, Value};
 
 use super::{RecoverableError, ToolContext};
 use crate::tools::output_buffer::looks_like_ack_handle;
-use crate::util::path_security::{classify_write_path, validate_approve_path, WritePathDecision};
+use crate::util::path_security::{
+    classify_write_path, too_broad_directory_denial, validate_approve_path, WritePathDecision,
+};
 
 /// Result of resolving a write target with capture awareness.
 #[derive(Debug)]
@@ -102,6 +104,12 @@ pub async fn resolve_write_or_capture(
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| resolved.clone());
+            // `approve_write` refuses a directory that is too broad: say what is true of THIS
+            // write (the same text `validate_write_path` gives) instead of the approval's own
+            // refusal, which reads as advice about a different call.
+            if let Some(denial) = too_broad_directory_denial(raw_path, &dir) {
+                return Err(RecoverableError::new(denial).into());
+            }
             // Pre-validate so a minted handle is guaranteed replayable.
             if let Err(e) = validate_approve_path(&dir.to_string_lossy(), &root, &security) {
                 return Err(RecoverableError::new(e.to_string()).into());

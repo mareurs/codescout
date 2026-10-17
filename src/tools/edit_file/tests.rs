@@ -314,6 +314,71 @@ fn approving_a_file_directly_in_the_home_cannot_make_it_writable() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn the_ack_path_says_what_is_true_for_a_file_in_a_directory_approve_write_refuses() {
+    flow_in_decoy_home(
+        "the_ack_path_says_what_is_true_for_a_file_in_a_directory_approve_write_refuses",
+        |ctx, _proj, home| {
+            Box::pin(async move {
+                // create_file, edit_file and edit_markdown reach the write gate through
+                // `resolve_write_or_capture` (the ack path), not `validate_write_path`.
+                let in_home = home.join(".bashrc2");
+                let created = CreateFile
+                    .call(
+                        json!({ "path": in_home.to_str().unwrap(), "content": "x\n" }),
+                        ctx,
+                    )
+                    .await
+                    .expect_err("a file directly in the home is refused")
+                    .to_string();
+                assert!(
+                    created.contains("directly in the home directory"),
+                    "the ack path must say what is true of a file in the home, got: {created}"
+                );
+                let edited = EditFile
+                    .call(
+                        json!({
+                            "path": home.join(".bashrc").to_str().unwrap(),
+                            "insert": "append",
+                            "new_string": "x\n"
+                        }),
+                        ctx,
+                    )
+                    .await
+                    .expect_err("a file directly in the home is refused")
+                    .to_string();
+                assert!(
+                    edited.contains("directly in the home directory"),
+                    "{edited}"
+                );
+                let in_root = CreateFile
+                    .call(
+                        json!({ "path": "/ce_ack_probe_x.txt", "content": "x\n" }),
+                        ctx,
+                    )
+                    .await
+                    .expect_err("a file directly in / is refused")
+                    .to_string();
+                assert!(
+                    in_root.contains("filesystem root"),
+                    "the ack path must say what is true of a file in `/`, got: {in_root}"
+                );
+                // The advice is the one the other write path gives: no approval helps, a
+                // subdirectory of the home can be approved.
+                assert!(
+                    created.contains("only a file inside a subdirectory"),
+                    "{created}"
+                );
+                assert!(
+                    !created.contains("Approve a subdirectory that does not contain it"),
+                    "that is the approval's own refusal, not advice about THIS write: {created}"
+                );
+            })
+        },
+    );
+}
+
 // ── ReadFile ──────────────────────────────────────────────────────────────
 
 #[tokio::test]

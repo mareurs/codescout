@@ -729,8 +729,8 @@ fn validate_write_path_in(
             // answer `OutsideRoot`. Read from the two code paths and exercised by the
             // `deny_list_holds_*` tests, not proven for every filesystem shape; a mutant that
             // deleted such a branch could not be killed, so it was left out.
-            if let Some(why) = too_broad(dir, &env.homes) {
-                bail!("{}", too_broad_write_denial(raw, dir, &why));
+            if let Some(denial) = too_broad_directory_denial_in(raw, dir, &env.homes) {
+                bail!("{denial}");
             }
             // The directory is text a caller pastes into the call, so it is a JSON string
             // literal: a `"` or `\` in a directory name (or a Windows separator) would otherwise
@@ -835,6 +835,20 @@ fn too_broad_write_denial(raw: &str, dir: &Path, why: &TooBroad) -> String {
             dir.display()
         ),
     }
+}
+
+/// The denial for a write to `raw` whose directory `dir` `approve_write` would refuse as too broad
+/// (a filesystem root, a protected home, or a directory above one), or `None` when the directory
+/// is not too broad. Over the ambient protected homes: the one place every write path that mints
+/// or names an `approve_write` call (`validate_write_path`, and `resolve_write_or_capture`, the
+/// ack path of `create_file`, `edit_file` and `edit_markdown`) asks before it does.
+pub fn too_broad_directory_denial(raw: &str, dir: &Path) -> Option<String> {
+    too_broad_directory_denial_in(raw, dir, &protected_homes())
+}
+
+/// `too_broad_directory_denial` over explicit homes.
+fn too_broad_directory_denial_in(raw: &str, dir: &Path, homes: &[PathBuf]) -> Option<String> {
+    too_broad(dir, homes).map(|why| too_broad_write_denial(raw, dir, &why))
 }
 
 /// `validate_approve_path` over an explicit list of protected homes, so a test can inject them.
