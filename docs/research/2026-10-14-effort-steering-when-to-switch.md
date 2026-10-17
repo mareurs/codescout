@@ -33,7 +33,7 @@
 1. The R1 ruling: record `not_shown_safe` as a no-ship for the static rule.
 2. The branch `effort-routing-r1` (never pushed; it holds a foreign commit `f17afad`): how to integrate (cherry-pick the R1 commits, not a merge).
 3. The four `docs/research/2026-10-14-effort-steering-when-to-switch*.md` files and `.codescout/memories/research/effort-steering.md` were committed on 2026-10-16 by pathspec at the operator's request, after the Stage A results (not pushed).
-4. Tracker updates ES-22 / ES-23 in `claude-plugins` (not done; that checkout is shared with other sessions).
+4. Tracker updates ES-22 / ES-23 in `claude-plugins`: DONE 2026-10-17 at the operator's choice, commit `090b6bb` on the local branch `effort-routing-r1` (not pushed; that checkout is shared with other sessions, and only the tracker file was committed).
 5. Work directories outside any repo: `s5-work-v2r` (rerun), `s5-work-v2p` (paragraph test), `es-stage0` (instruments and mining output). They hold transcripts as evidence.
 6. The personal S5 token was pasted into a chat session earlier: revoke or replace it when the study ends.
 7. The termination gate was built and tested on `cs-p20` (section below): `low` with a `Stop` hook that type-checks all targets passed 5 of 5 for $1.26, against 0 of 10 without it in the earlier batches. One task, a compile-class failure, references from other batches. The next step, if any, is the operator's.
