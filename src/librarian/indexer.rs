@@ -396,9 +396,15 @@ pub fn index_repo_sync(
         //
         // A link pointing OUTSIDE the root is deliberately KEPT: it is the only path by
         // which this walk reaches those bytes, so skipping it would trade a silent
-        // duplicate for a silent omission, which is the worse direction. This repo has
-        // exactly one (`.claude/skills/claude-traces`), which is why the predicate is
-        // "resolves inside" and not "is a symlink".
+        // duplicate for a silent omission, which is the worse direction. Only FILE links reach
+        // here: a symlinked directory is never descended (see
+        // `a_symlinked_directory_is_not_descended_into_by_the_walk`), so this repo's
+        // `.claude/skills/claude-traces`, which IS a directory link, catalogs nothing. The
+        // predicate is "resolves inside", not "is a symlink", because of the outward FILE links.
+        //
+        // A catalogued outward link is a row whose `abs_path` names a file the repository does
+        // not own, so every writer that takes its path from the catalog must refuse a link
+        // (`util::write_catalogued_file`).
         //
         // BOTH SIDES ARE CANONICALIZED, and that is load-bearing rather than defensive.
         // `abs_root` is whatever the caller held, while `canonicalize` always returns a
@@ -1741,6 +1747,38 @@ kind = "memory"
             artifact::get(&cat, &alias_id).unwrap().is_none(),
             "the inside-resolving symlink must have no row of its own"
         );
+    }
+
+    /// A symlinked DIRECTORY is not descended, so a document inside the directory it points at is
+    /// not catalogued through it. Pins what the comment above `is_symlink` claims about this repo
+    /// (".claude/skills/claude-traces" as the one kept outward link) against what the walker does:
+    /// that path is a directory link, `WalkBuilder` does not follow links by default, and
+    /// `is_file()` is false for it — so the walk reaches nothing through it and the only catalogued
+    /// outward links are FILE links. Measured by this test, not by reading the builder's defaults.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_is_not_descended_into_by_the_walk() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("inner.md"), "# Inner\n\nbody\n").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("real.md"), "# Real\n\nbody\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linkdir")).unwrap();
+        // Precondition: the file IS reachable through the link, so a zero is the walker's doing.
+        assert!(root.path().join("linkdir/inner.md").is_file());
+
+        let (report, _) =
+            index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
+
+        assert_eq!(
+            report.added, 1,
+            "only real.md: a document under a symlinked directory is not catalogued through it"
+        );
+        let through_link =
+            crate::librarian::ids::artifact_id_from_abs(&root.path().join("linkdir/inner.md"));
+        assert!(artifact::get(&cat, &through_link).unwrap().is_none());
     }
 
     /// A row that ALREADY EXISTS for a path this walk now skips must be reclaimed.
