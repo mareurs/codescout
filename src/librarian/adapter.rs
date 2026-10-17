@@ -680,12 +680,12 @@ impl LibrarianAdapter {
 /// deep walk over an arbitrarily large response to choose a guide would cost more than the
 /// guide saves, and the shallow form covers the shapes that actually carry a path:
 /// `get`/`create` return one at the top level, `find` returns them per item, `doctor`
-/// returns them per violation under a differently-named key. **`update` and `move` do
-/// NOT** (measured 2026-10-16 against a `docs/trackers/` artifact: `update` returns
-/// `{id, updated}`, `move` returns `old_abs_path`/`new_abs_path`, keys this scan does not
-/// read), nor do `append_entry`, `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` or
-/// `augment` — so those calls route to `librarian`, and the `tracker-conventions` sections
-/// that need them are pull-only. See
+/// returns them per violation under a differently-named key, and `move` returns the pair it
+/// moved between as `old_abs_path`/`new_abs_path` (read since 2026-10-17, so an archive
+/// reaches the archive sections). **`update` does NOT** (measured 2026-10-16 against a
+/// `docs/trackers/` artifact: it returns `{id, updated}`), nor do `append_entry`, `delete`,
+/// `rekey_prefix`, `state_at`, `event_*`, `link` or `augment` — so those calls route to
+/// `librarian`, and the `tracker-conventions` sections that need them are pull-only. See
 /// `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
 ///
 /// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*
@@ -2242,10 +2242,28 @@ mod tests {
     /// See `docs/issues/archive/2026-08-16-cap-evicted-guidance-lands-in-guides-nothing-triggers.md`.
     #[test]
     fn tracker_paths_route_to_the_tracker_guide_and_nothing_else_does() {
-        // Top-level shapes — what get/create/update/move return.
+        // Top-level shapes — what get/create return.
         assert!(names_tracker_path(&json!({
             "abs_path": "docs/trackers/open-issue-work-queue.md"
         })));
+        // `move` (the archive flow) names its file only as `old_abs_path`/`new_abs_path`.
+        // `update` still returns `{id, updated}` and names nothing, so it stays on
+        // `librarian`.
+        assert!(names_tracker_path(&json!({
+            "old_abs_path": "/r/docs/issues/2026-10-16-some-bug.md",
+            "new_abs_path": "/r/docs/issues/archive/2026-10-16-some-bug.md"
+        })));
+        assert!(names_tracker_path(&json!({
+            "old_abs_path": "/r/docs/trackers/x.md",
+            "new_abs_path": "/r/docs/trackers/archive/x.md"
+        })));
+        assert!(!names_tracker_path(&json!({
+            "old_abs_path": "/r/docs/plans/x.md",
+            "new_abs_path": "/r/docs/plans/archive/x.md"
+        })));
+        assert!(!names_tracker_path(
+            &json!({ "id": "0123", "updated": true })
+        ));
         assert!(names_tracker_path(&json!({
             "rel_path": "docs/issues/2026-08-16-some-bug.md"
         })));

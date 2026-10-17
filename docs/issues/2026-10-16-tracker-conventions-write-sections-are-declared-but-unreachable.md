@@ -97,26 +97,53 @@ every waiver, so the state is visible where the next author edits.
 
 ## Fix
 
-Not started. Three options, none made here because each changes which guide arrives on a common call
-(cf. `32736ca0`, which routed tracker work to this guide on purpose):
+**Partial fix, 2026-10-17: option 1 (the `move` / archive flow). Options 2 and 3 are NOT done, so this
+bug stays `open`.**
 
-1. **Scan `old_abs_path`/`new_abs_path`** in `names_path_containing`. One line plus tests. Fixes `move`
-   only, which is the archive flow (about 8 KB of the waived bytes: stage both halves, re-point
-   citations, the sweep).
-2. **Route on the selector.** `relevant_guide_topic` sees only the result; `selector_key` sees the
-   input. A `(selector, kind-of-target)` route would reach `update` and `append_entry`, but the
-   target's path is not in either, so the adapter would have to resolve the id to a path first.
+What landed:
+
+- `names_path_containing` (`src/util/librarian_response.rs`) now also scans top-level
+  `old_abs_path`/`new_abs_path`, so a `doc(action="move")` of a bug file or tracker routes to
+  `tracker-conventions` instead of `librarian`.
+- The 15 KB `Closing a bug` section was split at its natural boundary: the fix-provenance half keeps
+  that heading (renamed `Closing a bug — patch-id and fix provenance`, 5.5 KB, still waived: its
+  call is `update`), and the archive flow became five `###` sections, each under the 2,500 B cap
+  (`Archiving a bug — through the catalog, never git mv`, `… stage both halves of the move`,
+  `… re-point the citations`, `Verifying the citation sweep`, `Reading move's inbound_path_citations`),
+  each declared `serves: doc.move(path~docs/issues/)`. A sixth, `Citing an archive path — where the
+  file is, not where it will go`, is the fix-time half and stays waived.
+- `Archiving a tracker` (401 B) now declares `serves: doc.move(path~docs/trackers/)`; its waiver row
+  is gone, and `TRACKER_SECTION_NEEDS_A_WRITE` no longer names `move`.
+
+What a `move` of a bug file now ships: about 9.5 KB of sections (a bound of 16 KB and a quarter of the
+guide are both asserted). That is a deliberate change to which guide arrives on `move`: `librarian`
+§ *Archiving / Moving Trackers* used to; it still arrives on the fallthrough once the
+`tracker-conventions` sections are spent.
+
+Still open, each a decision rather than an edit:
+
+2. **Route on the selector** for `update` and `append_entry`: the target's path is in neither the
+   input nor the result, so the adapter would have to resolve the id to a path first.
 3. **A `check~<name>` predicate in `Shape`** so `librarian.doctor` can serve the section that
-   remediates the check a violation names, instead of all of them (the eight sections that name a
-   doctor check total 31.6 KB, measured 2026-10-16, and the home of
-   `terminal_status_without_fix_anchor` is one 15 KB section). A grammar amendment:
-   `guide_index::Shape` says widening it requires amending the spec.
+   remediates the check a violation names (a grammar amendment).
+
+The remaining waived sections (`Entry ids` 6.5 KB, `Closing a bug`, and the entry-level sections) need
+option 2 first, and the large ones must be split at `###` before they can be declared.
 
 ## Tests added
 
-None for the unreachable state itself: it is pinned by absence. The routed side is pinned by
-`guide_index::tests::tracker_conventions_ships_sections_to_each_shape_that_routes_to_it` and
-`server::guide_hint_tests::the_first_call_of_each_routed_shape_ships_a_tracker_conventions_section`.
+For the `move` half (2026-10-17), red before the fix, green after:
+
+- `util::librarian_response::tests::a_move_result_names_the_paths_it_moved_between`
+- `librarian::adapter::tests::tracker_paths_route_to_the_tracker_guide_and_nothing_else_does`
+  (extended: `move` routes, `update` does not)
+- `prompts::guide_index::tests::tracker_conventions_ships_sections_to_each_shape_that_routes_to_it`
+  (extended with `doc.move` for a bug file and a tracker; asserts the byte bounds)
+- `server::guide_hint_tests::moving_a_bug_file_or_a_tracker_ships_the_archive_sections`
+  (real `doc` create + move calls, asserting section body text and that the whole guide does not ship)
+
+The `update`/`append_entry` half is still pinned by absence only. The routed side of the other shapes
+is pinned by `the_first_call_of_each_routed_shape_ships_a_tracker_conventions_section`.
 
 ## Workarounds
 
@@ -126,10 +153,10 @@ the whole topic was over the auto-inject bound and shipped a pointer.
 
 ## Resume
 
-The decision is the router (options 1 and 2) and the grammar (option 3). Whichever is taken, delete the
-waiver rows it makes reachable from `SECTION_WAIVERS` and declare the sections; Gate 5 then holds them
-to their size cap, so the large ones (`Entry ids` 6.5 KB, the 15 KB `Closing a bug` section) must be
-split at `###` first.
+`move` is done (see Fix). What remains is the decision on the router for `update`/`append_entry`
+(option 2) and on the grammar for `doctor` (option 3). Whichever is taken, delete the waiver rows it
+makes reachable from `SECTION_WAIVERS` and declare the sections; Gate 5 then holds them to their size
+cap, so the large ones (`Entry ids` 6.5 KB, `Closing a bug` 5.5 KB) must be split at `###` first.
 
 ## References
 

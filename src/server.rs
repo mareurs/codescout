@@ -15468,6 +15468,107 @@ mod guide_hint_tests {
         );
         assert!(!guide.contains(pointer));
     }
+    /// Archiving through `doc(action="move")` ships the `tracker-conventions` sections that
+    /// describe that flow, for a bug file and for a tracker.
+    ///
+    /// `move` answers `old_abs_path`/`new_abs_path` and no `abs_path`, so before the router
+    /// scanned those keys the call routed to `librarian` and these sections -- stage both
+    /// halves, re-point the citations -- were declared nowhere and reached nobody.
+    /// Driven through real `doc` calls because what routes is the RESULT's content, which a
+    /// `match_sections` probe bypasses. Each step asserts body text unique to its section and
+    /// that the create's sections are not repeated.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[tokio::test]
+    async fn moving_a_bug_file_or_a_tracker_ships_the_archive_sections() {
+        let (_dir, server) = make_server().await;
+
+        async fn create_then_move(
+            server: &CodeScoutServer,
+            kind: &str,
+            from: &str,
+            to: &str,
+        ) -> Vec<String> {
+            let created = call_tool(
+                server,
+                "doc",
+                json!({
+                    "action": "create",
+                    "rel_path": from,
+                    "kind": kind,
+                    "title": "archive section probe",
+                    "body": "probe body"
+                }),
+            )
+            .await;
+            let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+                .expect("primary block is JSON")["id"]
+                .as_str()
+                .expect("create returns an id")
+                .to_string();
+            let move_call = json!({"action": "move", "id": id, "new_rel_path": to});
+            let mut moved = call_tool(server, "doc", move_call.clone()).await;
+            // The FIRST destructive call of a shape is held before it runs, to serve the
+            // `librarian` section that `serves: doc.move` declares (input-derivable, so
+            // the gate cannot see the result). The identical re-issue executes, and its
+            // post-call emission is what routes on the result's paths.
+            let first: Value = serde_json::from_str(&moved[0].as_text().unwrap().text)
+                .expect("primary block is JSON");
+            if first.get("executed") == Some(&json!(false)) {
+                moved = call_tool(server, "doc", move_call).await;
+            }
+            let primary: Value = serde_json::from_str(&moved[0].as_text().unwrap().text)
+                .expect("primary block is JSON");
+            assert!(
+                primary.get("new_abs_path").is_some(),
+                "the move must have succeeded, got {primary}"
+            );
+            guide_blocks(&moved)
+        }
+
+        let guide = create_then_move(
+            &server,
+            "bug",
+            "docs/issues/2026-10-16-archive-probe.md",
+            "docs/issues/archive/2026-10-16-archive-probe.md",
+        )
+        .await
+        .join("");
+        for want in [
+            "Archive through the catalog",
+            "**And stage BOTH halves of the move together",
+            "**Then re-point the citations, in the same commit as the move",
+        ] {
+            assert!(
+                guide.contains(want),
+                "move of a bug file must ship `{want}`, got {} B: {}",
+                guide.len(),
+                guide.chars().take(300).collect::<String>()
+            );
+        }
+        assert!(
+            !guide.contains("NOT auto-injected"),
+            "a section set is not a pointer"
+        );
+        assert!(
+            !guide.contains("Never suffix an id"),
+            "the whole guide must not ship on a move"
+        );
+
+        let guide = create_then_move(
+            &server,
+            "tracker",
+            "docs/trackers/archive-probe.md",
+            "docs/trackers/archive/archive-probe.md",
+        )
+        .await
+        .join("");
+        assert!(
+            guide.contains("preferred path is in-place archival"),
+            "move of a tracker must ship \u{a7} Archiving a tracker, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+    }
 
     /// A guide too large to auto-inject is delivered by SECTION, never whole, and the
     /// bare topic is stamped only by a deliberate explicit fetch.

@@ -147,7 +147,7 @@ The file MUST carry the fix SHA when archived experiments-only, because nothing
 re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orphans on
 rebase and an unlabelled one in `archive/` becomes an untraceable string.
 
-### Closing a bug — patch-id, fix provenance and the archive flow
+### Closing a bug — patch-id and fix provenance
 
 **And record a `patch-id` next to it, because the sentence above describes a wound with
 no remedy.** `git show <sha> | git patch-id --stable` is a content hash of the commit's
@@ -243,6 +243,9 @@ instructions, not open debt** — the SHA in each was correct when written. Do n
 them. Measured 2026-08-19: 10 of 63 had nonetheless lost their SHA to a rebase, which is
 why the patch-id now rides alongside.)
 
+### Archiving a bug — through the catalog, never git mv
+<!-- serves: doc.move(path~docs/issues/) -->
+
 Archive through the catalog — `doc(action="move", id=…,
 new_rel_path="docs/issues/archive/…")` — never a bare `git mv`: `id =
 sha256(abs_path)`, so a hand-move orphans the catalog row.
@@ -253,6 +256,9 @@ observations and augmentation onto the new id in the same call and returns
 `{"id": <new>, "previous_id": <old>, "id_changed": true}`. Read the new id from the
 response — the old one stops resolving immediately, and a later call with it
 returns `unknown id`.
+
+### Archiving a bug — stage both halves of the move
+<!-- serves: doc.move(path~docs/issues/) -->
 
 **And stage BOTH halves of the move together — `git add -- <old> <new>`.** At the
 catalog layer the move is atomic; on disk it is a tracked *deletion* plus an untracked
@@ -278,6 +284,9 @@ response carries `stage_together` and `stage_hint` saying exactly this — both 
 were always reported, and reporting them was measured insufficient: one session read
 them six times across six moves and still had to be told the action.
 `docs/issues/archive/2026-09-02-tracked-only-staging-commits-half-an-archive-move.md`
+
+### Archiving a bug — re-point the citations
+<!-- serves: doc.move(path~docs/issues/) -->
 
 **Then re-point the citations, in the same commit as the move —
 paths *and* ids.** The move changes both, and archiving is a bug file's *normal*
@@ -314,6 +323,9 @@ is already ignoring them.
 Note the gate only catches the subset that lands in a full-severity surface, so the grep
 is the check — not a green CI run.
 
+### Verifying the citation sweep
+<!-- serves: doc.move(path~docs/issues/) -->
+
 **Verifying the sweep afterward needs a different pattern than the sweep itself — grepping the
 slug is the mistake to avoid.** An archive move keeps the filename and changes only the
 directory, so the slug — the part everyone reaches for, because it is the memorable half — is
@@ -332,6 +344,9 @@ unswept corpus reported as clean.
 - **Move before you write the citation, not after.** A Members line, tracker row or
   cross-reference written after the move already names the new path, so a slug-only
   verification has nothing to hide — the same zero is honest either way.
+### Reading move's inbound_path_citations
+<!-- serves: doc.move(path~docs/issues/) -->
+
 - **`doc(action="move")`'s `inbound_path_citations` sees BOTH forms, and tells you which is
   which.** It once matched the path form only, so a bare-slug citation — every `**Members:**`
   line in `docs/trackers/issue-clusters/` is one — reported as `[]`; that was fixed in
@@ -357,6 +372,8 @@ unswept corpus reported as clean.
   a move only because the slug does, so a move that *renames* the stem breaks slug and path
   citations alike. The flag is why the list is empty, which is a different fact from "checked
   and found none".
+
+### Citing an archive path — where the file is, not where it will go
 
 **Cite where the file IS, never where the archive flow will put it.** The sweep above
 repairs citations that *were* correct when written; it can never reach one that was wrong
@@ -441,6 +458,7 @@ that would have corrected it. **Before reading a `draft` as "not started", check
 `resume-*` tracker names it.**
 
 ### Archiving a tracker
+<!-- serves: doc.move(path~docs/trackers/) -->
 
 **Archiving a tracker:** preferred path is in-place archival via the
 catalog:
