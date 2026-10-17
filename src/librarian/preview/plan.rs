@@ -16,6 +16,7 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
 
     let mut total = 0u64;
     let mut done = 0u64;
+    let mut open_total = 0u64;
     let mut open_next: Vec<String> = Vec::new();
     let mut fence = crate::util::markdown_fence::FenceState::new();
 
@@ -38,6 +39,7 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
         match marker {
             " " | "" => {
                 total += 1;
+                open_total += 1;
                 if open_next.len() < OPEN_NEXT_LIMIT {
                     open_next.push(truncate_task_text(after));
                 }
@@ -66,6 +68,13 @@ pub fn extract(_row: &ArtifactRow, body: &str) -> Value {
         },
         "line_count": line_count,
     });
+    // `open_next` is a window over the open tasks; say so when the window is smaller
+    // than what it looks at, and state how many open tasks there are. Absent otherwise,
+    // so a small plan's preview stays lean (mirrors `headings::stamp_truncation`).
+    if open_total > open_next.len() as u64 {
+        v["tasks"]["open_total"] = json!(open_total);
+        v["tasks"]["open_next_truncated"] = json!(true);
+    }
     headings::stamp_truncation(&mut v, dropped, last_heading);
     v
 }
@@ -75,7 +84,10 @@ fn truncate_task_text(s: &str) -> String {
     if s.chars().count() <= TASK_TEXT_MAX {
         return s.to_string();
     }
-    s.chars().take(TASK_TEXT_MAX).collect()
+    // A cut task ends in `…` so it cannot be read as a task that was exactly this long.
+    let mut out: String = s.chars().take(TASK_TEXT_MAX).collect();
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
@@ -151,7 +163,74 @@ mod tests {
         let body = format!("- [ ] {long_task}\n");
         let v = extract(&mk_row(), &body);
         let text = v["tasks"]["open_next"][0].as_str().unwrap();
-        assert!(text.chars().count() <= TASK_TEXT_MAX);
+        // The cap itself, plus the one `…` that marks the cut.
+        assert!(text.chars().count() <= TASK_TEXT_MAX + 1);
+    }
+    #[test]
+    fn a_cut_task_text_ends_with_an_ellipsis() {
+        // docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md
+        //
+        // A task string cut at `TASK_TEXT_MAX` used to be exactly that many characters
+        // with nothing saying more followed, so a cut task and a task that happened to
+        // be that long read the same. The cut one now ends in `…`.
+        let long_task = "x".repeat(TASK_TEXT_MAX + 50);
+        let body = format!("- [ ] {long_task}\n");
+        let v = extract(&mk_row(), &body);
+        let text = v["tasks"]["open_next"][0].as_str().unwrap();
+        assert!(
+            text.ends_with('…'),
+            "a cut task must be marked; got: {text}"
+        );
+        assert_eq!(text.chars().count(), TASK_TEXT_MAX + 1);
+    }
+
+    #[test]
+    fn a_task_text_exactly_at_the_limit_is_not_marked_as_cut() {
+        let exact_task = "y".repeat(TASK_TEXT_MAX);
+        let body = format!("- [ ] {exact_task}\n");
+        let v = extract(&mk_row(), &body);
+        let text = v["tasks"]["open_next"][0].as_str().unwrap();
+        assert!(!text.ends_with('…'));
+        assert_eq!(text, exact_task);
+    }
+
+    #[test]
+    fn open_next_cut_is_signaled_with_the_true_open_count() {
+        // docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md
+        //
+        // Five open tasks against `OPEN_NEXT_LIMIT` 3: the window keeps its first three,
+        // and the object now says it is a window and how many open tasks exist. The
+        // count is stated, not left to `total - done`, which also counts nothing for a
+        // task whose marker is neither blank nor `x`.
+        let body = "\
+- [ ] Alpha
+- [x] Beta (done)
+- [ ] Gamma
+- [ ] Delta
+- [ ] Epsilon
+- [ ] Zeta
+- [~] Eta (neither open nor done)
+";
+        let v = extract(&mk_row(), body);
+        assert_eq!(
+            v["tasks"]["open_next_truncated"], true,
+            "the cap must be signaled; got: {v}"
+        );
+        assert_eq!(v["tasks"]["open_total"], 5);
+        // The window itself is untouched: still the first three open tasks, in order.
+        let open = v["tasks"]["open_next"].as_array().unwrap();
+        assert_eq!(open.len(), OPEN_NEXT_LIMIT);
+        assert_eq!(open[0], "Alpha");
+        assert_eq!(open[2], "Delta");
+    }
+
+    #[test]
+    fn open_next_within_the_cap_carries_no_truncation_marker() {
+        let body = "- [ ] Alpha\n- [ ] Beta\n- [ ] Gamma\n";
+        let v = extract(&mk_row(), body);
+        assert!(v["tasks"].get("open_next_truncated").is_none());
+        assert!(v["tasks"].get("open_total").is_none());
+        assert_eq!(v["tasks"]["open_next"].as_array().unwrap().len(), 3);
     }
 
     #[test]

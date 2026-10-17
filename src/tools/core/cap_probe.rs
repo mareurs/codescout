@@ -492,36 +492,30 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
-        // A cap that truncates and emits NO marker at all. Flagged to the whole-branch
-        // review as arguably an `IC-13` MEMBER rather than a coverage gap.
+        // Was `NoMarker` (docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md):
+        // the cut now stamps `tasks.open_next_truncated` + `tasks.open_total` in `extract`,
+        // `src/librarian/preview/plan.rs`.
+        //
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 5 open tasks against `OPEN_NEXT_LIMIT` 3.
         id: "preview.plan_open_next",
-        coverage: Coverage::NoMarker {
-            reason: "`OPEN_NEXT_LIMIT` (3) truncates the `open_next` vector at \
-             `src/librarian/preview/plan.rs:41` and no companion field discloses the drop \
-             (the true open count is derivable as `tasks.total - tasks.done`, but nothing \
-             says to), so the only observable is the array's own length. Every test in \
-             tracked `src/` therefore reads the field into a `let` and asserts on that length \
-             (`open_next_returns_first_three_unchecked`, `plan.rs:108`, drives 4 tasks \
-             past the cap but asserts `open.len(), 3`), while the one assertion naming \
-             `[\"tasks\"][\"open_next\"]` inline (`plan.rs:130`) seeds zero tasks. Uncitable \
-             until the cap emits a marker of its own.",
-            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.tasks.open_next_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "open_next_cut_is_signaled_with_the_true_open_count",
         },
     },
     ProbeRow {
-        // Corrected: task_text_truncated_to_limit (plan.rs) seeds "x".repeat(150) against
-        // TASK_TEXT_MAX=100 and asserts <=, which DOES red if truncation is removed
-        // outright — it is monotone under TIGHTENING (over-truncation), not removal. The
-        // real IC-13 gap is different: truncate_task_text appends no ellipsis or other
-        // marker at the caller-visible surface, so a genuinely-cut task and a genuinely-
-        // short one are indistinguishable to the caller reading the result.
+        // Was `NoMarker` (same issue file): `truncate_task_text` now appends `…` to a cut
+        // task, `src/librarian/preview/plan.rs`.
+        //
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds a task of `TASK_TEXT_MAX` + 50 characters.
         id: "preview.plan_task_text",
-        coverage: Coverage::NoMarker {
-            reason: "truncate_task_text appends no ellipsis or other marker at the caller's \
-             surface, so a caller cannot tell a cut task from a genuinely short one; the \
-             length-cap itself is tested (task_text_truncated_to_limit), but that is \
-             orthogonal to the marker gap IC-13 is about",
-            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("…"),
+            mutation: Mutation::Killed,
+            cited_test: "a_cut_task_text_ends_with_an_ellipsis",
         },
     },
     // -- src/librarian/tools/doctor.rs --
