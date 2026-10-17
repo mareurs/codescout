@@ -1,14 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'the p50 emission-budget fixture moves docs/specs to docs/specs, so archiving a bug file (about 9.6 KB of tracker-conventions sections after a doc.move) is outside every session-level byte budget'
 tags:
 - cluster/instrument-omits-the-dimension-that-grows
 - guides
 - section-grain-delivery
 opened: 2026-10-17
-closed:
-owner: marius
+closed: 2026-10-17owner: marius
 severity: low
 related:
 - docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
@@ -69,15 +68,29 @@ None. Observed by reading the fixture.
 
 ## Fix
 
-Not started. Either add a bug-archive step (create under `docs/issues/`, move to
-`docs/issues/archive/`) to the p50 fixture and re-derive its ceiling (a spec amendment, since the
-ceiling is derived, not chosen), or add a separate budget test for the archive flow with its own
-derived ceiling, which leaves the p50 figure untouched. The second is smaller and keeps the p50
-population honest: the p50 session does not archive bugs.
+Fixed 2026-10-17 as a SEPARATE worst-case budget test, not a step in the p50 fixture.
+
+Why separate: a p50 session does not archive bug files, and the p50 ceiling is derived from the
+shapes a p50 session issues (measured 12,116 B + 128 B). Adding the archive to it would either raise
+that ceiling, which the byte-budget policy forbids (they only move down), or hide a regression in the
+common case behind the slack the rare case needs. Two populations get two ceilings, and the p50
+fixture and its ceiling are untouched.
+
+`server::guide_hint_tests::a_bug_archive_move_stays_under_its_own_emission_byte_ceiling` creates a
+bug under `docs/issues/`, makes the held first `doc.move` (asserted held), re-issues it, and sums every
+block after the primary on both calls (the librarian section served at the hold plus the six
+tracker-conventions sections served after the move). Measured by running it at ceiling 0:
+**13,758 B** (hold 2,271 B + executed 11,487 B). Ceiling **13,886 B**, the same 128 B margin the p50
+ceiling carries. Asserts no counted block carries the fixture root (so the total is not a property of
+this machine's temp path) and that all six sections' distinctive sentences are present (a vanished
+section lowers a byte count, so the count alone cannot catch it).
 
 ## Tests added
 
-None.
+`server::guide_hint_tests::a_bug_archive_move_stays_under_its_own_emission_byte_ceiling`. Observed
+RED by mutation: appending 442 B of padding to a served archive section failed it with `a bug-archive
+move emitted 14200 B after the primary (hold 2271 B + executed 11929 B), ceiling 13886 B`; the file
+was restored and the test passes at 13,758 B.
 
 ## Workarounds
 
@@ -85,8 +98,15 @@ None needed: each section is individually capped and the set is bounded by the a
 
 ## Resume
 
-Decide between the two options in Fix. Measure the delivery with real `doc` calls (see
-`server::guide_hint_tests::moving_a_bug_file_or_a_tracker_ships_the_archive_sections`).
+Nothing owed. If the budget fires, shrink or split a `doc.move` section rather than raising the
+ceiling. The anonymous tier (no hold) ships fewer bytes and is covered by the same ceiling.
+
+## Fix provenance
+
+- **SHA:** `46bffcf1` (`worktree-agent-a666e4cdd398d0f53`)
+- **patch-id:** `ee0a4bac5516`
+
+## References
 
 ## References
 

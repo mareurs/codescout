@@ -132,7 +132,8 @@ What a `move` ships now, and what it displaces:
   runs and served `librarian` § Archiving / Moving Trackers (that gate is input-derived and cannot
   see the result); after the identical re-issue executes, `tracker-conventions` adds about 9.6 KB
   for a bug file (about 5.1 KB for a tracker). Nothing is displaced; the cost is that added
-  volume. A bug-archive step is not in the p50 session budget fixture, which is filed separately.
+  volume. The bug-archive delivery is budgeted by its own test (13,758 B measured, 13,886 B
+  ceiling; see the issue linked under References), separate from the p50 session.
 - **Anonymous tier** (no session id, so the hold never fires): the move's post-call emission is now
   `tracker-conventions` sections, where it used to be `librarian` § Archiving / Moving Trackers.
   The tracker-conventions sections carry the same stage-both-halves and re-point guidance, so the
