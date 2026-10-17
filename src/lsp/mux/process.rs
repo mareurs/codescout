@@ -1316,6 +1316,107 @@ mod tests {
         assert_eq!(forwarded["id"], "a:3", "{forwarded}");
         assert!(to_client.is_empty(), "nothing is answered locally");
     }
+    /// The answer is the REQUESTING client's, under the id it sent whatever its JSON type: a
+    /// number, `0`, or a string. Echoing to every client would resolve another client's pending
+    /// request that happens to carry the same id with `null`.
+    #[tokio::test]
+    async fn a_shutdown_reply_goes_only_to_the_requesting_client_under_its_own_id() {
+        for id in [json!(0), json!(7), json!("req-9")] {
+            let (server_tx, _server_rx) = tokio::io::duplex(64 * 1024);
+            let (a_tx, a_rx) = tokio::io::duplex(64 * 1024);
+            let (b_tx, b_rx) = tokio::io::duplex(64 * 1024);
+            let server_writer: SharedWriter = Arc::new(Mutex::new(Box::new(server_tx)));
+            let mut st = MuxState::new(json!({}));
+            st.clients
+                .insert("a".to_string(), Arc::new(Mutex::new(Box::new(a_tx))));
+            st.clients
+                .insert("b".to_string(), Arc::new(Mutex::new(Box::new(b_tx))));
+            let state = Arc::new(Mutex::new(st));
+
+            let mut msg = json!({"jsonrpc": "2.0", "id": id, "method": "shutdown", "params": null});
+            handle_client_message("a", &mut msg, &server_writer, &state)
+                .await
+                .unwrap();
+            state.lock().await.clients.clear();
+
+            use tokio::io::AsyncReadExt;
+            let (mut a_bytes, mut b_bytes) = (Vec::new(), Vec::new());
+            let (mut a_rx, mut b_rx) = (a_rx, b_rx);
+            a_rx.read_to_end(&mut a_bytes).await.unwrap();
+            b_rx.read_to_end(&mut b_bytes).await.unwrap();
+            let reply = read_message(&mut BufReader::new(&a_bytes[..]))
+                .await
+                .unwrap();
+            assert_eq!(reply["id"], id, "{reply}");
+            assert!(reply["result"].is_null(), "{reply}");
+            assert!(
+                b_bytes.is_empty(),
+                "the other client must hear nothing: {}",
+                String::from_utf8_lossy(&b_bytes)
+            );
+        }
+    }
+
+    /// The reason a client's `shutdown` is not forwarded: its session ends with its connection.
+    /// A client that sends `shutdown` and hangs up leaves the mux with no clients and the idle
+    /// timer running, and the server has been sent nothing. End to end through the real reader
+    /// task over a socket pair.
+    #[tokio::test]
+    async fn a_client_that_shuts_down_and_hangs_up_starts_the_idle_timer() {
+        use tokio::io::AsyncWriteExt;
+        let (server_tx, mut server_rx) = tokio::io::duplex(64 * 1024);
+        let server_writer: SharedWriter = Arc::new(Mutex::new(Box::new(server_tx)));
+        let (peer, mux_side) = tokio::net::UnixStream::pair().unwrap();
+        let (mux_read, mux_write) = mux_side.into_split();
+        let client_writer: SharedWriter = Arc::new(Mutex::new(Box::new(mux_write)));
+        let state = {
+            let mut st = MuxState::new(json!({}));
+            st.clients.insert("a".to_string(), client_writer);
+            st.idle_since = None; // a client is connected
+            Arc::new(Mutex::new(st))
+        };
+        let task = tokio::spawn(client_reader_task(
+            "a".to_string(),
+            BufReader::new(mux_read),
+            server_writer.clone(),
+            state.clone(),
+        ));
+
+        let (mut peer_read, mut peer_write) = peer.into_split();
+        for frame in [
+            r#"{"jsonrpc":"2.0","id":1,"method":"shutdown","params":null}"#,
+            r#"{"jsonrpc":"2.0","method":"exit"}"#,
+        ] {
+            peer_write
+                .write_all(format!("Content-Length: {}\r\n\r\n{frame}", frame.len()).as_bytes())
+                .await
+                .unwrap();
+        }
+        let reply = read_message(&mut BufReader::new(&mut peer_read))
+            .await
+            .unwrap();
+        assert_eq!(reply["id"], 1);
+        drop(peer_write);
+        drop(peer_read); // the client hangs up
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), task)
+            .await
+            .expect("the reader task ends when the client hangs up")
+            .unwrap();
+        let st = state.lock().await;
+        assert!(st.clients.is_empty(), "the client is released");
+        assert!(
+            st.idle_since.is_some(),
+            "with no clients left the idle timer must be running"
+        );
+        drop(st);
+
+        use tokio::io::AsyncReadExt;
+        drop(server_writer);
+        let mut to_server = Vec::new();
+        server_rx.read_to_end(&mut to_server).await.unwrap();
+        assert!(to_server.is_empty(), "the server was sent nothing");
+    }
 
     // ---- memory watchdog (classify_memory / read_mem_available_kb) ----
 

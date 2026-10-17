@@ -1038,29 +1038,54 @@ impl LspClient {
     }
 
     /// Gracefully shut down the LSP server.
+    ///
+    /// A DIRECT client asks its own child to stop (`shutdown`, `exit`) and waits for the reader
+    /// task, which ends when the child closes its stdout. A SOCKET client does neither: its
+    /// server is shared through a mux with other clients, so it only disconnects. The mux
+    /// answers a `shutdown` itself and drops `exit` (and a mux started by an older codescout
+    /// would forward both and stop the server under every other client), and it never hangs up
+    /// on a client, so waiting for the reader would burn the whole timeout and leave the
+    /// connection — and with it the mux's idle timer — held open by a detached task. Closing
+    /// both halves is what ends the client's session on the mux (`handle_client_disconnect`).
     pub async fn shutdown(&self) -> Result<()> {
         if !self.alive.load(Ordering::SeqCst) {
             return Ok(());
         }
 
-        // Send shutdown request
-        let _ = self.request("shutdown", Value::Null).await;
+        let is_socket = matches!(self.transport, LspTransport::Socket { .. });
+        if !is_socket {
+            // Send shutdown request
+            let _ = self.request("shutdown", Value::Null).await;
 
-        // Send exit notification
-        let _ = self.notify("exit", Value::Null).await;
+            // Send exit notification
+            let _ = self.notify("exit", Value::Null).await;
+        }
 
         // Mark as dead
         self.alive.store(false, Ordering::SeqCst);
 
-        // Wait for reader task to finish (with timeout)
         // Extract handle before awaiting to avoid holding MutexGuard across await
         let handle = self
             .reader_handle
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        if let Some(handle) = handle {
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
+        if let Some(mut handle) = handle {
+            if is_socket {
+                // Dropping the task drops its read half and its clone of the writer.
+                handle.abort();
+                let _ = handle.await;
+                // Then end our write half: the mux reads EOF and releases this client.
+                let mut w = self.writer.lock().await;
+                let _ = tokio::io::AsyncWriteExt::shutdown(&mut *w).await;
+            } else if tokio::time::timeout(std::time::Duration::from_secs(5), &mut handle)
+                .await
+                .is_err()
+            {
+                // A dropped JoinHandle DETACHES its task; abort it so the reader (and the
+                // child it owns) does not outlive a shutdown that gave up waiting.
+                handle.abort();
+            }
         }
 
         Ok(())
@@ -2204,6 +2229,67 @@ struct Point {
             result[0].detail, None,
             "empty string detail should collapse to None"
         );
+    }
+    /// A mux never hangs up on a client, so a socket client that waited for its reader task
+    /// (which ends only on EOF) burned the whole 5 s, dropped the handle — which DETACHES the
+    /// task — and kept the connection open: the mux's idle timer never started while the
+    /// process lived. `workspace(post_compact)`, idle eviction and exit all pay this.
+    /// This stands in for a mux: it accepts, sends the init message, and reads until EOF.
+    /// docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn socket_client_shutdown_closes_its_connection_promptly_and_sends_no_shutdown() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let (tx, mut seen) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+                    let framed = format!("Content-Length: {}\r\n\r\n{init}", init.len());
+                    stream.write_all(framed.as_bytes()).await.unwrap();
+                    // Like a mux: never hang up first; report what arrived once the client does.
+                    let mut got = Vec::new();
+                    let _ = stream.read_to_end(&mut got).await;
+                    let _ = tx.send(got);
+                });
+            }
+        });
+
+        // Three connect/flush cycles: a leaked connection would show as a missing EOF.
+        for cycle in 0..3 {
+            let client = LspClient::connect(&sock, dir.path().to_path_buf())
+                .await
+                .unwrap();
+            let started = std::time::Instant::now();
+            client.shutdown().await.unwrap();
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "cycle {cycle}: shutdown must not wait out the reader, took {:?}",
+                started.elapsed()
+            );
+            let got = tokio::time::timeout(std::time::Duration::from_secs(2), seen.recv())
+                .await
+                .unwrap_or_else(|_| panic!("cycle {cycle}: the mux never saw the client hang up"))
+                .unwrap();
+            // The client is still alive here: shutdown itself closed the connection.
+            let text = String::from_utf8_lossy(&got);
+            assert!(
+                !text.contains("shutdown") && !text.contains("\"exit\""),
+                "a shared server must not be asked to stop, got: {text}"
+            );
+            assert!(
+                client
+                    .reader_handle
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .is_none(),
+                "no reader task may survive shutdown"
+            );
+        }
     }
 
     /// A variable-like symbol as pyright reports it: name-only range at `(line, 0)`.
