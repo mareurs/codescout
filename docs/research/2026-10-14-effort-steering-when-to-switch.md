@@ -41,6 +41,7 @@
 9. Stage C (2026-10-16, section below): with the critic as a `Stop` hook in a plan-writing loop, verified defects in the final plans were `low` 5, gated `low` 4, `xhigh` 0 (6 plans each); the gate blocked once in 6 runs and passed plans with real defects. No help shown; gated `low` does not match `xhigh` ($0.54 vs $1.92 per run). For plans, producer effort mattered and a cheap critic did not replace it.
 10. Stage D (2026-10-16, section below): the same 6 plans written at `medium` and `high` without a gate. Verified defects in the final plans were `low` 5, `medium` 5, `high` 3, `xhigh` 0, at $0.35, $0.47, $0.81 and $1.92 per run. By the pre-registered rules neither new level matches `xhigh`. Open confound: plan length rises with effort, and the audit may look less closely at a long plan.
 11. Stage E (2026-10-17, section below): the audit alone, on 8 clean plans (4 `low`, 4 `xhigh`) with 2 planted defects each. It named all 16 planted defects, and 5 of 8 as blocking in each arm; by the pre-registered rule, no length effect shown. This is a ceiling result on planted defects of the rubric's classes. It does not cover natural defects.
+12. Stage F (2026-10-17, section below): one repeat audit of each of the six `xhigh` plans, same plan and audit, natural defects. All 6 repeats passed with minor findings only, so by the pre-registered rule N = 0: no hidden defect shown by one repeat ($9.37 for 6 audits; I ran 6 of the 12 approved, because the real audit cost on long plans was higher than my estimate). "xhigh = 0" is not contradicted. The same auditor cannot show that it has no shared blind spot.
 
 ## Our own evidence (R1 V2, Sonnet 5.5, CLI 2.1.296)
 
@@ -246,6 +247,29 @@ Pre-registered in `/home/marius/work/claude/es-stage0/critic-e/prereg-e.md`, wit
 Limits: the test is at a ceiling (all 16 found), so it cannot show a small loss. The planted defects are local edits in classes the rubric names; Stage C showed that a critic can miss natural defects that planted ones do not predict. So this result does not show that natural defects in a long plan are found as often. There are 8 defects per arm and one audit per plan. The `X` plans differ from the `L` plans in content and redundancy, not only in length. The mean position of the planted edits is earlier in the `X` plans (0.33) than in the `L` plans (0.44). The judge used 2 tool calls, so I did not rely on its labels alone.
 
 What this adds to Stage D: on planted defects of the rubric's classes, the audit is not less sensitive on a long plan. So "the audit looked less closely" is not supported as the reason for `xhigh` = 0. The same question for natural defects stays open, and nothing was run for it.
+
+## Stage F (2026-10-17): does a repeat audit of the same long plan pass it again? — yes, on all 6
+
+Pre-registered in `/home/marius/work/claude/es-stage0/critic-f/prereg-f.md`, with input hashes taken before the first call. Stage E covered planted defects only. Stage F asks the cheapest question about natural defects: the first audit passed all six Stage C `xhigh` plans (`ok=true`, minor findings only). If the same audit reads the same plan again, does it find a blocking defect the first one missed? I ran one repeat audit per plan: Opus 5.5 at `high`, the same script and rubric, the same plan (sha256 checked against the Stage C file), the plan hidden behind a random code, no defect planted, and the auditor not told it was a repeat. The operator approved 12 audits and a $12 cap. I ran 6 and say why below.
+
+| plan | first audit | repeat audit | cost of repeat |
+|---|---|---|---|
+| p01 | 0 findings | 0 findings | $0.64 |
+| p02 | 2 minor | 0 findings | $0.93 |
+| p03 | 0 findings | 0 findings | $1.48 |
+| p08 | 1 minor | 1 minor | $1.07 |
+| p09 | 4 minor | 5 minor | $3.10 |
+| p10 | 2 minor | 3 minor | $2.14 |
+
+- The rule was fixed before the run: N = plans with a verified `true` blocking finding in the repeat; N >= 2 "verdict not stable", N = 1 "inconclusive", N = 0 "no hidden defect shown by one repeat". The repeats returned **0 blocking findings**, so there was nothing to verify and **N = 0**.
+- All 6 repeats returned `ok=true`. Each ran 21 to 69 turns without an error, so the zero is not a failed call.
+- Spend: $9.37 for the 6 repeats. The first audits of the same plans had cost $8.50.
+- The estimate I gave for the approval was wrong. I had used the Stage E average ($0.76 per audit), and the `xhigh` plans cost more because they are long. By the measured first-audit costs, 12 audits would have cost about $17 and exceeded the cap. So I ran 6, which is fewer than approved and inside the cost cap, and wrote the correction into the pre-registration before the first call.
+- Secondary: by location text, 3 of the 4 first-audit locations in p09, the single location in p08, and 1 of 2 in p10 appeared again in the repeat. p02's two minor findings did not. I did not compare the finding texts one by one.
+
+Limits: one repeat per plan, so this measures the audit's run-to-run variation by one extra draw. The repeat uses the same model, rubric and tools, so a defect that both audits miss for a shared reason stays invisible; N = 0 cannot show that no defect exists. There is no positive control on natural defects in this stage. The `low` plans were not re-audited, so the comparison with them is the Stage C one. I did not verify the minor findings. Some read like real defects that the auditor rated `minor` (for example, in p09 a test filter that matches no test, so the check passes without running anything). So "xhigh = 0" is a count of blocking findings, and it depends on the auditor's severity choice.
+
+What this adds to Stages C to E: two tests (planted defects in Stage E, a repeat on natural defects in Stage F) found no sign that the audit's pass of the `xhigh` plans is an artefact of plan length or of one lucky draw. The `xhigh` advantage for plan writing is not contradicted. It is also not proven by a method independent of this auditor. Nothing was run on the `low` plans' stability, and Stage D phase 2 was not run.
 
 ## Defects filed from Stage A (2026-10-16)
 
