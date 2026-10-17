@@ -991,6 +991,32 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
+    /// The rename is the other failure point after a successful create. A target that is a
+    /// directory makes `rename` fail; the staging file the call created must not outlive it.
+    #[test]
+    fn a_failed_rename_leaves_no_staging_file_and_the_target_untouched() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("sub");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("inner.txt"), "inner").unwrap();
+
+        let err = atomic_write(&target, "x").expect_err("renaming a file over a directory fails");
+
+        assert!(
+            err.raw_os_error().is_some(),
+            "expected the OS's refusal, got {err:?}"
+        );
+        assert_eq!(
+            entry_names_any(dir.path()),
+            vec!["sub".to_string()],
+            "the staging file leaked after the rename failed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("inner.txt")).unwrap(),
+            "inner"
+        );
+    }
+
     #[test]
     fn a_path_with_no_file_name_is_refused_up_front() {
         let dir = tempdir().unwrap();
