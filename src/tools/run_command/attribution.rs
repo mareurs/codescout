@@ -409,17 +409,20 @@ fn script_dir(base: &Path, uid: Uid) -> Option<PathBuf> {
 /// verifies, else a fresh one. Reuse is what bounds the leak to one directory per process
 /// rather than one per failing command.
 fn fallback_dir(base: &Path, uid: Uid) -> Option<PathBuf> {
-    static FALLBACK: std::sync::Mutex<Option<(PathBuf, PathBuf)>> = std::sync::Mutex::new(None);
-    let mut slot = FALLBACK
+    // Keyed by base. One base per process in production; several in a test binary, where a
+    // single slot would be evicted by whichever sibling test ran last.
+    static FALLBACKS: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+    let mut slots = FALLBACKS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((cached_base, dir)) = slot.as_ref() {
-        if cached_base == base && verify_private_dir(dir, uid).is_ok() {
+    if let Some((_, dir)) = slots.iter().find(|(b, _)| b == base) {
+        if verify_private_dir(dir, uid).is_ok() {
             return Some(dir.clone());
         }
     }
     let dir = fresh_private_dir(base, uid)?;
-    *slot = Some((base.to_path_buf(), dir.clone()));
+    slots.retain(|(b, _)| b != base);
+    slots.push((base.to_path_buf(), dir.clone()));
     Some(dir)
 }
 
@@ -1207,6 +1210,28 @@ mod tests {
             );
             assert_ne!(c.parent(), Some(other.as_path()));
             assert_complete_and_private(c.parent().unwrap());
+        }
+
+        /// A cached fallback belongs to the base it was made under. Two squatted bases alive at
+        /// once must each get a directory of their own, or a run could execute from a directory
+        /// outside the temp directory it was asked to use.
+        #[test]
+        fn a_fallback_is_never_reused_across_bases() {
+            let squatted = |base: &Path| {
+                std::fs::write(extraction_dir(base, effective_uid()), "x").expect("squat");
+            };
+            let one = tempfile::tempdir().expect("tmp");
+            let two = tempfile::tempdir().expect("tmp");
+            squatted(one.path());
+            squatted(two.path());
+            let a = materialize_into(one.path()).expect("a");
+            let b = materialize_into(two.path()).expect("b");
+            assert!(a.starts_with(one.path()), "{a:?}");
+            assert!(b.starts_with(two.path()), "{b:?}");
+            assert_ne!(a.parent(), b.parent());
+            // Each base keeps its own cached directory.
+            assert_eq!(materialize_into(one.path()).expect("a again"), a);
+            assert_eq!(materialize_into(two.path()).expect("b again"), b);
         }
 
         /// The directory is verified before EACH run, not once per process. Probe: use the
