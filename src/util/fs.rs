@@ -52,76 +52,163 @@ pub fn read_utf8(path: &Path) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))
 }
 
-/// The staging path `atomic_write` writes through before renaming onto `path`.
+/// How many staging names `atomic_write` tries before it gives up. A collision needs an
+/// existing entry at a 128-bit random name, so reaching even the second attempt means
+/// something is planting names; sixteen is generous for a benign cause and still bounded.
+const STAGING_ATTEMPTS: u32 = 16;
+
+/// How many bytes of the target's file name a staging name carries. Staging adds
+/// `.<32 hex>.tmp` (37 bytes), and a name already near `NAME_MAX` (255) would otherwise
+/// turn a write that used to fit into `ENAMETOOLONG`.
+const STAGING_STEM_MAX_BYTES: usize = 100;
+
+/// A staging path for `path`: `<file name>.<nonce>.tmp` in the target's own directory.
+/// `None` when `path` has no final component (a bare root, or one ending in `..`).
 ///
-/// Appends to the **whole filename** rather than replacing the extension, and that
-/// distinction is the only reason this helper exists. `Path::with_extension("tmp")` — what
-/// this used to be — derives the staging path from the directory and stem alone, so
-/// `Cargo.toml` and `Cargo.lock` both stage through `Cargo.tmp`. Two concurrent writers then
-/// rename *each other's* content onto their own targets: cross-file corruption rather than a
-/// lost update, with a successful return on both sides and nothing logged anywhere.
+/// Two properties are load-bearing, each from a measured defect:
 ///
-/// Measured 2026-08-31 from `git ls-files`: **7** groups of tracked files in this repo share
-/// a stem, including `Cargo.toml`/`Cargo.lock`, five `.env.*` variants, and
-/// `src/prompts/source.md`/`source.rs` — the last a prompt surface with three consumers that
-/// must stay consistent, written through `edit_file` and `edit_code`, both of which route
-/// here.
-/// `docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
+/// * **Derived from the whole filename, not the stem.** `Path::with_extension("tmp")` — what
+///   this used to be — discarded the one component that tells `Cargo.toml` from
+///   `Cargo.lock`, so two concurrent writers to same-stem files renamed *each other's*
+///   content onto their own targets. `7` same-stem groups were tracked in this repo on
+///   2026-08-31 (`source.md`/`source.rs` among them).
+///   `docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
+/// * **Carries a nonce the caller supplies, and `atomic_write` makes it unpredictable.** A
+///   fixed `<name>.tmp` was a name anyone could plant in advance — a repository can ship it
+///   as a symlink — and `fs::write` followed it. The nonce keeps the name unguessable;
+///   exclusive creation in [`create_staging_file`] is what makes a guessed or colliding name
+///   harmless.
 ///
-/// **This does not make `atomic_write` race-free and must not be read as doing so.** Two
-/// writers to the *same* target still race — inherent to write-then-rename without a lock.
-/// What this removes is only the case where the damage lands on a file the caller never
-/// named. A per-writer unique suffix would go further and is a separate decision.
+/// The nonce is a parameter so a test can hold it constant and observe the filename half on
+/// its own: with a random nonce every pair of names is distinct and that test could not fail.
+///
+/// The staging file stays a sibling of the target: the rename that finishes `atomic_write`
+/// fails across filesystems, and sibling placement is what makes it atomic.
 ///
 /// The sibling `with_extension` uses at `src/lsp/mux/mod.rs` and `src/retrieval/index_lock.rs`
-/// are **not** instances of this defect: both take an internally-built `*.lock` path, so their
-/// input namespace holds exactly one extension and no two inputs can share a stem. Checked
-/// rather than assumed, because a fix that names a population asserts that population is
-/// non-empty.
-fn staging_path(path: &Path) -> PathBuf {
-    match path.file_name() {
-        Some(name) => {
-            let mut staged = name.to_os_string();
-            staged.push(".tmp");
-            path.with_file_name(staged)
-        }
-        // A path with no final component — a bare root, or one ending in `..`. No caller can
-        // reach this (all 15 call sites pass a real file path) and `atomic_write` on such a
-        // path cannot succeed anyway, since the rename target is not a file. Deliberately
-        // preserves the previous derivation rather than synthesising a name: appending to an
-        // empty filename would yield a writable `<root>/.tmp`, turning an operation that used
-        // to fail harmlessly into one that creates a stray file at the filesystem root.
-        None => path.with_extension("tmp"),
+/// are **not** instances of the stem defect: both take an internally-built `*.lock` path.
+fn staging_path(path: &Path, nonce: &str) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy();
+    let mut end = name.len().min(STAGING_STEM_MAX_BYTES);
+    while !name.is_char_boundary(end) {
+        end -= 1;
     }
+    Some(path.with_file_name(format!("{}.{nonce}.tmp", &name[..end])))
 }
 
-/// Atomic write: write to a sibling `.tmp` file then rename, so a crash or
-/// disk-full condition mid-write can't leave the target in a corrupt state.
+/// An unpredictable nonce for [`staging_path`].
+fn fresh_staging_nonce() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Create the staging file for `atomic_write`, **exclusively**: `create_new` is
+/// `O_CREAT | O_EXCL` (`CREATE_NEW` on Windows), which fails if ANYTHING already exists at the
+/// name — a regular file, a directory, a symlink, even a dangling one — and never follows a
+/// link at the final component. So the file returned is one this call created, and nothing
+/// planted in advance can redirect the write or be overwritten by it.
+///
+/// On `AlreadyExists` the next name is tried, up to [`STAGING_ATTEMPTS`]; the colliding entry
+/// is left exactly as found (it is not ours to remove). Any other error is returned at once.
+fn create_staging_file(
+    path: &Path,
+    next_name: &mut dyn FnMut() -> Option<PathBuf>,
+) -> std::io::Result<(std::fs::File, PathBuf)> {
+    for _ in 0..STAGING_ATTEMPTS {
+        let Some(tmp) = next_name() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{} has no file name to write to", path.display()),
+            ));
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(file) => return Ok((file, tmp)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        format!(
+            "could not create an unused staging file beside {} after {STAGING_ATTEMPTS} \
+             attempts: every candidate name already exists",
+            path.display()
+        ),
+    ))
+}
+
+/// Atomic write: write to a uniquely named sibling staging file, then rename it onto `path`,
+/// so a crash or disk-full condition mid-write can't leave the target in a corrupt state.
 /// The target file must have a parent directory (true for all real paths).
+///
+/// **The staging file is created exclusively and never follows a link.** See
+/// [`create_staging_file`]. Before this, staging was `fs::write(<name>.tmp)`, so a symlink
+/// planted at `<name>.tmp` — shipped in a cloned repository, say — redirected the write to
+/// whatever it pointed at and the rename then moved the link onto the target. An existing
+/// entry at a staging name is now skipped over, never written through, replaced or removed.
+/// `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`.
+///
+/// **A target that is itself a symlink is replaced, not written through.** `rename` swaps the
+/// directory entry, so the file the link pointed at keeps its content and `path` becomes a
+/// regular file. (The mode copied below is read with `metadata`, which follows the link, so
+/// the new regular file takes the pointed-at file's permission bits; for a dangling link
+/// there is nothing to read and the default applies.)
 ///
 /// Preserves the target file's Unix permissions (e.g. exec bit) across the
 /// rename. Without this, editing a `*.sh` script would silently strip +x
-/// because the freshly-created tmp file has default 0644 perms.
+/// because the freshly-created staging file has default 0644 perms.
+///
+/// Not fsynced, as before: atomic against a concurrent reader and a failed write, not
+/// durable across power loss. Two writers to the *same* target still race (last rename wins).
 pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let tmp = staging_path(path);
+    atomic_write_with(
+        path,
+        content,
+        &mut || staging_path(path, &fresh_staging_nonce()),
+        &mut |file, bytes| std::io::Write::write_all(file, bytes),
+    )
+}
 
-    // Cleanup is needed on BOTH failure points, not just the rename below.
-    // `std::fs::write` is `File::create` + `write_all`, so under ENOSPC the create
-    // can SUCCEED — the tmp file now exists — while the write fails. Before this
-    // guard the `?` propagated straight out and left the sibling `.tmp` behind;
-    // the target itself was always safe, because only the rename touches it.
-    std::fs::write(&tmp, content).inspect_err(|_| {
+/// The body of [`atomic_write`], with the two things a test cannot otherwise steer as
+/// parameters: the sequence of staging names offered, and the write into the staging file.
+///
+/// The names let a test make the FIRST candidate a planted link, so the exclusive create is
+/// what refuses it — with random names a planted `x.txt.tmp` is simply never opened and a
+/// test of it passes against any implementation. The write lets a test fail it after the
+/// create succeeded (ENOSPC), which the old test did by planting `<name>.tmp -> /dev/full`:
+/// that planting IS the vulnerability, so it can no longer be the way in.
+fn atomic_write_with(
+    path: &Path,
+    content: &str,
+    next_name: &mut dyn FnMut() -> Option<PathBuf>,
+    write: &mut dyn FnMut(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let (mut file, tmp) = create_staging_file(path, next_name)?;
+
+    // From here `tmp` is a file THIS call created, so removing it is always ours to do.
+    // Cleanup is needed on BOTH failure points, not just the rename below: under ENOSPC
+    // the create can SUCCEED — the staging file now exists — while the write fails.
+    // The target itself is always safe, because only the rename touches it.
+    if let Err(e) = write(&mut file, content.as_bytes()) {
+        drop(file);
         let _ = std::fs::remove_file(&tmp);
-    })?;
+        return Err(e);
+    }
 
-    // Preserve original mode if the target already exists.
+    // Preserve original mode if the target already exists. Through the open handle
+    // (`fchmod`), not the path: no window in which the path could be swapped.
     #[cfg(unix)]
     if let Ok(meta) = std::fs::metadata(path) {
         use std::os::unix::fs::PermissionsExt;
         let mode = meta.permissions().mode();
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(mode));
     }
 
+    // Closed before the rename: Windows will not rename an open file.
+    drop(file);
     std::fs::rename(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
@@ -573,7 +660,9 @@ mod tests {
         for group in groups {
             let mut seen: Vec<(&str, PathBuf)> = Vec::new();
             for name in group {
-                let staged = staging_path(&dir.join(name));
+                // One nonce for every name: with a random one all names are distinct and
+                // this test could not fail; held constant, only the filename half is left.
+                let staged = staging_path(&dir.join(name), "nonce").unwrap();
                 if let Some((other, _)) = seen.iter().find(|(_, p)| *p == staged) {
                     panic!(
                         "'{name}' and '{other}' both stage through {} — a concurrent write to \
@@ -598,7 +687,7 @@ mod tests {
     #[test]
     fn the_staging_path_stays_beside_its_target() {
         let target = Path::new("/repo/src/prompts/source.md");
-        let staged = staging_path(target);
+        let staged = staging_path(target, "nonce").unwrap();
 
         assert_eq!(
             staged.parent(),
@@ -624,19 +713,346 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o755, "exec bit must survive atomic_write");
     }
+    // ---- The staging file must never be a link someone else planted ----------------------
+    //
+    // `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`.
+    // `atomic_write` used to stage at `<name>.tmp` with `std::fs::write`, which follows a
+    // symlink; the rename then moved the link onto the target. A repository can ship such a
+    // link (git carries symlinks), so any codescout write to `x.txt` overwrote a file outside
+    // the root. Every test below plants through the LEGACY staging name, so that against the
+    // old derivation the planted entry is exactly the one `atomic_write` opens.
+
+    /// `root/` (the "project"), `outside/victim.txt` holding `ORIGINAL`, in one tempdir.
+    #[cfg(unix)]
+    fn staging_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("root");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let victim = outside.join("victim.txt");
+        std::fs::write(&victim, "ORIGINAL").unwrap();
+        (dir, root, victim)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_staging_symlink_is_not_followed_and_the_victim_is_untouched() {
+        let (_dir, root, victim) = staging_fixture();
+        let planted = root.join("x.txt.tmp");
+        std::os::unix::fs::symlink(&victim, &planted).unwrap();
+
+        atomic_write(&root.join("x.txt"), "WRITTEN").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "ORIGINAL",
+            "atomic_write wrote through a planted staging symlink to a file outside the root"
+        );
+        let target_meta = std::fs::symlink_metadata(root.join("x.txt")).unwrap();
+        assert!(
+            target_meta.file_type().is_file(),
+            "the target must be a regular file, not a link to the victim"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("x.txt")).unwrap(),
+            "WRITTEN"
+        );
+        // A file we did not create is neither followed, nor moved, nor removed.
+        assert_eq!(std::fs::read_link(&planted).unwrap(), victim);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_dangling_staging_symlink_does_not_create_the_file_it_points_at() {
+        let (dir, root, _victim) = staging_fixture();
+        let created = dir.path().join("outside").join("created-by-the-write.txt");
+        let planted = root.join("x.txt.tmp");
+        std::os::unix::fs::symlink(&created, &planted).unwrap();
+
+        atomic_write(&root.join("x.txt"), "WRITTEN").unwrap();
+
+        assert!(
+            created.symlink_metadata().is_err(),
+            "a dangling staging symlink made atomic_write create {created:?} outside the root"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("x.txt")).unwrap(),
+            "WRITTEN"
+        );
+        assert!(planted.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_regular_staging_file_is_not_clobbered() {
+        let (_dir, root, _victim) = staging_fixture();
+        let planted = root.join("x.txt.tmp");
+        std::fs::write(&planted, "PLANTED").unwrap();
+
+        atomic_write(&root.join("x.txt"), "WRITTEN").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&planted).unwrap(),
+            "PLANTED",
+            "atomic_write overwrote a file it did not create"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("x.txt")).unwrap(),
+            "WRITTEN"
+        );
+    }
+
+    /// The ordinary paths, so the fix cannot be "refuse everything". Covers a new file and an
+    /// overwrite, and pins that neither leaves a staging file in the directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_file_and_an_overwrite_both_work_and_leave_no_staging_file() {
+        let (_dir, root, _victim) = staging_fixture();
+        let target = root.join("x.txt");
+
+        atomic_write(&target, "first").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "first");
+        assert_eq!(entry_names_any(&root), vec!["x.txt".to_string()]);
+
+        atomic_write(&target, "second, longer").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "second, longer");
+        assert_eq!(entry_names_any(&root), vec!["x.txt".to_string()]);
+    }
+
+    /// DECISION, for a target that is itself a symlink: `atomic_write` never writes THROUGH the
+    /// leaf link. The rename replaces the link with a regular file, so the file the link
+    /// pointed at keeps its content. That is what `edit_file` was already measured doing in
+    /// `2026-10-17-write-allowlist-canonicalizes-only-the-parent...`; this pins it for the
+    /// shared writer so a future "preserve the link" change cannot reopen an escape.
+    #[cfg(unix)]
+    #[test]
+    fn a_target_that_is_a_symlink_is_replaced_not_written_through() {
+        let (dir, root, victim) = staging_fixture();
+        let leaf = root.join("leaf");
+        std::os::unix::fs::symlink(&victim, &leaf).unwrap();
+
+        atomic_write(&leaf, "WRITTEN").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "ORIGINAL");
+        assert!(std::fs::symlink_metadata(&leaf)
+            .unwrap()
+            .file_type()
+            .is_file());
+        assert_eq!(std::fs::read_to_string(&leaf).unwrap(), "WRITTEN");
+
+        // Dangling leaf link: the write must not create the file it points at.
+        let never = dir.path().join("outside").join("never-created.txt");
+        let dangling = root.join("dangling");
+        std::os::unix::fs::symlink(&never, &dangling).unwrap();
+        atomic_write(&dangling, "WRITTEN").unwrap();
+        assert!(never.symlink_metadata().is_err());
+        assert!(std::fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_file());
+    }
+
+    /// The test the three above cannot be: with random staging names a planted `x.txt.tmp` is
+    /// never even opened, so they would pass against ANY implementation that merely renamed
+    /// its staging file. Here the planted entries are the FIRST candidates offered, so it is
+    /// the exclusive create that has to refuse each one — a symlink to a victim, a dangling
+    /// symlink, a regular file, a directory — and move on to the next name.
+    #[cfg(unix)]
+    #[test]
+    fn every_kind_of_planted_entry_at_a_candidate_name_is_refused_and_left_alone() {
+        let (dir, root, victim) = staging_fixture();
+        let never = dir.path().join("outside").join("never-created.txt");
+
+        let p_link = root.join("c1.tmp");
+        let p_dangling = root.join("c2.tmp");
+        let p_regular = root.join("c3.tmp");
+        let p_dir = root.join("c4.tmp");
+        let fresh = root.join("c5.tmp");
+        std::os::unix::fs::symlink(&victim, &p_link).unwrap();
+        std::os::unix::fs::symlink(&never, &p_dangling).unwrap();
+        std::fs::write(&p_regular, "PLANTED").unwrap();
+        std::fs::create_dir(&p_dir).unwrap();
+
+        let mut queue: std::collections::VecDeque<PathBuf> =
+            [&p_link, &p_dangling, &p_regular, &p_dir, &fresh]
+                .into_iter()
+                .cloned()
+                .collect();
+        let target = root.join("x.txt");
+        atomic_write_with(
+            &target,
+            "WRITTEN",
+            &mut || queue.pop_front(),
+            &mut |f, b| std::io::Write::write_all(f, b),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "ORIGINAL");
+        assert!(
+            never.symlink_metadata().is_err(),
+            "dangling link was followed"
+        );
+        assert_eq!(std::fs::read_link(&p_link).unwrap(), victim);
+        assert_eq!(std::fs::read_link(&p_dangling).unwrap(), never);
+        assert_eq!(std::fs::read_to_string(&p_regular).unwrap(), "PLANTED");
+        assert!(p_dir.is_dir());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "WRITTEN");
+        // The fresh candidate was consumed by the rename, and nothing else was added.
+        assert!(fresh.symlink_metadata().is_err());
+        assert_eq!(
+            entry_names_any(&root),
+            vec!["c1.tmp", "c2.tmp", "c3.tmp", "c4.tmp", "x.txt"]
+        );
+    }
+
+    /// Collisions are retried a BOUNDED number of times, then fail with a clear error. Offered
+    /// the same planted name forever, `atomic_write_with` must stop after exactly
+    /// `STAGING_ATTEMPTS` tries, create and change nothing, and say why.
+    #[cfg(unix)]
+    #[test]
+    fn staging_gives_up_after_a_bounded_number_of_collisions_and_changes_nothing() {
+        let (_dir, root, victim) = staging_fixture();
+        let planted = root.join("always.tmp");
+        std::os::unix::fs::symlink(&victim, &planted).unwrap();
+        let target = root.join("x.txt");
+
+        let mut offered = 0u32;
+        let err = atomic_write_with(
+            &target,
+            "WRITTEN",
+            &mut || {
+                offered += 1;
+                Some(planted.clone())
+            },
+            &mut |f, b| std::io::Write::write_all(f, b),
+        )
+        .expect_err("a staging name that always collides must be an error");
+
+        assert_eq!(
+            offered, STAGING_ATTEMPTS,
+            "the retry loop must be bounded and use its budget"
+        );
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(
+            err.to_string().contains("staging"),
+            "the error must say what ran out: {err}"
+        );
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "ORIGINAL");
+        assert_eq!(std::fs::read_link(&planted).unwrap(), victim);
+        assert!(
+            target.symlink_metadata().is_err(),
+            "the target must not appear"
+        );
+        assert_eq!(entry_names_any(&root), vec!["always.tmp"]);
+    }
+
+    /// Staging names are unpredictable, so planting one in advance is a guess; and they stay
+    /// beside the target. A fixed derivation (the old `<name>.tmp`) fails the first two asserts.
+    #[test]
+    fn real_staging_names_are_unpredictable_and_not_the_legacy_name() {
+        let target = Path::new("/repo/src/x.txt");
+        let a = staging_path(target, &fresh_staging_nonce()).unwrap();
+        let b = staging_path(target, &fresh_staging_nonce()).unwrap();
+        assert_ne!(a, b, "two staging names for one target must differ");
+        assert_ne!(
+            a,
+            Path::new("/repo/src/x.txt.tmp"),
+            "the legacy name is plantable"
+        );
+        assert_eq!(a.parent(), target.parent());
+        assert!(a.to_string_lossy().ends_with(".tmp"));
+    }
+
+    /// A file name near `NAME_MAX` (255 bytes) must still be writable: the staging name adds a
+    /// nonce, and unbounded growth would turn it into ENAMETOOLONG. The multi-byte name makes
+    /// the truncation land inside a character, which must back off to a boundary, not panic.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_name_near_the_name_max_still_writes() {
+        let dir = tempdir().unwrap();
+        for name in ["a".repeat(250), "あ".repeat(82)] {
+            assert!(name.len() >= 246 && name.len() <= 255, "{}", name.len());
+            let target = dir.path().join(&name);
+            atomic_write(&target, "ok").unwrap();
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "ok");
+        }
+        assert_eq!(
+            entry_names_any(dir.path()).len(),
+            2,
+            "a staging file leaked"
+        );
+    }
+
+    #[test]
+    fn a_missing_parent_directory_is_an_error_not_a_retry_loop() {
+        let dir = tempdir().unwrap();
+        let err = atomic_write(&dir.path().join("no-such-dir").join("x.txt"), "x").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn a_path_with_no_file_name_is_refused_up_front() {
+        let dir = tempdir().unwrap();
+        let dotdot = dir.path().join("..");
+        assert!(
+            dotdot.file_name().is_none(),
+            "precondition: `..` has no file name"
+        );
+        for p in [dotdot.as_path(), Path::new("/")] {
+            let err = atomic_write(p, "x").unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{p:?}");
+        }
+    }
+
+    /// Same-stem files written concurrently — the archived stem-collision scenario, now with
+    /// unique staging names too. Every file must end up holding one of ITS OWN writes, and no
+    /// staging file may survive.
+    // Unix only: Windows may refuse a rename onto a file another thread has open.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_writers_to_same_stem_files_never_cross_or_leak() {
+        let dir = tempdir().unwrap();
+        let names = ["Cargo.toml", "Cargo.lock", "source.md", "source.rs"];
+        std::thread::scope(|s| {
+            for name in names {
+                // Two threads per file: same-target writers race on the rename, not the staging.
+                for writer in 0..2 {
+                    let path = dir.path().join(name);
+                    s.spawn(move || {
+                        for i in 0..40 {
+                            atomic_write(&path, &format!("{name}:{writer}:{i}")).unwrap();
+                        }
+                    });
+                }
+            }
+        });
+        for name in names {
+            let got = std::fs::read_to_string(dir.path().join(name)).unwrap();
+            assert!(got.starts_with(&format!("{name}:")), "{name} holds {got:?}");
+        }
+        let mut want: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        want.sort();
+        assert_eq!(entry_names_any(dir.path()), want, "a staging file leaked");
+    }
 
     /// The leak the `rename` guard never covered. `std::fs::write` is
-    /// `File::create` + `write_all`, so under ENOSPC the create SUCCEEDS — the tmp
+    /// `File::create` + `write_all`, so under ENOSPC the create SUCCEEDS — the staging
     /// file exists from that moment — and the write then fails. The `?` propagated
     /// straight out, leaving the sibling `.tmp` behind.
     ///
     /// **Reproducing it requires create to succeed and the write to fail**, and
-    /// that is the whole difficulty. The obvious reproductions — making the tmp
-    /// path a directory, or its parent read-only — fail at `File::create` instead,
+    /// that is the whole difficulty. The obvious reproductions — making the staging
+    /// path a directory, or its parent read-only — fail at the create instead,
     /// so nothing is created, nothing leaks, and such a test PASSES against the
     /// unfixed function. `/dev/full` gives the right shape: the open succeeds and
-    /// every write returns ENOSPC. Verified at the shell before this was written,
-    /// then demonstrated failing against the unfixed function.
+    /// every write returns ENOSPC.
+    ///
+    /// **How `/dev/full` gets in changed with the staging fix.** This test used to plant
+    /// `target.tmp -> /dev/full` so that `atomic_write` itself opened it — which IS the
+    /// vulnerability (a planted staging link followed), and is now refused. So the real create
+    /// still happens, exclusively, and the injected write sends the bytes to `/dev/full`
+    /// instead: the kernel still returns the real ENOSPC, after a real create.
     ///
     /// Linux-only: `/dev/full` does not exist on macOS, and CI runs a macOS lane.
     #[cfg(target_os = "linux")]
@@ -652,7 +1068,6 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let target = dir.path().join("target");
-        let tmp = target.with_extension("tmp");
 
         // Pre-existing content, so the atomicity guarantee is pinned as "unchanged"
         // rather than merely "not created" — the stronger of the two properties, and
@@ -660,12 +1075,27 @@ mod tests {
         const ORIGINAL: &str = "original content, must survive a failed write\n";
         std::fs::write(&target, ORIGINAL).unwrap();
 
-        std::os::unix::fs::symlink("/dev/full", &tmp).unwrap();
-
+        // Positive control for the create: the writer sees the staging file already
+        // on disk, so a leak below is a leak of a file that really existed.
+        let mut staging_seen_by_writer: Option<PathBuf> = None;
+        let mut names = {
+            let target = target.clone();
+            move || staging_path(&target, &fresh_staging_nonce())
+        };
+        let dir_path = dir.path().to_path_buf();
+        let err = atomic_write_with(&target, "new content", &mut names, &mut |_staged, bytes| {
+            let on_disk = entry_names_any(&dir_path);
+            staging_seen_by_writer = on_disk
+                .into_iter()
+                .find(|n| n.ends_with(".tmp"))
+                .map(PathBuf::from);
+            // The real ENOSPC, from the kernel.
+            let mut full = std::fs::OpenOptions::new().write(true).open("/dev/full")?;
+            std::io::Write::write_all(&mut full, bytes)
+        })
         // (1) It must FAIL. A version that swallowed the error and returned Ok would
         // satisfy the cleanup assertion below while breaking the function's purpose.
-        let err = atomic_write(&target, "new content")
-            .expect_err("atomic_write must propagate the write failure, not swallow it");
+        .expect_err("atomic_write must propagate the write failure, not swallow it");
 
         // (2) Positive control: pin that we reproduced the INTENDED failure. Without
         // it, a mechanism that silently started yielding some other error (EACCES,
@@ -674,6 +1104,11 @@ mod tests {
             err.raw_os_error(),
             Some(28),
             "expected ENOSPC (28) from /dev/full, got {err:?}"
+        );
+        assert!(
+            staging_seen_by_writer.is_some(),
+            "the staging file did not exist when the write ran, so this test never \
+             exercised the create-succeeds-then-write-fails shape"
         );
 
         // (3) Atomicity: the target is untouched, because only the rename ever
@@ -684,13 +1119,23 @@ mod tests {
             "a failed write must leave the target byte-identical"
         );
 
-        // (4) The leak itself. `symlink_metadata`, not `exists()`: `exists()` follows
-        // the link and would report on /dev/full — which always exists — rather than
-        // on the tmp entry that must have been removed.
-        assert!(
-            tmp.symlink_metadata().is_err(),
-            "atomic_write leaked {tmp:?} after the write failed"
+        // (4) The leak itself: nothing but the target is left in the directory.
+        assert_eq!(
+            entry_names_any(dir.path()),
+            vec!["target".to_string()],
+            "atomic_write leaked its staging file after the write failed"
         );
+    }
+
+    /// Names in `dir`, sorted. Platform-neutral twin of `entry_names` (which is unix-only
+    /// because the fixtures around it plant symlinks).
+    fn entry_names_any(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     // `Path::is_absolute()` requires a drive or UNC prefix on Windows — a bare
