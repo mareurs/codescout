@@ -21,6 +21,12 @@
 # cargo shares one script across checkouts and a 4 MB stale one is invisible to a size rule
 # (bug f1162428494d0ad1).
 #
+# A fourth bound is the same cause for the workspace crates themselves: `slot_evict_foreign_members`
+# stamps the slot with the checkout that last leased it and, when the lessee changes, removes
+# the fingerprints of every workspace crate (and its build-script units), because cargo
+# trusts a fingerprint by mtime and a checkout older than the slot's last build is handed
+# the other checkout's compiled crate (bug 2026-10-16, E0432 on a module the source declares).
+#
 # THE LOCK IS THE ONLY PROOF A TREE IS IDLE, which is why the pruning lives here and not
 # in a cron job or a warning. `flock -n` succeeding is the one observation that no leased
 # run is inside a slot, so every removal happens under that lock. A tree with no lock
@@ -163,55 +169,98 @@ slot_evict_foreign_build_scripts() {
 # slot_evict_foreign_members <who> <tree> <checkout> <cargo-home>
 # Call it holding a lease. When <tree> was last leased for a different checkout than
 # <checkout> (or for none on record), removes the cargo fingerprint of every compiled unit
-# that is not a registry dependency, so cargo compiles the lessee's workspace crates again.
-# Then it records <checkout> as the lessee. Nothing happens when <checkout> is empty.
+# of a WORKSPACE crate, so cargo compiles the lessee's own crates again, then records
+# <checkout> as the lessee. With an empty <checkout> (not a git tree, or git refused) it
+# removes the record instead and evicts nothing: nobody can be named as the lessee, and a
+# stale record would let this lease write units its previous owner then trusts.
 #
 # WHY. Cargo hashes a workspace member by its path RELATIVE to the workspace root, so two
 # checkouts of one repository name the same unit `codescout-embed-<hash>` and share one
 # fingerprint, and it calls that fingerprint fresh when no source file in the CURRENT
 # checkout is newer than the dep-info the OTHER checkout's build wrote. A checkout whose
 # files are older than the slot's last build is therefore handed the other checkout's
-# compiled crate, whatever its source says. Measured with two toy workspaces in one target
-# dir: tree B added a function, its mtimes predated A's build, `cargo build --workspace`
-# printed `Finished` in 0.01s and compiled nothing. That is the mechanism offered for the
-# 2026-10-16 failure, a default build in slot-0 that reported `unresolved import
-# codescout_embed::ceiling` for a module the source declares; the incident itself was not
-# captured, so it is not proven to be that one. `slot_evict_foreign_build_scripts` closes
-# the same hole for build scripts only.
+# compiled crate, whatever its source says. Measured 2026-10-17 with two toy workspaces in
+# one target dir, tree B older than A's build and its member `emb` gaining `pub mod ceiling`:
+# `cargo test --no-run` printed `Compiling emb` and then `E0432 unresolved import
+# emb::ceiling`, because only one unit of `emb` was dirty (its lib-test unit was new) and
+# the binary linked the other checkout's stale lib unit. That is the 2026-10-16 failure in
+# a gate slot, line for line. A tree whose members are all skipped instead prints
+# `Finished` and runs the other checkout's code. `slot_evict_foreign_build_scripts` closes
+# the same hole for the `env!`-baked path of a compiled build script only.
 #
-# HOW A MEMBER IS RECOGNISED. Cargo runs rustc from the workspace root, so the dep-info
-# `deps/<crate>-<hash>.d` of a workspace member lists its sources as relative paths, and that
-# of a registry or git dependency lists absolute ones under <cargo-home>. A unit whose first
-# source is under <cargo-home> is kept, because it is meant to be shared and recompiling C
-# would cost minutes. The fingerprint directory is `.fingerprint/<package>-<hash>` with the
-# same hash. Removing it is what makes cargo call the unit dirty, and a dirty unit dirties
+# WHAT IS EVICTED, in two passes over each `<profile>/.fingerprint` directory (`debug`,
+# `release`, and the same under a `--target <triple>` directory):
+#   1. every unit whose `<profile>/deps/<crate>-<hash>.d` lists, as its FIRST source, a path
+#      that is not under <cargo-home>. A workspace member lists relative paths, a path
+#      dependency outside the workspace lists absolute ones, and a registry or git
+#      dependency lists absolute ones under <cargo-home>, which is kept because it is meant to
+#      be shared and recompiling C would cost minutes. The fingerprint directory is
+#      `.fingerprint/<package>-<hash>`, the same hash.
+#   2. the build-script units, compile and run, of every package pass 1 evicted. They carry
+#      no `deps/*.d` (the run unit's fingerprint records only package-relative paths), so
+#      the package NAME is the only link to them, and the matching `build/<package>-<hash>`
+#      directories go too, because the run unit's OUT_DIR holds files such as
+#      `include_str!`-ed copies of the other checkout's sources. Measured 2026-10-17: a
+#      build.rs copying a file of its own tree into OUT_DIR printed the other tree's marker
+#      after pass 1 alone.
+# Removing a fingerprint is what makes cargo call the unit dirty, and a dirty unit dirties
 # everything that depends on it.
 #
 # THE OWNER FIELD. Cargo records no checkout, so the lessee is stamped in
-# `<tree>/.codescout-lessee`. Same checkout, same stamp, nothing evicted: an edit there bumps
-# an mtime, so cargo's own rule is sound inside one checkout. A tree with no stamp (every slot
-# that predates this) is treated as foreign once.
+# `<tree>/.codescout-lessee`, AFTER the eviction: a run interrupted part-way leaves the old
+# stamp, and the next lease evicts again. Same checkout, same stamp, nothing evicted: an
+# edit there bumps an mtime, so cargo's own rule is sound inside one checkout. A tree with no
+# stamp (every slot that predates this) is treated as foreign once. The stamp is compared
+# whole, never as a prefix: a worktree nested under the stamped checkout is another lessee.
+#
+# LIMIT. The lessee is the git toplevel of the CWD of the leasing command, which is what
+# `with-slot.sh` and `gate.sh` build in the usual case. A command that builds another tree
+# (`--manifest-path ../other/Cargo.toml`, or a `cd` inside `bash -c`) is stamped as the CWD's
+# checkout, and the tree it built stays unprotected until the next lease from that CWD.
+#
+# COST. One lease that changes lessee reads the dep-info of every unit and removes the
+# workspace ones, with no per-unit `find` or fork: measured on a copy of a real slot, see
+# the issue record for this change. The next build compiles the workspace crates, not the
+# registry dependencies.
 slot_evict_foreign_members() {
-    local who="$1" tree="$2" checkout="$3" cargo_home="$4" stamp owner dep line src base hash fp
-    [ -n "$checkout" ] || return 0
+    local who="$1" tree="$2" checkout="$3" cargo_home="$4" stamp owner="" n=0
+    local fpdir prof dep line src base fp name
+    local -A foreign pkgs
     stamp="$tree/.codescout-lessee"
-    owner="$(cat "$stamp" 2>/dev/null)"
+    [ -n "$checkout" ] || { rm -f -- "$stamp"; return 0; }
+    [ -r "$stamp" ] && IFS= read -r owner < "$stamp"
     if [ "$owner" != "$checkout" ]; then
-        while IFS= read -r dep; do
-            line="$(head -n1 "$dep" 2>/dev/null)" || continue
-            case "$line" in *".d: "*) ;; *) continue ;; esac
-            src="${line#*.d: }"; src="${src%% *}"
-            [ -n "$src" ] || continue
-            # An empty <cargo-home> would make the pattern `/*`, which matches every path.
-            if [ -n "$cargo_home" ]; then
-                case "$src" in "$cargo_home"/*) continue ;; esac
-            fi
-            base="${dep##*/}"; base="${base%.d}"; hash="${base##*-}"
-            while IFS= read -r fp; do
-                echo "$who: evicting ${fp}: $tree was last leased for ${owner:-no recorded checkout}, not for $checkout" >&2
-                rm -rf -- "$fp"
-            done < <(find "$tree" -maxdepth 4 -path '*/.fingerprint/*' -type d -name "*-$hash" 2>/dev/null)
-        done < <(find "$tree" -maxdepth 4 -path '*/deps/*' -name '*.d' 2>/dev/null)
+        # One find, pruned at each `.fingerprint`; depth 3 reaches `<triple>/debug`.
+        while IFS= read -r fpdir; do
+            prof="${fpdir%/.fingerprint}"
+            foreign=(); pkgs=()
+            for dep in "$prof"/deps/*.d; do
+                [ -r "$dep" ] || continue
+                line=""; IFS= read -r line < "$dep" || [ -n "$line" ] || continue
+                case "$line" in *".d: "*) ;; *) continue ;; esac
+                # The pattern below is a prefix test, so the first source decides: no need to cut it.
+                src="${line#*.d: }"
+                [ -n "$src" ] || continue
+                # An empty <cargo-home> would make the pattern `/*`, which matches every path.
+                if [ -n "$cargo_home" ]; then
+                    case "$src" in "$cargo_home"/*) continue ;; esac
+                fi
+                base="${dep##*/}"; base="${base%.d}"; foreign["${base##*-}"]=1
+            done
+            for fp in "$fpdir"/*/; do
+                fp="${fp%/}"; name="${fp##*/}"
+                [ -n "${foreign["${name##*-}"]:-}" ] || continue
+                pkgs["${name%-*}"]=1
+                rm -rf -- "$fp"; n=$((n + 1))
+            done
+            for fp in "$fpdir"/*/; do
+                fp="${fp%/}"; name="${fp##*/}"
+                [ -n "${pkgs["${name%-*}"]:-}" ] || continue
+                compgen -G "$fp/*build-script-*" >/dev/null || continue
+                rm -rf -- "$fp" "$prof/build/$name"; n=$((n + 1))
+            done
+        done < <(find "$tree" -maxdepth 3 -type d -name .fingerprint -prune -print 2>/dev/null)
+        [ "$n" -eq 0 ] || echo "$who: evicted $n compiled units of workspace crates from $tree: it was last leased for ${owner:-no recorded checkout}, not for $checkout" >&2
     fi
     mkdir -p "$tree" 2>/dev/null && printf '%s\n' "$checkout" > "$stamp"
 }
