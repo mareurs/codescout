@@ -1494,20 +1494,38 @@ fn the_vectorless_count_ignores_a_case_only_sibling() {
 /// P6 / L-1: the armed roots OUTLIVED the call that armed them, so a catalog-level writer reached
 /// without arming inherited another call's roots instead of falling back to the spelled repository
 /// as the field's doc says.
+///
+/// The fixture needs an input whose verdict DIFFERS between armed and unarmed. The first version
+/// (an umbrella) stopped differing once the door judged against the deeper root, so it went
+/// vacuous and a mutant that never cleared the roots survived. Here the project is registered
+/// canonically (`data/proj`) and reached through `home/proj`, and `home` holds a `.git`: unarmed,
+/// the spelled repository is `home`, and the file resolves to `data/proj/...`, outside it
+/// (refused); armed with the project's roots it is inside the project (admitted).
 #[tokio::test]
 async fn an_unarmed_writer_does_not_inherit_the_previous_calls_roots() {
-    let (u, a, b) = umbrella();
-    std::fs::write(
-        b.join("docs/ledger.md"),
-        "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n",
-    )
-    .unwrap();
-    let ctx = mk_ctx(u.path());
-    let id = catalog_row(&ctx, &a.join("linkdir/ledger.md"));
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/docs")).unwrap();
+    let ledger = "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n";
+    std::fs::write(data.join("proj/docs/ledger.md"), ledger).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    let canonical = std::fs::canonicalize(data.join("proj")).unwrap();
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_current_project(cp(&canonical))
+        .build();
+    let id = catalog_row(&ctx, &home.join("proj/docs/ledger.md"));
     let direct = |ctx: &ToolContext| {
         augmentation::allocate_entry_id(&mut ctx.catalog.lock(), &id, "F", None)
     };
-    assert!(direct(&ctx).is_err(), "unarmed: the spelled repo A refuses");
+    let unarmed = direct(&ctx).expect_err("unarmed: the spelled repository `home` refuses");
+    assert!(
+        msg(&unarmed).contains("outside the repository root"),
+        "{}",
+        msg(&unarmed)
+    );
 
     // A tool that arms, even one that then fails, must not leave its roots behind.
     let _ = super::update_entry::call(
@@ -1517,12 +1535,15 @@ async fn an_unarmed_writer_does_not_inherit_the_previous_calls_roots() {
     )
     .await;
 
-    assert!(direct(&ctx).is_err(), "still unarmed: no inherited roots");
+    let after = direct(&ctx).expect_err("still unarmed: no inherited roots");
     assert!(
-        std::fs::read_to_string(b.join("docs/ledger.md"))
-            .unwrap()
-            .ends_with("# Ledger\n"),
-        "B's ledger untouched"
+        msg(&after).contains("outside the repository root"),
+        "{}",
+        msg(&after)
+    );
+    assert_eq!(
+        std::fs::read_to_string(data.join("proj/docs/ledger.md")).unwrap(),
+        ledger
     );
 }
 
