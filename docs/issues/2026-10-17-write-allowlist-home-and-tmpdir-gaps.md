@@ -140,8 +140,16 @@ item 6 in `2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admi
    section (review follow-up: as a safe fn it was sound only if every closure honoured the
    contract, a promise the type system did not carry). An EINTR retry bounded at 8, an ERANGE-grown buffer
    bounded at 1 MiB, and a `OnceLock` cache of the ACCOUNT lookup only: a definitive answer
-   (found, or no entry) is kept, a failed call is not (a transient error must not switch the guard
-   off for the life of the process). `$HOME` is read on every call, never cached.
+   (found, or no entry) is kept for the life of the process; a FAILED call is remembered for 5 s
+   (`PASSWD_FAILURE_TTL`, injectable clock in the tests) and not repeated before then, then tried
+   again, so an NSS outage (EAGAIN/EIO on LDAP or sssd) costs one blocking call per window instead
+   of one per tool call and a transient failure cannot switch the guard off for good (review
+   follow-up; the first version never cached a failure). The cache's mutex is held across the
+   lookup, so concurrent first callers make one NSS call between them. The first lookup runs on
+   whichever thread asked, which for a tool call is a tokio worker (`protected_homes` is plain
+   synchronous code reached from async handlers); it is NOT moved to `spawn_blocking`, because those
+   call sites have no async context to await in and the cache bounds the cost to one call per
+   process (or per failure window). `$HOME` is read on every call, never cached.
    `geteuid` rather than `getuid`: file access is authorised by the effective uid, so that user's
    home is the one worth guarding. `std::env::home_dir` and `dirs-sys` use `getuid`; the two are
    equal for a process that is not setuid, so the choice never shows (mutant m2m survives, see
@@ -220,7 +228,7 @@ nothing and its cold isolated build does.
 | 2 | m2b no absolute filter on `$HOME` | `resolve_home_falls_back_...`, `resolved_home_dir_is_not_stale_...`, 2 child tests: KILLED |
 | 2 | m2c no absolute filter on the result | `resolve_home_falls_back_...`: KILLED |
 | 2 | m2d cache never read | `a_found_answer_is_looked_up_once_and_kept`, `a_definitive_no_entry_is_kept_too`: KILLED |
-| 2 | m2e a failed lookup is cached | `a_failed_lookup_is_not_kept_so_the_next_call_asks_again`: KILLED |
+| 2 | m2e a failed lookup is cached for good | `a_failed_lookup_is_retried_after_the_ttl_and_a_success_then_sticks` (measured against the first version, where a failure was never cached, the mutant was `Failed => cell.get_or_init(|| None)` and `a_failed_lookup_is_not_kept_so_the_next_call_asks_again` killed it): KILLED |
 | 2 | m2n no-entry is not cached | `a_definitive_no_entry_is_kept_too`: KILLED |
 | 2 | m2f EINTR not retried | `a_lookup_interrupted_by_a_signal_is_retried`, `..gives_up_after_the_retry_bound`: KILLED |
 | 2 | m2g EINTR bound `<` -> `<=` | `a_lookup_that_is_always_interrupted_gives_up_after_the_retry_bound`: KILLED |

@@ -23,30 +23,75 @@ enum AccountLookup {
 /// empty or wrong one must not make a guard that is "about the home directory" silently stop
 /// guarding the real one.
 ///
-/// Cached: the answer is looked up once per process and kept (`OnceLock`), because every write
-/// classification asks for it and one lookup can mean a blocking NSS round trip (LDAP, sssd) on a
-/// tokio worker. Only a definitive answer is kept (`AccountLookup::Failed` is retried on the
-/// next call). The cache holds the ACCOUNT's home only; `$HOME` is read fresh on every call by the
-/// caller (`platform::resolved_home_dir`). An account's home directory changing under a running
-/// server is not handled: restart it.
+/// Cached, because every write classification and read validation asks for it and one lookup can
+/// mean a blocking NSS round trip (LDAP, sssd) on whatever thread asked. A definitive answer
+/// (found, or no entry) is kept for the life of the process. A FAILED lookup (EAGAIN, EIO: an NSS
+/// outage) is remembered for `PASSWD_FAILURE_TTL` and not repeated before then, so an outage costs
+/// one blocking call per window, not one per tool call; after the window it is tried again, so a
+/// transient failure cannot switch the account guard off for good. The cache holds the ACCOUNT's
+/// home only; `$HOME` is read fresh on every call by the caller (`platform::resolved_home_dir`).
+/// An account's home directory changing under a running server is not handled: restart it.
+///
+/// Where it runs: `protected_homes` calls this from synchronous code reached from async tool
+/// handlers, so the FIRST lookup (and a retry after a failure window) runs on a tokio worker thread
+/// and can block it for the length of one NSS call. It is not moved to `spawn_blocking`: the call
+/// sites are plain functions with no async context to await in, and the cache bounds the cost to one
+/// call per process (or per failure window).
 pub fn account_home_dir() -> Option<PathBuf> {
-    static ACCOUNT_HOME: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-    cached_account_home(&ACCOUNT_HOME, lookup_account_home)
+    static ACCOUNT_HOME: AccountCache = AccountCache::new();
+    cached_account_home(&ACCOUNT_HOME, std::time::Instant::now, lookup_account_home)
 }
 
-/// The cache policy of `account_home_dir` over a caller-supplied cell and lookup: ask once, keep
-/// a definitive answer (`Found`, `NoEntry`), and ask again after a `Failed` one.
+/// How long a failed account lookup is not repeated.
+// cap-class: NOT_A_CAP — a retry back-off for one account lookup; it bounds how often the lookup is tried, and no result is truncated or presented as complete
+const PASSWD_FAILURE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The account lookup's memory: a definitive answer kept for the life of the process, and when the
+/// last attempt FAILED. The mutex is held across the lookup on purpose, so concurrent first callers
+/// make one NSS call between them rather than one each.
+struct AccountCache {
+    known: std::sync::OnceLock<Option<PathBuf>>,
+    failed_at: std::sync::Mutex<Option<std::time::Instant>>,
+}
+
+impl AccountCache {
+    const fn new() -> Self {
+        Self {
+            known: std::sync::OnceLock::new(),
+            failed_at: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+/// The cache policy of `account_home_dir` over a caller-supplied cache, clock and lookup: a
+/// definitive answer (`Found`, `NoEntry`) is asked once and kept; a `Failed` one is remembered for
+/// `PASSWD_FAILURE_TTL` and the lookup is not run again before it has passed. `now` is injectable
+/// so a test can move time without sleeping.
 fn cached_account_home(
-    cell: &std::sync::OnceLock<Option<PathBuf>>,
+    cache: &AccountCache,
+    now: impl Fn() -> std::time::Instant,
     lookup: impl FnOnce() -> AccountLookup,
 ) -> Option<PathBuf> {
-    if let Some(known) = cell.get() {
+    if let Some(known) = cache.known.get() {
         return known.clone();
     }
+    // Held across the lookup: concurrent callers wait for this one instead of each asking NSS.
+    let mut failed_at = cache.failed_at.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(known) = cache.known.get() {
+        return known.clone(); // another caller finished while this one waited
+    }
+    if let Some(at) = *failed_at {
+        if now().saturating_duration_since(at) < PASSWD_FAILURE_TTL {
+            return None;
+        }
+    }
     match lookup() {
-        AccountLookup::Found(home) => cell.get_or_init(|| Some(home)).clone(),
-        AccountLookup::NoEntry => cell.get_or_init(|| None).clone(),
-        AccountLookup::Failed => None,
+        AccountLookup::Found(home) => cache.known.get_or_init(|| Some(home)).clone(),
+        AccountLookup::NoEntry => cache.known.get_or_init(|| None).clone(),
+        AccountLookup::Failed => {
+            *failed_at = Some(now());
+            None
+        }
     }
 }
 
@@ -456,16 +501,44 @@ mod tests {
         assert_eq!(lookup(&mut |_, _, _| libc::EIO), AccountLookup::Failed);
     }
 
+    /// A clock a test moves by hand: `now()` is a fixed instant plus whatever was advanced.
+    struct FakeClock {
+        base: std::time::Instant,
+        offset: std::cell::Cell<std::time::Duration>,
+    }
+
+    impl FakeClock {
+        fn new() -> Self {
+            Self {
+                base: std::time::Instant::now(),
+                offset: std::cell::Cell::new(std::time::Duration::ZERO),
+            }
+        }
+        fn advance(&self, by: std::time::Duration) {
+            self.offset.set(self.offset.get() + by);
+        }
+        fn now(&self) -> std::time::Instant {
+            self.base + self.offset.get()
+        }
+    }
+
     #[test]
     fn a_found_answer_is_looked_up_once_and_kept() {
-        let cell = std::sync::OnceLock::new();
+        let cache = AccountCache::new();
+        let clock = FakeClock::new();
         let mut lookups = 0;
         for _ in 0..3 {
-            let got = cached_account_home(&cell, || {
-                lookups += 1;
-                AccountLookup::Found(PathBuf::from("/home/fake"))
-            });
+            let got = cached_account_home(
+                &cache,
+                || clock.now(),
+                || {
+                    lookups += 1;
+                    AccountLookup::Found(PathBuf::from("/home/fake"))
+                },
+            );
             assert_eq!(got, Some(PathBuf::from("/home/fake")));
+            // A success is kept for the life of the process, however much time passes.
+            clock.advance(std::time::Duration::from_secs(86_400));
         }
         assert_eq!(
             lookups, 1,
@@ -475,24 +548,155 @@ mod tests {
 
     #[test]
     fn a_definitive_no_entry_is_kept_too() {
-        let cell = std::sync::OnceLock::new();
+        let cache = AccountCache::new();
+        let clock = FakeClock::new();
         let mut lookups = 0;
         for _ in 0..3 {
-            let got = cached_account_home(&cell, || {
-                lookups += 1;
-                AccountLookup::NoEntry
-            });
+            let got = cached_account_home(
+                &cache,
+                || clock.now(),
+                || {
+                    lookups += 1;
+                    AccountLookup::NoEntry
+                },
+            );
             assert_eq!(got, None);
+            clock.advance(PASSWD_FAILURE_TTL * 10);
         }
         assert_eq!(lookups, 1);
     }
 
     #[test]
-    fn a_failed_lookup_is_not_kept_so_the_next_call_asks_again() {
-        let cell = std::sync::OnceLock::new();
-        assert_eq!(cached_account_home(&cell, || AccountLookup::Failed), None);
-        // A transient failure must not switch the account guard off for the life of the process.
-        let got = cached_account_home(&cell, || AccountLookup::Found(PathBuf::from("/home/fake")));
+    fn a_failed_lookup_is_not_repeated_before_the_ttl() {
+        // An NSS outage (LDAP, sssd: EAGAIN or EIO) must not turn every tool call into another
+        // blocking `getpwuid_r` on a tokio worker.
+        let cache = AccountCache::new();
+        let clock = FakeClock::new();
+        let mut lookups = 0;
+        let mut ask = |clock: &FakeClock| {
+            cached_account_home(
+                &cache,
+                || clock.now(),
+                || {
+                    lookups += 1;
+                    AccountLookup::Failed
+                },
+            )
+        };
+        assert_eq!(ask(&clock), None);
+        assert_eq!(ask(&clock), None);
+        clock.advance(PASSWD_FAILURE_TTL - std::time::Duration::from_nanos(1));
+        assert_eq!(ask(&clock), None, "one tick before the window ends");
+        assert_eq!(
+            lookups, 1,
+            "the failure must be remembered for the whole window"
+        );
+    }
+
+    #[test]
+    fn a_failed_lookup_is_retried_after_the_ttl_and_a_success_then_sticks() {
+        let cache = AccountCache::new();
+        let clock = FakeClock::new();
+        let mut lookups = 0;
+        let mut outcomes = vec![
+            AccountLookup::Found(PathBuf::from("/home/fake")),
+            AccountLookup::Failed,
+        ];
+        let mut ask = |clock: &FakeClock| {
+            cached_account_home(
+                &cache,
+                || clock.now(),
+                || {
+                    lookups += 1;
+                    outcomes.pop().expect("no more lookups expected")
+                },
+            )
+        };
+        assert_eq!(ask(&clock), None, "first lookup fails");
+        clock.advance(PASSWD_FAILURE_TTL);
+        assert_eq!(
+            ask(&clock),
+            Some(PathBuf::from("/home/fake")),
+            "exactly at the TTL the lookup is tried again"
+        );
+        clock.advance(PASSWD_FAILURE_TTL * 100);
+        assert_eq!(ask(&clock), Some(PathBuf::from("/home/fake")));
+        assert_eq!(lookups, 2, "a success is kept; no third lookup");
+    }
+
+    #[test]
+    fn each_failure_restarts_the_window() {
+        let cache = AccountCache::new();
+        let clock = FakeClock::new();
+        let mut lookups = 0;
+        let mut ask = |clock: &FakeClock| {
+            cached_account_home(
+                &cache,
+                || clock.now(),
+                || {
+                    lookups += 1;
+                    AccountLookup::Failed
+                },
+            )
+        };
+        ask(&clock);
+        clock.advance(PASSWD_FAILURE_TTL);
+        ask(&clock); // second failure, at t = TTL
+        clock.advance(PASSWD_FAILURE_TTL - std::time::Duration::from_nanos(1));
+        ask(&clock); // still inside the window that began at the SECOND failure
+        assert_eq!(lookups, 2, "the window is measured from the latest failure");
+    }
+
+    #[test]
+    fn concurrent_first_callers_make_one_lookup_between_them() {
+        // Thread A is inside the (slow) lookup, holding the cache's lock; thread B arrives meanwhile.
+        // B must wait and then be answered from the cache, not run a second NSS call.
+        let cache = std::sync::Arc::new(AccountCache::new());
+        let lookups = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let a = {
+            let (cache, lookups) = (cache.clone(), lookups.clone());
+            std::thread::spawn(move || {
+                cached_account_home(&cache, std::time::Instant::now, || {
+                    lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    started_tx.send(()).unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    AccountLookup::Found(PathBuf::from("/home/fake"))
+                })
+            })
+        };
+        started_rx.recv().unwrap(); // A holds the lock now
+        let b = cached_account_home(&cache, std::time::Instant::now, || {
+            lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            AccountLookup::Found(PathBuf::from("/home/other"))
+        });
+        assert_eq!(a.join().unwrap(), Some(PathBuf::from("/home/fake")));
+        assert_eq!(
+            b,
+            Some(PathBuf::from("/home/fake")),
+            "B is answered from A's result"
+        );
+        assert_eq!(lookups.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_kept_answer_is_served_without_taking_the_lock() {
+        // The hot path (every tool call after the first) must not queue behind a lookup in flight.
+        let cache = std::sync::Arc::new(AccountCache::new());
+        cached_account_home(&cache, std::time::Instant::now, || {
+            AccountLookup::Found(PathBuf::from("/home/fake"))
+        });
+        let _lookup_in_flight = cache.failed_at.lock().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = cache.clone();
+        std::thread::spawn(move || {
+            let got =
+                cached_account_home(&reader, std::time::Instant::now, || AccountLookup::Failed);
+            let _ = tx.send(got);
+        });
+        let got = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("a kept answer must not wait for the lock");
         assert_eq!(got, Some(PathBuf::from("/home/fake")));
     }
 
