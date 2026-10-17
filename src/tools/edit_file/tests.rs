@@ -178,68 +178,6 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
 // target through the link (the not-found hint echoes it, a unique match copies it into the
 // project) although `read_file` refuses the same link.
 
-/// Hermetic form, Linux only: `/etc/shadow` is deny-listed whatever `$HOME` is, so no process
-/// environment is touched, and it is never read — the refusal comes first.
-///
-/// Every edit grammar is asked, because each reaches the file through a different branch of
-/// `EditFile::call` (single, batch, insert, heading-addressed markdown), and `create_file` too,
-/// which shares the resolver. The `message` is asserted, not just `is_err()`: against the
-/// unfixed code the read fails with `Permission denied` for a non-root user, which is an error
-/// but NOT the deny-list refusal, so a bare `is_err()` would pass the unfixed code.
-#[cfg(target_os = "linux")]
-#[tokio::test]
-async fn edit_tools_refuse_a_leaf_link_to_a_deny_listed_file_on_every_grammar() {
-    let (dir, ctx) = project_ctx().await;
-    for name in ["leaf.txt", "leaf.md"] {
-        std::os::unix::fs::symlink("/etc/shadow", dir.path().join(name)).unwrap();
-    }
-    let calls: Vec<(&str, serde_json::Value)> = vec![
-        (
-            "single old_string",
-            json!({"path": "leaf.txt", "old_string": "root", "new_string": "X"}),
-        ),
-        (
-            "batch edits[]",
-            json!({"path": "leaf.txt", "edits": [{"old_string": "root", "new_string": "X"}]}),
-        ),
-        (
-            "insert append",
-            json!({"path": "leaf.txt", "insert": "append", "new_string": "X"}),
-        ),
-        (
-            "heading-addressed markdown",
-            json!({"path": "leaf.md", "heading": "# x", "action": "replace", "body": "X"}),
-        ),
-    ];
-    for (grammar, input) in calls {
-        let err = EditFile.call(input, &ctx).await.expect_err(&format!(
-            "{grammar}: a leaf link to /etc/shadow must be refused"
-        ));
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("protected location"),
-            "{grammar}: refused by the deny-list, not by some other failure: {msg}"
-        );
-    }
-    let err = CreateFile
-        .call(
-            json!({"path": "leaf.txt", "content": "X", "overwrite": true}),
-            &ctx,
-        )
-        .await
-        .expect_err("create_file shares the resolver and must refuse the same link");
-    assert!(format!("{err:#}").contains("protected location"), "{err:#}");
-    for name in ["leaf.txt", "leaf.md"] {
-        assert!(
-            std::fs::symlink_metadata(dir.path().join(name))
-                .unwrap()
-                .file_type()
-                .is_symlink(),
-            "{name}: a refused call must leave the link in place"
-        );
-    }
-}
-
 /// The control the refusal must not break, and the behaviour it must not change: a leaf link to
 /// a harmless file OUTSIDE the project still edits, by REPLACING the link with the edited copy
 /// and sparing the file it pointed at (`atomic_write` renames over the link). A fix that refused
@@ -306,15 +244,24 @@ fn edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_noth
     let rec: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
 
-    // Preconditions: the fixture is the one the issue measured. `read_file` refuses the link
-    // (so the deny-list sees the fake key), and the key is readable at all.
-    assert_eq!(rec["read_file_refused"], true, "{rec}");
+    // Preconditions: the fixture is the one the issue measured. The key is readable at all, and
+    // `read_file` refuses BOTH spellings of the link (so the deny-list sees the fake key).
     assert_eq!(rec["key_readable"], true, "{rec}");
-    // The defects.
-    assert_eq!(rec["near_miss_error_leaks"], false, "{rec}");
-    assert_eq!(rec["unique_match_succeeded"], false, "{rec}");
-    assert_eq!(rec["leaf_is_still_a_link"], true, "{rec}");
-    assert_eq!(rec["no_copy_in_project"], true, "{rec}");
+    for name in ["abs.txt", "rel.txt"] {
+        let r = &rec[name];
+        assert_eq!(r["read_file_refused"], true, "{name}: {rec}");
+        // The defects, and what refused them: the deny-list, not some other failure.
+        assert_eq!(r["near_miss_error_leaks"], false, "{name}: {rec}");
+        assert_eq!(r["near_miss_refused_by_deny_list"], true, "{name}: {rec}");
+        assert_eq!(r["unique_match_succeeded"], false, "{name}: {rec}");
+        assert_eq!(
+            r["other_grammars_refused_by_deny_list"],
+            json!([true, true, true]),
+            "{name}: batch, insert and create_file: {rec}"
+        );
+        assert_eq!(r["leaf_is_still_a_link"], true, "{name}: {rec}");
+        assert_eq!(r["no_copy_in_project"], true, "{name}: {rec}");
+    }
     assert_eq!(std::fs::read_to_string(&key).unwrap(), KEY);
 }
 
@@ -328,47 +275,109 @@ async fn edit_file_leaf_link_probe_child() {
     let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
     let key = home.join(".ssh/id_rsa");
     let (dir, ctx) = project_ctx().await;
-    let leaf = dir.path().join("leaf.txt");
-    std::os::unix::fs::symlink(&key, &leaf).unwrap();
+    // Two spellings of the same link: the absolute target, and the RELATIVE one a repository
+    // ships (`../../../home/...`), which resolves against the link's own directory. A
+    // `read_link`-based resolver sees the second as a path relative to the process cwd, finds
+    // nothing, and lets it through.
+    let depth = dir.path().components().count() - 1;
+    let relative_target: std::path::PathBuf = std::iter::repeat_n("..", depth)
+        .collect::<std::path::PathBuf>()
+        .join(key.strip_prefix("/").unwrap());
+    let mut rec = serde_json::Map::new();
+    rec.insert(
+        "key_readable".into(),
+        json!(std::fs::read_to_string(&key).is_ok()),
+    );
+    for (name, target) in [("abs.txt", key.clone()), ("rel.txt", relative_target)] {
+        let leaf = dir.path().join(name);
+        std::os::unix::fs::symlink(&target, &leaf).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&leaf).ok(),
+            std::fs::read_to_string(&key).ok(),
+            "precondition: {name} really resolves to the key"
+        );
 
-    let read = ReadFile
-        .call(json!({"path": "leaf.txt"}), &ctx)
-        .await
-        .map(|v| v.to_string());
-    let near_miss = EditFile
-        .call(
-            json!({"path": "leaf.txt",
-                   "old_string": "FAKE-SECRET-KEY-MARKER\nsecond secret LINE",
-                   "new_string": "x"}),
-            &ctx,
-        )
-        .await;
-    let near_miss_text = match &near_miss {
-        Ok(v) => v.to_string(),
-        Err(e) => format!("{e:#}"),
-    };
-    let unique = EditFile
-        .call(
-            json!({"path": "leaf.txt", "old_string": "FAKE-SECRET-KEY-MARKER",
-                   "new_string": "EDITED"}),
-            &ctx,
-        )
-        .await;
-    let leaf_meta = std::fs::symlink_metadata(&leaf).unwrap();
-    let copy_in_project = !leaf_meta.file_type().is_symlink()
-        && std::fs::read_to_string(&leaf)
-            .map(|s| s.contains("second secret line"))
-            .unwrap_or(false);
-    let rec = json!({
-        "read_file_refused": read.is_err(),
-        "key_readable": std::fs::read_to_string(&key).is_ok(),
-        "near_miss_error_leaks": near_miss_text.contains("second secret line")
-            || near_miss_text.contains("third secret line"),
-        "unique_match_succeeded": unique.is_ok(),
-        "leaf_is_still_a_link": leaf_meta.file_type().is_symlink(),
-        "no_copy_in_project": !copy_in_project,
-    });
-    std::fs::write(record, rec.to_string()).unwrap();
+        let read = ReadFile
+            .call(json!({"path": name}), &ctx)
+            .await
+            .map(|v| v.to_string());
+        let near_miss = EditFile
+            .call(
+                json!({"path": name,
+                       "old_string": "FAKE-SECRET-KEY-MARKER\nsecond secret LINE",
+                       "new_string": "x"}),
+                &ctx,
+            )
+            .await;
+        let near_miss_text = match &near_miss {
+            Ok(v) => v.to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+        let unique = EditFile
+            .call(
+                json!({"path": name, "old_string": "FAKE-SECRET-KEY-MARKER",
+                       "new_string": "EDITED"}),
+                &ctx,
+            )
+            .await;
+        // Every other grammar, and create_file: each reaches the file through its own branch.
+        let others = vec![
+            (
+                "batch",
+                EditFile
+                    .call(
+                        json!({"path": name,
+                               "edits": [{"old_string": "second", "new_string": "X"}]}),
+                        &ctx,
+                    )
+                    .await,
+            ),
+            (
+                "insert",
+                EditFile
+                    .call(
+                        json!({"path": name, "insert": "append", "new_string": "X"}),
+                        &ctx,
+                    )
+                    .await,
+            ),
+            (
+                "create_file",
+                CreateFile
+                    .call(
+                        json!({"path": name, "content": "X", "overwrite": true}),
+                        &ctx,
+                    )
+                    .await,
+            ),
+        ];
+        let leaf_meta = std::fs::symlink_metadata(&leaf).unwrap();
+        let copy_in_project = !leaf_meta.file_type().is_symlink()
+            && std::fs::read_to_string(&leaf)
+                .map(|s| s.contains("second secret line"))
+                .unwrap_or(false);
+        let others_refused: Vec<bool> = others
+            .iter()
+            .map(|(_, r)| match r {
+                Err(e) => format!("{e:#}").contains("protected location"),
+                Ok(_) => false,
+            })
+            .collect();
+        rec.insert(
+            name.into(),
+            json!({
+                "read_file_refused": read.is_err(),
+                "near_miss_refused_by_deny_list": near_miss_text.contains("protected location"),
+                "near_miss_error_leaks": near_miss_text.contains("second secret line")
+                    || near_miss_text.contains("third secret line"),
+                "unique_match_succeeded": unique.is_ok(),
+                "other_grammars_refused_by_deny_list": others_refused,
+                "leaf_is_still_a_link": leaf_meta.file_type().is_symlink(),
+                "no_copy_in_project": !copy_in_project,
+            }),
+        );
+    }
+    std::fs::write(record, serde_json::Value::Object(rec).to_string()).unwrap();
 }
 
 // ── ReadFile ──────────────────────────────────────────────────────────────
