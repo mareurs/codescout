@@ -661,7 +661,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // Verified against `enforce_file_cap` in
         // `src/librarian/tools/audit_doc_refs/mod.rs`: exceeding this cap is a LOUD
         // `RecoverableError` refusal, not a silent truncation — the opposite of the
-        // false-zero failure mode `audit_doc_refs.basename_index` names below. The
+        // false-zero failure mode `audit_doc_refs.basename_index` named before its fix. The
         // existing `glob_explosion_returns_recoverable` test drives the cap past its
         // bound (`enforce_file_cap(5, 1)`) and asserts `msg.contains("cap") &&
         // msg.contains('5')` — NOT "glob matched" (that phrase is unasserted
@@ -676,13 +676,27 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // Was `NoMarker` until the 2026-10-17 fix of
+        // `docs/issues/2026-10-16-audit-doc-refs-basename-index-cap-reports-existing-files-missing.md`:
+        // an index that stopped at the cap resolved fewer refs and the un-indexed tail's
+        // refs came back `Missing`, a claim of absence about files that exist. The walk now
+        // reports whether it left a FILE out, and `try_basename_fallback` turns a bare-basename
+        // miss on such an index into `Unknown` (`basename_index_truncated`).
+        //
+        // The cap is driven past its bound through `call_with_index_cap` (the injectable seam;
+        // the env override `LIBRARIAN_AUDIT_MAX_INDEXED_FILES` is read only in `call`, so no
+        // `set_var`). The marker is `scan_meta.basename_index_truncated`, the flag beside the
+        // capped result; the cited test also asserts the refs are not `missing`.
+        //
+        // Mutation, 2026-10-17: (a) the `"basename_index_truncated"` key dropped from
+        // `build_response` -> the cited test red at its `scan_meta` assertion; (b) the
+        // truncated arm of `try_basename_fallback` disabled -> the cited test AND
+        // `resolver_basename_miss_on_truncated_index_is_unknown_not_missing` red. Both reverted.
         id: "audit_doc_refs.basename_index",
-        coverage: Coverage::NoMarker {
-            reason: "bounds build_basename_index's own scan; an index that stopped early \
-             resolves fewer refs rather than warning indexing was incomplete — \
-             a false zero on a truncated index reads as 'no such basename', not 'index \
-             incomplete', and no fixture currently drives it past the cap",
-            bug: "docs/issues/2026-10-16-audit-doc-refs-basename-index-cap-reports-existing-files-missing.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.scan_meta.basename_index_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "existing_file_beyond_index_cap_is_not_reported_missing",
         },
     },
     // -- src/librarian/tools/audit_log.rs --
