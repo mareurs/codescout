@@ -449,6 +449,29 @@ async fn handle_client_message(
 ) -> Result<()> {
     let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
 
+    // The server is SHARED, and a client's session ends with its connection
+    // (`handle_client_disconnect` closes its documents and starts the idle timer), so a
+    // client's `shutdown`/`exit` must never reach the server: forwarded, the first client
+    // to exit cleanly stopped the language server under every other one, the mux went
+    // with it despite its idle timeout, and the next client paid a cold start or saw
+    // `Mux connection lost`. The client is answered here, as the server would have.
+    // docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md
+    match method.as_deref() {
+        Some("shutdown") => {
+            if let Some(id) = msg.get("id").cloned() {
+                let reply = json!({"jsonrpc": "2.0", "id": id, "result": null});
+                let writer = state.lock().await.clients.get(tag).cloned();
+                if let Some(writer) = writer {
+                    let mut w = writer.lock().await;
+                    write_message(&mut *w, &reply).await?;
+                }
+            }
+            return Ok(());
+        }
+        Some("exit") => return Ok(()),
+        _ => {}
+    }
+
     // Tag the id only on REQUESTS (has both id and method) so responses can
     // route back to this client via untag_response_id. Client-to-server
     // RESPONSES (has id, no method) — e.g. auto-responses to server-initiated
@@ -1179,6 +1202,119 @@ mod tests {
             1,
             "identical re-registration must not grow the replay cache"
         );
+    }
+    /// Two in-memory pipes standing in for the server's stdin and one connected client's socket,
+    /// and a mux state holding that client as tag `a`.
+    struct ClientHarness {
+        server_writer: SharedWriter,
+        server_rx: tokio::io::DuplexStream,
+        state: Arc<Mutex<MuxState>>,
+        client_rx: tokio::io::DuplexStream,
+    }
+
+    fn client_harness() -> ClientHarness {
+        let (server_tx, server_rx) = tokio::io::duplex(64 * 1024);
+        let (client_tx, client_rx) = tokio::io::duplex(64 * 1024);
+        let server_writer: SharedWriter = Arc::new(Mutex::new(Box::new(server_tx)));
+        let client_writer: SharedWriter = Arc::new(Mutex::new(Box::new(client_tx)));
+        let mut st = MuxState::new(json!({}));
+        st.clients.insert("a".to_string(), client_writer);
+        ClientHarness {
+            server_writer,
+            server_rx,
+            state: Arc::new(Mutex::new(st)),
+            client_rx,
+        }
+    }
+
+    impl ClientHarness {
+        /// Everything the mux wrote to the server and to the client so far, as raw bytes.
+        /// Both writers are dropped first, so each pipe ends and the read returns.
+        async fn finish(self) -> (Vec<u8>, Vec<u8>) {
+            use tokio::io::AsyncReadExt;
+            let ClientHarness {
+                server_writer,
+                mut server_rx,
+                state,
+                mut client_rx,
+            } = self;
+            drop(server_writer);
+            state.lock().await.clients.clear();
+            let (mut to_server, mut to_client) = (Vec::new(), Vec::new());
+            server_rx.read_to_end(&mut to_server).await.unwrap();
+            client_rx.read_to_end(&mut to_client).await.unwrap();
+            (to_server, to_client)
+        }
+    }
+
+    /// The mux is shared: one client saying `shutdown` ends ITS session, not the server's. It
+    /// was forwarded verbatim, so every `mcp call` (and every codescout that exited cleanly)
+    /// stopped the language server under all the others — measured 2026-10-17, the kotlin-lsp
+    /// JVM and its mux were gone within 3 s of the first call's return, despite the 300 s idle
+    /// timeout, and the next call paid a cold start (or saw `Mux connection lost`). The client
+    /// is answered by the mux, as the server would have answered.
+    /// docs/issues/2026-10-17-symbols-name-lookup-on-kotlin-lsp-says-0-matches-for-a-symbol-that-exists.md
+    #[tokio::test]
+    async fn a_clients_shutdown_request_is_answered_by_the_mux_not_forwarded_to_the_server() {
+        let h = client_harness();
+        let mut msg = json!({"jsonrpc": "2.0", "id": 7, "method": "shutdown", "params": null});
+        handle_client_message("a", &mut msg, &h.server_writer, &h.state)
+            .await
+            .unwrap();
+        let (to_server, to_client) = h.finish().await;
+        assert!(
+            to_server.is_empty(),
+            "the shared server must not see a client's shutdown: {}",
+            String::from_utf8_lossy(&to_server)
+        );
+        let reply = read_message(&mut BufReader::new(&to_client[..]))
+            .await
+            .unwrap();
+        assert_eq!(
+            reply["id"], 7,
+            "answered under the client's own id: {reply}"
+        );
+        assert!(
+            reply["result"].is_null() && reply.get("error").is_none(),
+            "{reply}"
+        );
+    }
+
+    /// The `exit` that follows a `shutdown` is dropped for the same reason.
+    #[tokio::test]
+    async fn a_clients_exit_notification_is_not_forwarded_to_the_server() {
+        let h = client_harness();
+        let mut msg = json!({"jsonrpc": "2.0", "method": "exit"});
+        handle_client_message("a", &mut msg, &h.server_writer, &h.state)
+            .await
+            .unwrap();
+        let (to_server, _) = h.finish().await;
+        assert!(
+            to_server.is_empty(),
+            "the shared server must not see a client's exit: {}",
+            String::from_utf8_lossy(&to_server)
+        );
+    }
+
+    /// The guard on the two tests above: an ordinary request still reaches the server, its id
+    /// tagged with the client so the answer can be routed back.
+    #[tokio::test]
+    async fn an_ordinary_client_request_is_still_forwarded_with_a_tagged_id() {
+        let h = client_harness();
+        let mut msg = json!({
+            "jsonrpc": "2.0", "id": 3, "method": "textDocument/documentSymbol",
+            "params": {"textDocument": {"uri": "file:///x.kt"}}
+        });
+        handle_client_message("a", &mut msg, &h.server_writer, &h.state)
+            .await
+            .unwrap();
+        let (to_server, to_client) = h.finish().await;
+        let forwarded = read_message(&mut BufReader::new(&to_server[..]))
+            .await
+            .unwrap();
+        assert_eq!(forwarded["method"], "textDocument/documentSymbol");
+        assert_eq!(forwarded["id"], "a:3", "{forwarded}");
+        assert!(to_client.is_empty(), "nothing is answered locally");
     }
 
     // ---- memory watchdog (classify_memory / read_mem_available_kb) ----
