@@ -160,9 +160,65 @@ slot_evict_foreign_build_scripts() {
         done < <(find "$tree" -maxdepth 5 -path '*/build/*' -name 'build_script_build-*.d' 2>/dev/null)
 }
 
+# slot_evict_foreign_members <who> <tree> <checkout> <cargo-home>
+# Call it holding a lease. When <tree> was last leased for a different checkout than
+# <checkout> (or for none on record), removes the cargo fingerprint of every compiled unit
+# that is not a registry dependency, so cargo compiles the lessee's workspace crates again.
+# Then it records <checkout> as the lessee. Nothing happens when <checkout> is empty.
+#
+# WHY. Cargo hashes a workspace member by its path RELATIVE to the workspace root, so two
+# checkouts of one repository name the same unit `codescout-embed-<hash>` and share one
+# fingerprint, and it calls that fingerprint fresh when no source file in the CURRENT
+# checkout is newer than the dep-info the OTHER checkout's build wrote. A checkout whose
+# files are older than the slot's last build is therefore handed the other checkout's
+# compiled crate, whatever its source says. Measured with two toy workspaces in one target
+# dir: tree B added a function, its mtimes predated A's build, `cargo build --workspace`
+# printed `Finished` in 0.01s and compiled nothing. That is the mechanism offered for the
+# 2026-10-16 failure, a default build in slot-0 that reported `unresolved import
+# codescout_embed::ceiling` for a module the source declares; the incident itself was not
+# captured, so it is not proven to be that one. `slot_evict_foreign_build_scripts` closes
+# the same hole for build scripts only.
+#
+# HOW A MEMBER IS RECOGNISED. Cargo runs rustc from the workspace root, so the dep-info
+# `deps/<crate>-<hash>.d` of a workspace member lists its sources as relative paths, and that
+# of a registry or git dependency lists absolute ones under <cargo-home>. A unit whose first
+# source is under <cargo-home> is kept, because it is meant to be shared and recompiling C
+# would cost minutes. The fingerprint directory is `.fingerprint/<package>-<hash>` with the
+# same hash. Removing it is what makes cargo call the unit dirty, and a dirty unit dirties
+# everything that depends on it.
+#
+# THE OWNER FIELD. Cargo records no checkout, so the lessee is stamped in
+# `<tree>/.codescout-lessee`. Same checkout, same stamp, nothing evicted: an edit there bumps
+# an mtime, so cargo's own rule is sound inside one checkout. A tree with no stamp (every slot
+# that predates this) is treated as foreign once.
+slot_evict_foreign_members() {
+    local who="$1" tree="$2" checkout="$3" cargo_home="$4" stamp owner dep line src base hash fp
+    [ -n "$checkout" ] || return 0
+    stamp="$tree/.codescout-lessee"
+    owner="$(cat "$stamp" 2>/dev/null)"
+    if [ "$owner" != "$checkout" ]; then
+        while IFS= read -r dep; do
+            line="$(head -n1 "$dep" 2>/dev/null)" || continue
+            case "$line" in *".d: "*) ;; *) continue ;; esac
+            src="${line#*.d: }"; src="${src%% *}"
+            [ -n "$src" ] || continue
+            # An empty <cargo-home> would make the pattern `/*`, which matches every path.
+            if [ -n "$cargo_home" ]; then
+                case "$src" in "$cargo_home"/*) continue ;; esac
+            fi
+            base="${dep##*/}"; base="${base%.d}"; hash="${base##*-}"
+            while IFS= read -r fp; do
+                echo "$who: evicting ${fp}: $tree was last leased for ${owner:-no recorded checkout}, not for $checkout" >&2
+                rm -rf -- "$fp"
+            done < <(find "$tree" -maxdepth 4 -path '*/.fingerprint/*' -type d -name "*-$hash" 2>/dev/null)
+        done < <(find "$tree" -maxdepth 4 -path '*/deps/*' -name '*.d' 2>/dev/null)
+    fi
+    mkdir -p "$tree" 2>/dev/null && printf '%s\n' "$checkout" > "$stamp"
+}
+
 # lease_gate_target <who> [slot] — lease a cargo target dir from the pool gate.sh and
 # with-slot.sh share (the lowest free one, or exactly <slot>), tend it, evict build scripts
-# compiled for another checkout, and export CARGO_TARGET_DIR. Sets GATE_POOL.
+# and workspace crates compiled for another checkout, and export CARGO_TARGET_DIR. Sets GATE_POOL.
 lease_gate_target() {
     GATE_POOL="${CODESCOUT_GATE_POOL:-$HOME/.cache/codescout-gate}"
     slot_lease "$GATE_POOL" slot- "$1" "${2:-}" || return 2
@@ -171,6 +227,8 @@ lease_gate_target() {
     # The lessee is whichever checkout the command will build, which is the cwd's, not the
     # one this script lives in. Outside a git tree there is none, and nothing is evicted.
     slot_evict_foreign_build_scripts "$1" "$SLOT_DIR" \
+        "$(git rev-parse --show-toplevel 2>/dev/null)" "${CARGO_HOME:-$HOME/.cargo}"
+    slot_evict_foreign_members "$1" "$SLOT_DIR" \
         "$(git rev-parse --show-toplevel 2>/dev/null)" "${CARGO_HOME:-$HOME/.cargo}"
     export CARGO_TARGET_DIR="$SLOT_DIR"
 }

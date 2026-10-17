@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: a shared gate slot compiled codescout against a codescout-embed that lacks a module the source declares, after rebuilding codescout-embed'
 owners:
 - marius
@@ -10,9 +10,10 @@ tags:
 - build
 - shared-checkout
 opened: 2026-10-16
-closed:
+closed: 2026-10-17
 severity: medium
 topic: gate slot pool hygiene
+unverified: "'The 2026-10-16 incident was not captured; the fixed mechanism (cross-checkout mtime freshness of workspace crates in a shared slot) reproduces the symptom class but does not explain `Compiling codescout-embed` appearing before the error. Re-open if E0432 on a module the source declares recurs after this change.'"
 ---
 
 # BUG: a shared gate slot compiled codescout against a codescout-embed that lacks a module the source declares, after rebuilding codescout-embed
@@ -53,11 +54,13 @@ Linux, rustc 1.97.1 (toolchain `1.97.1-x86_64-unknown-linux-gnu`). Integration w
 
 ## Root cause
 
-Unknown, see Hypotheses tried.
+Verified 2026-10-17 as a mechanism that yields exactly this symptom, not proven to be the one the 2026-10-16 runs hit.
 
-Measured 2026-10-16, from the source: `crates/codescout-embed/src/lib.rs:3` reads `pub mod ceiling;` in the tree that failed, so the error cannot come from this source. The log shows `codescout-embed` was recompiled immediately before the error. So the compiled `codescout_embed` that `codescout` saw is not the one just produced from this tree, or it was produced from a different revision of the crate.
+Cargo hashes a workspace member by its path relative to the workspace root, so every checkout of the repository names the same unit `codescout-embed-<hash>` and shares one `.fingerprint/` entry and one `deps/*.d` in a pooled slot. It calls the fingerprint fresh when no source file in the CURRENT checkout is newer than the dep-info the OTHER checkout's build wrote. A checkout whose files are older than the slot's last build is handed the other checkout's compiled crate, whatever its source says.
 
-Measured the same day, the same tree built clean in `slot-2` (`cargo build --workspace --tests`, exit 0), in `slot-1` (`gate5.log`, `DEFAULT=0`) and in `slot-2` earlier (`gate3.log`, `DEFAULT=0`). The failing runs were the only two in `slot-0`.
+Measured with two toy workspaces sharing one `CARGO_TARGET_DIR` (tree B adds a function, its mtimes predate A's build): `cargo build --workspace` in B printed `Finished` in 0.01s and compiled nothing. `tests/gate-slot.sh` case P reproduces it with real cargo through `with-slot.sh`: B prints A's marker before the fix, its own after. The `deps/<crate>-<hash>.d` of a member lists relative sources and names no checkout, so nothing in the slot recorded an owner. This is the archived sibling's mtime mechanism, applied to ordinary workspace crates instead of build scripts.
+
+NOT explained: the log shows `Compiling codescout-embed` immediately before the error. The toy shows a unit skipped, not a unit recompiled and then stale, so the incident may involve a second path (hypothesis 3, an unleased writer into the slot) that this does not close.
 
 ## Evidence
 
@@ -73,11 +76,15 @@ Measured the same day, the same tree built clean in `slot-2` (`cargo build --wor
 
 ## Fix
 
-Not attempted. This record only files the failure. A first step for whoever takes it: on the next occurrence, before cleaning, list `slot-N/debug/deps/libcodescout_embed-*` with sizes and mtimes and the `.d` file of the one rustc was passed as `--extern`, then compare against the tree being built.
+`scripts/slot-pool.sh`: new `slot_evict_foreign_members`, called from `lease_gate_target` after the build-script eviction, so `gate.sh` and `with-slot.sh` both get it. The lease stamps `<slot>/.codescout-lessee` with the git toplevel. When the stamp differs from the lessee's checkout (or is absent, once per pre-existing slot), it removes the `.fingerprint/<pkg>-<hash>` directory of every unit whose `deps/*.d` lists a source that is not under `$CARGO_HOME`, so cargo compiles the lessee's workspace crates again. Registry dependencies are kept. The same checkout leasing again evicts nothing, so a warm slot stays warm. Outside a git tree nothing is evicted or stamped; a preset `CARGO_TARGET_DIR` is untouched.
+
+Cost: alternating checkouts in one slot recompiles the workspace crates (not registry dependencies) on each switch, which is the price of not trusting an mtime across checkouts.
+
+Not done: a capture of the slot's `debug/deps/libcodescout_embed-*` state on failure, which the original Fix note asked for. If the error recurs after this change, that capture is the next step, because it would point at an unleased writer.
 
 ## Tests added
 
-N/A, nothing fixed.
+`tests/gate-slot.sh` case O (fixtures: eviction, keep registry, same-checkout no-op, restamp, `--target <triple>`, with-slot.sh, no git tree, `CARGO_HOME`, preset target dir) and case P (real cargo, two checkouts, one slot). Against the unmodified `slot-pool.sh`, 11 of the new assertions fail (96 passed, 11 failed); with the change, 107 passed, 0 failed.
 
 ## Workarounds
 

@@ -425,6 +425,85 @@ else
     eq "and not A's" "$(grep -c 'marker-A' "$WORK/out-m2")" "0"
 fi
 
+echo "O. a lease evicts the workspace crates another checkout compiled, and nothing else"
+# Cargo hashes a workspace member by its path relative to the workspace root, so every
+# checkout of a repository shares one fingerprint per unit, and it trusts that fingerprint
+# when the lessee's files are no newer than the other checkout's dep-info. The owner field
+# a slot lacks is the `.codescout-lessee` stamp the lease writes.
+unit_o() { # unit_o <slot dir> <crate> <hash> <first source>
+    local d="$1/debug"; mkdir -p "$d/deps" "$d/.fingerprint/$2-$3"
+    echo "$d/deps/${2//-/_}-$3.d: $4" > "$d/deps/${2//-/_}-$3.d"
+    : > "$d/.fingerprint/$2-$3/lib-$2"
+}
+fixture_o() { # fixture_o <slot dir>
+    unit_o "$1" codescout-embed aaaa111122223333 crates/codescout-embed/src/lib.rs
+    unit_o "$1" codescout bbbb111122223333 src/lib.rs
+    unit_o "$1" serde cccc111122223333 "$WORK/home/.cargo/registry/src/idx/serde-1.0.0/src/lib.rs"
+    # A foreign member under a --target <triple> layout: same rule, one level deeper.
+    unit_o "$1/x86_64-unknown-linux-gnu" codescout-embed dddd111122223333 crates/codescout-embed/src/lib.rs
+}
+fp_o() { state "$POOL/slot-0/debug/.fingerprint/$1"; }
+POOL="$WORK/pool-o1"; fixture_o "$POOL/slot-0"
+run_gate o1 sid-o1
+eq "a tree with no recorded lessee has its workspace crates evicted" "$(fp_o codescout-embed-aaaa111122223333)" "gone"
+eq "the root crate too" "$(fp_o codescout-bbbb111122223333)" "gone"
+eq "a registry dependency is kept" "$(fp_o serde-cccc111122223333)" "kept"
+eq "its dep-info is kept" "$(state "$POOL/slot-0/debug/deps/codescout_embed-aaaa111122223333.d")" "kept"
+eq "a member under a --target <triple> layout is evicted" \
+    "$(state "$POOL/slot-0/x86_64-unknown-linux-gnu/debug/.fingerprint/codescout-embed-dddd111122223333")" "gone"
+eq "the lessee is recorded" "$(cat "$POOL/slot-0/.codescout-lessee" 2>/dev/null)" "$REPO"
+eq "the eviction names the checkout it was for" "$(grep -c 'evicting .*codescout-embed-aaaa111122223333.*not for '"$REPO" "$WORK/out-o1")" "1"
+# Same checkout again: its own edits bump its own mtimes, so cargo's rule is sound there and
+# a rebuild on every lease would throw the warm slot away.
+fixture_o "$POOL/slot-0"
+run_gate o2 sid-o2
+eq "the same checkout leasing again evicts nothing" "$(fp_o codescout-embed-aaaa111122223333)" "kept"
+eq "and says nothing" "$(grep -c 'evicting' "$WORK/out-o2")" "0"
+echo "/elsewhere/checkout" > "$POOL/slot-0/.codescout-lessee"
+run_gate o3 sid-o3
+eq "a tree stamped for another checkout is evicted" "$(fp_o codescout-embed-aaaa111122223333)" "gone"
+eq "and re-stamped for this one" "$(cat "$POOL/slot-0/.codescout-lessee" 2>/dev/null)" "$REPO"
+
+POOL="$WORK/pool-o4"; fixture_o "$POOL/slot-0"
+run_with o4 bash "$WITH" true
+eq "with-slot.sh evicts on its lease too" "$(fp_o codescout-embed-aaaa111122223333)" "gone"
+POOL="$WORK/pool-o5"; fixture_o "$POOL/slot-0"
+WITH_CWD="$WORK/nogit" run_with o5 bash "$WITH" true
+eq "outside a git tree there is no lessee, so nothing is evicted" "$(fp_o codescout-embed-aaaa111122223333)" "kept"
+eq "and none is recorded" "$([ -e "$POOL/slot-0/.codescout-lessee" ] && echo stamped || echo none)" "none"
+POOL="$WORK/pool-o6"; fixture_o "$POOL/slot-0"
+run_gate o6 sid-o6 CARGO_HOME="$WORK/cargohome"
+eq "a path under the default ~/.cargo is no longer exempt once CARGO_HOME names another" "$(fp_o serde-cccc111122223333)" "gone"
+POOL="$WORK/pool-o7"; fixture_o "$WORK/preset-o"
+run_gate o7 sid-o7 CARGO_TARGET_DIR="$WORK/preset-o"
+eq "a preset CARGO_TARGET_DIR is not ours to tend" \
+    "$(state "$WORK/preset-o/debug/.fingerprint/codescout-embed-aaaa111122223333")" "kept"
+
+echo "P. with real cargo, the second checkout builds its own crate, not the first one's"
+# The half only cargo can answer. Tree B differs from A in one workspace member and its files
+# are OLDER than A's build, which is a checkout whose sources have not changed in a while.
+# Without the eviction cargo prints `Finished` and runs A's compiled member.
+if [ -z "$REAL_CARGO" ]; then
+    echo "  SKIP  no cargo on PATH"
+else
+    ws() { # ws <dir> <marker>
+        mkdir -p "$1/emb/src" "$1/src"
+        printf '[package]\nname = "probe"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nemb = { path = "emb" }\n\n[workspace]\nmembers = ["emb"]\n' > "$1/Cargo.toml"
+        printf '[package]\nname = "emb"\nversion = "0.0.0"\nedition = "2021"\n' > "$1/emb/Cargo.toml"
+        printf 'pub fn mark() -> &'"'"'static str { "%s" }\n' "$2" > "$1/emb/src/lib.rs"
+        printf 'fn main() { println!("{}", emb::mark()); }\n' > "$1/src/main.rs"
+        git init -q "$1"
+    }
+    ws "$WORK/ws-a" member-A; ws "$WORK/ws-b" member-B
+    touch -d 2020-01-01 "$WORK/ws-b/emb/src/lib.rs" "$WORK/ws-b/src/main.rs" "$WORK/ws-b/emb/Cargo.toml" "$WORK/ws-b/Cargo.toml"
+    POOL="$WORK/pool-p"
+    real "$WORK/ws-a" p1
+    eq "control: tree A prints its own member" "$(grep -c '^member-A$' "$WORK/out-p1")" "1"
+    real "$WORK/ws-b" p2
+    eq "tree B, leasing A's slot, prints its own member" "$(grep -c '^member-B$' "$WORK/out-p2")" "1"
+    eq "and not A's" "$(grep -c 'member-A' "$WORK/out-p2")" "0"
+fi
+
 echo
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
