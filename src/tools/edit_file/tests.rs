@@ -1380,11 +1380,19 @@ async fn create_file_overwrite_on_a_leaf_symlink_replaces_the_link_and_spares_th
             &ctx,
         )
         .await
-        .ok();
+        .expect("a dangling in-project leaf link is an allowed target; the call must succeed");
     assert!(
         never.symlink_metadata().is_err(),
         "create_file created {never:?} through a dangling leaf symlink"
     );
+    assert!(
+        std::fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_file(),
+        "the dangling link must be replaced by a regular file"
+    );
+    assert_eq!(std::fs::read_to_string(&dangling).unwrap(), "x");
 }
 
 #[tokio::test]

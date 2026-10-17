@@ -63,25 +63,25 @@ const STAGING_ATTEMPTS: u32 = 16;
 // cap-class: NOT_A_CAP — bounds only how much of the target's file name is echoed into the throwaway staging name; the staged content and the final file name are untouched, and uniqueness comes from the nonce
 const STAGING_STEM_MAX_BYTES: usize = 100;
 
-/// A staging path for `path`: `<file name>.<nonce>.tmp` in the target's own directory.
+/// A staging path for `path`: `<file name prefix>.<nonce>.tmp` in the target's own directory.
 /// `None` when `path` has no final component (a bare root, or one ending in `..`).
 ///
-/// Two properties are load-bearing, each from a measured defect:
+/// **Collision-freedom and safety come from the nonce plus the exclusive create in
+/// [`create_staging_file`], not from the file-name prefix.** The prefix (the target's file name,
+/// cut to `STAGING_STEM_MAX_BYTES` bytes) is kept so a leftover staging file names its target,
+/// and because it was once the guarantee: `Path::with_extension("tmp")` derived the name from
+/// the stem alone, so two concurrent writers to `Cargo.toml` and `Cargo.lock` renamed *each
+/// other's* content onto their own targets (`7` same-stem groups were tracked in this repo on
+/// 2026-08-31, `source.md`/`source.rs` among them;
+/// `docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`).
+/// With a random nonce two writers cannot share a staging name whatever their file names are.
 ///
-/// * **Derived from the whole filename, not the stem.** `Path::with_extension("tmp")` — what
-///   this used to be — discarded the one component that tells `Cargo.toml` from
-///   `Cargo.lock`, so two concurrent writers to same-stem files renamed *each other's*
-///   content onto their own targets. `7` same-stem groups were tracked in this repo on
-///   2026-08-31 (`source.md`/`source.rs` among them).
-///   `docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md`.
-/// * **Carries a nonce the caller supplies, and `atomic_write` makes it unpredictable.** A
-///   fixed `<name>.tmp` was a name anyone could plant in advance — a repository can ship it
-///   as a symlink — and `fs::write` followed it. The nonce keeps the name unguessable;
-///   exclusive creation in [`create_staging_file`] is what makes a guessed or colliding name
-///   harmless.
+/// A fixed name was also a name anyone could plant in advance — a repository can ship
+/// `<name>.tmp` as a symlink — and `fs::write` followed it. The nonce keeps the name
+/// unguessable; the exclusive create makes a guessed or colliding one harmless.
 ///
-/// The nonce is a parameter so a test can hold it constant and observe the filename half on
-/// its own: with a random nonce every pair of names is distinct and that test could not fail.
+/// The nonce is a parameter so a test can hold it constant and observe the prefix on its own:
+/// with a random nonce every pair of names is distinct and that test could not fail.
 ///
 /// The staging file stays a sibling of the target: the rename that finishes `atomic_write`
 /// fails across filesystems, and sibling placement is what makes it atomic.
@@ -105,14 +105,28 @@ fn fresh_staging_nonce() -> String {
 /// Create the staging file for `atomic_write`, **exclusively**: `create_new` is
 /// `O_CREAT | O_EXCL` (`CREATE_NEW` on Windows), which fails if ANYTHING already exists at the
 /// name — a regular file, a directory, a symlink, even a dangling one — and never follows a
-/// link at the final component. So the file returned is one this call created, and nothing
-/// planted in advance can redirect the write or be overwritten by it.
+/// link **at the final component**. So the file returned is one this call created, and an
+/// entry planted at that name in advance can neither redirect the write nor be overwritten
+/// by it.
+///
+/// **This says nothing about the directory part of the path.** A symlinked PARENT component
+/// redirects both this create and the closing rename (measured), exactly as it redirects any
+/// path-based write. For the write tools that is the write classifier's job
+/// (`util::path_security`, which resolves the parent); a caller that bypasses it — for example
+/// `MemoryStore::ensure_gitignored` (`memory/mod.rs`) writing `.gitignore` — gets no parent
+/// protection from this function.
+///
+/// `private` creates the file `0600` (Unix; the umask can only narrow that) instead of the
+/// default `0666 & !umask`. `atomic_write` uses it when the target already exists, so that a
+/// private target's new content is not readable by other users while it is being written; the
+/// target's own mode is applied afterwards.
 ///
 /// On `AlreadyExists` the next name is tried, up to [`STAGING_ATTEMPTS`]; the colliding entry
 /// is left exactly as found (it is not ours to remove). Any other error is returned at once.
 fn create_staging_file(
     path: &Path,
     next_name: &mut dyn FnMut() -> Option<PathBuf>,
+    private: bool,
 ) -> std::io::Result<(std::fs::File, PathBuf)> {
     for _ in 0..STAGING_ATTEMPTS {
         let Some(tmp) = next_name() else {
@@ -121,11 +135,15 @@ fn create_staging_file(
                 format!("{} has no file name to write to", path.display()),
             ));
         };
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-        {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if private {
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        }
+        #[cfg(not(unix))]
+        let _ = private;
+        match options.open(&tmp) {
             Ok(file) => return Ok((file, tmp)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
@@ -145,7 +163,7 @@ fn create_staging_file(
 /// so a crash or disk-full condition mid-write can't leave the target in a corrupt state.
 /// The target file must have a parent directory (true for all real paths).
 ///
-/// **The staging file is created exclusively and never follows a link.** See
+/// **The staging file is created exclusively and never follows a link at its own name.** See
 /// [`create_staging_file`]. Before this, staging was `fs::write(<name>.tmp)`, so a symlink
 /// planted at `<name>.tmp` — shipped in a cloned repository, say — redirected the write to
 /// whatever it pointed at and the rename then moved the link onto the target. An existing
@@ -158,9 +176,19 @@ fn create_staging_file(
 /// the new regular file takes the pointed-at file's permission bits; for a dangling link
 /// there is nothing to read and the default applies.)
 ///
+/// **Leftovers.** A process killed between the create and the rename leaves a uniquely named
+/// `<name prefix>.<32 hex>.tmp` beside the target, and nothing reclaims it. A stale legacy
+/// `<name>.tmp` from before this change is never touched either (a fixed name is no longer
+/// used, so it is neither reused nor removed). `.tmp` is not in this repository's `.gitignore`,
+/// so a leftover shows in `git status`; it is not embedded (`retrieval/sync.rs`) and not
+/// catalogued (`librarian/indexer.rs` takes `.md` only). A reaper is possible and not built.
+///
 /// Preserves the target file's Unix permissions (e.g. exec bit) across the
 /// rename. Without this, editing a `*.sh` script would silently strip +x
-/// because the freshly-created staging file has default 0644 perms.
+/// because the freshly-created staging file has default 0644 perms. For an existing target the
+/// staging file is created `0600` and given the target's mode after the write, so the new
+/// content of a private file is not readable by other users during the write; a new file keeps
+/// the `0666 & !umask` default.
 ///
 /// Not fsynced, as before: atomic against a concurrent reader and a failed write, not
 /// durable across power loss. Two writers to the *same* target still race (last rename wins).
@@ -180,14 +208,27 @@ pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
 /// what refuses it — with random names a planted `x.txt.tmp` is simply never opened and a
 /// test of it passes against any implementation. The write lets a test fail it after the
 /// create succeeded (ENOSPC), which the old test did by planting `<name>.tmp -> /dev/full`:
-/// that planting IS the vulnerability, so it can no longer be the way in.
+/// that planting IS the vulnerability, so it can no longer be the way in. It also runs after
+/// the create and before the final mode is set, which is where the private-target window can
+/// be observed.
 fn atomic_write_with(
     path: &Path,
     content: &str,
     next_name: &mut dyn FnMut() -> Option<PathBuf>,
     write: &mut dyn FnMut(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    let (mut file, tmp) = create_staging_file(path, next_name)?;
+    // The mode to preserve, if the target already exists (`metadata` follows a symlink target,
+    // so a replaced link takes the mode of what it pointed at). Read BEFORE the create, because
+    // an existing target is also what makes the staging file private until it is applied.
+    #[cfg(unix)]
+    let existing_mode = std::fs::metadata(path).ok().map(|m| {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode()
+    });
+    #[cfg(not(unix))]
+    let existing_mode: Option<u32> = None;
+
+    let (mut file, tmp) = create_staging_file(path, next_name, existing_mode.is_some())?;
 
     // From here `tmp` is a file THIS call created, so removing it is always ours to do.
     // Cleanup is needed on BOTH failure points, not just the rename below: under ENOSPC
@@ -199,12 +240,11 @@ fn atomic_write_with(
         return Err(e);
     }
 
-    // Preserve original mode if the target already exists. Through the open handle
-    // (`fchmod`), not the path: no window in which the path could be swapped.
+    // Preserve the original mode. Through the open handle (`fchmod`), not the path: no window
+    // in which the path could be swapped.
     #[cfg(unix)]
-    if let Ok(meta) = std::fs::metadata(path) {
+    if let Some(mode) = existing_mode {
         use std::os::unix::fs::PermissionsExt;
-        let mode = meta.permissions().mode();
         let _ = file.set_permissions(std::fs::Permissions::from_mode(mode));
     }
 
@@ -620,7 +660,13 @@ mod tests {
         assert_eq!(owned, "a/b");
     }
 
-    /// The staging path must be unique per TARGET FILENAME, not per stem.
+    /// The staging path's file-name prefix must differ per TARGET FILENAME, not per stem — held
+    /// at a CONSTANT nonce so only the prefix is under test.
+    ///
+    /// Since the nonce, the prefix is no longer what makes two writers' staging files distinct
+    /// (a random nonce does, and the exclusive create backstops it); this pins the remaining
+    /// property that a leftover staging file names its own target, and that nobody re-derives
+    /// the name from the stem. The history below is why that derivation is distrusted.
     ///
     /// `Path::with_extension("tmp")` — what this derivation used to be — builds the staging
     /// path from the directory and stem alone, discarding the one component that tells
@@ -852,6 +898,144 @@ mod tests {
             .unwrap()
             .file_type()
             .is_file());
+    }
+
+    /// What `File::create` gives in this environment (`0666 & !umask`): the mode a new file
+    /// gets today. Also the precondition for the window test below — under a umask that
+    /// already hides group/other bits there is nothing to observe, and a test that cannot
+    /// fail must say so rather than pass.
+    #[cfg(unix)]
+    fn default_new_file_mode(dir: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        let control = dir.join("umask-control");
+        std::fs::File::create(&control).unwrap();
+        let mode = std::fs::metadata(&control).unwrap().permissions().mode() & 0o7777;
+        std::fs::remove_file(&control).unwrap();
+        mode
+    }
+
+    /// While the content is being written the staging file holds the NEW content of a target
+    /// that may be private. It was created `0666 & !umask` (0644), so another local user could
+    /// read a `0600` target's new bytes for the length of the write. For an EXISTING target the
+    /// staging file is now created `0600` and given the target's mode only after the write.
+    ///
+    /// Observed from inside the write step, which runs after the create and before the final
+    /// mode is set, so this is the window itself rather than a before/after comparison.
+    #[cfg(unix)]
+    #[test]
+    fn the_staging_file_of_a_private_target_is_private_while_it_is_written() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        assert_ne!(
+            default_new_file_mode(dir.path()) & 0o077,
+            0,
+            "this environment's umask already hides group/other bits, so the window cannot be \
+             observed — run the test under `umask 022`; that is a harness limit, not a pass"
+        );
+        let target = dir.path().join("secret.txt");
+        std::fs::write(&target, "old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let mut seen_during_write = None;
+        atomic_write_with(
+            &target,
+            "new secret",
+            &mut || staging_path(&target, &fresh_staging_nonce()),
+            &mut |f, bytes| {
+                seen_during_write = Some(f.metadata()?.permissions().mode() & 0o777);
+                std::io::Write::write_all(f, bytes)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            seen_during_write.expect("the write step must run") & 0o077,
+            0,
+            "the staging file was readable by group/other while it held the new content"
+        );
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777,
+            0o600
+        );
+    }
+
+    /// The hardening above must not move the FINAL mode in any case. Each row is the mode
+    /// `atomic_write` gave before it: an existing target keeps its own (setuid included), a new
+    /// file gets the umask default, and a symlink target gets the mode of what it points at
+    /// (`metadata` follows the link; `symlink_metadata` would give 0777) while a dangling one
+    /// gets the default.
+    #[cfg(unix)]
+    #[test]
+    fn the_final_mode_is_unchanged_for_every_kind_of_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let default = default_new_file_mode(dir.path());
+        let mode_of = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let chmod = |p: &Path, m: u32| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+        };
+
+        for existing in [0o600, 0o640, 0o755, 0o4755] {
+            let t = dir.path().join(format!("existing-{existing:o}"));
+            std::fs::write(&t, "old").unwrap();
+            chmod(&t, existing);
+            atomic_write(&t, "new").unwrap();
+            assert_eq!(mode_of(&t), existing, "existing target {existing:o}");
+            assert_eq!(std::fs::read_to_string(&t).unwrap(), "new");
+        }
+
+        let fresh = dir.path().join("fresh");
+        atomic_write(&fresh, "new").unwrap();
+        assert_eq!(
+            mode_of(&fresh),
+            default,
+            "a new file keeps the umask default"
+        );
+
+        let pointed_at = dir.path().join("pointed-at");
+        std::fs::write(&pointed_at, "old").unwrap();
+        chmod(&pointed_at, 0o640);
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&pointed_at, &link).unwrap();
+        atomic_write(&link, "new").unwrap();
+        assert_eq!(
+            mode_of(&link),
+            0o640,
+            "a replaced symlink takes the mode of what it pointed at, never the link's 0777"
+        );
+        assert_eq!(std::fs::read_to_string(&pointed_at).unwrap(), "old");
+
+        let dangling = dir.path().join("dangling");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &dangling).unwrap();
+        atomic_write(&dangling, "new").unwrap();
+        assert_eq!(mode_of(&dangling), default);
+    }
+
+    /// The real staging names must stay on the target's filesystem, or the closing `rename`
+    /// fails with EXDEV. Seam-free: a target on one device and `std::env::temp_dir()` on
+    /// another means a staging file placed in the temp dir makes the write fail. Linux only
+    /// (`/dev/shm`, `/var/tmp`); the precondition is asserted, not skipped, because a skipped
+    /// check reads as coverage.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_real_staging_file_is_created_on_the_targets_filesystem() {
+        use std::os::unix::fs::MetadataExt;
+        let temp_dev = std::fs::metadata(std::env::temp_dir()).unwrap().dev();
+        let other = ["/dev/shm", "/var/tmp"].iter().find_map(|c| {
+            let d = tempfile::tempdir_in(c).ok()?;
+            (std::fs::metadata(d.path()).ok()?.dev() != temp_dev).then_some(d)
+        });
+        let other = other.expect(
+            "no writable directory on a different device than std::env::temp_dir() \
+             (/dev/shm, /var/tmp): this test cannot tell a sibling staging file from one \
+             in the temp dir — that is a harness limit, not a pass",
+        );
+        let target = other.path().join("x.txt");
+
+        atomic_write(&target, "WRITTEN").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "WRITTEN");
+        assert_eq!(entry_names_any(other.path()), vec!["x.txt".to_string()]);
     }
 
     /// The test the three above cannot be: with random staging names a planted `x.txt.tmp` is
