@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-ca
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Parent-directory forms reproduced and fixed through round 3; the write door judges against the caller managed roots. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). Two round-3 mutants survive by redundancy (the LIKE escape behind the starts_with filter; the write-through re-arm behind the preflight arm in the same call). Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue.'
+unverified: 'Parent-directory forms reproduced and fixed through round 4; the write door judges against the deeper of the managed base and the spelled repository. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). A path with no managed root, no .git above it and no ancestor resolving to a managed root gets only the leaf rule. Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue; the remaining LIKE call sites are listed in the doctor-prune issue.'
 ---
 
 # BUG: `doc(update)` writes with `std::fs::write(row.abs_path)`, so a catalogued in-root symlink to a file outside the root has that file rewritten
@@ -198,6 +198,8 @@ failed before the fix, e.g. `removed=…`, `updated: true` through a link, a ref
   `Catalog::write_roots`, which the tool arms under the catalog lock (`arm_write_roots`). Order: the first managed root that
   contains the spelling (strict check), else a managed root whose RESOLUTION contains the path (a project registered under its
   canonical path while rows keep the spelled one), else the spelled repository. A project without a `.git` is therefore confined.
+  **Superseded in round 4, see below: this order was wrong in three ways (an umbrella root hid a link between its repositories, the
+  resolution shortcut could only admit, and a canonically registered project reached through a link was not checked at all).**
   `doc(move)`'s id repair takes the same roots, so it no longer fails after its rename in such a project.
 - **M1, a refusal after the upsert:** preflight and door now share the root, so the refusal comes before the catalog moves; if one
   still follows the upsert (a link planted in between) its text says "the augmentation WAS updated in the catalog, but its committed
@@ -223,8 +225,10 @@ failed before the fix, e.g. `removed=…`, `updated: true` through a link, a ref
   still act on the link itself.
 - **LOW 7:** both fake-HOME children refuse to run unless `HOME` is the throwaway directory the parent test created.
 
-**Decisions of round 2 that changed:** (1) the write door's root is the managed root, not the spelled `.git` ancestor, so the
-round-2 limit "a repository root reached through a link is not covered" is gone, and projects without `.git` are covered;
+**Decisions of round 2 that changed:** (1) the write door's root is the managed root, not the spelled `.git` ancestor. **(Round 3 claimed here
+that the round-2 limit "a repository root reached through a link is not covered" was gone. That was false for a project
+registered under its canonical path and reached through a link, which the door did not check at all; round 4 H-1 fixes it, and
+the statement is withdrawn.)** Projects without `.git` are covered;
 (2) reclamation judged against the walk root and exempted leaf links: now git root and parent chain; (3) reclamation deleted every
 escaping row: it now keeps and reports the ones with history; (4) "a relative outward leaf link moves fine": it does not, now
 refused. Unchanged: refuse any leaf link; no exception for an outward FILE link.
@@ -238,6 +242,65 @@ history; the walk keeping an escaping row; judging the leaf instead of the paren
 confinement; the refusal worded as a parse failure. **Survived, by redundancy:** the LIKE escape (the `starts_with` filter
 protects the same rows; the escape is a cost and defence-in-depth measure) and `doc(augment)`'s second arm inside
 `sidecar_write_through` (the roots persist on the catalog from the preflight arm of the same call).
+**Round 4 correction of that last line:** the second arm was not "redundant", it was MASKED by the defect that the roots
+persisted past the call that armed them (L-1 below). With arming scoped to the call by a guard, the second arm is load-bearing
+and its removal is killed by a test.
+
+## Round 4 (Opus review of `7a7bfc9b`): the door's two wrong answers, an exact path compare, and arming scoped to the call
+
+Commits `a6a293c0` (patch-id `a6a293c00d255ecfab8880b41a1914116edc6722`) and `c8108ca0` (`c8108ca095d314a52fbbae03c944ce6b6cf32413`, a test fix
+found by the mutation probe). Every behavioural item was reproduced red first (`link_dir_tests.rs`, `doctor.rs`; 11 tests red before the
+fix). The others are pins that were green from the start, said plainly: the P1 control, P4 (round 3 already fixed it), the absolute-link move
+(P7), the events-only-history keep (M-A), the vanished-row-below-an-escaping-parent case, and the tool-level reindex response test (M-B,
+the keys existed; nothing pinned them).
+
+- **H-1 and M-1, the write door (measured by the reviewer's probes P1-P3, reproduced here):** two inputs were answered wrongly.
+  *P3:* a project registered under its canonical path (`data/proj`), rows spelled through a link (`home/proj/...`), no `.git` above the
+  link, and a link INSIDE the project to an outside directory: no managed root contains the spelling, the resolution shortcut could
+  only admit, and the spelled walk skips both links and finds no `.git`, so nothing was checked and the write landed outside every
+  managed root. *P1/P2:* with a legacy umbrella root (or an unrelated active project listed first) the first containing managed root
+  was the umbrella, and a link from repository A into repository B stayed "inside" it; the shortcut also admitted a FOREIGN
+  repository's row that resolves into the managed project. `refuse_catalogued_path_outside_repo` now judges against the DEEPER of (a) the
+  *base* (the first managed root that lexically contains the spelling, else the deepest ancestor of the spelling that resolves to a
+  managed root exactly) and (b) the *spelled repository* (nearest non-link ancestor with a `.git`), and the "resolution lies under some
+  managed root, so accept" shortcut is gone. Controls: a link that stays inside its own repository, and the owning project active, still
+  work. Not covered: a path with neither candidate (no managed root contains it, no `.git` above it, no ancestor resolves to a managed
+  root); only the leaf rule applies there, as before.
+- **H-2, a second LIKE site (own issue: `docs/issues/2026-10-18-doctor-prune-missing-matches-rows-with-like-and-deletes-the-rows-of-live-sibling-repositories.md`):**
+  `prune_dead_root` and `count_dead_root` deleted and counted with unescaped, case-insensitive `LIKE`. Now exact. The same class
+  remains at call sites this round did not touch (listed in that issue's caveat).
+- **M-2 and L-5, one exact predicate for every prefix match here:** `util::path_at_or_under_sql` is `(col = ?root OR substr(col, 1, length(?prefix)) = ?prefix)`,
+  byte-exact. The indexer's reclaim candidates and its vectorless count use it, and the Rust-side `starts_with` re-filter round 3 added
+  is gone (it handled case only for the reclaim, was wrong on Windows spellings, and masked the SQL being wrong). The vectorless count
+  matched a case-only sibling (red: `Some(1)` against `Some(0)`). A Linux unit test runs the helper on Windows-shaped strings.
+- **L-1, arming outlived the call:** `Catalog::write_roots` was set by a tool and never cleared, so a catalog-level writer reached without
+  arming inherited the previous call's roots, against the field's own doc. `arm_write_roots` now returns a guard (`#[must_use]`) that
+  clears on drop; each tool binds it for the call. **This corrects round 3's survivor note:** the second arm in `sidecar_write_through`
+  was not redundant, it was masked by this defect; removing it is now killed. (The first test of this item also went vacuous once H-1
+  was fixed, and a mutant that never cleared survived; its fixture was rebuilt on an input whose verdict differs between armed and unarmed.)
+- **L-3:** the reindex `escaping_note` names `doc(action="graft")` and says that removing the link deletes a kept row with its history
+  unless that history is first folded into the row of the file's real location. A vanished row below an escaping parent is pinned as an ordinary
+  vanished row (`removed`, not `reclaimed_escaping`).
+- **L-4, a move that did not need refusing:** round 3's up-front refusal of any relative leaf link moved to another directory also
+  refused `a/x.md -> ../real/x.md` moved to `b/x.md`, whose target still lands on the same file. `doc(move)` now compares where the
+  target lands from each directory (`util::link_target_landing`) and refuses only a link that would land elsewhere (the
+  sibling-name target `real.md` is the control, and the old tests used prefix `..` which a non-`..` target would not have caught).
+  An absolute-target link moves freely.
+- **L-6:** `rekey_prefix` runs the sidecar preflight before its transaction, in preview too, so a refused declared sidecar no longer
+  leaves a committed rekey behind; its hint no longer advises deleting "the stale file", which for a refused sidecar is the file behind a link.
+- **M-A, M-B:** an escaping row whose only history is an EVENT is kept (test added); the reindex TOOL response carries
+  `reclaimed_escaping`, `reclaimed_escaping_ids`, `escaping_kept_ids` and the note (tool-level test, plus a null-note control).
+
+**Decisions of rounds 2-3 that changed:** the door's root order (round 3 "Order: ...", superseded above); round 3's claim that the
+canonical-path limit "is gone" (withdrawn above, fixed now); the round 3 survivor note on the second arm; round 3 LOW 2's blanket relative-link
+refusal (now precise). Unchanged: refuse any leaf link; reclaim keeps rows with history; one root for the walk (git root).
+
+**Mutation probe, round 4** (52-262 tests per run): killed — the deeper-root rule; the ancestor-resolution base; the spelled-repository
+fallback; the exact predicate's root equality and its prefix clause; the indexer's candidate predicate swapped for case-insensitive `LIKE`;
+the indexer's placeholder offset; the guard's clear; `sidecar_write_through`'s own arm; the relative-link landing comparison and its `..`
+handling; `rekey_prefix`'s preflight; the graft naming in the note. **Survived:** none left; one (the guard's clear) survived on the first
+fixture and was killed after it was rebuilt. **Not probed, equivalent by construction:** `ancestors().skip(1)` in
+`ancestor_resolving_to_managed_root` (a file path cannot canonicalize to a directory root).
 
 ## Tests added
 
