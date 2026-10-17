@@ -60,6 +60,7 @@ const STAGING_ATTEMPTS: u32 = 16;
 /// How many bytes of the target's file name a staging name carries. Staging adds
 /// `.<32 hex>.tmp` (37 bytes), and a name already near `NAME_MAX` (255) would otherwise
 /// turn a write that used to fit into `ENAMETOOLONG`.
+// cap-class: NOT_A_CAP — bounds only how much of the target's file name is echoed into the throwaway staging name; the staged content and the final file name are untouched, and uniqueness comes from the nonce
 const STAGING_STEM_MAX_BYTES: usize = 100;
 
 /// A staging path for `path`: `<file name>.<nonce>.tmp` in the target's own directory.
