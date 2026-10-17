@@ -578,7 +578,9 @@ impl std::fmt::Display for MuxConnectFailure {
 ///
 /// `holder_lock` is the mux's ownership lock when the caller is waiting on ANOTHER process's mux:
 /// once that lock is free its holder has died, no socket will ever appear, and the wait ends at
-/// once so the caller can respawn instead of sitting out the window.
+/// once so the caller can respawn instead of sitting out the window. The lock is checked after
+/// EVERY failed attempt, including the one that finds the deadline passed, so a holder that died
+/// during the last interval is reported gone rather than wedged.
 #[cfg(unix)]
 async fn connect_to_mux(
     socket_path: &std::path::Path,
@@ -593,12 +595,6 @@ async fn connect_to_mux(
             Ok(client) => return Ok(client),
             Err(e) => e,
         };
-        if tokio::time::Instant::now() >= deadline {
-            return Err(MuxConnectFailure {
-                source: err,
-                holder_gone: false,
-            });
-        }
         // A free lock means the holder is gone: stop waiting, the caller re-arbitrates.
         if let Some(lock) = holder_lock {
             if matches!(claim_mux_lock(lock), Ok(Some(_))) {
@@ -607,6 +603,12 @@ async fn connect_to_mux(
                     holder_gone: true,
                 });
             }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(MuxConnectFailure {
+                source: err,
+                holder_gone: false,
+            });
         }
         tokio::time::sleep(MUX_CONNECT_RETRY_INTERVAL).await;
     }
@@ -2735,6 +2737,69 @@ mod tests {
             connected.is_ok(),
             "a mux that binds its socket 1.2 s after taking its lock is starting, not wedged: {:?}",
             connected.err().map(|e| format!("{e:#}"))
+        );
+    }
+
+    /// OPEN BUG, ignored on purpose: a mux that has bound its socket but never sends its init
+    /// message hangs `LspClient::connect` (it reads the init message with no timeout), so the
+    /// window and deadline of `connect_to_mux` are never reached. Run with `--ignored` to see the
+    /// red. docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "open bug: docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md"]
+    async fn connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        tokio::spawn(async move {
+            // Accept and hold, saying nothing.
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+
+        let started = Instant::now();
+        let returned = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::connect_to_mux(&sock_path, dir.path(), Duration::from_secs(1), None),
+        )
+        .await
+        .is_ok();
+        assert!(
+            returned,
+            "a 1 s window must end by itself; still waiting after {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The wait's last act is a lock check. A holder that dies after the loop's previous check but
+    /// before the deadline used to be reported as "the whole window was served with the holder
+    /// alive", which the caller records as a wedged mux for 60 s. Dropped at 0.9 s of a 1 s wait
+    /// (checks fall at 0.8 s and 1.0 s) the failure must say the holder is gone.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_holder_that_dies_just_before_the_deadline_is_reported_gone_not_wedged() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("mux.lock");
+        let sock_path = dir.path().join("mux.sock");
+        let owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(900)).await;
+            drop(owner);
+        });
+        let failure = super::connect_to_mux(
+            &sock_path,
+            dir.path(),
+            Duration::from_secs(1),
+            Some(&lock_path),
+        )
+        .await
+        .err()
+        .expect("no socket ever appeared");
+        assert!(
+            failure.holder_gone,
+            "the holder died before the wait ended; a wedged mux must not be recorded"
         );
     }
 

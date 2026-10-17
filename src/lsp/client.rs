@@ -2264,6 +2264,74 @@ struct Point {
         rx
     }
 
+    /// A reader stand-in that holds what the real reader holds (its clones of `pending` and the
+    /// writer) and never ends by itself. Dropped, those clones are released; merely aborted, they
+    /// stay until the runtime next polls the task.
+    fn spawn_holding_reader(client: &LspClient) -> JoinHandle<()> {
+        let pending = client.pending.clone();
+        let writer = client.writer.clone();
+        tokio::spawn(async move {
+            let _held = (pending, writer);
+            std::future::pending::<()>().await;
+        })
+    }
+
+    /// `shutdown` must not return while the reader is still alive: `handle.abort()` only REQUESTS
+    /// cancellation, and the task (with the read half and writer clone it owns) is dropped when the
+    /// runtime next polls it. Awaiting the aborted handle is what makes "connection closed" true
+    /// at the moment `shutdown` returns. Observed with no await between `shutdown()` and the
+    /// check; on the current-thread runtime nothing else can run in between.
+    #[tokio::test(start_paused = true)]
+    async fn socket_shutdown_has_dropped_the_reader_when_it_returns() {
+        let mut client = bare_client(
+            LspTransport::Socket {
+                socket_path: "/unused.sock".into(),
+            },
+            None,
+        );
+        let reader = spawn_holding_reader(&client);
+        // Let the reader run once so it is parked holding its clones.
+        tokio::task::yield_now().await;
+        *client.reader_handle.get_mut().unwrap() = Some(reader);
+        assert_eq!(
+            Arc::strong_count(&client.pending),
+            2,
+            "premise: the reader holds a clone"
+        );
+
+        client.shutdown().await.unwrap();
+
+        assert_eq!(
+            Arc::strong_count(&client.pending),
+            1,
+            "the reader's clone must be released by the time shutdown returns"
+        );
+        assert_eq!(Arc::strong_count(&client.writer), 1);
+    }
+
+    /// The same for the direct client's timed-out wait.
+    #[tokio::test(start_paused = true)]
+    async fn direct_shutdown_has_dropped_the_reader_when_it_returns() {
+        let mut client = bare_client(LspTransport::Process { child_pid: None }, None);
+        let reader = spawn_holding_reader(&client);
+        tokio::task::yield_now().await;
+        *client.reader_handle.get_mut().unwrap() = Some(reader);
+        assert_eq!(
+            Arc::strong_count(&client.pending),
+            2,
+            "premise: the reader holds a clone"
+        );
+
+        client.shutdown().await.unwrap();
+
+        assert_eq!(
+            Arc::strong_count(&client.pending),
+            1,
+            "the reader's clone must be released by the time shutdown returns"
+        );
+        assert_eq!(Arc::strong_count(&client.writer), 1);
+    }
+
     /// `shutdown` aborts the reader task, which is the one place a disconnect resolves the
     /// requests still waiting (`drain_pending_disconnect` runs at the END of the reader task, and
     /// an aborted task never gets there). Another tool call holding the same `Arc<LspClient>`
@@ -2366,9 +2434,10 @@ struct Point {
                 !text.contains("shutdown") && !text.contains("\"exit\""),
                 "a shared server must not be asked to stop, got: {text}"
             );
-            // The reader task (and the writer clone it holds) is GONE, not detached: a task that
-            // is still alive keeps a clone of each Arc. Observed right after `shutdown` returns,
-            // with the peer still holding its end open.
+            // The reader task (and the writer clone it holds) is gone, not detached, as of a
+            // moment up to 2 s after `shutdown` returned (the peer's EOF was awaited first). That
+            // is the weaker claim: a task merely aborted would also be dropped by then. That it is
+            // gone AT return is pinned by `socket_shutdown_has_dropped_the_reader_when_it_returns`.
             assert_eq!(
                 Arc::strong_count(&client.pending),
                 1,
