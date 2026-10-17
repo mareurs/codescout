@@ -517,6 +517,10 @@ the author adding the new section, since nothing in the act of appending points 
 ## Declaring an augmentation
 <!-- serves: doc.augment(path~docs/trackers/) -->
 
+**Before you augment: `merge=false` resets every field you omit, and under `merge=true` a `params`
+array replaces the WHOLE collection** — a patch holding one row deletes the others, and the catalog
+is not in git. Add and change rows with `append_entry` / `update_entry`, never by patching `params`.
+
 If an artifact is meant to carry an augmentation, say so in **frontmatter** — and name
 the committed sidecar holding its shape:
 

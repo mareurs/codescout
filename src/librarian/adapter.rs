@@ -684,12 +684,12 @@ impl LibrarianAdapter {
 /// moved between as `old_abs_path`/`new_abs_path` (read since 2026-10-17, so an archive
 /// reaches the archive sections).
 ///
-/// **The writes that return only `{id, ...}` are given a path before they get here**
-/// (`write_target_id`/`name_the_target`, `src/librarian/tools/artifact.rs`): `append_entry`,
-/// `update_entry`, and an `update` that changes `status`. Still unnamed, and so still
-/// `librarian`'s: an `update` that changes no status (its § *Choosing a mode* warns against
-/// wiping a body), `augment` and `link` (they return the bare string `"ok"`), `delete`,
-/// `rekey_prefix`, `state_at`, `event_*`, `graph`, `gather`. See
+/// **The writes that return only `{id, ...}` or the bare `"ok"` are given a path before they get
+/// here** (`write_target_id`/`name_the_target`, `src/librarian/tools/artifact.rs`):
+/// `append_entry`, `update_entry`, `augment` and `link`, each naming the row whose file it
+/// wrote. Still unnamed, and so still `librarian`'s: EVERY `update`, status change included
+/// (naming one delayed librarian's § *Choosing a mode* and § *The shrink guard*, the warnings
+/// against wiping a body), `delete`, `rekey_prefix`, `state_at`, `event_*`, `graph`, `gather`. See
 /// `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
 ///
 /// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*

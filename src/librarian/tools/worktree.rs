@@ -105,6 +105,11 @@ pub(crate) fn peek_write_target(cat: &Catalog, ctx: &ToolContext, id: &str) -> R
         return Ok(id.to_string());
     }
     let (shadow_id, _) = shadow_coordinates(cp, main_root.as_path(), &row);
+    // The `else` is defensive, not a live path: every SUCCESSFUL write to a main-checkout row
+    // from a worktree session has already forked its shadow (`resolve_write_target` runs first),
+    // so the shadow exists by the time anything asks. It is kept so a caller that asks about a
+    // write that never reached the fork (a refused call, a new caller) still gets a real id back
+    // instead of a missing row.
     if artifact::get(cat, &shadow_id)?.is_some() {
         Ok(shadow_id)
     } else {

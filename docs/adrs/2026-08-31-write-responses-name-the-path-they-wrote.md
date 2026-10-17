@@ -166,7 +166,22 @@ change, not a field addition.
   3. **Input-threading stays rejected** for the reason in the table above: it widens
      `Shape::matches`, which the operator rules share.
   4. The path is bounded (one string, project-relative after the stripper) and carries no
-     content, so the no-echo prohibition is untouched. The cost is about 45 B per named write.
+     content, so the no-echo prohibition is untouched. Measured cost, in compact JSON: an object
+     result gains `14 + len(path)` B and a promoted bare `"ok"` gains `25 + len(path)` B over `"ok"`:
+     +50 B and +61 B for the probe path, and +59 B and +70 B at the median `docs/trackers/` path
+     (45 characters, n = 92).
+  5. **A `link` names the row whose FILE it wrote.** A plain edge writes only a catalog row on its
+     source, so the source is named, through the overlay. A `supersedes` link writes the
+     DESTINATION's frontmatter, so the destination is named, as the caller passed it:
+     `link::call` hands `dst_id` to `write_field_to_frontmatter` unresolved, so from a worktree
+     session it writes the MAIN checkout's file (filed:
+     `docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`),
+     and the result names what was written, not what should have been. Pinned per rel kind, in
+     and out of a worktree session.
+  6. The row is looked up AFTER the write, which takes the catalog lock a second time. A
+     `merge_worktree` or abandon landing in that window makes the result name the main row's
+     path or none. Cosmetic: the answer is advisory and routing does not depend on which it
+     names.
 
 ## Sites (initial)
 

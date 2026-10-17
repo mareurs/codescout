@@ -15818,7 +15818,7 @@ mod guide_hint_tests {
             "the first append_entry delivers {delivered} B, over the auto-inject bound"
         );
         assert!(
-            delivered < 14_000,
+            delivered <= crate::prompts::guide_index::WRITE_CEILING_APPEND_ENTRY,
             "the first append_entry delivers {delivered} B; measured 12,928 B on 2026-10-17"
         );
 
@@ -15866,6 +15866,23 @@ mod guide_hint_tests {
             "augment on a tracker must ship \u{a7} Declaring an augmentation, got {} B: {}",
             guide.len(),
             guide.chars().take(300).collect::<String>()
+        );
+        // The FIRST augment of a tracker is claimed by tracker-conventions, so the librarian's
+        // § Augmentation Lifecycle (the only other place `merge=true` replacing a params array
+        // is explained) arrives on the SECOND. The warning therefore has to be in the section
+        // this call does ship, or routing has delayed an anti-wipe warning: asserted here, and
+        // sized by `WRITE_CEILING_AUGMENT`.
+        assert!(
+            guide.contains("**Before you augment:")
+                && guide.contains("replaces the WHOLE collection"),
+            "the first augment of a tracker must carry the merge=true wipe warning, got {} B: {}",
+            guide.len(),
+            guide.chars().take(400).collect::<String>()
+        );
+        let augment_delivered: usize = guide_blocks(&out).iter().map(String::len).sum();
+        assert!(
+            augment_delivered <= crate::prompts::guide_index::WRITE_CEILING_AUGMENT,
+            "the first augment delivers {augment_delivered} B, over its measured ceiling"
         );
 
         // update_entry -> citing. The entry law was spent by the first append_entry, so what is

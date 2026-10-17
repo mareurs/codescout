@@ -152,7 +152,7 @@ is given the path before the router reads it (`write_target_id` / `name_the_targ
 `src/librarian/tools/artifact.rs`). Reviewed by Opus the same day; this section records the
 reviewed state.
 
-- `append_entry`, `update_entry`, `augment` and `link` (keyed on `src_id`) answer with `abs_path` (+45 B).
+- `append_entry`, `update_entry`, `augment` and `link` (keyed on `src_id`) answer with `abs_path` (+50 B on an object result, +61 B when a bare `"ok"` is promoted, for the probe path; +59 / +70 B at the median `docs/trackers/` path, 45 characters, n = 92).
   `augment` and `link` answered the bare string `"ok"`; they now answer `{"status":"ok","abs_path":…}`,
   the promotion `annotate_write_path` already makes for every other write and `annotate_write_root`
   already made in any repo with linked worktrees. The ADR it follows
@@ -184,16 +184,41 @@ reviewed state.
   refusals and counter sections stay on `append_entry` (a prose-ledger append is its main use and the
   router cannot tell prose from params).
 - `Declaring an augmentation` (4.1 KB) was split at `###` (1.9 + 2.4 KB), as the other five splits were.
+- **The merge warning rides the first `augment`.** The first `augment` of a tracker is claimed by
+  tracker-conventions, so librarian § *Augmentation Lifecycle* (the only guide text saying that under
+  `merge=true` a `params` array replaces the WHOLE collection) arrives on the SECOND. The `doc` tool
+  description states the `merge=false` reset inline but not the `merge=true` array replacement, and
+  `augment` (unlike `update`) reports no `entries_removed`. So one sentence now opens
+  § *Declaring an augmentation*: "merge=false resets every field you omit, and under merge=true a
+  params array replaces the WHOLE collection ... use append_entry / update_entry"; the section is 2.25 KB
+  (cap 2.5 KB). Pinned by the end-to-end test on the FIRST augment (deleting it reds). **Follow-up, not
+  done:** surface `entries_removed` plus a `warning` in `augment`'s result, as `update` does
+  (`update.rs:895-899`); `augment.rs:448` keeps only `.found` from `merge_params` and drops the
+  before/after counts.
+- **A `link` names the row whose file it wrote**: the source for a plain edge, the destination (as the
+  caller passed it) for `supersedes`. From a worktree session `link::call` writes the MAIN
+  checkout's destination file; that is filed separately
+  (`docs/issues/2026-10-17-a-supersedes-link-from-a-worktree-session-writes-the-main-checkouts-destination-file.md`).
+- Naming re-takes the catalog lock after the write; a `merge_worktree` or abandon in that window makes
+  the result name the main row's path or none (cosmetic, routing unchanged).
 
 Delivered bytes per call, wrapped blocks as injected (before = first cut b96a56ea):
 
-| call | before | after | ceiling (test) |
+| call | before | after (measured) | ceiling (measured + 128 B) |
 |---|---|---|---|
-| `append_entry` on a tracker | 16,344 | 12,928 | 14,000 |
-| `update_entry` on a tracker | 9,077 | 9,077 | 9,800 |
-| `augment` on a tracker | unrouted (librarian) | 4,958 | 5,400 |
-| `link` from a tracker or a bug | unrouted (librarian) | 2,591 | 2,800 |
+| `append_entry` on a tracker | 16,344 | 12,928 | 13,056 |
+| `update_entry` on a tracker | 9,077 | 9,077 | 9,205 |
+| `augment` on a tracker | unrouted (librarian) | 5,261 (4,958 + the merge warning, below) | 5,389 |
+| `link` from a tracker or a bug | unrouted (librarian) | 2,591 | 2,719 |
 | status-changing `update` | 9,048 (anonymous tier, reviewer) | 0 from tracker-conventions; librarian's 2,683 | n/a |
+
+The ceilings are one constant each (`WRITE_CEILING_*`, `src/prompts/guide_index.rs`), measured plus a
+fixed 128 B (the margin the emission-budget fixtures use); the end-to-end test reads the same constant
+instead of a literal. **Against the peer's bug-archive move budget** (13,758 B, ceiling 13,886 B,
+`a_bug_archive_move_stays_under_its_own_emission_byte_ceiling`): that figure counts the hold (2,271 B)
+plus the executed response (11,487 B). Per RESPONSE, the first `append_entry` (12,928 B) already
+exceeds the move's executed response, so "the largest real draw is the move" holds only if hold and
+re-issue are counted together.
 
 The earlier note that adding `Citing an entry` to `append_entry` would give 16.8 KB was a BODY sum;
 wrapped it is about 19.7 KB. It stays on `update_entry` only.
@@ -272,6 +297,13 @@ of the 16 below was KILLED. Naming the landed row's id instead of the caller's, 
 found, `augment` or `link` unnamed or naming the wrong end, `update` named, the bare `"ok"` not
 promoted, a section widened or its `path~` dropped, each byte bound (ceiling, floor, wrapper-counting,
 auto-inject bound, ratio, end-to-end), a waiver drifting, and the librarian ceasing to declare `link`.
+
+Second review round, each KILLED: a `supersedes` link keyed on the source; a plain link keyed on the
+destination; `supersedes` resolved through the overlay (observable because the test pre-forks the
+destination's shadow); a plain link not resolved through the overlay; the merge warning deleted from
+§ Declaring an augmentation (end-to-end, first `augment`); each of the four ceilings at measured - 1
+(so each constant is within 128 B of its measurement, and the first `augment` / `append_entry` really
+deliver at least the stated bytes); each section delivered twice.
 
 ## Workarounds
 

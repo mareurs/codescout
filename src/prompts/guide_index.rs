@@ -272,6 +272,26 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
 // cap-class: NOT_A_CAP — authoring ceiling asserted by a test; no runtime path truncates a section that exceeds it
 pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
 
+/// Measured delivered bytes (wrapped blocks, as injected) of the FIRST call of each write shape
+/// on a tracker, plus a fixed 128 B (the margin the emission-budget fixtures use): 2026-10-17,
+/// `append_entry` 12,928 B, `update_entry` 9,077 B, `augment` 5,261 B, `link` 2,591 B. `link` is
+/// also bounded on a bug file. Raise one only with a new measurement. They sit under
+/// `MAX_AUTO_INJECT_GUIDE_BYTES` (16,384 B, wrapper included), which the first cut of
+/// `append_entry` met with 40 B to spare (16,344 B) while a body-summing test read 13.5 KB.
+/// `append_entry`'s is also read by the end-to-end test, so there is one number.
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_APPEND_ENTRY: usize = 12_928 + 128;
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_UPDATE_ENTRY: usize = 9_077 + 128;
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_AUGMENT: usize = 5_261 + 128;
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_LINK: usize = 2_591 + 128;
+/// A floor for `append_entry`, between its section BODIES (10,641 B) and what it delivers
+/// wrapped (12,928 B): it fails a delivered-bytes measure that forgot the wrappers.
+#[cfg(test)]
+pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 12_000;
+
 /// A guide section with its declarations resolved.
 #[derive(Debug, Clone)]
 pub struct GuideSection {
@@ -1146,20 +1166,6 @@ Body Mu.
             "a tracker move must not be served the update-first § Archiving a tracker"
         );
     }
-    /// Measured delivered bytes (wrapped blocks) of the FIRST call of each write shape on a
-    /// tracker, plus ~8% margin (2026-10-17: append_entry 12,928 B, update_entry 9,077 B,
-    /// augment 4,958 B, link 2,591 B); `link` is also bounded on a bug file. Raise one only
-    /// with a new measurement. The bound they sit under is `MAX_AUTO_INJECT_GUIDE_BYTES`
-    /// (16,384 B, wrapper included), which the first cut of `append_entry` met with 40 B to
-    /// spare (16,344 B delivered) while the old body-summing test read 13.5 KB.
-    const WRITE_CEILING_APPEND_ENTRY: usize = 14_000;
-    const WRITE_CEILING_UPDATE_ENTRY: usize = 9_800;
-    const WRITE_CEILING_AUGMENT: usize = 5_400;
-    const WRITE_CEILING_LINK: usize = 2_800;
-    /// A floor for `append_entry`, between its section BODIES (10,641 B) and what it delivers
-    /// wrapped (12,928 B): it fails a delivered-bytes measure that forgot the wrappers.
-    const WRITE_FLOOR_APPEND_ENTRY: usize = 12_000;
-
     /// Every write-shape section of `tracker-conventions` that a write other than `move` needs
     /// and that can be routed safely is reachable by the call that needs it, and by no call that
     /// does not.
@@ -1333,8 +1339,8 @@ Body Mu.
         }
 
         // What each call DELIVERS: the wrapped blocks, bounded by the auto-inject bound, by the
-        // section-grain ratio, and by a measured ceiling (delivered bytes + ~10% margin; raise
-        // it deliberately, with the new measurement, never to make this pass).
+        // section-grain ratio, and by a measured ceiling (delivered bytes + 128 B; raise it
+        // deliberately, with the new measurement, never to make this pass).
         let delivered = |call: Call| -> usize {
             idx.match_sections("tracker-conventions", Some(call.0), call.1)
                 .iter()
