@@ -54,7 +54,47 @@ The decision was option C: declare `snapshot_anchor` on a tracker only after its
 
 Declaring an anchor on any of these would make the first `update_entry` rewrite a hand-authored row into the rendered shape, or no-op, so none was declared. No tracker file was changed. The two that already declare one (`review-catches`: 56 of 56 rows byte-equal; `open-issue-work-queue`: 48 of 77 equal, 29 differ) are unchanged. The 29 differing rows in `open-issue-work-queue` were already known (`resync_snapshot_row` re-renders per row for that reason).
 
-The doctor check "snapshot-keeping tracker without declared snapshot_anchor" was NOT added: it would fire on all 12 with nothing actionable, because the condition it tests (`body_keeps_snapshot`, a majority of ids line-anchored) is satisfied by heading-anchored ledgers that keep no table. The finding worth a follow-up is the advisory itself: `snapshot_missing` / `snapshot_stale` fire for heading-anchored ledgers on the same heuristic.
+The doctor check "snapshot-keeping tracker without declared snapshot_anchor" was NOT added: it would fire on all 12 with nothing actionable, because the condition it tests (`body_keeps_snapshot`, a majority of ids line-anchored) is satisfied by heading-anchored ledgers that keep no table. The finding worth a follow-up is the advisory itself: `snapshot_missing` / `snapshot_stale` fire for heading-anchored ledgers on the same heuristic. **[Corrected 2026-10-17: that sentence is false at HEAD. Measured below under *Outcome 2026-10-17*: the advisory is keyed on table ROWS, not headings, since `2026-08-28-body-keeps-snapshot-counts-headings-as-a-table`.]**
+
+### Outcome 2026-10-17: the narrowing the user decided on is already the code's behaviour
+
+The decision was to narrow `snapshot_missing` / `snapshot_stale` so they fire only for ledgers that keep a rendered table. **At HEAD (`299395e5`) that is already what the code does, and it has been since 2026-08-28** (`docs/issues/archive/2026-08-28-body-keeps-snapshot-counts-headings-as-a-table.md`). The closing sentence of the section above (heading-anchored ledgers get the advisory) was false when written; it is marked corrected in place. No production code changed.
+
+**The predicate, as it exists (read at the bytes):** the advisory fires iff `body_keeps_snapshot(claimed, in_body)` (`src/librarian/catalog/augmentation.rs`) where `in_body = snapshot_rows_in_declared_block(doc, PREFIX)`. That set is the `N` of every line matching `^\|[ \t]*[`*\[]*PREFIX-(\d+)\b`, a `|`-anchored row whose first cell is the id, and **never a heading** (`body_snapshot_row_indices`). With a declared `snapshot_anchor` it is narrowed to that block. `body_keeps_snapshot` is true iff `claimed` and `in_body` are non-empty and `|claimed ∩ in_body| * 2 > |claimed|`. So "keeps a table" means: the body carries table rows for a majority of the ledger's ids. Three call sites share it: `append_entry` (`snapshot_missing`), `update_entry` via `snapshot_stale_note` (`snapshot_stale`), and doctor's `scan_snapshot_drift`.
+
+**Measured 2026-10-17 by running the real `snapshot_rows_in_declared_block` and `body_keeps_snapshot` over the real tracker files at `299395e5`** (scratch test, not committed; `claimed` approximated by the ids the body anchors, because the catalog's params are machine-local and were not read):
+
+| tracker | prefix | ids the body anchors | table rows | advisory applies |
+|---|---|---|---|---|
+| `claim-decay` | DC | 6 | 0 | no |
+| `tracker-management-redesign` | TMR | 7 | 0 | no |
+| `structural-debt-refactor` | SD | 11 | 0 | no |
+| `test-escape-hardening` | I | 11 | 0 | no |
+| `codex-pilot-checks-2026-10-13` | T | 12 | 0 | no |
+| `fable-tuning-tasks` | FT | 12 | 0 | no |
+| `fable-tuning-findings` | FND | 18 | 0 | no |
+| `tool-usage-patterns` | T | 34 | 0 | no |
+| `system-retrospective-improvements` | SRI | 17 | 2 (`SRI-11`, `SRI-12`, an unrelated findings table) | no, a minority citation |
+| `2026-08-16-iron-law-gate-firing-audit` | GF | 8 | 8 | yes |
+| `windows-platform-support` | WIN | 35 | 35 | yes |
+| `prompt-hamsa-audit-log` | A | 40 | 40 | yes |
+
+So **9 of the 12 are already silent and 3 keep a real table**. Those 3 are the ledgers the user's rule keeps the advisory for, and they are the ones whose table columns differ from the template, so none can declare an anchor (section above). Controls from the same run: `review-catches` 56/56 rows and `open-issue-work-queue` 77/77 rows apply, `provenance-subsystem` 10 of 30 does not (params-canonical).
+
+**What was added.** Three tests, each with an in-test control (the same ids as table rows must still be flagged), because an absence assertion is monotone under removal:
+- `update_entry::tests::patching_a_headings_only_ledger_says_no_snapshot_exists_to_be_behind`: `update_entry` on a headings-only ledger carries no `snapshot_stale`. No `update_entry` test covered this shape before.
+- `update_entry::tests::patching_a_heading_ledger_that_cites_two_ids_in_a_table_stays_silent`: the `system-retrospective-improvements` shape, on `update_entry`.
+- `augmentation::tests::append_entry_stays_silent_for_a_heading_ledger_that_cites_two_ids_in_a_table`: the same shape on `append_entry`, with the table-keeper control (`["F-5","F-6"]`).
+
+Pre-existing pins that already covered the rest: `append_entry_does_not_claim_a_snapshot_when_the_body_is_headings_only`, `append_entry_still_reports_a_missing_row_when_the_body_renders_a_table` (a table and no anchor still gets `snapshot_missing`), `patching_a_rendered_row_without_an_anchor_flags_it_without_asserting_the_cells_moved` (still gets `snapshot_stale`), and the doctor `snapshot_drift_*` set.
+
+**Mutation probes** (`./scripts/mutation-probe.sh`, run against the three new tests alone): heading alternation added to `body_snapshot_row_indices`: KILLED 3 of 3. Majority gate loosened to `count() >= 1`: KILLED 2 of 3 (the headings-only test cannot see it, correctly: no rows at all). Gate raised to `count() * 2 > 2 * claimed.len()`: KILLED 3 of 3 via the controls.
+
+**Deliberately NOT done, and why.** Tightening "a row" further (require a header and separator line, skip fenced code) was weighed and rejected: a scan of every `docs/trackers/**/*.md` found rows outside a table structure or inside a fence in exactly one file, `bug-fix-session-log.md`, a prose ledger that declares `entry_prefix` and has no sidecar under `docs/augmentations/`, so this path never reads it. The change would fix no ledger that exists and would red the many fixtures that write a bare `| T-1 | open |` with no separator. No prompt surface or guide names `snapshot_missing` / `snapshot_stale` (grep over `src/prompts`, `src/**/*.md`), so `ONBOARDING_VERSION` does not move.
+
+**Status.** The proposed transition is `mitigated`, `closed: 2026-10-17`, with `unverified: STANDING` naming the 3 table-keeping ledgers that stay warning-only because their columns differ from the render. It is NOT applied in the frontmatter here: this file is catalog-managed, so the flip has to go through `doc(action="update")`, which writes the catalog, and this session was barred from catalog writes. Note for whoever applies it: the archived parent carries `unverified: TRACKED a2859e0d13968b04`, which `doctor`'s `terminal_status_with_caveat` stops honouring once this file leaves `open`, so the parent will be reported again until it is discharged.
+
+Test commit `8a0ad373` (patch-id `26de8fbc230a2535b0d3f37fa478bbdc051f396b`), on a worktree branch cut from `experiments` at `299395e5`, not yet merged to `experiments`.
 
 ## References
 
