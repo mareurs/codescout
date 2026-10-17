@@ -633,7 +633,11 @@ fn classify_write_path_in(
             allowed.push(cwd_canon);
         }
     }
-    for extra in &config.extra_write_roots {
+    // An entry that is not an absolute path is skipped: `""` is a prefix of EVERY path
+    // (`Path::starts_with`) and a relative one resolves against the server's cwd. The config
+    // refuses them when it loads (`ProjectConfig::validate_list_limits`); this holds when a
+    // config reaches the classifier another way or changes after it was validated.
+    for extra in config.extra_write_roots.iter().filter(|e| e.is_absolute()) {
         allowed.push(canonicalize_through_existing_ancestor(extra));
     }
     for root in session_roots {
@@ -7791,6 +7795,81 @@ EOF"#;
         assert!(
             matches!(&decision, WritePathDecision::OutsideRoot { .. }),
             "a cwd above the second home must not become a write root, got: {decision:?}"
+        );
+    }
+
+    // ── `extra_write_roots` entries that are not absolute paths ─────────────────────────────────
+    //
+    // An empty entry resolved to the empty path, which `Path::starts_with` treats as a prefix of
+    // EVERY path (F9a: every file on the filesystem outside the deny list was admitted), and `.`
+    // resolved against the server's cwd. The config refuses both when it loads
+    // (`validate_list_limits`); the classifier ignores them as well, because a config can change
+    // after it was validated.
+
+    fn extra_roots_config(roots: &[&str]) -> PathSecurityConfig {
+        PathSecurityConfig {
+            extra_write_roots: roots.iter().map(PathBuf::from).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_empty_extra_write_root_admits_nothing() {
+        let scratch = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let target = scratch.path().join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &extra_roots_config(&[""]),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "an empty extra root must not become a root, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_relative_extra_write_root_admits_nothing() {
+        // `.` is resolved against the process cwd; the target is built from that same cwd.
+        let cwd = std::env::current_dir().unwrap();
+        let target = cwd.join("ce_relative_extra_root_probe.txt");
+        let project = tempdir().unwrap();
+        for entry in [".", "sub/dir", "~/elsewhere"] {
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &extra_roots_config(&[entry]),
+                &[],
+                &env_of(Path::new("/nonexistent-temp"), None, None),
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+                "the relative extra root {entry:?} must not become a root, got: {decision:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_absolute_extra_write_root_beside_an_unusable_one_still_works() {
+        let scratch = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let root = scratch.path().join("shared");
+        std::fs::create_dir(&root).unwrap();
+        let target = root.join("x.txt");
+        let root_str = root.to_str().unwrap();
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &extra_roots_config(&["", ".", root_str]),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "the absolute entry must keep working, got: {decision:?}"
         );
     }
 

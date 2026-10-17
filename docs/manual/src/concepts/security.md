@@ -108,7 +108,9 @@ extra_write_roots = [
 ```
 
 The deny list still applies first. `extra_write_roots` only extends where writes
-land — it cannot unlock credential paths.
+land — it cannot unlock credential paths. Each entry must be an absolute path:
+an empty or relative entry is refused when the project config loads (a leading `~`
+is not expanded).
 
 ### Disabling Writes Entirely
 

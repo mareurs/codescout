@@ -661,7 +661,8 @@ impl ProjectConfig {
     /// already limits total size, but 1 MiB of TOML easily encodes tens of
     /// thousands of regex patterns — each evaluated on every shell invocation,
     /// every path check, every ignore walk. Cap the counts to keep a crafted
-    /// or copy-pasted manifest from DoS'ing per-request hot paths.
+    /// or copy-pasted manifest from DoS'ing per-request hot paths. Also refuses an
+    /// `extra_write_roots` entry that is not an absolute path.
     fn validate_list_limits(&self) -> Result<()> {
         // cap-class: NOT_A_CAP — config validation ceiling; a breach bails with an error naming the count, no entry is silently dropped
         const MAX_EXTRA_WRITE_ROOTS: usize = 128;
@@ -676,6 +677,18 @@ impl ProjectConfig {
                 self.security.extra_write_roots.len(),
                 MAX_EXTRA_WRITE_ROOTS,
             );
+        }
+        // An entry that is not an absolute path is not a directory anyone can have meant: the
+        // empty string became the empty path (a prefix of EVERY path), and a relative one was
+        // resolved against the server's cwd rather than the project. Refuse, naming the entry.
+        // (`classify_write_path_in` skips such entries too: a config can change after this runs.)
+        for (i, root) in self.security.extra_write_roots.iter().enumerate() {
+            if !std::path::Path::new(root).is_absolute() {
+                anyhow::bail!(
+                    "security.extra_write_roots entry {i} ({root:?}) is not an absolute path; \
+                     use a full path (a leading '~' is not expanded)",
+                );
+            }
         }
         if self.security.shell_dangerous_patterns.len() > MAX_SHELL_DANGEROUS_PATTERNS {
             anyhow::bail!(
@@ -1268,6 +1281,39 @@ model = "local:test"
             err.to_string().contains("ignored_paths.patterns"),
             "expected ignored_paths limit error, got {err}"
         );
+    }
+
+    /// An empty `extra_write_roots` entry made the empty path a write root, and
+    /// `Path::starts_with("")` is true for every path: every file outside the deny list became
+    /// writable (`F9a` in `docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md`).
+    /// A relative one is resolved against the server's cwd, not the project. Neither is a
+    /// directory the author can have meant, so the config is refused, naming the entry.
+    #[test]
+    fn validate_list_limits_rejects_an_extra_write_root_that_is_not_absolute() {
+        let mut cfg = ProjectConfig::default_for("x".into());
+        cfg.validate_list_limits().unwrap();
+
+        for bad in ["", ".", "sub/dir", "../sibling", "~/elsewhere"] {
+            cfg.security.extra_write_roots = vec![bad.to_string()];
+            let err = cfg
+                .validate_list_limits()
+                .expect_err(&format!("{bad:?} is not an absolute path"));
+            let msg = err.to_string();
+            assert!(
+                msg.contains("security.extra_write_roots") && msg.contains("absolute"),
+                "{bad:?}: the error must name the field and the rule, got {msg}"
+            );
+        }
+
+        // The offending entry is named even when it is not the first.
+        let good = std::env::temp_dir().display().to_string();
+        cfg.security.extra_write_roots = vec![good.clone(), String::new()];
+        let err = cfg.validate_list_limits().unwrap_err();
+        assert!(err.to_string().contains("entry 1"), "got {err}");
+
+        // Absolute entries are untouched.
+        cfg.security.extra_write_roots = vec![good];
+        cfg.validate_list_limits().unwrap();
     }
 
     // docs/issues/archive/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md
