@@ -6,9 +6,10 @@ title: 'BUG: predicate probe counts next-call buffer syntax and repeated argumen
 tags:
 - cluster/value-correct-in-a-frame-its-name-does-not-state
 opened: 2026-09-20
+closed: 2026-10-17
 owner: marius
 severity: medium
-unverified: STANDING Which retrieval horizon is the headline figure is a user decision, deliberately not made; the existing key names still overclaim by name and are kept for comparability.
+unverified: 'q2''s redundancy figure is still an upper bound (run_command, doc and rename writes and a differently spelled path are invisible; no source-state evidence is collected), and the legacy key names still overclaim by name, kept on purpose for comparability with the recorded 32.1%. The retrieval-horizon question is SETTLED: the user chose the next call on 2026-10-17 (a84f492d).'
 ---
 
 # BUG: predicate probe observations are broader in prose than in the instrument
@@ -123,10 +124,28 @@ Status `mitigated` (set 2026-10-16, on the coordinator's instruction): additive 
 `classify_next` and `docs/PROBES.md` Q4/Q2 cells now name the measured over- and undercount, the 600
 unlinkable overflows and the new keys). The existing keys keep their names and meaning.
 
-**Left open on purpose, for the user:** which horizon, if any, is the headline eventual-retrieval figure.
-The probe reports 1, 3, 10 calls and session end side by side and designates none; "referenced" is a
-mention in `read_output_ids`, not delivery of content that was needed. Whether the misleading key names
-should ever be renamed is also left open (not done: it would break comparability with the recorded 32.1%).
+**Decided 2026-10-17, by the user: the headline eventual-retrieval figure is the NEXT CALL (horizon 1).**
+Landed at `a84f492d` (patch-id `3e06f5f539338c4cba7dc47190b00adc85b2722e`, on `experiments`' line, not yet
+on `master`): `q4.own_handle_referenced_later.headline` names the horizon (`horizon_calls: 1`) and carries
+its value, what it measures (`own handle referenced at the next call`) and its limit (`a mention in
+read_output_ids, not proof the content was needed`); the human-readable report prints it first. The
+1 / 3 / 10 / session-end figures stay beside it, unchanged. Six regression tests (five red before the
+change; mutating `HEADLINE_HORIZON` to 3 reds two of them). Measured on a COPY of the live db taken
+2026-10-17 (the live file was not read in place): 817 of 3,808 linkable overflows, 21.45%. That is a later
+snapshot than the 2026-10-16 one above (808 of 3,652, 22.12%), a different population, so the two are not a
+trend.
+
+**Key names deliberately kept.** `classify_next`'s `queried_the_buffer`, `next_call_pct` and the rest keep
+their names and meaning, so the recorded 32.1% stays reproducible; the name overclaim is carried by the
+docstrings and `docs/PROBES.md`, not by a rename. Additivity was checked at the bytes: the old script and the
+new one were run with `--json` on the same db copy, and with `headline` stripped from the new output the two
+are byte-identical (`diff` empty).
+
+**What this does NOT close.** The redundancy half: `q2`'s no-named-edit-between figure is still an upper
+bound (writes by `run_command`, `doc` or rename, and a differently spelled path, are invisible), and no
+source-state evidence is collected, so status stays `mitigated` and the `unverified:` caveat is reworded to
+say so rather than cleared. "Referenced" is still a mention, so whether unread content was *needed* is
+separate and unmeasured.
 
 ## References
 

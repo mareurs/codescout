@@ -384,6 +384,11 @@ def _read_handles(r) -> list[str]:
 
 
 HANDLE_HORIZONS = (1, 3, 10)
+# The designated headline horizon (user decision 2026-10-17): the NEXT call. It must be one of
+# HANDLE_HORIZONS, whose within_N_calls keys it restates.
+HEADLINE_HORIZON = 1
+HEADLINE_MEASURES = "own handle referenced at the next call"
+HEADLINE_LIMIT = "a mention in read_output_ids, not proof the content was needed"
 
 
 def own_handle_referenced_later(seq_by_session):
@@ -391,9 +396,10 @@ def own_handle_referenced_later(seq_by_session):
 
     Matches the handle the overflowing call emitted (`emitted_output_id`) against the handles later
     calls recorded as referenced (`read_output_ids`), which `classify_next` never does. Reported at
-    several horizons side by side and no single one is chosen: "the next call" is itself a horizon,
-    and was the one that produced the overclaim. Handles are per-process counters or random ids, so
-    the match is confined to one session_id (per-process).
+    several horizons side by side. The HEADLINE is horizon 1, the next call (user decision
+    2026-10-17, `headline` key); the others stay alongside it because "the next call" is itself a
+    horizon, and was the one that produced the original overclaim. Handles are per-process counters
+    or random ids, so the match is confined to one session_id (per-process).
 
     Still a MENTION, not a retrieval of needed content: a call that names the handle may be
     reading a page of it, listing it, or acknowledging it. Overflows with no recorded handle
@@ -439,7 +445,29 @@ def own_handle_referenced_later(seq_by_session):
         for h in HANDLE_HORIZONS
     })
     out["by_session_end_pct"] = round(100.0 * ever / linkable, 2) if linkable else 0.0
+    # ADDITIVE (2026-10-17): the user-designated headline is the NEXT CALL (horizon 1). It restates
+    # `within_1_calls` under a name that carries what it measures and its limit; no key above moves.
+    out["headline"] = {
+        "metric": "own_handle_referenced_at_next_call",
+        "horizon_calls": HEADLINE_HORIZON,
+        "count": within[HEADLINE_HORIZON],
+        "of_linkable_overflows": linkable,
+        "pct": out[f"within_{HEADLINE_HORIZON}_calls_pct"],
+        "measures": HEADLINE_MEASURES,
+        "limit": HEADLINE_LIMIT,
+        "decided": "2026-10-17, by the user",
+    }
     return out
+
+
+def headline_line(q4_out) -> str:
+    """The one-line, human-readable statement of the headline figure, labelled and limited."""
+    h = q4_out["own_handle_referenced_later"]["headline"]
+    return (
+        f"HEADLINE (eventual retrieval, horizon {h['horizon_calls']} = next call): "
+        f"{h['pct']}% ({h['count']} of {h['of_linkable_overflows']} linkable overflows) - "
+        f"{h['measures']}; limit: {h['limit']}"
+    )
 
 
 def q4(rows):
@@ -516,6 +544,8 @@ def main() -> int:
     if a.json:
         print(json.dumps(rep, indent=2))
         return 0
+    print(headline_line(rep["q4_overflow_economics"]))
+    print()
     print(json.dumps(rep, indent=2))
     return 0
 

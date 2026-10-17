@@ -1,17 +1,17 @@
 ---
 id: '3ff543cad7b4fb22'
 kind: bug
-status: open
+status: wontfix
 title: 'RESIDUAL: Author section-use signatures for the other nine guide topics and distinguish a missing guide file from ''no rules'' in topics_with_rules()'
 tags:
 - cluster/selector-narrower-than-its-population
-closed: null
+closed: 2026-10-17
 opened: 2026-09-24
 owner: marius
 related:
 - docs/issues/archive/2026-09-03-section-use-probe-zeroes-every-untargeted-topic.md
 severity: low
-unverified: 'PARTIAL FIX (2026-10-16, ec439798): keyed by (topic, heading), librarian signatures authored and checked on real transcripts, the other eight topics refused with a recorded reason. NOT done: a tool scope for progressive-disclosure, symbol-navigation and workspace-state (injected in 57%, 62% and 10% of sessions but carried by tools scan_transcript does not count), which is a design decision, and four topics (error-handling, iron-laws-detail, librarian-runtime, untrusted-content) have no injection anywhere so no positive control can exist. Python tests are hand-run only (no gate or CI lane runs tests/test_*.py).'
+unverified: 'STANDING Eight guide topics are refused, not measured: the user decided 2026-10-17 not to widen scan_transcript''s tool scope for progressive-disclosure, symbol-navigation and workspace-state (01b1a82b); error-handling, iron-laws-detail, librarian-runtime and untrusted-content have no injection anywhere, so no positive control can exist; project-activation-bootstrap is the session opener and would credit every later call by construction. Only librarian and tracker-conventions are scored.'
 ---
 
 ## Summary
@@ -69,11 +69,18 @@ Tests: `tests/test_probe_section_signatures.py` (13 cases, hand-run like the res
 
 **Reading the librarian non-zeros:** a `librarian` section is delivered BY the call shape its rule then matches, so a later call of that shape scores it engaged. Only its zeros carry information; e.g. `Worktree overlay` was engaged by 0 of 454 subagent sessions and 11 of 258 main sessions.
 
-**Not done, and not an authoring task:** a tool scope per topic for progressive-disclosure, symbol-navigation and workspace-state. Widening `scan_transcript` beyond doc/librarian is what once scored all six tracker-conventions sections at 100% from the `create_file` that wrote the script, so each tool added needs its own self-trigger control. Options and evidence were sent to the lead; until it is decided those three stay refused with `OUT OF SCOPE (decision pending)`.
+**Not done, and not an authoring task:** a tool scope per topic for progressive-disclosure, symbol-navigation and workspace-state. Widening `scan_transcript` beyond doc/librarian is what once scored all six tracker-conventions sections at 100% from the `create_file` that wrote the script, so each tool added needs its own self-trigger control. Options and evidence were sent to the lead; at the time of writing those three stayed refused with `OUT OF SCOPE (decision pending)`. **Decided 2026-10-17, see `## Resume`: not widened; the refusal now records the decision.**
 
 ## Resume
 
 Missing-guide half is in on `experiments` (local, not pushed at the time of writing). Status stays `open` for the nine-topic signature authoring, a separate measurement project that Marius must decide to staff; until then nine topics stay refused, by design. Separately, and more consequential than this bug: the Python test population (`tests/test_*.py`, 27 files measured) has no gate or CI lane, so every Python regression test is hand-run only. Whether to add a lane (and which runner) is a decision for Marius and should be filed as its own bug.
+
+
+**Decision 2026-10-17 (user): REFUSE all eight remaining topics; do not widen `scan_transcript`'s tool scope.** The three that were `OUT OF SCOPE (decision pending)` (progressive-disclosure, symbol-navigation, workspace-state) now carry `OUT OF SCOPE (decided 2026-10-17: widening the tool scope needs its own self-trigger control per tool; not staffed)` in `UNMEASURABLE_TOPICS`, so a refusal no longer sends a reader to wait on a decision that was made. Landed at `01b1a82b` (patch-id `a8585300c548f0ba438914ca88bd0c7f08f747ad`, on `experiments`' line, not yet on `master`); `tests/test_probe_section_signatures.py` gained `test_the_three_tool_scope_topics_carry_the_decided_reason_not_a_pending_one` (red before the change, 14 cases green after) and `topics_unaccounted_for()` is still empty (`test_every_topic_is_ruled_or_has_a_recorded_reason`). The other five unmeasurable topics are unchanged: four have no injection anywhere (a population cannot be created by deciding), and `project-activation-bootstrap` credits every later mechanism call by construction.
+
+**Status `wontfix` for the remainder; `librarian` is done.** Signatures for `librarian` and `tracker-conventions` exist and are verified on real transcripts (`ec439798`, patch-id `57b119b84b0b47a7b989f001c049b0f94e37e64b`); the missing-guide half is `34d39567`. What the user chose not to do is the tool-scope widening for the three topics, which is the only authoring left. If it is ever staffed, reopen with a self-trigger control per tool (a `create_file` carrying the guide's own words must engage nothing), as `ec439798` did for `librarian`.
+
+The separate Python-lane question in the previous Resume is overtaken: `scripts/gate.sh` now runs `python3 ./scripts/python-tests.py --lane light` (read at lines 144-146), so `tests/test_*.py` outside the heavy list are no longer hand-run only.
 
 ## References
 
