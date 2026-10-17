@@ -785,6 +785,46 @@ mod tests {
         }
     }
 
+    /// The root itself reached through a link (`/tmp` -> `/private/tmp` on macOS is the everyday
+    /// case): the target is canonicalized, so the ROOT must be resolved the same way or every
+    /// legitimate create is refused as "outside". The mutation that skips the root's resolution
+    /// survived the other tests, none of which has a symlinked root.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_still_works_when_the_repo_root_is_itself_a_symlink() {
+        let real = TempDir::new().unwrap();
+        let holder = TempDir::new().unwrap();
+        let root_link = holder.path().join("repo");
+        std::os::unix::fs::symlink(real.path(), &root_link).unwrap();
+        let ctx = mk_ctx(root_link);
+
+        call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/new/a.md", "kind": "spec",
+                   "title": "T", "body": "b"}),
+        )
+        .await
+        .expect("a create under a symlinked root stays inside it");
+
+        assert!(real.path().join("docs/new/a.md").is_file());
+    }
+
+    /// `validate_rel_path` rejects `..`, so this is defence in depth, but the property is the
+    /// reason the check exists at all: below an existing ancestor, `missing/../../x` is KEPT
+    /// as written, and `starts_with` is component-wise, so it still matches the root while the
+    /// OS would resolve it one level above. Refused rather than trusted.
+    #[test]
+    fn an_unresolved_dotdot_below_an_existing_ancestor_is_refused_not_trusted() {
+        let root = TempDir::new().unwrap();
+        let escaping = root.path().join("missing/../../escaped.md");
+        assert!(
+            refuse_create_outside_root(&escaping, root.path()).is_err(),
+            "a path whose `..` could not be resolved must be refused"
+        );
+        // Control: a plain nested path that does not exist yet is inside the root.
+        assert!(refuse_create_outside_root(&root.path().join("a/b/c.md"), root.path()).is_ok());
+    }
+
     #[tokio::test]
     async fn create_mints_a_slug_for_the_new_artifact() {
         let tmp = TempDir::new().unwrap();
