@@ -7296,6 +7296,9 @@ mod tests {
     /// `GUIDE_INDEX.declares(topic)` — `librarian` and `tracker-conventions` today — so it is
     /// meaningful in Phase 1 and widens automatically as later phases land
     /// declarations on other topics.
+    ///
+    /// Blind to any shape the census does not hold: it was recorded before
+    /// `doc.rekey_prefix`, `doc.state_at`, `doc.graft` and `librarian.audit_log` existed.
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_observed_shape_of_a_declaring_topic_has_a_section() {
@@ -7303,7 +7306,6 @@ mod tests {
         // calls. Scoped to topics that have opted into section grain, so it is
         // meaningful in Phase 1 and widens automatically as Phases 2-3 land.
         use crate::prompts::guide_index::GUIDE_INDEX;
-        let census = include_str!("prompts/shape_census.txt");
         let (_dir, server) = make_server().await;
 
         // Each probe stands for a RESULT SHAPE a real call returns, because
@@ -7322,15 +7324,14 @@ mod tests {
         ];
 
         let registered: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
-        // Rows evaluated per resolved tool, so a gate that ran over nothing cannot pass.
-        let mut evaluated: std::collections::BTreeMap<String, usize> = Default::default();
+        // (tool, topic) pairs actually JUDGED: a probe that routed to a declaring topic and was
+        // checked for coverage. Counted after the `declares` check, not when the row resolves,
+        // so a router that stopped reaching any declaring topic cannot leave this gate green
+        // having judged nothing.
+        let mut judged: std::collections::BTreeMap<(String, String), usize> = Default::default();
         let mut uncovered: Vec<String> = Vec::new();
 
-        for census_shape in census
-            .lines()
-            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
-            .map(|l| l.split_whitespace().next().unwrap())
-        {
+        for census_shape in census_shapes() {
             // A row whose tool is neither registered, renamed nor recorded as retired is a
             // stale census, not a row to step over: skipping it is how every `doc.*` shape
             // went unchecked after the `artifact` -> `doc` rename.
@@ -7340,13 +7341,12 @@ mod tests {
                 CensusRow::Retired(_) => continue,
                 CensusRow::Unresolved => panic!(
                     "census row `{census_shape}` names no registered tool and is neither \
-                     renamed nor retired; see \
-                     every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement"
+                 renamed nor retired; see \
+                 every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement"
                 ),
             };
             let shape = shape.as_str();
             let tool_name = shape.split('.').next().unwrap();
-            *evaluated.entry(tool_name.to_string()).or_default() += 1;
             let tool = server
                 .tools
                 .iter()
@@ -7365,13 +7365,13 @@ mod tests {
                 if !GUIDE_INDEX.declares(topic) {
                     continue;
                 }
+                *judged
+                    .entry((tool_name.to_string(), topic.to_string()))
+                    .or_default() += 1;
                 let covered = !GUIDE_INDEX
                     .match_sections(topic, Some(shape), probe)
                     .is_empty();
-                let waived = crate::prompts::SECTION_WAIVERS
-                    .iter()
-                    .any(|(t, _, r)| *t == topic && r.contains(shape));
-                if !(covered || waived) {
+                if !(covered || crate::prompts::shape_is_waived(topic, shape)) {
                     uncovered.push(format!(
                         "`{shape}` -> `{topic}` on a result shaped like {probe}"
                     ));
@@ -7381,17 +7381,27 @@ mod tests {
         assert!(
             uncovered.is_empty(),
             "call shapes route to a declaring topic but no section there serves them, and no \
-             SECTION_WAIVERS entry names the shape: {uncovered:#?}. Add a `serves:` declaration \
-             in that topic, or a SECTION_WAIVERS entry naming the shape and saying why. An \
-             undeclared shape gets only the preamble."
+         SECTION_WAIVERS entry carries the shape as a whole word: {uncovered:#?}. Add a \
+         `serves:` declaration in that topic, or a SECTION_WAIVERS entry naming the shape and \
+         saying why. An undeclared shape gets only the preamble."
         );
-        // The loop above is only evidence for the tools it reached. Name the two this gate
-        // exists for, so deleting a rename (or the `doc` tool) fails here, not silently.
-        for tool in ["doc", "librarian"] {
+        // The loop above is evidence only for the (tool, topic) pairs it judged. Name the four
+        // this gate exists for, so a router or registry change that leaves one unjudged fails
+        // here instead of narrowing the gate silently.
+        for (tool, topic) in [
+            ("doc", "librarian"),
+            ("doc", "tracker-conventions"),
+            ("librarian", "librarian"),
+            ("librarian", "tracker-conventions"),
+        ] {
             assert!(
-                evaluated.get(tool).copied().unwrap_or(0) > 0,
-                "Gate 2 evaluated no census row for `{tool}` (evaluated: {evaluated:?}): \
-                 it would pass while checking none of that tool's shapes."
+                judged
+                    .get(&(tool.to_string(), topic.to_string()))
+                    .copied()
+                    .unwrap_or(0)
+                    > 0,
+                "Gate 2 judged no `{tool}` census shape against `{topic}` (judged: {judged:?}): \
+             it would pass while checking none of them."
             );
         }
     }
@@ -7422,24 +7432,21 @@ mod tests {
     #[cfg(feature = "librarian")]
     const CENSUS_RENAMED_TOOLS: &[(&str, &str)] = &[("artifact", "doc")];
 
-    /// Census tool names that no longer exist and have no successor, each with its reason.
+    /// Census tool names the registry does not have and `RETIRED_TOOL_NAMES` does not cover:
+    /// stray transcript rows with no successor, each with its reason. The 2026-09-02 collapse
+    /// retirements (`read_markdown`, `edit_markdown`, ...) are deliberately NOT repeated here;
+    /// they come from `RETIRED_TOOL_NAMES`, the one table of dead tool names.
     #[cfg(feature = "librarian")]
-    const CENSUS_RETIRED_TOOLS: &[(&str, &str)] = &[
-        (
-            "read_markdown",
-            "Folded into `read_file`'s markdown mode; the action vocabulary differs, so no row maps 1:1.",
-        ),
-        (
-            "edit_markdown",
-            "Folded into `edit_file`'s markdown mode; the action vocabulary differs, so no row maps 1:1.",
-        ),
+    const CENSUS_STRAY_TOOLS: &[(&str, &str)] = &[
         (
             "Edit",
             "Claude Code's built-in editor, not a codescout tool; the row is a misrouted call.",
         ),
         (
             "peer",
-            "Not registered in this server today; a single stray row (count 1) with no successor.",
+            "PeerTool registers only when `peer_enabled_at_runtime` opts in, which `make_server` \
+         does not; the one row (`peer.list`, count 1) also names an action `peer` does not \
+         have (status, query, explore, knowledge), so it could not be judged when registered.",
         ),
         (
             "replace_all",
@@ -7450,6 +7457,28 @@ mod tests {
             "Not registered in this server today; a single stray row (count 1) with no successor.",
         ),
     ];
+    /// Why a census tool name that is not registered may be stepped over, if it may.
+    ///
+    /// A name the rename tables map to a live tool never gets retired here (it resolves through
+    /// the rename), so an unknown action under a renamed prefix (`artifact_refresh.other`) stays
+    /// `Unresolved` rather than being retired by `RETIRED_TOOL_NAMES`'s entry for the old name.
+    #[cfg(feature = "librarian")]
+    fn census_retirement(tool: &str) -> Option<&'static str> {
+        if let Some((_, why)) = CENSUS_STRAY_TOOLS.iter().find(|(t, _)| *t == tool) {
+            return Some(why);
+        }
+        let renamed = CENSUS_RENAMED_TOOLS.iter().any(|(old, _)| *old == tool)
+            || CENSUS_RENAMED_SHAPES
+                .iter()
+                .any(|(old, _)| old.split('.').next() == Some(tool));
+        if renamed {
+            return None;
+        }
+        RETIRED_TOOL_NAMES
+            .iter()
+            .find(|(name, _, _)| *name == tool)
+            .map(|(_, note, _)| *note)
+    }
 
     /// Resolve one census row against the registered tool names. Never skips: a row is
     /// `Live`, `Retired` with a recorded reason, or `Unresolved`, which callers must fail on.
@@ -7478,8 +7507,8 @@ mod tests {
             return CensusRow::Live(current);
         }
         let census_tool = shape.split('.').next().unwrap();
-        match CENSUS_RETIRED_TOOLS.iter().find(|(t, _)| *t == census_tool) {
-            Some((_, why)) => CensusRow::Retired(why),
+        match census_retirement(census_tool) {
+            Some(why) => CensusRow::Retired(why),
             None => CensusRow::Unresolved,
         }
     }
@@ -7500,38 +7529,97 @@ mod tests {
     /// skipped and the gate verified only the rows whose name had not changed — green because it
     /// skipped its subject. This is the guard on the skip: every row must resolve to a live tool
     /// or carry a recorded retirement, so the next rename fails here instead of narrowing Gate 2.
+    ///
+    /// It also refuses to pass on an empty or truncated census: the unresolved check alone is
+    /// monotone under removal (a census with no rows has no unresolved ones), so the row count and
+    /// the per-tool Live counts are floors, not totals. They sit below today's counts (88 rows,
+    /// 16 resolving to `doc`, 9 to `librarian`) and census rows are never added without
+    /// regenerating it, so they never need revising upward.
     /// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement() {
         let (_dir, server) = make_server().await;
         let registered: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
-        let unresolved: Vec<&str> = census_shapes()
-            .into_iter()
-            .filter(|s| resolve_census_row(s, &registered) == CensusRow::Unresolved)
-            .collect();
+        let rows = census_shapes();
+        let mut unresolved: Vec<&str> = Vec::new();
+        let mut live_by_tool: std::collections::BTreeMap<String, usize> = Default::default();
+        for row in &rows {
+            match resolve_census_row(row, &registered) {
+                CensusRow::Live(shape) => {
+                    *live_by_tool
+                        .entry(shape.split('.').next().unwrap().to_string())
+                        .or_default() += 1;
+                }
+                CensusRow::Retired(_) => {}
+                CensusRow::Unresolved => unresolved.push(row),
+            }
+        }
         assert!(
             unresolved.is_empty(),
             "census rows {unresolved:?} name no registered tool, no rename in \
          CENSUS_RENAMED_SHAPES / CENSUS_RENAMED_TOOLS and no retirement in \
-         CENSUS_RETIRED_TOOLS (registered: {registered:?}). Gate 2 would skip them. \
-         Rename them to today's tool, or record why the tool is gone."
+         CENSUS_STRAY_TOOLS or RETIRED_TOOL_NAMES (registered: {registered:?}). Gate 2 would \
+         skip them. Rename them to today's tool, or record why the tool is gone."
         );
+        assert!(
+            rows.len() >= 60,
+            "the census parsed to only {} rows: it is empty or truncated, and every check here \
+         would pass over it",
+            rows.len()
+        );
+        for (tool, floor) in [("doc", 10usize), ("librarian", 5)] {
+            let live = live_by_tool.get(tool).copied().unwrap_or(0);
+            assert!(
+                live >= floor,
+                "only {live} census rows resolve to a live `{tool}` shape (floor {floor}; live: \
+             {live_by_tool:?}): the renames that carry the census to today's names are missing"
+            );
+        }
     }
     /// The tables above must not outlive their reason: a retirement for a tool that is registered
     /// again, or a rename whose target does not exist, would let the census row resolve to
-    /// nothing the gate checks. And the resolver must fail an unknown name rather than skip it.
+    /// nothing the gate checks. A rename must also land on a real ACTION of its target (the
+    /// way Gate 6 checks a declared shape), since a renamed shape naming an action `doc` does not
+    /// have is judged against a call no one can make. And the resolver must fail an unknown name
+    /// rather than skip it.
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn census_renames_and_retirements_are_not_stale() {
         let (_dir, server) = make_server().await;
         let registered: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
+        let actions_of = |tool: &str| -> Vec<String> {
+            server
+                .tools
+                .iter()
+                .find(|t| t.name() == tool)
+                .expect("checked registered before asking for its actions")
+                .input_schema()
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(|e| e.as_array())
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
         for (old, new) in CENSUS_RENAMED_SHAPES {
-            let target = new.split('.').next().unwrap();
+            let (target, action) = new.split_once('.').unwrap_or_else(|| {
+                panic!("CENSUS_RENAMED_SHAPES `{old}` -> `{new}` names no action")
+            });
             assert!(
                 registered.contains(&target),
                 "CENSUS_RENAMED_SHAPES `{old}` -> `{new}`: `{target}` is not a registered tool"
+            );
+            assert!(
+                actions_of(target).iter().any(|a| a == action),
+                "CENSUS_RENAMED_SHAPES `{old}` -> `{new}`: `{action}` is not one of `{target}`'s \
+             actions ({})",
+                actions_of(target).join(", ")
             );
         }
         for (old, new) in CENSUS_RENAMED_TOOLS {
@@ -7545,18 +7633,37 @@ mod tests {
              its rows are checked under their own name"
             );
         }
-        for (tool, why) in CENSUS_RETIRED_TOOLS {
+        // Every census row a rename carried over must land on a real action of its new tool.
+        for row in census_shapes() {
+            if let CensusRow::Live(now) = resolve_census_row(row, &registered) {
+                if now != row {
+                    if let Some((tool, action)) = now.split_once('.') {
+                        assert!(
+                            actions_of(tool).iter().any(|a| a == action),
+                            "census row `{row}` resolves to `{now}`, but `{action}` is not one of \
+                         `{tool}`'s actions ({})",
+                            actions_of(tool).join(", ")
+                        );
+                    }
+                }
+            }
+        }
+        for (tool, why) in CENSUS_STRAY_TOOLS {
             assert!(
                 !registered.contains(tool),
-                "CENSUS_RETIRED_TOOLS `{tool}` is a registered tool again; drop the retirement"
+                "CENSUS_STRAY_TOOLS `{tool}` is a registered tool again; drop the entry"
+            );
+            assert!(
+                !RETIRED_TOOL_NAMES.iter().any(|(name, _, _)| name == tool),
+                "CENSUS_STRAY_TOOLS `{tool}` is already in RETIRED_TOOL_NAMES; one table per fact"
             );
             assert!(
                 why.len() > 40,
-                "CENSUS_RETIRED_TOOLS `{tool}` needs a real reason, not a placeholder"
+                "CENSUS_STRAY_TOOLS `{tool}` needs a real reason, not a placeholder"
             );
         }
 
-        // The resolver's three outcomes, on a fixed registry so the tables cannot change them.
+        // The resolver's outcomes, on a fixed registry so the tables cannot change them.
         let fixed = ["doc", "symbols"];
         assert_eq!(
             resolve_census_row("symbols", &fixed),
@@ -7576,10 +7683,26 @@ mod tests {
             CensusRow::Unresolved,
             "an unknown tool must be Unresolved (a failure), never skipped"
         );
+        assert_eq!(
+            resolve_census_row("artifact_refresh.other", &fixed),
+            CensusRow::Unresolved,
+            "an unknown action under a renamed prefix must not be retired by the old name's entry \
+         in RETIRED_TOOL_NAMES"
+        );
         assert!(matches!(
             resolve_census_row("Edit", &fixed),
             CensusRow::Retired(_)
         ));
+        // The markdown retirements come from RETIRED_TOOL_NAMES, not from a second copy.
+        let from_table = RETIRED_TOOL_NAMES
+            .iter()
+            .find(|(name, _, _)| *name == "read_markdown")
+            .map(|(_, note, _)| *note)
+            .expect("RETIRED_TOOL_NAMES records read_markdown");
+        assert_eq!(
+            resolve_census_row("read_markdown", &fixed),
+            CensusRow::Retired(from_table)
+        );
     }
 
     /// Every DECLARED shape must name a real tool, and a real action on that tool.

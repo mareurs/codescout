@@ -80,6 +80,12 @@ primary block:
 | `delete` | `dry_run, deleted, id, would_delete_abs_path, ...` | no |
 | `rekey_prefix`, `state_at`, `event_create`, `event_list`, `link`, `augment`, `gather`, `graph`, `list_stale` | no path key | no |
 
+**Correction 2026-10-17:** the `list_stale` entry in that last row is wrong. `list_stale` returns
+`items[].abs_path`, which the scan reads, so a real call against an augmented tracker DOES route to
+`tracker-conventions` (preamble only); filed as
+`docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md`.
+`gather`, `graph`, `event_create` and `event_list` were re-measured the same day and name no tracker path.
+
 The adapter's own doc comment claimed `update` and `move` return a top-level path; it is corrected in
 the same change. A fixture comment in `server.rs` also claimed an `append_entry` under
 `docs/trackers/` would route here; it would not.
