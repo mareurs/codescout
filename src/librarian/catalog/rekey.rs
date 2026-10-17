@@ -588,6 +588,10 @@ pub fn rekey_prefix_rows(
     }
 
     let roots = cat.write_roots();
+    // The sidecar publication after the commit would be refused for a declared path that is a
+    // link or leaves the repository; ask first, in `Preview` too (an Ok preview promises the
+    // apply succeeds), so the refusal comes with nothing rewritten and no half-committed rekey.
+    crate::librarian::augmentation_sidecar::preflight_write_through(cat, artifact_id)?;
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -794,9 +798,11 @@ pub fn rekey_prefix_rows(
             format!("rekey_prefix: the catalog moved but its committed sidecar did not: {e}"),
             "The rekey itself is COMMITTED — ids, schema and body have all moved. Only the \
              sidecar under `docs/augmentations/` is behind, which matters on other machines \
-             because `reindex` re-attaches the declared shape from it. Republish with \
-             librarian(action=\"doctor\", fix=\"export_augmentations\") after removing the stale \
-             file; that fix creates rather than refreshes."
+             because `reindex` re-attaches the declared shape from it. If the error above says \
+             the sidecar path is a symbolic link or leaves the repository, fix THAT first (the \
+             file behind a link is not yours to delete). For an ordinary stale file, remove it \
+             and republish with librarian(action=\"doctor\", fix=\"export_augmentations\"); that \
+             fix creates rather than refreshes."
                 .to_string(),
         )
     })?;

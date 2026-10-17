@@ -221,19 +221,33 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             crate::librarian::util::refuse_path_outside_root(src_parent, root_path, "move from")?;
         }
         // `rename` moves a LINK without retargeting it, so a link whose target is spelled
-        // RELATIVELY would resolve against the new directory and dangle (the id repair's read then
-        // failed with ENOENT, after the rename, leaving the move half done).
+        // RELATIVELY resolves against the new directory. It still means the same file when both
+        // directories reach the target the same way (`a/x.md -> ../real/x.md` moved to `b/x.md`),
+        // and dangles, or silently names ANOTHER file, when they do not (the id repair's read then
+        // failed with ENOENT after the rename, leaving the move half done). The first version
+        // refused any relative link whose directory changed, which also refused the former; this
+        // compares where the target lands from each directory.
         if old_full.parent() != new_full.parent() {
-            if let Ok(target) = std::fs::read_link(&old_full) {
-                if target.is_relative() {
+            if let (Ok(target), Some(old_dir), Some(new_dir)) = (
+                std::fs::read_link(&old_full),
+                old_full.parent(),
+                new_full.parent(),
+            ) {
+                if target.is_relative()
+                    && crate::librarian::util::link_target_landing(old_dir, &target)
+                        != crate::librarian::util::link_target_landing(new_dir, &target)
+                {
                     return Err(super::LibrarianRecoverableError::with_hint(
                         format!(
                             "refusing to move `{}`: it is a symbolic link with the RELATIVE target `{}`, \
-                             and a move does not retarget a link, so it would dangle in a different directory",
+                             and a move does not retarget a link, so from `{}` it would not resolve to \
+                             the file it names now",
                             old_full.display(),
-                            target.display()
+                            target.display(),
+                            new_dir.display()
                         ),
-                        "Nothing was moved. Move it within its own directory, or replace the link with \
+                        "Nothing was moved. Move it within its own directory, to a directory from which \
+                         the same relative target reaches the same file, or replace the link with \
                          one whose target is absolute, or move the file it points at.",
                     ));
                 }

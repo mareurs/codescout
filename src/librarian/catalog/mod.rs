@@ -38,9 +38,25 @@ pub struct Catalog {
     /// tool call that holds this catalog's lock. Catalog-level writers (`allocate_entry_id`,
     /// `append_entry`, `update_entry`, `rekey_prefix_rows`, the sidecar write-through) have no
     /// `ToolContext`, and the write door needs a root to judge "outside" against; the tool arms it
-    /// right after taking the lock (`arm_write_roots`). Empty means "no managed root known" and the
-    /// door falls back to the repository the path spells. Interior-mutable so a `&Catalog` can arm it.
-    write_roots: parking_lot::Mutex<Vec<std::path::PathBuf>>,
+    /// right after taking the lock (`arm_write_roots`), and holds the returned [`WriteRootsArm`]
+    /// for the call: dropping it CLEARS the roots, so they never outlive the call that armed them.
+    /// Empty means "no managed root known" and the door falls back to the repository the path
+    /// spells. Interior-mutable (and shared with the guard) so a `&Catalog` can arm it.
+    write_roots: std::sync::Arc<parking_lot::Mutex<Vec<std::path::PathBuf>>>,
+}
+/// Clears a catalog's armed write roots when dropped. Returned by `Catalog::set_write_roots`; hold
+/// it in a named local (`let _armed = ...`, never `let _ = ...`, which drops at once) for the
+/// length of the tool call. It owns a handle on the roots, not a borrow of the catalog, so the
+/// caller can keep using the catalog mutably while it lives.
+#[must_use = "the roots are cleared when this is dropped; bind it for the whole call"]
+pub(crate) struct WriteRootsArm {
+    roots: std::sync::Arc<parking_lot::Mutex<Vec<std::path::PathBuf>>>,
+}
+
+impl Drop for WriteRootsArm {
+    fn drop(&mut self) {
+        self.roots.lock().clear();
+    }
 }
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -597,13 +613,17 @@ impl Catalog {
     fn from_conn(conn: Connection) -> Self {
         Self {
             conn,
-            write_roots: parking_lot::Mutex::new(Vec::new()),
+            write_roots: std::sync::Arc::new(parking_lot::Mutex::new(Vec::new())),
         }
     }
 
-    /// Arm the managed roots for the tool call that holds this catalog's lock (see the field).
-    pub(crate) fn set_write_roots(&self, roots: Vec<std::path::PathBuf>) {
+    /// Arm the managed roots for the tool call that holds this catalog's lock (see the field). The
+    /// returned guard clears them on drop.
+    pub(crate) fn set_write_roots(&self, roots: Vec<std::path::PathBuf>) -> WriteRootsArm {
         *self.write_roots.lock() = roots;
+        WriteRootsArm {
+            roots: std::sync::Arc::clone(&self.write_roots),
+        }
     }
 
     /// The managed roots armed by the current tool call; empty when none was armed.

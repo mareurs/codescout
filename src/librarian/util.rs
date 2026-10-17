@@ -113,8 +113,8 @@ pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::Pat
     }
 }
 
-/// [`refuse_path_outside_root`] for a catalog-supplied path, against ONE root chosen by
-/// [`confinement_root`]; a path with no root at all is not checked.
+/// [`refuse_path_outside_root`] for a catalog-supplied path, against ONE root; a path for which no
+/// root can be named is not checked.
 ///
 /// This is the question the LEAF rule cannot ask: a row whose parent directory is a link out of
 /// the repository. The indexer can mint one two ways, both shippable by a repository
@@ -124,34 +124,39 @@ pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::Pat
 /// A link whose target stays INSIDE the repository is untouched: a symlinked tracker directory
 /// is a legitimate setup.
 ///
-/// `roots` are the caller's MANAGED roots (`tools::managed_roots`, git root first), the same list
-/// `doc(move)` and `doc(delete)` consult, so the three agree on what "outside" means. The
-/// first design used a root found by walking the spelled ancestors for a `.git`, which cannot
-/// tell "a link to ANOTHER repository" (outside) from "my own project reached through a link"
-/// (inside) — the two are the same input, and only the managed roots say which one this is.
+/// **Which root.** Two candidates, and the path is judged against the DEEPER of the two:
+///
+/// 1. the *base*: the first managed root that lexically contains the spelling
+///    ([`confinement_root`]; `roots` is `tools::managed_roots`, the list `doc(move)` and
+///    `doc(delete)` consult), else the deepest ANCESTOR of the spelling that resolves to a
+///    managed root (a project registered under its canonical path while rows keep the spelling
+///    of a link to it: `home/proj/x.md` against a root of `data/proj`);
+/// 2. the *spelled repository* ([`spelled_repo_root`]): the nearest non-link ancestor holding a
+///    `.git`.
+///
+/// Neither alone is sound. The base alone is too wide where a managed root holds several
+/// repositories (a legacy `[[roots]]` umbrella, or an unrelated active project listed first): a
+/// link from repository A into repository B stays inside the umbrella, and the write lands in B.
+/// The spelled repository alone knows nothing of a project reached through a link (its walk
+/// skips both links and finds no `.git`), and so checked nothing. There is deliberately NO
+/// "the resolution lies under some managed root, so accept" shortcut: a foreign repository's row
+/// that resolves into a managed project is the very case that must be refused, and the
+/// shortcut admitted it. A path with neither candidate has nothing to compare against and only
+/// the leaf rule applies.
 pub(crate) fn refuse_catalogued_path_outside_repo(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
     verb: &str,
 ) -> anyhow::Result<()> {
-    if let Some(root) = confinement_root(roots, path) {
-        return refuse_path_outside_root(path, &root, verb);
-    }
-    // No managed root contains the SPELLING. A project reached through a link is registered under
-    // its canonical path while rows keep the spelled one (`home/proj/x.md` against a root of
-    // `data/proj`), so before falling back, accept a path whose RESOLUTION lies under a managed
-    // root: it is inside something the caller manages.
-    let resolved = resolve_through_existing_ancestor(path);
-    if roots
-        .iter()
-        .any(|r| resolved.starts_with(resolve_through_existing_ancestor(r)))
-    {
-        return Ok(());
-    }
-    match spelled_repo_root(path) {
-        Some(root) => refuse_path_outside_root(path, &root, verb),
-        None => Ok(()),
-    }
+    let base =
+        confinement_root(roots, path).or_else(|| ancestor_resolving_to_managed_root(roots, path));
+    let root = match (base, spelled_repo_root(path)) {
+        (Some(base), Some(spelled)) if spelled.starts_with(&base) => spelled,
+        (Some(base), _) => base,
+        (None, Some(spelled)) => spelled,
+        (None, None) => return Ok(()),
+    };
+    refuse_path_outside_root(path, &root, verb)
 }
 
 /// The root a catalogued path is judged against: the first managed root that contains its
@@ -163,6 +168,43 @@ pub(crate) fn confinement_root(
     path: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
     crate::librarian::tools::containing_root(roots, path).cloned()
+}
+
+/// The deepest ancestor of `path`'s SPELLING that resolves to a managed root, if any: the root a
+/// project reached through a link is registered as, found from the spelled side. Only an ancestor
+/// that resolves to a root EXACTLY counts; one that resolves to somewhere merely below a root (a
+/// foreign repository's link into a managed project) names no root, which is the point.
+fn ancestor_resolving_to_managed_root(
+    roots: &[std::path::PathBuf],
+    path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let resolved_roots: Vec<std::path::PathBuf> = roots
+        .iter()
+        .map(|r| resolve_through_existing_ancestor(r))
+        .collect();
+    path.ancestors()
+        .skip(1)
+        .find(|a| {
+            std::fs::canonicalize(a)
+                .map(|c| resolved_roots.contains(&c))
+                .unwrap_or(false)
+        })
+        .map(std::path::Path::to_path_buf)
+}
+
+/// SQL predicate (text, with bound parameters) matching a path column that IS `root` or lies
+/// under it, by exact comparison: `(col = ?root OR substr(col, 1, length(?prefix)) = ?prefix)`
+/// where the caller binds `root` to the root's path and `prefix` to `root + "/"`.
+///
+/// Not `LIKE`. SQLite's `LIKE` ignores ASCII case, treats `_` and `%` in the pattern as
+/// wildcards, and the escaping that cures the second does nothing for the first: `b/my_app`
+/// matched the rows of `b/MY_APP`, and a path containing `'` needs the parameter left UNquoted.
+/// Equality and `substr` are byte-exact for the characters the stored path holds and take every
+/// metacharacter literally, so a sibling can never be "under" the root. `col` and the two
+/// parameter placeholders are SQL text the CALLER supplies (a column name and `?N`); never
+/// interpolate a user string into them.
+pub(crate) fn path_at_or_under_sql(col: &str, root_param: &str, prefix_param: &str) -> String {
+    format!("({col} = {root_param} OR substr({col}, 1, length({prefix_param})) = {prefix_param})")
 }
 
 /// Refuse a `path` that does not resolve to somewhere under `root`.
@@ -240,6 +282,33 @@ fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::path::PathB
     }
 }
 
+/// Where the relative symlink target `target` lands when the link sits in directory `dir`:
+/// `dir` resolved as far as it exists ([`resolve_through_existing_ancestor`]), then the target's
+/// components applied lexically (`..` pops, a name pushes). The result is a comparison key, not a
+/// path to open: two directories that give the SAME key reach the same file through the same
+/// relative target, which is what a move that cannot retarget a link needs to know. `dir` may not
+/// exist yet (the destination of a move, before its directories are created); the components below
+/// the deepest existing ancestor are plain names, so popping them is exact.
+pub(crate) fn link_target_landing(
+    dir: &std::path::Path,
+    target: &std::path::Path,
+) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = resolve_through_existing_ancestor(dir);
+    for c in target.components() {
+        match c {
+            Component::Normal(n) => out.push(n),
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            // A rooted or prefixed target is absolute and never reaches here for a relative link.
+            Component::RootDir | Component::Prefix(_) => return target.to_path_buf(),
+        }
+    }
+    out
+}
+
 /// Escape SQL `LIKE` wildcard characters (`%`, `_`) and the escape character
 /// itself (`\`) in a *needle* (user-supplied pattern) before interpolating it
 /// into a `LIKE` clause. Callers MUST pair this with `ESCAPE '\\'` on the SQL
@@ -305,6 +374,42 @@ mod tests {
     #[test]
     fn escape_like_pattern_combined_input() {
         assert_eq!(escape_like_pattern("50%_off\\sale"), "50\\%\\_off\\\\sale");
+    }
+
+    /// Rows as the catalog stores a Windows path (`//?/C:/...`), a root with every LIKE hazard in
+    /// it, and siblings that differ in case, in a wildcard position and by a longer name: only the
+    /// root itself and its descendants match.
+    #[test]
+    fn path_at_or_under_sql_is_exact_for_windows_shaped_paths() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (p TEXT);").unwrap();
+        let root = "//?/C:/Users/Dev/My_App's%x";
+        for p in [
+            root.to_string(),
+            format!("{root}/docs/a.md"),
+            "//?/C:/Users/Dev/MY_APP's%x/docs/a.md".to_string(),
+            "//?/c:/Users/Dev/My_App's%x/docs/a.md".to_string(),
+            "//?/C:/Users/Dev/MyXApp's%x/docs/a.md".to_string(),
+            format!("{root}-other/docs/a.md"),
+            format!("{root}x/docs/a.md"),
+        ] {
+            conn.execute("INSERT INTO t VALUES (?1)", [p]).unwrap();
+        }
+        let prefix = format!("{root}/");
+        let sql = format!(
+            "SELECT p FROM t WHERE {} ORDER BY p",
+            path_at_or_under_sql("p", "?1", "?2")
+        );
+
+        let got: Vec<String> = conn
+            .prepare(&sql)
+            .unwrap()
+            .query_map([root, prefix.as_str()], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(got, vec![root.to_string(), format!("{root}/docs/a.md")]);
     }
 
     #[test]

@@ -1271,3 +1271,416 @@ async fn append_entry_writes_its_section_in_a_project_reached_through_a_link() {
     let text = std::fs::read_to_string(real.join("ledger.md")).unwrap();
     assert!(text.contains("F-1 — first"), "{text}");
 }
+
+// ======================= round 4 =============================================================
+
+fn cp(path: &Path) -> std::sync::Arc<crate::librarian::current_project::CurrentProject> {
+    std::sync::Arc::new(crate::librarian::current_project::CurrentProject {
+        abs_path: path.to_path_buf(),
+        git_root: path.to_path_buf(),
+        main_root: None,
+        umbrella: None,
+    })
+}
+
+/// `U` holds two repositories A and B (a legacy `[[roots]]` entry can hold several), and
+/// `A/linkdir -> B/docs`. Returns (u, a, b).
+fn umbrella() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let u = tempfile::tempdir().unwrap();
+    let a = u.path().join("A");
+    let b = u.path().join("B");
+    std::fs::create_dir_all(a.join(".git")).unwrap();
+    std::fs::create_dir_all(b.join(".git")).unwrap();
+    std::fs::create_dir_all(b.join("docs")).unwrap();
+    std::fs::write(b.join("docs/x.md"), DOC).unwrap();
+    std::os::unix::fs::symlink(b.join("docs"), a.join("linkdir")).unwrap();
+    (u, a, b)
+}
+
+/// P1: a legacy umbrella root plus an UNRELATED active project. The first managed root that contains
+/// the spelling is the umbrella, and judged strictly against it a link from repository A into
+/// ANOTHER repository B stays "inside". Round 2 judged against the spelled repository A and refused.
+/// The path is now judged against the DEEPER of the confinement root and the spelled repository.
+#[tokio::test]
+async fn an_umbrella_root_does_not_admit_a_link_into_another_repository() {
+    let (u, a, b) = umbrella();
+    let c = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(c.path().join(".git")).unwrap();
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_root(Root {
+            name: "u".into(),
+            path: u.path().to_path_buf(),
+        })
+        .with_current_project(cp(c.path()))
+        .build();
+    let id = catalog_row(&ctx, &a.join("linkdir/x.md"));
+
+    let err = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("a link from A to ANOTHER repository B is outside A");
+
+    assert!(
+        msg(&err).contains("outside the repository root"),
+        "{}",
+        msg(&err)
+    );
+    assert_eq!(std::fs::read_to_string(b.join("docs/x.md")).unwrap(), DOC);
+}
+
+/// The control of P1: the same layout with A as the active project was already refused.
+#[tokio::test]
+async fn with_the_owning_repository_active_a_link_into_another_one_is_refused() {
+    let (u, a, b) = umbrella();
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_root(Root {
+            name: "u".into(),
+            path: u.path().to_path_buf(),
+        })
+        .with_current_project(cp(&a))
+        .build();
+    let id = catalog_row(&ctx, &a.join("linkdir/x.md"));
+
+    update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("refused");
+
+    assert_eq!(std::fs::read_to_string(b.join("docs/x.md")).unwrap(), DOC);
+}
+
+/// A repository INSIDE the managed root that links to a place still inside the managed root but
+/// outside that repository: judged against the deeper spelled repository, refused; the control is
+/// a link that stays inside the nested repository.
+#[tokio::test]
+async fn a_nested_repository_is_judged_against_itself_not_against_the_umbrella() {
+    let (u, a, b) = umbrella();
+    std::fs::create_dir_all(a.join("real")).unwrap();
+    std::fs::write(a.join("real/y.md"), DOC).unwrap();
+    std::os::unix::fs::symlink(a.join("real"), a.join("inner")).unwrap();
+    let ctx = mk_ctx(u.path());
+    let outside = catalog_row(&ctx, &a.join("linkdir/x.md"));
+    let inside = catalog_row(&ctx, &a.join("inner/y.md"));
+
+    update::call(&ctx, json!({"id": outside, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("B is another repository");
+    update::call(&ctx, json!({"id": inside, "patch": {"status": "fixed"}}))
+        .await
+        .expect("a link that stays inside its own repository is fine");
+
+    assert_eq!(std::fs::read_to_string(b.join("docs/x.md")).unwrap(), DOC);
+}
+
+/// P2: a FOREIGN repository Q (not managed) has `Q/linkdir -> P/docs`, P being the managed
+/// project. The resolution lies inside P, so the old "resolution under any managed root" shortcut
+/// admitted Q's row and the write landed in P's file under Q's id.
+#[tokio::test]
+async fn a_foreign_repositorys_row_resolving_into_the_managed_project_is_refused() {
+    let p = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(p.path().join(".git")).unwrap();
+    std::fs::create_dir_all(p.path().join("docs")).unwrap();
+    std::fs::write(p.path().join("docs/x.md"), DOC).unwrap();
+    let q = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(q.path().join(".git")).unwrap();
+    std::os::unix::fs::symlink(p.path().join("docs"), q.path().join("linkdir")).unwrap();
+    let ctx = mk_ctx(p.path());
+    let id = catalog_row(&ctx, &q.path().join("linkdir/x.md"));
+
+    update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("Q's row below a link out of Q is outside Q");
+
+    assert_eq!(
+        std::fs::read_to_string(p.path().join("docs/x.md")).unwrap(),
+        DOC
+    );
+}
+
+/// P3 (H-1): the managed root is registered CANONICALLY (`data/proj`), rows are spelled through a
+/// link to it (`home/proj/...`), no `.git` sits above the link, and INSIDE the project `linkdir`
+/// links to an outside directory. No root contains the spelling; the old resolution shortcut could
+/// only admit; the spelled walk skips both links and finds no `.git`, so nothing was checked and
+/// the write landed OUTSIDE every managed root. An ancestor of the spelling that canonicalizes to
+/// a managed root is now the root, strictly.
+#[tokio::test]
+async fn a_canonically_registered_project_reached_through_a_link_still_refuses_an_outward_dir_link()
+{
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("x.md"), DOC).unwrap();
+    std::os::unix::fs::symlink(outside.path(), data.join("proj/linkdir")).unwrap();
+    let canonical = std::fs::canonicalize(data.join("proj")).unwrap();
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_current_project(cp(&canonical))
+        .build();
+    let id = catalog_row(&ctx, &home.join("proj/linkdir/x.md"));
+
+    let err = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("the resolution leaves every managed root");
+
+    assert!(
+        msg(&err).contains("outside the repository root"),
+        "{}",
+        msg(&err)
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("x.md")).unwrap(),
+        DOC
+    );
+}
+
+/// P4: H1 re-derived with `%`, `_` and `'` in the walk root, plus case-only and wildcard siblings.
+#[test]
+fn a_walk_root_with_like_metacharacters_reclaims_its_own_rows_and_spares_siblings() {
+    let b = tempfile::tempdir().unwrap();
+    let root = b.path().join("x%_'y");
+    let siblings = ["xAB'y", "xA'y", "X%_'Y", "x%_'Y"];
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/n.md"), DOC).unwrap();
+    for s in siblings {
+        std::fs::create_dir_all(b.path().join(s).join("docs")).unwrap();
+        std::fs::write(b.path().join(s).join("docs/n.md"), DOC).unwrap();
+    }
+    let ctx = mk_ctx(&root);
+    let sib: Vec<String> = siblings
+        .iter()
+        .map(|s| catalog_row(&ctx, &b.path().join(s).join("docs/n.md")))
+        .collect();
+    assert_eq!(index(&ctx, &root).added, 1);
+    std::fs::remove_file(root.join("docs/n.md")).unwrap();
+
+    let report = index(&ctx, &root);
+
+    let survivors = sib
+        .iter()
+        .filter(|id| artifact::get(&ctx.catalog.lock(), id).unwrap().is_some())
+        .count();
+    assert_eq!(report.removed, 1);
+    assert_eq!(survivors, sib.len());
+}
+
+/// L-5: the vectorless count matched case-only siblings (ESCAPE was added, the filter was not).
+/// The walked root's row is queued, so it owns chunk rows; the sibling's row owns none and must not
+/// be counted as this root's hole.
+#[test]
+fn the_vectorless_count_ignores_a_case_only_sibling() {
+    let b = tempfile::tempdir().unwrap();
+    let ctx = mk_ctx(&b.path().join("my_app"));
+    for name in ["my_app", "MY_APP"] {
+        std::fs::create_dir_all(b.path().join(name).join("docs")).unwrap();
+        std::fs::write(b.path().join(name).join("docs/n.md"), DOC).unwrap();
+    }
+    catalog_row(&ctx, &b.path().join("MY_APP").join("docs/n.md"));
+
+    let (report, _) = crate::librarian::indexer::index_repo_sync(
+        &ctx.catalog.lock(),
+        &md_rules(),
+        &b.path().join("my_app"),
+        &globset::GlobSet::empty(),
+        true,
+        false,
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(report.vectorless, Some(0), "{report:?}");
+}
+
+/// P6 / L-1: the armed roots OUTLIVED the call that armed them, so a catalog-level writer reached
+/// without arming inherited another call's roots instead of falling back to the spelled repository
+/// as the field's doc says.
+#[tokio::test]
+async fn an_unarmed_writer_does_not_inherit_the_previous_calls_roots() {
+    let (u, a, b) = umbrella();
+    std::fs::write(
+        b.join("docs/ledger.md"),
+        "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(u.path());
+    let id = catalog_row(&ctx, &a.join("linkdir/ledger.md"));
+    let direct = |ctx: &ToolContext| {
+        augmentation::allocate_entry_id(&mut ctx.catalog.lock(), &id, "F", None)
+    };
+    assert!(direct(&ctx).is_err(), "unarmed: the spelled repo A refuses");
+
+    // A tool that arms, even one that then fails, must not leave its roots behind.
+    let _ = super::update_entry::call(
+        &ctx,
+        json!({"id": "0000000000000000", "entry_collection": "x", "entry_id": "X-1",
+               "fields": {"a": 1}}),
+    )
+    .await;
+
+    assert!(direct(&ctx).is_err(), "still unarmed: no inherited roots");
+    assert!(
+        std::fs::read_to_string(b.join("docs/ledger.md"))
+            .unwrap()
+            .ends_with("# Ledger\n"),
+        "B's ledger untouched"
+    );
+}
+
+/// P7: an ABSOLUTE-target leaf link moves to another directory fine; the outside target is
+/// untouched.
+#[tokio::test]
+async fn doc_move_of_an_absolute_leaf_link_to_another_directory_completes() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("repo");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    let target = base.path().join("elsewhere.md");
+    let content = "---\nid: 0123456789abcdef\nkind: spec\nstatus: draft\ntitle: T\n---\n\nbody\n";
+    std::fs::write(&target, content).unwrap();
+    std::os::unix::fs::symlink(&target, root.join("outward.md")).unwrap();
+    let ctx = mk_ctx(&root);
+    let id = catalog_row(&ctx, &root.join("outward.md"));
+
+    mv::call(&ctx, json!({"id": id, "new_rel_path": "sub/moved.md"}))
+        .await
+        .expect("an absolute target still resolves from any directory");
+
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), content);
+    assert!(std::fs::symlink_metadata(root.join("sub/moved.md"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
+/// L-4: `a/x.md -> ../real/x.md` moved to `b/x.md` (same depth): the relative target still
+/// resolves to the same file, so the move is allowed. The refusal is for a link that would NOT
+/// resolve to the same file.
+#[tokio::test]
+async fn doc_move_allows_a_relative_link_whose_target_still_resolves_to_the_same_file() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("repo");
+    for d in [".git", "real", "a", "b"] {
+        std::fs::create_dir_all(root.join(d)).unwrap();
+    }
+    std::fs::write(root.join("real/x.md"), DOC).unwrap();
+    std::os::unix::fs::symlink("../real/x.md", root.join("a/x.md")).unwrap();
+    let ctx = mk_ctx(&root);
+    let id = catalog_row(&ctx, &root.join("a/x.md"));
+
+    mv::call(&ctx, json!({"id": id, "new_rel_path": "b/x.md"}))
+        .await
+        .expect("same depth, same target");
+
+    assert_eq!(std::fs::read_to_string(root.join("b/x.md")).unwrap(), DOC);
+}
+
+/// L-4 / M-E: a relative target that does not START with `..` (`real.md`, a sibling of the link)
+/// dangles in any other directory, and must be refused; the first version tested the prefix.
+#[tokio::test]
+async fn doc_move_refuses_a_relative_link_whose_target_would_not_resolve_there() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("repo");
+    for d in [".git", "a"] {
+        std::fs::create_dir_all(root.join(d)).unwrap();
+    }
+    std::fs::write(root.join("a/real.md"), DOC).unwrap();
+    std::os::unix::fs::symlink("real.md", root.join("a/x.md")).unwrap();
+    let ctx = mk_ctx(&root);
+    let id = catalog_row(&ctx, &root.join("a/x.md"));
+
+    let err = mv::call(&ctx, json!({"id": id, "new_rel_path": "b/x.md"}))
+        .await
+        .expect_err("`real.md` would not exist next to b/x.md");
+
+    assert!(msg(&err).contains("would not resolve"), "{}", msg(&err));
+    assert!(
+        std::fs::symlink_metadata(root.join("a/x.md")).is_ok(),
+        "nothing moved"
+    );
+}
+
+/// L-3 / M-F: a row below an escaping parent whose FILE is gone is an ordinary vanished row, not
+/// an escaping one: it is reclaimed and counted as `removed`, never as `reclaimed_escaping`.
+#[test]
+fn a_vanished_row_below_an_escaping_parent_is_reclaimed_as_an_ordinary_vanished_row() {
+    let outside = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("docs")).unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &root.path().join("docs/gone.md"));
+
+    let report = index(&ctx, root.path());
+
+    assert!(artifact::get(&ctx.catalog.lock(), &id).unwrap().is_none());
+    assert_eq!(report.removed, 1);
+    assert_eq!(
+        report.reclaimed_escaping, 0,
+        "the file is gone: that is not a policy reclaim"
+    );
+}
+
+/// M-A: a row whose only history is EVENTS is kept as well.
+#[tokio::test]
+async fn an_escaping_row_whose_only_history_is_an_event_is_kept() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("e.md"), DOC).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("docs")).unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &root.path().join("docs/e.md"));
+    super::event_create::call(
+        &ctx,
+        json!({"artifact_id": id, "kind": "note", "payload": {"text": "history"}}),
+    )
+    .await
+    .unwrap();
+
+    let report = index(&ctx, root.path());
+
+    assert!(artifact::get(&ctx.catalog.lock(), &id).unwrap().is_some());
+    assert_eq!(report.escaping_kept_ids, vec![id]);
+    assert_eq!(report.reclaimed_escaping, 0);
+}
+
+/// L-6: `rekey_prefix`'s sidecar write ran AFTER its commit with no preflight, and its refusal
+/// hint said "after removing the stale file", which for a refused sidecar points at the file
+/// behind the link. The refusal now comes first, with nothing rewritten.
+#[tokio::test]
+async fn rekey_prefix_refuses_a_ledger_whose_declared_sidecar_leaves_the_repo_before_rewriting() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("t.yaml"), "prompt: OUTSIDE\n").unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join(".git")).unwrap();
+    std::fs::create_dir_all(root.path().join("docs")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("docs/aug")).unwrap();
+    let ledger = "---\nkind: tracker\nentry_prefix: T\nexpects_augmentation: docs/aug/t.yaml\n---\n\n## T-1 — a\n\nsee T-1\n";
+    std::fs::write(root.path().join("ledger.md"), ledger).unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &root.path().join("ledger.md"));
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id)).unwrap();
+
+    let err = super::rekey_prefix::call(
+        &ctx,
+        json!({"id": id, "from": "T", "to": "SRI", "force": true}),
+    )
+    .await
+    .expect_err("the sidecar publication would be refused");
+
+    assert!(
+        msg(&err).contains("outside the repository root"),
+        "{}",
+        msg(&err)
+    );
+    assert!(
+        !msg(&err).contains("removing the stale file"),
+        "no advice to delete a file behind a link: {}",
+        msg(&err)
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("ledger.md")).unwrap(),
+        ledger
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("t.yaml")).unwrap(),
+        "prompt: OUTSIDE\n"
+    );
+}

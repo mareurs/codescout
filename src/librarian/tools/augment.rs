@@ -68,7 +68,7 @@ fn sidecar_write_through(
     id: &str,
     authored: crate::librarian::augmentation_sidecar::Authored<'_>,
 ) -> Result<()> {
-    crate::librarian::tools::arm_write_roots(ctx, cat);
+    let _armed = crate::librarian::tools::arm_write_roots(ctx, cat);
     let outcome = crate::librarian::augmentation_sidecar::write_through(cat, id, authored)
         .map_err(|e| {
             // A REFUSAL is the caller's input, not a failed write: keep it RECOVERABLE
@@ -356,7 +356,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // BEFORE any row moves: `sidecar_write_through` runs after the upsert (it renders the new
         // row), so a refusal found only there left the catalog ahead of the repository. A declared
         // sidecar that leaves the repository, or is a link, is refused here with nothing written.
-        crate::librarian::tools::arm_write_roots(ctx, &cat);
+        let _armed = crate::librarian::tools::arm_write_roots(ctx, &cat);
         crate::librarian::augmentation_sidecar::preflight_write_through(&cat, &a.id)?;
     }
 

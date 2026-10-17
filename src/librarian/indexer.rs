@@ -673,19 +673,22 @@ pub fn index_repo_sync(
     // debugging Mercury BOM's "reindex succeeds but find/get come back empty"
     // — the docs/trackers/*.md rows were being deleted by this exact path).
     // The prefix is BOUND as a parameter, so it must not be SQL-quoted (`'` -> `''` made every
-    // path containing an apostrophe match nothing), and it is a LIKE pattern, so `_`, `%` and `\`
-    // in the path are escaped (`ESCAPE '\'`): unescaped, `_` matched any character and the rows of
-    // `b/myXapp` were "under" `b/my_app`. LIKE is also case-INSENSITIVE for ASCII, which no escape
-    // fixes, so the candidates are filtered again below with `Path::starts_with`.
-    let root_prefix = format!("{}/", crate::util::fs::RepoPath::from(abs_root).as_str());
-    let root_like = format!(
-        "{}%",
-        crate::librarian::util::escape_like_pattern(&root_prefix)
-    );
-    let mut candidates: Vec<(String, String)> = if seen_ids.is_empty() {
+    // path containing an apostrophe match nothing), and the comparison is EXACT, not `LIKE`:
+    // `LIKE` reads `_` and `%` in the path as wildcards (the rows of `b/myXapp` were "under"
+    // `b/my_app`) and ignores ASCII case (so did `b/MY_APP`'s), and an `ESCAPE` clause cures only
+    // the first. `path_at_or_under_sql` compares bytes, so a sibling is never this walk's row and
+    // no Rust-side re-filter is needed (the one that was here masked the SQL being wrong).
+    let root_str = crate::util::fs::RepoPath::from(abs_root)
+        .as_str()
+        .to_string();
+    let root_prefix = format!("{root_str}/");
+    let under_root = crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2");
+    let candidates: Vec<(String, String)> = if seen_ids.is_empty() {
         cat.conn
-            .prepare("SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 ESCAPE '\\'")?
-            .query_map(rusqlite::params![root_like], |r| {
+            .prepare(&format!(
+                "SELECT id, abs_path FROM artifact WHERE {under_root}"
+            ))?
+            .query_map(rusqlite::params![root_str, root_prefix], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<rusqlite::Result<_>>()?
@@ -693,14 +696,14 @@ pub fn index_repo_sync(
         let placeholders = seen_ids
             .iter()
             .enumerate()
-            .map(|(i, _)| format!("?{}", i + 2))
+            .map(|(i, _)| format!("?{}", i + 3))
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 ESCAPE '\\' AND id NOT IN ({})",
-            placeholders
+            "SELECT id, abs_path FROM artifact WHERE {under_root} AND id NOT IN ({placeholders})"
         );
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(root_like.clone())];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(root_str.clone()), Box::new(root_prefix.clone())];
         for id in &seen_ids {
             params.push(Box::new(id.clone()));
         }
@@ -712,10 +715,6 @@ pub fn index_repo_sync(
             )?
             .collect::<rusqlite::Result<_>>()?
     };
-
-    // Case-insensitive LIKE (and a root spelled differently from the stored path) can still hand
-    // back a sibling's row; only a row whose path really is under `abs_root` is this walk's.
-    candidates.retain(|(_, p)| std::path::Path::new(p).starts_with(abs_root));
 
     let mut removed = 0usize;
     // A row whose path resolves OUTSIDE the repository through a link in a parent directory: the
@@ -800,12 +799,15 @@ pub fn index_repo_sync(
     // already reports it through `embed_errors` / `embed_note`.
     if want_embeddings {
         let vectorless: i64 = cat.conn.query_row(
-            "SELECT COUNT(*) FROM artifact a \
-             WHERE a.abs_path LIKE ?1 ESCAPE '\\' \
-               AND NOT EXISTS ( \
-                 SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
-               )",
-            rusqlite::params![root_like],
+            &format!(
+                "SELECT COUNT(*) FROM artifact a \
+                 WHERE {} \
+                   AND NOT EXISTS ( \
+                     SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
+                   )",
+                crate::librarian::util::path_at_or_under_sql("a.abs_path", "?1", "?2")
+            ),
+            rusqlite::params![root_str, root_prefix],
             |r| r.get(0),
         )?;
         report.vectorless = Some(vectorless.max(0) as usize);

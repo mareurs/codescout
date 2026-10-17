@@ -659,9 +659,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "escaping_kept_ids": escaping_kept_ids,
         "escaping_note": if total_reclaimed_escaping > 0 || !escaping_kept_ids.is_empty() {
             json!("Some catalogued paths resolve OUTSIDE their repository through a symlinked \
-                directory. Rows without an augmentation or events were reclaimed \
-                (`reclaimed_escaping`); rows that carry either were KEPT (`escaping_kept_ids`) \
-                and are reported on every reindex until the link is removed or re-pointed.")
+                 directory. Rows without an augmentation or events were reclaimed \
+                 (`reclaimed_escaping`); rows that carry either were KEPT (`escaping_kept_ids`) \
+                 and are reported on every reindex while the link stands. Removing or \
+                 re-pointing the link makes the file vanish from that path, and the next \
+                 reindex then deletes the kept row WITH its augmentation and events: to keep \
+                 that history, first fold it into the row of the file's real location with \
+                 `doc(action=\"graft\", from_id=<kept id>, into_id=<real id>)`.")
         } else {
             Value::Null
         },
@@ -1407,6 +1411,87 @@ mod tests {
             1,
             "README.md should be unknown"
         );
+    }
+
+    /// M-B: the reclaim reporting reaches the TOOL response, not just `IndexReport`: the three
+    /// ids/counts and the note, with the note naming `doc(graft)` as the way to keep a kept row's
+    /// history. A rename of a response key, or dropping the accumulation, would leave every
+    /// indexer-level test green.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reindex_response_reports_reclaimed_and_kept_escaping_rows() {
+        use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("plain.md"), "---\ntitle: P\n---\nb\n").unwrap();
+        std::fs::write(outside.path().join("rich.md"), "---\ntitle: R\n---\nb\n").unwrap();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::os::unix::fs::symlink(outside.path(), root.join("docs")).unwrap();
+        let rules_toml = "[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n";
+        let ctx = mk_ctx(root.to_path_buf(), rules_toml);
+        let mut ids = Vec::new();
+        for name in ["plain", "rich"] {
+            let path = root.join(format!("docs/{name}.md"));
+            let id = crate::librarian::ids::artifact_id_from_abs(&path);
+            crate::librarian::catalog::artifact::upsert(
+                &ctx.catalog.lock(),
+                &TestArtifactRowBuilder::new(&id)
+                    .with_abs_path(&path)
+                    .with_kind("doc")
+                    .with_status("draft")
+                    .build(),
+            )
+            .unwrap();
+            ids.push(id);
+        }
+        let (plain, rich) = (ids[0].clone(), ids[1].clone());
+        crate::librarian::catalog::augmentation::upsert(
+            &ctx.catalog.lock(),
+            &crate::librarian::catalog::augmentation::AugmentationRow {
+                artifact_id: rich.clone(),
+                prompt: "p".into(),
+                params: "{}".into(),
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: "2026-08-01T00:00:00Z".into(),
+                updated_at: "2026-08-01T00:00:00Z".into(),
+                render_template: None,
+                params_schema: None,
+                append_mode: false,
+                history_cap: None,
+                entry_collection: None,
+                refreshed_at_commit: None,
+            },
+        )
+        .unwrap();
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(v["reclaimed_escaping"].as_u64(), Some(1), "{v}");
+        assert_eq!(v["reclaimed_escaping_ids"], json!([plain]), "{v}");
+        assert_eq!(v["escaping_kept_ids"], json!([rich]), "{v}");
+        let note = v["escaping_note"]
+            .as_str()
+            .expect("a note when rows were reclaimed or kept");
+        assert!(note.contains("doc(action=\"graft\""), "{note}");
+    }
+
+    /// The control: a root with no escaping rows has a null note and empty id lists.
+    #[tokio::test]
+    async fn reindex_response_has_no_escaping_note_when_nothing_escapes() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("a.md"), "# a\n").unwrap();
+        let ctx = mk_ctx(
+            tmp.path().to_path_buf(),
+            "[[rule]]\nglob = \"**/*.md\"\nkind = \"doc\"\n",
+        );
+
+        let v = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(v["reclaimed_escaping"].as_u64(), Some(0));
+        assert_eq!(v["reclaimed_escaping_ids"], json!([]));
+        assert_eq!(v["escaping_kept_ids"], json!([]));
+        assert!(v["escaping_note"].is_null());
     }
 
     /// `restore_declared_augmentations` attaches a shape from the sidecar a document DECLARES. A

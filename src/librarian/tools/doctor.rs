@@ -2581,15 +2581,26 @@ fn reseat_worktree(
 /// (augmentation / links / events / chunks) and the `artifact_vec_v2` cascade
 /// trigger they reach all fire — a bare `sqlite3` CLI cannot (7ca71bf7). Returns (artifact_rows,
 /// commit_rows) removed.
+///
+/// The match is EXACT ([`crate::librarian::util::path_at_or_under_sql`]), not `LIKE`: `LIKE`
+/// without `ESCAPE` read `_` and `%` in the dead root as wildcards and ignored ASCII case, so
+/// pruning `/gone/my_app` deleted the rows (with their cascaded history) of the LIVE
+/// `/gone/myXapp` and `/gone/MY_APP`.
 fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Result<(usize, usize)> {
     let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
-    let under = format!("{root_fwd}/%");
+    let under = format!("{root_fwd}/");
     let artifact_rows = conn.execute(
-        "DELETE FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2",
+        &format!(
+            "DELETE FROM artifact WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
     )?;
     let commit_rows = conn.execute(
-        "DELETE FROM commits WHERE git_root = ?1 OR git_root LIKE ?2",
+        &format!(
+            "DELETE FROM commits WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("git_root", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
     )?;
     Ok((artifact_rows, commit_rows))
@@ -2636,20 +2647,26 @@ fn derive_dead_roots(conn: &rusqlite::Connection) -> anyhow::Result<Vec<std::pat
 }
 
 /// Read-only count of `(artifact_rows, commit_rows)` under `root`, mirroring the
-/// WHERE clauses `prune_dead_root` deletes with.
+/// WHERE clauses `prune_dead_root` deletes with (the same exact predicate).
 fn count_dead_root(
     conn: &rusqlite::Connection,
     root: &std::path::Path,
 ) -> anyhow::Result<(usize, usize)> {
     let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
-    let under = format!("{root_fwd}/%");
+    let under = format!("{root_fwd}/");
     let arts: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2",
+        &format!(
+            "SELECT COUNT(*) FROM artifact WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
         |r| r.get(0),
     )?;
     let commits: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM commits WHERE git_root = ?1 OR git_root LIKE ?2",
+        &format!(
+            "SELECT COUNT(*) FROM commits WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("git_root", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
         |r| r.get(0),
     )?;
@@ -17788,6 +17805,65 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM commits", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n_com, 1, "only the /tmp commit remains");
+    }
+
+    /// H-2: `prune_dead_root` and `count_dead_root` matched `abs_path LIKE '<root>/%'` with NO
+    /// `ESCAPE`, so `_` and `%` in the dead root were wildcards and SQLite's ASCII case-insensitive
+    /// `LIKE` reached other repositories: pruning the dead `/gone/my_app` deleted the rows of the LIVE
+    /// `/gone/myXapp` and `/gone/MY_APP` (and their cascaded augmentation, events and chunks), and
+    /// the dry run counted them too, so it could not warn. A root with an apostrophe must still match
+    /// its own rows.
+    #[test]
+    fn prune_and_count_dead_root_spare_siblings_that_match_a_like_pattern() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "own", "/gone/my_app/docs/a.md");
+        seed_artifact(&cat, "own-root", "/gone/my_app");
+        seed_artifact(&cat, "wild", "/gone/myXapp/docs/a.md");
+        seed_artifact(&cat, "case", "/gone/MY_APP/docs/a.md");
+        seed_artifact(&cat, "pct", "/gone/myAB/docs/a.md");
+        seed_commit(&cat, "ownc", "/gone/my_app");
+        seed_commit(&cat, "wildc", "/gone/myXapp");
+        seed_commit(&cat, "casec", "/gone/MY_APP");
+        let root = std::path::Path::new("/gone/my_app");
+
+        let counted = count_dead_root(&cat.conn, root).unwrap();
+        let pruned = prune_dead_root(&cat.conn, root).unwrap();
+
+        assert_eq!(
+            counted,
+            (2, 1),
+            "the dry run counts only the root's own rows"
+        );
+        assert_eq!(pruned, (2, 1));
+        let left: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 3, "the three siblings' rows survive");
+        let left_commits: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM commits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left_commits, 2);
+    }
+
+    /// The apostrophe half of H-2: a bound parameter is never SQL-quoted, and `%`/`_` in the root are
+    /// literal.
+    #[test]
+    fn prune_dead_root_matches_a_root_with_an_apostrophe_and_wildcards_literally() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "own", "/gone/x%_'y/docs/a.md");
+        seed_artifact(&cat, "sib", "/gone/xAB'y/docs/a.md");
+        seed_artifact(&cat, "case", "/gone/X%_'Y/docs/a.md");
+
+        let pruned = prune_dead_root(&cat.conn, std::path::Path::new("/gone/x%_'y")).unwrap();
+
+        assert_eq!(pruned.0, 1);
+        let left: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 2);
     }
 
     #[test]

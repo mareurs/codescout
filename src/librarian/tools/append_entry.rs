@@ -234,7 +234,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             ));
         }
         let mut cat = ctx.catalog.lock();
-        super::arm_write_roots(ctx, &cat);
+        let _armed = super::arm_write_roots(ctx, &cat);
         // An entry id is a LEDGER-WIDE fact, and a worktree is by definition not the
         // ledger. Left unguarded, `resolve_write_target` forks a shadow whose distinct
         // `artifact_id` misses the reservation, so main and the worktree both issue the
@@ -395,7 +395,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     let mut cat = ctx.catalog.lock();
-    super::arm_write_roots(ctx, &cat);
+    let _armed = super::arm_write_roots(ctx, &cat);
     // Refuse cites-from-worktree BEFORE resolve_write_target can fork a shadow.
     // The old ordering forked first and refused after, so a refused call still
     // materialized an empty shadow row + augmentation + worktree_fork event +
