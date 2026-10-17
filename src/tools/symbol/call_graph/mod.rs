@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use crate::tools::symbol::call_edges::cache::EdgeCache;
 use crate::tools::symbol::call_edges::resolver::{resolve_one_hop, Direction, Edge, EdgeSource};
 use crate::tools::symbol::call_graph::traversal::{EdgeWithDepth, OneHopResolver, TraversalResult};
+use crate::tools::symbol::scan_budget::{scan_walk, ScanBudget, ScanCoverage};
 use crate::tools::{OutputForm, Tool, ToolContext};
 
 /// Cache-checking one-hop resolver.
@@ -37,47 +38,52 @@ struct CachedResolver {
     /// File cap for the Phase B workspace walk. [`MAX_WORKSPACE_FILES_SCAN`] in
     /// production; a field so the boundary can be driven without thousands of files.
     workspace_scan_cap: usize,
-    /// Symbols whose Phase B walk stopped at the cap with candidate files left
-    /// unexamined. Such a symbol is also in `not_found`, but that set means "no file
-    /// defines it" only for symbols NOT listed here: for these the definition may exist
-    /// past the cap, and the edges beyond them are missing from the graph, not absent.
-    scan_cut_short: Mutex<std::collections::BTreeSet<String>>,
+    /// Symbols whose Phase B walk did not cover the project: the cap stopped it with
+    /// candidate files left, or a candidate file could not be read or parsed, or a
+    /// directory could not be entered. Such a symbol is also in `not_found`, but that set
+    /// means "no file defines it" only for symbols NOT listed here: for these the
+    /// definition may exist where the walk did not look, and the edges beyond them are
+    /// missing from the graph, not absent.
+    scan_incomplete: Mutex<std::collections::BTreeSet<String>>,
+    /// What those walks failed to cover (see [`ScanCoverage::merge`]).
+    scan_coverage: Mutex<ScanCoverage>,
 }
 
 /// Hard cap on files the Phase B workspace walk examines before giving up. Set so a
 /// typical project (1k–10k files) completes well under the MCP 60 s ceiling while a
 /// monorepo stops short instead of stalling the call. The cap is a performance guard and
-/// stays; what a walk it stops must do is say so ([`WorkspaceScan::CutShort`]).
+/// stays; what a walk it stops must do is say so ([`WorkspaceScan::Incomplete`]).
 // cap-class: RESULT_CAP call_graph.workspace_files_scan — probed
 const MAX_WORKSPACE_FILES_SCAN: usize = 5_000;
 
 /// Outcome of the Phase B workspace walk. The walk used to return `Option`, whose `None`
-/// carried both "no file defines it" and "the walk stopped before reaching the file that
-/// does".
+/// carried both "no file defines it" and "the walk did not look everywhere".
 enum WorkspaceScan {
     Found((PathBuf, u32, u32)),
-    /// The walk ran to the end of the tree without the cap stopping it and no file
-    /// defines the symbol. Not a proof that every file was READ: an admitted file that
-    /// could not be read or parsed is skipped with nothing recorded
-    /// (docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md).
+    /// The walk covered every candidate (see [`ScanCoverage::is_complete`]) and no file
+    /// defines the symbol: a trustworthy miss.
     NotFound,
-    /// The walk hit its file cap with candidates left unexamined.
-    CutShort,
+    /// The walk did not cover the project — the cap stopped it, a candidate could not be
+    /// read or parsed, or a directory could not be entered — so a miss is unconfirmed.
+    Incomplete(ScanCoverage),
 }
 
 /// The `completeness_warning` for a graph in which some node's definition could not be
-/// located because the fallback source walk stopped at its cap. `None` when no walk was
-/// cut short (a trustworthy "unresolvable" stays unremarked — ADR 2026-08-27 clause 2).
+/// located because the fallback source walk did not cover the project: the cap stopped it,
+/// a candidate file could not be read or parsed, or a directory could not be entered.
+/// `None` when no walk fell short (a trustworthy "unresolvable" stays unremarked — ADR
+/// 2026-08-27 clause 2).
 ///
-/// States what is proven: for these symbols the walk stopped with files unexamined and
-/// their edges were not followed — not that the symbols are defined past the cap.
-fn scan_cut_short_warning(
+/// States what is proven: for these symbols the walk fell short in the stated way and
+/// their edges were not followed — not that the symbols are defined where it did not look.
+fn scan_incomplete_warning(
     symbols: &std::collections::BTreeSet<String>,
-    cap: usize,
+    coverage: &ScanCoverage,
 ) -> Option<String> {
     if symbols.is_empty() {
         return None;
     }
+    let gap = coverage.describe()?;
     const SHOWN: usize = 5;
     let named: Vec<String> = symbols
         .iter()
@@ -91,7 +97,7 @@ fn scan_cut_short_warning(
         String::new()
     };
     Some(format!(
-        "the language server could not place {} symbol(s) — {}{more} — and the fallback source walk stopped after {cap} same-language files with more left unexamined, so their edges were not followed and this graph may be incomplete. Corroborate with `references` or grep before treating a missing caller/callee as absent.",
+        "the language server could not place {} symbol(s) — {}{more} — and the fallback source walk {gap}, so their edges were not followed and this graph may be incomplete. Corroborate with `references` or grep before treating a missing caller/callee as absent.",
         symbols.len(),
         named.join(", "),
     ))
@@ -99,25 +105,25 @@ fn scan_cut_short_warning(
 /// How many unplaced symbols the result lists by name. The full set can be as large as
 /// the graph and counts toward the size that decides whether the result is buffered, so
 /// the list is bounded and the total travels beside it.
-const SCAN_CUT_SHORT_LISTED: usize = 20;
+const SCAN_INCOMPLETE_LISTED: usize = 20;
 
-/// Put the cut-short disclosure into a `call_graph` result: the `completeness_warning`
-/// (when any walk was cut short), a bounded list of the symbols, and their total.
-/// Leaves `out` untouched when no walk was cut short.
-fn attach_scan_cut_short(
+/// Put the walk-fell-short disclosure into a `call_graph` result: the
+/// `completeness_warning` (when any walk fell short), a bounded list of the symbols, and
+/// their total. Leaves `out` untouched when every walk covered the project.
+fn attach_scan_incomplete(
     out: &mut Value,
-    cut_short: &std::collections::BTreeSet<String>,
-    cap: usize,
+    incomplete: &std::collections::BTreeSet<String>,
+    coverage: &ScanCoverage,
 ) {
-    let Some(warning) = scan_cut_short_warning(cut_short, cap) else {
+    let Some(warning) = scan_incomplete_warning(incomplete, coverage) else {
         return;
     };
     out["completeness_warning"] = json!(warning);
-    out["scan_cut_short_symbols"] = json!(cut_short
+    out["scan_incomplete_symbols"] = json!(incomplete
         .iter()
-        .take(SCAN_CUT_SHORT_LISTED)
+        .take(SCAN_INCOMPLETE_LISTED)
         .collect::<Vec<_>>());
-    out["scan_cut_short_total"] = json!(cut_short.len());
+    out["scan_incomplete_total"] = json!(incomplete.len());
 }
 
 impl CachedResolver {
@@ -174,9 +180,9 @@ impl CachedResolver {
         // Phase B fallback: bounded tree-sitter walk of the project root.
         // Picks up cross-file definitions when LSP is down. The not_found
         // cache below ensures we pay the walk cost at most once per missing
-        // symbol per resolver lifetime. A walk the cap cut short is recorded in
-        // `scan_cut_short` so the result can say "not reached" instead of letting the
-        // miss pass for "no such symbol".
+        // symbol per resolver lifetime. A walk that did not cover the project is
+        // recorded in `scan_incomplete` so the result can say "not reached" instead of
+        // letting the miss pass for "no such symbol".
         match self.lookup_pos_via_ts_workspace(symbol) {
             WorkspaceScan::Found(pos) => {
                 self.positions
@@ -185,11 +191,12 @@ impl CachedResolver {
                     .insert(symbol.to_string(), pos.clone());
                 return Some(pos);
             }
-            WorkspaceScan::CutShort => {
-                self.scan_cut_short
+            WorkspaceScan::Incomplete(coverage) => {
+                self.scan_incomplete
                     .lock()
                     .unwrap()
                     .insert(symbol.to_string());
+                self.scan_coverage.lock().unwrap().merge(coverage);
             }
             WorkspaceScan::NotFound => {}
         }
@@ -242,26 +249,36 @@ impl CachedResolver {
 
     /// Phase B fallback: bounded workspace walk.
     ///
-    /// Scans `self.root` for source files matching `self.lang`, parses each
+    /// Scans `self.root` for source files of the seed's language family, parses each
     /// with tree-sitter (`extract_symbols_from_source`), and returns the first
     /// top-level / impl-method definition whose name matches `symbol`.
+    ///
+    /// `self.lang` is the LSP languageId (`get_lsp_client`), so it is converted to the AST
+    /// vocabulary before it is compared with `detect_language`'s answer for each file;
+    /// compared as-is a `typescriptreact`/`javascriptreact` seed matched no file. The
+    /// comparison is by family (`ast::language_family`): TypeScript, TSX, JavaScript and
+    /// JSX are one population (BUG 2026-10-17
+    /// call-graph-phase-b-compares-the-lsp-language-id-to-the-ast-language).
     ///
     /// Caps file count at `self.workspace_scan_cap` ([`MAX_WORKSPACE_FILES_SCAN`]
     /// in production) so a monorepo with 100k source files doesn't burn the BFS
     /// budget on one missing symbol. The caller's `not_found` cache ensures this
-    /// walk runs at most once per missing symbol per resolver lifetime. A walk
-    /// the cap stops with candidates left returns [`WorkspaceScan::CutShort`],
-    /// never `NotFound` (BUG 2026-10-16
-    /// call-graph-workspace-scan-cap-returns-a-false-no-callers).
+    /// walk runs at most once per missing symbol per resolver lifetime.
+    ///
+    /// A walk that did not cover the project returns [`WorkspaceScan::Incomplete`], never
+    /// `NotFound`: the cap stopped it with candidates left (BUG 2026-10-16
+    /// call-graph-workspace-scan-cap-returns-a-false-no-callers), a candidate could not be
+    /// read or parsed or has no grammar, or a directory could not be entered (BUG
+    /// 2026-10-17 scan-walks-skip-unreadable-files-and-report-a-clean-miss). Vendored
+    /// directories are pruned and not counted (see `scan_budget::scan_walk`).
     fn lookup_pos_via_ts_workspace(&self, symbol: &str) -> WorkspaceScan {
-        let walker = ignore::WalkBuilder::new(&self.root)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
-
-        let mut budget =
-            crate::tools::symbol::scan_budget::ScanBudget::new(self.workspace_scan_cap);
-        for entry in walker.flatten() {
+        let mut budget = ScanBudget::new(self.workspace_scan_cap);
+        let family =
+            crate::ast::language_family(crate::lsp::servers::ast_language_for_lsp_id(&self.lang));
+        for item in scan_walk(&self.root) {
+            let Some(entry) = budget.entry(item) else {
+                continue;
+            };
             if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
@@ -269,21 +286,25 @@ impl CachedResolver {
             let Some(file_lang) = crate::ast::detect_language(path) else {
                 continue;
             };
-            if file_lang != self.lang {
+            if crate::ast::language_family(file_lang) != family {
                 continue;
             }
             if crate::ast::get_ts_language(file_lang).is_none() {
+                // A same-language file this walk can never parse: counted, not skipped
+                // silently, or a seed language with no grammar ends on a clean miss.
+                budget.record_unexamined();
                 continue;
             }
             if !budget.admit() {
                 break;
             }
-            let Ok(source) = std::fs::read_to_string(path) else {
-                continue;
-            };
-            let Ok(syms) =
-                crate::ast::parser::extract_symbols_from_source(&source, Some(file_lang), path)
-            else {
+            // Read and parse share one skip site: tree-sitter's `parse` returns `None`
+            // only on a timeout or cancellation, which no fixture can provoke, so the
+            // unreadable-file test is what exercises it.
+            let Some(syms) = std::fs::read_to_string(path).ok().and_then(|source| {
+                crate::ast::parser::extract_symbols_from_source(&source, Some(file_lang), path).ok()
+            }) else {
+                budget.record_unexamined();
                 continue;
             };
             if let Some(found) = find_named_def(&syms, symbol) {
@@ -294,17 +315,20 @@ impl CachedResolver {
                 ));
             }
         }
-        match budget.cut_short_at() {
-            Some(_) => WorkspaceScan::CutShort,
-            None => WorkspaceScan::NotFound,
+        let coverage = budget.coverage();
+        if coverage.is_complete() {
+            WorkspaceScan::NotFound
+        } else {
+            WorkspaceScan::Incomplete(coverage)
         }
     }
-    /// The symbols whose Phase B walk the cap stopped, with the cap that walk was given.
-    /// `None` when no walk was cut short. The cap comes from the resolver, not from the
-    /// production constant, so the warning names what the walk actually used.
-    fn cut_short(&self) -> Option<(std::collections::BTreeSet<String>, usize)> {
-        let symbols = self.scan_cut_short.lock().unwrap().clone();
-        (!symbols.is_empty()).then_some((symbols, self.workspace_scan_cap))
+
+    /// The symbols whose Phase B walk did not cover the project, with what those walks
+    /// failed to cover (including the cap they were GIVEN, not the production constant).
+    /// `None` when every walk was complete.
+    fn incomplete(&self) -> Option<(std::collections::BTreeSet<String>, ScanCoverage)> {
+        let symbols = self.scan_incomplete.lock().unwrap().clone();
+        (!symbols.is_empty()).then(|| (symbols, *self.scan_coverage.lock().unwrap()))
     }
 }
 
@@ -573,11 +597,11 @@ impl Tool for CallGraph {
         };
 
         let mut by_dir: HashMap<&str, TraversalResult> = HashMap::new();
-        // Symbols whose definition the fallback walk gave up looking for at its cap.
-        let mut cut_short: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        // The cap the walk that was cut short ACTUALLY used, so the warning names it
-        // instead of restating a constant the walk may not have been given.
-        let mut cut_short_cap = MAX_WORKSPACE_FILES_SCAN;
+        // Symbols whose definition the fallback walk did not look everywhere for, and
+        // what those walks failed to cover. The cap it reports is the one the walk was
+        // GIVEN (`resolver.incomplete()`), not a constant restated here.
+        let mut incomplete: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut coverage = ScanCoverage::default();
 
         for direction in &directions {
             let mut positions: HashMap<String, (PathBuf, u32, u32)> = HashMap::new();
@@ -592,13 +616,14 @@ impl Tool for CallGraph {
                 positions: Mutex::new(positions),
                 not_found: Mutex::new(std::collections::HashSet::new()),
                 workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
-                scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
+                scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+                scan_coverage: Mutex::new(ScanCoverage::default()),
             };
 
             let result = bfs(&resolver, symbol, direction.clone(), cfg.clone()).await?;
-            if let Some((walked, walked_cap)) = resolver.cut_short() {
-                cut_short_cap = walked_cap;
-                cut_short.extend(walked);
+            if let Some((walked, walked_coverage)) = resolver.incomplete() {
+                coverage.merge(walked_coverage);
+                incomplete.extend(walked);
             }
             let key = match direction {
                 Direction::Callers => "callers",
@@ -612,7 +637,7 @@ impl Tool for CallGraph {
         let render_full = detail_full || auto_promote;
 
         let mut out = format_output(symbol, &by_dir, render_full, auto_promote);
-        attach_scan_cut_short(&mut out, &cut_short, cut_short_cap);
+        attach_scan_incomplete(&mut out, &incomplete, &coverage);
         Ok(out)
     }
 
@@ -944,7 +969,8 @@ mod tests {
             positions: Mutex::new(positions),
             not_found: Mutex::new(std::collections::HashSet::new()),
             workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
-            scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
+            scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+            scan_coverage: Mutex::new(ScanCoverage::default()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -993,7 +1019,8 @@ mod tests {
             positions: Mutex::new(positions),
             not_found: Mutex::new(std::collections::HashSet::new()),
             workspace_scan_cap: MAX_WORKSPACE_FILES_SCAN,
-            scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
+            scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+            scan_coverage: Mutex::new(ScanCoverage::default()),
         };
 
         let pos = resolver.lookup_pos("b").await;
@@ -1034,7 +1061,8 @@ mod tests {
             positions: Mutex::new(HashMap::new()),
             not_found: Mutex::new(std::collections::HashSet::new()),
             workspace_scan_cap: cap,
-            scan_cut_short: Mutex::new(std::collections::BTreeSet::new()),
+            scan_incomplete: Mutex::new(std::collections::BTreeSet::new()),
+            scan_coverage: Mutex::new(ScanCoverage::default()),
         }
     }
 
@@ -1055,16 +1083,44 @@ mod tests {
 
         assert!(resolver.lookup_pos("ghost").await.is_none());
 
-        let (cut_short, cap) = resolver
-            .cut_short()
+        let (incomplete, coverage) = resolver
+            .incomplete()
             .expect("a walk stopped at its cap must be recorded, not left as a plain miss");
-        assert!(cut_short.contains("ghost"), "{cut_short:?}");
+        assert!(incomplete.contains("ghost"), "{incomplete:?}");
         assert_eq!(
-            cap, 2,
+            coverage.cut_short_at,
+            Some(2),
             "the cap the walk was given, not the production constant"
         );
-        let warning = scan_cut_short_warning(&cut_short, cap).expect("a cut-short walk must warn");
+        let warning =
+            scan_incomplete_warning(&incomplete, &coverage).expect("a cut-short walk must warn");
         assert!(warning.contains("stopped after 2"), "{warning}");
+    }
+
+    /// The cap is a performance guard and must still BOUND the work, not merely disclose that
+    /// it bit: the disclosure lives in `ScanBudget::admit`, so a walk that ignored `admit`'s
+    /// refusal would keep reporting a cut-short walk while reading the whole tree. Three files
+    /// each define one symbol; with cap 2 a walk examines two of them, so the three lookups
+    /// cannot all succeed.
+    #[tokio::test]
+    async fn the_cap_stops_the_walk_instead_of_only_reporting_it() {
+        let dir = tempfile::tempdir().unwrap();
+        for (file, def) in [
+            ("a.rs", "fn s_a() {}\n"),
+            ("b.rs", "fn s_b() {}\n"),
+            ("c.rs", "fn s_c() {}\n"),
+        ] {
+            std::fs::write(dir.path().join(file), def).unwrap();
+        }
+        let mut found = 0;
+        for symbol in ["s_a", "s_b", "s_c"] {
+            let r = resolver_over(dir.path(), 2);
+            if r.lookup_pos(symbol).await.is_some() {
+                found += 1;
+            }
+        }
+
+        assert!(found < 3, "a cap of 2 let a walk examine all 3 files");
     }
 
     /// ADR 2026-08-27 clause 2: a walk that examined every file and found nothing is a
@@ -1080,12 +1136,12 @@ mod tests {
 
         assert!(resolver.lookup_pos("ghost").await.is_none());
 
-        let cut_short = resolver.scan_cut_short.lock().unwrap().clone();
         assert!(
-            cut_short.is_empty(),
-            "every file was examined: {cut_short:?}"
+            resolver.incomplete().is_none(),
+            "every file was examined: {:?}",
+            resolver.incomplete()
         );
-        assert!(scan_cut_short_warning(&cut_short, 3).is_none());
+        assert!(scan_incomplete_warning(&Default::default(), &Default::default()).is_none());
         assert!(resolver.not_found.lock().unwrap().contains("ghost"));
     }
 
@@ -1098,7 +1154,7 @@ mod tests {
         let resolver = resolver_over(dir.path(), 2);
 
         assert!(resolver.lookup_pos("target").await.is_some());
-        assert!(resolver.scan_cut_short.lock().unwrap().is_empty());
+        assert!(resolver.incomplete().is_none());
     }
 
     /// `call_graph` is `OutputForm::Text`, so `format_compact` is what the caller reads: the
@@ -1230,9 +1286,9 @@ mod tests {
             warning.contains("stopped after 5000") && warning.contains("`ghost`"),
             "a caller the walk never reached must be named in the result: {result}"
         );
-        assert_eq!(result["scan_cut_short_total"], json!(1), "{result}");
+        assert_eq!(result["scan_incomplete_total"], json!(1), "{result}");
         assert_eq!(
-            result["scan_cut_short_symbols"],
+            result["scan_incomplete_symbols"],
             json!(["ghost"]),
             "{result}"
         );
@@ -1258,7 +1314,7 @@ mod tests {
             result.get("completeness_warning").is_none(),
             "a finished walk that found nothing is not a cut-short one: {result}"
         );
-        assert!(result.get("scan_cut_short_symbols").is_none(), "{result}");
+        assert!(result.get("scan_incomplete_symbols").is_none(), "{result}");
     }
 
     /// The warning must survive the overflow path. A result over the inline budget is stored
@@ -1292,6 +1348,220 @@ mod tests {
         assert!(
             summary.contains("stopped after 5000") && summary.contains("`ghost`"),
             "the warning must be in what the caller reads, not only in the buffer: {summary}"
+        );
+    }
+    /// Phase B compares the language of each file on disk with the language of the SEED. The
+    /// seed's language arrives as the LSP languageId (`get_lsp_client`), the files' as the AST
+    /// language, and those vocabularies differ for React files: `typescriptreact` is not `tsx`.
+    /// Compared as-is, a React seed examined no file at all. Each case here hands the resolver
+    /// the id `get_lsp_client` really produces for that seed.
+    #[tokio::test]
+    async fn a_react_seed_walk_examines_react_files() {
+        for (file, ast_lang) in [("a.tsx", "tsx"), ("a.jsx", "jsx")] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join(file),
+                "export function ghost() { return 1; }\n",
+            )
+            .unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            r.lang = crate::lsp::servers::lsp_language_id(ast_lang).to_string();
+
+            let found = r.lookup_pos("ghost").await;
+
+            assert_eq!(
+                found.map(|(p, _, _)| p),
+                Some(dir.path().join(file)),
+                "a {ast_lang} seed (languageId {}) must examine {file}",
+                r.lang
+            );
+        }
+    }
+
+    /// TypeScript, TSX, JavaScript and JSX are one population for this walk: one language
+    /// server (`typescript-language-server`) serves all four, and `.tsx` components import
+    /// functions from `.ts` modules and the reverse, so the definition of a symbol one file
+    /// calls routinely lives in a file of the sibling extension.
+    #[tokio::test]
+    async fn the_typescript_family_is_one_population_for_the_walk() {
+        for (seed_ast_lang, def_file) in [
+            ("typescript", "view.tsx"),
+            ("tsx", "util.ts"),
+            ("javascript", "view.jsx"),
+            ("jsx", "util.js"),
+            ("tsx", "util.js"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join(def_file),
+                "export function ghost() { return 1; }\n",
+            )
+            .unwrap();
+            let mut r = resolver_over(dir.path(), 100);
+            r.lang = crate::lsp::servers::lsp_language_id(seed_ast_lang).to_string();
+
+            assert!(
+                r.lookup_pos("ghost").await.is_some(),
+                "a {seed_ast_lang} seed must find a definition in {def_file}"
+            );
+        }
+    }
+
+    /// The family is not "every language": a Rust walk does not look in TypeScript files, and
+    /// those files are not counted as unexamined candidates either (they were never candidates).
+    #[tokio::test]
+    async fn a_rust_walk_does_not_examine_typescript_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("x.ts"),
+            "export function ghost() { return 1; }\n",
+        )
+        .unwrap();
+        let r = resolver_over(dir.path(), 100);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+        assert!(
+            r.incomplete().is_none(),
+            "files of another language are not unexamined candidates"
+        );
+    }
+
+    /// ADR 2026-08-27, "ran and examined nothing": a candidate that is admitted but cannot be
+    /// read must not leave a clean miss. `latin1.rs` is not valid UTF-8, so
+    /// `read_to_string` rejects it; it is the only file that could define `ghost`.
+    #[tokio::test]
+    async fn an_unreadable_candidate_file_makes_a_miss_incomplete() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("latin1.rs"),
+            b"// caf\xe9\nfn ghost() {}\n".as_slice(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn x() {}\n").unwrap();
+        let r = resolver_over(dir.path(), 100);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        assert!(
+            r.incomplete().is_some(),
+            "a file that could not be read went unexamined; the miss is not a clean one"
+        );
+    }
+
+    /// A seed language with no tree-sitter grammar (C here) has same-language files the walk
+    /// can never parse. They used to be skipped before being counted, so the walk ended on a
+    /// clean `NotFound` having examined nothing.
+    #[tokio::test]
+    async fn a_seed_language_with_no_grammar_reports_the_files_it_could_not_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("x.c"), "int ghost(void) { return 1; }\n").unwrap();
+        std::fs::write(dir.path().join("y.c"), "int other(void) { return 2; }\n").unwrap();
+        let mut r = resolver_over(dir.path(), 100);
+        r.lang = "c".to_string();
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+
+        assert!(
+            r.incomplete().is_some(),
+            "two same-language files were never parsed; that is not a clean miss"
+        );
+    }
+
+    /// A project whose `node_modules/` (or `target/`, `vendor/`, ...) is not gitignored must
+    /// not spend the file budget on vendored files — the `references` walk already prunes them,
+    /// and this walk burned its whole cap there. Cap 2 over three vendored files.
+    #[tokio::test]
+    async fn the_walk_does_not_spend_its_budget_on_vendored_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let vendored = dir.path().join("node_modules").join("pkg");
+        std::fs::create_dir_all(&vendored).unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            std::fs::write(vendored.join(name), "fn x() {}\n").unwrap();
+        }
+        let r = resolver_over(dir.path(), 2);
+
+        assert!(r.lookup_pos("ghost").await.is_none());
+        assert!(
+            r.incomplete().is_none(),
+            "vendored files are not candidates, so nothing was left unexamined"
+        );
+    }
+
+    /// The exclusion applies to the path BELOW the project root: `path_in_excluded_dir` tests
+    /// every component, so the absolute path would exclude every file of a project that merely
+    /// lives under a directory called `build` or `out`.
+    #[tokio::test]
+    async fn the_walk_prunes_below_the_project_root_not_above_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("build").join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.rs"), "fn ghost() {}\n").unwrap();
+        let r = resolver_over(&root, 100);
+
+        assert!(
+            r.lookup_pos("ghost").await.is_some(),
+            "a project under a `build/` parent directory must still be walked"
+        );
+    }
+
+    /// A directory the walker cannot enter is a part of the tree nobody looked at. Skipped on
+    /// root (which can read anything, so the fixture cannot make a directory unreadable).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unenterable_directory_makes_a_miss_incomplete() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::write(locked.join("hidden.rs"), "fn ghost() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn x() {}\n").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let restore = || {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        if std::fs::read_dir(&locked).is_ok() {
+            restore();
+            return; // running with privileges that read it anyway
+        }
+        let r = resolver_over(dir.path(), 100);
+
+        let found = r.lookup_pos("ghost").await;
+        let incomplete = r.incomplete();
+        restore();
+
+        assert!(found.is_none());
+        assert!(
+            incomplete.is_some(),
+            "a directory that could not be entered is unexamined, not empty"
+        );
+    }
+
+    /// Through the tool: the unplaceable caller `ghost` is looked for in a tree that holds one
+    /// file the walk cannot read. The result must name that, in the JSON and the compact text.
+    #[tokio::test]
+    async fn call_graph_names_the_files_it_could_not_read_when_it_cannot_place_a_caller() {
+        let (dir, ctx) = ghost_project(3, 0).await;
+        std::fs::write(
+            dir.path().join("src").join("latin1.rs"),
+            b"// caf\xe9\nfn x() {}\n".as_slice(),
+        )
+        .unwrap();
+
+        let result = CallGraph
+            .call(json!({ "symbol": "seed", "path": "src/lib.rs" }), &ctx)
+            .await
+            .unwrap();
+
+        let warning = result["completeness_warning"].as_str().unwrap_or_default();
+        assert!(
+            warning.contains("could not read or parse 1 same-language file")
+                && warning.contains("`ghost`"),
+            "an unreadable file must be named, not turned into a clean miss: {result}"
+        );
+        let compact = CallGraph.format_compact(&result).unwrap();
+        assert!(
+            compact.contains("could not read or parse 1 same-language file"),
+            "{compact}"
         );
     }
 } // mod tests

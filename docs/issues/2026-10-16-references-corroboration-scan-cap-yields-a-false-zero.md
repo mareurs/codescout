@@ -74,7 +74,7 @@ It is noise in practice in repos over the cap: the warning is true (the walk did
 
 Options for the human to decide: (1) raise the cap, since the scan is a whole-word text match and not a parse (reading all 5,086 `codex` `.rs` files, 72 MB, took 0.85 s warm, `cat` only, so a 50,000-file cap is a few seconds worst case); (2) keep the cap and scope the warning to symbols that are not obviously file-local; (3) leave as is.
 
-Not fixed here: a non-UTF-8 file is skipped unrecorded (`docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`).
+Follow-up, 2026-10-17: a non-UTF-8 candidate file, an unenterable directory and the TypeScript/TSX/JavaScript/JSX family are handled in the same branch (`docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`, `docs/issues/2026-10-17-call-graph-phase-b-compares-the-lsp-language-id-to-the-ast-language-so-a-tsx-or-jsx-seed-walks-no-files.md`). The warning now covers every way the walk fails to look, through `CorroborationScan::coverage`; `corroboration_cut_short_warning` is `corroboration_incomplete_warning`, and the vendored-directory prune moved into the shared `scan_walk`.
 
 ## References
 

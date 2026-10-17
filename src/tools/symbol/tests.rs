@@ -6044,13 +6044,17 @@ fn corroborate_scan_reports_cut_short_only_when_a_candidate_was_left_unexamined(
     let exact = corroborate_with_cap(root, &def, "target", "rust", 3);
     assert!(exact.hits.is_empty());
     assert_eq!(
-        exact.cut_short_at, None,
+        exact.coverage.cut_short_at, None,
         "3 candidates, cap 3: all examined"
     );
 
     let short = corroborate_with_cap(root, &def, "target", "rust", 2);
     assert!(short.hits.is_empty());
-    assert_eq!(short.cut_short_at, Some(2), "3 candidates, cap 2: one left");
+    assert_eq!(
+        short.coverage.cut_short_at,
+        Some(2),
+        "3 candidates, cap 2: one left"
+    );
 }
 /// The warning must survive the overflow path. A result over the inline budget is stored
 /// in a buffer and the caller reads `truncate_compact(format_compact(..), 2000, 3000)`,
@@ -6108,7 +6112,7 @@ fn corroborate_scan_does_not_spend_its_budget_on_vendored_directories() {
 
     assert!(scan.hits.is_empty());
     assert_eq!(
-        scan.cut_short_at, None,
+        scan.coverage.cut_short_at, None,
         "vendored files are not candidates, so nothing was left unexamined"
     );
 }
@@ -6132,6 +6136,130 @@ fn corroborate_scan_filters_below_the_project_root_not_above_it() {
         scan.hits.len(),
         1,
         "a project under a `build/` parent directory must still be scanned: {scan:?}"
+    );
+}
+/// The file cap must still BOUND the scan, not merely disclose that it bit (the disclosure
+/// lives in `ScanBudget::admit`): three files name the identifier, cap 2, so exactly two
+/// are read and the third is never opened.
+#[test]
+fn corroborate_scan_stops_reading_at_its_file_cap() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        std::fs::write(root.join(name), "fn x() { target(); }").unwrap();
+    }
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 2);
+
+    assert_eq!(scan.hits.len(), 2, "a cap of 2 admits exactly two files");
+    assert_eq!(scan.coverage.cut_short_at, Some(2));
+}
+
+/// TypeScript, TSX, JavaScript and JSX are one population for the corroboration scan, for
+/// the reason the `call_graph` walk groups them: one language server serves all four and
+/// `.tsx` components import from `.ts` modules. A `.ts` definition used only from a `.tsx`
+/// file is exactly the stale-graph case this scan exists to catch, and a same-extension
+/// filter never looked there.
+#[test]
+fn corroborate_scan_treats_the_typescript_family_as_one_population() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    for (def_name, def_lang, user_name) in [
+        ("def.ts", "typescript", "user.tsx"),
+        ("def.tsx", "tsx", "user.ts"),
+        ("def.js", "javascript", "user.jsx"),
+        ("def.jsx", "jsx", "user.js"),
+    ] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let def = root.join(def_name);
+        std::fs::write(&def, "export function target() {}").unwrap();
+        std::fs::write(root.join(user_name), "target();").unwrap();
+
+        let scan = corroborate_with_cap(root, &def, "target", def_lang, 10);
+
+        assert_eq!(
+            scan.hits.len(),
+            1,
+            "a {def_lang} definition used only from {user_name} must corroborate: {scan:?}"
+        );
+    }
+}
+
+/// The family is not "every language": a Rust definition is not corroborated by a
+/// TypeScript file that happens to name the identifier, and that file is not an
+/// unexamined candidate either.
+#[test]
+fn corroborate_scan_does_not_cross_into_another_language_family() {
+    use crate::tools::symbol::references::corroborate_with_cap;
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let def = root.join("def.rs");
+    std::fs::write(&def, "pub fn target() {}").unwrap();
+    std::fs::write(root.join("user.ts"), "target();").unwrap();
+
+    let scan = corroborate_with_cap(root, &def, "target", "rust", 10);
+
+    assert!(scan.hits.is_empty(), "{scan:?}");
+}
+
+/// ADR 2026-08-27: a candidate file the scan could not read is a file nobody looked at, so
+/// "0 references outside the definition file" is unconfirmed. `latin1.rs` is not valid
+/// UTF-8 and is the only other file that could use `helper`. Without the fix the result is
+/// a bare zero, indistinguishable from `references_zero_from_a_completed_corroboration_scan_stays_bare`.
+#[tokio::test]
+async fn references_zero_with_an_unreadable_candidate_file_is_warned() {
+    use crate::tools::symbol::references::References;
+
+    let (dir, ctx) = declaration_only_ctx(3, 0).await;
+    std::fs::write(
+        dir.path().join("src").join("latin1.rs"),
+        b"// caf\xe9\nfn caller() { helper(); }\n".as_slice(),
+    )
+    .unwrap();
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("could not read or parse 1 same-language file"),
+        "an unreadable candidate must not leave a clean zero: {result}"
+    );
+}
+
+/// A directory the walker cannot enter is a part of the tree nobody looked at. Skipped on
+/// root, which can read anything.
+#[cfg(unix)]
+#[tokio::test]
+async fn references_zero_with_an_unenterable_directory_is_warned() {
+    use crate::tools::symbol::references::References;
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, ctx) = declaration_only_ctx(3, 0).await;
+    let locked = dir.path().join("src").join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::write(locked.join("user.rs"), "fn c() { helper(); }\n").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&locked).is_ok() {
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+
+    let result = References
+        .call(json!({ "symbol": "helper", "path": "src/lib.rs" }), &ctx)
+        .await
+        .unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let warning = result["completeness_warning"].as_str().unwrap_or_default();
+    assert!(
+        warning.contains("could not enter 1 path"),
+        "a directory that could not be entered must not leave a clean zero: {result}"
     );
 }
 

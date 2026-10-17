@@ -1306,13 +1306,17 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
         // Reclassified from `NoMarker`: `lookup_pos_via_ts_workspace` now returns
-        // `WorkspaceScan::CutShort` for a walk the cap stopped with candidates left,
+        // `WorkspaceScan::Incomplete` for a walk the cap stopped with candidates left,
         // `lookup_pos` records the symbol, `CallGraph::call` puts a `completeness_warning`
         // in the result and `format_compact` renders it FIRST (so the overflow summary's
         // `truncate_compact` cannot cut it). The cited test drives `CallGraph::call` over
         // 5,001 files and asserts the production text ("stopped after 5000") in both the
-        // JSON and the compact rendering. Mutation: deleting `attach_scan_cut_short` from
-        // `CallGraph::call` reds it (observed 2026-10-17).
+        // JSON and the compact rendering. Mutation: deleting `attach_scan_incomplete` from
+        // `CallGraph::call` reds it, as does dropping the `scan_coverage.merge` in
+        // `lookup_pos` (re-observed 2026-10-17 after the coverage rewrite). It does NOT red
+        // when the walk ignores `admit()`'s refusal and reads on: the disclosure lives in
+        // `ScanBudget::admit`, so that bound (the cap as a performance guard) is held by
+        // `the_cap_stops_the_walk_instead_of_only_reporting_it`.
         // docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md
         id: "call_graph.workspace_files_scan",
         coverage: Coverage::Probed {
