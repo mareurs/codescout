@@ -1002,6 +1002,37 @@ mod tests {
                 assert_eq!(mode_of(p.parent().unwrap()), 0o700);
             }
         }
+
+        /// Two users of one shared `/tmp` must not contend for one name: a squatter would
+        /// otherwise push every other user's engine into the leaking fallback.
+        #[test]
+        fn the_directory_name_is_per_user() {
+            let base = Path::new("/base");
+            let me = effective_uid();
+            assert_ne!(
+                extraction_dir(base, me),
+                extraction_dir(base, me.wrapping_add(1))
+            );
+            assert!(
+                extraction_dir(base, 4242)
+                    .to_string_lossy()
+                    .contains("-4242-"),
+                "the uid is part of the name"
+            );
+        }
+
+        /// Parity with the `create_dir_all` this replaced: a base that does not exist yet is
+        /// created rather than failing the whole hint into silence.
+        #[test]
+        fn a_missing_base_directory_is_created() {
+            let root = tempfile::tempdir().expect("tmp");
+            let base = root.path().join("not").join("yet");
+            let entry = materialize_into(&base).expect("a missing base must not fail the hint");
+            assert_eq!(
+                entry.parent().unwrap(),
+                extraction_dir(&base, effective_uid())
+            );
+        }
     }
 
     /// Every local module the engine imports must be materialized beside it.
