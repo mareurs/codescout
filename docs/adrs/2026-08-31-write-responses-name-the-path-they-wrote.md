@@ -97,9 +97,11 @@ bug nor its repair. It is removed, per its own instruction.
 ## Revisit-when
 
 - A write tool needs to answer with a path it did **not** take from `input["path"]` —
-  the capture is a single well-known key, not a general mechanism.
+  the capture is a single well-known key, not a general mechanism. **Revisited 2026-10-17:
+  that has now happened, once; see the Amendment below for what holds.**
 - `names_path_containing` grows beyond `abs_path`/`rel_path`/`items[]`/`violations[].path`,
   at which point the absoluteness keying should be re-checked against what it scans.
+  (Grew 2026-10-17 by `old_abs_path`/`new_abs_path`, a `doc(move)` result.)
 - The no-echo convention is revisited as a whole. This ADR widens it by one bounded field
   and does not license a second widening by analogy.
 
@@ -133,6 +135,38 @@ What that changes:
 A reader sizing the blast radius of a future widening of no-echo should start from this:
 the baseline for most repos is a bare string, and a second annotation there is a shape
 change, not a field addition.
+
+## Amendment 2026-10-17 — the `doc` tool names the row it wrote, taking the path from the catalog
+
+- **Status:** accepted extension of the decision. **Trigger:**
+  `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
+- **What happened.** `annotate_write_path` captures `input["path"]`, and the `doc` tool has no
+  such input: it names its target by `id` (`src_id` for `link`). Four `doc` writes —
+  `append_entry`, `update_entry`, `augment`, `link` — therefore answered `{id, …}` or a bare
+  `"ok"` that named no file, so the guide router, which reads the RESULT, could never pick the
+  guide section written for a write to a tracker. This is the Revisit-when's first condition,
+  and it is a second mechanism, not a widening of the first: `name_the_target`
+  (`src/librarian/tools/artifact.rs`), in the `doc` dispatcher, resolves the id against the
+  catalog and puts `abs_path` on the result. A bare `"ok"` is promoted to `{"status":"ok",
+  "abs_path":…}`, the same promotion `annotate_write_path` already makes.
+- **What now holds.**
+  1. **The path named is the row the write LANDED ON**, not the row the caller's id points at.
+     In a worktree session a write to a main-checkout artifact lands on its overlay shadow
+     (`resolve_write_target`), so the id the caller passed and the file that changed differ.
+     `name_the_target` asks `worktree::peek_write_target`, which computes the shadow without
+     forking anything and shares `shadow_coordinates` with the forking function so the two
+     cannot disagree. The first cut read `args["id"]` and named the main-checkout file, which
+     the write never touched (a reviewer's probe; pinned by
+     `a_write_names_the_row_it_landed_on_in_a_worktree_session_and_the_artifact_otherwise`).
+  2. **Scope is the four writes above and `move`** (which already answered
+     `old_abs_path`/`new_abs_path`, now scanned). It is **not** `update`: naming a status
+     change delayed librarian's anti-wipe sections (measured; see the issue), so every
+     `update` keeps answering without a path. Any further `doc` action named this way needs
+     the same measurement of what its routing displaces.
+  3. **Input-threading stays rejected** for the reason in the table above: it widens
+     `Shape::matches`, which the operator rules share.
+  4. The path is bounded (one string, project-relative after the stripper) and carries no
+     content, so the no-echo prohibition is untouched. The cost is about 45 B per named write.
 
 ## Sites (initial)
 

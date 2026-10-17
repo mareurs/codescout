@@ -63,6 +63,55 @@ pub(crate) fn ensure_registration(cat: &Catalog, cp: &CurrentProject) -> Result<
     )
 }
 
+/// Where the overlay fork of a main-checkout artifact lives: its id and path under the
+/// worktree root. One computation, shared by [`resolve_write_target`] (which forks) and
+/// [`peek_write_target`] (which must not), so the two cannot disagree about which row a
+/// write lands on.
+fn shadow_coordinates(
+    cp: &CurrentProject,
+    main_root: &std::path::Path,
+    row: &artifact::ArtifactRow,
+) -> (String, String) {
+    let main_s = RepoPath::from(main_root).into_string();
+    let wt_s = RepoPath::from(cp.git_root.as_path()).into_string();
+    let row_path = RepoPath::from(row.abs_path.as_path()).into_string();
+    let rel = row_path
+        .strip_prefix(&format!("{main_s}/"))
+        .unwrap_or(&row_path);
+    let shadow_path = format!("{wt_s}/{rel}");
+    let shadow_id = ids::artifact_id_from_abs(std::path::Path::new(&shadow_path));
+    (shadow_id, shadow_path)
+}
+
+/// The id a write to `id` landed on, read AFTER the write and WITHOUT forking anything.
+///
+/// [`resolve_write_target`] answers "which row must this write go to, forking it if need be";
+/// this answers "which row did it go to", for a caller that only wants to name the file. In a
+/// worktree session a write to a main-checkout artifact lands on its overlay shadow, so the
+/// artifact the caller passed and the one that changed are different rows at different
+/// paths. Returns the shadow's id when it exists, otherwise `id` unchanged, which is also the
+/// answer outside a worktree session and for an unknown id.
+pub(crate) fn peek_write_target(cat: &Catalog, ctx: &ToolContext, id: &str) -> Result<String> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(id.to_string());
+    };
+    let Some(main_root) = cp.main_root.as_ref() else {
+        return Ok(id.to_string());
+    };
+    let Some(row) = artifact::get(cat, id)? else {
+        return Ok(id.to_string());
+    };
+    if !is_main_checkout_artifact(cp, &row.abs_path) {
+        return Ok(id.to_string());
+    }
+    let (shadow_id, _) = shadow_coordinates(cp, main_root.as_path(), &row);
+    if artifact::get(cat, &shadow_id)?.is_some() {
+        Ok(shadow_id)
+    } else {
+        Ok(id.to_string())
+    }
+}
+
 /// The overlay write gate. A mutating action targeting a MAIN-root artifact
 /// from a worktree session forks it: shadow row at the worktree path (seeded
 /// from the main row), `worktree_fork` event carrying the base snapshot,
@@ -90,14 +139,7 @@ pub(crate) fn resolve_write_target(
         return Ok(id.to_string()); // already shadow, or foreign repo — no isolation (spec non-goal)
     }
 
-    let main_s = RepoPath::from(main_root.as_path()).into_string();
-    let wt_s = RepoPath::from(cp.git_root.as_path()).into_string();
-    let row_path = RepoPath::from(row.abs_path.as_path()).into_string();
-    let rel = row_path
-        .strip_prefix(&format!("{main_s}/"))
-        .unwrap_or(&row_path);
-    let shadow_path = format!("{wt_s}/{rel}");
-    let shadow_id = ids::artifact_id_from_abs(std::path::Path::new(&shadow_path));
+    let (shadow_id, shadow_path) = shadow_coordinates(cp, main_root.as_path(), &row);
     if artifact::get(cat, &shadow_id)?.is_some() {
         return Ok(shadow_id); // already forked
     }

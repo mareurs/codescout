@@ -99,52 +99,65 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
 ///
 /// Why a result needs to say it: `LibrarianAdapter::relevant_guide_topic` chooses the guide
 /// from the RESULT, and chooses `tracker-conventions` only when the result names a path under
-/// `docs/issues/` or `docs/trackers/`. `append_entry`, `update_entry` and `update` return
-/// `{id, ...}` and nothing else, so a write to a tracker or a bug file never reached the
-/// guide section written for it (`serves: doc.append_entry(path~docs/trackers/)` and its kin
-/// could not be chosen). `move` is not here: it already returns `old_abs_path`/`new_abs_path`,
-/// which `names_path_containing` now reads.
+/// `docs/issues/` or `docs/trackers/`. `append_entry`, `update_entry`, `augment` and `link`
+/// answer `{id, ...}` or the bare `"ok"` and nothing else, so a write to a tracker never
+/// reached the guide section written for it (`serves: doc.append_entry(path~docs/trackers/)`
+/// and its kin could not be chosen). `move` is not here: it already returns
+/// `old_abs_path`/`new_abs_path`, which `names_path_containing` reads.
 ///
-/// **`augment` and `link` are not here either, and cannot be:** they return the bare string
-/// `"ok"` (the write-tool convention), and a string has nowhere to carry a path. Giving them
-/// one is a wire-contract change, recorded as an open decision in the issue.
-///
-/// **An `update` is named only when it changes `status`.** That is the lifecycle write —
-/// closing a bug, archiving a tracker — and the one `tracker-conventions` has sections for.
-/// An ordinary `update` (a body edit) stays unnamed and keeps routing to `librarian`, whose
-/// § *Choosing a mode* and § *The shrink guard* are the warnings against wiping a body; the
-/// engine ships ONE topic per call, so naming every update would put `tracker-conventions`
-/// in front of those on a tracker's first update and delay them to its second.
+/// **`update` is NOT here, deliberately, and neither is any status change.** An `update` that
+/// changes `status` was named in the first cut of this routing and measured to delay the
+/// anti-wipe warnings: the engine ships ONE topic per call and stops at the first that ships
+/// something (`emit_guide_sections`), so a bug close, then a tracker archive, then a body
+/// edit delivered `librarian` § *Choosing a mode* / § *The shrink guard* only AFTER the third
+/// call had run; and in the anonymous tier (no session identity, so the destructive gate
+/// holds nothing) a forced status update ran unheld and the next forced wholesale
+/// `patch.body` ran without the warning. Safety outranks reachability, so every `update`
+/// keeps routing to `librarian` and the sections only a status change needs stay waived.
 ///
 /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
 fn write_target_id(action: &str, args: &Value) -> Option<String> {
     let key = match action {
-        "append_entry" | "update_entry" => "id",
-        "update" if args.pointer("/patch/status").is_some() || args.get("status").is_some() => "id",
+        "append_entry" | "update_entry" | "augment" => "id",
+        "link" => "src_id",
         _ => return None,
     };
     args.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-/// Put the written artifact's path on a write's result, so the guide router can read it.
-/// Only when the result is an object that names no path of its own, and only when the id
-/// resolves: a failed lookup leaves the result exactly as the tool returned it.
+/// Put the path of the artifact a write LANDED ON on its result, so the guide router can read
+/// it. `target` is the id the caller passed; the path named is the one
+/// [`super::worktree::peek_write_target`] says the write reached, which in a worktree session
+/// is the overlay shadow, not the main-checkout file the caller's id points at (naming the
+/// latter would send an agent to read a file the write never touched).
+///
+/// A bare string answer (`augment`, `link` answer `"ok"`) is promoted to `{"status": ...}` to
+/// hold the path, the same promotion `annotate_write_path` makes for every other write
+/// (`docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`, amended 2026-10-17).
+/// Only when the id resolves and the result names no path of its own: a failed lookup leaves
+/// the result exactly as the tool returned it.
 fn name_the_target(ctx: &ToolContext, target: Option<&str>, mut out: Value) -> Value {
     let Some(id) = target else { return out };
+    let landed = {
+        let cat = ctx.catalog.lock();
+        let Ok(landed_id) = super::worktree::peek_write_target(&cat, ctx, id) else {
+            return out;
+        };
+        match crate::librarian::catalog::artifact::get(&cat, &landed_id) {
+            Ok(Some(row)) => row.abs_path,
+            _ => return out,
+        }
+    };
+    if let Some(status) = out.as_str() {
+        out = json!({ "status": status });
+    }
     let Some(obj) = out.as_object_mut() else {
         return out;
     };
-    if obj.contains_key("abs_path") || obj.contains_key("rel_path") {
-        return out;
-    }
-    let row = {
-        let cat = ctx.catalog.lock();
-        crate::librarian::catalog::artifact::get(&cat, id)
-    };
-    if let Ok(Some(row)) = row {
+    if !(obj.contains_key("abs_path") || obj.contains_key("rel_path")) {
         obj.insert(
             "abs_path".to_string(),
-            json!(crate::util::fs::to_forward_slash(&row.abs_path)),
+            json!(crate::util::fs::to_forward_slash(&landed)),
         );
     }
     out
@@ -489,6 +502,147 @@ mod tests {
 
     fn mk_ctx() -> ToolContext {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
+    }
+
+    /// The path a write names is the file it LANDED ON, not the one the caller's id points at.
+    ///
+    /// In a worktree session a write to a main-checkout artifact lands on its overlay shadow:
+    /// `resolve_write_target` forks it and the write goes there. The first cut of
+    /// `name_the_target` read `args["id"]` before dispatch, so every one of these answered
+    /// `{"abs_path": "/repo/docs/trackers/t.md"}` — the MAIN file, which the write never
+    /// touched — while the row that changed sat at `/repo/.worktrees/feat/docs/trackers/t.md`.
+    /// An agent reading that path would look at the wrong file or conclude its write was lost.
+    ///
+    /// One case per action, each on a FRESH context so no earlier write has already forked the
+    /// shadow (the first write must name the shadow it is about to create, not the main file
+    /// the shadow did not yet exist for); a non-worktree control per action proves the same
+    /// code still names the artifact itself. Mutation sites: `write_target_id` keys,
+    /// `name_the_target`'s `peek_write_target` call.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[tokio::test]
+    async fn a_write_names_the_row_it_landed_on_in_a_worktree_session_and_the_artifact_otherwise() {
+        use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
+        use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
+        const MAIN: &str = "/repo/docs/trackers/t.md";
+        const SHADOW: &str = "/repo/.worktrees/feat/docs/trackers/t.md";
+
+        let cases: [(&str, fn(&str, &str) -> Value); 4] = [
+            ("append_entry", |id, _| {
+                json!({"action": "append_entry", "id": id, "entry_collection": "items",
+                       "id_prefix": "F", "entry": {"t": "x"}})
+            }),
+            ("update_entry", |id, _| {
+                json!({"action": "update_entry", "id": id, "entry_collection": "items",
+                       "entry_id": "F-1", "fields": {"t": "b"}})
+            }),
+            ("augment", |id, _| {
+                json!({"action": "augment", "id": id, "merge": true,
+                       "augment": {"params": {"note": "x"}}})
+            }),
+            (
+                "link",
+                |id, dst| json!({"action": "link", "src_id": id, "dst_id": dst, "rel": "implements"}),
+            ),
+        ];
+        for (action, build) in cases {
+            for worktree in [true, false] {
+                let ctx = if worktree {
+                    wt_ctx(Catalog::open_in_memory().unwrap())
+                } else {
+                    mk_ctx()
+                };
+                let (id, dst) = {
+                    let cat = ctx.catalog.lock();
+                    let id = if worktree {
+                        seed_main_tracker(&cat)
+                    } else {
+                        // The same tracker, in a session that is not a worktree.
+                        let id =
+                            crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(MAIN));
+                        upsert(
+                            &cat,
+                            &TestArtifactRowBuilder::new(&id)
+                                .with_abs_path(MAIN)
+                                .with_kind("tracker")
+                                .build(),
+                        )
+                        .unwrap();
+                        crate::librarian::catalog::augmentation::upsert(
+                            &cat,
+                            &crate::librarian::catalog::augmentation::AugmentationRow {
+                                artifact_id: id.clone(),
+                                prompt: "p".into(),
+                                params: r#"{"items":[{"id":"F-1","t":"a"}],"note":"base"}"#.into(),
+                                last_refreshed_at: None,
+                                refresh_count: 0,
+                                created_at: "2026-01-01T00:00:00.000Z".into(),
+                                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                                render_template: None,
+                                params_schema: None,
+                                append_mode: false,
+                                history_cap: None,
+                                entry_collection: Some("items".into()),
+                                refreshed_at_commit: None,
+                            },
+                        )
+                        .unwrap();
+                        id
+                    };
+                    let dst = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+                        "/repo/docs/specs/other.md",
+                    ));
+                    upsert(
+                        &cat,
+                        &TestArtifactRowBuilder::new(&dst)
+                            .with_abs_path("/repo/docs/specs/other.md")
+                            .with_kind("spec")
+                            .build(),
+                    )
+                    .unwrap();
+                    (id, dst)
+                };
+                let out = Artifact
+                    .call(&ctx, build(&id, &dst))
+                    .await
+                    .unwrap_or_else(|e| panic!("{action} (worktree={worktree}) failed: {e:#}"));
+                let named = out["abs_path"].as_str().unwrap_or_else(|| {
+                    panic!("{action} (worktree={worktree}) names no path: {out}")
+                });
+                let want = if worktree { SHADOW } else { MAIN };
+                assert_eq!(
+                    named, want,
+                    "{action} (worktree={worktree}) must name the file it landed on, got {out}"
+                );
+            }
+        }
+    }
+
+    /// `update` names nothing, whether the status arrives as `patch.status` or as the
+    /// top-level shortcut `doc(update, id, status=…)`, which `update::call` lifts into the
+    /// patch. Routing a status change to `tracker-conventions` delayed librarian's anti-wipe
+    /// sections (see `write_target_id`). Both spellings are asserted because they are two
+    /// SITES of one rule: a mutation of the top-level one survived all of `guide_hint_tests`
+    /// when only the other was driven. (Driven end to end, against real files, in
+    /// `guide_hint_tests::a_status_update_keeps_the_librarians_anti_wipe_sections_first`.)
+    #[test]
+    fn an_update_that_changes_status_names_no_path_in_either_spelling() {
+        let id = "b00000000000000a";
+        for args in [
+            json!({"id": id, "patch": {"status": "investigating"}}),
+            json!({"id": id, "status": "open"}),
+            json!({"id": id, "patch": {"title": "t"}}),
+        ] {
+            assert_eq!(write_target_id("update", &args), None, "{args}");
+        }
+        // And the actions that ARE named still are, so the control above is not vacuous.
+        assert_eq!(
+            write_target_id("append_entry", &json!({"id": id})).as_deref(),
+            Some(id)
+        );
+        assert_eq!(
+            write_target_id("link", &json!({"src_id": id, "dst_id": "d"})).as_deref(),
+            Some(id)
+        );
     }
 
     #[tokio::test]

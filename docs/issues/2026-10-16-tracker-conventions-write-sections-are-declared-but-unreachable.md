@@ -1,7 +1,7 @@
 ---
 kind: bug
 status: open
-title: 'tracker-conventions sections that a write needs are declared-but-unreachable: augment and link return the bare string "ok" and cannot route (move, update, append_entry and update_entry were fixed 2026-10-17), and doctor cannot be served per violation class'
+title: 'tracker-conventions sections that a write needs are declared-but-unreachable: the sections only a status-changing update needs stay waived (routing it delays librarian''s anti-wipe sections), and doctor cannot be served per violation class (move, append_entry, update_entry, augment and link were fixed 2026-10-17)'
 tags:
 - cluster/declared-not-wired
 - guides
@@ -145,61 +145,81 @@ What a `move` ships now, and what it displaces:
   The tracker-conventions sections carry the same stage-both-halves and re-point guidance, so the
   content is replaced rather than lost, but `librarian`'s section is displaced there.
 
-**Second change, 2026-10-17: the writes that returned only `{id, ...}`.** Option 2's obstacle was that
-the target's path is in neither the input nor the result. It did not need the adapter to resolve
-anything: the doc tool already has the catalog and the id, so the result is given the path before
-the router reads it (`write_target_id` / `name_the_target`, `src/librarian/tools/artifact.rs`):
+**Second change, 2026-10-17: the writes that returned only `{id, ...}` or the bare `"ok"`.**
+Option 2's obstacle was that the target's path is in neither the input nor the result. It did not
+need the router to resolve anything: the doc tool already has the catalog and the id, so the result
+is given the path before the router reads it (`write_target_id` / `name_the_target`,
+`src/librarian/tools/artifact.rs`). Reviewed by Opus the same day; this section records the
+reviewed state.
 
-- `append_entry` and `update_entry` name the tracker they wrote (`abs_path`, +45 B).
-- An `update` names its target ONLY WHEN IT CHANGES `status`. That is the lifecycle write (closing a
-  bug, archiving a tracker) and the one the guide has sections for. A body edit stays unnamed and keeps
-  routing to `librarian`, because the engine ships ONE topic per call and `librarian` § *Choosing a
-  mode* and § *The shrink guard* are the warnings against wiping a body: naming every update would put
-  `tracker-conventions` in front of them on a tracker's first update and delay them to its second.
-  (Not guessed: that is the sign-flipped form of the starvation `emit_guide_sections` documents.)
+- `append_entry`, `update_entry`, `augment` and `link` (keyed on `src_id`) answer with `abs_path` (+45 B).
+  `augment` and `link` answered the bare string `"ok"`; they now answer `{"status":"ok","abs_path":…}`,
+  the promotion `annotate_write_path` already makes for every other write and `annotate_write_root`
+  already made in any repo with linked worktrees. The ADR it follows
+  (`docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`) is cited and amended: its
+  Revisit-when named exactly this ("a write tool needs a path it did not take from
+  `input['path']`"), and the amendment says what now holds. Option (b) (routing on the input) was
+  already measured and rejected there and is not done.
+- **The path is the row the write LANDED ON.** The first cut read `args["id"]`, which in a worktree
+  session is the main-checkout artifact; the write goes to its overlay shadow, so the result named a
+  file the write never touched (reviewer's probe: `artifact_id` of the shadow, `abs_path` of the main
+  file). `name_the_target` now asks `worktree::peek_write_target`, which shares `shadow_coordinates`
+  with the forking `resolve_write_target` and forks nothing.
+- **`update` is not routed, in either spelling of `status`.** The first cut named a status-changing
+  update. The engine ships ONE topic per call and stops at the first that ships something
+  (`emit_guide_sections`), so librarian § *Choosing a mode* and § *The shrink guard* (the anti-wipe
+  warnings) were delayed: reviewer-measured, bug close -> tracker archive -> body edit delivered them
+  only after the THIRD call had run; in the anonymous tier (no session identity, so the destructive
+  gate holds nothing) a forced status update ran unheld and shipped 9,048 B of tracker-conventions,
+  and the next call, a forced wholesale `patch.body`, ran with no warning. I reproduced both by
+  re-introducing the naming (mutation P5, below), which kills the two end-to-end tests that pin the
+  opposite. Priority rule: routing must not delay the anti-wipe sections. Chosen: drop the
+  status-update shape (not "serve the anti-wipe sections first", which is multi-topic emission, an
+  engine change). Cost: the three sections only a status change needs (`Settled caveats`,
+  `Closing a bug — patch-id and fix provenance`, `Archiving a tracker`) are waived again, and the
+  three-way split of `Closing a bug` made in the first cut was reverted, since nothing served it.
+- `One entry format` and `Compaction and archival` were moved OFF `append_entry`: they inform body and
+  index maintenance (a `body_edits` update), not an append, and the first cut delivered 16,344 B against
+  the 16,384 B bound because the test summed section BODIES while the bound counts the wrapper. The
+  refusals and counter sections stay on `append_entry` (a prose-ledger append is its main use and the
+  router cannot tell prose from params).
+- `Declaring an augmentation` (4.1 KB) was split at `###` (1.9 + 2.4 KB), as the other five splits were.
 
-Sections now declared (all `path~`-qualified, so none can gate a call; the destructive gate and its
-option-B ordering are untouched, pinned by
-`a_forced_status_update_is_still_held_before_it_runs_and_then_routed_to_the_close_sections`):
+Delivered bytes per call, wrapped blocks as injected (before = first cut b96a56ea):
 
-| call | sections served (bytes) |
-|---|---|
-| `doc.update(path~docs/issues/)` | `Settled caveats`, `Closing a bug — patch-id and fix provenance`, and three fix-provenance children split out of it: 1.6 + 1.7 + 1.4 + 1.7 + 1.2 KB |
-| `doc.update(path~docs/trackers/)` | `Archiving a tracker` (0.4 KB) |
-| `doc.append_entry(path~docs/trackers/)` | entry-level standard, `Entry ids` (split in 3: allocation 2.1, refusals 2.5, counter 1.0 KB), `Entry headings — the definition rule`, `One entry format`, `Required fields` (split in 2), `Detecting these fields`, `Compaction and archival`: 13.5 KB |
-| `doc.update_entry(path~docs/trackers/)` | entry-level standard, `Required fields` (2), `Detecting these fields`, `Citing an entry` (split in 2): 7.3 KB |
+| call | before | after | ceiling (test) |
+|---|---|---|---|
+| `append_entry` on a tracker | 16,344 | 12,928 | 14,000 |
+| `update_entry` on a tracker | 9,077 | 9,077 | 9,800 |
+| `augment` on a tracker | unrouted (librarian) | 4,958 | 5,400 |
+| `link` from a tracker or a bug | unrouted (librarian) | 2,591 | 2,800 |
+| status-changing `update` | 9,048 (anonymous tier, reviewer) | 0 from tracker-conventions; librarian's 2,683 | n/a |
 
-Five sections were split at `###` (the cap is 2,500 B and the guide's own cap test holds it): `Closing a
-bug` (5.5 KB), `Entry ids` (6.5 KB), `Entry headings`, `Citing an entry` and `Required fields` (each
-about 3 KB). No prose was rewritten; each split inserts a heading and a `serves:` line at a paragraph
-boundary. `Citing an entry` is served on `update_entry` only: adding it to `append_entry` took that call
-to 16.8 KB, over the 16 KiB auto-inject bound.
+The earlier note that adding `Citing an entry` to `append_entry` would give 16.8 KB was a BODY sum;
+wrapped it is about 19.7 KB. It stays on `update_entry` only.
 
-Not done, and why each is a decision rather than an edit:
+Still waived, each with its reason in `SECTION_WAIVERS`:
 
-- **`doc.augment` and `doc.link` return the bare string `"ok"`** (the write-tool convention), which can
-  carry no path, so `Declaring an augmentation` (4.1 KB) and `Cross-linking` cannot route. Measured: a
-  real `augment` of a tracker under `docs/trackers/` ships a `librarian` section. (`link` with
-  `rel: "supersedes"` returns `{ok, superseded}`, also pathless.) Options: (a) return an object from
-  these two actions (a wire-contract change, and every test asserting `"ok"`); (b) give `Tool` a way
-  to route on the INPUT (a trait change, and the id still has to become a path). They stay waived
-  under `TRACKER_SECTION_RESULT_IS_A_BARE_STRING`, and
-  `a_write_to_a_tracker_or_bug_file_is_routed_to_its_section` asserts `augment` and `link` still
-  return `"ok"` so the day (a) is taken the assertion reds and names the waivers to drop.
-- **A `check~<name>` predicate in `Shape`** (option 3, a grammar amendment) so `librarian.doctor` can
-  serve the section that remediates the check a violation names. Two sections exist only as doctor
-  remedies (`Entry ids — when two hosts allocate anyway`, `Entry headings — a prefix with no definer,
-  or owned outside markdown`); they stay waived under `TRACKER_SECTION_IS_A_DOCTOR_REMEDY` rather
-  than being served to a write that neither creates nor reads the state they explain.
-- **`Citing an archive path`** (the fix-time half of the archive flow) stays waived: it informs a body
-  write made BEFORE the move, and no result of that write carries the destination.
+- `Settled caveats`, `Closing a bug — patch-id and fix provenance`, `Archiving a tracker`: need a
+  status-changing `update` (above). The fix that would serve them is multi-topic emission.
+- `One entry format`, `Compaction and archival`: inform `body_edits` updates, which stay librarian's.
+- `Entry ids — when two hosts allocate anyway`, `Entry headings — a prefix with no definer, or owned
+  outside markdown`: doctor remedies. Serving them per violation class needs a `check~<name>` predicate
+  in `Shape` (a grammar amendment). The doctor messages that cite `§ Entry headings` were checked: they
+  say an entry has no `## <ID> — <title>` heading, which is `Entry headings — the definition rule`
+  (still that heading, now served on `append_entry`); none points at the no-definer child, so no
+  pointer needed changing.
+- `Citing an archive path`: informs a body write made before the move.
 
-**What the new routing displaces, measured:** the first `append_entry`, `update_entry` and
-status-changing `update` on a tracker or bug file now ship `tracker-conventions` sections where they
-shipped `librarian` § *Reach for augmentation* / § *Changing ONE entry* / § *Choosing a mode*. Those
-arrive on the NEXT call of the shape (`emit_guide_sections` falls through to the declaring topic once
-the content topic is spent). The one that matters is § *Choosing a mode* (anti-wipe); it is why a plain
-`update` is not named.
+**What the new routing displaces, measured:** the first `append_entry`, `update_entry`, `augment` and
+`link` on a tracker now ship tracker-conventions sections where they shipped librarian § *Reach for
+augmentation* / § *Changing ONE entry* / § *Augmentation Lifecycle* / § *Relationship Map*. Those arrive
+on the NEXT call of the shape, because the fallthrough picks the topic `topic_declaring` names, and that
+is the librarian only because it sorts first in the topic map and nothing else declares these shapes
+unqualified: pinned per shape by `the_fallback_for_every_routed_write_is_the_librarians_declaration`,
+and by the second `append_entry` in the end-to-end test. `augment`'s § *Augmentation Lifecycle* carries
+the merge-versus-replace semantics; the `doc` tool description states `merge=false` replaces wholesale
+inline, which is why this was judged acceptable and `update` was not.
 
 ## Tests added
 
@@ -224,27 +244,34 @@ For the `move` half (2026-10-17), red before the fix, green after:
   the slice anchored on `**Then re-point` absorbed the new heading and `serves:` comment and broke
   the 2,000 B ceiling, which was not raised)
 
-For the `update` / `append_entry` / `update_entry` half (second change), red before the fix (the
-declarations did not exist and the results named no path):
+For the second change (red before the fix: the declarations did not exist, and then the reviewed
+defects below were reproduced by mutation):
 
-- `prompts::guide_index::tests::tracker_write_shapes_ship_their_sections_and_only_theirs`: for each
-  of the 18 sections declared for these writes, the calls that MUST serve it and at least one that
-  must NOT (a body of the wrong kind of file, the wrong action, a `move`, a result naming no path); the
-  table is compared as a SET with the guide's declared write-sections, so a section added later without
-  a row fails; every call it names is held to the byte bounds.
-- `server::guide_hint_tests::a_write_to_a_tracker_or_bug_file_is_routed_to_its_section`: real `doc`
-  calls: `append_entry`, `update_entry` and a status-changing `update` each name the file and ship
-  their own section (distinctive text from it); a title-only `update` names nothing and is not claimed;
-  `augment` and `link` still return `"ok"` and are not claimed (the pinned open decision).
-- `server::guide_hint_tests::a_forced_status_update_is_still_held_before_it_runs_and_then_routed_to_the_close_sections`
-  (guide-ordering decision B, preserved).
+- `prompts::guide_index::tests::tracker_write_shapes_ship_their_sections_and_only_theirs`: for each of
+  the 13 sections declared for these writes, the calls that MUST serve it and at least one that must NOT;
+  the table is compared as a SET with the guide's declared write-sections; `doc.update` serves nothing
+  from the topic on a tracker, a bug or no path; bytes are measured on the WRAPPED blocks
+  (`section_block`), bounded by `MAX_AUTO_INJECT_GUIDE_BYTES`, the 1/4-of-guide ratio, a measured
+  ceiling per call, and a floor that fails an instrument that stops counting wrappers.
+- `librarian::tools::artifact::tests::a_write_names_the_row_it_landed_on_in_a_worktree_session_and_the_artifact_otherwise`:
+  one case per action (`append_entry`, `update_entry`, `augment`, `link`), each in a worktree context
+  (the overlay shadow's path) and outside one (the artifact's own path).
+- `...::an_update_that_changes_status_names_no_path_in_either_spelling` (`patch.status` and the
+  top-level `status` shortcut: two sites of one rule).
+- `server::guide_hint_tests::a_write_to_a_tracker_or_bug_file_is_routed_to_its_section` (real calls,
+  delivered bytes of the first `append_entry`, the librarian fallthrough on its second call, `augment`
+  and `link` named, a link from a spec not claimed);
+  `a_status_update_keeps_the_librarians_anti_wipe_sections_first` (both spellings, the three-call
+  sequence); `the_anonymous_tier_still_gets_the_anti_wipe_sections_after_a_forced_status_update`;
+  `a_forced_status_update_is_held_behind_the_anti_wipe_sections_and_then_runs` (the held block IS
+  librarian § Choosing a mode and § The shrink guard: option B preserved);
+  `the_fallback_for_every_routed_write_is_the_librarians_declaration`.
 
-Mutation probes (`./scripts/mutation-probe.sh`), all 13 KILLED: `append_entry` unnamed; `update_entry`
-unnamed; every `update` named; the status predicate inverted; `name_the_target` never resolving; a
-section moved to the wrong call; a section widened to `update_entry`; a `serves:` with its `path~`
-dropped; `Archiving a tracker` gaining `move`; `Citing an entry` added to `append_entry` (the byte
-bounds); an undeclared section gaining a `serves:` (the set closure); `Settled caveats` moved to
-trackers; a doc-shape waiver drifting.
+Mutation probes (`./scripts/mutation-probe.sh`): see the final report for the verdict list; every one
+of the 16 below was KILLED. Naming the landed row's id instead of the caller's, the shadow never
+found, `augment` or `link` unnamed or naming the wrong end, `update` named, the bare `"ok"` not
+promoted, a section widened or its `path~` dropped, each byte bound (ceiling, floor, wrapper-counting,
+auto-inject bound, ratio, end-to-end), a waiver drifting, and the librarian ceasing to declare `link`.
 
 ## Workarounds
 
@@ -254,11 +281,12 @@ the whole topic was over the auto-inject bound and shipped a pointer.
 
 ## Resume
 
-`move`, `update` (status), `append_entry` and `update_entry` are done (see Fix). What remains is
-two decisions: the result contract for `augment`/`link` (an object, or routing on the input), and
-the grammar for `doctor` (`check~<name>`). Whichever is taken, delete the waiver rows it makes
-reachable from `SECTION_WAIVERS` and declare the sections; Gate 5 then holds them to their size
-cap, so `Declaring an augmentation` (4.1 KB) must be split at `###` first.
+`move`, `append_entry`, `update_entry`, `augment` and `link` are done (see Fix). What remains is
+three decisions: multi-topic emission (one call shipping the librarian's anti-wipe sections AND the
+tracker-conventions close/archive sections), which would let a status-changing `update` be named;
+the grammar for `doctor` (`check~<name>`); and where `One entry format` / `Compaction and archival`
+should be delivered if not on an update. Whichever is taken, delete the waiver rows it makes
+reachable from `SECTION_WAIVERS` and declare the sections; Gate 5 then holds them to their size cap.
 
 ## References
 

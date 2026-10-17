@@ -95,7 +95,6 @@ is why `MEASURED` is deliberately not one. An unmarked caveat behaves exactly as
 has, so nothing written before this convention changes meaning.
 
 ### Settled caveats — STANDING and TRACKED
-<!-- serves: doc.update(path~docs/issues/) -->
 
 **Two more first words, and they are opposites.** `STANDING` marks a limit NO action can
 settle — a property no test can observe, a cause that will never be established — and
@@ -149,7 +148,6 @@ re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orph
 rebase and an unlabelled one in `archive/` becomes an untraceable string.
 
 ### Closing a bug — patch-id and fix provenance
-<!-- serves: doc.update(path~docs/issues/) -->
 
 **And record a `patch-id` next to it, because the sentence above describes a wound with
 no remedy.** `git show <sha> | git patch-id --stable` is a content hash of the commit's
@@ -181,9 +179,6 @@ reader scanning for provenance finds the commit the bug was OBSERVED at and stop
 - **patch-id:** `e9f8df63b911`
 ````
 
-### Fix provenance — plural, cross-repo, and no commit
-<!-- serves: doc.update(path~docs/issues/) -->
-
 **Plural, because a fix is not always one commit.** Repeat the pair; each `- **patch-id:**`
 binds to the `- **SHA:**` above it, not to the first in the file. The singular shape this
 replaced pushed one author into a table — which read well and was invisible to every check,
@@ -208,9 +203,6 @@ no_fix_commit: "mitigation was a doc note; nothing was committed"
 
 An empty value does not discharge it. The check wants the reason, not the field.
 
-### Fix provenance — a merge commit's patch-id
-<!-- serves: doc.update(path~docs/issues/) -->
-
 **A merge commit's patch-id is never citable — but it is not always EMPTY, and the
 difference decides whether you notice.** For a **clean** merge `git show <merge>` emits
 the message with no diff (the tree is derivable from the parents, so there is nothing to
@@ -232,9 +224,6 @@ objection. docs/issues/archive/2026-09-10-a-conflicted-merge-yields-a-patch-id-a
 Do not reach for `git diff <first-parent>..<merge>` to manufacture one: it hashes, but
 not to the object a cherry-pick would reproduce, so it is a plausible value in a field
 that means something else.
-
-### Fix provenance — nothing is owed to master
-<!-- serves: doc.update(path~docs/issues/) -->
 
 Already the practice in this repo before it was a rule —
 `docs/issues/archive/2026-08-13-url-silently-overrides-local-dir-model.md` reads *"Fixed
@@ -473,7 +462,6 @@ that would have corrected it. **Before reading a `draft` as "not started", check
 `resume-*` tracker names it.**
 
 ### Archiving a tracker
-<!-- serves: doc.update(path~docs/trackers/) -->
 
 **Archiving a tracker:** preferred path is in-place archival via the
 catalog:
@@ -527,6 +515,7 @@ retired section keeps reading as settled prose. Same repair, applied where you n
 banner naming what superseded it. Recorded as `observer-blindness:OB-12`, whose blind party is
 the author adding the new section, since nothing in the act of appending points backwards.
 ## Declaring an augmentation
+<!-- serves: doc.augment(path~docs/trackers/) -->
 
 If an artifact is meant to carry an augmentation, say so in **frontmatter** — and name
 the committed sidecar holding its shape:
@@ -560,6 +549,9 @@ writes through to an existing sidecar, and a params-only merge leaves the file
 byte-identical. The catalog is authoritative and the sidecar is its committed
 projection, so a shape change made locally is what gets published — read `git diff` on
 `docs/augmentations/` before committing, as with any generated file.
+
+### Declaring an augmentation — why the sidecar exists, and the check's remedy
+<!-- serves: doc.augment(path~docs/trackers/) -->
 
 That wiring exists because its absence was measured rather than imagined. Export
 skipping, `reindex` attaching only when a row is *absent*, and `doc(action="augment")` not
@@ -888,7 +880,6 @@ ledgers — R-N alone accounted for 27 of 50. That is the permanent record losin
 links to its own evidence, not session logs cross-talking.
 
 ### One entry format, never two
-<!-- serves: doc.append_entry(path~docs/trackers/) -->
 
 Do not hand-maintain an index table *alongside* body sections. Two formats for one
 entry is the defect that generates the rest: the index falls behind (13 orphaned
@@ -976,7 +967,6 @@ counts sentences *about* Status, and a `/fired/` probe matches "the tell that sh
 have fired". Both mistakes were made, in the same pass, by the same agent.
 
 ### Compaction and archival
-<!-- serves: doc.append_entry(path~docs/trackers/) -->
 
 The ladder is **live body → archived section (heading kept) → nothing further.**
 
@@ -1073,6 +1063,7 @@ behavior — including the session-passover pattern — see
 `get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
 
 ## Cross-linking (edges are derived — cite in prose)
+<!-- serves: doc.link(path~docs/trackers/), doc.link(path~docs/issues/) -->
 
 How artifacts reference each other, and who maintains the link graph:
 
