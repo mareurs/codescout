@@ -5,7 +5,17 @@
 #
 # Requires:
 #   - `mcp` CLI (~/.local/bin/mcp)
-#   - Kotlin project at /home/marius/work/mirela/backend-kotlin
+#   - kotlin-language-server on PATH (without it the symbols steps depend on the
+#     tree-sitter fallback and a red there is not a Kotlin-LSP signal)
+#
+# The target is a THROWAWAY COPY of tests/fixtures/kotlin-library, never a project on a
+# developer's disk: codescout writes `.codescout/` state into whatever it is started
+# against, and a script that names one machine's checkout goes stale the moment that
+# checkout is reorganised (docs/issues/2026-10-16-mcp-smoke-kotlin-targets-a-project-
+# layout-that-no-longer-exists.md). The fixture carries no README, .properties or .yml,
+# so the copy gets one of each written below; `the_kotlin_smoke_script_targets_a_checked_
+# in_fixture_and_every_path_it_reads_exists` (tests/mcp_smoke_scripts_reference_real_tools.rs)
+# re-reads every `"path"` in this script against the fixture and those writes.
 set -euo pipefail
 
 PASS=0
@@ -14,7 +24,8 @@ STEPS=0
 FAILURES=""
 RESULT=""
 
-KOTLIN_PROJECT="/home/marius/work/mirela/backend-kotlin"
+KOTLIN_FIXTURE="tests/fixtures/kotlin-library"
+KOTLIN_PROJECT="$(mktemp -d)"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -70,11 +81,17 @@ cargo build --release 2>&1 | tail -1
 echo "done"
 echo ""
 
+cp -R "$KOTLIN_FIXTURE"/. "$KOTLIN_PROJECT"/
+printf 'kotlin.code.style=official\n' > "$KOTLIN_PROJECT/gradle.properties"
+printf '# Kotlin Library Fixture\n\nA throwaway copy used by the MCP smoke test.\n' > "$KOTLIN_PROJECT/README.md"
+printf 'services:\n  catalog:\n    image: example/catalog\n' > "$KOTLIN_PROJECT/docker-compose.yml"
+
 export PATH="$HOME/.local/bin:$PATH"
 mcp alias add ce-kt-test ./target/release/codescout start --project "$KOTLIN_PROJECT"
 
 cleanup() {
     mcp alias remove ce-kt-test 2>/dev/null || true
+    rm -rf "$KOTLIN_PROJECT"
 }
 trap cleanup EXIT
 
@@ -122,56 +139,56 @@ test_read_file_allows_yml
 echo ""
 echo "=== Symbol Navigation ==="
 
-test_symbols_overview_auth_service() {
-    call symbols '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
-    if assert_contains "AuthService" && assert_contains "login" && assert_contains "AuthError"; then
-        pass 1 "symbols overview finds symbols in AuthService.kt"
+test_symbols_overview_catalog() {
+    call symbols '{"path": "src/main/kotlin/library/services/Catalog.kt"}'
+    if assert_contains "Catalog" && assert_contains "search" && assert_contains "createDefaultCatalog"; then
+        pass 1 "symbols overview finds symbols in Catalog.kt"
     else
-        fail 1 "symbols overview finds symbols in AuthService.kt" "missing expected symbols"
+        fail 1 "symbols overview finds symbols in Catalog.kt" "missing expected symbols"
     fi
 }
 
-test_symbols_login() {
-    call symbols '{"name": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
-    if assert_contains "login" && assert_contains "AuthService"; then
-        pass 1 "symbols locates login method"
+test_symbols_search() {
+    call symbols '{"name": "search", "path": "src/main/kotlin/library/services/Catalog.kt"}'
+    if assert_contains "search" && assert_contains "Catalog"; then
+        pass 1 "symbols locates search method"
     else
-        fail 1 "symbols locates login method" "function not found"
+        fail 1 "symbols locates search method" "function not found"
     fi
 }
 
 test_symbols_with_body() {
-    call symbols '{"name": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
-    if assert_contains "verifyPassword" && assert_contains "generateTokens"; then
-        pass 1 "symbols with include_body returns login source"
+    call symbols '{"name": "search", "path": "src/main/kotlin/library/services/Catalog.kt", "include_body": true}'
+    if assert_contains "filter" && assert_contains "searchText"; then
+        pass 1 "symbols with include_body returns search source"
     else
-        fail 1 "symbols with include_body returns login source" "body not returned or missing expected code"
+        fail 1 "symbols with include_body returns search source" "body not returned or missing expected code"
     fi
 }
 
 test_symbols_sealed_class() {
-    call symbols '{"name": "AuthError", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
-    if assert_contains "AuthError" && assert_contains "InvalidCredentials" && assert_contains "sealed class"; then
-        pass 1 "symbols finds AuthError sealed class with subclasses"
+    call symbols '{"name": "SearchResult", "path": "src/main/kotlin/library/extensions/Results.kt", "include_body": true}'
+    if assert_contains "SearchResult" && assert_contains "NotFound" && assert_contains "sealed class"; then
+        pass 1 "symbols finds SearchResult sealed class with subclasses"
     else
-        fail 1 "symbols finds AuthError sealed class with subclasses" "sealed class not found"
+        fail 1 "symbols finds SearchResult sealed class with subclasses" "sealed class not found"
     fi
 }
 
-test_symbols_calendar() {
-    call symbols '{"path": "src/main/kotlin/edu/planner/service/CalendarService.kt"}'
-    if assert_contains "getAvailableTeachingDays" && assert_contains "getVacationSummary"; then
-        pass 1 "symbols returns CalendarService signatures"
+test_symbols_book() {
+    call symbols '{"path": "src/main/kotlin/library/models/Book.kt"}'
+    if assert_contains "Book" && assert_contains "isAvailable"; then
+        pass 1 "symbols returns Book members"
     else
-        fail 1 "symbols returns CalendarService signatures" "missing expected functions"
+        fail 1 "symbols returns Book members" "missing expected members"
     fi
 }
 
-test_symbols_overview_auth_service
-test_symbols_login
+test_symbols_overview_catalog
+test_symbols_search
 test_symbols_with_body
 test_symbols_sealed_class
-test_symbols_calendar
+test_symbols_book
 
 # ── Category 3: Search Workflows ────────────────────────────────────────────
 
@@ -187,28 +204,28 @@ test_search_pattern() {
     fi
 }
 
-test_find_file_services() {
-    call tree '{"glob": "**/*Service*.kt"}'
-    if assert_contains "AuthService" && assert_contains "CalendarService"; then
-        pass 1 "tree glob locates service files"
+test_find_file_models() {
+    call tree '{"glob": "**/models/*.kt"}'
+    if assert_contains "Book" && assert_contains "Genre"; then
+        pass 1 "tree glob locates model files"
     else
-        fail 1 "tree glob locates service files" "service files not found"
+        fail 1 "tree glob locates model files" "model files not found"
     fi
 }
 
 test_semantic_search() {
-    call semantic_search '{"query": "authentication login password verification"}'
-    if assert_contains "auth" || assert_contains "login" || assert_contains "password"; then
-        pass 1 "semantic_search finds auth-related content"
+    call semantic_search '{"query": "search catalog items matching a query"}'
+    if assert_contains "search" || assert_contains "Catalog"; then
+        pass 1 "semantic_search finds catalog-search content"
     elif assert_contains "index" || assert_contains "No index"; then
         pass 1 "semantic_search reports index status (index not built or stale)"
     else
-        fail 1 "semantic_search finds auth-related content" "no relevant results"
+        fail 1 "semantic_search finds catalog-search content" "no relevant results"
     fi
 }
 
 test_search_pattern
-test_find_file_services
+test_find_file_models
 test_semantic_search
 
 # ── Category 4: Non-code file access ────────────────────────────────────────
@@ -227,7 +244,7 @@ test_read_gradle_properties() {
 
 test_read_readme() {
     call read_file '{"path": "README.md"}'
-    if assert_contains "EDU-Planner"; then
+    if assert_contains "Kotlin Library Fixture"; then
         pass 1 "read_file returns README.md with project name"
     else
         fail 1 "read_file returns README.md with project name" "blocked or error"
@@ -242,40 +259,40 @@ test_read_readme
 echo ""
 echo "=== Multi-step Exploration ==="
 
-test_explore_auth_flow() {
-    # Step 1: Find the AuthService class
-    call symbols '{"path": "src/main/kotlin/edu/planner/service/AuthService.kt"}'
-    if ! assert_contains "AuthService" || ! assert_contains "login"; then
-        fail 1 "explore auth: find AuthService structure" "class or methods not found"
+test_explore_search_flow() {
+    # Step 1: Find the Catalog class
+    call symbols '{"path": "src/main/kotlin/library/services/Catalog.kt"}'
+    if ! assert_contains "Catalog" || ! assert_contains "search"; then
+        fail 1 "explore search: find Catalog structure" "class or methods not found"
         return
     fi
-    # Step 2: Read login method body
-    call symbols '{"name": "login", "path": "src/main/kotlin/edu/planner/service/AuthService.kt", "include_body": true}'
-    if assert_contains "verifyPassword" && assert_contains "AuthError"; then
-        pass 2 "explore auth: discover login flow (find class → read method)"
+    # Step 2: Read search method body
+    call symbols '{"name": "search", "path": "src/main/kotlin/library/services/Catalog.kt", "include_body": true}'
+    if assert_contains "searchText" && assert_contains "filter"; then
+        pass 2 "explore search: discover search flow (find class → read method)"
     else
-        fail 2 "explore auth: discover login flow (find class → read method)" "login body incomplete"
+        fail 2 "explore search: discover search flow (find class → read method)" "search body incomplete"
     fi
 }
 
-test_explore_service_architecture() {
-    # Step 1: Find all service files (need enough results to include both)
-    call tree '{"glob": "**/*Service*.kt"}'
-    if ! assert_contains "CalendarService" || ! assert_contains "NotificationService"; then
-        fail 1 "explore architecture: find service layer" "service files not found"
+test_explore_model_layer() {
+    # Step 1: Find all model files (need enough results to include both)
+    call tree '{"glob": "**/models/*.kt"}'
+    if ! assert_contains "Book" || ! assert_contains "Genre"; then
+        fail 1 "explore models: find model layer" "model files not found"
         return
     fi
-    # Step 2: Overview a specific service
-    call symbols '{"path": "src/main/kotlin/edu/planner/service/CalendarService.kt"}'
-    if assert_contains "getAvailableTeachingDays" && assert_contains "isInstitutionalVacation"; then
-        pass 2 "explore architecture: discover service layer (find files → symbols)"
+    # Step 2: Overview a specific model
+    call symbols '{"path": "src/main/kotlin/library/models/Genre.kt"}'
+    if assert_contains "Genre" && assert_contains "label"; then
+        pass 2 "explore models: discover model layer (find files → symbols)"
     else
-        fail 2 "explore architecture: discover service layer (find files → list functions)" "functions not found"
+        fail 2 "explore models: discover model layer (find files → list functions)" "functions not found"
     fi
 }
 
-test_explore_auth_flow
-test_explore_service_architecture
+test_explore_search_flow
+test_explore_model_layer
 
 # ── Report ───────────────────────────────────────────────────────────────────
 

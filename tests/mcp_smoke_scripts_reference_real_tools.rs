@@ -271,3 +271,84 @@ fn no_smoke_script_parses_the_reply_as_json() {
          script list or the read is wrong, and this gate checked almost nothing"
     );
 }
+/// `tests/mcp-smoke-kotlin.sh` hardcoded a project on one developer's disk
+/// (`/home/marius/work/mirela/backend-kotlin`) and asserted on files inside it. The project
+/// was reorganised, every path went stale, and nothing re-read the script against it:
+/// `docs/issues/2026-10-16-mcp-smoke-kotlin-targets-a-project-layout-that-no-longer-exists.md`.
+///
+/// The script is a document of its target's layout, so the target must be one this repository
+/// owns and this test can read. Three checks, each a different way for that to rot again:
+/// the script names no machine-local absolute path; it declares a `KOTLIN_FIXTURE` that
+/// exists in the repo; and every literal `"path": "..."` it passes to a tool exists in that
+/// fixture, or is written into the throwaway copy by the script itself
+/// (`> "$KOTLIN_PROJECT/<path>"`) — the escape for non-code files the fixture does not carry.
+///
+/// **Ceiling:** checks `"path"` literals only. A `"glob"` or a `"pattern"` is not resolved
+/// against the fixture, and an assertion string the fixture no longer contains is invisible to
+/// this test; only a live run reads those.
+#[test]
+fn the_kotlin_smoke_script_targets_a_checked_in_fixture_and_every_path_it_reads_exists() {
+    let script = repo_root().join("tests/mcp-smoke-kotlin.sh");
+    let content = std::fs::read_to_string(&script)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", script.display()));
+
+    let abs = regex::Regex::new(r"/home/[A-Za-z0-9_.-]+/").unwrap();
+    let machine_local: Vec<String> = content
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| abs.is_match(l))
+        .map(|(i, l)| format!("tests/mcp-smoke-kotlin.sh:{}  {}", i + 1, l.trim()))
+        .collect();
+    assert!(
+        machine_local.is_empty(),
+        "the Kotlin smoke script names a path on one machine, which this repository cannot \
+         keep true:\n  {}\n\nPoint it at a fixture under tests/fixtures/ instead.",
+        machine_local.join("\n  ")
+    );
+
+    let fixture_re = regex::Regex::new(r#"(?m)^KOTLIN_FIXTURE="([^"]+)""#).unwrap();
+    let fixture_rel = fixture_re
+        .captures(&content)
+        .map(|c| c[1].to_string())
+        .expect("tests/mcp-smoke-kotlin.sh must declare KOTLIN_FIXTURE=\"<repo-relative dir>\"");
+    let fixture = repo_root().join(&fixture_rel);
+    assert!(
+        fixture.is_dir(),
+        "KOTLIN_FIXTURE={fixture_rel} does not exist under the repo root"
+    );
+
+    let path_re = regex::Regex::new(r#""path":\s*"([^"]+)""#).unwrap();
+    let mut missing = Vec::new();
+    let mut checked = 0usize;
+    let mut kt_in_fixture = 0usize;
+    for (i, line) in content.lines().enumerate() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        for cap in path_re.captures_iter(line) {
+            let p = &cap[1];
+            checked += 1;
+            let generated = content.contains(&format!("\"$KOTLIN_PROJECT/{p}\""));
+            if fixture.join(p).is_file() {
+                if p.ends_with(".kt") {
+                    kt_in_fixture += 1;
+                }
+            } else if !generated {
+                missing.push(format!("tests/mcp-smoke-kotlin.sh:{}  {p}", i + 1));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "these paths are read by the Kotlin smoke script but are neither in {fixture_rel} nor \
+         written by the script into its copy:\n  {}",
+        missing.join("\n  ")
+    );
+
+    // Non-vacuity: a regex that stopped matching would check zero paths and report clean.
+    assert!(
+        checked >= 5 && kt_in_fixture >= 1,
+        "expected >=5 `\"path\"` literals including a .kt file in the fixture; saw {checked} \
+         paths, {kt_in_fixture} of them .kt — the path regex stopped matching the script"
+    );
+}
