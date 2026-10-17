@@ -699,15 +699,26 @@ pub fn validate_write_path(
 /// Validate a path for **session approval** via the `approve_write` tool.
 ///
 /// Checks:
-/// 1. Rejects the filesystem root (`/`) and `$HOME` — too broad.
+/// 1. Rejects a filesystem root (`/`, `C:\`), every protected home, and every directory ABOVE
+///    one — each is too broad: a root over `/home` admits `~/.bashrc` and every other file in
+///    the home that is not on the deny list.
 /// 2. Checks the deny-list — protected paths can never be approved.
 ///
 /// Returns the canonicalized path on success.
+///
+/// Trade-off, stated: a host whose `$HOME` is under its temp dir or under the project (for
+/// example `HOME=/tmp/h`) cannot approve `/tmp`, or that project, as a whole; it approves a
+/// subdirectory that does not contain the home instead.
 pub fn validate_approve_path(
     raw: &str,
     project_root: &Path,
-    config: &PathSecurityConfig,
+    _config: &PathSecurityConfig,
 ) -> Result<PathBuf> {
+    validate_approve_path_in(raw, project_root, &protected_homes())
+}
+
+/// `validate_approve_path` over an explicit list of protected homes, so a test can inject them.
+fn validate_approve_path_in(raw: &str, project_root: &Path, homes: &[PathBuf]) -> Result<PathBuf> {
     if raw.is_empty() {
         bail!("path must not be empty");
     }
@@ -722,18 +733,32 @@ pub fn validate_approve_path(
         best_effort_canonicalize(&project_root.join(raw))
     };
 
-    // Breadth guard: reject / and every protected home
-    let is_fs_root = resolved == Path::new("/");
-    let is_home = protected_homes().iter().any(|h| *h == resolved);
-    if is_fs_root || is_home {
+    // Breadth guard, on the form every protected home is held in (`resolved` stays literal when
+    // it does not exist yet, which a home behind a symlinked ancestor would never match).
+    let broad = canonicalize_through_existing_ancestor(&resolved);
+    // `parent().is_none()` is "is a filesystem root" on every platform (`/`, `C:\`), and also
+    // true of the empty path.
+    if broad.parent().is_none() {
         bail!(
             "approve_write: '{}' is too broad — specify a subdirectory",
             resolved.display()
         );
     }
+    // A protected home, or any directory above one: `home.starts_with(broad)` is true for both.
+    if let Some(home) = canonical_homes(homes)
+        .iter()
+        .find(|h| h.starts_with(&broad))
+    {
+        bail!(
+            "approve_write: '{}' is too broad — it is, or contains, the home directory '{}'. \
+             Approve a subdirectory that does not contain it.",
+            resolved.display(),
+            home.display()
+        );
+    }
 
     // Deny-list: protected paths can never be approved
-    let denied = denied_read_paths(config);
+    let denied = denied_paths_with(homes, best_effort_canonicalize);
     if is_denied(&resolved, &denied) {
         bail!(
             "approve_write: '{}' is in a protected location and cannot be approved",
@@ -5534,6 +5559,152 @@ mod tests {
         let result = validate_approve_path(home.to_str().unwrap(), dir.path(), &default_config());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("too broad"));
+    }
+
+    /// `approve_write("/home")` used to be accepted (`F8a` in
+    /// `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`):
+    /// only `/` and `$HOME` itself were refused, so a directory CONTAINING the home passed, and a
+    /// session root over it admitted `~/.bashrc` and every other non-denied file in the home.
+    #[test]
+    fn validate_approve_path_rejects_every_ancestor_of_the_home_directory() {
+        let dir = tempdir().unwrap();
+        let home = std::fs::canonicalize(home_dir().unwrap()).unwrap();
+        for ancestor in home.ancestors().skip(1) {
+            let result =
+                validate_approve_path(ancestor.to_str().unwrap(), dir.path(), &default_config());
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|e| e.to_string().contains("too broad")),
+                "{ancestor:?} contains the home directory {home:?} and must be refused, got: {result:?}"
+            );
+        }
+    }
+
+    /// `base/a/b/home` is the home: `base/a` and `base/a/b` contain it and are refused, `base/a/other`
+    /// does not and is accepted, and so is a subdirectory of the home (the normal thing to approve).
+    #[test]
+    fn approve_refuses_a_directory_that_contains_a_home_and_accepts_one_that_does_not() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/b/home");
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        std::fs::create_dir_all(base.join("a/other")).unwrap();
+        let homes = [home.clone()];
+        let approve = |p: &Path| validate_approve_path_in(p.to_str().unwrap(), &base, &homes);
+        for refused in [base.join("a"), base.join("a/b"), home.clone()] {
+            let result = approve(&refused);
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|e| e.to_string().contains("too broad")),
+                "{refused:?} is or contains the home and must be refused, got: {result:?}"
+            );
+        }
+        for accepted in [base.join("a/other"), home.join("projects")] {
+            let result = approve(&accepted);
+            assert!(
+                result.is_ok(),
+                "{accepted:?} does not contain the home and must be accepted, got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn approve_refuses_a_directory_above_either_of_two_homes() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let (first, second) = (base.join("x/first"), base.join("y/z/second"));
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let homes = [first, second];
+        for refused in [base.join("x"), base.join("y"), base.join("y/z")] {
+            let result = validate_approve_path_in(refused.to_str().unwrap(), &base, &homes);
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|e| e.to_string().contains("too broad")),
+                "{refused:?} contains a protected home and must be refused, got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn approve_refuses_the_filesystem_root_with_no_home_at_all() {
+        let scratch = tempdir().unwrap();
+        let result = validate_approve_path_in("/", scratch.path(), &[]);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "the filesystem root must be refused even when no home is known, got: {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approve_sees_a_missing_home_behind_a_symlinked_ancestor() {
+        // The home does not exist, and its parent is reached through a symlink: a literal
+        // comparison would never see `real` as containing it.
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let missing_home = link.join("home");
+        assert!(
+            !real.join("home").exists(),
+            "fixture: the home must not exist"
+        );
+        let result = validate_approve_path_in(
+            real.to_str().unwrap(),
+            scratch.path(),
+            std::slice::from_ref(&missing_home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "{real:?} contains the home behind the link and must be refused, got: {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approve_sees_a_missing_directory_behind_a_symlink_that_contains_the_home() {
+        // `link/newdir` does not exist and is spelled through the link; the home is below the REAL
+        // spelling of it. The approved directory is only known to contain the home once its
+        // existing ancestor is resolved.
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let home = std::fs::canonicalize(&real).unwrap().join("newdir/home");
+        let result = validate_approve_path_in(
+            link.join("newdir").to_str().unwrap(),
+            scratch.path(),
+            std::slice::from_ref(&home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "a missing directory that contains the home must be refused, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn approve_still_refuses_a_deny_listed_directory_under_an_injected_home() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        let result = validate_approve_path_in(
+            home.join(".ssh").to_str().unwrap(),
+            &base,
+            std::slice::from_ref(&home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("protected location")),
+            "the deny list must hold for an injected home, got: {result:?}"
+        );
     }
 
     #[test]
