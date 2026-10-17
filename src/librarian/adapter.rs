@@ -682,10 +682,14 @@ impl LibrarianAdapter {
 /// `get`/`create` return one at the top level, `find` returns them per item, `doctor`
 /// returns them per violation under a differently-named key, and `move` returns the pair it
 /// moved between as `old_abs_path`/`new_abs_path` (read since 2026-10-17, so an archive
-/// reaches the archive sections). **`update` does NOT** (measured 2026-10-16 against a
-/// `docs/trackers/` artifact: it returns `{id, updated}`), nor do `append_entry`, `delete`,
-/// `rekey_prefix`, `state_at`, `event_*`, `link` or `augment` — so those calls route to
-/// `librarian`, and the `tracker-conventions` sections that need them are pull-only. See
+/// reaches the archive sections).
+///
+/// **The writes that return only `{id, ...}` are given a path before they get here**
+/// (`write_target_id`/`name_the_target`, `src/librarian/tools/artifact.rs`): `append_entry`,
+/// `update_entry`, and an `update` that changes `status`. Still unnamed, and so still
+/// `librarian`'s: an `update` that changes no status (its § *Choosing a mode* warns against
+/// wiping a body), `augment` and `link` (they return the bare string `"ok"`), `delete`,
+/// `rekey_prefix`, `state_at`, `event_*`, `graph`, `gather`. See
 /// `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
 ///
 /// Each shape is enumerated explicitly because a missing one fails as a *wrong guide*

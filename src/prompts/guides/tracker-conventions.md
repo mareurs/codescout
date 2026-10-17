@@ -95,6 +95,7 @@ is why `MEASURED` is deliberately not one. An unmarked caveat behaves exactly as
 has, so nothing written before this convention changes meaning.
 
 ### Settled caveats — STANDING and TRACKED
+<!-- serves: doc.update(path~docs/issues/) -->
 
 **Two more first words, and they are opposites.** `STANDING` marks a limit NO action can
 settle — a property no test can observe, a cause that will never be established — and
@@ -148,6 +149,7 @@ re-reads `archive/`: label it **`experiments`**, since an `experiments` SHA orph
 rebase and an unlabelled one in `archive/` becomes an untraceable string.
 
 ### Closing a bug — patch-id and fix provenance
+<!-- serves: doc.update(path~docs/issues/) -->
 
 **And record a `patch-id` next to it, because the sentence above describes a wound with
 no remedy.** `git show <sha> | git patch-id --stable` is a content hash of the commit's
@@ -179,6 +181,9 @@ reader scanning for provenance finds the commit the bug was OBSERVED at and stop
 - **patch-id:** `e9f8df63b911`
 ````
 
+### Fix provenance — plural, cross-repo, and no commit
+<!-- serves: doc.update(path~docs/issues/) -->
+
 **Plural, because a fix is not always one commit.** Repeat the pair; each `- **patch-id:**`
 binds to the `- **SHA:**` above it, not to the first in the file. The singular shape this
 replaced pushed one author into a table — which read well and was invisible to every check,
@@ -203,6 +208,9 @@ no_fix_commit: "mitigation was a doc note; nothing was committed"
 
 An empty value does not discharge it. The check wants the reason, not the field.
 
+### Fix provenance — a merge commit's patch-id
+<!-- serves: doc.update(path~docs/issues/) -->
+
 **A merge commit's patch-id is never citable — but it is not always EMPTY, and the
 difference decides whether you notice.** For a **clean** merge `git show <merge>` emits
 the message with no diff (the tree is derivable from the parents, so there is nothing to
@@ -224,6 +232,9 @@ objection. docs/issues/archive/2026-09-10-a-conflicted-merge-yields-a-patch-id-a
 Do not reach for `git diff <first-parent>..<merge>` to manufacture one: it hashes, but
 not to the object a cherry-pick would reproduce, so it is a plausible value in a field
 that means something else.
+
+### Fix provenance — nothing is owed to master
+<!-- serves: doc.update(path~docs/issues/) -->
 
 Already the practice in this repo before it was a rule —
 `docs/issues/archive/2026-08-13-url-silently-overrides-local-dir-model.md` reads *"Fixed
@@ -462,6 +473,7 @@ that would have corrected it. **Before reading a `draft` as "not started", check
 `resume-*` tracker names it.**
 
 ### Archiving a tracker
+<!-- serves: doc.update(path~docs/trackers/) -->
 
 **Archiving a tracker:** preferred path is in-place archival via the
 catalog:
@@ -583,6 +595,7 @@ The check now splits by remedy. A declared sidecar that exists means run `reinde
 sidecar means the shape survives only in some other machine's catalog — export it
 there and commit the result, or re-author with `doc(action="augment", id=…, augment={prompt: …, …})`.
 ## Entry-level standard — the shape INSIDE a tracker
+<!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
 The rules above govern the tracker *file*. These govern its **entries** (`F-3`,
 `R-91`, `HY-11`, `BUG-40`). They are not style preferences: the first three are
@@ -649,6 +662,7 @@ three**. The citation grammar is `[A-Z]{1,3}-\d+`, so a four-letter prefix alloc
 nobody can cite.
 
 ### Entry ids
+<!-- serves: doc.append_entry(path~docs/trackers/) -->
 
 The resolver's token grammar is `\b[A-Z]{1,3}-\d+\b` — one to three uppercase
 letters, a hyphen, digits, and **nothing else**.
@@ -678,6 +692,9 @@ letters, a hyphen, digits, and **nothing else**.
   `statement-validity-session-log` starts at `F-2`/`W-3`.
 - If you must hand-allocate, scan **every** entry format the file uses, and re-scan
   in the same breath as the write — a max-id is a fact about an instant.
+### Entry ids — refusals: main checkout only, and unpushed ledgers
+<!-- serves: doc.append_entry(path~docs/trackers/) -->
+
 - **From the MAIN checkout only.** `append_entry` refuses id allocation from a
   worktree session, on the same grounds it refuses `cites`: an entry id is
   ledger-wide state and must key to the main tracker. Left unguarded, the worktree's
@@ -709,6 +726,9 @@ letters, a hyphen, digits, and **nothing else**.
   covers prose ledgers only; a ledger declaring an `entry_collection` takes the
   params path and is unguarded.
 
+### Entry ids — where the counter lives
+<!-- serves: doc.append_entry(path~docs/trackers/) -->
+
 **Where the counter lives.** A ledger carries its own high-water mark in committed
 frontmatter, one key per namespace, written by the allocator:
 
@@ -726,6 +746,8 @@ and because the resolver binds a token to its sole **active** definer, every
 historical citation silently re-points to the new entry with no dangling or ambiguous
 count moving. Compaction is safe because a body edit preserves the frontmatter block
 byte for byte; a hand-rewritten file does not.
+
+### Entry ids — when two hosts allocate anyway
 
 **When two hosts allocate anyway.** The mark is committed, so two clones that have
 diverged each hold a valid one and each issues the same next id; the merge then
@@ -746,6 +768,7 @@ headings only — a params ledger whose entries live as index-table rows is cove
 by neither.
 
 ### Entry headings — the definition rule
+<!-- serves: doc.append_entry(path~docs/trackers/) -->
 
 An entry is defined by a heading of exactly this shape:
 
@@ -770,6 +793,8 @@ a sibling ledger keeping headings for all its entries produced zero.
 **Heading level is not the discriminator** in the table above — `### D-6 — …` and
 `#### S-1 — …` both define. `### A-9 Addendum` fails on the missing dash, not the
 level; two readers took it as a level rule and were wrong.
+
+### Entry headings — a prefix with no definer, or owned outside markdown
 
 **A prefix with no definer ANYWHERE is a third state, distinct from dangling.**
 Dangling means the prefix is known (something, somewhere, defines a sibling
@@ -806,6 +831,7 @@ does not read the key and keeps treating the tokens as prose, which is the point
 
 
 ### Citing an entry — bare, or qualified
+<!-- serves: doc.update_entry(path~docs/trackers/) -->
 
 Cite by **bare token** when the prefix has exactly one ledger: `R-98`, `HY-10`,
 `CAP-5`.
@@ -829,6 +855,9 @@ A qualifier naming no file in this repo is still a cross-repo reference
 workspaces. A qualifier that *does* name a file which lacks that entry is
 **dangling**, not ambiguous — the two need different fixes, so they are reported
 separately.
+
+### Citing an entry — a third shape, and mentioning without citing
+<!-- serves: doc.update_entry(path~docs/trackers/) -->
 
 **A third shape — `<repo>:<file-stem>:<TOKEN>`, naming a file inside a *different*
 repo — has no supported grammar at all.** `link_scan` treats any citation with 2+
@@ -859,6 +888,7 @@ ledgers — R-N alone accounted for 27 of 50. That is the permanent record losin
 links to its own evidence, not session logs cross-talking.
 
 ### One entry format, never two
+<!-- serves: doc.append_entry(path~docs/trackers/) -->
 
 Do not hand-maintain an index table *alongside* body sections. Two formats for one
 entry is the defect that generates the rest: the index falls behind (13 orphaned
@@ -893,6 +923,7 @@ You do not have to take this on trust. `librarian(action="doctor")` reports
 that no heading defines.
 
 ### Required fields
+<!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
 - **`**Status:**` is not optional.** It is the disposition field, and the only thing
   that makes a fired `Promote-when` harvestable. Without it, criteria go unharvested
@@ -918,6 +949,9 @@ that no heading defines.
   check — and caught by `librarian(action="doctor")`'s `validity_unparseable`
   check if one already landed. The first declaration in a section wins if there
   is more than one.
+### Required fields — Rests on, and detecting the lines
+<!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
+
 - **`**Rests on:**` is the durable route back to the proof.** Code rots and
   `path:line` rots with it; an ADR, a decision, or a principle does not. Three of
   codescout's seven ADRs already converge on this shape by practice — `Decision` is
@@ -934,6 +968,7 @@ that no heading defines.
   "promoted" — that judgement stays with the reader.
 
 ### Detecting these fields
+<!-- serves: doc.append_entry(path~docs/trackers/), doc.update_entry(path~docs/trackers/) -->
 
 Anchor detection on **structure** — line-start, a key prefix — never on a keyword.
 Prose and field share a vocabulary by construction, so `grep -c 'Status:'` also
@@ -941,6 +976,7 @@ counts sentences *about* Status, and a `/fired/` probe matches "the tell that sh
 have fired". Both mistakes were made, in the same pass, by the same agent.
 
 ### Compaction and archival
+<!-- serves: doc.append_entry(path~docs/trackers/) -->
 
 The ladder is **live body → archived section (heading kept) → nothing further.**
 

@@ -1146,6 +1146,217 @@ Body Mu.
             "a tracker move must not be served the update-first § Archiving a tracker"
         );
     }
+    /// Every write-shape section of `tracker-conventions` that a write other than `move` needs
+    /// is reachable by the call that needs it, and by no call that does not.
+    ///
+    /// The routing half is proved separately, against real `doc` calls
+    /// (`server::guide_hint_tests::a_write_to_a_tracker_or_bug_file_is_routed_to_its_section`);
+    /// this table is the declaration half: for each section, the calls that MUST serve it and
+    /// at least one that must NOT. Both directions, because each alone is monotone — "every
+    /// section is served by something" is satisfied by a `serves:` widened to every write
+    /// (over-reporting), and "no section leaks" by an emptied declaration. The `doc.move`
+    /// archive sections have their own cases in
+    /// `tracker_conventions_ships_sections_to_each_shape_that_routes_to_it`; here `move` is
+    /// only ever a negative control.
+    ///
+    /// The table is closed over the guide, compared as sets: a `serves:` on one of these
+    /// write shapes with no row here fails, rather than passing untested.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[test]
+    fn tracker_write_shapes_ship_their_sections_and_only_theirs() {
+        let idx = GuideIndex::try_build().unwrap();
+        let whole = crate::prompts::topic_body("tracker-conventions")
+            .unwrap()
+            .len();
+        let t = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let i = serde_json::json!({"abs_path": "docs/issues/x.md"});
+        let none = serde_json::json!({});
+        let upd_t = ("doc.update", &t);
+        let upd_i = ("doc.update", &i);
+        let mov_t = ("doc.move", &t);
+        let mov_i = ("doc.move", &i);
+        let app_t = ("doc.append_entry", &t);
+        let app_i = ("doc.append_entry", &i);
+        let ue_t = ("doc.update_entry", &t);
+        // A write whose result names no path routes nowhere near this topic.
+        let app_none = ("doc.append_entry", &none);
+
+        type Call<'a> = (&'a str, &'a Value);
+        // (heading, calls that must serve it, calls that must not)
+        let table: Vec<(&str, Vec<Call>, Vec<Call>)> = vec![
+            (
+                "Settled caveats — STANDING and TRACKED",
+                vec![upd_i],
+                vec![upd_t, mov_i, app_t],
+            ),
+            (
+                "Closing a bug — patch-id and fix provenance",
+                vec![upd_i],
+                vec![mov_i, upd_t],
+            ),
+            (
+                "Fix provenance — plural, cross-repo, and no commit",
+                vec![upd_i],
+                vec![mov_i, upd_t],
+            ),
+            (
+                "Fix provenance — a merge commit's patch-id",
+                vec![upd_i],
+                vec![mov_i, upd_t],
+            ),
+            (
+                "Fix provenance — nothing is owed to master",
+                vec![upd_i],
+                vec![mov_i, upd_t],
+            ),
+            (
+                "Archiving a tracker",
+                vec![upd_t],
+                vec![upd_i, mov_t, app_t],
+            ),
+            (
+                "Entry-level standard — the shape INSIDE a tracker",
+                vec![app_t, ue_t],
+                vec![app_i, app_none, mov_t, upd_t],
+            ),
+            ("Entry ids", vec![app_t], vec![ue_t, app_i, upd_t, mov_t]),
+            (
+                "Entry ids — refusals: main checkout only, and unpushed ledgers",
+                vec![app_t],
+                vec![ue_t, app_i, upd_t, mov_t],
+            ),
+            (
+                "Entry ids — where the counter lives",
+                vec![app_t],
+                vec![ue_t, app_i, upd_t, mov_t],
+            ),
+            (
+                "Entry headings — the definition rule",
+                vec![app_t],
+                vec![ue_t, app_i, upd_t, mov_t],
+            ),
+            (
+                "One entry format, never two",
+                vec![app_t],
+                vec![ue_t, app_i, upd_t, mov_t],
+            ),
+            (
+                "Required fields",
+                vec![app_t, ue_t],
+                vec![app_i, upd_t, mov_t],
+            ),
+            (
+                "Required fields — Rests on, and detecting the lines",
+                vec![app_t, ue_t],
+                vec![app_i, upd_t, mov_t],
+            ),
+            (
+                "Detecting these fields",
+                vec![app_t, ue_t],
+                vec![app_i, upd_t, mov_t],
+            ),
+            (
+                "Compaction and archival",
+                vec![app_t],
+                vec![ue_t, upd_t, mov_t],
+            ),
+            (
+                "Citing an entry — bare, or qualified",
+                vec![ue_t],
+                vec![app_t, upd_t, mov_t],
+            ),
+            (
+                "Citing an entry — a third shape, and mentioning without citing",
+                vec![ue_t],
+                vec![app_t, upd_t, mov_t],
+            ),
+        ];
+
+        let served = |call: Call| -> Vec<String> {
+            idx.match_sections("tracker-conventions", Some(call.0), call.1)
+                .iter()
+                .map(|s| s.heading.clone())
+                .collect()
+        };
+        for (heading, must, must_not) in &table {
+            for call in must {
+                assert!(
+                    served(*call).iter().any(|h| h == heading),
+                    "`{}` on {} must be served § {heading}",
+                    call.0,
+                    call.1
+                );
+            }
+            for call in must_not {
+                assert!(
+                    !served(*call).iter().any(|h| h == heading),
+                    "`{}` on {} must NOT be served § {heading}",
+                    call.0,
+                    call.1
+                );
+            }
+        }
+
+        // The table is closed over the guide: a section declared for one of these write
+        // shapes that has no row above is untested, and a row naming a heading that is not
+        // declared for one proves nothing. Compared as sets, both ways, so neither a new
+        // section nor a rename can pass silently.
+        let writes = ["update", "append_entry", "update_entry"];
+        let mut declared: Vec<&str> = idx
+            .topic("tracker-conventions")
+            .unwrap()
+            .declared()
+            .filter(|s| {
+                s.serves
+                    .iter()
+                    .any(|sh| sh.action.as_deref().is_some_and(|a| writes.contains(&a)))
+            })
+            .map(|s| s.heading.as_str())
+            .collect();
+        declared.sort_unstable();
+        let mut tabled: Vec<&str> = table.iter().map(|(h, _, _)| *h).collect();
+        tabled.sort_unstable();
+        assert_eq!(
+            declared, tabled,
+            "the table and the guide's write-shape sections must be the same set"
+        );
+
+        // Every call the table names ships a bounded set, not the guide.
+        let mut calls: Vec<Call> = table
+            .iter()
+            .flat_map(|(_, m, n)| m.iter().chain(n.iter()).copied())
+            .collect();
+        calls.sort_by(|a, b| (a.0, a.1.to_string()).cmp(&(b.0, b.1.to_string())));
+        calls.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+        for call in calls {
+            let bytes: usize = idx
+                .match_sections("tracker-conventions", Some(call.0), call.1)
+                .iter()
+                .map(|s| s.body.len())
+                .sum();
+            assert!(
+                bytes <= crate::tools::guide_emit::MAX_AUTO_INJECT_GUIDE_BYTES,
+                "`{}` on {} ships {bytes} B — over the auto-inject bound",
+                call.0,
+                call.1
+            );
+            assert!(
+                bytes * 4 < whole,
+                "`{}` on {} ships {bytes} B of a {whole} B guide; that is not section grain",
+                call.0,
+                call.1
+            );
+        }
+
+        // A write whose result names no tracker or bug path serves nothing from this topic.
+        for sel in ["doc.update", "doc.append_entry", "doc.update_entry"] {
+            assert!(
+                idx.match_sections("tracker-conventions", Some(sel), &none)
+                    .is_empty(),
+                "`{sel}` with a result naming no path must serve no tracker-conventions section"
+            );
+        }
+    }
 
     /// A `path~` shape can never match a result-less call, which is what keeps the
     /// pre-call first-use gate (`first_use_guide_gate`) from ever holding a call for a

@@ -94,6 +94,62 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     }
 }
 
+/// The id argument naming the artifact a `doc` write acts on, for the writes whose RESULT
+/// says nothing about where they wrote. `None` for every other call.
+///
+/// Why a result needs to say it: `LibrarianAdapter::relevant_guide_topic` chooses the guide
+/// from the RESULT, and chooses `tracker-conventions` only when the result names a path under
+/// `docs/issues/` or `docs/trackers/`. `append_entry`, `update_entry` and `update` return
+/// `{id, ...}` and nothing else, so a write to a tracker or a bug file never reached the
+/// guide section written for it (`serves: doc.append_entry(path~docs/trackers/)` and its kin
+/// could not be chosen). `move` is not here: it already returns `old_abs_path`/`new_abs_path`,
+/// which `names_path_containing` now reads.
+///
+/// **`augment` and `link` are not here either, and cannot be:** they return the bare string
+/// `"ok"` (the write-tool convention), and a string has nowhere to carry a path. Giving them
+/// one is a wire-contract change, recorded as an open decision in the issue.
+///
+/// **An `update` is named only when it changes `status`.** That is the lifecycle write —
+/// closing a bug, archiving a tracker — and the one `tracker-conventions` has sections for.
+/// An ordinary `update` (a body edit) stays unnamed and keeps routing to `librarian`, whose
+/// § *Choosing a mode* and § *The shrink guard* are the warnings against wiping a body; the
+/// engine ships ONE topic per call, so naming every update would put `tracker-conventions`
+/// in front of those on a tracker's first update and delay them to its second.
+///
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+fn write_target_id(action: &str, args: &Value) -> Option<String> {
+    let key = match action {
+        "append_entry" | "update_entry" => "id",
+        "update" if args.pointer("/patch/status").is_some() || args.get("status").is_some() => "id",
+        _ => return None,
+    };
+    args.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+/// Put the written artifact's path on a write's result, so the guide router can read it.
+/// Only when the result is an object that names no path of its own, and only when the id
+/// resolves: a failed lookup leaves the result exactly as the tool returned it.
+fn name_the_target(ctx: &ToolContext, target: Option<&str>, mut out: Value) -> Value {
+    let Some(id) = target else { return out };
+    let Some(obj) = out.as_object_mut() else {
+        return out;
+    };
+    if obj.contains_key("abs_path") || obj.contains_key("rel_path") {
+        return out;
+    }
+    let row = {
+        let cat = ctx.catalog.lock();
+        crate::librarian::catalog::artifact::get(&cat, id)
+    };
+    if let Ok(Some(row)) = row {
+        obj.insert(
+            "abs_path".to_string(),
+            json!(crate::util::fs::to_forward_slash(&row.abs_path)),
+        );
+    }
+    out
+}
+
 pub struct Artifact;
 
 #[async_trait]
@@ -396,7 +452,9 @@ impl Tool for Artifact {
         if let Err(e) = ctx.catalog.lock().set_audit_verb(&format!("doc.{action}")) {
             tracing::warn!("audit verb stamp failed: {e}");
         }
-        match action {
+        // Taken before `args` moves into an arm: which artifact will this call write?
+        let target = write_target_id(action, &args);
+        let out = match action {
                 "find"     => super::find::call(ctx, args).await,
                 "get"      => super::get::call(ctx, args).await,
                 "create"   => super::create::call(ctx, args).await,
@@ -418,7 +476,8 @@ impl Tool for Artifact {
                 other => Err(LibrarianRecoverableError::new(format!(
                     "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale"
                 ))),
-            }
+            };
+        out.map(|v| name_the_target(ctx, target.as_deref(), v))
     }
 }
 

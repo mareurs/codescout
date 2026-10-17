@@ -15749,6 +15749,283 @@ mod guide_hint_tests {
             "one topic per call — the spent pointer must not ride along again"
         );
     }
+    /// Every write the guide has sections for (other than `move`, which has its own tests)
+    /// reaches its section from a REAL `doc` call.
+    ///
+    /// The declaration half is `guide_index::tests::tracker_write_shapes_ship_their_sections_and_only_theirs`
+    /// (`match_sections` on a hand-built result); this is the half that table cannot see —
+    /// whether the result a call really returns names the path the router reads. Until
+    /// 2026-10-17 it did not: `update`, `append_entry` and `update_entry` returned `{id, ...}`
+    /// and nothing `LibrarianAdapter::relevant_guide_topic` scans, so a `path~` declaration for
+    /// them could never be chosen and those sections were waived as unreachable.
+    ///
+    /// Each step asserts text unique to the section it expects (a section is spent once per
+    /// session, so a step proves its OWN section arrived), then the negative controls: a body
+    /// edit is not a lifecycle write and stays the librarian's, and `augment` / `link` return
+    /// the bare string `"ok"` and so cannot route at all (the pinned open decision — the
+    /// assertion reds the day it is closed).
+    ///
+    /// Mutations that must kill this: `write_target_id` returning `None` for an action (that
+    /// step dies); naming every `update` rather than a status change (the body-edit control).
+    #[tokio::test]
+    async fn a_write_to_a_tracker_or_bug_file_is_routed_to_its_section() {
+        let (_dir, server) = make_server().await;
+        let primary = |out: &[rmcp::model::Content]| -> Value {
+            serde_json::from_str(&out[0].as_text().expect("primary block is text").text)
+                .expect("primary block is JSON")
+        };
+        let primary_text = |out: &[rmcp::model::Content]| -> String {
+            out[0]
+                .as_text()
+                .expect("primary block is text")
+                .text
+                .clone()
+        };
+        let tracker = create_tracker(&server, "docs/trackers/write-routing-probe.md").await;
+
+        // append_entry -> the entry law, from tracker-conventions and not the librarian.
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({"action": "append_entry", "id": tracker, "id_prefix": "T"}),
+        )
+        .await;
+        let named = primary(&out)["abs_path"].as_str().unwrap_or("").to_string();
+        assert!(
+            named.contains("docs/trackers/write-routing-probe.md"),
+            "append_entry must name the tracker it wrote, got {:?}",
+            primary(&out)
+        );
+        let guide = guide_blocks(&out).join("");
+        assert!(
+            guide.contains("**Never suffix an id.**"),
+            "append_entry on a tracker must ship \u{a7} Entry ids, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(
+            content_carries_guide_body(&out, "tracker-conventions"),
+            "and from tracker-conventions, not the librarian"
+        );
+        assert!(
+            !guide.contains("Cite by **bare token**"),
+            "the entry law must not drag \u{a7} Citing an entry (an update_entry section) with it"
+        );
+
+        // augment returns the bare string "ok": nothing to name a path on, so it routes to
+        // the librarian. Pinned so whoever gives it an object finds the waivers that come off
+        // (TRACKER_SECTION_RESULT_IS_A_BARE_STRING).
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "augment",
+                "id": tracker,
+                "augment": {"prompt": "probe", "entry_collection": "tasks", "params": {"tasks": []}}
+            }),
+        )
+        .await;
+        assert_eq!(
+            primary_text(&out),
+            "\"ok\"",
+            "doc.augment now returns an object: declare the tracker-conventions sections that \
+             need it and drop TRACKER_SECTION_RESULT_IS_A_BARE_STRING's rows"
+        );
+        assert!(!content_carries_guide_body(&out, "tracker-conventions"));
+
+        // update_entry -> citing. The entry law was spent by the first append_entry, so what is
+        // left to ship on this call is the section only update_entry carries.
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "append_entry",
+                "id": tracker,
+                "entry_collection": "tasks",
+                "id_prefix": "T",
+                "entry": {"title": "probe task", "status": "open"}
+            }),
+        )
+        .await;
+        let entry_id = primary(&out)["id"].as_str().unwrap_or("T-1").to_string();
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "update_entry",
+                "id": tracker,
+                "entry_collection": "tasks",
+                "entry_id": entry_id,
+                "fields": {"status": "done"}
+            }),
+        )
+        .await;
+        assert!(
+            primary(&out)["abs_path"]
+                .as_str()
+                .unwrap_or("")
+                .contains("docs/trackers/"),
+            "update_entry must name the tracker it wrote, got {:?}",
+            primary(&out)
+        );
+        let guide = guide_blocks(&out).join("");
+        assert!(
+            guide.contains("Cite by **bare token**"),
+            "update_entry on a tracker must ship \u{a7} Citing an entry, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+
+        // A body edit is NOT a lifecycle write: the result stays unnamed and the call keeps
+        // routing to the librarian, whose § Choosing a mode warns against wiping a body.
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({"action": "update", "id": tracker, "patch": {"title": "renamed probe"}}),
+        )
+        .await;
+        assert!(
+            primary(&out).get("abs_path").is_none(),
+            "an update that changes no status must not name a path: {:?}",
+            primary(&out)
+        );
+        assert!(
+            !content_carries_guide_body(&out, "tracker-conventions"),
+            "a title edit must not be claimed by tracker-conventions"
+        );
+
+        // update(status) -> archiving a tracker.
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({"action": "update", "id": tracker, "patch": {"status": "archived"}}),
+        )
+        .await;
+        let guide = guide_blocks(&out).join("");
+        assert!(
+            guide.contains("preferred path is in-place archival"),
+            "an update changing a tracker's status must ship \u{a7} Archiving a tracker, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+
+        // A bug file: closing it (a status change) ships the fix-provenance sections, and not
+        // the archive flow, which waits for the move.
+        let bug = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-10-17-write-routing-probe.md",
+                "kind": "bug",
+                "title": "write routing probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let bug_id = primary(&bug)["id"].as_str().expect("create id").to_string();
+        let out = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "update",
+                "id": bug_id,
+                "patch": {
+                    "status": "fixed",
+                    "extra": {"no_fix_commit": "probe fixture; nothing was committed"}
+                }
+            }),
+        )
+        .await;
+        let guide = guide_blocks(&out).join("");
+        assert!(
+            guide.contains("**Write the pair as a `## Fix provenance` section"),
+            "closing a bug must ship \u{a7} Closing a bug, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(
+            !guide.contains("**Then re-point the citations"),
+            "closing is not archiving: the archive flow must wait for the move"
+        );
+    }
+
+    /// Guide-ordering decision B is untouched by naming a status-changing update: a FORCED
+    /// update is destructive, so the first one of a session is HELD and the librarian's section
+    /// (the only kind a result-less call can select) is served before it runs. The identical
+    /// re-issue runs, and its result — now naming the bug file — is what routes the close-a-bug
+    /// sections of tracker-conventions after it. A fresh session, because the gate holds only a
+    /// section it has not served yet, and any earlier `doc(update)` spends it.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[tokio::test]
+    async fn a_forced_status_update_is_still_held_before_it_runs_and_then_routed_to_the_close_sections(
+    ) {
+        let (_dir, server) = make_server().await;
+        let primary_text = |out: &[rmcp::model::Content]| -> String {
+            out[0]
+                .as_text()
+                .expect("primary block is text")
+                .text
+                .clone()
+        };
+        let bug = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-10-17-forced-update-probe.md",
+                "kind": "bug",
+                "title": "forced update probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let bug_id = serde_json::from_str::<Value>(&primary_text(&bug)).expect("primary is JSON")
+            ["id"]
+            .as_str()
+            .expect("create id")
+            .to_string();
+        let forced = json!({
+            "action": "update",
+            "id": bug_id,
+            "force": true,
+            "patch": {
+                "status": "wontfix",
+                "extra": {"no_fix_commit": "probe fixture; nothing was committed"}
+            }
+        });
+        let held = call_tool(&server, "doc", forced.clone()).await;
+        assert!(
+            primary_text(&held).contains("\"executed\":false"),
+            "the first forced update is held, got: {}",
+            render_content(&held)
+        );
+        let before = guide_blocks(&held).join("");
+        assert!(
+            !before.contains("**Write the pair as a `## Fix provenance` section"),
+            "before the update runs only a section a result-less call can select is served: {}",
+            before.chars().take(300).collect::<String>()
+        );
+        assert!(
+            !before.is_empty(),
+            "the held call must carry the librarian's section, or it was held for nothing"
+        );
+        let ran = call_tool(&server, "doc", forced).await;
+        assert!(
+            !primary_text(&ran).contains("\"executed\":false"),
+            "premise: the re-issued update ran, got: {}",
+            render_content(&ran)
+        );
+        let after = guide_blocks(&ran).join("");
+        assert!(
+            after.contains("**Write the pair as a `## Fix provenance` section"),
+            "the re-issue's result names the bug file and routes to the close-a-bug sections, \
+             got {} B: {}",
+            after.len(),
+            after.chars().take(300).collect::<String>()
+        );
+    }
+
     /// The first call of each shape that routes to `tracker-conventions` ships a
     /// section of it, with the section's BODY, and never the pointer the whole-topic
     /// path sent while the guide was over the auto-inject bound.
