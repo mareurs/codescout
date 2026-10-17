@@ -81,16 +81,25 @@ Correction to the report: the `0 matches` reply was not silent. At this commit i
 
 ## Fix
 
-- `src/lsp/manager.rs`: `connect_to_mux` + `MUX_PEER_STARTUP_WAIT` (30 s). A mux another process owns is waited for until its socket binds; the wait ends at once when its lock is freed (the holder died), and a holder that never binds is still reported wedged after the wait. The spawned-by-us path keeps its ~1 s window. `get_or_start_via_mux_waiting` takes the wait as a parameter so tests do not sit out 30 s.
-- `src/lsp/mux/process.rs`: `handle_client_message` answers a client's `shutdown` itself (`result: null`, the client's own id) and drops `exit`. A client's session already ends at disconnect (`handle_client_disconnect`: `didClose`, idle timer).
+Three parts; every commit is on branch `worktree-agent-af85b780928eaa450` (not on experiments).
 
-Fix commits on branch `worktree-agent-af85b780928eaa450` (not on experiments): `b451979a` (patch-id `a2068783a60e078be34de6abcabd136703aec224`, the wait) and `c9fc5575` (patch-id `a0a3d8806bdd869b7edb9af73211f0e99593043b`, the mux). Verified live: the Kotlin smoke 15/15 four runs in a row with its `0 matches` retry removed.
+1. **Wait for a mux another process is starting** (`b451979a`, patch-id `a2068783a60e078be34de6abcabd136703aec224`; refined by `ae4b7bca`, patch-id `e9a3cac0a2962a00949522d2f28374931b34640c`). `src/lsp/manager.rs`: `connect_to_mux` + `MUX_PEER_STARTUP_WAIT` (30 s) for a mux whose lock another process holds, ending at once when the lock is freed (the holder died). The wait is paid once per (language, workspace): `LspManager::mux_wedged_at` remembers for `MUX_WEDGED_MEMORY` (60 s) that a full wait ended unreachable, and later attempts make ONE connect attempt (a mux that has come up still connects) and fail fast with the same error; a successful connect clears it. Why 30 s and not the 120 s a spawning client allows its own mux: the wait is served inside a tool call whose server timeout is 60 s; the error it ends in says to retry, and the retry connects at once. The spawned-by-us path keeps its ~0.8 s window.
+2. **The mux no longer forwards a client's `shutdown`/`exit`** (`c9fc5575`, patch-id `a0a3d8806bdd869b7edb9af73211f0e99593043b`). `src/lsp/mux/process.rs` `handle_client_message` answers `shutdown` itself (`result: null`, the requesting client only, under its own id: number, `0` or string) and drops `exit`.
+3. **A socket client disconnects instead of shutting down** (`0dbea4ef`, patch-id `2049b1c10b693c065f1574e6d95917c73dc325bd`). Part 2 alone was NOT mergeable: the mux now keeps the socket open after answering, `LspClient::shutdown` waited 5 s for a reader task that ends only on EOF and then dropped its JoinHandle (which detaches the task), so the connection stayed open and the mux's idle timer never started (reviewer's probe, rerun here: `workspace(post_compact)` 7.52 s / 5.04 s, client connections 1,1,2,2,3, server exit 5.04 s). `src/lsp/client.rs` `LspClient::shutdown` for the socket transport now sends neither `shutdown` nor `exit` (an older mux would forward them and stop the shared server), aborts the reader and shuts its write half, so the mux sees EOF; a direct client's timed-out wait now aborts its reader instead of detaching it.
+
+**Behaviour change for other clients (mux + client together).**
+- A mux client that exits, is evicted (idle TTL, LRU) or flushed (`workspace(post_compact)`) now only hangs up. Before: it stopped the shared language server under every other client and the mux with it. The server now lives until the mux's own lifecycle ends it: idle timer after the last client leaves (rust 180 s, kotlin and others 300 s) plus up to one 10 s watchdog tick, server death, or SIGTERM/SIGINT. A JVM therefore stays up to 300 s after the last client where it used to die at once; that is the documented design (`src/lsp/mux/process.rs` header).
+- Direct (non-mux) clients are unchanged except that a shutdown whose reader outlives the 5 s wait aborts it.
+- A new client against an OLD mux is safe (it sends nothing to stop the server); an OLD client against a NEW mux is answered by the mux and its socket stays open until that client process ends.
+- Re-measured with the reviewer's probe on the branch binary: flush 0.04 s and 0.53 s, server exit 0.02 s, client connections 1,0,1,0,1 (no leak), and the idle mux exited about 195 s after its last client left (rust 180 s + tick).
 
 ## Tests added
 
-- `src/lsp/manager.rs` tests: `connect_to_mux_waits_for_a_peer_mux_that_binds_its_socket_late` (red before: `Failed to connect to mux socket ... No such file or directory`), `connect_to_mux_stops_waiting_when_the_lock_holder_dies` (red when the early stop is disabled: took 20.1 s), `a_peer_mux_that_never_binds_is_reported_wedged_after_the_wait`.
-- `src/lsp/mux/process.rs` tests: `a_clients_shutdown_request_is_answered_by_the_mux_not_forwarded_to_the_server`, `a_clients_exit_notification_is_not_forwarded_to_the_server` (both red before: the server saw `Content-Length: 62` / `33`), and the guard `an_ordinary_client_request_is_still_forwarded_with_a_tagged_id`.
+- `src/lsp/manager.rs`: `connect_to_mux_waits_for_a_peer_mux_that_binds_its_socket_late` (red before: `Failed to connect to mux socket ... No such file or directory`), `connect_to_mux_stops_waiting_when_the_lock_holder_dies` (red with the early stop disabled: 20.1 s), `a_peer_mux_that_never_binds_is_reported_wedged_after_the_wait` (waits 1.5 s, longer than the 0.8 s spawned window, so a call site passing the wrong window reds), `a_peer_mux_that_never_binds_costs_one_wait_not_one_per_file` (red before: 6 files took 3.62 s against a 0.6 s wait; red again with the memory disabled), `a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up`, `the_production_peer_wait_is_thirty_seconds` (paused clock; red when the constant is 800 ms and when the spawned window is passed instead of the caller's).
+- `src/lsp/mux/process.rs`: `a_clients_shutdown_request_is_answered_by_the_mux_not_forwarded_to_the_server`, `a_clients_exit_notification_is_not_forwarded_to_the_server` (both red before: the server saw `Content-Length: 62` / `33`), `an_ordinary_client_request_is_still_forwarded_with_a_tagged_id`, `a_shutdown_reply_goes_only_to_the_requesting_client_under_its_own_id` (two clients; number, 0, string ids; red when the reply is broadcast and when the id is narrowed to `as_i64`), `a_client_that_shuts_down_and_hangs_up_starts_the_idle_timer` (real reader task over a socket pair).
+- `src/lsp/client.rs`: `socket_client_shutdown_closes_its_connection_promptly_and_sends_no_shutdown` (3 connect/flush cycles against a stand-in mux that never hangs up: returns under 2 s, the peer sees EOF, the peer saw no `shutdown`/`exit`, no reader task survives; red with the old path: 35 s).
 - `tests/mcp-smoke-kotlin.sh`: the `0 matches` retry in `call()` is gone, so a recurrence reds the smoke.
+- Not covered by a default test: the timed-out DIRECT-client abort branch (needs a child that ignores `exit`), and a real mux + real server end to end (the live probe and the Kotlin smoke are the evidence).
 
 ## Workarounds
 
@@ -98,7 +107,7 @@ N/A once fixed. Before: repeat the call.
 
 ## Resume
 
-N/A: fixed. If `0 matches` plus a mux warning returns, read the warning's cause first: `holds its lock ... unreachable` after 30 s is a wedged mux (`fuser` the lock), `Mux connection lost` is a server that died under the mux.
+N/A: fixed. Two predicted lock races in the connect path are not reproduced and are filed separately: `docs/issues/2026-10-17-mux-connect-path-lock-races.md`. If `0 matches` plus a mux warning returns, read the warning's cause first: `holds its lock ... unreachable` after 30 s is a wedged mux (`fuser` the lock), `Mux connection lost` is a server that died under the mux.
 
 ## References
 
