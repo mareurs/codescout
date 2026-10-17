@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: describe_payload_shape drops over-length and surplus scalars from its shape line with no "+N more"
 owners:
 - marius
@@ -8,6 +8,8 @@ tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-10-16
 severity: low
+closed: 2026-10-17
+unverified: full gate not run; verified by targeted tests (describe_payload_shape, result_caps) only; fix SHA and patch-id not yet recorded
 ---
 
 ## Summary
@@ -32,16 +34,27 @@ The scalar pass is a `filter_map` + `take` with no counter of what either step r
 
 ## Fix
 
-Not designed. Candidate: count the filtered and the taken-away scalars and append `… +N more scalars` the way the key line does. A reader-facing nicety, not a correctness defect.
+Landed 2026-10-17 on the worktree branch `worktree-agent-ae50bad7b60f28077` (fix SHA recorded in the commit; not yet on `experiments`).
+
+`describe_payload_shape` now counts what its scalar pass removes and ends the scalar line `… +N more scalars`, the counterpart of the key line's `… +N more`. `N` sums the two removals: strings over `MAX_SCALAR_LEN` (filtered) and scalars past `MAX_SCALARS` (cut). The same count is carried by the one-level descent (`flat_scalars`), printed inside that object's braces (`hints: {…, … +3 more scalars}`); an object whose scalars were all over-length now shows `meta: {… +1 more scalars}` instead of vanishing. Silent when nothing was dropped, and fields that are not scalars (arrays, null, empty objects) are never counted, so the marker stays a signal (ADR `2026-08-27-negative-results-name-their-scope`, clause 2). An object-valued key holds one slot of the top-level cap, however many scalars it carries.
+
+Both `PROBE_ROWS` rows moved from `NoMarker` to `Probed` (`Marker::TextContains("more scalars")`, `Mutation::Killed`).
 
 ## Tests added
 
-None — filing only.
+In `src/tools/format.rs`, all driven red before the fix:
+
+- `describe_payload_shape_counts_over_length_scalars_it_drops` (cited by `format.shape_scalar_len`; 60-byte string admitted, 61-byte dropped, only the length bound can bite)
+- `describe_payload_shape_counts_scalars_past_the_cap` (cited by `format.shape_scalars`; eleven short numbers, only the count cap can bite)
+- `describe_payload_shape_counts_both_scalar_bounds_together` (sum, +4)
+- `describe_payload_shape_counts_what_it_drops_inside_a_nested_object` (nested site, and the all-over-length nested object)
+- `describe_payload_shape_is_silent_when_no_scalar_was_dropped` (guards over-reporting; passes before and after by design)
+
+Mutation sweep, one per guarded site, each reds the named tests: dropping the over-length term in `cap_scalars` (3 reds); dropping the cut term in `cap_scalars` (3 reds); zeroing the over-length count at the top-level call (2 reds); zeroing it at the `flat_scalars` call (1 red, the nested test).
 
 ## Resume
 
-1. Add the count to the scalar line (both the top-level pass and `flat_scalars`).
-2. Move `format.shape_scalar_len` and `format.shape_scalars` to `Probed` in `src/tools/core/cap_probe.rs`, citing a test that drives past each bound and asserts the text.
+Nothing outstanding for the defect. Not done here: the full gate (`./scripts/gate.sh`) was not run, only `cargo test --lib describe_payload_shape` and `--test result_caps`; archive once the gate is green on `experiments`, recording the fix SHA and its patch-id. `format.shape_keys` (the key line's own `… +N more`) is still `Untested` in `PROBE_ROWS`; a test seeding more than 24 keys would move it to `Probed`.
 
 ## References
 

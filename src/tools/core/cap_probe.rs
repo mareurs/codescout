@@ -592,43 +592,30 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
-        // Verified: `the_generic_fallback_describes_the_payload_instead_of_the_envelope`
-        // (format.rs) DOES drive this cap past its bound — it seeds a 20,000-char `body`
-        // against MAX_SCALAR_LEN=60 and asserts `!shape.contains("xxxxxxxxxx")` (the raw
-        // value is never inlined) and `shape.len() < 600`; raising or removing the cap
-        // reds both. But `describe_payload_shape`'s scalars filter (`format.rs`) SKIPS an
-        // over-length string from the `scalars:` line entirely — it emits no "+N more" or
-        // any other marker that arrives when the cap fires, unlike MAX_KEYS's "… +{} more".
-        // `Coverage::Probed`'s contract (this file, `Marker` doc comment) requires "a
-        // behavioural test... asserts the marker arrives" — a positive, present signal.
-        // This cap's only real test evidence is an ABSENCE assertion, which does not fit;
-        // inventing a `TextContains` value here would claim something never arrives as
-        // though it does. Classified `NoMarker` (it was `Deferred` until the 2026-10-16 split),
-        // with the honest reason, not `Probed`.
+        // Was `NoMarker` until `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`:
+        // an over-length string was filtered out of the scalar line with no count. The line
+        // now ends `… +N more scalars`, and the cited test seeds a 60-byte string (admitted)
+        // beside a 61-byte one (dropped) with FOUR scalar candidates against a cap of eight,
+        // so only this bound can bite. Mutation: dropping `too_long` from `cap_scalars`' count,
+        // and separately zeroing it at the top-level and at the nested (`flat_scalars`) call
+        // site, each reds the cited test.
         id: "format.shape_scalar_len",
-        coverage: Coverage::NoMarker {
-            reason: "the_generic_fallback_describes_the_payload_instead_of_the_envelope drives a \
-             20,000-char scalar past MAX_SCALAR_LEN=60 and asserts the raw value is never \
-             inlined, but describe_payload_shape emits no marker that arrives when the cap \
-             fires (an over-length scalar is dropped from the scalars: line with no count, \
-             unlike MAX_KEYS's '… +N more'); the only test evidence is an absence \
-             assertion, which Coverage::Probed's marker contract does not cover",
-            bug: "docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more scalars"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_payload_shape_counts_over_length_scalars_it_drops",
         },
     },
     ProbeRow {
-        // Reclassified from `Untested` on a use-site read, 2026-10-16: the reason this row
-        // carried named only the missing test, but `describe_payload_shape` applies
-        // `.take(MAX_SCALARS)` to its scalar line (`format.rs:213-217`) and appends no count
-        // — the same non-disclosure as `format.shape_scalar_len`, which the key line does not
-        // share (it ends `… +N more`). No test can assert a marker that is not emitted.
+        // Was `NoMarker` until the same fix: `.take(MAX_SCALARS)` cut every scalar past the
+        // eighth silently. The cited test seeds ELEVEN short numbers (none over-length, so
+        // only the count cap bites) and asserts the line ends `… +3 more scalars`. Mutation:
+        // dropping the `cut` term from `cap_scalars`' count reds it.
         id: "format.shape_scalars",
-        coverage: Coverage::NoMarker {
-            reason: "`.take(MAX_SCALARS)` on describe_payload_shape's scalar line drops every \
-             scalar past the eighth and nothing says so (the key line, by contrast, ends \
-             '… +N more'); no test seeds more than the cap, and none could assert a marker \
-             that is not emitted",
-            bug: "docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more scalars"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_payload_shape_counts_scalars_past_the_cap",
         },
     },
     // -- src/tools/symbol/references.rs --

@@ -126,6 +126,11 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 /// outright (`status`, `title`, a count).
 ///
 /// Bounded on purpose: a wide object must not spend the whole summary budget listing keys.
+/// **Every bound discloses itself:** the key line ends `… +N more`, and the scalar line ends
+/// `… +N more scalars` — counting both the over-length strings it filtered and the scalars it
+/// cut past `MAX_SCALARS` (inside the braces, for an object-valued key's descent). The marker
+/// is absent when nothing was dropped. See
+/// `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`.
 /// Returns `None` for a payload with no describable shape (a bare scalar), leaving the
 /// caller its own wording.
 ///
@@ -152,24 +157,70 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     // cap-class: RESULT_CAP format.shape_scalars — probed
     const MAX_SCALARS: usize = 8;
 
+    /// What one object field contributes to a scalar line.
+    enum ScalarCell {
+        /// A renderable `k=v` pair.
+        Shown(String),
+        /// A string over the length bound: a scalar the line COULD have carried and did not.
+        TooLong,
+        /// Not a scalar (array, null, object) — the key line and `arrays:` already cover
+        /// it, so it is not a drop and must not inflate the count.
+        NotScalar,
+    }
+
+    /// Classify one string/number/bool field. Object-valued keys are the caller's concern.
+    fn scalar_cell(k: &str, v: &Value, max_len: usize) -> ScalarCell {
+        match v {
+            Value::String(s) if s.len() <= max_len => ScalarCell::Shown(format!("{k}={s:?}")),
+            Value::String(_) => ScalarCell::TooLong,
+            Value::Number(n) => ScalarCell::Shown(format!("{k}={n}")),
+            Value::Bool(b) => ScalarCell::Shown(format!("{k}={b}")),
+            _ => ScalarCell::NotScalar,
+        }
+    }
+
+    /// Cap `shown` at `max_count`, returning what survived and how many scalar fields were
+    /// removed in all — the `too_long` ones filtered earlier plus the ones cut here. The
+    /// count is what lets the rendered line say it is partial, as the key line does.
+    fn cap_scalars(
+        mut shown: Vec<String>,
+        too_long: usize,
+        max_count: usize,
+    ) -> (Vec<String>, usize) {
+        let cut = shown.len().saturating_sub(max_count);
+        shown.truncate(max_count);
+        (shown, too_long + cut)
+    }
+
+    /// Join rendered scalars and, when any were dropped, end with `… +N more scalars` —
+    /// the scalar-line counterpart of the key line's `… +N more`. Silent at zero.
+    fn join_scalars(mut shown: Vec<String>, dropped: usize) -> String {
+        if dropped > 0 {
+            shown.push(format!("… +{dropped} more scalars"));
+        }
+        shown.join(", ")
+    }
+
     /// Render a flat object's own scalar fields as `k=v` pairs, bounded the same way the
-    /// top-level scalar pass is. Used both for the top level and for the one-level descent
-    /// into an object-valued key — never called a third time, which is what keeps the
-    /// descent narrow rather than a general recursive walk.
+    /// top-level scalar pass is. Used for the one-level descent into an object-valued key —
+    /// never called a second level down, which is what keeps the descent narrow rather than
+    /// a general recursive walk. Returns the pairs that fit and the number of scalar fields
+    /// it dropped (over-length or past `max_count`).
     fn flat_scalars(
         map: &serde_json::Map<String, Value>,
         max_len: usize,
         max_count: usize,
-    ) -> Vec<String> {
-        map.iter()
-            .filter_map(|(k, v)| match v {
-                Value::String(s) if s.len() <= max_len => Some(format!("{k}={s:?}")),
-                Value::Number(n) => Some(format!("{k}={n}")),
-                Value::Bool(b) => Some(format!("{k}={b}")),
-                _ => None,
-            })
-            .take(max_count)
-            .collect()
+    ) -> (Vec<String>, usize) {
+        let mut shown = Vec::new();
+        let mut too_long = 0;
+        for (k, v) in map {
+            match scalar_cell(k, v, max_len) {
+                ScalarCell::Shown(s) => shown.push(s),
+                ScalarCell::TooLong => too_long += 1,
+                ScalarCell::NotScalar => {}
+            }
+        }
+        cap_scalars(shown, too_long, max_count)
     }
 
     match val {
@@ -189,32 +240,35 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
                 out.push_str(&format!("\n  arrays: {}", arrays.join(", ")));
             }
 
-            let scalars: Vec<String> = map
-                .iter()
-                .filter_map(|(k, v)| match v {
-                    Value::String(s) if s.len() <= MAX_SCALAR_LEN => Some(format!("{k}={s:?}")),
-                    Value::Number(n) => Some(format!("{k}={n}")),
-                    Value::Bool(b) => Some(format!("{k}={b}")),
+            let mut scalars: Vec<String> = Vec::new();
+            let mut too_long = 0;
+            for (k, v) in map {
+                match v {
                     // A non-empty object gets ONE level of descent into its own scalars —
                     // e.g. `hints={unindexed_files=1}` — instead of being reduced to its
                     // bare key name. An object whose contents are themselves non-scalar
                     // (nested further, or empty) still contributes nothing here; that is
                     // the narrow-fix boundary, not a silent regression, since it is no
-                    // worse than the prior behavior for that shape.
+                    // worse than the prior behavior for that shape. What the descent
+                    // itself drops is counted inside the braces, and the object holds
+                    // ONE slot of the top-level cap however many scalars it carries.
                     Value::Object(o) if !o.is_empty() => {
-                        let nested = flat_scalars(o, MAX_SCALAR_LEN, MAX_SCALARS);
-                        if nested.is_empty() {
-                            None
-                        } else {
-                            Some(format!("{k}: {{{}}}", nested.join(", ")))
+                        let (nested, nested_dropped) = flat_scalars(o, MAX_SCALAR_LEN, MAX_SCALARS);
+                        if !nested.is_empty() || nested_dropped > 0 {
+                            scalars
+                                .push(format!("{k}: {{{}}}", join_scalars(nested, nested_dropped)));
                         }
                     }
-                    _ => None,
-                })
-                .take(MAX_SCALARS)
-                .collect();
-            if !scalars.is_empty() {
-                out.push_str(&format!("\n  {}", scalars.join(", ")));
+                    _ => match scalar_cell(k, v, MAX_SCALAR_LEN) {
+                        ScalarCell::Shown(s) => scalars.push(s),
+                        ScalarCell::TooLong => too_long += 1,
+                        ScalarCell::NotScalar => {}
+                    },
+                }
+            }
+            let (scalars, dropped) = cap_scalars(scalars, too_long, MAX_SCALARS);
+            if !scalars.is_empty() || dropped > 0 {
+                out.push_str(&format!("\n  {}", join_scalars(scalars, dropped)));
             }
             Some(out)
         }
@@ -479,6 +533,153 @@ mod tests {
         assert!(
             shape.contains("reindex_hint=true"),
             "every flat scalar inside the nested object must surface, not just the first: {shape}"
+        );
+    }
+    /// The shape's scalar line is the LAST line of the description (the `keys:` and
+    /// `arrays:` lines precede it), so a marker asserted on it cannot be satisfied by the
+    /// key line's own `… +N more`.
+    fn scalar_line(shape: &str) -> &str {
+        shape
+            .lines()
+            .last()
+            .expect("a shape has at least a keys line")
+    }
+
+    /// Regression test for
+    /// `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`
+    /// (the `MAX_SCALAR_LEN` half): a string over the length bound is filtered out of the
+    /// scalar line, and the line must say how many fields that removed — the key line
+    /// above it ends `… +N more`, this one used to end in silence.
+    ///
+    /// Built so only the LENGTH bound can bite: four scalar candidates against a cap of
+    /// eight, so `MAX_SCALARS` admits every one. 60 bytes is the longest admitted, 61 the
+    /// shortest dropped — the boundary, not just a far-over-length blob.
+    #[test]
+    fn describe_payload_shape_counts_over_length_scalars_it_drops() {
+        let val = serde_json::json!({
+            "id": "T-1",
+            "edge_ok": "e".repeat(60),
+            "edge_over": "e".repeat(61),
+            "blob": "b".repeat(20_000),
+        });
+        let shape = describe_payload_shape(&val).expect("an object has a shape");
+        let line = scalar_line(&shape);
+
+        assert!(
+            line.contains("id=\"T-1\""),
+            "short scalar must show: {shape}"
+        );
+        assert!(
+            line.contains("edge_ok="),
+            "a 60-byte string is admitted: {shape}"
+        );
+        assert!(
+            !line.contains("edge_over=") && !line.contains("blob="),
+            "over-length strings are named in the key line, never inlined: {shape}"
+        );
+        assert!(
+            line.ends_with("… +2 more scalars"),
+            "two over-length strings were dropped and the line must say so: {shape}"
+        );
+    }
+
+    /// Regression test for the same issue (the `MAX_SCALARS` half): scalars past the
+    /// eighth are cut by `.take(MAX_SCALARS)` and the line must count them.
+    ///
+    /// Built so only the COUNT cap can bite: eleven short numbers, none over-length.
+    #[test]
+    fn describe_payload_shape_counts_scalars_past_the_cap() {
+        let mut obj = serde_json::Map::new();
+        for i in 0..11 {
+            obj.insert(format!("n{i:02}"), serde_json::json!(i));
+        }
+        let shape = describe_payload_shape(&serde_json::Value::Object(obj)).expect("a shape");
+        let line = scalar_line(&shape);
+
+        assert!(
+            line.contains("n07=7"),
+            "the eighth scalar is the last shown: {shape}"
+        );
+        assert!(!line.contains("n08="), "the ninth is cut: {shape}");
+        assert!(
+            line.ends_with("n07=7, … +3 more scalars"),
+            "three scalars were cut past the cap and the line must say so: {shape}"
+        );
+    }
+
+    /// Both bounds firing on one object must report the SUM — a counter that only sees one
+    /// of the two filters would pass each single-bound test above and fail here.
+    #[test]
+    fn describe_payload_shape_counts_both_scalar_bounds_together() {
+        let mut obj = serde_json::Map::new();
+        for i in 0..10 {
+            obj.insert(format!("n{i:02}"), serde_json::json!(i));
+        }
+        obj.insert("long_a".into(), serde_json::json!("a".repeat(61)));
+        obj.insert("long_b".into(), serde_json::json!("b".repeat(61)));
+        let shape = describe_payload_shape(&serde_json::Value::Object(obj)).expect("a shape");
+
+        // 10 numbers, cap 8 -> 2 cut; 2 over-length -> 2 filtered; 4 in all.
+        assert!(
+            scalar_line(&shape).ends_with("… +4 more scalars"),
+            "2 over-length + 2 past the cap must read +4: {shape}"
+        );
+    }
+
+    /// The one-level descent into an object-valued key is bounded by the same two limits
+    /// (`flat_scalars`) and must disclose them too — a second site, killed independently of
+    /// the top-level one.
+    #[test]
+    fn describe_payload_shape_counts_what_it_drops_inside_a_nested_object() {
+        let mut hints = serde_json::Map::new();
+        for i in 0..10 {
+            hints.insert(format!("h{i:02}"), serde_json::json!(i));
+        }
+        hints.insert("long".into(), serde_json::json!("l".repeat(61)));
+        let val = serde_json::json!({"count": 3, "hints": hints});
+        let shape = describe_payload_shape(&val).expect("an object has a shape");
+
+        // 10 numbers, cap 8 -> 2 cut; 1 over-length -> 1 filtered; 3 in all, INSIDE the braces.
+        assert!(
+            scalar_line(&shape).contains("h07=7, … +3 more scalars}"),
+            "the nested object's own elision must be counted inside its braces: {shape}"
+        );
+        assert_eq!(
+            shape.matches("more scalars").count(),
+            1,
+            "the top level dropped nothing, so it must add no marker of its own: {shape}"
+        );
+
+        // An object whose scalars are ALL over-length used to vanish from the line; it must
+        // now say what it held back.
+        let all_long = serde_json::json!({"id": "x", "meta": {"a": "z".repeat(100)}});
+        let shape = describe_payload_shape(&all_long).expect("an object has a shape");
+        assert!(
+            scalar_line(&shape).contains("meta: {… +1 more scalars}"),
+            "a nested object with only over-length scalars must not be silently empty: {shape}"
+        );
+    }
+
+    /// The marker is for a bitten line only (ADR `2026-08-27-negative-results-name-their-scope`
+    /// clause 2): a payload whose every scalar fits, plus fields that are not scalars at all
+    /// (an array, a null, an empty object), reports nothing — a marker on every payload
+    /// stops being read.
+    #[test]
+    fn describe_payload_shape_is_silent_when_no_scalar_was_dropped() {
+        let val = serde_json::json!({
+            "id": "T-1",
+            "count": 2,
+            "ok": true,
+            "items": [1, 2, 3],
+            "nothing": null,
+            "empty": {},
+            "hints": {"unindexed_files": 1},
+        });
+        let shape = describe_payload_shape(&val).expect("an object has a shape");
+
+        assert!(
+            !shape.contains("more scalars"),
+            "nothing scalar was dropped, so nothing may be claimed: {shape}"
         );
     }
 
