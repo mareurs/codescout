@@ -85,6 +85,8 @@ Mutations, one per guarded site (observed 2026-10-17, each turned the named test
 
 ## Resume
 
+**Fix commit:** `d5c5694b` on branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5); patch-id `a6f2116cc2322da460627237ee10de2225b3099e`.
+
 N/A once fixed. The design choices listed under Fix (especially 1, the no-grammar seeds) are for the human to confirm.
 
 ## References
