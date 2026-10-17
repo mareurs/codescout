@@ -1696,11 +1696,26 @@ mod tests {
                 None => rest,
             }
         };
-        let tracker_conventions = guide_slice(
-            "tracker-conventions",
-            "stage BOTH halves",
-            "**Then re-point",
-        );
+        // Read from the guide INDEX, not by anchoring on the next paragraph's text: this
+        // paragraph is its own declared section, so the section boundary IS the closing
+        // anchor, and it cannot drift when a heading or `serves:` comment is added between
+        // two paragraphs (which is how the old `**Then re-point` anchor went stale).
+        let tracker_conventions = {
+            let heading = "Archiving a bug or tracker \u{2014} stage both halves of the move";
+            let entry = crate::prompts::guide_index::GUIDE_INDEX
+                .topic("tracker-conventions")
+                .expect("tracker-conventions must be indexed");
+            let sec = entry
+                .sections
+                .iter()
+                .find(|s| s.heading == heading)
+                .unwrap_or_else(|| panic!("tracker-conventions must have § {heading}"));
+            let from = sec
+                .body
+                .find("stage BOTH halves")
+                .expect("the staging paragraph's opening anchor must exist in its section");
+            sec.body[from..].trim_end()
+        };
         let librarian = guide_slice("librarian", "**Stage both halves:", "Two consequences");
 
         // Each slice is bounded ABOVE, and the direction is the whole point. A missing
@@ -1713,7 +1728,7 @@ mod tests {
         // assertions it was meant to protect: the first mutation run reddened site 3 on
         // "not a real slice" rather than on the missing discriminator, which is a red
         // that proves sensitivity to the file without proving the assertions discriminate.
-        const SLICE_CEILING: usize = 2_000; // slices measured 1655 and 462
+        const SLICE_CEILING: usize = 2_000; // slices measured 1991 and 294 on 2026-10-17 (the old 1655 and 462 were stale)
         for (surface, text) in [
             ("tracker-conventions guide", tracker_conventions),
             ("librarian guide", librarian),

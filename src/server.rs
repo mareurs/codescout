@@ -15468,6 +15468,341 @@ mod guide_hint_tests {
         );
         assert!(!guide.contains(pointer));
     }
+    /// Archiving through `doc(action="move")` ships the `tracker-conventions` sections that
+    /// describe that flow, for a bug file and for a tracker.
+    ///
+    /// `move` answers `old_abs_path`/`new_abs_path` and no `abs_path`, so before the router
+    /// scanned those keys the call routed to `librarian` and these sections -- stage both
+    /// halves, re-point the citations -- were declared nowhere and reached nobody.
+    /// Driven through real `doc` calls because what routes is the RESULT's content, which a
+    /// `match_sections` probe bypasses.
+    ///
+    /// Two deliveries are asserted separately, because they come from different topics at
+    /// different times: the FIRST destructive `doc.move` of a session is held BEFORE it runs
+    /// and served `librarian` § Archiving / Moving Trackers (input-derivable, so the gate
+    /// cannot see the result); the identical re-issue executes and ships the
+    /// `tracker-conventions` sections the result's paths select. Each tracker case gets a
+    /// fresh server, since sections already spent in a session are not served again.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[tokio::test]
+    async fn moving_a_bug_file_or_a_tracker_ships_the_archive_sections() {
+        /// `(guide text served with the hold, guide text served after the executed move,
+        /// text of the create call's guide)`.
+        async fn create_then_move(kind: &str, from: &str, to: &str) -> (String, String, String) {
+            let (_dir, server) = make_server().await;
+            let created = call_tool(
+                &server,
+                "doc",
+                json!({
+                    "action": "create",
+                    "rel_path": from,
+                    "kind": kind,
+                    "title": "archive section probe",
+                    "body": "probe body"
+                }),
+            )
+            .await;
+            let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+                .expect("primary block is JSON")["id"]
+                .as_str()
+                .expect("create returns an id")
+                .to_string();
+            let move_call = json!({"action": "move", "id": id, "new_rel_path": to});
+
+            let held = call_tool(&server, "doc", move_call.clone()).await;
+            let first: Value = serde_json::from_str(&held[0].as_text().unwrap().text)
+                .expect("primary block is JSON");
+            assert_eq!(
+                first.get("executed"),
+                Some(&json!(false)),
+                "the first destructive doc.move of a session must be held, got {first}"
+            );
+
+            let moved = call_tool(&server, "doc", move_call).await;
+            let primary: Value = serde_json::from_str(&moved[0].as_text().unwrap().text)
+                .expect("primary block is JSON");
+            assert!(
+                primary.get("new_abs_path").is_some(),
+                "the re-issued move must have executed, got {primary}"
+            );
+            (
+                guide_blocks(&held).join(""),
+                guide_blocks(&moved).join(""),
+                guide_blocks(&created).join(""),
+            )
+        }
+
+        fn assert_ships(guide: &str, what: &str, wants: &[&str]) {
+            for want in wants {
+                assert!(
+                    guide.contains(want),
+                    "{what} must ship `{want}`, got {} B: {}",
+                    guide.len(),
+                    guide.chars().take(300).collect::<String>()
+                );
+            }
+            assert!(
+                !guide.contains("NOT auto-injected"),
+                "{what}: a section set is not a pointer"
+            );
+            assert!(
+                !guide.contains("Never suffix an id"),
+                "{what}: the whole guide must not ship"
+            );
+        }
+
+        // The hold serves `librarian`, never a tracker-conventions section.
+        let librarian_hold = "**Stage both halves: `git add -- <old> <new>`";
+        let tracker_stage = "**And stage BOTH halves of the move together";
+
+        let (held, after, created) = create_then_move(
+            "bug",
+            "docs/issues/2026-10-16-archive-probe.md",
+            "docs/issues/archive/2026-10-16-archive-probe.md",
+        )
+        .await;
+        assert_ships(&held, "the hold of a bug move", &[librarian_hold]);
+        assert!(
+            !held.contains(tracker_stage),
+            "the hold is input-derived and cannot carry a path-qualified section"
+        );
+        assert_ships(
+            &after,
+            "the executed move of a bug file",
+            &[
+                // one distinctive sentence per section, in document order
+                "Archive through the catalog",
+                tracker_stage,
+                "**Then re-point the citations, in the same commit as the move",
+                "**Verifying the sweep afterward needs a different pattern",
+                "sees BOTH forms, and tells you which is",
+                "Be precise about *why* a green run proves nothing here",
+            ],
+        );
+        assert!(
+            !after.contains(librarian_hold),
+            "the librarian section was spent at the hold and must not repeat"
+        );
+        assert!(
+            !after.contains("One file per bug."),
+            "the create's sections must not repeat on the move"
+        );
+        assert!(
+            created.contains("One file per bug."),
+            "premise: create ships it"
+        );
+
+        let (held, after, _) = create_then_move(
+            "tracker",
+            "docs/trackers/archive-probe.md",
+            "docs/trackers/archive/archive-probe.md",
+        )
+        .await;
+        assert_ships(&held, "the hold of a tracker move", &[librarian_hold]);
+        assert_ships(
+            &after,
+            "the executed move of a tracker",
+            &[
+                "Archive through the catalog",
+                tracker_stage,
+                "**Then re-point the citations, in the same commit as the move",
+            ],
+        );
+        // Its lead instruction is `doc.update`, the call that needs it; it stays pull-only.
+        assert!(
+            !after.contains("preferred path is in-place archival"),
+            "\u{a7} Archiving a tracker is waived and must not ship after a move"
+        );
+    }
+
+    /// The WORST-CASE `doc.move` delivery has its own byte budget, separate from the p50
+    /// session's.
+    ///
+    /// Archiving a bug file is the largest real draw of any single `doc` call: the hold
+    /// serves `librarian` § Archiving / Moving Trackers before the move runs, and the
+    /// re-issue then ships six `tracker-conventions` sections selected by the result's
+    /// paths. The p50 fixture cannot carry it: its `move` goes `docs/specs/` to
+    /// `docs/specs/`, which names no tracked path, and a p50 session does not archive bugs,
+    /// so folding a rare worst case into it would either raise its derived ceiling (a spec
+    /// amendment, and these budgets only move down) or hide a regression in the common
+    /// case behind the slack the rare one needs. Two populations, two ceilings.
+    ///
+    /// Counts every block after the primary on BOTH `move` calls (the hold and the
+    /// executed re-issue), in an identified session, which is the one that pays both. The
+    /// create that makes the target file is not counted: its sections are another shape's
+    /// and are disjoint from these (the move test above asserts they do not repeat).
+    ///
+    /// Same discipline as the p50 ceiling: the number is MEASURED, set a fixed margin
+    /// above, and raising it is a decision, not a fix; when it fires, shrink or split a
+    /// section. The fixture root must not reach the counted bytes (asserted), so the total
+    /// is a property of the guides and not of this machine's temp path.
+    /// docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md
+    #[tokio::test]
+    async fn a_bug_archive_move_stays_under_its_own_emission_byte_ceiling() {
+        // MEASURED 2026-10-17: 13,758 B (hold 2,271 B + executed 11,487 B), read from this
+        // test's own failure message at ceiling 0, plus the same 128 B margin the p50
+        // ceiling carries over its measurement. Not derived from section sizes: the six
+        // sections sum to about 9.6 KB and the rest is block wrappers and the librarian
+        // hold, which is why it is read off a run. Never raise it to fit.
+        const CEILING: usize = 13_886;
+
+        let (dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-10-17-budget-probe.md",
+                "kind": "bug",
+                "title": "archive budget probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+        let move_call = json!({
+            "action": "move", "id": id,
+            "new_rel_path": "docs/issues/archive/2026-10-17-budget-probe.md"
+        });
+
+        let held = call_tool(&server, "doc", move_call.clone()).await;
+        let first: Value =
+            serde_json::from_str(&held[0].as_text().unwrap().text).expect("primary is JSON");
+        assert_eq!(
+            first.get("executed"),
+            Some(&json!(false)),
+            "premise: the first destructive doc.move is held, got {first}"
+        );
+        let moved = call_tool_checked(&server, "doc", move_call, "move").await;
+
+        let (held_blocks, moved_blocks) = (guide_blocks(&held), guide_blocks(&moved));
+        let (held_bytes, moved_bytes): (usize, usize) = (
+            held_blocks.iter().map(String::len).sum(),
+            moved_blocks.iter().map(String::len).sum(),
+        );
+        let total = held_bytes + moved_bytes;
+
+        let root = dir.path().to_string_lossy().into_owned();
+        for b in held_blocks.iter().chain(&moved_blocks) {
+            assert!(
+                !b.contains(&root),
+                "a counted block carries the fixture root, so the total would measure this \
+                 machine's temp path: {}",
+                b.chars().take(200).collect::<String>()
+            );
+        }
+        // Non-vacuity, in the payload: a vanished section lowers the total, so a byte
+        // count alone moves the safe way when content disappears.
+        let all = held_blocks
+            .iter()
+            .chain(&moved_blocks)
+            .cloned()
+            .collect::<String>();
+        for want in [
+            "**Stage both halves: `git add -- <old> <new>`",
+            "**And stage BOTH halves of the move together",
+            "**Then re-point the citations, in the same commit as the move",
+            "**Verifying the sweep afterward needs a different pattern",
+            "sees BOTH forms, and tells you which is",
+            "Be precise about *why* a green run proves nothing here",
+        ] {
+            assert!(all.contains(want), "the worst case must ship `{want}`");
+        }
+
+        assert!(
+            total <= CEILING,
+            "a bug-archive move emitted {total} B after the primary (hold {held_bytes} B + \
+             executed {moved_bytes} B), ceiling {CEILING} B, margin {} B. Raising CEILING is \
+             a decision, not a fix: shrink or split a `doc.move` section in \
+             tracker-conventions or librarian, or narrow a `serves:` declaration.",
+            CEILING.saturating_sub(total)
+        );
+    }
+
+    /// A real `doc(action="list_stale")` against an augmented tracker is served the
+    /// librarian refresh-cycle section, not the `tracker-conventions` preamble.
+    ///
+    /// The result's `items[].abs_path` names a `docs/trackers/` file, which used to route
+    /// the call to `tracker-conventions`; no section there declares `doc.list_stale`, so the
+    /// caller got the preamble and the next-action text (gather, synthesize, update with
+    /// `commit_refresh=true`) stayed unserved on that call. Driven through real `doc` calls
+    /// because what routes is the RESULT's content. The tracker is created WITH its
+    /// augmentation so no earlier call has already spent `librarian` § Augmentation
+    /// Lifecycle (which `doc.augment` also declares).
+    /// docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md
+    #[tokio::test]
+    async fn list_stale_on_an_augmented_tracker_ships_the_refresh_cycle_not_a_preamble() {
+        let (_dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/trackers/stale-probe.md",
+                "kind": "tracker",
+                "title": "stale probe",
+                "body": "probe body",
+                "augment": {"prompt": "keep the probe"}
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+
+        let listed = call_tool(
+            &server,
+            "doc",
+            json!({"action": "list_stale", "threshold_hours": 0}),
+        )
+        .await;
+        let primary: Value =
+            serde_json::from_str(&listed[0].as_text().unwrap().text).expect("primary is JSON");
+        let items = primary["items"]
+            .as_array()
+            .expect("list_stale returns items");
+        assert!(
+            items.iter().any(|i| i["id"] == json!(id)
+                && i["abs_path"]
+                    .as_str()
+                    .is_some_and(|p| p.replace('\\', "/").contains("docs/trackers/"))),
+            "premise: the result names the augmented tracker under docs/trackers/, got {primary}"
+        );
+
+        let guide = guide_blocks(&listed).join("");
+        assert!(
+            guide.contains("**Refresh cycle** (run by the agent, not automatic)"),
+            "list_stale must ship the refresh cycle, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(
+            !guide.contains("no section declares this call's shape"),
+            "list_stale must not be served a tracker-conventions preamble"
+        );
+
+        let again = call_tool(
+            &server,
+            "doc",
+            json!({"action": "list_stale", "threshold_hours": 0}),
+        )
+        .await;
+        assert!(
+            guide_blocks(&again).is_empty(),
+            "the spent section must not ship again, got {:?}",
+            guide_blocks(&again)
+                .join("")
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
+    }
 
     /// A guide too large to auto-inject is delivered by SECTION, never whole, and the
     /// bare topic is stamped only by a deliberate explicit fetch.

@@ -563,7 +563,12 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
     ),
     (
         "tracker-conventions",
-        "Closing a bug — patch-id, fix provenance and the archive flow",
+        "Closing a bug — patch-id and fix provenance",
+        TRACKER_SECTION_NEEDS_A_WRITE,
+    ),
+    (
+        "tracker-conventions",
+        "Citing an archive path — where the file is, not where it will go",
         TRACKER_SECTION_NEEDS_A_WRITE,
     ),
     (
@@ -636,22 +641,24 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
 /// `abs_path`/`rel_path`, `items[].rel_path`, `violations[].path`). Measured 2026-10-16 by
 /// making every `doc` action against a `docs/trackers/` artifact and reading which
 /// results name such a path: `create`, `get` and `find` do; `update` (`{id, updated}`),
-/// `append_entry`, `move` (`old_abs_path`/`new_abs_path`, keys the scan does not read),
-/// `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` and `augment` do not. Those
+/// `append_entry`, `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` and `augment` do
+/// not. (`move` was on this list until 2026-10-17: it answers `old_abs_path`/`new_abs_path`,
+/// which the scan now reads, so the archive sections are served from `doc.move`; `Archiving
+/// a tracker` stays waived because it leads with `doc.update`, the call that needs it.) Those
 /// calls route to `librarian`, so a `path~`-qualified section here could never be chosen
 /// for them — a declaration nothing reaches, which is the failure section grain exists to
-/// prevent. Until the router is widened (scan `new_abs_path`, or route on the selector)
+/// prevent. Until the router is widened further (route on the selector)
 /// the section is pull-only via `get_guide("tracker-conventions")`; before section grain
 /// the same bytes reached nobody either, because the whole topic was over the
 /// auto-inject bound and shipped a pointer.
 /// docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md
 const TRACKER_SECTION_NEEDS_A_WRITE: &str =
     "Unreachable by auto-injection, not unimportant: the call \
-     that needs this section is a write (doc.update, append_entry, update_entry, move, delete, \
+     that needs this section is a write (doc.update, append_entry, update_entry, delete, \
      augment, link), and no write's result names a path the router reads — measured \
      2026-10-16 by making each call against a docs/trackers/ artifact. Such a call routes to \
      `librarian`, so a path-qualified `serves:` here could never be chosen for it. Needs the \
-     router widened (scan new_abs_path, or route on the selector); until then it is pull-only \
+     router widened (route on the selector); until then it is pull-only \
      via get_guide(\"tracker-conventions\"). See \
      docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md.";
 
@@ -665,14 +672,16 @@ const TRACKER_SECTION_NEEDS_A_WRITE: &str =
 /// and `Shape` can only qualify on a path, not on the violation class: serving every
 /// section that names a doctor check would ship them all to a call whose report names
 /// one or two. Each check's home is one section, but the home of
-/// `terminal_status_without_fix_anchor` is the 15 KB `Closing a bug` section. A
+/// `terminal_status_without_fix_anchor` is the `Closing a bug` section (about 5.5 KB once the
+/// archive flow was split out of it on 2026-10-17; it was 15 KB); the largest section that
+/// names a check is now `Entry ids` (about 6.5 KB). A
 /// `check~<name>` predicate is a grammar amendment ("widening it requires amending the
 /// spec", `guide_index::Shape`), so it is left to a decision rather than made here.
 const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes route to \
      tracker-conventions when their result names a tracker or bug path, and none has a \
      section here: librarian.doctor (its violations are remediated by different sections and \
      Shape cannot qualify on the violation class — serving every check-named section would \
-     ship them all, the largest being 15 KB), librarian.link_scan, librarian.reindex, \
+     ship them all, the largest being 6.5 KB), librarian.link_scan, librarian.reindex, \
      librarian.audit_doc_refs, librarian.tracker_design, librarian.context, \
      librarian.legibility_scan, librarian.merge_worktree, librarian.find (not an action; a \
      mistyped doc(action=\"find\")). Those that librarian.md declares are served from it on \
@@ -1932,6 +1941,17 @@ mod tests {
                 "the reason for waiving `{topic}` § `{heading}` must say why; a \
                      placeholder turns this waiver back into a silent gap. Got: {reason:?}"
             );
+            // A parenthesised heading is a shape-level row (Gate 2), not a section.
+            if !heading.starts_with('(') {
+                let entry = crate::prompts::guide_index::GUIDE_INDEX
+                    .topic(topic)
+                    .unwrap_or_else(|| panic!("`{topic}` has no index entry"));
+                assert!(
+                    entry.sections.iter().any(|s| s.heading == *heading),
+                    "SECTION_WAIVERS waives `{topic}` § `{heading}`, which is not a heading \
+                     in that guide — a rename left a dead row that waives nothing."
+                );
+            }
         }
     }
 
