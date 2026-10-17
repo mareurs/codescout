@@ -102,7 +102,7 @@ Mutations, one per guarded site, each reverted and observed red (first round 202
 
 ## Resume
 
-**Fix commits:** `d5c5694b` (first pass, patch-id `a6f2116cc2322da460627237ee10de2225b3099e`); second review round recorded below. Branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5).
+**Fix commits:** `d5c5694b` (first pass, patch-id `a6f2116cc2322da460627237ee10de2225b3099e`); second review round `ab545e5d`, patch-id `f0846b6e88217067d93835e919cebf914c800f6c`. Branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5).
 
 N/A once fixed. Open for the human: design choice 4 (a refused no-parser walk still warns once per result with an unplaced node).
 

@@ -74,7 +74,7 @@ Mutations, one per guarded site (observed 2026-10-17, each turned exactly the na
 
 ## Resume
 
-**Fix commits:** `d5c5694b` (first pass, patch-id `a6f2116cc2322da460627237ee10de2225b3099e`); second review round recorded below. Branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5).
+**Fix commits:** `d5c5694b` (first pass, patch-id `a6f2116cc2322da460627237ee10de2225b3099e`); second review round `ab545e5d`, patch-id `f0846b6e88217067d93835e919cebf914c800f6c`. Branch `worktree-agent-ab12363de3a0d43f1` (cut from `experiments` 299395e5).
 
 N/A once fixed. Two choices for the human to confirm: the family grouping above (TS and JS are one population), and, for the `.ts`-seed-walks-`.tsx` widening, that a larger candidate population draws on the same 5,000-file budget. The widening also excludes compiled twins (`foo.js` next to `foo.ts`) from both walks; see `docs/issues/2026-10-17-scan-walks-skip-unreadable-files-and-report-a-clean-miss.md`.
 
