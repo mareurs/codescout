@@ -170,6 +170,215 @@ async fn project_ctx() -> (tempfile::TempDir, ToolContext) {
     )
 }
 
+// ── the approve -> create -> write flow, against a decoy HOME ───────────────────────────────
+
+/// Drives the REAL tools (`approve_write`, `create_file`, `edit_file`) over a project that lives
+/// inside a decoy `$HOME`, in a child process whose `HOME` is that decoy (`platform::test_child`),
+/// and returns what happened to the decoy `~/.bashrc`. `steps` runs with the context, the project
+/// root and the decoy home.
+#[cfg(unix)]
+fn flow_in_decoy_home(
+    name: &'static str,
+    steps: impl for<'a> FnOnce(
+            &'a ToolContext,
+            &'a std::path::Path,
+            &'a std::path::Path,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>
+        + 'static,
+) {
+    let fixture = tempdir().unwrap();
+    let home = fixture.path().canonicalize().unwrap().join("home");
+    crate::platform::test_child::run(
+        module_path!(),
+        name,
+        &[("HOME", Some(home.to_str().unwrap()))],
+        || {
+            let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+            let proj = home.join("work/proj");
+            std::fs::create_dir_all(proj.join(".codescout")).unwrap();
+            std::fs::write(home.join(".bashrc"), "# decoy bashrc\n").unwrap();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let agent = Agent::new(Some(proj.clone())).await.unwrap();
+                    let ctx = ToolContext {
+                        agent,
+                        lsp: LspManager::new_arc(),
+                        output_buffer: std::sync::Arc::new(
+                            crate::tools::output_buffer::OutputBuffer::new(20),
+                        ),
+                        progress: None,
+                        peer: None,
+                        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                            crate::tools::section_coverage::SectionCoverage::new(),
+                        )),
+                        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(
+                            Default::default(),
+                        )),
+                        workspace_override: None,
+                    };
+                    steps(&ctx, &proj, &home).await;
+                });
+        },
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn approve_with_an_unresolved_dotdot_cannot_open_the_home_to_writes() {
+    flow_in_decoy_home(
+        "approve_with_an_unresolved_dotdot_cannot_open_the_home_to_writes",
+        |ctx, _proj, home| {
+            Box::pin(async move {
+                use crate::tools::approve_write::ApproveWrite;
+                // Step 1: `zz` does not exist, so `zz/../../..` is not (yet) the home's parent.
+                let approved = ApproveWrite
+                    .call(json!({ "path": "zz/../../.." }), ctx)
+                    .await;
+                // Step 2: create `zz`, as an ordinary in-project write does.
+                let created = CreateFile
+                    .call(json!({ "path": "zz/keep.txt", "content": "k\n" }), ctx)
+                    .await;
+                assert!(
+                    created.is_ok(),
+                    "fixture: an in-project create works: {created:?}"
+                );
+                // Step 3: write the decoy `~/.bashrc`.
+                let bashrc = home.join(".bashrc");
+                let edit = EditFile
+                    .call(
+                        json!({
+                            "path": bashrc.to_str().unwrap(),
+                            "insert": "append",
+                            "new_string": "echo PWNED\n"
+                        }),
+                        ctx,
+                    )
+                    .await;
+                let after = std::fs::read_to_string(&bashrc).unwrap();
+                assert_eq!(
+                after, "# decoy bashrc\n",
+                "the decoy ~/.bashrc was written. approve_write -> {approved:?}; edit_file -> {edit:?}"
+            );
+            })
+        },
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn approving_a_file_directly_in_the_home_cannot_make_it_writable() {
+    flow_in_decoy_home(
+        "approving_a_file_directly_in_the_home_cannot_make_it_writable",
+        |ctx, _proj, home| {
+            Box::pin(async move {
+                use crate::tools::approve_write::ApproveWrite;
+                let bashrc = home.join(".bashrc");
+                let newrc = home.join(".newrc");
+                // An existing file, and a name that does not exist yet: both are files directly in the home.
+                let a = ApproveWrite
+                    .call(json!({ "path": bashrc.to_str().unwrap() }), ctx)
+                    .await;
+                let b = ApproveWrite
+                    .call(json!({ "path": newrc.to_str().unwrap() }), ctx)
+                    .await;
+                let edit = EditFile
+                    .call(
+                        json!({
+                            "path": bashrc.to_str().unwrap(),
+                            "insert": "append",
+                            "new_string": "echo PWNED\n"
+                        }),
+                        ctx,
+                    )
+                    .await;
+                let create = CreateFile
+                    .call(
+                        json!({ "path": newrc.to_str().unwrap(), "content": "x\n" }),
+                        ctx,
+                    )
+                    .await;
+                assert_eq!(
+                    std::fs::read_to_string(&bashrc).unwrap(),
+                    "# decoy bashrc\n",
+                    "~/.bashrc was written. approve(file) -> {a:?}; edit_file -> {edit:?}"
+                );
+                assert!(
+                    !newrc.exists(),
+                    "~/.newrc was created. approve(name) -> {b:?}; create_file -> {create:?}"
+                );
+            })
+        },
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_ack_path_says_what_is_true_for_a_file_in_a_directory_approve_write_refuses() {
+    flow_in_decoy_home(
+        "the_ack_path_says_what_is_true_for_a_file_in_a_directory_approve_write_refuses",
+        |ctx, _proj, home| {
+            Box::pin(async move {
+                // create_file, edit_file and edit_markdown reach the write gate through
+                // `resolve_write_or_capture` (the ack path), not `validate_write_path`.
+                let in_home = home.join(".bashrc2");
+                let created = CreateFile
+                    .call(
+                        json!({ "path": in_home.to_str().unwrap(), "content": "x\n" }),
+                        ctx,
+                    )
+                    .await
+                    .expect_err("a file directly in the home is refused")
+                    .to_string();
+                assert!(
+                    created.contains("directly in the home directory"),
+                    "the ack path must say what is true of a file in the home, got: {created}"
+                );
+                let edited = EditFile
+                    .call(
+                        json!({
+                            "path": home.join(".bashrc").to_str().unwrap(),
+                            "insert": "append",
+                            "new_string": "x\n"
+                        }),
+                        ctx,
+                    )
+                    .await
+                    .expect_err("a file directly in the home is refused")
+                    .to_string();
+                assert!(
+                    edited.contains("directly in the home directory"),
+                    "{edited}"
+                );
+                let in_root = CreateFile
+                    .call(
+                        json!({ "path": "/ce_ack_probe_x.txt", "content": "x\n" }),
+                        ctx,
+                    )
+                    .await
+                    .expect_err("a file directly in / is refused")
+                    .to_string();
+                assert!(
+                    in_root.contains("filesystem root"),
+                    "the ack path must say what is true of a file in `/`, got: {in_root}"
+                );
+                // The advice is the one the other write path gives: no approval helps, a
+                // subdirectory of the home can be approved.
+                assert!(
+                    created.contains("only a file inside a subdirectory"),
+                    "{created}"
+                );
+                assert!(
+                    !created.contains("Approve a subdirectory that does not contain it"),
+                    "that is the approval's own refusal, not advice about THIS write: {created}"
+                );
+            })
+        },
+    );
+}
+
 // ── ReadFile ──────────────────────────────────────────────────────────────
 
 #[tokio::test]

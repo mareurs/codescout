@@ -93,6 +93,26 @@ the env read out into a `_with` writer taking `allow_dim_migration` as a
 parameter (today `write_embeddings_v2_with`) plus a pure `migrate_opt_in`
 predicate — so those tests now set no environment at all. That is the shape to copy when you meet an `EnvGuard`: push
 the env read up to the caller and unit-test the decision as a pure function.
+
+### When the subject IS the process environment: re-exec in a child
+
+Option A cannot cover a test whose SUBJECT is how a function reacts to the process environment
+changing (for example that `platform::resolved_home_dir` re-reads `$HOME` on every call even after
+the account lookup behind it is cached): the value has to change inside one process. The pattern
+for that case is a **child process**, in `src/platform/test_child.rs`:
+
+- `test_child::run(module_path!(), "<this test's name>", &[("HOME", Some("..."))], || { .. })`
+  re-executes the test binary on that one test (`--exact`, `--test-threads=1`) with a marker
+  variable and the listed environment edits applied to the CHILD only. The child runs the body;
+  the parent only asserts the child passed and really ran (`1 passed`, so a filtered-out child cannot
+  pass vacuously). In the shared suite the marker is absent and nothing is mutated.
+- A body that only needs a different INITIAL environment (an unset, empty or symlinked `HOME`) needs
+  no mutation at all: pass the values in `envs`.
+- A body that must change the environment mid-run (the stale-`$HOME` test) calls `set_var` itself,
+  inside the child. That is the only kind of site `tests/env_mutation_isolation.rs` allowlists, and it
+  allowlists exactly the one test-only file that holds it, never a production module: a future
+  production `set_var` next to it must still fail the gate.
+- The cost is one process spawn per test. Prefer option A wherever the value can be passed in.
 ## Diagnostic shape
 
 The race is detectable in production CI as one of:

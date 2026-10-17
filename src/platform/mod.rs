@@ -21,6 +21,45 @@ pub fn home_dir() -> Option<PathBuf> {
     imp::home_dir()
 }
 
+/// The home directory according to the OS account database, independent of `$HOME` (unix
+/// `getpwuid_r`, cached for the life of the process; Windows `std::env::home_dir`). `None` when
+/// the account has no usable entry.
+///
+/// The ACCOUNT's answer is cached, `$HOME` never is: see [`resolved_home_dir`].
+pub fn account_home_dir() -> Option<PathBuf> {
+    imp::account_home_dir()
+}
+
+/// Pick a usable home directory: the environment's if it is an absolute path, else the
+/// account's. Pure, so the choice is testable without touching process state.
+///
+/// An unset, empty or relative `$HOME` is not a home directory, and `std::env::home_dir` is not
+/// relied on to say so. Its own docs (1.88.0, this crate's MSRV): "Returns the value of the 'HOME'
+/// environment variable if it is set (including to an empty string)", so `HOME=` yields
+/// `Some("")` there; read from the 1.97.1 source (`library/std/src/sys/paths/unix.rs`), which
+/// filters an empty `HOME` and falls back to the passwd entry, so the two toolchains disagree. A
+/// RELATIVE `HOME` is returned as given by both. Hence the `is_absolute` filters, on both sides.
+pub(crate) fn resolve_home(
+    env_home: Option<PathBuf>,
+    account: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    env_home
+        .filter(|h| h.is_absolute())
+        .or_else(account)
+        .filter(|h| h.is_absolute())
+}
+
+/// The home directory for SECURITY decisions (deny list, breadth guards): `$HOME` when it is an
+/// absolute path, otherwise the account's home directory. See [`resolve_home`].
+///
+/// `$HOME` is read on EVERY call, so a changed environment is seen at once. Only the account
+/// lookup behind it is cached (`account_home_dir`): caching this function's result would hold a
+/// stale `$HOME` for the life of the process, which
+/// `resolved_home_dir_is_not_stale_after_home_changes` pins.
+pub fn resolved_home_dir() -> Option<PathBuf> {
+    resolve_home(home_dir(), account_home_dir)
+}
+
 /// Return the system temporary directory.
 pub fn temp_dir() -> PathBuf {
     imp::temp_dir()
@@ -260,9 +299,54 @@ pub fn kill_on_close_job(child: &tokio::process::Child) -> Option<windows::JobGu
     imp::kill_on_close_job(child)
 }
 
+/// Test-only: run a test body in a CHILD process with a chosen environment, and the one test that
+/// changes `$HOME` inside such a child. A file of its own so the environment-mutation gate
+/// (`tests/env_mutation_isolation.rs`) allowlists exactly that file, not this whole module.
+#[cfg(all(test, unix))]
+pub(crate) mod test_child;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The security guards must not lose the home directory because `$HOME` is missing, empty or
+    /// relative: each of those used to turn the `$HOME` breadth guard off and empty the `~` entries
+    /// of the deny-list. Every case here asserts the ACCOUNT's home is used instead (a guard that
+    /// silently skipped would return `None`).
+    #[test]
+    fn resolve_home_falls_back_to_the_account_for_an_unusable_home() {
+        let env = std::env::temp_dir().join("env-home");
+        let acct = std::env::temp_dir().join("acct-home");
+
+        assert_eq!(
+            resolve_home(Some(env.clone()), || Some(acct.clone())),
+            Some(env.clone()),
+            "an absolute $HOME wins"
+        );
+        for (case, env_home) in [
+            ("unset", None),
+            ("empty", Some(PathBuf::new())),
+            ("relative", Some(PathBuf::from("marius"))),
+            ("dot", Some(PathBuf::from("."))),
+        ] {
+            assert_eq!(
+                resolve_home(env_home, || Some(acct.clone())),
+                Some(acct.clone()),
+                "$HOME {case}"
+            );
+        }
+        assert_eq!(resolve_home(None, || None), None, "no home anywhere");
+        assert_eq!(
+            resolve_home(None, || Some(PathBuf::new())),
+            None,
+            "an empty account home is not a home either"
+        );
+        assert_eq!(
+            resolve_home(Some(PathBuf::new()), || Some(PathBuf::from("rel"))),
+            None,
+            "nor is a relative one"
+        );
+    }
 
     #[test]
     fn posix_tokenize_handles_quotes_and_escapes() {

@@ -1,6 +1,6 @@
 //! Per-project configuration loaded from `.codescout/project.toml`.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -637,7 +637,7 @@ impl ProjectConfig {
                 );
             }
             let text = std::fs::read_to_string(&config_path)?;
-            toml::from_str(&text)?
+            toml::from_str(&text).with_context(|| format!("parsing {}", config_path.display()))?
         } else {
             let name = root
                 .file_name()
@@ -653,7 +653,14 @@ impl ProjectConfig {
 
         let merged = merge_toml(global_base, project_overlay);
         let config: Self = toml::Value::try_into(merged)?;
-        config.validate_list_limits()?;
+        // Name the file: the merged config may also carry the global config, and a reader with
+        // several projects cannot tell which one stopped.
+        config.validate_list_limits().with_context(|| {
+            format!(
+                "invalid configuration for {} (merged with the global config)",
+                config_path.display()
+            )
+        })?;
         Ok(config)
     }
 
@@ -661,7 +668,8 @@ impl ProjectConfig {
     /// already limits total size, but 1 MiB of TOML easily encodes tens of
     /// thousands of regex patterns — each evaluated on every shell invocation,
     /// every path check, every ignore walk. Cap the counts to keep a crafted
-    /// or copy-pasted manifest from DoS'ing per-request hot paths.
+    /// or copy-pasted manifest from DoS'ing per-request hot paths. Also refuses an
+    /// `extra_write_roots` entry that is not an absolute path.
     fn validate_list_limits(&self) -> Result<()> {
         // cap-class: NOT_A_CAP — config validation ceiling; a breach bails with an error naming the count, no entry is silently dropped
         const MAX_EXTRA_WRITE_ROOTS: usize = 128;
@@ -676,6 +684,29 @@ impl ProjectConfig {
                 self.security.extra_write_roots.len(),
                 MAX_EXTRA_WRITE_ROOTS,
             );
+        }
+        // An entry that is not an absolute path is not a directory anyone can have meant: the
+        // empty string became the empty path (a prefix of EVERY path), and a relative one was
+        // resolved against the server's cwd rather than the project. Refuse, naming the entry.
+        // (`classify_write_path_in` skips such entries too: a config can change after this runs.)
+        for (i, root) in self.security.extra_write_roots.iter().enumerate() {
+            let path = std::path::Path::new(root);
+            if !path.is_absolute() {
+                anyhow::bail!(
+                    "security.extra_write_roots entry {i} ({root:?}) is not an absolute path; \
+                     use a full path (a leading '~' is not expanded)",
+                );
+            }
+            // `/home/u/work/..` is `/home/u`: the spelling hides how wide the root is.
+            if path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                anyhow::bail!(
+                    "security.extra_write_roots entry {i} ({root:?}) contains a '..' component; \
+                     write the directory out without it",
+                );
+            }
         }
         if self.security.shell_dangerous_patterns.len() > MAX_SHELL_DANGEROUS_PATTERNS {
             anyhow::bail!(
@@ -1267,6 +1298,100 @@ model = "local:test"
         assert!(
             err.to_string().contains("ignored_paths.patterns"),
             "expected ignored_paths limit error, got {err}"
+        );
+    }
+
+    /// An empty `extra_write_roots` entry made the empty path a write root, and
+    /// `Path::starts_with("")` is true for every path: every file outside the deny list became
+    /// writable (`F9a` in `docs/issues/2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admits-every-path.md`).
+    /// A relative one is resolved against the server's cwd, not the project. Neither is a
+    /// directory the author can have meant, so the config is refused, naming the entry.
+    #[test]
+    fn validate_list_limits_rejects_an_extra_write_root_that_is_not_absolute() {
+        let mut cfg = ProjectConfig::default_for("x".into());
+        cfg.validate_list_limits().unwrap();
+
+        for bad in ["", ".", "sub/dir", "../sibling", "~/elsewhere"] {
+            cfg.security.extra_write_roots = vec![bad.to_string()];
+            let err = cfg
+                .validate_list_limits()
+                .expect_err(&format!("{bad:?} is not an absolute path"));
+            let msg = err.to_string();
+            assert!(
+                msg.contains("security.extra_write_roots") && msg.contains("absolute"),
+                "{bad:?}: the error must name the field and the rule, got {msg}"
+            );
+        }
+
+        // The offending entry is named even when it is not the first.
+        let good = std::env::temp_dir().display().to_string();
+        cfg.security.extra_write_roots = vec![good.clone(), String::new()];
+        let err = cfg.validate_list_limits().unwrap_err();
+        assert!(err.to_string().contains("entry 1"), "got {err}");
+
+        // Absolute entries are untouched.
+        cfg.security.extra_write_roots = vec![good];
+        cfg.validate_list_limits().unwrap();
+    }
+
+    /// An absolute entry with a `..` component hides how wide the root is: `/home/u/work/..` is
+    /// `/home/u`. Refused at load, naming the entry, like a relative one.
+    #[test]
+    fn validate_list_limits_rejects_an_absolute_extra_write_root_with_dotdot() {
+        let mut cfg = ProjectConfig::default_for("x".into());
+        let spelled = std::env::temp_dir().join("work/..").display().to_string();
+        cfg.security.extra_write_roots = vec![spelled.clone()];
+        let err = cfg
+            .validate_list_limits()
+            .expect_err("a `..` entry must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("security.extra_write_roots") && msg.contains("'..'"),
+            "the error must name the field and the `..` rule, got {msg}"
+        );
+        assert!(msg.contains(&spelled), "the entry is named, got {msg}");
+    }
+
+    /// The stderr line for a project that will not start must name the file: before, it read
+    /// `Error: security.extra_write_roots entry 0 ("~/scratch") is not an absolute path ...` and a
+    /// reader with several projects (or a global config in the merge) had to guess which.
+    #[test]
+    fn a_config_that_fails_to_load_names_the_project_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let path = cfg_dir.join("project.toml");
+
+        std::fs::write(
+            &path,
+            "[project]\nname = \"x\"\n\n[security]\nextra_write_roots = [\"~/scratch\"]\n",
+        )
+        .unwrap();
+        let err = ProjectConfig::load_with_global_base(
+            dir.path(),
+            toml::Value::Table(Default::default()),
+        )
+        .expect_err("a `~` extra root is refused");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains(&path.display().to_string()),
+            "the file is named: {msg}"
+        );
+        assert!(
+            msg.contains("extra_write_roots"),
+            "the cause is kept: {msg}"
+        );
+
+        // A TOML syntax error is named the same way.
+        std::fs::write(&path, "[project\nname = ").unwrap();
+        let err = ProjectConfig::load_with_global_base(
+            dir.path(),
+            toml::Value::Table(Default::default()),
+        )
+        .expect_err("invalid TOML");
+        assert!(
+            format!("{err:#}").contains(&path.display().to_string()),
+            "the file is named for a parse error too: {err:#}"
         );
     }
 

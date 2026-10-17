@@ -175,46 +175,94 @@ impl Default for PathSecurityConfig {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// The home directory for security decisions: `$HOME` when it is an absolute path, else the
+/// account's home (`platform::resolved_home_dir`). Never `None` merely because `$HOME` is unset,
+/// empty or relative: those used to switch the `$HOME` breadth guard off and empty the `~`
+/// entries of the deny list.
 fn home_dir() -> Option<PathBuf> {
-    crate::platform::home_dir()
+    crate::platform::resolved_home_dir()
 }
 
-/// Expand a leading `~` to `home`.
-fn expand_home_with(pattern: &str, home: Option<&Path>) -> Option<PathBuf> {
+/// Every home directory whose contents the guards protect: the resolved one (`$HOME` when it is
+/// an absolute path, else the account's) and the account's own. They differ when `$HOME` names
+/// some other directory (a sandbox, a CI job, a typo), which must not leave the account's real
+/// home unprotected (`F2e`/`F2f` in
+/// `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`).
+fn protected_homes() -> Vec<PathBuf> {
+    protected_homes_from(crate::platform::account_home_dir)
+}
+
+/// `protected_homes` with the account lookup supplied: the seam that lets a test prove the
+/// ambient wiring includes the ACCOUNT's home on every host, not only on one whose uid has a
+/// passwd entry. `$HOME` is still read from the process, fresh, on every call.
+fn protected_homes_from(account: impl FnOnce() -> Option<PathBuf>) -> Vec<PathBuf> {
+    protected_homes_of(home_dir(), account())
+}
+
+/// `protected_homes` over explicit inputs: `resolved` first, then `account`; for each, the home
+/// as it was given AND its canonical form (`canonicalize_through_existing_ancestor`, so a missing
+/// home behind a symlinked ancestor is still seen below its real parent), exact duplicates dropped.
+///
+/// Both spellings are kept on purpose. The canonical one is what breadth checks and resolved
+/// targets compare against (`canonical_homes` collapses the list back to it). The spelling as
+/// given is what a target that cannot be resolved stays in: with `HOME` a symlink and `~/.aws`
+/// missing, `<link>/.aws/credentials` never becomes `<real>/.aws/credentials`, and only a deny entry
+/// expanded against `<link>` matches it. Canonical-only made the read side refuse less than before
+/// (probe C2e of the review).
+fn protected_homes_of(resolved: Option<PathBuf>, account: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut homes: Vec<PathBuf> = Vec::new();
+    for home in resolved.into_iter().chain(account) {
+        let canonical = canonicalize_through_existing_ancestor(&home);
+        for spelling in [home, canonical] {
+            if !homes.contains(&spelling) {
+                homes.push(spelling);
+            }
+        }
+    }
+    homes
+}
+
+/// `homes` in canonical form (`canonicalize_through_existing_ancestor`), duplicates dropped (the
+/// two spellings `protected_homes_of` keeps collapse onto one). Idempotent, so it is safe to apply
+/// to raw homes a test injects.
+fn canonical_homes(homes: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for home in homes {
+        let canonical = canonicalize_through_existing_ancestor(home);
+        if !out.contains(&canonical) {
+            out.push(canonical);
+        }
+    }
+    out
+}
+
+/// Expand a leading `~` against each of `homes`; a pattern without one expands to itself.
+fn expand_home_all(pattern: &str, homes: &[PathBuf]) -> Vec<PathBuf> {
     if let Some(rest) = pattern.strip_prefix("~/") {
-        home.map(|h| h.join(rest))
+        homes.iter().map(|h| h.join(rest)).collect()
     } else if pattern == "~" {
-        home.map(Path::to_path_buf)
+        homes.to_vec()
     } else {
-        Some(PathBuf::from(pattern))
+        vec![PathBuf::from(pattern)]
     }
 }
 
-/// Build the full list of denied read paths (defaults + user-configured).
-///
-/// Each entry is canonicalized once here so that a `$HOME` symlink (e.g.
-/// `/home/user -> /var/users/user` on some macOS FileVault / NFS-mounted
-/// setups) cannot bypass the deny-list. Input paths get canonicalized by
-/// `validate_read_path`; without canonicalizing the deny-list too, the
-/// `starts_with` check compares a resolved input against an unresolved
-/// prefix and silently passes.
-fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
-    denied_paths_with(home_dir().as_deref(), best_effort_canonicalize)
-}
-
-/// The deny list with `$HOME` and the entry resolver supplied. A caller that compares a path
-/// resolved one way against entries resolved another can be walked around: behind a symlinked
-/// `$HOME` a missing entry kept literal never matches a target resolved through its existing
-/// ancestors, and an entry that is itself a symlink resolves away from its own name. The write
-/// classifier therefore asks for more than one resolver (see `classify_write_path_in`); this
+/// The deny list with the protected homes and the entry resolver supplied. A caller that compares
+/// a path resolved one way against entries resolved another can be walked around: behind a
+/// symlinked `$HOME` a missing entry kept literal never matches a target resolved through its
+/// existing ancestors, and an entry that is itself a symlink resolves away from its own name. The
+/// write classifier therefore asks for more than one resolver (see `classify_write_path_in`); this
 /// function does not choose for it.
-fn denied_paths_with(home: Option<&Path>, resolve: fn(&Path) -> PathBuf) -> Vec<PathBuf> {
+///
+/// A `~` entry is expanded against EVERY home (`expand_home_all`): protecting only `$HOME` left
+/// the account's real home unprotected whenever `$HOME` named something else.
+fn denied_paths_with(homes: &[PathBuf], resolve: fn(&Path) -> PathBuf) -> Vec<PathBuf> {
     let mut denied = Vec::new();
     for p in crate::platform::denied_read_prefixes()
         .iter()
         .chain(DEFAULT_DENIED_EXACT.iter())
     {
-        if let Some(expanded) = expand_home_with(p, home) {
+        for expanded in expand_home_all(p, homes) {
             denied.push(resolve(&expanded));
         }
     }
@@ -330,6 +378,18 @@ pub fn validate_read_path(
     project_root: Option<&Path>,
     config: &PathSecurityConfig,
 ) -> Result<PathBuf> {
+    validate_read_path_in(raw, project_root, config, &protected_homes())
+}
+
+/// `validate_read_path` over an explicit list of protected homes, so a test can inject them
+/// (including an account home, which the ambient lookup only finds on a host whose uid has a
+/// passwd entry).
+fn validate_read_path_in(
+    raw: &str,
+    project_root: Option<&Path>,
+    config: &PathSecurityConfig,
+    homes: &[PathBuf],
+) -> Result<PathBuf> {
     if raw.is_empty() {
         bail!("path must not be empty");
     }
@@ -361,7 +421,7 @@ pub fn validate_read_path(
     // Canonicalize to resolve symlinks and `..` components.
     let resolved = best_effort_canonicalize(&resolved);
 
-    let denied = denied_read_paths(config);
+    let denied = denied_paths_with(homes, best_effort_canonicalize);
     if is_denied(&resolved, &denied) {
         bail!("access denied: '{}' is in a protected location", raw);
     }
@@ -411,9 +471,26 @@ pub fn classify_write_path(
 /// permission error on an ancestor) yields no root at all, so no write is allowed under it. A
 /// temp dir that canonicalizes to `/` is refused too: it would admit the whole filesystem.
 ///
+/// A temp dir that is not an absolute path, or that has a `..` component, yields no root either:
+/// it is environment input that does not name the directory it resolves to.
+///
 /// A temp dir ABOVE `$HOME` (`TMPDIR=/tmp` with `HOME=/tmp/home`) is kept as a root, but see
 /// `temp_root_admits`: it admits nothing inside the home directory.
 fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
+    // `$TMPDIR` is environment input. A RELATIVE value would be canonicalized against the process
+    // cwd, and a `..` would be collapsed by `canonicalize` into a directory the operator never
+    // named; either way the root is not what `$TMPDIR` says it is, so there is no root. An empty
+    // value is refused twice over: it is not absolute, and `canonicalize("")` fails
+    // (`an_empty_temp_dir_is_not_a_write_root` pins the outcome, whichever rule fires). A
+    // SYMLINKED `$TMPDIR` is deliberately still
+    // followed: see `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`.
+    if !temp_dir.is_absolute()
+        || temp_dir
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+    {
+        return None;
+    }
     let canon = std::fs::canonicalize(temp_dir).ok()?;
     if canon == Path::new("/") {
         return None;
@@ -421,30 +498,31 @@ fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
     Some(canon)
 }
 
-/// Whether the temp root `root` admits `resolved`. `canonical_home` must already be canonical.
+/// Whether the temp root `root` admits `resolved`. `canonical_homes` must already be canonical.
 ///
-/// A root that is `canonical_home` or an ancestor of it would cover the whole home directory, so
-/// it admits nothing under the home: `~/.bashrc` is for another root to decide, never for a temp
-/// dir that merely sits above it. A temp root BELOW the home (the usual case,
+/// A root that is a protected home or an ancestor of one would cover that whole home directory,
+/// so it admits nothing under ANY home: `~/.bashrc` is for another root to decide, never for a
+/// temp dir that merely sits above it. A temp root BELOW the home (the usual case,
 /// `~/.cache/tmp`) is unaffected. The exclusion lives here, not as a refusal of the root, because
 /// refusing the root made `approve_write`'s own suggestion (the temp dir's parent) undo the
 /// refusal and broke sandboxes whose `HOME` lives under `TMPDIR`.
-fn temp_root_admits(root: &Path, canonical_home: Option<&Path>, resolved: &Path) -> bool {
+fn temp_root_admits(root: &Path, canonical_homes: &[PathBuf], resolved: &Path) -> bool {
     resolved.starts_with(root)
-        && !canonical_home.is_some_and(|h| h.starts_with(root) && resolved.starts_with(h))
+        && !canonical_homes
+            .iter()
+            .any(|h| h.starts_with(root) && resolved.starts_with(h))
 }
 
-/// `/`, `canonical_home` and every directory above it are never acceptable implicit CWD roots:
-/// each would allow writes anywhere on the filesystem, or inside the whole home directory.
-/// `canon` and `canonical_home` must both already be canonical
+/// `/`, every protected home and every directory above one are never acceptable implicit CWD
+/// roots: each would allow writes anywhere on the filesystem, or inside a whole home directory.
+/// `canon` and `canonical_homes` must both already be canonical
 /// (`canonicalize_through_existing_ancestor`: a missing home behind a symlinked ancestor has to
 /// be seen below its real parent, which a literal path never is).
 ///
 /// Used for the cwd root only; the temp root is handled by `temp_root_admits`.
-/// `validate_approve_path` still tests equality with `$HOME` alone, so `approve_write` can accept
-/// a directory above the home (follow-up in `docs/issues/2026-10-17-...`).
-fn is_overly_broad_write_root(canon: &Path, canonical_home: Option<&Path>) -> bool {
-    canon == Path::new("/") || canonical_home.is_some_and(|h| h.starts_with(canon))
+/// `validate_approve_path` has its own breadth guard over the same homes.
+fn is_overly_broad_write_root(canon: &Path, canonical_homes: &[PathBuf]) -> bool {
+    canon == Path::new("/") || canonical_homes.iter().any(|h| h.starts_with(canon))
 }
 
 /// The ambient facts the write allowlist depends on, gathered at one edge so a test can inject
@@ -453,17 +531,23 @@ fn is_overly_broad_write_root(canon: &Path, canonical_home: Option<&Path>) -> bo
 struct WriteEnv {
     /// The system temp directory (`platform::temp_dir()`).
     temp_dir: PathBuf,
-    /// `$HOME`, which both the deny list and the broad-root guard read.
-    home: Option<PathBuf>,
+    /// Every protected home (`protected_homes`: `$HOME` resolved plus the account's), which the
+    /// deny list and the breadth guards read. Empty only when no home can be found at all.
+    homes: Vec<PathBuf>,
     /// The server's working directory.
     cwd: Option<PathBuf>,
 }
 
 impl WriteEnv {
     fn ambient() -> Self {
+        Self::ambient_with(crate::platform::account_home_dir)
+    }
+
+    /// `ambient` with the account lookup supplied (see `protected_homes_from`).
+    fn ambient_with(account: impl FnOnce() -> Option<PathBuf>) -> Self {
         Self {
             temp_dir: crate::platform::temp_dir(),
-            home: home_dir(),
+            homes: protected_homes_from(account),
             cwd: std::env::current_dir().ok(),
         }
     }
@@ -535,11 +619,8 @@ fn classify_write_path_in(
     // - parent resolved, leaf as written (`canonicalize_write_target`): an entry that is itself a
     //   symlinked FILE (`~/.kube/config -> config-prod`) matches a write to its own name, which the
     //   fully resolved form no longer does.
-    let mut denied = denied_paths_with(env.home.as_deref(), canonicalize_through_existing_ancestor);
-    denied.extend(denied_paths_with(
-        env.home.as_deref(),
-        canonicalize_write_target,
-    ));
+    let mut denied = denied_paths_with(&env.homes, canonicalize_through_existing_ancestor);
+    denied.extend(denied_paths_with(&env.homes, canonicalize_write_target));
     if is_denied(&resolved, &denied) {
         return WritePathDecision::Denied(format!(
             "write denied: '{}' is in a protected location. approve_write cannot grant \
@@ -553,12 +634,9 @@ fn classify_write_path_in(
     // (`canonicalize_through_existing_ancestor`), so a root that does not exist yet under a
     // symlinked ancestor still matches the files written below it.
     let mut allowed = vec![project_root];
-    // The home directory in canonical form, resolved like every other root: a MISSING home
+    // The protected homes in canonical form, resolved like every other root: a MISSING home
     // behind a symlinked ancestor must still be seen below that ancestor's real path.
-    let canonical_home = env
-        .home
-        .as_deref()
-        .map(canonicalize_through_existing_ancestor);
+    let homes = canonical_homes(&env.homes);
     // System temp directory is always writable — useful for scratch files,
     // intermediate output, and cross-process coordination without polluting
     // the project root. Held CANONICALIZED (the target above is), absent when it cannot
@@ -575,21 +653,44 @@ fn classify_write_path_in(
     // the filesystem or inside the entire home directory.
     if let Some(cwd) = &env.cwd {
         let cwd_canon = canonicalize_through_existing_ancestor(cwd);
-        if !is_overly_broad_write_root(&cwd_canon, canonical_home.as_deref()) {
+        if !is_overly_broad_write_root(&cwd_canon, &homes) {
             allowed.push(cwd_canon);
         }
     }
-    for extra in &config.extra_write_roots {
+    // An entry that is not an absolute path is skipped: `""` is a prefix of EVERY path
+    // (`Path::starts_with`) and a relative one resolves against the server's cwd. A `..` is skipped
+    // too: `/home/u/work/..` is `/home/u`, and the spelling hides how wide the root is. The config
+    // refuses both when it loads (`ProjectConfig::validate_list_limits`); this holds when a config
+    // reaches the classifier another way or changes after it was validated.
+    for extra in config
+        .extra_write_roots
+        .iter()
+        .filter(|e| e.is_absolute() && !has_parent_dir(e))
+    {
         allowed.push(canonicalize_through_existing_ancestor(extra));
     }
-    for root in session_roots {
-        allowed.push(canonicalize_through_existing_ancestor(root));
-    }
+    // A session root is a DIRECTORY the user approved, and what it names is re-resolved on every
+    // call. So it is held to the rules approval applied, again, now: a root spelled with `..` is
+    // skipped, and so is one that resolves (today) onto a filesystem root, a protected home or a
+    // directory above one, however it got there (`zz/../..` once `zz` exists, a directory that was
+    // later replaced by a link to the home). Deny still wins over whatever remains.
+    let session_allowed: Vec<PathBuf> = session_roots
+        .iter()
+        .filter(|root| !has_parent_dir(root))
+        .map(|root| canonicalize_through_existing_ancestor(root))
+        .filter(|root| too_broad(root, &env.homes).is_none())
+        .collect();
 
+    // A session root admits what is INSIDE it, never a file named like the root itself:
+    // `approve_write(~/.newrc)` names a directory that does not exist yet, and creating a file
+    // with that name is not what was approved.
     let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root))
+        || session_allowed
+            .iter()
+            .any(|root| resolved != *root && resolved.starts_with(root))
         || temp_root
             .as_deref()
-            .is_some_and(|t| temp_root_admits(t, canonical_home.as_deref(), &resolved));
+            .is_some_and(|t| temp_root_admits(t, &homes, &resolved));
     if !under_allowed_root {
         return WritePathDecision::OutsideRoot { resolved };
     }
@@ -609,7 +710,24 @@ pub fn validate_write_path(
     config: &PathSecurityConfig,
     session_roots: &[PathBuf],
 ) -> Result<PathBuf> {
-    match classify_write_path(raw, project_root, config, session_roots) {
+    validate_write_path_in(
+        raw,
+        project_root,
+        config,
+        session_roots,
+        &WriteEnv::ambient(),
+    )
+}
+
+/// `validate_write_path` over an explicit environment, so a test can inject the homes.
+fn validate_write_path_in(
+    raw: &str,
+    project_root: &Path,
+    config: &PathSecurityConfig,
+    session_roots: &[PathBuf],
+    env: &WriteEnv,
+) -> Result<PathBuf> {
+    match classify_write_path_in(raw, project_root, config, session_roots, env) {
         WritePathDecision::Allowed(p) => Ok(p),
         // The directory to approve is derivable right here — `OutsideRoot` carries
         // `resolved` — and this arm used to match `{ .. }` and throw it away, printing a
@@ -626,6 +744,18 @@ pub fn validate_write_path(
         // See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
         WritePathDecision::OutsideRoot { resolved } => {
             let dir = resolved.parent().unwrap_or(resolved.as_path());
+            // `approve_write` refuses a directory that is too broad, and a call the next step is
+            // certain to refuse is a dead end (`F8b`). So when it WOULD refuse, do not name it:
+            // say which refusal applies and what is actually true of this file. The deny-list
+            // refusal of `validate_approve_path_in` gets no branch of its own: a directory it
+            // refuses lies under a deny entry, and `classify_write_path_in` checks the same
+            // entries (in two resolved forms, a superset of the approval's one) before it can
+            // answer `OutsideRoot`. Read from the two code paths and exercised by the
+            // `deny_list_holds_*` tests, not proven for every filesystem shape; a mutant that
+            // deleted such a branch could not be killed, so it was left out.
+            if let Some(denial) = too_broad_directory_denial_in(raw, dir, &env.homes) {
+                bail!("{denial}");
+            }
             // The directory is text a caller pastes into the call, so it is a JSON string
             // literal: a `"` or `\` in a directory name (or a Windows separator) would otherwise
             // end the literal early or start an escape.
@@ -645,15 +775,108 @@ pub fn validate_write_path(
 /// Validate a path for **session approval** via the `approve_write` tool.
 ///
 /// Checks:
-/// 1. Rejects the filesystem root (`/`) and `$HOME` — too broad.
+/// 1. Rejects a filesystem root (`/`, `C:\`), every protected home, and every directory ABOVE
+///    one — each is too broad: a root over `/home` admits `~/.bashrc` and every other file in
+///    the home that is not on the deny list.
 /// 2. Checks the deny-list — protected paths can never be approved.
 ///
 /// Returns the canonicalized path on success.
+///
+/// Trade-off, stated: a host whose `$HOME` is under its temp dir or under the project (for
+/// example `HOME=/tmp/h`) cannot approve `/tmp`, or that project, as a whole; it approves a
+/// subdirectory that does not contain the home instead.
 pub fn validate_approve_path(
     raw: &str,
     project_root: &Path,
-    config: &PathSecurityConfig,
+    _config: &PathSecurityConfig,
 ) -> Result<PathBuf> {
+    validate_approve_path_in(raw, project_root, &protected_homes())
+}
+
+/// Whether `path` still has a `..` component as written. A `..` is only meaningful once every
+/// directory before it exists; `starts_with` is component-wise and would match a root the `..`
+/// escapes, or hide how wide a root is.
+fn has_parent_dir(path: &Path) -> bool {
+    path.components().any(|c| matches!(c, Component::ParentDir))
+}
+
+/// Why a directory is too broad to approve.
+#[derive(Debug, PartialEq, Eq)]
+enum TooBroad {
+    /// A filesystem root (`/`, `C:\`).
+    FilesystemRoot,
+    /// The directory is, or contains, this protected home (canonical form).
+    Home(PathBuf),
+}
+
+/// Whether `dir` is too broad for `approve_write` over the protected `homes`, and why. Both
+/// sides are compared in canonical form (`canonicalize_through_existing_ancestor`): a directory
+/// or a home that does not exist yet, behind a symlinked ancestor, is still seen where it really
+/// is. The single source of the rule for `validate_approve_path_in` and for the denial text of
+/// `validate_write_path_in`, so the call a denial names is never one the approval refuses.
+fn too_broad(dir: &Path, homes: &[PathBuf]) -> Option<TooBroad> {
+    let broad = canonicalize_through_existing_ancestor(dir);
+    // `parent().is_none()` is "is a filesystem root" on every platform (`/`, `C:\`), and also
+    // true of the empty path.
+    if broad.parent().is_none() {
+        return Some(TooBroad::FilesystemRoot);
+    }
+    // A protected home, or any directory above one: `home.starts_with(broad)` is true for both.
+    // A home that IS the directory is named in preference to one it merely contains.
+    let homes = canonical_homes(homes);
+    homes
+        .iter()
+        .find(|h| **h == broad)
+        .or_else(|| homes.iter().find(|h| h.starts_with(&broad)))
+        .cloned()
+        .map(TooBroad::Home)
+}
+
+/// The denial for a write whose directory `approve_write` would refuse as too broad: it says why,
+/// and what is true of THIS file. A file directly in such a directory cannot be made writable by
+/// any approval (every directory that contains it is refused too), so "write into a subdirectory"
+/// is not an option for it; only a file inside a subdirectory can be approved.
+fn too_broad_write_denial(raw: &str, dir: &Path, why: &TooBroad) -> String {
+    match why {
+        TooBroad::FilesystemRoot => format!(
+            "write denied: '{raw}' is directly in the filesystem root, outside the project root. \
+             approve_write refuses a filesystem root as too broad, so no approval can make this \
+             write possible; only a file inside a subdirectory of it can be approved."
+        ),
+        TooBroad::Home(home) if canonicalize_through_existing_ancestor(dir) == *home => format!(
+            "write denied: '{raw}' is directly in the home directory '{}', outside the project \
+             root. approve_write refuses a home directory as too broad, so no approval can make \
+             this write possible; only a file inside a subdirectory of the home can be approved.",
+            home.display()
+        ),
+        TooBroad::Home(home) => format!(
+            "write denied: '{raw}' is directly in '{}', which contains the home directory '{}', \
+             outside the project root. approve_write refuses any directory that contains a home, \
+             so no approval can make this write possible; only a file inside a subdirectory of \
+             '{}' that does not contain the home can be approved.",
+            dir.display(),
+            home.display(),
+            dir.display()
+        ),
+    }
+}
+
+/// The denial for a write to `raw` whose directory `dir` `approve_write` would refuse as too broad
+/// (a filesystem root, a protected home, or a directory above one), or `None` when the directory
+/// is not too broad. Over the ambient protected homes: the one place every write path that mints
+/// or names an `approve_write` call (`validate_write_path`, and `resolve_write_or_capture`, the
+/// ack path of `create_file`, `edit_file` and `edit_markdown`) asks before it does.
+pub fn too_broad_directory_denial(raw: &str, dir: &Path) -> Option<String> {
+    too_broad_directory_denial_in(raw, dir, &protected_homes())
+}
+
+/// `too_broad_directory_denial` over explicit homes.
+fn too_broad_directory_denial_in(raw: &str, dir: &Path, homes: &[PathBuf]) -> Option<String> {
+    too_broad(dir, homes).map(|why| too_broad_write_denial(raw, dir, &why))
+}
+
+/// `validate_approve_path` over an explicit list of protected homes, so a test can inject them.
+fn validate_approve_path_in(raw: &str, project_root: &Path, homes: &[PathBuf]) -> Result<PathBuf> {
     if raw.is_empty() {
         bail!("path must not be empty");
     }
@@ -668,20 +891,42 @@ pub fn validate_approve_path(
         best_effort_canonicalize(&project_root.join(raw))
     };
 
-    // Breadth guard: reject / and $HOME
-    let is_fs_root = resolved == Path::new("/");
-    let is_home = home_dir()
-        .map(|h| best_effort_canonicalize(&h) == resolved)
-        .unwrap_or(false);
-    if is_fs_root || is_home {
+    // A `..` that survived resolution means a directory before it does not exist yet, so the
+    // path names a place nobody has resolved: it could be a home's parent once that directory is
+    // created, and the stored root is re-resolved on every call. Refuse it by name.
+    if has_parent_dir(&resolved) {
         bail!(
-            "approve_write: '{}' is too broad — specify a subdirectory",
+            "approve_write: '{}' contains '..' that could not be resolved (a directory in it does \
+             not exist yet); pass a path with no unresolved '..' segments",
+            raw
+        );
+    }
+    // Approval is of a DIRECTORY. A file that exists is not one, and approving it would make the
+    // file itself a root.
+    if resolved.exists() && !resolved.is_dir() {
+        bail!(
+            "approve_write: '{}' is not a directory; approve the directory to write into",
             resolved.display()
         );
     }
 
+    // Breadth guard (`too_broad`): a filesystem root, a protected home, or a directory above one.
+    match too_broad(&resolved, homes) {
+        Some(TooBroad::FilesystemRoot) => bail!(
+            "approve_write: '{}' is too broad — specify a subdirectory",
+            resolved.display()
+        ),
+        Some(TooBroad::Home(home)) => bail!(
+            "approve_write: '{}' is too broad — it is, or contains, the home directory '{}'. \
+             Approve a subdirectory that does not contain it.",
+            resolved.display(),
+            home.display()
+        ),
+        None => {}
+    }
+
     // Deny-list: protected paths can never be approved
-    let denied = denied_read_paths(config);
+    let denied = denied_paths_with(homes, best_effort_canonicalize);
     if is_denied(&resolved, &denied) {
         bail!(
             "approve_write: '{}' is in a protected location and cannot be approved",
@@ -2728,6 +2973,14 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    // `#[serial_test::serial]` marks the tests that read the process cwd through
+    // `WriteEnv::ambient()` (the ambient `classify_write_path` / `validate_write_path`) or through
+    // `std::env::current_dir()`: `agent::tests::new_with_relative_path_canonicalizes_home_root`
+    // CHANGES the cwd, and `#[serial]` is what keeps the two groups apart. It excludes only the
+    // tests that opt in, so a test elsewhere that reaches the ambient classifier through a tool is
+    // not covered (`docs/conventions/test-env-isolation.md`); everything that CAN take an injected
+    // `WriteEnv` does (`classify_write_path_in`, `env_of`) and needs no attribute.
+
     fn default_config() -> PathSecurityConfig {
         PathSecurityConfig::default()
     }
@@ -2836,6 +3089,7 @@ mod tests {
     // ── Write validation ─────────────────────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn write_empty_path_rejected() {
         let dir = tempdir().unwrap();
         let result =
@@ -2844,6 +3098,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_null_byte_rejected() {
         let dir = tempdir().unwrap();
         let result = validate_write_path(
@@ -2856,6 +3111,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_within_project_allowed() {
         let dir = tempdir().unwrap();
         // Create the target directory so canonicalize resolves properly
@@ -2874,6 +3130,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_outside_project_rejected() {
         let project = tempdir().unwrap();
         // Use a hardcoded path outside both the project root and /tmp so the
@@ -2894,6 +3151,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_traversal_outside_project_rejected() {
         let project = tempdir().unwrap();
         std::fs::create_dir_all(project.path().join("src")).unwrap();
@@ -2910,6 +3168,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_traversal_via_nonexistent_dir_rejected() {
         // Regression test for: when an intermediate directory does not exist,
         // best_effort_canonicalize falls back to the raw path (with `..`).
@@ -2943,6 +3202,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_extra_root_allowed() {
         let project = tempdir().unwrap();
         let extra = tempdir().unwrap();
@@ -2968,6 +3228,7 @@ mod tests {
         ignore = "Windows lacks /tmp; absolute Unix-path test inputs need a portable rewrite. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
     )]
     #[test]
+    #[serial_test::serial]
     fn write_to_tmp_allowed() {
         let project = tempdir().unwrap();
         // The allowlist holds the PLATFORM temp dir (`platform::temp_dir()`, which is `$TMPDIR`
@@ -3031,6 +3292,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_to_ssh_denied_even_if_under_project() {
         // If somehow ~/.ssh were under the project root, it should still be denied
         if let Some(home) = home_dir() {
@@ -3104,6 +3366,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn symlink_write_escape_caught() {
         #[cfg(unix)]
         let project = tempdir().unwrap();
@@ -5330,6 +5593,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn root_profile_bypasses_write_boundary() {
         let dir = tempdir().unwrap();
         let outside = dir.path().join("outside_project");
@@ -5354,6 +5618,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_outside_root_mentions_approve_write() {
         let dir = tempdir().unwrap();
         // Use /var — outside both the project root and /tmp, so the boundary check
@@ -5373,6 +5638,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_allows_session_approved_root() {
         let dir = tempdir().unwrap();
         let other = tempdir().unwrap();
@@ -5392,6 +5658,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_session_root_still_respects_deny_list() {
         let dir = tempdir().unwrap();
         let home = crate::platform::home_dir().unwrap();
@@ -5482,6 +5749,329 @@ mod tests {
         let result = validate_approve_path(home.to_str().unwrap(), dir.path(), &default_config());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("too broad"));
+    }
+
+    /// `approve_write("/home")` used to be accepted (`F8a` in
+    /// `docs/issues/2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`):
+    /// only `/` and `$HOME` itself were refused, so a directory CONTAINING the home passed, and a
+    /// session root over it admitted `~/.bashrc` and every other non-denied file in the home.
+    #[test]
+    fn validate_approve_path_rejects_every_ancestor_of_the_home_directory() {
+        let dir = tempdir().unwrap();
+        let home = std::fs::canonicalize(home_dir().unwrap()).unwrap();
+        for ancestor in home.ancestors().skip(1) {
+            let result =
+                validate_approve_path(ancestor.to_str().unwrap(), dir.path(), &default_config());
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|e| e.to_string().contains("too broad")),
+                "{ancestor:?} contains the home directory {home:?} and must be refused, got: {result:?}"
+            );
+        }
+    }
+
+    /// `base/a/b/home` is the home: `base/a` and `base/a/b` contain it and are refused, `base/a/other`
+    /// does not and is accepted, and so is a subdirectory of the home (the normal thing to approve).
+    #[test]
+    fn approve_refuses_a_directory_that_contains_a_home_and_accepts_one_that_does_not() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/b/home");
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        std::fs::create_dir_all(base.join("a/other")).unwrap();
+        let homes = [home.clone()];
+        let approve = |p: &Path| validate_approve_path_in(p.to_str().unwrap(), &base, &homes);
+        for refused in [base.join("a"), base.join("a/b"), home.clone()] {
+            let result = approve(&refused);
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|e| e.to_string().contains("too broad")),
+                "{refused:?} is or contains the home and must be refused, got: {result:?}"
+            );
+        }
+        for accepted in [base.join("a/other"), home.join("projects")] {
+            let result = approve(&accepted);
+            assert!(
+                result.is_ok(),
+                "{accepted:?} does not contain the home and must be accepted, got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn approve_refuses_a_directory_above_either_of_two_homes() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let (first, second) = (base.join("x/first"), base.join("y/z/second"));
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let homes = [first, second];
+        for refused in [base.join("x"), base.join("y"), base.join("y/z")] {
+            let result = validate_approve_path_in(refused.to_str().unwrap(), &base, &homes);
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|e| e.to_string().contains("too broad")),
+                "{refused:?} contains a protected home and must be refused, got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn approve_refuses_the_filesystem_root_with_no_home_at_all() {
+        let scratch = tempdir().unwrap();
+        let result = validate_approve_path_in("/", scratch.path(), &[]);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "the filesystem root must be refused even when no home is known, got: {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approve_sees_a_missing_home_behind_a_symlinked_ancestor() {
+        // The home does not exist, and its parent is reached through a symlink: a literal
+        // comparison would never see `real` as containing it.
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let missing_home = link.join("home");
+        assert!(
+            !real.join("home").exists(),
+            "fixture: the home must not exist"
+        );
+        let result = validate_approve_path_in(
+            real.to_str().unwrap(),
+            scratch.path(),
+            std::slice::from_ref(&missing_home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "{real:?} contains the home behind the link and must be refused, got: {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approve_sees_a_missing_directory_behind_a_symlink_that_contains_the_home() {
+        // `link/newdir` does not exist and is spelled through the link; the home is below the REAL
+        // spelling of it. The approved directory is only known to contain the home once its
+        // existing ancestor is resolved.
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let home = std::fs::canonicalize(&real).unwrap().join("newdir/home");
+        let result = validate_approve_path_in(
+            link.join("newdir").to_str().unwrap(),
+            scratch.path(),
+            std::slice::from_ref(&home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "a missing directory that contains the home must be refused, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn approve_still_refuses_a_deny_listed_directory_under_an_injected_home() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        let result = validate_approve_path_in(
+            home.join(".ssh").to_str().unwrap(),
+            &base,
+            std::slice::from_ref(&home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("protected location")),
+            "the deny list must hold for an injected home, got: {result:?}"
+        );
+    }
+
+    // ── review follow-up: `..` through a directory that does not exist yet, files as roots ───────
+    //
+    // `approve_write("zz/../../..")` was accepted while `zz` did not exist: `best_effort_canonicalize`
+    // keeps a literal `..` when a component is missing, and `too_broad` compares components, so the
+    // spelling never looked like an ancestor of the home. The stored session root was re-resolved
+    // on every call, so once `zz` existed it collapsed to the home itself
+    // (`docs/issues/2026-10-17-approve-write-accepts-an-unresolved-dotdot-that-collapses-onto-the-home.md`).
+
+    #[test]
+    fn approve_refuses_an_unresolved_dotdot() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/home");
+        std::fs::create_dir_all(&home).unwrap();
+        // `base/zz` does not exist, so the literal spelling is not an ancestor of the home; with
+        // `zz` created it is `base/a`, which contains it.
+        let spelled = base.join("zz/../a");
+        let result = validate_approve_path_in(spelled.to_str().unwrap(), &base, &[home]);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("'..'")),
+            "an unresolved `..` must be refused by name, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn approve_refuses_an_existing_file() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".bashrc"), "x").unwrap();
+        let result = validate_approve_path_in(
+            home.join(".bashrc").to_str().unwrap(),
+            &base,
+            std::slice::from_ref(&home),
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("not a directory")),
+            "a file is not a directory to approve, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn a_session_root_spelled_with_dotdot_adds_no_root() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(base.join("zz")).unwrap(); // the `..` now collapses onto `base/a`
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let target = home.join(".bashrc");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[base.join("zz/../a")],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a root that is only a home once its `..` collapses must not admit it, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_session_root_spelled_with_dotdot_adds_no_root_even_when_it_is_narrow() {
+        // Approval refuses a `..`, so a stored root carrying one did not come from approval. It is
+        // skipped whatever it collapses to: a stricter rule than "skip it only if it is broad", and
+        // one that cannot widen anything.
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        std::fs::create_dir_all(base.join("zz")).unwrap();
+        std::fs::create_dir_all(base.join("ok")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), None, None);
+        let target = base.join("ok/x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[base.join("zz/../ok")],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a root spelled with `..` must be skipped even when it is narrow, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_root_that_became_a_link_to_the_home_adds_no_root() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        // Approved while `lnk` was an ordinary (or missing) directory; later it points at the home.
+        std::os::unix::fs::symlink(&home, base.join("lnk")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let target = home.join(".bashrc");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[base.join("lnk")],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a session root that now resolves onto the home must not admit it, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_session_root_never_admits_a_file_that_is_the_root_itself() {
+        // `approve_write(~/.newrc)` takes a directory that does not exist yet; creating a FILE of that
+        // name is not what was approved, and `~/.newrc` is a file directly in the home.
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let root = home.join(".newrc");
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let itself = classify_write_path_in(
+            root.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&root),
+            &env,
+        );
+        assert!(
+            matches!(&itself, WritePathDecision::OutsideRoot { .. }),
+            "the root itself is not a file inside it, got: {itself:?}"
+        );
+        let below = root.join("x.txt");
+        let inside = classify_write_path_in(
+            below.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&root),
+            &env,
+        );
+        assert!(
+            matches!(&inside, WritePathDecision::Allowed(_)),
+            "a file inside the approved directory stays writable, got: {inside:?}"
+        );
+    }
+
+    #[test]
+    fn an_absolute_extra_write_root_with_dotdot_admits_nothing() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        std::fs::create_dir_all(base.join("work")).unwrap();
+        let project = tempdir().unwrap();
+        // `<base>/work/..` is `<base>`: the spelling hides how wide the root is.
+        let spelled = base.join("work/..");
+        let target = base.join("elsewhere.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &extra_roots_config(&[spelled.to_str().unwrap()]),
+            &[],
+            &env_of(&base.join("no-temp"), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "an extra root spelled with `..` must be skipped, got: {decision:?}"
+        );
     }
 
     #[test]
@@ -6355,6 +6945,7 @@ EOF"#;
     // ── classify_write_path tests ──────────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn classify_in_project_is_allowed() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -6596,11 +7187,18 @@ EOF"#;
 
     // ── injected home and cwd: deny list, roots that do not exist yet, broad roots ─────────────
 
-    /// A fully injected environment: nothing is read from the process.
+    /// A fully injected environment: nothing is read from the process. `home` is the single
+    /// protected home of the common case; `env_with_homes` injects several.
     fn env_of(temp_dir: &Path, home: Option<&Path>, cwd: Option<&Path>) -> WriteEnv {
+        let homes: Vec<&Path> = home.into_iter().collect();
+        env_with_homes(temp_dir, &homes, cwd)
+    }
+
+    /// `env_of` with a list of protected homes (`$HOME` resolved, the account's, ...).
+    fn env_with_homes(temp_dir: &Path, homes: &[&Path], cwd: Option<&Path>) -> WriteEnv {
         WriteEnv {
             temp_dir: temp_dir.to_path_buf(),
-            home: home.map(Path::to_path_buf),
+            homes: homes.iter().map(|h| h.to_path_buf()).collect(),
             cwd: cwd.map(Path::to_path_buf),
         }
     }
@@ -7079,8 +7677,631 @@ EOF"#;
             Some(std::fs::canonicalize(dir.path()).unwrap())
         );
     }
+    // ── a TMPDIR that is relative, empty or spelled with `..` is not a write root ────────────────
+    //
+    // `$TMPDIR` comes straight from the environment. A relative value was canonicalized against
+    // the process cwd (so the "temp root" was wherever the server started), and a `..` spelling was
+    // collapsed by `fs::canonicalize` to a directory the operator never named (`F5`, `F1-..` in
+    // `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`). Both used to be admitted.
+    //
+    // NOT closed, by design: a `$TMPDIR` that is, or sits under, a SYMLINK is followed to wherever
+    // it really is (`TMPDIR=link -> /etc` admits `/etc`). It cannot be told apart from macOS's own
+    // `/var -> /private/var`, and whoever sets `$TMPDIR` can already set it to that directory
+    // literally. See the same issue file.
 
     #[test]
+    fn a_relative_temp_dir_is_not_a_write_root() {
+        assert_eq!(
+            canonical_temp_write_root(Path::new(".")),
+            None,
+            "`TMPDIR=.` must not make the process cwd a write root"
+        );
+    }
+
+    #[test]
+    fn a_temp_dir_spelled_with_dotdot_is_not_a_write_root() {
+        let scratch = tempdir().unwrap();
+        std::fs::create_dir(scratch.path().join("real")).unwrap();
+        std::fs::create_dir(scratch.path().join("sibling")).unwrap();
+        let spelled = scratch.path().join("real/../sibling");
+        assert!(
+            std::fs::canonicalize(&spelled).is_ok(),
+            "fixture: {spelled:?} must resolve, or this proves nothing about the `..` rule"
+        );
+        assert_eq!(canonical_temp_write_root(&spelled), None);
+    }
+
+    /// Refused whichever rule fires: it is not absolute, and `fs::canonicalize("")` fails. It was
+    /// refused before the absolute/`..` rule existed, and stays so if the rule is reordered or
+    /// removed: `Path::starts_with("")` is true for every path, so an empty root would admit the
+    /// whole filesystem.
+    #[test]
+    fn an_empty_temp_dir_is_not_a_write_root() {
+        assert_eq!(canonical_temp_write_root(Path::new("")), None);
+    }
+
+    #[test]
+    fn a_dotdot_temp_dir_admits_no_write_through_classification() {
+        let scratch = tempdir().unwrap();
+        std::fs::create_dir(scratch.path().join("real")).unwrap();
+        std::fs::create_dir(scratch.path().join("sibling")).unwrap();
+        let spelled = scratch.path().join("real/../sibling");
+        let project = tempdir().unwrap();
+        let target = scratch.path().join("sibling/x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&spelled, None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a `..` TMPDIR must add no root, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_relative_temp_dir_admits_no_write_through_classification() {
+        // Only the temp dir is injected as ".": it would resolve against the process cwd. The
+        // target is built from that same cwd, so the old behaviour admitted it.
+        let cwd = std::env::current_dir().unwrap();
+        let target = cwd.join("ce_relative_tmpdir_probe.txt");
+        let project = tempdir().unwrap();
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(Path::new("."), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "`TMPDIR=.` must add no root, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_temp_dir_admits_no_write_through_classification() {
+        let scratch = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let target = scratch.path().join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(Path::new(""), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "an empty TMPDIR must add no root, got: {decision:?}"
+        );
+    }
+
+    // ── `$HOME` unset, empty or relative: the account's home must still be protected ─────────────
+    //
+    // `validate_read_path`, `validate_approve_path` and `classify_write_path` read `$HOME` from the
+    // process, and the process cannot be mutated here, so each case runs in a CHILD with its own
+    // environment (`platform::test_child`). Before `resolved_home_dir`, the three cases below
+    // returned `Ok` for `~/.ssh/id_probe` and for the home itself (F2a-F2d in
+    // `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`).
+
+    /// The body run inside the child: with the child's unusable `$HOME`, the ACCOUNT's home still
+    /// gets its deny-list entries and its breadth guard. A host whose uid has no passwd entry has
+    /// no account home to protect, and the body says nothing there.
+    #[cfg(unix)]
+    fn assert_the_accounts_home_is_protected() {
+        let Some(account) = crate::platform::account_home_dir() else {
+            eprintln!(
+                "SKIPPED the real-passwd check: this uid has no usable account home on this host; \
+                 the injected-account tests (`the_ambient_homes_include_the_injected_account_home`, \
+                 ...) cover the same guards"
+            );
+            return;
+        };
+        let project = tempdir().unwrap();
+        let config = default_config();
+        let key = account.join(".ssh/id_probe");
+        let read = validate_read_path(key.to_str().unwrap(), Some(project.path()), &config);
+        assert!(
+            read.as_ref()
+                .is_err_and(|e| e.to_string().contains("protected location")),
+            "reading {key:?} must be refused, got: {read:?}"
+        );
+        let approve = validate_approve_path(account.to_str().unwrap(), project.path(), &config);
+        assert!(
+            approve
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("too broad")),
+            "approving {account:?} must be refused as too broad, got: {approve:?}"
+        );
+        let target = account.join(".ssh/authorized_keys");
+        let decision = classify_write_path(target.to_str().unwrap(), project.path(), &config, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+            "writing {target:?} must be a deny-list refusal, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unset_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "an_unset_home_still_protects_the_accounts_home",
+            &[("HOME", None)],
+            assert_the_accounts_home_is_protected,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "an_empty_home_still_protects_the_accounts_home",
+            &[("HOME", Some(""))],
+            assert_the_accounts_home_is_protected,
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "a_relative_home_still_protects_the_accounts_home",
+            &[("HOME", Some("not/absolute"))],
+            assert_the_accounts_home_is_protected,
+        );
+    }
+
+    /// A `$HOME` that names some OTHER directory (a sandbox, a CI job, a typo) must not leave the
+    /// account's real home unprotected: both are protected homes (F2e, F2f). The wrong home is
+    /// protected too: `~/.ssh` under it is refused, and it cannot be approved as a whole.
+    #[cfg(unix)]
+    #[test]
+    fn a_wrong_home_still_protects_the_accounts_home() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "a_wrong_home_still_protects_the_accounts_home",
+            &[("HOME", Some("/nonexistent/wrong-home"))],
+            || {
+                let project = tempdir().unwrap();
+                let config = default_config();
+                // The wrong home's own deny entries and breadth guard still apply.
+                let read = validate_read_path(
+                    "/nonexistent/wrong-home/.ssh/id_probe",
+                    Some(project.path()),
+                    &config,
+                );
+                assert!(
+                    read.is_err(),
+                    "wrong home's ~/.ssh must be refused: {read:?}"
+                );
+                let approve =
+                    validate_approve_path("/nonexistent/wrong-home", project.path(), &config);
+                assert!(
+                    approve
+                        .as_ref()
+                        .is_err_and(|e| e.to_string().contains("too broad")),
+                    "the wrong home must not be approvable as a whole: {approve:?}"
+                );
+                // And the account's real home is protected as well.
+                assert_the_accounts_home_is_protected();
+            },
+        );
+    }
+
+    // ── the account home, injected: guarded on EVERY host ───────────────────────────────────────
+    //
+    // `assert_the_accounts_home_is_protected` and the child tests above read the real passwd entry and
+    // do nothing on a host whose uid has none (a container with an arbitrary uid), so a guard that
+    // dropped the account home was killed only on hosts that have one. These inject the account
+    // lookup instead (`protected_homes_from`, `WriteEnv::ambient_with`, `validate_read_path_in`).
+
+    fn injected_account(base: &Path) -> PathBuf {
+        let acct = base.join("acct-home");
+        std::fs::create_dir_all(acct.join(".ssh")).unwrap();
+        acct
+    }
+
+    #[test]
+    fn the_ambient_homes_include_the_injected_account_home() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let acct = injected_account(&base);
+        assert!(
+            protected_homes_from(|| Some(acct.clone())).contains(&acct),
+            "the account home must be one of the protected homes"
+        );
+        assert!(
+            WriteEnv::ambient_with(|| Some(acct.clone()))
+                .homes
+                .contains(&acct),
+            "the ambient write environment must carry the account home"
+        );
+        assert!(
+            !protected_homes_from(|| None).contains(&acct),
+            "control: with no account the injected home is not there"
+        );
+    }
+
+    #[test]
+    fn a_read_of_the_injected_account_homes_ssh_is_refused() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let acct = injected_account(&base);
+        let project = tempdir().unwrap();
+        let key = acct.join(".ssh/id_probe");
+        let with = validate_read_path_in(
+            key.to_str().unwrap(),
+            Some(project.path()),
+            &default_config(),
+            &protected_homes_from(|| Some(acct.clone())),
+        );
+        assert!(
+            with.as_ref()
+                .is_err_and(|e| e.to_string().contains("protected location")),
+            "reading {key:?} must be refused, got: {with:?}"
+        );
+        let without = validate_read_path_in(
+            key.to_str().unwrap(),
+            Some(project.path()),
+            &default_config(),
+            &protected_homes_from(|| None),
+        );
+        // Control: without the account lookup (and with this process's real `HOME` elsewhere) nothing
+        // protects the injected home, which is exactly what the account lookup exists to prevent.
+        assert!(without.is_ok(), "control: {without:?}");
+    }
+
+    #[test]
+    fn a_write_to_the_injected_account_homes_ssh_is_denied_through_the_ambient_wiring() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let acct = injected_account(&base);
+        let project = tempdir().unwrap();
+        let target = acct.join(".ssh/authorized_keys");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&acct),
+            &WriteEnv::ambient_with(|| Some(acct.clone())),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+            "{target:?} must be a deny-list refusal, got: {decision:?}"
+        );
+    }
+
+    // ── every protected home, not just `$HOME` ──────────────────────────────────────────────────
+
+    /// `base` canonicalized (a temp dir may itself sit behind a symlink), for expected values.
+    fn canonical_base(scratch: &Path) -> PathBuf {
+        std::fs::canonicalize(scratch).unwrap()
+    }
+
+    #[test]
+    fn protected_homes_are_the_resolved_home_and_the_accounts_deduplicated() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let (a, b) = (base.join("a"), base.join("b"));
+        assert_eq!(
+            protected_homes_of(Some(a.clone()), Some(b.clone())),
+            vec![a.clone(), b.clone()]
+        );
+        assert_eq!(
+            protected_homes_of(None, Some(b.clone())),
+            vec![b.clone()],
+            "no usable $HOME: the account alone"
+        );
+        assert_eq!(
+            protected_homes_of(Some(a.clone()), Some(a.clone())),
+            vec![a.clone()],
+            "one directory twice is one home"
+        );
+        assert_eq!(protected_homes_of(Some(a.clone()), None), vec![a]);
+        assert!(protected_homes_of(None, None).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn two_spellings_of_one_home_are_both_kept_but_collapse_to_one_canonical_home() {
+        let scratch = tempdir().unwrap();
+        let (real, link) = real_and_link(scratch.path());
+        let canonical = std::fs::canonicalize(&real).unwrap();
+        // The deny list needs both spellings (see `protected_homes_of`) ...
+        assert_eq!(
+            protected_homes_of(Some(link.clone()), Some(real)),
+            vec![link.clone(), canonical.clone()],
+            "the spelling as given, then the canonical one, each once"
+        );
+        // ... and every breadth check sees ONE home.
+        let spellings = protected_homes_of(Some(link), None);
+        assert_eq!(canonical_homes(&spellings), vec![canonical]);
+    }
+
+    /// `HOME` is a symlink to the real home and the deny entry is MISSING (`~/.aws` does not
+    /// exist): the target `<link>/.aws/credentials` cannot be resolved, so it stays in the spelling
+    /// the caller wrote, and only a deny entry expanded against that same spelling matches it.
+    /// Canonicalizing the homes alone (as `protected_homes_of` first did) dropped that spelling, so
+    /// the read side refused LESS than before (probe C2e of the review).
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_deny_entry_is_matched_under_the_symlink_spelling_of_the_home() {
+        let scratch = tempdir().unwrap();
+        let (_real, link) = real_and_link(scratch.path());
+        let homes = protected_homes_of(Some(link.clone()), None);
+        let denied = denied_paths_with(&homes, best_effort_canonicalize);
+        let target = link.join(".aws/credentials");
+        assert!(!target.exists(), "fixture: the entry must be missing");
+        assert!(
+            is_denied(&best_effort_canonicalize(&target), &denied),
+            "{target:?} must be denied under the spelling the home was given in"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_through_a_symlinked_home_of_a_missing_deny_entry_is_refused() {
+        // The same through the real `validate_read_path`, with the process `HOME` a symlink.
+        let scratch = tempdir().unwrap();
+        let base = std::fs::canonicalize(scratch.path()).unwrap();
+        let (real, link) = real_and_link(&base);
+        std::fs::create_dir_all(&real).unwrap();
+        crate::platform::test_child::run(
+            module_path!(),
+            "a_read_through_a_symlinked_home_of_a_missing_deny_entry_is_refused",
+            &[("HOME", Some(link.to_str().unwrap()))],
+            || {
+                let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+                let project = tempdir().unwrap();
+                let target = home.join(".aws/credentials");
+                let read = validate_read_path(
+                    target.to_str().unwrap(),
+                    Some(project.path()),
+                    &default_config(),
+                );
+                assert!(
+                    read.as_ref()
+                        .is_err_and(|e| e.to_string().contains("protected location")),
+                    "{target:?} must be refused, got: {read:?}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn tilde_patterns_expand_against_every_home() {
+        let homes = [PathBuf::from("/h/a"), PathBuf::from("/h/b")];
+        assert_eq!(
+            expand_home_all("~/.ssh", &homes),
+            vec![PathBuf::from("/h/a/.ssh"), PathBuf::from("/h/b/.ssh")]
+        );
+        assert_eq!(
+            expand_home_all("~", &homes),
+            vec![PathBuf::from("/h/a"), PathBuf::from("/h/b")]
+        );
+        assert_eq!(
+            expand_home_all("/etc/shadow", &homes),
+            vec![PathBuf::from("/etc/shadow")],
+            "a pattern with no `~` is not multiplied"
+        );
+        assert!(expand_home_all("~/.ssh", &[]).is_empty());
+    }
+
+    /// `[nowhere, real_home]`: `$HOME` names a directory that is not the account's home. The
+    /// deny list must cover BOTH, under every root (here a session root over each home).
+    #[test]
+    fn the_write_deny_list_covers_every_protected_home() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let nowhere = base.join("nowhere");
+        let real_home = base.join("real-home");
+        std::fs::create_dir_all(real_home.join(".ssh")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_with_homes(&base.join("no-temp"), &[&nowhere, &real_home], None);
+        for home in [&nowhere, &real_home] {
+            for rel in [".ssh/authorized_keys", ".aws/credentials"] {
+                let target = home.join(rel);
+                let decision = classify_write_path_in(
+                    target.to_str().unwrap(),
+                    project.path(),
+                    &default_config(),
+                    std::slice::from_ref(home),
+                    &env,
+                );
+                assert!(
+                    matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+                    "{target:?} must be a deny-list refusal, got: {decision:?}"
+                );
+            }
+        }
+    }
+
+    /// The classifier holds each deny entry in two forms (`classify_write_path_in`), and each form
+    /// must be expanded over EVERY home: a symlinked directory entry is matched by the fully
+    /// resolved form only, a symlinked file entry by the leaf-as-written form only. The first home
+    /// is `nowhere`, so a form built from the first home alone matches neither.
+    #[cfg(unix)]
+    #[test]
+    fn the_write_deny_list_covers_a_symlinked_entry_of_every_protected_home() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let nowhere = base.join("nowhere");
+        let real_home = base.join("real-home");
+        std::fs::create_dir_all(real_home.join(".kube")).unwrap();
+        // `~/.ssh -> <base>/data-ssh` (a symlinked DIRECTORY entry) ...
+        std::fs::create_dir(base.join("data-ssh")).unwrap();
+        std::os::unix::fs::symlink(base.join("data-ssh"), real_home.join(".ssh")).unwrap();
+        // ... and `~/.kube/config -> config-prod` (a symlinked FILE entry).
+        std::fs::write(real_home.join(".kube/config-prod"), "x").unwrap();
+        std::os::unix::fs::symlink("config-prod", real_home.join(".kube/config")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_with_homes(&base.join("no-temp"), &[&nowhere, &real_home], None);
+        for (target, root) in [
+            (real_home.join(".ssh/authorized_keys"), real_home.clone()),
+            (real_home.join(".kube/config"), real_home.join(".kube")),
+        ] {
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &default_config(),
+                &[root],
+                &env,
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+                "{target:?} must be a deny-list refusal, got: {decision:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_temp_root_admits_nothing_inside_any_protected_home() {
+        // The temp dir is above the SECOND home only: a guard that read the first home alone would
+        // see no home under the temp root and admit `real_home/.bashrc`.
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let nowhere = base.join("elsewhere/nowhere");
+        let temp = base.join("temp");
+        let real_home = temp.join("real-home");
+        std::fs::create_dir_all(&real_home).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_with_homes(&temp, &[&nowhere, &real_home], None);
+        let inside = real_home.join(".bashrc");
+        let decision = classify_write_path_in(
+            inside.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "the temp root must not admit {inside:?}, got: {decision:?}"
+        );
+        let beside = temp.join("scratch.txt");
+        let decision = classify_write_path_in(
+            beside.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "scratch beside the home stays writable, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_cwd_above_any_protected_home_adds_no_root() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let nowhere = base.join("elsewhere/nowhere");
+        let real_home = base.join("a/b/real-home");
+        std::fs::create_dir_all(&real_home).unwrap();
+        std::fs::create_dir_all(base.join("a/other")).unwrap();
+        let cwd = base.join("a");
+        let project = tempdir().unwrap();
+        let env = env_with_homes(&base.join("no-temp"), &[&nowhere, &real_home], Some(&cwd));
+        let target = cwd.join("other/x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a cwd above the second home must not become a write root, got: {decision:?}"
+        );
+    }
+
+    // ── `extra_write_roots` entries that are not absolute paths ─────────────────────────────────
+    //
+    // An empty entry resolved to the empty path, which `Path::starts_with` treats as a prefix of
+    // EVERY path (F9a: every file on the filesystem outside the deny list was admitted), and `.`
+    // resolved against the server's cwd. The config refuses both when it loads
+    // (`validate_list_limits`); the classifier ignores them as well, because a config can change
+    // after it was validated.
+
+    fn extra_roots_config(roots: &[&str]) -> PathSecurityConfig {
+        PathSecurityConfig {
+            extra_write_roots: roots.iter().map(PathBuf::from).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_empty_extra_write_root_admits_nothing() {
+        let scratch = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let target = scratch.path().join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &extra_roots_config(&[""]),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "an empty extra root must not become a root, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn a_relative_extra_write_root_admits_nothing() {
+        // `.` is resolved against the process cwd; the target is built from that same cwd.
+        let cwd = std::env::current_dir().unwrap();
+        let target = cwd.join("ce_relative_extra_root_probe.txt");
+        let project = tempdir().unwrap();
+        for entry in [".", "sub/dir", "~/elsewhere"] {
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &extra_roots_config(&[entry]),
+                &[],
+                &env_of(Path::new("/nonexistent-temp"), None, None),
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+                "the relative extra root {entry:?} must not become a root, got: {decision:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_absolute_extra_write_root_beside_an_unusable_one_still_works() {
+        let scratch = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let root = scratch.path().join("shared");
+        std::fs::create_dir(&root).unwrap();
+        let target = root.join("x.txt");
+        let root_str = root.to_str().unwrap();
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &extra_roots_config(&["", ".", root_str]),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "the absolute entry must keep working, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
     fn classify_outside_root_is_outsideroot() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -7090,6 +8311,125 @@ EOF"#;
         assert!(
             matches!(decision, WritePathDecision::OutsideRoot { .. }),
             "got: {decision:?}"
+        );
+    }
+
+    /// A file directly in a directory `approve_write` refuses (`/`, a home, a directory above a
+    /// home) used to be answered with "Call approve_write(path=<that directory>) first", a call
+    /// certain to be refused as too broad: a dead end (`F8b`), found for hosts whose `$HOME` is
+    /// their temp dir. The denial must not name that call, and must say what is true instead.
+    #[test]
+    #[serial_test::serial]
+    fn a_denial_does_not_name_an_approve_write_call_that_is_certain_to_be_refused() {
+        let tmp = tempdir().unwrap();
+        let msg = validate_write_path("/ce_probe_x.rs", tmp.path(), &default_config(), &[])
+            .expect_err("a path outside the project root must be denied")
+            .to_string();
+
+        assert!(
+            !msg.contains("approve_write(path="),
+            "that call is refused for `/`: {msg}"
+        );
+        assert!(
+            msg.contains("filesystem root") && msg.contains("subdirectory"),
+            "say why, and what can work: {msg}"
+        );
+    }
+
+    /// What is true for each refused case, with injected homes: a file directly in the filesystem
+    /// root, in a protected home, or in a directory above one cannot be approved at all, and the
+    /// denial must say so instead of naming `approve_write` or telling the reader to "write into a
+    /// subdirectory of it" (wrong for `~/.bashrc`, which IS the file). A file in a subdirectory
+    /// that approve_write accepts still gets the callable `approve_write(path=...)`.
+    #[test]
+    fn a_denial_says_what_is_true_for_each_directory_approve_write_refuses() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let home = base.join("a/b/home");
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_of(&base.join("no-temp"), Some(&home), None);
+        let denial = |target: &Path| {
+            validate_write_path_in(
+                target.to_str().unwrap(),
+                project.path(),
+                &default_config(),
+                &[],
+                &env,
+            )
+            .expect_err("outside every root, so denied")
+            .to_string()
+        };
+
+        // A file directly in the filesystem root.
+        let msg = denial(Path::new("/ce_probe_x.rs"));
+        assert!(
+            !msg.contains("approve_write(path="),
+            "names a refused call: {msg}"
+        );
+        assert!(msg.contains("filesystem root"), "{msg}");
+        assert!(msg.contains("only a file inside a subdirectory"), "{msg}");
+
+        // A file directly in the home: `~/.bashrc`.
+        let msg = denial(&home.join(".bashrc"));
+        assert!(
+            !msg.contains("approve_write(path="),
+            "names a refused call: {msg}"
+        );
+        assert!(msg.contains("directly in the home directory"), "{msg}");
+        assert!(
+            !msg.contains("Write into a subdirectory of it"),
+            "`~/.bashrc` is the file itself; that advice is wrong for it: {msg}"
+        );
+
+        // A file directly in a directory above the home.
+        let above = base.join("a");
+        let msg = denial(&above.join("x.txt"));
+        assert!(
+            !msg.contains("approve_write(path="),
+            "names a refused call: {msg}"
+        );
+        assert!(msg.contains("which contains the home directory"), "{msg}");
+
+        // A file in a subdirectory of the home: approvable, so the callable form is named.
+        let target = home.join("projects/x.txt");
+        let msg = denial(&target);
+        assert!(
+            msg.contains(&format!(
+                "approve_write(path={})",
+                crate::util::text::json_quote(&home.join("projects").display().to_string())
+            )),
+            "an approvable directory must still be named: {msg}"
+        );
+    }
+
+    /// With two homes, one of them the very directory the file is in and the other somewhere below
+    /// it (`$HOME` set wrong, F2e), the denial names the home the file is directly in.
+    #[test]
+    fn a_denial_names_the_home_the_file_is_directly_in_when_there_are_two() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let below = base.join("real-home/deeper/wrong-home");
+        let real_home = base.join("real-home");
+        std::fs::create_dir_all(&below).unwrap();
+        let project = tempdir().unwrap();
+        let env = env_with_homes(&base.join("no-temp"), &[&below, &real_home], None);
+        let target = real_home.join(".bashrc");
+        let msg = validate_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env,
+        )
+        .expect_err("outside every root, so denied")
+        .to_string();
+        assert!(
+            msg.contains(&format!(
+                "directly in the home directory '{}'",
+                real_home.display()
+            )),
+            "{msg}"
         );
     }
 
@@ -7105,6 +8445,7 @@ EOF"#;
     ///
     /// See `docs/issues/archive/2026-08-15-write-scope-denial-does-not-name-approve-write.md`.
     #[test]
+    #[serial_test::serial]
     fn write_denial_names_an_approve_write_call_that_can_be_run_verbatim() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -7144,6 +8485,7 @@ EOF"#;
     /// the test builds no file.
     #[cfg(unix)]
     #[test]
+    #[serial_test::serial]
     fn the_approve_write_call_of_a_denial_reads_back_to_the_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -7186,6 +8528,7 @@ EOF"#;
     /// and the sibling below pins the difference instead of leaving it implicit.
     #[cfg(not(windows))]
     #[test]
+    #[serial_test::serial]
     fn hard_denials_say_that_approve_write_will_not_help() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -7227,6 +8570,7 @@ EOF"#;
     /// this test fails, and that is the signal to re-unify the two rather than a mystery.
     #[cfg(windows)]
     #[test]
+    #[serial_test::serial]
     fn windows_resolves_dotdot_lexically_so_the_unresolved_arm_is_unreachable() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -7239,6 +8583,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn classify_empty_is_denied() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();
@@ -7250,6 +8595,7 @@ EOF"#;
     }
 
     #[test]
+    #[serial_test::serial]
     fn validate_write_path_still_bails_outside_with_unchanged_message() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = PathSecurityConfig::default();

@@ -3779,7 +3779,34 @@ mod tests {
         assert!(agent.is_home().await);
     }
 
+    /// Changes the process cwd for the life of the guard and restores it on drop, INCLUDING when the
+    /// test panics: the cwd is process-global, so a panic that skipped the restore would leave every
+    /// later test in the binary running somewhere else.
+    struct CwdGuard {
+        original: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn change_to(dir: &std::path::Path) -> Self {
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir).unwrap();
+            Self { original }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
+    /// `#[serial]`: this test CHANGES the process cwd, which every ambient-cwd reader sees. It
+    /// serializes only against the tests that opt in (`util::path_security`'s ambient-classification
+    /// tests do; tests elsewhere that reach `WriteEnv::ambient()` through a tool do not), which is
+    /// the documented limit of `#[serial]` (`docs/conventions/test-env-isolation.md`). The cwd
+    /// itself cannot be injected: resolving a relative `--project` against it is what is tested.
     #[tokio::test]
+    #[serial_test::serial]
     async fn new_with_relative_path_canonicalizes_home_root() {
         let dir = tempdir().unwrap();
         let canonical = dir.path().canonicalize().unwrap();
@@ -3791,11 +3818,11 @@ mod tests {
         let parent = canonical.parent().unwrap();
         let rel = canonical.file_name().unwrap();
 
-        // Save and restore CWD so the test doesn't affect others.
-        let orig_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(parent).unwrap();
-        let agent = Agent::new(Some(PathBuf::from(rel))).await.unwrap();
-        std::env::set_current_dir(&orig_cwd).unwrap();
+        // The guard restores the cwd when it drops, panic or not.
+        let cwd_guard = CwdGuard::change_to(parent);
+        let agent = Agent::new(Some(PathBuf::from(rel))).await;
+        drop(cwd_guard);
+        let agent = agent.unwrap();
 
         // home_root must be the canonical absolute path, not the relative input.
         let home = agent.home_root().await.unwrap();
@@ -3812,6 +3839,42 @@ mod tests {
         assert!(
             agent.is_home().await,
             "is_home must be true after re-activating the same directory"
+        );
+    }
+
+    /// The guard's whole purpose: a panic while the cwd is changed must not leave it changed.
+    ///
+    /// Runs in a CHILD process (`platform::test_child`): the test changes the process cwd, and in
+    /// the child the shared test binary never sees that change. (Unix only, like the helper.)
+    #[cfg(unix)]
+    #[test]
+    fn the_cwd_guard_restores_the_cwd_when_the_guarded_code_panics() {
+        crate::platform::test_child::run(
+            module_path!(),
+            "the_cwd_guard_restores_the_cwd_when_the_guarded_code_panics",
+            &[],
+            || {
+                let original = std::env::current_dir().unwrap();
+                let elsewhere = tempdir().unwrap();
+                let elsewhere = elsewhere.path().canonicalize().unwrap();
+
+                let outcome = std::panic::catch_unwind(|| {
+                    let _guard = CwdGuard::change_to(&elsewhere);
+                    assert_eq!(
+                        std::env::current_dir().unwrap(),
+                        elsewhere,
+                        "fixture: moved"
+                    );
+                    panic!("the guarded code fails");
+                });
+
+                assert!(outcome.is_err(), "fixture: the closure must have panicked");
+                assert_eq!(
+                    std::env::current_dir().unwrap(),
+                    original,
+                    "the guard must put the cwd back during the unwind"
+                );
+            },
         );
     }
 
