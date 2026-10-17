@@ -160,11 +160,21 @@ async fn resolve_via_ts(
     language_id: &str,
     direction: Direction,
 ) -> anyhow::Result<Vec<Edge>> {
+    // `language_id` is the LSP languageId (`typescriptreact`, ...), right for the LSP calls
+    // below. Every tree-sitter helper keys on the AST vocabulary (`tsx`, ...): handed the
+    // languageId, `call_kinds_for` is empty and `get_ts_language` finds no grammar, so a
+    // React file's fallback silently produced nothing (BUG 2026-10-17
+    // call-graph-phase-b-compares-the-lsp-language-id-to-the-ast-language).
+    let ast_lang = crate::lsp::servers::ast_language_for_lsp_id(language_id);
     match direction {
         Direction::Callees => {
             // LIMIT-001 fix: walk the AST descendants of the enclosing
-            // function and collect every direct call expression.
-            resolve_callees_via_ts(sym_name, sym_path, sym_line, sym_col, language_id)
+            // function and collect every direct call expression. Parsed with the grammar of
+            // the symbol's OWN file (the seed's id only decides when the path says nothing):
+            // Phase B places a `.tsx` seed's callee in a `.ts` file and the reverse, and the
+            // wrong grammar silently yields a partial edge set.
+            let node_lang = crate::ast::detect_language(sym_path).unwrap_or(ast_lang);
+            resolve_callees_via_ts(sym_name, sym_path, sym_line, sym_col, node_lang)
         }
         Direction::Callers => {
             let refs = client
@@ -182,17 +192,21 @@ async fn resolve_via_ts(
                     Err(_) => continue,
                 };
 
-                let Some(tree) = parse_ts_tree(&src, language_id) else {
+                // The reference's own file decides its grammar (a `.ts` file referencing a
+                // `.tsx` symbol parses as TypeScript); the seed's language is the fallback.
+                let file_lang = crate::ast::detect_language(&ref_path).unwrap_or(ast_lang);
+
+                let Some(tree) = parse_ts_tree(&src, file_lang) else {
                     continue;
                 };
 
                 let byte = position_to_byte(&src, loc.range.start.line, loc.range.start.character);
 
-                if !super::ts_classifier::position_is_call(&tree, byte, language_id) {
+                if !super::ts_classifier::position_is_call(&tree, byte, file_lang) {
                     continue;
                 }
 
-                let caller = enclosing_function_name(&tree, &src, byte, language_id)
+                let caller = enclosing_function_name(&tree, &src, byte, file_lang)
                     .unwrap_or_else(|| "<anonymous>".to_owned());
 
                 // Skip self-edges: when the LSP can't model a symbol (e.g.
@@ -929,6 +943,177 @@ mod tests {
         assert!(callees.contains(&"c"), "missing c in {:?}", callees);
         assert!(callees.contains(&"D"), "missing D in {:?}", callees);
     }
+    /// `CachedResolver::lang` is the LSP languageId (`get_lsp_client`'s second value), so
+    /// for a React file the resolver is handed `"typescriptreact"` / `"javascriptreact"`.
+    /// The tree-sitter fallbacks key on the AST vocabulary (`"tsx"` / `"jsx"`); fed the
+    /// languageId, `call_kinds_for` is empty and `direction=callees` answers
+    /// "requires LSP callHierarchy" for a file the fallback fully supports.
+    #[tokio::test]
+    async fn resolve_callees_via_ts_accepts_the_lsp_language_id_of_react_files() {
+        for (file, lsp_id, src) in [
+            (
+                "fixture.tsx",
+                "typescriptreact",
+                "function a() {\n    b();\n}\nfunction b() {}\n",
+            ),
+            (
+                "fixture.jsx",
+                "javascriptreact",
+                "function a() {\n    b();\n}\nfunction b() {}\n",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let fixture = dir.path().join(file);
+            std::fs::write(&fixture, src).unwrap();
+            let mock = MockLspClient::new();
+
+            let edges = resolve_one_hop(&mock, "a", &fixture, 0, 9, lsp_id, Direction::Callees)
+                .await
+                .unwrap_or_else(|e| panic!("{lsp_id}: callees fallback refused: {e}"));
+
+            let callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+            assert_eq!(callees, vec!["b"], "{lsp_id}: {edges:?}");
+        }
+    }
+
+    /// The callers fallback parses each reference's file with the same vocabulary.
+    #[tokio::test]
+    async fn resolve_callers_via_ts_accepts_the_lsp_language_id_of_react_files() {
+        let src = "function bar() { foo(1); }\nfunction foo(x: number) {}\n";
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("fixture.tsx");
+        std::fs::write(&fixture, src).unwrap();
+        let uri: lsp_types::Uri = url::Url::from_file_path(&fixture)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        // `foo(1)` inside `bar`: line 0, column 17.
+        let ref_loc = lsp_types::Location {
+            uri,
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 17,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 20,
+                },
+            },
+        };
+        let mock = MockLspClient::new();
+        mock.references_results
+            .lock()
+            .unwrap()
+            .insert(fixture.clone(), vec![ref_loc]);
+
+        let edges = resolve_one_hop(
+            &mock,
+            "foo",
+            &fixture,
+            1,
+            9,
+            "typescriptreact",
+            Direction::Callers,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(edges.len(), 1, "expected the call site in bar: {edges:?}");
+        assert_eq!(edges[0].caller_sym, "bar");
+    }
+    /// Phase B places a `.tsx` seed's callee in a `.ts` module and a `.ts` seed's callee in a
+    /// `.tsx` file, so the node being resolved is not in the seed's language. Parsed with the
+    /// seed's grammar, a `.ts` file's type assertion `<string>x` is a JSX tag and the call
+    /// after it is lost (reviewer PROBE_A: `Ok([])`), and a `.tsx` file's JSX parsed as
+    /// TypeScript loses the calls inside it (PROBE_B: `["format"]`, `track` missing). Both
+    /// came back as a quiet, partial edge set.
+    #[tokio::test]
+    async fn resolve_callees_via_ts_uses_the_grammar_of_the_symbols_own_file() {
+        for (file, seed_id, src, expected) in [
+            (
+                "util.ts",
+                "typescriptreact",
+                "export function outer() { const y = <string>x; return inner(y); }\nfunction inner(a: string) { return a; }\n",
+                vec!["inner"],
+            ),
+            (
+                "view.tsx",
+                "typescript",
+                "export function view() { return <div onClick={() => track()}>{format(1)}</div>; }\n",
+                vec!["format", "track"],
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let fixture = dir.path().join(file);
+            std::fs::write(&fixture, src).unwrap();
+            let name = if file == "util.ts" { "outer" } else { "view" };
+            let mock = MockLspClient::new();
+
+            let edges = resolve_one_hop(&mock, name, &fixture, 0, 16, seed_id, Direction::Callees)
+                .await
+                .unwrap_or_else(|e| panic!("{file} via {seed_id}: {e}"));
+
+            let mut callees: Vec<&str> = edges.iter().map(|e| e.callee_sym.as_str()).collect();
+            callees.sort_unstable();
+            assert_eq!(
+                callees, expected,
+                "{file} resolved with the seed's id {seed_id} lost calls: {edges:?}"
+            );
+        }
+    }
+
+    /// The callers fallback already parsed each reference with its own file's language; this
+    /// pins it. The reference sits in a `.ts` file after a type assertion, which the TSX
+    /// grammar (the seed's) cannot parse as TypeScript.
+    #[tokio::test]
+    async fn resolve_callers_via_ts_uses_the_grammar_of_the_references_own_file() {
+        let src = "function bar() { const y = <string>x; foo(y); }\nfunction foo(a: string) {}\n";
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = dir.path().join("a.ts");
+        std::fs::write(&fixture, src).unwrap();
+        let uri: lsp_types::Uri = url::Url::from_file_path(&fixture)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        // `foo(y)` inside `bar`: line 0, column 38.
+        let ref_loc = lsp_types::Location {
+            uri,
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 38,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 41,
+                },
+            },
+        };
+        let mock = MockLspClient::new();
+        mock.references_results
+            .lock()
+            .unwrap()
+            .insert(fixture.clone(), vec![ref_loc]);
+
+        let edges = resolve_one_hop(
+            &mock,
+            "foo",
+            &fixture,
+            1,
+            9,
+            "typescriptreact",
+            Direction::Callers,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(edges.len(), 1, "expected the call site in bar: {edges:?}");
+        assert_eq!(edges[0].caller_sym, "bar");
+    }
+
     #[tokio::test]
     async fn resolve_callees_via_ts_function_valued_consts() {
         // Regression (2026-06-04-call-graph-ts-arrow-const-callees): callees of

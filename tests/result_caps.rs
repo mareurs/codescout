@@ -2865,7 +2865,7 @@ fn ambiguity_message(id: &str, cited_test: &str, declarers: &[String]) -> String
 /// was `sources.iter().find_map(|src| extract_fn_body(src, &c.cited_test))` —
 /// silent first-match over `git ls-files src` order — and the namespace already
 /// holds a live collision: `heading_truncation_is_signaled` is declared THREE
-/// times (`src/librarian/preview/default.rs:57`, `plan.rs:168`, `spec.rs:76`),
+/// times (`src/librarian/preview/default.rs:57`, `plan.rs` (`tests` module), `spec.rs:76`),
 /// each driving a DIFFERENT cap past its bound. Citing it from the
 /// `preview.plan_headings` row would have bound to `default.rs:57` — the SIBLING
 /// row's test — and the gate would have gone green while certifying one cap

@@ -7,11 +7,15 @@ mod display;
 mod edit_code;
 mod list_overview;
 mod references;
+mod scan_budget;
 mod symbol_at;
 mod symbols;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod kotlin_lsp_tests;
 
 #[cfg(test)]
 mod route_path_tests;

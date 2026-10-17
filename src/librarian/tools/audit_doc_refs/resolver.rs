@@ -77,9 +77,13 @@ pub struct ResolveCtx<'a> {
     /// Basename → list of relative paths in the workspace. Used by
     /// `resolve_file_path` as a fallback when a bare basename (no `/`) doesn't
     /// literally exist at the repo root. Built once per audit run in
-    /// `mod.rs::call`. Empty disables the fallback (treat misses as
-    /// `Verdict::Missing` exactly as before).
+    /// `mod.rs::call`. Empty disables the fallback: a miss is `Verdict::Missing`, unless
+    /// `basename_index_truncated` is set, in which case a bare-basename miss is `Unknown`.
     pub basename_index: std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+    /// `true` when `basename_index` was built from a walk that hit its file cap, so
+    /// it is a prefix of the workspace. A basename absent from it is then "not
+    /// reached", and `try_basename_fallback` reports `Unknown`, never `Missing`.
+    pub basename_index_truncated: bool,
     /// Compiled `.gitignore` for the repo plus the index-derived directory set
     /// needed to read it correctly, used by `is_gitignored` to cap findings whose
     /// absence is the normal state. `None` disables the cap (every ref is treated
@@ -216,18 +220,54 @@ fn basename_candidate(raw_ref: &str) -> Option<&str> {
 }
 
 /// Look up `raw_ref` in the basename index when it has no `/`. Returns
-/// `Some(Resolution)` with `ResolvedBasename` (single hit) or
-/// `AmbiguousBasename` (multiple hits); `None` means "no match — caller should
-/// fall through to the default missing verdict".
+/// `Some(Resolution)` with `ResolvedBasename` (single hit), `AmbiguousBasename`
+/// (multiple hits), or — when the lookup found nothing in an index that was cut
+/// off at its file cap — `Unknown`/`BasenameIndexTruncated`. `None` means "no
+/// match in a COMPLETE index — caller should fall through to the default missing
+/// verdict".
+///
+/// The truncated-index arm lives here, not at each caller's `Missing` fallthrough,
+/// so every ref kind that consults the index (`file_path`, `file_line`,
+/// `file_symbol`, `link`) inherits it: `Missing` asserts the file does not exist,
+/// and a miss against a prefix of the tree cannot assert that. A ref carrying real
+/// path structure never reaches the index (`basename_candidate` is `None`), so its
+/// `Missing` is unaffected.
 fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resolution> {
-    let matches = ctx.basename_index.get(basename_candidate(raw_ref)?)?;
+    let key = basename_candidate(raw_ref)?;
+    let matches = match ctx.basename_index.get(key) {
+        Some(m) if !m.is_empty() => m,
+        _ if ctx.basename_index_truncated => {
+            return Some(Resolution {
+                verdict: Verdict::Unknown,
+                severity: Severity::Low,
+                severity_reason: SeverityReason::BasenameIndexTruncated,
+                notes: Some(
+                    "not found on disk or in the basename index, but the index \
+                     was truncated at its file cap, so the file may exist in the \
+                     un-indexed part of the tree; cite it by path to verify \
+                     (LIBRARIAN_AUDIT_MAX_INDEXED_FILES raises the cap)"
+                        .to_string(),
+                ),
+            });
+        }
+        _ => return None,
+    };
     match matches.len() {
-        0 => None,
         1 => Some(Resolution {
             verdict: Verdict::ResolvedBasename,
             severity: Severity::Low,
             severity_reason: SeverityReason::BasenameMatch,
-            notes: Some(format!("resolved by basename to {}", matches[0].display())),
+            notes: Some(if ctx.basename_index_truncated {
+                // Exactly one INDEXED copy is not proof of exactly one copy: say so.
+                format!(
+                    "resolved by basename to {} (the only copy in the basename index, which \
+                     was truncated at its file cap, so a same-named file may exist in the \
+                     un-indexed part of the tree; cite the path to be certain)",
+                    matches[0].display()
+                )
+            } else {
+                format!("resolved by basename to {}", matches[0].display())
+            }),
         }),
         n => {
             let preview: Vec<String> = matches
@@ -254,6 +294,32 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
         }
     }
 }
+/// The verdict for a `path:line` / `path::symbol` ref whose file was taken from a SINGLE
+/// entry of a TRUNCATED basename index, when the check against that copy came out negative.
+///
+/// One indexed copy is "a" copy, not "the" copy: the index is a prefix of the tree, so a
+/// same-named twin — the one the doc may actually cite — can sit in the un-indexed tail.
+/// Judging the line or symbol against the copy we happen to see and calling it
+/// `line_oob`/`symbol_missing` would be a false claim about a file the doc may cite
+/// correctly. A POSITIVE on the copy is left alone (it can only be a false "ok", never a
+/// false "broken"); only the negative is demoted, to `Unknown` at `Low` — never above the
+/// `Med` the old verdict carried.
+fn indexed_copy_unproven(copy: &Path, ctx: &ResolveCtx<'_>) -> Resolution {
+    let rel = copy.strip_prefix(ctx.repo_root).unwrap_or(copy);
+    Resolution {
+        verdict: Verdict::Unknown,
+        severity: Severity::Low,
+        severity_reason: SeverityReason::BasenameIndexTruncated,
+        notes: Some(format!(
+            "the only copy in the basename index is {}, but the index was truncated at its \
+             file cap, so a same-named file the doc may mean can exist in the un-indexed part \
+             of the tree; the line/symbol was not judged against it; cite the path to verify \
+             (LIBRARIAN_AUDIT_MAX_INDEXED_FILES raises the cap)",
+            rel.display()
+        )),
+    }
+}
+
 /// The single indexed path for a basename-shaped ref, if exactly one exists.
 ///
 /// `try_basename_fallback` answers "what verdict?"; this answers "which file?",
@@ -322,10 +388,11 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // missing. Without this the two ref kinds disagree about identical path
     // parts — see
     // `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
-    let path = if direct.exists() {
-        direct
+    let (path, indexed_copy_only) = if direct.exists() {
+        (direct, false)
     } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
-        resolved
+        // One indexed copy. On a truncated index that is not proof of uniqueness.
+        (resolved, ctx.basename_index_truncated)
     } else {
         return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
             verdict_with_drops_for_ref(
@@ -349,7 +416,11 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         .map(|s| s.lines().count() as u32)
         .unwrap_or(0);
     if start == 0 || end == 0 || start > end || end > total {
-        verdict_with_drops(Verdict::LineOob, Path::new(&c.md_file), ctx.memory_globs)
+        if indexed_copy_only {
+            indexed_copy_unproven(&path, ctx)
+        } else {
+            verdict_with_drops(Verdict::LineOob, Path::new(&c.md_file), ctx.memory_globs)
+        }
     } else {
         Resolution {
             verdict: Verdict::Resolved,
@@ -466,7 +537,24 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // leading `./` — before that, such a ref fell out of the fallback on its own slash,
     // so the guard restates the old behaviour explicitly rather than changing it.
     if !path_part.starts_with("./") && !path_part.starts_with("../") {
-        if let Some(r) = try_basename_fallback(path_part, ctx) {
+        if let Some(mut r) = try_basename_fallback(path_part, ctx) {
+            if r.severity_reason == SeverityReason::BasenameIndexTruncated {
+                // A link target is explicit intent to point at a local file, so its miss was
+                // `high`. On a truncated index it is unproven, not absent: `Unknown`, and by
+                // the band convention `default_severity` documents for a non-deterministic
+                // answer, `med` — "keeps the report and takes the non-determinism out of the
+                // exit code" for `--fail-on high`, while a `--fail-on med` gate still sees it.
+                // Never above what the `Missing` would have carried (an archived or memory
+                // document's link was already dropped).
+                let would_be =
+                    verdict_with_drops(Verdict::Missing, Path::new(&c.md_file), ctx.memory_globs)
+                        .severity;
+                r.severity = if would_be == Severity::High {
+                    Severity::Med
+                } else {
+                    would_be
+                };
+            }
             return r;
         }
     }
@@ -506,17 +594,19 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // than claiming the file is gone. The comment above used to assert this while
     // only the unique half was implemented — see the `else` arm below.
     let direct = ctx.repo_root.join(path_str);
-    let path = if direct.exists() {
-        direct
+    let (path, indexed_copy_only) = if direct.exists() {
+        (direct, false)
     } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
-        resolved
+        (resolved, ctx.basename_index_truncated)
     } else {
         // Ambiguous is not missing. `unique_basename_path` answers "which file?" and so
         // returns None for BOTH zero matches and two-or-more — which meant this branch
         // claimed `FileMissing` for a file that exists twice. `try_basename_fallback`
         // answers "what verdict?", and is the same helper `resolve_file_path` and
-        // `resolve_file_line` use to tell the two apart. Here it can only return
-        // `AmbiguousBasename`: a single match would already have been taken above.
+        // `resolve_file_line` use to tell the two apart. Here it returns
+        // `AmbiguousBasename` for a twin (a single match would already have been taken
+        // above), or `Unknown`/`BasenameIndexTruncated` when the index was cut off and
+        // this ref's file may sit in the un-indexed tail.
         return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
             verdict_with_drops_for_ref(
                 Verdict::FileMissing,
@@ -607,6 +697,10 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                         syms.len()
                     )),
                 }
+            } else if indexed_copy_only {
+                // Absent from the one copy we could see; the doc may cite a twin in the
+                // un-indexed tail. See `indexed_copy_unproven`.
+                indexed_copy_unproven(&ast_path, ctx)
             } else {
                 verdict_with_drops(
                     Verdict::SymbolMissing,
@@ -715,7 +809,9 @@ fn path_evidence(raw_ref: &str, ctx: &ResolveCtx<'_>) -> severity::PathEvidence 
 /// Used only on the two path-classification paths (`file_path`, `file_line`).
 /// A markdown link target is deliberately NOT routed through here: `[x](y.md)`
 /// is explicit author intent to point at a local file, so a missing link target
-/// stays `high` even without a slash.
+/// stays `high` even without a slash — with one exception, in `resolve_link`: when the
+/// basename index was truncated, the miss is `Unknown` and capped at `med` (it was
+/// never proven absent, but it must stay visible under `--fail-on med`).
 fn verdict_with_drops_for_ref(
     verdict: Verdict,
     raw_ref: &str,
@@ -886,6 +982,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         }
     }
@@ -978,6 +1075,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: Some(TrackedIgnore {
                 matcher: gi,
                 // Empty = unknown, so the matcher alone decides — the behaviour these
@@ -1043,6 +1141,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: Some(TrackedIgnore {
                 matcher: gi,
                 // Empty = unknown, so the matcher alone decides — the behaviour these
@@ -1111,6 +1210,7 @@ mod tests {
             lsp: None,
             degraded_languages: std::cell::RefCell::new(Vec::new()),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: Some(TrackedIgnore {
                 matcher: gi,
                 // What `build_tracked_dirs` derives from an index that holds
@@ -1178,6 +1278,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: Some(TrackedIgnore {
                 matcher: gi,
                 // Empty = unknown, so the matcher alone decides — the behaviour these
@@ -1444,6 +1545,7 @@ mod tests {
                 lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
+                basename_index_truncated: false,
                 gitignore: None,
             },
         );
@@ -1462,6 +1564,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(&c, &ctx);
@@ -1498,6 +1601,7 @@ mod tests {
                 lsp: None,
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
+                basename_index_truncated: false,
                 gitignore: None,
             };
             let r = resolve_ref(&cand(refstr, "docs/spec.md", RefKind::FileSymbol), &ctx);
@@ -1534,6 +1638,7 @@ mod tests {
             lsp: Some(lsp),
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(&c, &ctx);
@@ -1593,6 +1698,7 @@ mod tests {
             lsp: Some(lsp),
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(&c, &ctx);
@@ -1640,6 +1746,7 @@ mod tests {
                 lsp: Some(lsp),
                 degraded_languages: Default::default(),
                 basename_index: std::collections::HashMap::new(),
+                basename_index_truncated: false,
                 gitignore: None,
             },
         );
@@ -1693,6 +1800,7 @@ mod tests {
             lsp: Some(lsp),
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         };
         let mk_lsp = || {
@@ -1804,6 +1912,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -1843,6 +1952,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
 
@@ -1874,6 +1984,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
 
@@ -1904,6 +2015,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
 
@@ -1939,6 +2051,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
 
@@ -1963,6 +2076,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         };
 
@@ -1993,6 +2107,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         }
     }
@@ -2111,6 +2226,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2163,6 +2279,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2199,6 +2316,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(&cand("./only_one.j2", "docs/x.md", RefKind::FilePath), &ctx);
@@ -2232,6 +2350,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2277,6 +2396,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2312,6 +2432,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2335,6 +2456,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2421,6 +2543,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: index,
+            basename_index_truncated: false,
             gitignore: None,
         };
         let r = resolve_ref(
@@ -2429,6 +2552,274 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Missing);
         assert_eq!(r.severity, Severity::High);
+    }
+    /// A bare basename absent from an index built from a TRUNCATED walk is "not
+    /// reached", not "does not exist". It must not claim `Missing` — the file may
+    /// sit in the un-indexed tail. Covers every ref kind that consults the index.
+    #[test]
+    fn resolver_basename_miss_on_truncated_index_is_unknown_not_missing() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        for (raw, kind) in [
+            ("tail_file.py", RefKind::FilePath),
+            ("tail_file.py", RefKind::Link),
+            ("tail_file.py:3", RefKind::FileLine),
+            ("tail_file.py::run", RefKind::FileSymbol),
+        ] {
+            let r = resolve_ref(&cand(raw, "docs/spec.md", kind), &ctx);
+            assert_eq!(r.verdict, Verdict::Unknown, "{kind:?}");
+            // A path/line/symbol ref was already `low` (inferred path); a LINK target was
+            // `high`, and keeps `med` so a `--fail-on med` gate still sees it.
+            let want = if kind == RefKind::Link {
+                Severity::Med
+            } else {
+                Severity::Low
+            };
+            assert_eq!(r.severity, want, "{kind:?}");
+            assert_eq!(r.severity_reason.as_str(), "basename_index_truncated");
+            let notes = r.notes.expect("truncation must be named in the notes");
+            assert!(
+                notes.contains("truncated"),
+                "notes must name the scope: {notes}"
+            );
+        }
+    }
+    /// The truncated-index link verdict is never stronger than the `Missing` it replaces:
+    /// a link in a memory file was already dropped two bands (`high` -> `low`), and the
+    /// truncation cap must not lift it back to `med`.
+    #[test]
+    fn resolver_truncated_link_severity_never_exceeds_the_missing_it_replaces() {
+        let tmp = TempDir::new().unwrap();
+        let memory_globs: Vec<globset::Glob> = severity::DEFAULT_MEMORY_GLOBS
+            .iter()
+            .map(|g| globset::Glob::new(g).unwrap())
+            .collect();
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &memory_globs,
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("tail_file.md", ".buddy/memory/m.md", RefKind::Link),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::Unknown);
+        assert_eq!(r.severity, Severity::Low, "memory drop must survive");
+    }
+    /// A truncated index is a prefix of the tree, so a SINGLE indexed copy of a basename is
+    /// not proof the file is unique: a twin may sit in the un-indexed tail. Range-checking
+    /// the one copy we can see and reporting `line_oob` would be a false claim about a file
+    /// the doc may cite correctly. A negative on the copy is therefore `Unknown`; a positive
+    /// stays `Resolved`; a complete index is unchanged.
+    #[test]
+    fn resolver_line_miss_in_single_indexed_copy_of_truncated_index_is_unknown() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a")).unwrap();
+        std::fs::write(tmp.path().join("a/x.py"), "1\n2\n3\n").unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert("x.py".to_string(), vec![std::path::PathBuf::from("a/x.py")]);
+        let mk = |truncated: bool, index| ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: truncated,
+            gitignore: None,
+        };
+
+        let truncated = mk(true, index.clone());
+        let r = resolve_ref(
+            &cand("x.py:50", "docs/spec.md", RefKind::FileLine),
+            &truncated,
+        );
+        assert_eq!(r.verdict, Verdict::Unknown, "{r:?}");
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason, SeverityReason::BasenameIndexTruncated);
+        let notes = r.notes.expect("the scope must be named");
+        assert!(
+            notes.contains("a/x.py") && notes.contains("truncated"),
+            "notes must name the copy examined and the truncation: {notes}"
+        );
+        // A positive on the copy we can see is still a positive.
+        let r = resolve_ref(
+            &cand("x.py:2", "docs/spec.md", RefKind::FileLine),
+            &truncated,
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+
+        // Silence on a trustworthy negative: a complete index keeps `line_oob`.
+        let complete = mk(false, index);
+        let r = resolve_ref(
+            &cand("x.py:50", "docs/spec.md", RefKind::FileLine),
+            &complete,
+        );
+        assert_eq!(r.verdict, Verdict::LineOob);
+        assert_eq!(r.severity, Severity::Med);
+    }
+
+    /// The `file_symbol` twin of the line test: the symbol is absent from the one indexed
+    /// copy, but the doc may cite the twin in the un-indexed tail.
+    #[test]
+    fn resolver_symbol_miss_in_single_indexed_copy_of_truncated_index_is_unknown() {
+        use crate::lsp::mock::{MockLspClient, MockLspProvider};
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a")).unwrap();
+        std::fs::write(tmp.path().join("a/foo.rs"), "pub fn bar() {}\n").unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "foo.rs".to_string(),
+            vec![std::path::PathBuf::from("a/foo.rs")],
+        );
+        let run = |truncated: bool| {
+            // MockLspClient::new() answers with no symbols for any file.
+            let lsp = MockLspProvider::with_client(MockLspClient::new());
+            resolve_ref(
+                &cand("foo.rs:renamed_baz", "docs/spec.md", RefKind::FileSymbol),
+                &ResolveCtx {
+                    live_artifact_ids: None,
+                    repo_root: tmp.path(),
+                    memory_globs: &[],
+                    lsp: Some(lsp),
+                    degraded_languages: Default::default(),
+                    basename_index: index.clone(),
+                    basename_index_truncated: truncated,
+                    gitignore: None,
+                },
+            )
+        };
+
+        let r = run(true);
+        assert_eq!(r.verdict, Verdict::Unknown, "{r:?}");
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason, SeverityReason::BasenameIndexTruncated);
+        assert!(r.notes.expect("scope named").contains("truncated"));
+
+        // Silence on a trustworthy negative.
+        assert_eq!(run(false).verdict, Verdict::SymbolMissing);
+    }
+
+    /// `resolved_basename` on a single indexed copy of a truncated index: the file exists, so
+    /// the verdict stays, but the note must not leave the reader believing the match is unique.
+    #[test]
+    fn resolver_single_copy_basename_hit_on_truncated_index_says_uniqueness_is_unproven() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "bar.py".to_string(),
+            vec![std::path::PathBuf::from("pkg/bar.py")],
+        );
+        let mk = |truncated: bool, index| ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: truncated,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("bar.py", "docs/spec.md", RefKind::FilePath),
+            &mk(true, index.clone()),
+        );
+        assert_eq!(r.verdict, Verdict::ResolvedBasename);
+        let notes = r.notes.unwrap();
+        assert!(
+            notes.contains("pkg/bar.py") && notes.contains("truncated"),
+            "{notes}"
+        );
+
+        // Complete index: the output is byte-for-byte what it always was.
+        let r = resolve_ref(
+            &cand("bar.py", "docs/spec.md", RefKind::FilePath),
+            &mk(false, index),
+        );
+        assert_eq!(r.notes.unwrap(), "resolved by basename to pkg/bar.py");
+    }
+
+    /// A ref carrying a `/` never reaches the basename index, so truncation changes nothing
+    /// for it — including the line and symbol kinds.
+    #[test]
+    fn resolver_slashed_line_ref_is_unaffected_by_a_truncated_index() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert("x.py".to_string(), vec![std::path::PathBuf::from("a/x.py")]);
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        let r = resolve_ref(&cand("src/x.py:5", "docs/spec.md", RefKind::FileLine), &ctx);
+        assert_eq!(r.verdict, Verdict::Missing);
+    }
+
+    /// A path-prefixed ref never consults the basename index, so truncation is not
+    /// a reason to doubt its `Missing`.
+    #[test]
+    fn resolver_slash_ref_stays_missing_on_truncated_index() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("src/gone/tail_file.py", "docs/spec.md", RefKind::FilePath),
+            &ctx,
+        );
+        assert_eq!(r.verdict, Verdict::Missing);
+        assert_eq!(r.severity, Severity::High);
+    }
+
+    /// Truncation only weakens a MISS; a hit in the indexed portion is true.
+    #[test]
+    fn resolver_basename_hit_on_truncated_index_still_resolves() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "bar.py".to_string(),
+            vec![std::path::PathBuf::from("pkg/bar.py")],
+        );
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        let r = resolve_ref(&cand("bar.py", "docs/spec.md", RefKind::FilePath), &ctx);
+        assert_eq!(r.verdict, Verdict::ResolvedBasename);
     }
 
     #[test]
@@ -2634,6 +3025,7 @@ mod tests {
             lsp: None,
             degraded_languages: Default::default(),
             basename_index: std::collections::HashMap::new(),
+            basename_index_truncated: false,
             gitignore: None,
             live_artifact_ids: live,
         }

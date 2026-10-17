@@ -1015,14 +1015,14 @@ Body Mu.
     /// the guide sections that call needs, so the first tracker-path call of a session
     /// ships those and not the whole topic.
     ///
-    /// The four shapes are the ones verified at runtime on 2026-10-16 by making the
+    /// The five shapes are the ones verified at runtime on 2026-10-16 by making the
     /// calls and reading which results name a tracker or bug path (the only thing
     /// `LibrarianAdapter::relevant_guide_topic` looks at): `doc.create` and `doc.get`
-    /// name `abs_path`, `doc.find` names `rel_path` per item, and
-    /// `librarian.doctor` names `path` per violation. `doc.update`, `append_entry`,
-    /// `move`, `delete`, `rekey_prefix` and the rest name no scanned path, so they
-    /// route to `librarian` and no tracker-conventions declaration could ever
-    /// reach them — see SECTION_WAIVERS.
+    /// name `abs_path`, `doc.find` names `rel_path` per item, `doc.move` names
+    /// `old_abs_path`/`new_abs_path` (read since 2026-10-17), and `librarian.doctor` names
+    /// `path` per violation. `doc.update`, `append_entry`, `delete`, `rekey_prefix` and
+    /// the rest name no scanned path, so they route to `librarian` and no
+    /// tracker-conventions declaration could ever reach them — see SECTION_WAIVERS.
     ///
     /// **A bound on bytes as well as on headings.** `MAX_AUTO_INJECT_GUIDE_BYTES` is
     /// the size a harness may save to disk unread; a "section" set larger than that
@@ -1042,7 +1042,17 @@ Body Mu.
         let issue = serde_json::json!({"abs_path": "docs/issues/x.md"});
         let find_tracker = serde_json::json!({"items": [{"rel_path": "docs/trackers/x.md"}]});
         let find_issue = serde_json::json!({"items": [{"rel_path": "docs/issues/x.md"}]});
-        let cases: [(&str, &Value, &[&str]); 6] = [
+        // `doc.move` is the archive flow; its result names the file only as
+        // `old_abs_path`/`new_abs_path`.
+        let move_issue = serde_json::json!({
+            "old_abs_path": "/r/docs/issues/x.md",
+            "new_abs_path": "/r/docs/issues/archive/x.md"
+        });
+        let move_tracker = serde_json::json!({
+            "old_abs_path": "/r/docs/trackers/x.md",
+            "new_abs_path": "/r/docs/trackers/archive/x.md"
+        });
+        let cases: [(&str, &Value, &[&str]); 8] = [
             (
                 "doc.create",
                 &tracker,
@@ -1078,6 +1088,27 @@ Body Mu.
             ),
             ("doc.find", &find_tracker, &["Querying with the librarian"]),
             (
+                "doc.move",
+                &move_issue,
+                &[
+                    "Archiving a bug or tracker \u{2014} through the catalog, never git mv",
+                    "Archiving a bug or tracker \u{2014} stage both halves of the move",
+                    "Archiving a bug or tracker \u{2014} re-point the citations",
+                    "Verifying the citation sweep",
+                    "Reading move's inbound_path_citations",
+                    "Why a green gate proves nothing about the sweep",
+                ],
+            ),
+            (
+                "doc.move",
+                &move_tracker,
+                &[
+                    "Archiving a bug or tracker \u{2014} through the catalog, never git mv",
+                    "Archiving a bug or tracker \u{2014} stage both halves of the move",
+                    "Archiving a bug or tracker \u{2014} re-point the citations",
+                ],
+            ),
+            (
                 "doc.find",
                 &find_issue,
                 &[
@@ -1106,6 +1137,14 @@ Body Mu.
                 "`{sel}` on {result} ships {bytes} B of a {whole} B guide; that is not section grain"
             );
         }
+        // `Archiving a tracker` leads with `doc(action="update", patch={status: archived})`,
+        // the call that needs it, and `update` still routes to `librarian`: serving it
+        // after a MOVE has run is the late, wrong-call delivery that its waiver records.
+        let moved = idx.match_sections("tracker-conventions", Some("doc.move"), &move_tracker);
+        assert!(
+            !moved.iter().any(|s| s.heading == "Archiving a tracker"),
+            "a tracker move must not be served the update-first § Archiving a tracker"
+        );
     }
 
     /// A `path~` shape can never match a result-less call, which is what keeps the

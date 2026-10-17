@@ -38,6 +38,10 @@ pub struct MockLspClient {
             Option<lsp_types::CallHierarchyItem>,
         >,
     >,
+    /// The `(path, language_id)` of every `prepare_call_hierarchy` call, in order. The real
+    /// client opens the file with that languageId (`did_open`), and typescript-language-server
+    /// maps it to a script kind, so which id a node is opened under is observable behaviour.
+    pub prepare_call_hierarchy_calls: std::sync::Mutex<Vec<(std::path::PathBuf, String)>>,
     /// Canned responses for `incoming_calls`, keyed by item name.
     pub incoming_calls_results: std::sync::Mutex<
         std::collections::HashMap<String, Vec<lsp_types::CallHierarchyIncomingCall>>,
@@ -62,6 +66,7 @@ impl MockLspClient {
             hover_responses: std::sync::Mutex::new(std::collections::VecDeque::new()),
             goto_responses: std::sync::Mutex::new(std::collections::VecDeque::new()),
             prepare_call_hierarchy_results: std::sync::Mutex::new(std::collections::HashMap::new()),
+            prepare_call_hierarchy_calls: std::sync::Mutex::new(Vec::new()),
             incoming_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             outgoing_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             references_results: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -262,8 +267,12 @@ impl LspClientOps for MockLspClient {
         path: &Path,
         line: u32,
         col: u32,
-        _language_id: &str,
+        language_id: &str,
     ) -> anyhow::Result<Option<lsp_types::CallHierarchyItem>> {
+        self.prepare_call_hierarchy_calls
+            .lock()
+            .unwrap()
+            .push((path.to_path_buf(), language_id.to_string()));
         Ok(self
             .prepare_call_hierarchy_results
             .lock()

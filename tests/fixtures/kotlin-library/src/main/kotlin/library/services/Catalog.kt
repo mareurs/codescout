@@ -31,7 +31,7 @@ fun createDefaultCatalog(): Catalog<Book> = Catalog("Main Library")
  * Multi-line KDoc with preamble text before params.
  *
  * This function exists to test whether kotlin-language-server includes
- * the full docstring (from the opening /**) in the symbol's `range.start`,
+ * the full docstring (from the opening comment marker) in the symbol's `range.start`,
  * or only starts the range at the first @param line.
  *
  * @param name The catalog name to use

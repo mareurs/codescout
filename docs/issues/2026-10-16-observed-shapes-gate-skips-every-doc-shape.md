@@ -1,13 +1,14 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'Gate 2 (every_observed_shape_of_a_declaring_topic_has_a_section) iterates a census of artifact.* shapes, no tool is named artifact any more, so every doc.* shape is skipped'
 tags:
 - cluster/selector-narrower-than-its-population
 - guides
 - section-grain-delivery
 opened: 2026-10-16
-closed:
+closed: 2026-10-17
+unverified: 'Gate 2 still cannot judge shapes added after the census was recorded (doc.rekey_prefix, doc.state_at, doc.graft, librarian.audit_log); the census was not regenerated.'
 owner: marius
 severity: low
 related:
@@ -74,13 +75,82 @@ reads the registry rather than the census, so it is not affected; this is Gate 2
 
 ## Fix
 
-Not started. Either regenerate the census under the current tool names (its header points at the
-script), or have the gate fail when a census row's tool resolves to nothing, so the next rename is
-loud. The second is the guard; the first only refreshes the data.
+The guard, not the data. Verified 2026-10-17 on `experiments` + `299395e5`: 33 census rows named no
+registered tool (rows `artifact.*`, `artifact_augment`, `artifact_event.*`, `artifact_refresh.*`, plus
+`read_markdown`, `edit_markdown.*`, `Edit`, `peer.list`, `replace_all`, `run_file`), the census had no `doc.`
+row, and the gate `continue`d past all of them. The census itself was NOT regenerated (its generator is a
+plan-doc snippet that needs real transcripts); the rows are read through recorded renames instead. Fix in
+`src/server.rs` (tests):
+
+- `resolve_census_row` classifies each census row as `Live` (registered, after `CENSUS_RENAMED_SHAPES` /
+  `CENSUS_RENAMED_TOOLS`), `Retired` (in `CENSUS_STRAY_TOOLS`, or in `RETIRED_TOOL_NAMES` for the
+  2026-09-02 collapse names, so there is one table of dead names) or `Unresolved`, which fails.
+- Gate 2 reads the census through `census_shapes()`, reads `artifact.*` rows as the `doc.*` shapes they
+  became, panics on `Unresolved`, collects every uncovered shape into one message, and counts the
+  `(tool, topic)` pairs it actually JUDGED (after the `declares` check), asserting each of
+  (`doc`, `librarian`), (`doc`, `tracker-conventions`), (`librarian`, `librarian`) and
+  (`librarian`, `tracker-conventions`) is non-zero.
+- A waiver now resolves on the shape as a whole word of the reason (`prompts::waiver_reason_names_shape`,
+  `shape_is_waived`), not `contains`: the bare `doc` shape had read as waived through the `doc(action="find")`
+  in an unrelated reason. `doc` is named explicitly in the `librarian` "Common Mistakes" waiver and in
+  `TRACKER_DOC_SHAPES_UNSERVED`.
+- `TRACKER_DOC_SHAPES_UNSERVED` (`src/prompts/mod.rs`) waives the `doc.*` shapes no `tracker-conventions`
+  section serves. Measured 2026-10-16/17 by real calls: `append_entry`, `update_entry`, `move`, `delete`,
+  `link`, `augment`, `event_create`, `event_list`, `gather` and `graph` name no tracker path, so a real call
+  reaches `librarian` (ledger:
+  `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`). `doc.list_stale`
+  is the exception: its result carries `items[].abs_path`, so a real call on an augmented tracker routes to
+  `tracker-conventions` and is served only the preamble. Filed as
+  `docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md`
+  (open); the waiver names it.\n  Superseded at integration (2026-10-17): that issue is fixed and its waiver token deleted, and `move` is no\n  longer waived either (the archive sections declare it); the waiver now carries the remaining shapes only.
+
+Fix commits, on branch `worktree-agent-ab7a7e0e672e14d3a` (based on `experiments`): `53a53782` (patch-id
+`7ee22cbb367f42b2039b86af9fe3294f5decc618`) and the review fixes `e5075a12` (patch-id
+`b52d9d53b2beee1196fcbb116395562ca3bb5e41`).
+
+What this does not cover: Gate 2 sees only the shapes the census holds, and the census was recorded before
+`doc.rekey_prefix`, `doc.state_at`, `doc.graft` and `librarian.audit_log` existed, so those cannot be
+judged by it. Gate 6 (`every_declared_shape_names_a_live_tool_and_action`) reads the registry and covers
+declarations, not these observations.
 
 ## Tests added
 
-None.
+In `src/server.rs`: `every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement` (red before the tables
+were filled, listing 33 unresolved rows; also floors the census at 60 rows and at 10 / 5 Live rows for `doc` /
+`librarian`), `census_renames_and_retirements_are_not_stale` (rename targets registered and landing on a real
+action, stray tools not registered and not duplicating `RETIRED_TOOL_NAMES`, the resolver failing an unknown
+name or an unknown action under a renamed prefix), and the strengthened
+`every_observed_shape_of_a_declaring_topic_has_a_section`. In `src/prompts/mod.rs`:
+`waiver_reason_names_a_shape_as_a_whole_word_not_a_substring` and
+`shape_is_waived_resolves_the_bare_doc_shape_on_an_explicit_mention`.
+
+Each strengthened assertion was observed red with `scripts/mutation-probe.sh` (2026-10-17, isolated tree):
+
+- (`doc`, `tracker-conventions`) judged: `names_tracker_path` made `false` → Gate 2 red, "judged no `doc` census
+  shape against `tracker-conventions`". Same for `librarian` topic via `declares` returning false for it.
+- Row floor and Gate 2 reading `census_shapes()`: its filter made `|_| false` → both red, "census parsed to only 0 rows".
+- `doc` Live floor and rename-lands-on-a-real-action: `("artifact", "doc")` → `("artifact", "symbols")` → "only 5 census
+  rows resolve to a live `doc` shape" and "`artifact.update` resolves to `symbols.update`".
+- Rename action validity: `doc.augment` → `doc.augmentt` → "`augmentt` is not one of `doc`'s actions".
+- Unknown action under a renamed prefix stays unresolved: `if renamed {` → `if false {` → red.
+- Whole-word waiver: removing the one explicit `doc` mention from the `librarian` waiver → Gate 2 red for
+  (`doc`, `librarian`); making the helper `contains` instead → `waiver_reason_names_a_shape_as_a_whole_word_not_a_substring`
+  red (Gate 2 itself stays green there, which is why the helper has its own test).
+
+Gate 2's own decision was a survivor (found by a peer's mutation probe, reproduced here 2026-10-17): with the
+inline predicate `if !(covered || shape_is_waived(topic, shape))` in the gate, forcing it to `if false`, forcing
+`covered` true, and forcing `shape_is_waived` true all left `cargo test --lib -- every_observed_shape census
+section_waivers prompts:: guide_index::` green (118 passed each); only `||` to `&&` was killed, by the gate
+itself on the real corpus. Fixed by extracting `shape_is_served_or_waived(topic, shape, probe)` (real coverage
+lookup and real waiver matcher, not booleans) and `judge_shape` (counter plus decision in one function), pinned by
+`gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape`, `judge_shape_counts_every_pair_and_records_only_the_gaps`
+and `the_waiver_matcher_does_not_read_a_neighbour_or_a_path_as_the_shape`. Each mutant now red, one at a time:
+
+- `judge_shape`'s `if !shape_is_served_or_waived(..)` to `if false` → `judge_shape_counts_every_pair_and_records_only_the_gaps` ("the gap must be recorded").
+- the decision with `served` forced true, and with the waiver forced true → `gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape` ("coverage must read the probe") and the `judge_shape` test.
+- `||` to `&&` → `gate_two_...`, `judge_shape_...` and Gate 2 itself.
+- waiver match as `contains` → `waiver_reason_names_a_shape_as_a_whole_word_not_a_substring`, `the_waiver_matcher_...` and `gate_two_...` ("a waiver that merely contains the shape as a substring must not waive it").
+- the `judged` counter increment dropped → `judge_shape_...` and Gate 2 ("judged no `doc` census shape against `librarian`").
 
 ## Workarounds
 
@@ -90,10 +160,17 @@ this gate does not.
 
 ## Resume
 
-Read the gate's loop first. Expect a regenerated census to demand sections or waivers for every
-`doc.*` shape of both declaring topics; budget for that.
+Fixed in the sense the issue named as the guard: the next tool rename fails
+`every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement` instead of narrowing Gate 2. Open
+remainders: the census is not regenerated and does not hold `doc.rekey_prefix`, `doc.state_at`, `doc.graft`
+or `librarian.audit_log`, so Gate 2 cannot judge them (regenerating it would need the transcripts the
+generator reads, and is likely to demand sections or waivers for every shape it adds).
+`doc.list_stale` was waived until its own issue was fixed; the waiver token is deleted and Gate 2 now
+probes that shape with a real result (`threshold_hours`, `probe_as_the_shape_returns` in `src/server.rs`).
 
 ## References
 
 - `src/prompts/shape_census.txt`
 - `docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md`
+- `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md` (open ledger entry for the write shapes)
+- `docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md` (open)

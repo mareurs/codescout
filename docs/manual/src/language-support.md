@@ -130,9 +130,15 @@ Binary: `jdtls`
 
 ### Kotlin
 
-`kotlin-lsp` (JetBrains) is distributed as a release archive on the
-[GitHub releases page](https://github.com/Kotlin/kotlin-lsp/releases).
-Unpack and place the `kotlin-lsp` script on `PATH`.
+`kotlin-lsp` (JetBrains) is listed on the
+[GitHub releases page](https://github.com/Kotlin/kotlin-lsp/releases), with the
+standalone archives hosted on `download.jetbrains.com` (a `.tar.gz` for Linux,
+a `.sit` for macOS, a `.win.zip` for Windows; each has an `-aarch64` build for
+arm64). Unpack the archive, then put a `kotlin-lsp` link to its
+`bin/intellij-server` launcher on `PATH`, for example
+`ln -s ~/.local/share/kotlin-lsp/bin/intellij-server ~/.local/bin/kotlin-lsp`.
+`./scripts/install-lsp.sh kotlin` does this on Linux; it does not unpack the
+macOS `.sit` archive, so install by hand there.
 
 Binary: `kotlin-lsp`, invoked with `--stdio`. Each codescout instance
 automatically passes `--system-path` to isolate its workspace cache.

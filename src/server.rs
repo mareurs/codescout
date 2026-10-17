@@ -7296,6 +7296,9 @@ mod tests {
     /// `GUIDE_INDEX.declares(topic)` — `librarian` and `tracker-conventions` today — so it is
     /// meaningful in Phase 1 and widens automatically as later phases land
     /// declarations on other topics.
+    ///
+    /// Blind to any shape the census does not hold: it was recorded before
+    /// `doc.rekey_prefix`, `doc.state_at`, `doc.graft` and `librarian.audit_log` existed.
     #[cfg(feature = "librarian")]
     #[tokio::test]
     async fn every_observed_shape_of_a_declaring_topic_has_a_section() {
@@ -7303,7 +7306,6 @@ mod tests {
         // calls. Scoped to topics that have opted into section grain, so it is
         // meaningful in Phase 1 and widens automatically as Phases 2-3 land.
         use crate::prompts::guide_index::GUIDE_INDEX;
-        let census = include_str!("prompts/shape_census.txt");
         let (_dir, server) = make_server().await;
 
         // Each probe stands for a RESULT SHAPE a real call returns, because
@@ -7321,43 +7323,607 @@ mod tests {
             serde_json::json!({"violations": [{"path": "docs/trackers/x.md"}]}),
         ];
 
-        for line in census
-            .lines()
-            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
-        {
-            let shape = line.split_whitespace().next().unwrap();
-            let tool_name = shape.split('.').next().unwrap();
-            let Some(tool) = server.tools.iter().find(|t| t.name() == tool_name) else {
-                continue;
+        let registered: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
+        // (tool, topic) pairs actually JUDGED: a probe that routed to a declaring topic and was
+        // checked for coverage. Counted after the `declares` check, not when the row resolves,
+        // so a router that stopped reaching any declaring topic cannot leave this gate green
+        // having judged nothing.
+        let mut judged: std::collections::BTreeMap<(String, String), usize> = Default::default();
+        let mut uncovered: Vec<String> = Vec::new();
+
+        for census_shape in census_shapes() {
+            // A row whose tool is neither registered, renamed nor recorded as retired is a
+            // stale census, not a row to step over: skipping it is how every `doc.*` shape
+            // went unchecked after the `artifact` -> `doc` rename.
+            // docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
+            let shape = match resolve_census_row(census_shape, &registered) {
+                CensusRow::Live(shape) => shape,
+                CensusRow::Retired(_) => continue,
+                CensusRow::Unresolved => panic!(
+                    "census row `{census_shape}` names no registered tool and is neither \
+                 renamed nor retired; see \
+                 every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement"
+                ),
             };
+            let shape = shape.as_str();
+            let tool_name = shape.split('.').next().unwrap();
+            let tool = server
+                .tools
+                .iter()
+                .find(|t| t.name() == tool_name)
+                .expect("resolve_census_row returned Live only for a registered tool");
             // Pair each probe with the topic IT routes to, rather than fixing one
             // topic for all of them. `find_map` took the first `Some`, and the empty
             // probe yields `Some("librarian")` unconditionally — so coverage was only
             // ever evaluated against `librarian`, and a shape whose real results route
             // elsewhere was never checked against the topic it actually reaches.
             // That is the runtime relationship this gate exists to model.
-            for probe in &probes {
+            for generic_probe in &probes {
+                // The generic probes stand for results that name a tracker path, which is
+                // all a `find` or `get` returns. A real `list_stale` result also carries
+                // `threshold_hours`, which the router reads (`names_tracker_path`) to send it
+                // to `librarian`; probing it with the bare path shape judged a call that
+                // cannot happen, and needed a waiver to excuse it.
+                // docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md
+                let probe = &probe_as_the_shape_returns(shape, generic_probe);
                 let Some(topic) = tool.relevant_guide_topic(probe) else {
                     continue;
                 };
                 if !GUIDE_INDEX.declares(topic) {
                     continue;
                 }
-                let covered = !GUIDE_INDEX
-                    .match_sections(topic, Some(shape), probe)
-                    .is_empty();
-                let waived = crate::prompts::SECTION_WAIVERS
-                    .iter()
-                    .any(|(t, _, r)| *t == topic && r.contains(shape));
-                assert!(
-                    covered || waived,
-                    "call shape `{shape}` routes to declaring topic `{topic}` on a result \
-                 shaped like {probe}, but no section there serves it. Add a `serves:` \
-                 declaration in that topic, or a SECTION_WAIVERS entry naming the shape \
-                 and saying why. An undeclared shape gets only the preamble."
-                );
+                judge_shape(tool_name, topic, shape, probe, &mut judged, &mut uncovered);
             }
         }
+        assert!(
+            uncovered.is_empty(),
+            "call shapes route to a declaring topic but no section there serves them, and no \
+         SECTION_WAIVERS entry carries the shape as a whole word: {uncovered:#?}. Add a \
+         `serves:` declaration in that topic, or a SECTION_WAIVERS entry naming the shape and \
+         saying why. An undeclared shape gets only the preamble."
+        );
+        // The loop above is evidence only for the (tool, topic) pairs it judged. Name the four
+        // this gate exists for, so a router or registry change that leaves one unjudged fails
+        // here instead of narrowing the gate silently.
+        for (tool, topic) in [
+            ("doc", "librarian"),
+            ("doc", "tracker-conventions"),
+            ("librarian", "librarian"),
+            ("librarian", "tracker-conventions"),
+        ] {
+            assert!(
+                judged
+                    .get(&(tool.to_string(), topic.to_string()))
+                    .copied()
+                    .unwrap_or(0)
+                    > 0,
+                "Gate 2 judged no `{tool}` census shape against `{topic}` (judged: {judged:?}): \
+             it would pass while checking none of them."
+            );
+        }
+    }
+    /// The (tool, topic) pairs Gate 2 has judged, with how many probes each took.
+    #[cfg(feature = "librarian")]
+    type JudgedPairs = std::collections::BTreeMap<(String, String), usize>;
+
+    /// Gate 2's decision, on its own so it can be tested: a call shape that routes to declaring
+    /// `topic` on a result shaped like `probe` is acceptable when some section there serves it
+    /// (`GUIDE_INDEX`) or a `SECTION_WAIVERS` row for the topic names it as a whole word
+    /// (`prompts::shape_is_waived`). It takes the real inputs rather than two booleans, so a test
+    /// of it exercises the real coverage lookup and the real waiver matcher.
+    ///
+    /// Inline in the gate this was `if !(covered || shape_is_waived(..))`, and nothing read that
+    /// condition but the gate: forcing it to `false`, or either operand to `true`, left every test
+    /// green, so the gate could not fail on a coverage gap. Measured 2026-10-17 by mutation.
+    /// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
+    #[cfg(feature = "librarian")]
+    fn shape_is_served_or_waived(topic: &str, shape: &str, probe: &serde_json::Value) -> bool {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let served = !GUIDE_INDEX
+            .match_sections(topic, Some(shape), probe)
+            .is_empty();
+        served || crate::prompts::shape_is_waived(topic, shape)
+    }
+
+    /// Judge one (shape, topic, probe) the router reached: count the pair as judged, and record the
+    /// shape in `uncovered` when [`shape_is_served_or_waived`] refuses it. The counter and the
+    /// decision live in this one function, so a pair can never be counted without being decided.
+    #[cfg(feature = "librarian")]
+    fn judge_shape(
+        tool_name: &str,
+        topic: &str,
+        shape: &str,
+        probe: &serde_json::Value,
+        judged: &mut JudgedPairs,
+        uncovered: &mut Vec<String>,
+    ) {
+        *judged
+            .entry((tool_name.to_string(), topic.to_string()))
+            .or_default() += 1;
+        if !shape_is_served_or_waived(topic, shape, probe) {
+            uncovered.push(format!(
+                "`{shape}` -> `{topic}` on a result shaped like {probe}"
+            ));
+        }
+    }
+
+    /// The result shape a real call of `shape` returns, given a generic probe that names a path.
+    ///
+    /// Only `doc.list_stale` differs: its result carries `threshold_hours` (a key no other
+    /// librarian result has, `refresh_stale.rs`), which is what `names_tracker_path` reads to
+    /// keep it off `tracker-conventions`. Every other shape is probed as given.
+    #[cfg(feature = "librarian")]
+    fn probe_as_the_shape_returns(shape: &str, probe: &serde_json::Value) -> serde_json::Value {
+        let mut probe = probe.clone();
+        if shape == "doc.list_stale" {
+            probe["threshold_hours"] = serde_json::json!(24);
+        }
+        probe
+    }
+
+    /// How a `shape_census.txt` row stands against the tool registry today.
+    #[cfg(feature = "librarian")]
+    #[derive(Debug, PartialEq, Eq)]
+    enum CensusRow {
+        /// Resolves to a registered tool; carries the shape under today's name.
+        Live(String),
+        /// Names a tool that no longer exists, with the recorded reason.
+        Retired(&'static str),
+        /// Neither registered, renamed nor retired: the census and these tables disagree.
+        Unresolved,
+    }
+
+    /// Exact census shapes whose tool AND action both changed in a rename.
+    #[cfg(feature = "librarian")]
+    const CENSUS_RENAMED_SHAPES: &[(&str, &str)] = &[
+        // The 2026-09-02 collapse folded the sibling `artifact_*` tools into `doc` actions.
+        ("artifact_augment", "doc.augment"),
+        ("artifact_refresh.list_stale", "doc.list_stale"),
+        ("artifact_refresh.gather", "doc.gather"),
+        ("artifact_event.list", "doc.event_list"),
+        ("artifact_event.create", "doc.event_create"),
+    ];
+
+    /// Census tool names that were renamed, the action keeping its spelling: `old.x` is `new.x`.
+    #[cfg(feature = "librarian")]
+    const CENSUS_RENAMED_TOOLS: &[(&str, &str)] = &[("artifact", "doc")];
+
+    /// Census tool names the registry does not have and `RETIRED_TOOL_NAMES` does not cover:
+    /// stray transcript rows with no successor, each with its reason. The 2026-09-02 collapse
+    /// retirements (`read_markdown`, `edit_markdown`, ...) are deliberately NOT repeated here;
+    /// they come from `RETIRED_TOOL_NAMES`, the one table of dead tool names.
+    #[cfg(feature = "librarian")]
+    const CENSUS_STRAY_TOOLS: &[(&str, &str)] = &[
+        (
+            "Edit",
+            "Claude Code's built-in editor, not a codescout tool; the row is a misrouted call.",
+        ),
+        (
+            "peer",
+            "PeerTool registers only when `peer_enabled_at_runtime` opts in, which `make_server` \
+         does not; the one row (`peer.list`, count 1) also names an action `peer` does not \
+         have (status, query, explore, knowledge), so it could not be judged when registered.",
+        ),
+        (
+            "replace_all",
+            "Spells an `edit_file` parameter, not a tool; a single stray row (count 1) with no successor.",
+        ),
+        (
+            "run_file",
+            "Not registered in this server today; a single stray row (count 1) with no successor.",
+        ),
+    ];
+    /// Why a census tool name that is not registered may be stepped over, if it may.
+    ///
+    /// A name the rename tables map to a live tool never gets retired here (it resolves through
+    /// the rename), so an unknown action under a renamed prefix (`artifact_refresh.other`) stays
+    /// `Unresolved` rather than being retired by `RETIRED_TOOL_NAMES`'s entry for the old name.
+    #[cfg(feature = "librarian")]
+    fn census_retirement(tool: &str) -> Option<&'static str> {
+        if let Some((_, why)) = CENSUS_STRAY_TOOLS.iter().find(|(t, _)| *t == tool) {
+            return Some(why);
+        }
+        let renamed = CENSUS_RENAMED_TOOLS.iter().any(|(old, _)| *old == tool)
+            || CENSUS_RENAMED_SHAPES
+                .iter()
+                .any(|(old, _)| old.split('.').next() == Some(tool));
+        if renamed {
+            return None;
+        }
+        RETIRED_TOOL_NAMES
+            .iter()
+            .find(|(name, _, _)| *name == tool)
+            .map(|(_, note, _)| *note)
+    }
+
+    /// Resolve one census row against the registered tool names. Never skips: a row is
+    /// `Live`, `Retired` with a recorded reason, or `Unresolved`, which callers must fail on.
+    #[cfg(feature = "librarian")]
+    fn resolve_census_row(shape: &str, registered: &[&str]) -> CensusRow {
+        let current = CENSUS_RENAMED_SHAPES
+            .iter()
+            .find(|(old, _)| *old == shape)
+            .map(|(_, new)| (*new).to_string())
+            .or_else(|| {
+                let (tool, action) = match shape.split_once('.') {
+                    Some((t, a)) => (t, Some(a)),
+                    None => (shape, None),
+                };
+                CENSUS_RENAMED_TOOLS
+                    .iter()
+                    .find(|(old, _)| *old == tool)
+                    .map(|(_, new)| match action {
+                        Some(a) => format!("{new}.{a}"),
+                        None => (*new).to_string(),
+                    })
+            })
+            .unwrap_or_else(|| shape.to_string());
+        let current_tool = current.split('.').next().unwrap();
+        if registered.contains(&current_tool) {
+            return CensusRow::Live(current);
+        }
+        let census_tool = shape.split('.').next().unwrap();
+        match census_retirement(census_tool) {
+            Some(why) => CensusRow::Retired(why),
+            None => CensusRow::Unresolved,
+        }
+    }
+
+    /// The census rows, comments and blanks removed, each as the shape it names.
+    #[cfg(feature = "librarian")]
+    fn census_shapes() -> Vec<&'static str> {
+        include_str!("prompts/shape_census.txt")
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .map(|l| l.split_whitespace().next().unwrap())
+            .collect()
+    }
+
+    /// Gate 2's loop used to `continue` past a census row whose tool name resolved to nothing.
+    /// The census was recorded while the document tool was `artifact`; it is `doc` now, so every
+    /// `artifact.*` row (about 10,100 of the calls, against about 830 `librarian.*` ones) was
+    /// skipped and the gate verified only the rows whose name had not changed — green because it
+    /// skipped its subject. This is the guard on the skip: every row must resolve to a live tool
+    /// or carry a recorded retirement, so the next rename fails here instead of narrowing Gate 2.
+    ///
+    /// It also refuses to pass on an empty or truncated census: the unresolved check alone is
+    /// monotone under removal (a census with no rows has no unresolved ones), so the row count and
+    /// the per-tool Live counts are floors, not totals. They sit below today's counts (88 rows,
+    /// 16 resolving to `doc`, 9 to `librarian`) and census rows are never added without
+    /// regenerating it, so they never need revising upward.
+    /// docs/issues/2026-10-16-observed-shapes-gate-skips-every-doc-shape.md
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement() {
+        let (_dir, server) = make_server().await;
+        let registered: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
+        let rows = census_shapes();
+        let mut unresolved: Vec<&str> = Vec::new();
+        let mut live_by_tool: std::collections::BTreeMap<String, usize> = Default::default();
+        for row in &rows {
+            match resolve_census_row(row, &registered) {
+                CensusRow::Live(shape) => {
+                    *live_by_tool
+                        .entry(shape.split('.').next().unwrap().to_string())
+                        .or_default() += 1;
+                }
+                CensusRow::Retired(_) => {}
+                CensusRow::Unresolved => unresolved.push(row),
+            }
+        }
+        assert!(
+            unresolved.is_empty(),
+            "census rows {unresolved:?} name no registered tool, no rename in \
+         CENSUS_RENAMED_SHAPES / CENSUS_RENAMED_TOOLS and no retirement in \
+         CENSUS_STRAY_TOOLS or RETIRED_TOOL_NAMES (registered: {registered:?}). Gate 2 would \
+         skip them. Rename them to today's tool, or record why the tool is gone."
+        );
+        assert!(
+            rows.len() >= 60,
+            "the census parsed to only {} rows: it is empty or truncated, and every check here \
+         would pass over it",
+            rows.len()
+        );
+        for (tool, floor) in [("doc", 10usize), ("librarian", 5)] {
+            let live = live_by_tool.get(tool).copied().unwrap_or(0);
+            assert!(
+                live >= floor,
+                "only {live} census rows resolve to a live `{tool}` shape (floor {floor}; live: \
+             {live_by_tool:?}): the renames that carry the census to today's names are missing"
+            );
+        }
+    }
+    /// The tables above must not outlive their reason: a retirement for a tool that is registered
+    /// again, or a rename whose target does not exist, would let the census row resolve to
+    /// nothing the gate checks. A rename must also land on a real ACTION of its target (the
+    /// way Gate 6 checks a declared shape), since a renamed shape naming an action `doc` does not
+    /// have is judged against a call no one can make. And the resolver must fail an unknown name
+    /// rather than skip it.
+    #[cfg(feature = "librarian")]
+    #[tokio::test]
+    async fn census_renames_and_retirements_are_not_stale() {
+        let (_dir, server) = make_server().await;
+        let registered: Vec<&str> = server.tools.iter().map(|t| t.name()).collect();
+        let actions_of = |tool: &str| -> Vec<String> {
+            server
+                .tools
+                .iter()
+                .find(|t| t.name() == tool)
+                .expect("checked registered before asking for its actions")
+                .input_schema()
+                .get("properties")
+                .and_then(|p| p.get("action"))
+                .and_then(|a| a.get("enum"))
+                .and_then(|e| e.as_array())
+                .map(|v| {
+                    v.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        for (old, new) in CENSUS_RENAMED_SHAPES {
+            let (target, action) = new.split_once('.').unwrap_or_else(|| {
+                panic!("CENSUS_RENAMED_SHAPES `{old}` -> `{new}` names no action")
+            });
+            assert!(
+                registered.contains(&target),
+                "CENSUS_RENAMED_SHAPES `{old}` -> `{new}`: `{target}` is not a registered tool"
+            );
+            assert!(
+                actions_of(target).iter().any(|a| a == action),
+                "CENSUS_RENAMED_SHAPES `{old}` -> `{new}`: `{action}` is not one of `{target}`'s \
+             actions ({})",
+                actions_of(target).join(", ")
+            );
+        }
+        for (old, new) in CENSUS_RENAMED_TOOLS {
+            assert!(
+                registered.contains(new),
+                "CENSUS_RENAMED_TOOLS `{old}` -> `{new}`: `{new}` is not a registered tool"
+            );
+            assert!(
+                !registered.contains(old),
+                "CENSUS_RENAMED_TOOLS `{old}` is a registered tool again; drop the rename so \
+             its rows are checked under their own name"
+            );
+        }
+        // Every census row a rename carried over must land on a real action of its new tool.
+        for row in census_shapes() {
+            if let CensusRow::Live(now) = resolve_census_row(row, &registered) {
+                if now != row {
+                    if let Some((tool, action)) = now.split_once('.') {
+                        assert!(
+                            actions_of(tool).iter().any(|a| a == action),
+                            "census row `{row}` resolves to `{now}`, but `{action}` is not one of \
+                         `{tool}`'s actions ({})",
+                            actions_of(tool).join(", ")
+                        );
+                    }
+                }
+            }
+        }
+        for (tool, why) in CENSUS_STRAY_TOOLS {
+            assert!(
+                !registered.contains(tool),
+                "CENSUS_STRAY_TOOLS `{tool}` is a registered tool again; drop the entry"
+            );
+            assert!(
+                !RETIRED_TOOL_NAMES.iter().any(|(name, _, _)| name == tool),
+                "CENSUS_STRAY_TOOLS `{tool}` is already in RETIRED_TOOL_NAMES; one table per fact"
+            );
+            assert!(
+                why.len() > 40,
+                "CENSUS_STRAY_TOOLS `{tool}` needs a real reason, not a placeholder"
+            );
+        }
+
+        // The resolver's outcomes, on a fixed registry so the tables cannot change them.
+        let fixed = ["doc", "symbols"];
+        assert_eq!(
+            resolve_census_row("symbols", &fixed),
+            CensusRow::Live("symbols".to_string())
+        );
+        assert_eq!(
+            resolve_census_row("artifact.update", &fixed),
+            CensusRow::Live("doc.update".to_string()),
+            "an `artifact.*` row must be checked as the `doc.*` shape it became"
+        );
+        assert_eq!(
+            resolve_census_row("artifact_event.create", &fixed),
+            CensusRow::Live("doc.event_create".to_string())
+        );
+        assert_eq!(
+            resolve_census_row("artifact_augment", &fixed),
+            CensusRow::Live("doc.augment".to_string()),
+            "a whole-shape rename (tool AND action) resolves through CENSUS_RENAMED_SHAPES"
+        );
+        assert_eq!(
+            resolve_census_row("artifact_refresh.list_stale", &fixed),
+            CensusRow::Live("doc.list_stale".to_string())
+        );
+        assert_eq!(
+            resolve_census_row("no_such_tool.x", &fixed),
+            CensusRow::Unresolved,
+            "an unknown tool must be Unresolved (a failure), never skipped"
+        );
+        assert_eq!(
+            resolve_census_row("artifact_refresh.other", &fixed),
+            CensusRow::Unresolved,
+            "an unknown action under a renamed prefix must not be retired by the old name's entry \
+         in RETIRED_TOOL_NAMES"
+        );
+        assert!(matches!(
+            resolve_census_row("Edit", &fixed),
+            CensusRow::Retired(_)
+        ));
+        // The markdown retirements come from RETIRED_TOOL_NAMES, not from a second copy.
+        let from_table = RETIRED_TOOL_NAMES
+            .iter()
+            .find(|(name, _, _)| *name == "read_markdown")
+            .map(|(_, note, _)| *note)
+            .expect("RETIRED_TOOL_NAMES records read_markdown");
+        assert_eq!(
+            resolve_census_row("read_markdown", &fixed),
+            CensusRow::Retired(from_table)
+        );
+    }
+    /// Gate 2's decision is pinned here, because the gate cannot be: it reads the real corpus, which
+    /// is green, so a decision that always said yes would leave it green too. Each case below is one a
+    /// mutation of the decision (`false`, an operand forced true, `||` to `&&`, a `contains` waiver
+    /// match) gets wrong.
+    ///
+    /// The precondition asserts matter as much as the verdicts: "served without a waiver" is only a
+    /// test of the served arm if no waiver names the shape, and likewise the other way round.
+    #[cfg(feature = "librarian")]
+    #[test]
+    fn gate_two_refuses_a_gap_and_accepts_a_served_or_a_waived_shape() {
+        use crate::prompts::guide_index::GUIDE_INDEX;
+        let tracker = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let served_by = |topic: &str, shape: &str, probe: &serde_json::Value| {
+            !GUIDE_INDEX
+                .match_sections(topic, Some(shape), probe)
+                .is_empty()
+        };
+
+        // Served, not waived: accepted on the section alone.
+        assert!(served_by("tracker-conventions", "doc.get", &tracker));
+        assert!(!crate::prompts::shape_is_waived(
+            "tracker-conventions",
+            "doc.get"
+        ));
+        assert!(
+            shape_is_served_or_waived("tracker-conventions", "doc.get", &tracker),
+            "a shape a section serves needs no waiver"
+        );
+        // The same shape on a result that names no path is not served (`path~` reads the probe).
+        assert!(!served_by(
+            "tracker-conventions",
+            "doc.get",
+            &serde_json::json!({})
+        ));
+        assert!(
+            !shape_is_served_or_waived("tracker-conventions", "doc.get", &serde_json::json!({})),
+            "coverage must read the probe, not only the shape"
+        );
+
+        // Waived, not served: accepted on the waiver alone.
+        assert!(!served_by("tracker-conventions", "doc.graph", &tracker));
+        assert!(crate::prompts::shape_is_waived(
+            "tracker-conventions",
+            "doc.graph"
+        ));
+        assert!(
+            shape_is_served_or_waived("tracker-conventions", "doc.graph", &tracker),
+            "a shape a waiver names needs no section"
+        );
+
+        // Neither: REFUSED, on both declaring topics. This is the case that fails when the decision
+        // is forced to accept.
+        for topic in ["librarian", "tracker-conventions"] {
+            assert!(!served_by(topic, "doc.no_such_action", &tracker));
+            assert!(!crate::prompts::shape_is_waived(
+                topic,
+                "doc.no_such_action"
+            ));
+            assert!(
+                !shape_is_served_or_waived(topic, "doc.no_such_action", &tracker),
+                "a shape nothing serves and no waiver names must be refused on `{topic}`"
+            );
+        }
+
+        // A waiver naming a LONGER shape does not waive a prefix of it: `tracker-conventions` names
+        // `doc.update_entry`, and `doc.update_ent` is a substring of that.
+        assert!(crate::prompts::shape_is_waived(
+            "tracker-conventions",
+            "doc.update_entry"
+        ));
+        assert!(!served_by(
+            "tracker-conventions",
+            "doc.update_ent",
+            &tracker
+        ));
+        assert!(
+            !shape_is_served_or_waived("tracker-conventions", "doc.update_ent", &tracker),
+            "a waiver that merely contains the shape as a substring must not waive it"
+        );
+    }
+
+    /// The same decision through the gate's own loop body: a gap is recorded as uncovered and the pair
+    /// is counted either way, in the one function the gate calls. Fails if the recording is dropped
+    /// (`if false`), if the count is dropped, or if the verdict is not the one above.
+    #[cfg(feature = "librarian")]
+    #[test]
+    fn judge_shape_counts_every_pair_and_records_only_the_gaps() {
+        let tracker = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let mut judged = JudgedPairs::default();
+        let mut uncovered = Vec::new();
+
+        judge_shape(
+            "doc",
+            "tracker-conventions",
+            "doc.get",
+            &tracker,
+            &mut judged,
+            &mut uncovered,
+        );
+        assert!(uncovered.is_empty(), "served: {uncovered:?}");
+        judge_shape(
+            "doc",
+            "tracker-conventions",
+            "doc.graph",
+            &tracker,
+            &mut judged,
+            &mut uncovered,
+        );
+        assert!(uncovered.is_empty(), "waived: {uncovered:?}");
+        judge_shape(
+            "doc",
+            "tracker-conventions",
+            "doc.no_such_action",
+            &tracker,
+            &mut judged,
+            &mut uncovered,
+        );
+        assert_eq!(
+            uncovered.len(),
+            1,
+            "the gap must be recorded: {uncovered:?}"
+        );
+        assert!(
+            uncovered[0].starts_with("`doc.no_such_action` -> `tracker-conventions`"),
+            "{uncovered:?}"
+        );
+        assert_eq!(
+            judged.get(&("doc".to_string(), "tracker-conventions".to_string())),
+            Some(&3),
+            "every pair is counted, gap or not: {judged:?}"
+        );
+    }
+
+    /// The whole-word waiver matcher at the boundaries a `contains` gets wrong, and the ones a too
+    /// strict boundary would. `waiver_reason_names_a_shape_as_a_whole_word_not_a_substring` (in
+    /// `prompts`) holds the first group; these are the neighbour and punctuation cases a peer branch
+    /// pinned for its own matcher, checked here against ours.
+    #[test]
+    fn the_waiver_matcher_does_not_read_a_neighbour_or_a_path_as_the_shape() {
+        use crate::prompts::waiver_reason_names_shape as names;
+        // A longer token that begins or ends with the shape is not the shape.
+        assert!(!names("covers doc.update_entry only", "doc.update"));
+        assert!(!names("covers undoc.update", "doc.update"));
+        assert!(!names("covers x.doc.update", "doc.update"));
+        assert!(!names("covers doc.update.x", "doc.update"));
+        assert!(!names("see docs/issues/doc.update.md", "doc.update"));
+        // A sentence's full stop, a comma, a backtick or a parenthesis does not hide it.
+        assert!(names("ends a sentence with doc.graph.", "doc.graph"));
+        assert!(names("covers doc.graph, doc.link", "doc.graph"));
+        assert!(names("(doc.graph)", "doc.graph"));
+        assert!(names("`doc.graph`", "doc.graph"));
+        assert!(names("doc.graph", "doc.graph"));
+        // Shapes joined by a slash are one word to this matcher, so a waiver must separate them with
+        // a space or a comma (a boundary-scanning matcher would read both halves).
+        assert!(!names("covers doc.update/doc.move", "doc.move"));
     }
 
     /// Every DECLARED shape must name a real tool, and a real action on that tool.
@@ -15467,6 +16033,341 @@ mod guide_hint_tests {
             guide.chars().take(300).collect::<String>()
         );
         assert!(!guide.contains(pointer));
+    }
+    /// Archiving through `doc(action="move")` ships the `tracker-conventions` sections that
+    /// describe that flow, for a bug file and for a tracker.
+    ///
+    /// `move` answers `old_abs_path`/`new_abs_path` and no `abs_path`, so before the router
+    /// scanned those keys the call routed to `librarian` and these sections -- stage both
+    /// halves, re-point the citations -- were declared nowhere and reached nobody.
+    /// Driven through real `doc` calls because what routes is the RESULT's content, which a
+    /// `match_sections` probe bypasses.
+    ///
+    /// Two deliveries are asserted separately, because they come from different topics at
+    /// different times: the FIRST destructive `doc.move` of a session is held BEFORE it runs
+    /// and served `librarian` § Archiving / Moving Trackers (input-derivable, so the gate
+    /// cannot see the result); the identical re-issue executes and ships the
+    /// `tracker-conventions` sections the result's paths select. Each tracker case gets a
+    /// fresh server, since sections already spent in a session are not served again.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[tokio::test]
+    async fn moving_a_bug_file_or_a_tracker_ships_the_archive_sections() {
+        /// `(guide text served with the hold, guide text served after the executed move,
+        /// text of the create call's guide)`.
+        async fn create_then_move(kind: &str, from: &str, to: &str) -> (String, String, String) {
+            let (_dir, server) = make_server().await;
+            let created = call_tool(
+                &server,
+                "doc",
+                json!({
+                    "action": "create",
+                    "rel_path": from,
+                    "kind": kind,
+                    "title": "archive section probe",
+                    "body": "probe body"
+                }),
+            )
+            .await;
+            let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+                .expect("primary block is JSON")["id"]
+                .as_str()
+                .expect("create returns an id")
+                .to_string();
+            let move_call = json!({"action": "move", "id": id, "new_rel_path": to});
+
+            let held = call_tool(&server, "doc", move_call.clone()).await;
+            let first: Value = serde_json::from_str(&held[0].as_text().unwrap().text)
+                .expect("primary block is JSON");
+            assert_eq!(
+                first.get("executed"),
+                Some(&json!(false)),
+                "the first destructive doc.move of a session must be held, got {first}"
+            );
+
+            let moved = call_tool(&server, "doc", move_call).await;
+            let primary: Value = serde_json::from_str(&moved[0].as_text().unwrap().text)
+                .expect("primary block is JSON");
+            assert!(
+                primary.get("new_abs_path").is_some(),
+                "the re-issued move must have executed, got {primary}"
+            );
+            (
+                guide_blocks(&held).join(""),
+                guide_blocks(&moved).join(""),
+                guide_blocks(&created).join(""),
+            )
+        }
+
+        fn assert_ships(guide: &str, what: &str, wants: &[&str]) {
+            for want in wants {
+                assert!(
+                    guide.contains(want),
+                    "{what} must ship `{want}`, got {} B: {}",
+                    guide.len(),
+                    guide.chars().take(300).collect::<String>()
+                );
+            }
+            assert!(
+                !guide.contains("NOT auto-injected"),
+                "{what}: a section set is not a pointer"
+            );
+            assert!(
+                !guide.contains("Never suffix an id"),
+                "{what}: the whole guide must not ship"
+            );
+        }
+
+        // The hold serves `librarian`, never a tracker-conventions section.
+        let librarian_hold = "**Stage both halves: `git add -- <old> <new>`";
+        let tracker_stage = "**And stage BOTH halves of the move together";
+
+        let (held, after, created) = create_then_move(
+            "bug",
+            "docs/issues/2026-10-16-archive-probe.md",
+            "docs/issues/archive/2026-10-16-archive-probe.md",
+        )
+        .await;
+        assert_ships(&held, "the hold of a bug move", &[librarian_hold]);
+        assert!(
+            !held.contains(tracker_stage),
+            "the hold is input-derived and cannot carry a path-qualified section"
+        );
+        assert_ships(
+            &after,
+            "the executed move of a bug file",
+            &[
+                // one distinctive sentence per section, in document order
+                "Archive through the catalog",
+                tracker_stage,
+                "**Then re-point the citations, in the same commit as the move",
+                "**Verifying the sweep afterward needs a different pattern",
+                "sees BOTH forms, and tells you which is",
+                "Be precise about *why* a green run proves nothing here",
+            ],
+        );
+        assert!(
+            !after.contains(librarian_hold),
+            "the librarian section was spent at the hold and must not repeat"
+        );
+        assert!(
+            !after.contains("One file per bug."),
+            "the create's sections must not repeat on the move"
+        );
+        assert!(
+            created.contains("One file per bug."),
+            "premise: create ships it"
+        );
+
+        let (held, after, _) = create_then_move(
+            "tracker",
+            "docs/trackers/archive-probe.md",
+            "docs/trackers/archive/archive-probe.md",
+        )
+        .await;
+        assert_ships(&held, "the hold of a tracker move", &[librarian_hold]);
+        assert_ships(
+            &after,
+            "the executed move of a tracker",
+            &[
+                "Archive through the catalog",
+                tracker_stage,
+                "**Then re-point the citations, in the same commit as the move",
+            ],
+        );
+        // Its lead instruction is `doc.update`, the call that needs it; it stays pull-only.
+        assert!(
+            !after.contains("preferred path is in-place archival"),
+            "\u{a7} Archiving a tracker is waived and must not ship after a move"
+        );
+    }
+
+    /// The WORST-CASE `doc.move` delivery has its own byte budget, separate from the p50
+    /// session's.
+    ///
+    /// Archiving a bug file is the largest real draw of any single `doc` call: the hold
+    /// serves `librarian` § Archiving / Moving Trackers before the move runs, and the
+    /// re-issue then ships six `tracker-conventions` sections selected by the result's
+    /// paths. The p50 fixture cannot carry it: its `move` goes `docs/specs/` to
+    /// `docs/specs/`, which names no tracked path, and a p50 session does not archive bugs,
+    /// so folding a rare worst case into it would either raise its derived ceiling (a spec
+    /// amendment, and these budgets only move down) or hide a regression in the common
+    /// case behind the slack the rare one needs. Two populations, two ceilings.
+    ///
+    /// Counts every block after the primary on BOTH `move` calls (the hold and the
+    /// executed re-issue), in an identified session, which is the one that pays both. The
+    /// create that makes the target file is not counted: its sections are another shape's
+    /// and are disjoint from these (the move test above asserts they do not repeat).
+    ///
+    /// Same discipline as the p50 ceiling: the number is MEASURED, set a fixed margin
+    /// above, and raising it is a decision, not a fix; when it fires, shrink or split a
+    /// section. The fixture root must not reach the counted bytes (asserted), so the total
+    /// is a property of the guides and not of this machine's temp path.
+    /// docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md
+    #[tokio::test]
+    async fn a_bug_archive_move_stays_under_its_own_emission_byte_ceiling() {
+        // MEASURED 2026-10-17: 13,758 B (hold 2,271 B + executed 11,487 B), read from this
+        // test's own failure message at ceiling 0, plus the same 128 B margin the p50
+        // ceiling carries over its measurement. Not derived from section sizes: the six
+        // sections sum to about 9.6 KB and the rest is block wrappers and the librarian
+        // hold, which is why it is read off a run. Never raise it to fit.
+        const CEILING: usize = 13_886;
+
+        let (dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-10-17-budget-probe.md",
+                "kind": "bug",
+                "title": "archive budget probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+        let move_call = json!({
+            "action": "move", "id": id,
+            "new_rel_path": "docs/issues/archive/2026-10-17-budget-probe.md"
+        });
+
+        let held = call_tool(&server, "doc", move_call.clone()).await;
+        let first: Value =
+            serde_json::from_str(&held[0].as_text().unwrap().text).expect("primary is JSON");
+        assert_eq!(
+            first.get("executed"),
+            Some(&json!(false)),
+            "premise: the first destructive doc.move is held, got {first}"
+        );
+        let moved = call_tool_checked(&server, "doc", move_call, "move").await;
+
+        let (held_blocks, moved_blocks) = (guide_blocks(&held), guide_blocks(&moved));
+        let (held_bytes, moved_bytes): (usize, usize) = (
+            held_blocks.iter().map(String::len).sum(),
+            moved_blocks.iter().map(String::len).sum(),
+        );
+        let total = held_bytes + moved_bytes;
+
+        let root = dir.path().to_string_lossy().into_owned();
+        for b in held_blocks.iter().chain(&moved_blocks) {
+            assert!(
+                !b.contains(&root),
+                "a counted block carries the fixture root, so the total would measure this \
+                 machine's temp path: {}",
+                b.chars().take(200).collect::<String>()
+            );
+        }
+        // Non-vacuity, in the payload: a vanished section lowers the total, so a byte
+        // count alone moves the safe way when content disappears.
+        let all = held_blocks
+            .iter()
+            .chain(&moved_blocks)
+            .cloned()
+            .collect::<String>();
+        for want in [
+            "**Stage both halves: `git add -- <old> <new>`",
+            "**And stage BOTH halves of the move together",
+            "**Then re-point the citations, in the same commit as the move",
+            "**Verifying the sweep afterward needs a different pattern",
+            "sees BOTH forms, and tells you which is",
+            "Be precise about *why* a green run proves nothing here",
+        ] {
+            assert!(all.contains(want), "the worst case must ship `{want}`");
+        }
+
+        assert!(
+            total <= CEILING,
+            "a bug-archive move emitted {total} B after the primary (hold {held_bytes} B + \
+             executed {moved_bytes} B), ceiling {CEILING} B, margin {} B. Raising CEILING is \
+             a decision, not a fix: shrink or split a `doc.move` section in \
+             tracker-conventions or librarian, or narrow a `serves:` declaration.",
+            CEILING.saturating_sub(total)
+        );
+    }
+
+    /// A real `doc(action="list_stale")` against an augmented tracker is served the
+    /// librarian refresh-cycle section, not the `tracker-conventions` preamble.
+    ///
+    /// The result's `items[].abs_path` names a `docs/trackers/` file, which used to route
+    /// the call to `tracker-conventions`; no section there declares `doc.list_stale`, so the
+    /// caller got the preamble and the next-action text (gather, synthesize, update with
+    /// `commit_refresh=true`) stayed unserved on that call. Driven through real `doc` calls
+    /// because what routes is the RESULT's content. The tracker is created WITH its
+    /// augmentation so no earlier call has already spent `librarian` § Augmentation
+    /// Lifecycle (which `doc.augment` also declares).
+    /// docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md
+    #[tokio::test]
+    async fn list_stale_on_an_augmented_tracker_ships_the_refresh_cycle_not_a_preamble() {
+        let (_dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/trackers/stale-probe.md",
+                "kind": "tracker",
+                "title": "stale probe",
+                "body": "probe body",
+                "augment": {"prompt": "keep the probe"}
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+
+        let listed = call_tool(
+            &server,
+            "doc",
+            json!({"action": "list_stale", "threshold_hours": 0}),
+        )
+        .await;
+        let primary: Value =
+            serde_json::from_str(&listed[0].as_text().unwrap().text).expect("primary is JSON");
+        let items = primary["items"]
+            .as_array()
+            .expect("list_stale returns items");
+        assert!(
+            items.iter().any(|i| i["id"] == json!(id)
+                && i["abs_path"]
+                    .as_str()
+                    .is_some_and(|p| p.replace('\\', "/").contains("docs/trackers/"))),
+            "premise: the result names the augmented tracker under docs/trackers/, got {primary}"
+        );
+
+        let guide = guide_blocks(&listed).join("");
+        assert!(
+            guide.contains("**Refresh cycle** (run by the agent, not automatic)"),
+            "list_stale must ship the refresh cycle, got {} B: {}",
+            guide.len(),
+            guide.chars().take(300).collect::<String>()
+        );
+        assert!(
+            !guide.contains("no section declares this call's shape"),
+            "list_stale must not be served a tracker-conventions preamble"
+        );
+
+        let again = call_tool(
+            &server,
+            "doc",
+            json!({"action": "list_stale", "threshold_hours": 0}),
+        )
+        .await;
+        assert!(
+            guide_blocks(&again).is_empty(),
+            "the spent section must not ship again, got {:?}",
+            guide_blocks(&again)
+                .join("")
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
     }
 
     /// A guide too large to auto-inject is delivered by SECTION, never whole, and the

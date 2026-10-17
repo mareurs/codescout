@@ -228,6 +228,14 @@ pub(crate) fn tally(rows: &[ProbeRow]) -> Tally {
 // `doctor.exposure_threshold` — a floor that DOES drop rows of the result — is now
 // `Coverage::NoMarker`, with its bug filed.
 //
+// AMENDED 2026-10-17: both `NoMarker` doctor rows filed on 2026-10-16 are fixed and are
+// `Probed` now. `doctor.exposure_threshold` publishes `summary.below_exposure_floor`
+// (per-check counts of the candidates the floor withheld, split in-scope / out-of-scope,
+// the floor itself, and the scope the counts range over), and
+// `doctor.recently_touched_walk` publishes `walk_truncated` (the ceiling bit INSIDE the
+// settle window), `walk_ceiling_reached` and `walk_unavailable` in
+// `catalog_health.open_bug_source_citations`.
+//
 // The rule, once: a floor is a `RESULT_CAP` iff what it suppresses is rows of the result.
 //
 // `read_file.json_path_route_room` was struck by the same rule on 2026-10-16. Its floor only
@@ -481,10 +489,10 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         id: "preview.plan_headings",
         coverage: Coverage::Untested(
             "`MAX_HEADINGS` is exercised past its bound by `heading_truncation_is_signaled` \
-             (`src/librarian/preview/plan.rs:168`, 25 headings vs 20), which asserts the \
+             (`src/librarian/preview/plan.rs`, its `tests` module, 25 headings vs 20), which asserts the \
              marker on production output from `headings::stamp_truncation`. It is not \
              citable: that function name is declared identically in \
-             `preview/default.rs:57`, `preview/plan.rs:168` and `preview/spec.rs:76`, and \
+             `preview/default.rs:57`, `preview/plan.rs` (`tests` module) and `preview/spec.rs:76`, and \
              the gate resolves a `cited_test` by first match in `git ls-files src` order, \
              so the citation would bind to `default.rs:57` — the test for the \
              sibling `preview.default_headings` row. Citable as soon as one of the three \
@@ -492,36 +500,33 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
-        // A cap that truncates and emits NO marker at all. Flagged to the whole-branch
-        // review as arguably an `IC-13` MEMBER rather than a coverage gap.
+        // Was `NoMarker` (docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md):
+        // the cut now stamps `tasks.open_next_truncated` + `tasks.open_total` in `extract`,
+        // `src/librarian/preview/plan.rs`.
+        //
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds 5 open tasks against `OPEN_NEXT_LIMIT` 3; the one-over boundary is
+        // pinned by `open_next_cut_by_exactly_one_task_is_still_signaled`.
         id: "preview.plan_open_next",
-        coverage: Coverage::NoMarker {
-            reason: "`OPEN_NEXT_LIMIT` (3) truncates the `open_next` vector at \
-             `src/librarian/preview/plan.rs:41` and no companion field discloses the drop \
-             (the true open count is derivable as `tasks.total - tasks.done`, but nothing \
-             says to), so the only observable is the array's own length. Every test in \
-             tracked `src/` therefore reads the field into a `let` and asserts on that length \
-             (`open_next_returns_first_three_unchecked`, `plan.rs:108`, drives 4 tasks \
-             past the cap but asserts `open.len(), 3`), while the one assertion naming \
-             `[\"tasks\"][\"open_next\"]` inline (`plan.rs:130`) seeds zero tasks. Uncitable \
-             until the cap emits a marker of its own.",
-            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.tasks.open_next_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "open_next_cut_is_signaled_with_the_true_open_count",
         },
     },
     ProbeRow {
-        // Corrected: task_text_truncated_to_limit (plan.rs) seeds "x".repeat(150) against
-        // TASK_TEXT_MAX=100 and asserts <=, which DOES red if truncation is removed
-        // outright — it is monotone under TIGHTENING (over-truncation), not removal. The
-        // real IC-13 gap is different: truncate_task_text appends no ellipsis or other
-        // marker at the caller-visible surface, so a genuinely-cut task and a genuinely-
-        // short one are indistinguishable to the caller reading the result.
+        // Was `NoMarker` (same issue file): `truncate_task_text` now appends `…` to a cut
+        // task, `src/librarian/preview/plan.rs`.
+        //
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited
+        // test seeds a task of `TASK_TEXT_MAX` + 50 characters; the character-vs-byte and
+        // one-over boundaries are pinned by `a_task_one_character_over_the_limit_is_cut_and_marked`
+        // and `a_multibyte_task_within_the_character_limit_is_not_marked_as_cut`.
         id: "preview.plan_task_text",
-        coverage: Coverage::NoMarker {
-            reason: "truncate_task_text appends no ellipsis or other marker at the caller's \
-             surface, so a caller cannot tell a cut task from a genuinely short one; the \
-             length-cap itself is tested (task_text_truncated_to_limit), but that is \
-             orthogonal to the marker gap IC-13 is about",
-            bug: "docs/issues/2026-10-16-plan-preview-open-next-and-task-text-cut-without-a-marker.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("…"),
+            mutation: Mutation::Killed,
+            cited_test: "a_cut_task_text_ends_with_an_ellipsis",
         },
     },
     // -- src/librarian/tools/doctor.rs --
@@ -537,20 +542,18 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // A suppression FLOOR that drops ROWS OF THE RESULT (doctor's worklist entries below
         // it), which is what makes it a `RESULT_CAP` at all: a floor that merely gates an
         // advisory beside a whole result withholds nothing from it (see
-        // `context.attestation_exposure`, `NOT_A_CAP`). The floor is deliberate; the defect
-        // is that nothing counts what it dropped.
+        // `context.attestation_exposure`, `NOT_A_CAP`). The floor is deliberate; it now
+        // counts what it dropped, per check and split by whether the active scope would
+        // have shown the candidate, in `summary.below_exposure_floor.{in_scope,out_of_scope}`,
+        // and names the population the count ranges over. The cited test has no active
+        // project (everything in scope); `call_splits_the_withheld_count_by_the_active_scope`
+        // is the project-rooted case that pins the split.
+        // docs/issues/2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md
         id: "doctor.exposure_threshold",
-        coverage: Coverage::NoMarker {
-            reason: "`EXPOSURE_THRESHOLD` (5) is a suppression floor, not a truncating ceiling: \
-             `src/librarian/tools/doctor.rs:4553` (and `:4699`, `:4828`) drops rows *below* it \
-             and no field reports how many were dropped, while the marker \
-             `$.summary.by_check.entry_conditional_past_due` counts rows that survived. \
-             The marker is therefore observable non-zero only when the cap did not bite. \
-             The one test that drives exposure below the floor \
-             (`conditional_past_due_fires_exactly_at_the_exposure_threshold`, \
-             `doctor.rs:18868`) calls `scan_conditional_past_due` directly rather than \
-             `call()`, so no `summary.by_check` object exists in its output at all.",
-            bug: "docs/issues/2026-10-16-doctor-exposure-floor-drops-worklist-rows-without-a-count.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.summary.below_exposure_floor.in_scope"),
+            mutation: Mutation::Killed,
+            cited_test: "call_counts_the_candidates_the_exposure_floor_withheld_and_names_its_scope",
         },
     },
     ProbeRow {
@@ -587,48 +590,53 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     ProbeRow {
         id: "format.shape_keys",
         coverage: Coverage::Untested(
-            "no test references describe_payload_shape's key-count cap or seeds an object \
-             with enough keys to reach it",
+            "no test seeds an OBJECT with more than MAX_KEYS keys to drive describe_payload_shape's \
+             key line past its bound; its '… +N more' marker exists, so a test is writable. \
+             Covers the object branch only: the array branch's `item keys:` cut is \
+             format.shape_item_keys",
         ),
     },
     ProbeRow {
-        // Verified: `the_generic_fallback_describes_the_payload_instead_of_the_envelope`
-        // (format.rs) DOES drive this cap past its bound — it seeds a 20,000-char `body`
-        // against MAX_SCALAR_LEN=60 and asserts `!shape.contains("xxxxxxxxxx")` (the raw
-        // value is never inlined) and `shape.len() < 600`; raising or removing the cap
-        // reds both. But `describe_payload_shape`'s scalars filter (`format.rs`) SKIPS an
-        // over-length string from the `scalars:` line entirely — it emits no "+N more" or
-        // any other marker that arrives when the cap fires, unlike MAX_KEYS's "… +{} more".
-        // `Coverage::Probed`'s contract (this file, `Marker` doc comment) requires "a
-        // behavioural test... asserts the marker arrives" — a positive, present signal.
-        // This cap's only real test evidence is an ABSENCE assertion, which does not fit;
-        // inventing a `TextContains` value here would claim something never arrives as
-        // though it does. Classified `NoMarker` (it was `Deferred` until the 2026-10-16 split),
-        // with the honest reason, not `Probed`.
-        id: "format.shape_scalar_len",
-        coverage: Coverage::NoMarker {
-            reason: "the_generic_fallback_describes_the_payload_instead_of_the_envelope drives a \
-             20,000-char scalar past MAX_SCALAR_LEN=60 and asserts the raw value is never \
-             inlined, but describe_payload_shape emits no marker that arrives when the cap \
-             fires (an over-length scalar is dropped from the scalars: line with no count, \
-             unlike MAX_KEYS's '… +N more'); the only test evidence is an absence \
-             assertion, which Coverage::Probed's marker contract does not cover",
-            bug: "docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md",
+        // Split from `format.shape_keys` (2026-10-17) while it still printed no count; fixed
+        // the same day (`docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`):
+        // the array branch's `item keys:` line now ends `, … +N more entries` when the first
+        // item has more than MAX_ITEM_KEYS keys. The cited test seeds THIRTY keys and asserts
+        // the marker on the `item keys:` line itself, and that exactly 24 keys stay silent.
+        // Mutation: deleting the marker emission (the `if first.len() > keys.len()` push)
+        // reds the cited test.
+        id: "format.shape_item_keys",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more entries"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_payload_shape_counts_item_keys_past_the_cap",
         },
     },
     ProbeRow {
-        // Reclassified from `Untested` on a use-site read, 2026-10-16: the reason this row
-        // carried named only the missing test, but `describe_payload_shape` applies
-        // `.take(MAX_SCALARS)` to its scalar line (`format.rs:213-217`) and appends no count
-        // — the same non-disclosure as `format.shape_scalar_len`, which the key line does not
-        // share (it ends `… +N more`). No test can assert a marker that is not emitted.
+        // Was `NoMarker` until `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`:
+        // an over-length string was filtered out of the scalar line with no count. The line
+        // now ends `… +N more entries`, and the cited test seeds a 60-byte string (admitted)
+        // beside a 61-byte one (dropped) with FOUR scalar candidates against a cap of eight,
+        // so only this bound can bite. Mutation: dropping `too_long` from `cap_scalars`' count
+        // reds the cited test, and so does zeroing it at the top-level call. The nested
+        // (`flat_scalars`) call site is NOT exercised by this test — that site is killed by
+        // `describe_payload_shape_counts_what_it_drops_inside_a_nested_object`.
+        id: "format.shape_scalar_len",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more entries"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_payload_shape_counts_over_length_scalars_it_drops",
+        },
+    },
+    ProbeRow {
+        // Was `NoMarker` until the same fix: `.take(MAX_SCALARS)` cut every scalar past the
+        // eighth silently. The cited test seeds ELEVEN short numbers (none over-length, so
+        // only the count cap bites) and asserts the line ends `… +3 more entries`. Mutation:
+        // dropping the `cut` term from `cap_scalars`' count reds it.
         id: "format.shape_scalars",
-        coverage: Coverage::NoMarker {
-            reason: "`.take(MAX_SCALARS)` on describe_payload_shape's scalar line drops every \
-             scalar past the eighth and nothing says so (the key line, by contrast, ends \
-             '… +N more'); no test seeds more than the cap, and none could assert a marker \
-             that is not emitted",
-            bug: "docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("more entries"),
+            mutation: Mutation::Killed,
+            cited_test: "describe_payload_shape_counts_scalars_past_the_cap",
         },
     },
     // -- src/tools/symbol/references.rs --
@@ -640,13 +648,16 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         ),
     },
     ProbeRow {
+        // Reclassified from `NoMarker`: `corroborate_with_cap` now reports a walk the cap
+        // stopped with candidates left (`CorroborationScan::cut_short_at`) and `References`
+        // turns an empty-but-unfinished scan into a `completeness_warning`. Driven red
+        // against the pre-fix code by the cited test (5,001 files, one past the cap).
+        // docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md
         id: "references.corroborate_files_scan",
-        coverage: Coverage::NoMarker {
-            reason: "bounds a workspace file SCAN inside corroborate_zero_references; exceeding it \
-             under-scans rather than reporting a smaller number, so a false zero \
-             (\"no references\") is indistinguishable from \"scan stopped early\" — no \
-             fixture currently isolates the two",
-            bug: "docs/issues/2026-10-16-references-corroboration-scan-cap-yields-a-false-zero.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("stopped after 5000"),
+            mutation: Mutation::Killed,
+            cited_test: "references_zero_from_a_corroboration_scan_that_hit_its_cap_is_warned",
         },
     },
     ProbeRow {
@@ -661,7 +672,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         // Verified against `enforce_file_cap` in
         // `src/librarian/tools/audit_doc_refs/mod.rs`: exceeding this cap is a LOUD
         // `RecoverableError` refusal, not a silent truncation — the opposite of the
-        // false-zero failure mode `audit_doc_refs.basename_index` names below. The
+        // false-zero failure mode `audit_doc_refs.basename_index` named before its fix. The
         // existing `glob_explosion_returns_recoverable` test drives the cap past its
         // bound (`enforce_file_cap(5, 1)`) and asserts `msg.contains("cap") &&
         // msg.contains('5')` — NOT "glob matched" (that phrase is unasserted
@@ -676,13 +687,27 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // Was `NoMarker` until the 2026-10-17 fix of
+        // `docs/issues/2026-10-16-audit-doc-refs-basename-index-cap-reports-existing-files-missing.md`:
+        // an index that stopped at the cap resolved fewer refs and the un-indexed tail's
+        // refs came back `Missing`, a claim of absence about files that exist. The walk now
+        // reports whether it left a FILE out, and `try_basename_fallback` turns a bare-basename
+        // miss on such an index into `Unknown` (`basename_index_truncated`).
+        //
+        // The cap is driven past its bound through `call_with_index_cap` (the injectable seam;
+        // the env override `LIBRARIAN_AUDIT_MAX_INDEXED_FILES` is read only in `call`, so no
+        // `set_var`). The marker is `scan_meta.basename_index_truncated`, the flag beside the
+        // capped result; the cited test also asserts the refs are not `missing`.
+        //
+        // Mutation, 2026-10-17: (a) the `"basename_index_truncated"` key dropped from
+        // `build_response` -> the cited test red at its `scan_meta` assertion; (b) the
+        // truncated arm of `try_basename_fallback` disabled -> the cited test AND
+        // `resolver_basename_miss_on_truncated_index_is_unknown_not_missing` red. Both reverted.
         id: "audit_doc_refs.basename_index",
-        coverage: Coverage::NoMarker {
-            reason: "bounds build_basename_index's own scan; an index that stopped early \
-             resolves fewer refs rather than warning indexing was incomplete — \
-             a false zero on a truncated index reads as 'no such basename', not 'index \
-             incomplete', and no fixture currently drives it past the cap",
-            bug: "docs/issues/2026-10-16-audit-doc-refs-basename-index-cap-reports-existing-files-missing.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.scan_meta.basename_index_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "existing_file_beyond_index_cap_is_not_reported_missing",
         },
     },
     // -- src/librarian/tools/audit_log.rs --
@@ -916,7 +941,7 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         //
         // UNIQUENESS: the semantically obvious citation here is
         // `heading_truncation_is_signaled`, which is declared THREE times in tracked
-        // `src/` (`preview/default.rs:57`, `plan.rs:168`, `spec.rs:76`). The uniquely
+        // `src/` (`preview/default.rs:57`, `plan.rs` `tests` module, `spec.rs:76`). The uniquely
         // named sibling below is cited instead; see the `preview.plan_headings` row for
         // why the collision is disqualifying rather than merely untidy.
         id: "preview.default_headings",
@@ -1302,13 +1327,24 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/tools/symbol/call_graph/mod.rs --
     ProbeRow {
+        // Reclassified from `NoMarker`: `lookup_pos_via_ts_workspace` now returns
+        // `WorkspaceScan::Incomplete` for a walk the cap stopped with candidates left,
+        // `lookup_pos` records the symbol, `CallGraph::call` puts a `completeness_warning`
+        // in the result and `format_compact` renders it FIRST (so the overflow summary's
+        // `truncate_compact` cannot cut it). The cited test drives `CallGraph::call` over
+        // 5,001 files and asserts the production text ("stopped after 5000") in both the
+        // JSON and the compact rendering. Mutation: deleting `attach_scan_incomplete` from
+        // `CallGraph::call` reds it, as does dropping the `scan_coverage.merge` in
+        // `lookup_pos` (re-observed 2026-10-17 after the coverage rewrite). It does NOT red
+        // when the walk ignores `admit()`'s refusal and reads on: the disclosure lives in
+        // `ScanBudget::admit`, so that bound (the cap as a performance guard) is held by
+        // `the_cap_stops_the_walk_instead_of_only_reporting_it`.
+        // docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md
         id: "call_graph.workspace_files_scan",
-        coverage: Coverage::NoMarker {
-            reason: "bounds CachedResolver::lookup_pos_via_ts_workspace's own file-scan; \
-             exceeding it returns fewer or no candidate positions rather than \
-             reporting an incomplete scan — a false zero indistinguishable from 'no \
-             callers exist', and no fixture currently isolates the two",
-            bug: "docs/issues/2026-10-16-call-graph-workspace-scan-cap-returns-a-false-no-callers.md",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("stopped after 5000"),
+            mutation: Mutation::Killed,
+            cited_test: "call_graph_reports_a_caller_it_could_not_place_because_the_walk_hit_its_cap",
         },
     },
     // -- src/agent/build_check.rs --
@@ -1328,19 +1364,23 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     // -- src/librarian/tools/doctor.rs --
     ProbeRow {
+        // The walk's ceiling is reached on every call in this repo: measured 2026-10-17,
+        // 7,739 commits against 4,000, and the 4,000th/4,001st commit in `git log
+        // --date-order` is ~51 days older than the 7-day cutoff (the 2026-09-09 figures,
+        // 5,582 commits and a tail ~115 days back, are superseded). So the bare "ceiling
+        // reached" is the ordinary state here and says nothing; the row's marker is
+        // `walk_truncated`, which is `true` only when the ceiling bit while the last commit
+        // read was still INSIDE the window. `walk_ceiling_reached` publishes the ordinary
+        // state beside it. `paths_touched_since` returns a `TouchedWalk`; the cited test
+        // drives `call()` over 4,002 in-window commits against the real 4,000 bound, and
+        // `open_bug_cited_from_source_health_says_when_the_walk_was_truncated` injects a small
+        // ceiling through `scan_open_bug_cited_from_source_walking` for the harmless side.
+        // docs/issues/2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md
         id: "doctor.recently_touched_walk",
-        coverage: Coverage::NoMarker {
-            reason: "the ceiling IS reached on every call in this repo — 5,582 commits against \
-             a 4,000 walk, measured 2026-09-09 — and `paths_touched_since` returns a \
-             bare HashSet, breaking at the bound with nothing marking the set partial. \
-             What blocks a probe is reachability of the DEFECT, not of the cap: the walk \
-             is TIME-sorted, so the truncated tail's newest member is 2026-05-17, ~115 \
-             days behind the 7-day cutoff every caller passes, and no input available \
-             here makes the truncation change an answer. Driving it needs a fixture repo \
-             of >4,000 commits whose committer-time order is non-monotonic across the \
-             boundary — precisely the condition the ceiling exists to tolerate, per \
-             `paths_touched_since`'s own doc comment",
-            bug: "docs/issues/2026-10-16-doctor-recently-touched-walk-returns-a-bare-set-at-its-cap.md",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.catalog_health.open_bug_source_citations.walk_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "call_publishes_walk_truncated_when_the_production_ceiling_bites_in_the_window",
         },
     },
     // -- src/tools/memory/mod.rs --
