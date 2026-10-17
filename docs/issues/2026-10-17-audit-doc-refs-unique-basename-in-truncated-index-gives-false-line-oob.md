@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: audit_doc_refs file_line/file_symbol treat a single indexed copy as THE file when the basename index is truncated, so a twin in the un-indexed tail gives a false LineOob/SymbolMissing
 owners:
 - marius
@@ -8,6 +8,7 @@ tags:
 - cluster/capped-result-presented-as-complete
 opened: 2026-10-17
 severity: low
+closed: 2026-10-17
 ---
 
 ## Summary
@@ -29,6 +30,8 @@ Observed 2026-10-17 on the branch that fixed the sibling bug, with a throwaway t
 - cap 1: `"ref_kind":"file_line","verdict":"line_oob","severity":"med","severity_reason":"policy_default"`
 - uncapped: `"verdict":"ambiguous_basename","severity":"med","severity_reason":"basename_ambiguous","notes":"basename matches 2 files: a/x.py, b/x.py"`
 
+Re-verified at `afbe8abf` before fixing, by the new tests going red: `file_line` gave `LineOob`/`Med` (both resolver-level and end to end), `file_symbol` (mock LSP, empty symbols) gave `SymbolMissing`/`Med`, and `file_path` gave `ResolvedBasename` with the note `resolved by basename to pkg/bar.py` and no hint that the index was truncated.
+
 Code: `src/librarian/tools/audit_doc_refs/resolver.rs`, `unique_basename_path` (`[only] => Some(ctx.repo_root.join(only))`), called from `resolve_file_line` and `resolve_file_symbol` before `try_basename_fallback`. `file_symbol` shares the call and the match arm; only `file_line` was run.
 
 ## Root cause
@@ -37,16 +40,30 @@ Code: `src/librarian/tools/audit_doc_refs/resolver.rs`, `unique_basename_path` (
 
 ## Fix
 
-Not designed. Candidate: in `unique_basename_path`, return `None` when `ctx.basename_index_truncated` (so the caller falls through to `try_basename_fallback`), and have `try_basename_fallback` report a single indexed copy on a truncated index as `ResolvedBasename` with a note that uniqueness is unproven, or as `Unknown`/`BasenameIndexTruncated`. Decide which, with a test per ref kind.
+Fixed 2026-10-17. On a truncated index a single indexed copy is no longer treated as THE file:
+
+- `file_line` / `file_symbol`: when the file came from a lone entry of a truncated index (`indexed_copy_only`), a NEGATIVE on it (`line_oob` / `symbol_missing`) becomes `Unknown`, `Low`, `SeverityReason::BasenameIndexTruncated`, with notes naming the copy examined, the truncation and the env override (`resolver::indexed_copy_unproven`). A positive on the copy stays `Resolved` (it can only be a false "ok", never a false "broken"). `Low` is never above the `Med` the old verdict carried.
+- `file_path`: the verdict stays `ResolvedBasename` (the file exists, and the verdict is exempt from every gate), but on a truncated index the note says the copy is the only one *found*, not proven the only one. Making it `Unknown` would put every basename citation of a >50,000-file repo under `--fail-on low`; this is a judgement call, flagged in the commit report.
+- A complete index is unchanged byte for byte (asserted); refs containing `/` never reach this path (asserted for `file_line`).
 
 ## Tests added
 
-None — filing only (a throwaway probe test was run and removed).
+In `src/librarian/tools/audit_doc_refs/resolver.rs`:
+
+- `resolver_line_miss_in_single_indexed_copy_of_truncated_index_is_unknown` (negative -> unknown, positive stays resolved, complete index keeps `line_oob`/med)
+- `resolver_symbol_miss_in_single_indexed_copy_of_truncated_index_is_unknown` (mock LSP; complete index keeps `symbol_missing`)
+- `resolver_single_copy_basename_hit_on_truncated_index_says_uniqueness_is_unproven` (complete-index note unchanged)
+- `resolver_slashed_line_ref_is_unaffected_by_a_truncated_index`
+
+In `src/librarian/tools/audit_doc_refs/mod.rs`:
+
+- `single_indexed_copy_on_truncated_index_does_not_give_a_false_line_oob` (end to end through `call_with_index_cap`, with a complete-index control that yields `ambiguous_basename`)
+
+Red first at HEAD before the fix: the line, symbol, note and end-to-end tests failed (`left: LineOob right: Unknown`, `left: SymbolMissing right: Unknown`, note `resolved by basename to pkg/bar.py` without the truncation caveat); the slashed-ref test passed as a baseline. Then each guarded site was mutated once and observed red: `file_line` flag forced false (line and end-to-end tests red), `file_symbol` flag forced false (symbol test red), `file_path` note branch disabled (note test red).
 
 ## Resume
 
-1. Decide the verdict for a single indexed copy on a truncated index (resolved-with-caveat vs unknown) for `file_path` as well: `resolve_file_path` returns `ResolvedBasename` with the note "resolved by basename to <path>" and says nothing of uniqueness, which is the same unproven claim at `low`.
-2. Fix `unique_basename_path`, then add the cap-driven e2e test through `call_with_index_cap`.
+None outstanding.
 
 ## References
 

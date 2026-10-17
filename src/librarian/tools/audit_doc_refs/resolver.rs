@@ -257,7 +257,17 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
             verdict: Verdict::ResolvedBasename,
             severity: Severity::Low,
             severity_reason: SeverityReason::BasenameMatch,
-            notes: Some(format!("resolved by basename to {}", matches[0].display())),
+            notes: Some(if ctx.basename_index_truncated {
+                // Exactly one INDEXED copy is not proof of exactly one copy: say so.
+                format!(
+                    "resolved by basename to {} (the only copy in the basename index, which \
+                     was truncated at its file cap, so a same-named file may exist in the \
+                     un-indexed part of the tree; cite the path to be certain)",
+                    matches[0].display()
+                )
+            } else {
+                format!("resolved by basename to {}", matches[0].display())
+            }),
         }),
         n => {
             let preview: Vec<String> = matches
@@ -284,6 +294,32 @@ fn try_basename_fallback(raw_ref: &str, ctx: &ResolveCtx<'_>) -> Option<Resoluti
         }
     }
 }
+/// The verdict for a `path:line` / `path::symbol` ref whose file was taken from a SINGLE
+/// entry of a TRUNCATED basename index, when the check against that copy came out negative.
+///
+/// One indexed copy is "a" copy, not "the" copy: the index is a prefix of the tree, so a
+/// same-named twin — the one the doc may actually cite — can sit in the un-indexed tail.
+/// Judging the line or symbol against the copy we happen to see and calling it
+/// `line_oob`/`symbol_missing` would be a false claim about a file the doc may cite
+/// correctly. A POSITIVE on the copy is left alone (it can only be a false "ok", never a
+/// false "broken"); only the negative is demoted, to `Unknown` at `Low` — never above the
+/// `Med` the old verdict carried.
+fn indexed_copy_unproven(copy: &Path, ctx: &ResolveCtx<'_>) -> Resolution {
+    let rel = copy.strip_prefix(ctx.repo_root).unwrap_or(copy);
+    Resolution {
+        verdict: Verdict::Unknown,
+        severity: Severity::Low,
+        severity_reason: SeverityReason::BasenameIndexTruncated,
+        notes: Some(format!(
+            "the only copy in the basename index is {}, but the index was truncated at its \
+             file cap, so a same-named file the doc may mean can exist in the un-indexed part \
+             of the tree; the line/symbol was not judged against it; cite the path to verify \
+             (LIBRARIAN_AUDIT_MAX_INDEXED_FILES raises the cap)",
+            rel.display()
+        )),
+    }
+}
+
 /// The single indexed path for a basename-shaped ref, if exactly one exists.
 ///
 /// `try_basename_fallback` answers "what verdict?"; this answers "which file?",
@@ -352,10 +388,11 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // missing. Without this the two ref kinds disagree about identical path
     // parts — see
     // `docs/issues/archive/2026-08-06-audit-doc-refs-misreads-symbol-paths-as-files.md`.
-    let path = if direct.exists() {
-        direct
+    let (path, indexed_copy_only) = if direct.exists() {
+        (direct, false)
     } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
-        resolved
+        // One indexed copy. On a truncated index that is not proof of uniqueness.
+        (resolved, ctx.basename_index_truncated)
     } else {
         return try_basename_fallback(path_str, ctx).unwrap_or_else(|| {
             verdict_with_drops_for_ref(
@@ -379,7 +416,11 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         .map(|s| s.lines().count() as u32)
         .unwrap_or(0);
     if start == 0 || end == 0 || start > end || end > total {
-        verdict_with_drops(Verdict::LineOob, Path::new(&c.md_file), ctx.memory_globs)
+        if indexed_copy_only {
+            indexed_copy_unproven(&path, ctx)
+        } else {
+            verdict_with_drops(Verdict::LineOob, Path::new(&c.md_file), ctx.memory_globs)
+        }
     } else {
         Resolution {
             verdict: Verdict::Resolved,
@@ -553,10 +594,10 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     // than claiming the file is gone. The comment above used to assert this while
     // only the unique half was implemented — see the `else` arm below.
     let direct = ctx.repo_root.join(path_str);
-    let path = if direct.exists() {
-        direct
+    let (path, indexed_copy_only) = if direct.exists() {
+        (direct, false)
     } else if let Some(resolved) = unique_basename_path(path_str, ctx) {
-        resolved
+        (resolved, ctx.basename_index_truncated)
     } else {
         // Ambiguous is not missing. `unique_basename_path` answers "which file?" and so
         // returns None for BOTH zero matches and two-or-more — which meant this branch
@@ -656,6 +697,10 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                         syms.len()
                     )),
                 }
+            } else if indexed_copy_only {
+                // Absent from the one copy we could see; the doc may cite a twin in the
+                // un-indexed tail. See `indexed_copy_unproven`.
+                indexed_copy_unproven(&ast_path, ctx)
             } else {
                 verdict_with_drops(
                     Verdict::SymbolMissing,
@@ -2574,6 +2619,160 @@ mod tests {
         );
         assert_eq!(r.verdict, Verdict::Unknown);
         assert_eq!(r.severity, Severity::Low, "memory drop must survive");
+    }
+    /// A truncated index is a prefix of the tree, so a SINGLE indexed copy of a basename is
+    /// not proof the file is unique: a twin may sit in the un-indexed tail. Range-checking
+    /// the one copy we can see and reporting `line_oob` would be a false claim about a file
+    /// the doc may cite correctly. A negative on the copy is therefore `Unknown`; a positive
+    /// stays `Resolved`; a complete index is unchanged.
+    #[test]
+    fn resolver_line_miss_in_single_indexed_copy_of_truncated_index_is_unknown() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a")).unwrap();
+        std::fs::write(tmp.path().join("a/x.py"), "1\n2\n3\n").unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert("x.py".to_string(), vec![std::path::PathBuf::from("a/x.py")]);
+        let mk = |truncated: bool, index| ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: truncated,
+            gitignore: None,
+        };
+
+        let truncated = mk(true, index.clone());
+        let r = resolve_ref(
+            &cand("x.py:50", "docs/spec.md", RefKind::FileLine),
+            &truncated,
+        );
+        assert_eq!(r.verdict, Verdict::Unknown, "{r:?}");
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason, SeverityReason::BasenameIndexTruncated);
+        let notes = r.notes.expect("the scope must be named");
+        assert!(
+            notes.contains("a/x.py") && notes.contains("truncated"),
+            "notes must name the copy examined and the truncation: {notes}"
+        );
+        // A positive on the copy we can see is still a positive.
+        let r = resolve_ref(
+            &cand("x.py:2", "docs/spec.md", RefKind::FileLine),
+            &truncated,
+        );
+        assert_eq!(r.verdict, Verdict::Resolved);
+
+        // Silence on a trustworthy negative: a complete index keeps `line_oob`.
+        let complete = mk(false, index);
+        let r = resolve_ref(
+            &cand("x.py:50", "docs/spec.md", RefKind::FileLine),
+            &complete,
+        );
+        assert_eq!(r.verdict, Verdict::LineOob);
+        assert_eq!(r.severity, Severity::Med);
+    }
+
+    /// The `file_symbol` twin of the line test: the symbol is absent from the one indexed
+    /// copy, but the doc may cite the twin in the un-indexed tail.
+    #[test]
+    fn resolver_symbol_miss_in_single_indexed_copy_of_truncated_index_is_unknown() {
+        use crate::lsp::mock::{MockLspClient, MockLspProvider};
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a")).unwrap();
+        std::fs::write(tmp.path().join("a/foo.rs"), "pub fn bar() {}\n").unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "foo.rs".to_string(),
+            vec![std::path::PathBuf::from("a/foo.rs")],
+        );
+        let run = |truncated: bool| {
+            // MockLspClient::new() answers with no symbols for any file.
+            let lsp = MockLspProvider::with_client(MockLspClient::new());
+            resolve_ref(
+                &cand("foo.rs:renamed_baz", "docs/spec.md", RefKind::FileSymbol),
+                &ResolveCtx {
+                    live_artifact_ids: None,
+                    repo_root: tmp.path(),
+                    memory_globs: &[],
+                    lsp: Some(lsp),
+                    degraded_languages: Default::default(),
+                    basename_index: index.clone(),
+                    basename_index_truncated: truncated,
+                    gitignore: None,
+                },
+            )
+        };
+
+        let r = run(true);
+        assert_eq!(r.verdict, Verdict::Unknown, "{r:?}");
+        assert_eq!(r.severity, Severity::Low);
+        assert_eq!(r.severity_reason, SeverityReason::BasenameIndexTruncated);
+        assert!(r.notes.expect("scope named").contains("truncated"));
+
+        // Silence on a trustworthy negative.
+        assert_eq!(run(false).verdict, Verdict::SymbolMissing);
+    }
+
+    /// `resolved_basename` on a single indexed copy of a truncated index: the file exists, so
+    /// the verdict stays, but the note must not leave the reader believing the match is unique.
+    #[test]
+    fn resolver_single_copy_basename_hit_on_truncated_index_says_uniqueness_is_unproven() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert(
+            "bar.py".to_string(),
+            vec![std::path::PathBuf::from("pkg/bar.py")],
+        );
+        let mk = |truncated: bool, index| ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: truncated,
+            gitignore: None,
+        };
+        let r = resolve_ref(
+            &cand("bar.py", "docs/spec.md", RefKind::FilePath),
+            &mk(true, index.clone()),
+        );
+        assert_eq!(r.verdict, Verdict::ResolvedBasename);
+        let notes = r.notes.unwrap();
+        assert!(
+            notes.contains("pkg/bar.py") && notes.contains("truncated"),
+            "{notes}"
+        );
+
+        // Complete index: the output is byte-for-byte what it always was.
+        let r = resolve_ref(
+            &cand("bar.py", "docs/spec.md", RefKind::FilePath),
+            &mk(false, index),
+        );
+        assert_eq!(r.notes.unwrap(), "resolved by basename to pkg/bar.py");
+    }
+
+    /// A ref carrying a `/` never reaches the basename index, so truncation changes nothing
+    /// for it — including the line and symbol kinds.
+    #[test]
+    fn resolver_slashed_line_ref_is_unaffected_by_a_truncated_index() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let mut index = std::collections::HashMap::new();
+        index.insert("x.py".to_string(), vec![std::path::PathBuf::from("a/x.py")]);
+        let ctx = ResolveCtx {
+            live_artifact_ids: None,
+            repo_root: tmp.path(),
+            memory_globs: &[],
+            lsp: None,
+            degraded_languages: Default::default(),
+            basename_index: index,
+            basename_index_truncated: true,
+            gitignore: None,
+        };
+        let r = resolve_ref(&cand("src/x.py:5", "docs/spec.md", RefKind::FileLine), &ctx);
+        assert_eq!(r.verdict, Verdict::Missing);
     }
 
     /// A path-prefixed ref never consults the basename index, so truncation is not

@@ -132,8 +132,9 @@ pub enum SeverityReason {
     BasenameMatch,
     /// The basename matched more than one file, so the ref is ambiguous rather than broken.
     BasenameAmbiguous,
-    /// A bare-basename ref found nothing, but the basename index was cut off at its
-    /// file cap, so "nothing" means "not reached", not "does not exist".
+    /// A bare-basename ref found nothing — or, for a `path:line` / `path::symbol` ref, only
+    /// a single copy that could not be judged — but the basename index was cut off at its file
+    /// cap, so "nothing" means "not reached" and a lone copy is not proof of uniqueness.
     BasenameIndexTruncated,
     /// The LSP answered without the symbol but tree-sitter finds it — the server is
     /// mid-index, so the scan is degraded rather than the reference wrong.
@@ -221,8 +222,9 @@ impl SeverityReason {
                 "the basename matches several files — ambiguous, not broken; name the path"
             }
             SeverityReason::BasenameIndexTruncated => {
-                "the basename index stopped at its file cap — the file may exist in the \
-                 un-indexed part of the tree; name its path to verify"
+                "the basename index stopped at its file cap — the file, or a same-named twin \
+                 the doc may mean, can sit in the un-indexed part of the tree; name its path \
+                 to verify"
             }
             SeverityReason::LspBehindAst => {
                 "the LSP is mid-index and tree-sitter disagrees with it — the scan is \
@@ -2378,6 +2380,36 @@ mod tests {
         let params = load_tracker_params(&ctx, &id).await.unwrap();
         assert!(!params.scan_meta.basename_index_truncated);
         assert!(!render(&params).contains("basename index truncated"));
+    }
+    #[tokio::test]
+    async fn single_indexed_copy_on_truncated_index_does_not_give_a_false_line_oob() {
+        // `a/x.py` (3 lines) is the one indexed file under a sorted walk with cap 1; `b/x.py`
+        // (100 lines) is in the un-indexed tail and is what the doc cites. Before the fix the
+        // audit range-checked `a/x.py` and reported `line_oob`/med.
+        let tmp = TempDir::new().unwrap();
+        for d in ["a", "b", "docs"] {
+            std::fs::create_dir_all(tmp.path().join(d)).unwrap();
+        }
+        std::fs::write(tmp.path().join("a/x.py"), "1\n2\n3\n").unwrap();
+        std::fs::write(tmp.path().join("b/x.py"), "l\n".repeat(100)).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See `x.py:50`.\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"]});
+
+        let capped = call_with_index_cap(&ctx, args.clone(), 1).await.unwrap();
+        let f = &capped["findings"][0];
+        assert_eq!(f["verdict"], "unknown", "{capped}");
+        assert_eq!(f["severity_reason"], "basename_index_truncated", "{capped}");
+        assert_eq!(capped["n_refs_broken"], 0, "{capped}");
+
+        // Control: against a complete index the same ref is the honest ambiguity.
+        let full = call_with_index_cap(&ctx, args, MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        assert_eq!(
+            full["findings"][0]["verdict"], "ambiguous_basename",
+            "{full}"
+        );
     }
 
     #[tokio::test]

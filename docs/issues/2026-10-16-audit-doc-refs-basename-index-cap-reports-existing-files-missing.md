@@ -65,9 +65,9 @@ Mutation-verified 2026-10-17: with the truncated arm of `try_basename_fallback` 
 
 ## Resume
 
-Not covered, left as is, and filed separately: `docs/issues/2026-10-17-audit-doc-refs-unique-basename-in-truncated-index-gives-false-line-oob.md`. A basename with ONE indexed copy and a twin in the un-indexed tail is taken as unique by `unique_basename_path`, so `file_line`/`file_symbol` can report a false `line_oob`/`symbol_missing` (`med`) — a false claim, not only a uniqueness claim (observed 2026-10-17).
+Fixed in the same merge: `docs/issues/2026-10-17-audit-doc-refs-unique-basename-in-truncated-index-gives-false-line-oob.md`. A basename with ONE indexed copy and a twin in the un-indexed tail was taken as unique, so `file_line`/`file_symbol` could report a false `line_oob`/`symbol_missing` (`med`) — a false claim, not only a uniqueness claim. That bug now yields `Unknown` instead.
 
-Checked and NOT a bug: `build_basename_index` skips walk errors (`flatten`) without marking truncation, but `collect_markdown_files` walks the same tree with the same defaults and `?`-propagates walk errors first. A mode-000 subdirectory aborts the whole audit (`IO error ... Permission denied`) before the index is built, so no silent un-indexed tail results. The coupling is now documented on `build_basename_index`.
+Checked and NOT a bug: `build_basename_index` skips walk errors (`flatten`) without marking truncation, but `collect_markdown_files` walks the same tree with the same defaults and `?`-propagates walk errors first. A mode-000 subdirectory aborts the whole audit (`IO error ... Permission denied`) before the index is built, so no silent un-indexed tail results. The coupling is documented on `build_basename_index`.
 
 ## References
 
