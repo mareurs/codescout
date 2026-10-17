@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed
 opened: 2026-10-17
-closed:
+closed: 2026-10-17
+unverified: 'The cross-user case end to end (a directory really owned by another uid, through materialize_into) was not run: no second account, so the owner comparison is driven through a uid seam against a directory we own. The Windows build was not compiled; the cfg(unix) arms are gated and the non-unix arm is a subset. python3 -I is hardening only: a planted typing.py still runs under -I because file-provenance.py:91 re-inserts its own directory on sys.path; the directory checks are what close the hole.'
 severity: medium
 owner: marius
 related: [docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md]
@@ -68,13 +69,54 @@ None needed.
 
 ## Fix
 
-Not applied. Candidates: run the engine with `python3 -I` (isolated mode drops the script directory from
-`sys.path`), which closes the import hijack whatever the directory holds (measured 2026-10-17 on the scratch copy: with `-I` the planted `json.py` did not run and `--explain` exited 0; the sibling-module imports of a full engine run under `-I` were not re-checked); and/or use a per-user directory
-(`per_user_state_dir`) and check owner, mode and not-a-symlink before trusting it.
+Two changes in `src/tools/run_command/attribution.rs`, the second being the one that closes the hole:
+
+1. **The directory is trustworthy** (`script_dir`, `verify_private_dir`, `create_private_dir`, `fresh_private_dir`).
+   The name is now `codescout-attribution-<euid>-<hash>`; it is created mode 0700 (`DirBuilder`, not
+   `create_dir_all`) and RE-VERIFIED ON EVERY USE: `symlink_metadata` says a real directory (so a link,
+   even to a good directory, is refused), owned by the effective uid, and no group/other write bit
+   (read and execute bits are allowed: the scripts are public). On any refusal it logs a `warn` naming the
+   path and the reason and falls back to `fresh_private_dir`: a `mkdtemp` directory (unpredictable name,
+   0700 requested explicitly, verified, then deliberately kept for the life of the process).
+   `tempfile` creates directories with the umask's view of 0777, so the explicit mode matters: under
+   umask 002 the default would be group-writable and fail the check, leaving no fallback.
+   Single-user behaviour is unchanged: same cache reuse (no rewrite on the second call), same cost.
+2. **The engine is spawned as `python3 -I <script>`** (`engine_std_command`).
+
+**`-I` alone does NOT close the issue, which the issue's own candidate fix assumed.** Measured
+2026-10-17 on a scratch copy of all six scripts with `json`, `dataclasses`, `decimal`, `typing`, `sqlite3`
+and `functools` planted: plain `python3` runs `json` and `dataclasses`; under `-I` those do not run, but
+`typing.py` still does, because `file-provenance.py:91` does `sys.path.insert(0, <its own dir>)` before
+`from typing import Iterable` (:95). So `-I` closes the engine entry's own imports, `PYTHON*` and the user
+site, and no more. With the directory verified the residual is not reachable by another user. Left as it
+is: the insert is how `file-provenance.py` runs standalone.
+
+End to end under `-I` (scratch fixture, identical stdin, plain vs `-I`): both exit 0, stdout byte-identical
+(470 bytes, the full three-stage answer naming `src/held.rs` and the coverage gap), stderr empty. The
+engine does not need `PYTHON*` env or sibling imports from `sys.path`: it reaches `file-provenance.py` by
+`spec_from_file_location` and that file inserts its own directory.
 
 ## Tests added
 
-N/A: filed, not fixed.
+In `attribution.rs::tests` (scaffold-red 8 of 24 before the fix, controls green; then 27 green):
+
+- `a_planted_module_beside_the_entry_is_not_imported`: a `json.py` beside the entry runs under plain
+  `python3` (the CONTROL, asserted) and does not run under the shipped command line, which also must
+  finish cleanly.
+- `dir_trust::*` (unix): fresh directory is exactly 0700 and ours; a second call rewrites nothing (inode
+  unchanged); a trustworthy pre-existing directory (0700, 0755, 0750) is reused; a symlinked directory, a
+  file squatting on the name, and each of group/other write bits (0777, 0770, 0707, 0720, 0702) are
+  refused with nothing written into them; the owner predicate through a uid seam; the verifier names
+  what it refused; the fallback is fresh, 0700, re-verified and removed on refusal; the name is per user;
+  a missing base is created.
+- Not tested: a directory really owned by another uid (needs a second account or root).
+
+Mutation probe (`scripts/mutation-probe.sh`, 15 mutations of the production bytes): 14 KILLED, 1 SURVIVED
+(removing the fallback's re-verification), which a uid-seam test then killed on re-run.
+
+Fix commits on branch `worktree-agent-aa185d1f8e0bb222a` (not on experiments yet):
+66f2e8e8 patch-id 1ae04f390e7b225d278d792ee1ce347e907df6d1; 0bd53dc9 patch-id
+e28950dc04a0cdb8541fce16657bdb648da1932a; 42777d24 patch-id 5593a96d076eb8ead4527c44e25ef5007ea38a6b.
 
 ## Workarounds
 
@@ -82,7 +124,7 @@ Use a per-user `TMPDIR` (for example `$XDG_RUNTIME_DIR`).
 
 ## Resume
 
-Add `-I`, add a test that a planted `json.py` beside the entry is not imported, then decide on the directory checks.
+N/A once the branch is merged. If `file-provenance.py` ever stops inserting its own directory on `sys.path`, `-I` becomes a full defence rather than hardening.
 
 ## References
 
