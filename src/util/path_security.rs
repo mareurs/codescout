@@ -6875,7 +6875,7 @@ EOF"#;
                 target.to_str().unwrap(),
                 project.path(),
                 &default_config(),
-                &[home.clone()],
+                std::slice::from_ref(&home),
                 &env,
             );
             assert!(
