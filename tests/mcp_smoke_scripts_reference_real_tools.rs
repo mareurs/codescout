@@ -271,3 +271,358 @@ fn no_smoke_script_parses_the_reply_as_json() {
          script list or the read is wrong, and this gate checked almost nothing"
     );
 }
+
+/// Replace the first occurrence of `old` in the script, panicking if it is absent: a mutant
+/// whose anchor text vanished must fail loudly, not pass as an unmutated copy.
+fn mutate(content: &str, old: &str, new: &str) -> String {
+    assert!(
+        content.contains(old),
+        "self-test anchor missing from tests/mcp-smoke-kotlin.sh: {old}"
+    );
+    content.replacen(old, new, 1)
+}
+
+/// Comment out the first non-comment line containing `needle` (panics if there is none).
+fn comment_out_line(content: &str, needle: &str) -> String {
+    let mut done = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in content.lines() {
+        if !done && !line.trim_start().starts_with('#') && line.contains(needle) {
+            done = true;
+            out.push(format!("# {line}"));
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    assert!(
+        done,
+        "self-test anchor missing from tests/mcp-smoke-kotlin.sh: {needle}"
+    );
+    out.join("\n") + "\n"
+}
+
+/// Everything this repository can check statically about the target of
+/// `tests/mcp-smoke-kotlin.sh`, one line per offence; empty means clean. Comment lines are
+/// never evidence: a requirement met only in a comment is not met.
+fn kotlin_smoke_script_offenders(content: &str, root: &std::path::Path) -> Vec<String> {
+    let re = |p: &str| regex::Regex::new(p).unwrap();
+    let mut bad: Vec<String> = Vec::new();
+
+    // No path on one machine, comments included: there is no legitimate reason to name one.
+    let machine_local = re(r"/home/[A-Za-z0-9_.-]+/");
+    for (i, l) in content.lines().enumerate() {
+        if machine_local.is_match(l) {
+            bad.push(format!(
+                "line {}: names a path on one machine: {}",
+                i + 1,
+                l.trim()
+            ));
+        }
+    }
+
+    let code: Vec<(usize, &str)> = content
+        .lines()
+        .enumerate()
+        .map(|(i, l)| (i + 1, l))
+        .filter(|(_, l)| !l.trim_start().starts_with('#'))
+        .collect();
+    let first = |pat: &str| -> Option<usize> {
+        let r = re(pat);
+        code.iter().find(|(_, l)| r.is_match(l)).map(|(n, _)| *n)
+    };
+
+    let fixture_rel = re(r#"(?m)^KOTLIN_FIXTURE="([^"]+)"$"#)
+        .captures(content)
+        .map(|c| c[1].to_string());
+    let Some(fixture_rel) = fixture_rel else {
+        bad.push("no KOTLIN_FIXTURE=\"<repo-relative dir>\" declaration".into());
+        return bad;
+    };
+    let fixture = root.join(&fixture_rel);
+    if !fixture.is_dir() {
+        bad.push(format!(
+            "KOTLIN_FIXTURE={fixture_rel} is not a directory under the repo root"
+        ));
+        return bad;
+    }
+
+    // The target is a fresh mktemp directory, never the fixture and never a path on a disk.
+    let work = first(r#"^KOTLIN_WORK="\$\(mktemp -d\)"$"#);
+    if work.is_none() {
+        bad.push("KOTLIN_WORK must be assigned exactly `\"$(mktemp -d)\"`".into());
+    }
+    let project_assign = re(r"^KOTLIN_PROJECT=");
+    let project_ok = re(r#"^KOTLIN_PROJECT="\$KOTLIN_WORK/[^"$]+"$"#);
+    let mut project_assignments = 0;
+    for (n, l) in &code {
+        if project_assign.is_match(l) {
+            project_assignments += 1;
+            if !project_ok.is_match(l) {
+                bad.push(format!(
+                    "line {n}: KOTLIN_PROJECT must live under $KOTLIN_WORK, got: {}",
+                    l.trim()
+                ));
+            }
+        }
+    }
+    if project_assignments == 0 {
+        bad.push("KOTLIN_PROJECT is never assigned".into());
+    }
+    if first(r#"^export TMPDIR="\$KOTLIN_WORK/[^"$]+"$"#).is_none() {
+        bad.push(
+            "TMPDIR must be exported inside $KOTLIN_WORK, or kotlin-lsp's temp_dir() state \
+             outlives the run"
+                .into(),
+        );
+    }
+
+    // The trap is armed after the directory exists and before anything that can fail.
+    match first(r"^trap cleanup EXIT$") {
+        None => bad.push("`trap cleanup EXIT` is missing".into()),
+        Some(t) => {
+            if !matches!(work, Some(w) if w < t) {
+                bad.push("`trap cleanup EXIT` must come after KOTLIN_WORK is created".into());
+            }
+            for (what, pat) in [
+                ("the release build", "cargo build"),
+                ("the alias add", "mcp alias add"),
+            ] {
+                if first(pat).is_some_and(|n| n < t) {
+                    bad.push(format!("`trap cleanup EXIT` is armed after {what}"));
+                }
+            }
+        }
+    }
+    let cleanup_start = first(r"^cleanup\(\) \{$");
+    let cleanup_end = cleanup_start.and_then(|s| {
+        code.iter()
+            .find(|(n, l)| *n > s && *l == "}")
+            .map(|(n, _)| *n)
+    });
+    match (cleanup_start, cleanup_end) {
+        (Some(s), Some(e)) => {
+            let body: Vec<&str> = code
+                .iter()
+                .filter(|(n, _)| *n > s && *n < e)
+                .map(|(_, l)| l.trim())
+                .collect();
+            for need in [
+                r#"rm -rf "$KOTLIN_WORK""#,
+                "mcp alias remove",
+                r#"pkill -f -- "$KOTLIN_WORK""#,
+            ] {
+                if !body.iter().any(|l| l.starts_with(need)) {
+                    bad.push(format!("cleanup() does not run `{need}`"));
+                }
+            }
+            // The mux re-creates its directories as it shuts down, so it must be stopped
+            // before the directory is removed, not after.
+            let at = |needle: &str| body.iter().position(|l| l.starts_with(needle));
+            if let (Some(k), Some(r)) = (at("pkill"), at("rm -rf")) {
+                if k > r {
+                    bad.push("cleanup() removes $KOTLIN_WORK before stopping its processes".into());
+                }
+            }
+        }
+        _ => bad.push("no cleanup() { ... } function".into()),
+    }
+
+    // The copy: tracked files only, with the fixture's depth stripped, and a plain-copy
+    // fallback for a tree that is not a git checkout.
+    let depth = fixture_rel.split('/').count();
+    let archive = re(
+        r#"^\s*git -C "\$REPO_ROOT" archive HEAD "\$KOTLIN_FIXTURE" \| tar -x --strip-components=(\d+) -C "\$KOTLIN_PROJECT"$"#,
+    );
+    match code.iter().find_map(|(_, l)| archive.captures(l)) {
+        None => bad.push(
+            "no `git -C \"$REPO_ROOT\" archive HEAD \"$KOTLIN_FIXTURE\" | tar -x \
+             --strip-components=N -C \"$KOTLIN_PROJECT\"` line"
+                .into(),
+        ),
+        Some(c) => {
+            if c[1].parse::<usize>().ok() != Some(depth) {
+                bad.push(format!(
+                    "--strip-components={} does not match the {depth} components of {fixture_rel}",
+                    &c[1]
+                ));
+            }
+        }
+    }
+    if first(r#"^\s*cp -R "\$REPO_ROOT/\$KOTLIN_FIXTURE"/\. "\$KOTLIN_PROJECT"/$"#).is_none() {
+        bad.push(
+            "no `cp -R \"$REPO_ROOT/$KOTLIN_FIXTURE\"/. \"$KOTLIN_PROJECT\"/` fallback line".into(),
+        );
+    }
+
+    // Every path the script hands a tool exists in the fixture, or is written by the script
+    // into its copy with `> "$KOTLIN_PROJECT/<path>"` on a code line.
+    let path_re = re(r#""path":\s*"([^"]+)""#);
+    let mut checked = 0usize;
+    let mut kt_in_fixture = 0usize;
+    for (n, line) in &code {
+        for cap in path_re.captures_iter(line) {
+            let p = &cap[1];
+            checked += 1;
+            if p.starts_with('/') || p.split('/').any(|c| c == "..") {
+                bad.push(format!("line {n}: path `{p}` escapes the project"));
+                continue;
+            }
+            let written = re(&format!(r#">\s*"\$KOTLIN_PROJECT/{}""#, regex::escape(p)));
+            if fixture.join(p).is_file() {
+                if p.ends_with(".kt") {
+                    kt_in_fixture += 1;
+                }
+            } else if !code.iter().any(|(_, l)| written.is_match(l)) {
+                bad.push(format!(
+                    "line {n}: path `{p}` is neither in {fixture_rel} nor written by the script into its copy"
+                ));
+            }
+        }
+    }
+    // Non-vacuity: a regex that stopped matching would check zero paths and report clean.
+    if checked < 5 || kt_in_fixture < 1 {
+        bad.push(format!(
+            "expected >=5 `\"path\"` literals including a .kt file in the fixture; saw {checked} \
+             paths, {kt_in_fixture} of them .kt"
+        ));
+    }
+    bad
+}
+
+/// `tests/mcp-smoke-kotlin.sh` hardcoded a project on one developer's disk
+/// (`/home/marius/work/mirela/backend-kotlin`) and asserted on files inside it. The project
+/// was reorganised, every path went stale, and nothing re-read the script against it:
+/// `docs/issues/2026-10-16-mcp-smoke-kotlin-targets-a-project-layout-that-no-longer-exists.md`.
+///
+/// The script is a document of its target's layout, so the target must be one this repository
+/// owns and this test can read. `kotlin_smoke_script_offenders` checks that the script runs
+/// against a throwaway `mktemp` copy of the tracked fixture files (never the fixture itself,
+/// never a path on a disk), that the trap which removes the copy, its alias and its `TMPDIR`
+/// is armed first, and that every `"path": "..."` it hands a tool stays inside the fixture or
+/// is written by the script (`> "$KOTLIN_PROJECT/<path>"`) for the non-code files the fixture
+/// does not carry. Each of those is also run against a mutant of the script that breaks it,
+/// which must be reported.
+///
+/// **Ceiling:** a static read. It resolves `"path"` literals only: a `"glob"` or a `"pattern"`
+/// is not resolved against the fixture, and an assertion string the fixture no longer
+/// contains is invisible here; only a live run reads those.
+#[test]
+fn the_kotlin_smoke_script_targets_a_checked_in_fixture_and_every_path_it_reads_exists() {
+    let script = repo_root().join("tests/mcp-smoke-kotlin.sh");
+    let content = std::fs::read_to_string(&script)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", script.display()));
+
+    let offenders = kotlin_smoke_script_offenders(&content, &repo_root());
+    assert!(
+        offenders.is_empty(),
+        "tests/mcp-smoke-kotlin.sh no longer targets a throwaway copy of a checked-in fixture:\n  {}",
+        offenders.join("\n  ")
+    );
+
+    // The checks above are only as good as their ability to fail, so each mutant of the
+    // script below must be reported. A mutant whose anchor text vanished panics rather than
+    // passing silently, so a rewrite of the script cannot quietly retire a case.
+    let mutants: Vec<(&str, String)> = vec![
+        (
+            "target the checked-in fixture itself (cleanup would rm -rf it)",
+            mutate(
+                &content,
+                r#"KOTLIN_PROJECT="$KOTLIN_WORK/project""#,
+                r#"KOTLIN_PROJECT="$KOTLIN_FIXTURE""#,
+            ),
+        ),
+        (
+            "target a project under $HOME",
+            mutate(
+                &content,
+                r#"KOTLIN_PROJECT="$KOTLIN_WORK/project""#,
+                r#"KOTLIN_PROJECT="$HOME/work/mirela/backend-kotlin""#,
+            ),
+        ),
+        (
+            "mktemp replaced by a fixed directory",
+            mutate(
+                &content,
+                r#"KOTLIN_WORK="$(mktemp -d)""#,
+                r#"KOTLIN_WORK="$HOME/kotlin-smoke""#,
+            ),
+        ),
+        (
+            "git archive copy deleted",
+            comment_out_line(&content, "archive HEAD"),
+        ),
+        (
+            "cp fallback deleted",
+            comment_out_line(&content, r#"cp -R "$REPO_ROOT/$KOTLIN_FIXTURE""#),
+        ),
+        (
+            "git archive strips the wrong number of components",
+            mutate(&content, "--strip-components=3", "--strip-components=2"),
+        ),
+        (
+            "README write commented out",
+            comment_out_line(&content, r#"> "$KOTLIN_PROJECT/README.md""#),
+        ),
+        (
+            "rm -rf dropped from cleanup",
+            comment_out_line(&content, r#"rm -rf "$KOTLIN_WORK""#),
+        ),
+        (
+            "alias removal dropped from cleanup",
+            comment_out_line(&content, "mcp alias remove"),
+        ),
+        (
+            "processes not stopped before the directory is removed",
+            comment_out_line(&content, "pkill -f --"),
+        ),
+        (
+            "directory removed before the processes are stopped",
+            mutate(
+                &content,
+                "    pkill -f --",
+                "    rm -rf \"$KOTLIN_WORK\"\n    pkill -f --",
+            ),
+        ),
+        (
+            "trap removed",
+            comment_out_line(&content, "trap cleanup EXIT"),
+        ),
+        (
+            "trap armed only after the release build and the alias add",
+            format!(
+                "{}\ntrap cleanup EXIT\n",
+                comment_out_line(&content, "trap cleanup EXIT")
+            ),
+        ),
+        (
+            "TMPDIR no longer pointed inside the per-run directory",
+            comment_out_line(&content, "export TMPDIR="),
+        ),
+        (
+            "a path escaping the fixture",
+            mutate(
+                &content,
+                r#""path": "gradle.properties""#,
+                r#""path": "../../../Cargo.toml""#,
+            ),
+        ),
+        (
+            "an absolute path",
+            mutate(
+                &content,
+                r#""path": "gradle.properties""#,
+                r#""path": "/etc/hostname""#,
+            ),
+        ),
+        (
+            "a path the fixture does not carry",
+            mutate(&content, "models/Genre.kt", "models/Genr.kt"),
+        ),
+    ];
+    for (name, mutated) in &mutants {
+        assert!(
+            !kotlin_smoke_script_offenders(mutated, &repo_root()).is_empty(),
+            "mutant not caught by the static check: {name}"
+        );
+    }
+}

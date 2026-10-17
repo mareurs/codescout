@@ -59,7 +59,7 @@ ensure_download_dir() {
     mkdir -p "$DOWNLOAD_DIR"
 }
 
-# Fetch the latest GitHub release tag for a repo (e.g. "fwcd/kotlin-language-server").
+# Fetch the latest GitHub release tag for a repo (e.g. "Kotlin/kotlin-lsp" -> "kotlin-lsp/v263.6379.0").
 github_latest_tag() {
     local repo="$1"
     curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
@@ -88,7 +88,7 @@ binary_for() {
         typescript) echo "typescript-language-server" ;;
         go)         echo "gopls" ;;
         java)       echo "jdtls" ;;
-        kotlin)     echo "kotlin-language-server" ;;
+        kotlin)     echo "kotlin-lsp" ;;
         c)          echo "clangd" ;;
         csharp)     echo "OmniSharp" ;;
         ruby)       echo "solargraph" ;;
@@ -196,39 +196,57 @@ WRAPPER
     ok "jdtls ${version} installed to ${install_path}"
 }
 
+# codescout starts JetBrains' `kotlin-lsp` (src/lsp/servers/mod.rs), found on PATH by that name.
+# Its releases carry no GitHub assets: the GitHub release lists downloads on
+# download.jetbrains.com. Linux has a .tar.gz per CPU; macOS ships .sit archives, which this
+# script does not unpack, so macOS is sent to the manual.
 install_kotlin() {
-    local os arch tag url
+    local os arch tag version suffix url
     os="$(detect_os)"
     arch="$(detect_arch)"
+
+    if [[ "$os" == "macos" ]]; then
+        err "kotlin-lsp is distributed for macOS as a .sit archive, which this script does not unpack."
+        err "Install it by hand: see docs/manual/src/language-support.md (Kotlin)."
+        return 1
+    fi
 
     ensure_install_dir
     ensure_download_dir
 
-    info "Fetching latest kotlin-language-server release..."
-    tag=$(github_latest_tag "fwcd/kotlin-language-server")
-    if [[ -z "$tag" ]]; then
-        err "Could not determine latest kotlin-language-server release."
+    info "Fetching latest kotlin-lsp release..."
+    tag=$(github_latest_tag "Kotlin/kotlin-lsp")
+    # The tag looks like "kotlin-lsp/v263.6379.0"; the download path wants "263.6379.0".
+    version="${tag##*/v}"
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+ ]]; then
+        err "Could not determine the latest kotlin-lsp version (release tag: '${tag}')."
         return 1
     fi
 
-    url="https://github.com/fwcd/kotlin-language-server/releases/download/${tag}/server.zip"
-    info "Downloading kotlin-language-server ${tag}..."
-    curl -fSL -o "${DOWNLOAD_DIR}/kls.zip" "$url"
+    suffix=""
+    if [[ "$arch" == "arm64" ]]; then
+        suffix="-aarch64"
+    fi
+    url="https://download.jetbrains.com/language-server/kotlin-server/${version}/kotlin-server-${version}${suffix}.tar.gz"
+    info "Downloading kotlin-lsp ${version}..."
+    curl -fSL -o "${DOWNLOAD_DIR}/kotlin-lsp.tar.gz" "$url"
 
-    local install_path="${HOME}/.local/share/kotlin-language-server"
+    local install_path="${HOME}/.local/share/kotlin-lsp"
     rm -rf "$install_path"
     mkdir -p "$install_path"
-    unzip -qo "${DOWNLOAD_DIR}/kls.zip" -d "$install_path"
+    tar xzf "${DOWNLOAD_DIR}/kotlin-lsp.tar.gz" -C "$install_path"
 
-    # The zip extracts to server/ subdirectory
-    if [[ -d "${install_path}/server" ]]; then
-        # Symlink the launcher script
-        ln -sf "${install_path}/server/bin/kotlin-language-server" "${INSTALL_DIR}/kotlin-language-server"
-    else
-        ln -sf "${install_path}/bin/kotlin-language-server" "${INSTALL_DIR}/kotlin-language-server"
+    # The archive's launcher is bin/intellij-server (the kotlin-lsp.sh beside it is deprecated
+    # and only execs it). It may sit at the archive root or one directory down.
+    local launcher
+    launcher="$(find "$install_path" -maxdepth 3 -path '*/bin/intellij-server' -type f | head -1 || true)"
+    if [[ -z "$launcher" ]]; then
+        err "No bin/intellij-server in the kotlin-lsp archive under ${install_path}."
+        return 1
     fi
-    chmod +x "${INSTALL_DIR}/kotlin-language-server"
-    ok "kotlin-language-server ${tag} installed"
+    chmod +x "$launcher"
+    ln -sf "${launcher}" "${INSTALL_DIR}/kotlin-lsp"
+    ok "kotlin-lsp ${version} installed"
 }
 
 install_c() {

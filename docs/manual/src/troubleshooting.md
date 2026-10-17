@@ -107,7 +107,7 @@ which gopls
 which jdtls
 
 # Kotlin
-which kotlin-language-server
+which kotlin-lsp
 
 # C/C++
 which clangd
@@ -122,7 +122,7 @@ which solargraph
 See the [Language Support](language-support.md) page for the full list.
 
 **Also:** The language server may still be initializing. This is especially
-common with `jdtls` (Java) and `kotlin-language-server`, which can take 10-30
+common with `jdtls` (Java) and `kotlin-lsp`, which can take 10-30
 seconds on first startup while they index the project. Wait a few seconds and
 retry the tool call.
 
@@ -425,7 +425,7 @@ process. Startup time varies:
 | `gopls` | 1-3 seconds |
 | `clangd` | 1-2 seconds |
 | `jdtls` | 10-30 seconds |
-| `kotlin-language-server` | 5-15 seconds |
+| `kotlin-lsp` | 5-15 seconds |
 
 **Fix:** This is expected. Subsequent calls are fast because the server stays
 running. If startup time is a problem for Java or Kotlin, use `grep`

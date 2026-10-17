@@ -112,7 +112,7 @@ normal work fit, that is a leak to investigate, not a limit to relax.
 
 ## Not covered here
 
-The JVM-based LSPs (kotlin-language-server) had their own uncapped-heap problem and
+The JVM-based LSPs (`kotlin-lsp`) had their own uncapped-heap problem and
 their own native-memory watchdog work — closed 2026-08-15, archived at
 `docs/issues/archive/2026-06-19-kotlin-lsp-uncapped-jvm-heap.md`. codescout now spawns
 them with `-Xmx2g` and kills a process group that exceeds the RSS ceiling. A slice cap
