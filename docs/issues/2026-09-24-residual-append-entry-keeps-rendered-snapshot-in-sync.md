@@ -1,16 +1,17 @@
 ---
 id: a2859e0d13968b04
 kind: bug
-status: open
+status: mitigated
 title: 'RESIDUAL: Make append_entry/update_entry keep a tracker''s committed rendered snapshot in sync (or refuse), instead of only warning'
 tags:
 - cluster/unclassified
-closed: null
+closed: 2026-10-17
 opened: 2026-09-24
 owner: marius
 related:
 - docs/issues/archive/2026-08-16-append-entry-leaves-the-rendered-snapshot-stale-with-no-signal.md
 severity: low
+unverified: 'STANDING 2026-10-17. Three table-keeping ledgers stay warning-only (snapshot_missing / snapshot_stale on append_entry, update_entry and doctor; never refused or auto-synced): 2026-08-16-iron-law-gate-firing-audit, windows-platform-support and prompt-hamsa-audit-log. Their body table columns differ from the render_template output, so none can declare a snapshot_anchor without the first update_entry rewriting a hand-authored row into the rendered shape. The other 9 of the 12 snapshot-keeping candidates keep no table and the advisory is already silent for them. See Decision C and Outcome 2026-10-17 in the body.'
 ---
 
 ## Summary
