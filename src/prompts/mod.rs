@@ -718,9 +718,10 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
 ///   (`event_*`, `src/librarian/adapter.rs` `names_tracker_path`) and again 2026-10-17
 ///   (`gather`, `graph`); their results name no tracker path, and a real call reaches
 ///   `librarian`.
-/// - `doc.list_stale`: the one that really routes here. Its result carries `items[].abs_path`,
-///   which the scan reads, so a real call on an augmented tracker is served this topic's
-///   preamble and no section. Open ledger entry:
+/// - `doc.list_stale`: was the one that routed here (its result carries `items[].abs_path`)
+///   and was served only the preamble. Fixed 2026-10-17: a result carrying `threshold_hours`
+///   routes to `librarian` (`names_tracker_path`), so it is no longer waived here, and Gate 2
+///   probes it with that key (`probe_as_the_shape_returns`, `src/server.rs`). Ledger entry:
 ///   `docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md`.
 /// - `doc` (bare, no action): the census row for a call missing the required `action`.
 const TRACKER_DOC_SHAPES_UNSERVED: &str = "These doc.* call shapes route to \
@@ -730,9 +731,6 @@ const TRACKER_DOC_SHAPES_UNSERVED: &str = "These doc.* call shapes route to \
      doc.move, doc.delete, doc.link, doc.augment, doc.event_create, doc.event_list, doc.gather, \
      doc.graph, and doc (the bare tool key, a call missing its action); the write ones are \
      tracked in docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md. \
-     The one that really routes here and is served only the preamble: doc.list_stale (its \
-     result names items[].abs_path), tracked in \
-     docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md. \
      Surfaced 2026-10-17 when the gate began reading census rows renamed from artifact.* to \
      doc.*.";
 
@@ -2064,7 +2062,10 @@ mod tests {
                 "the bare `doc` shape must be named as a whole word in a `{topic}` waiver"
             );
         }
-        assert!(shape_is_waived("tracker-conventions", "doc.list_stale"));
+        // `doc.list_stale` is no longer waived: it routes to `librarian` (its result carries
+        // `threshold_hours`) and a section there serves it. `doc.gather` still is.
+        assert!(!shape_is_waived("tracker-conventions", "doc.list_stale"));
+        assert!(shape_is_waived("tracker-conventions", "doc.gather"));
         assert!(!shape_is_waived("librarian", "doc.no_such_action"));
     }
 

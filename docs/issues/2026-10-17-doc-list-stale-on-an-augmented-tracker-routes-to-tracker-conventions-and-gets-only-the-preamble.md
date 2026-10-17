@@ -8,7 +8,8 @@ tags:
 - section-grain-delivery
 - topic-routing
 opened: 2026-10-17
-closed: 2026-10-17owner: marius
+closed: 2026-10-17
+owner: marius
 severity: low
 related:
 - docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
@@ -110,6 +111,12 @@ under `tracker-conventions` (`TRACKER_DOC_SHAPES_UNSERVED`) because its Gate 2 p
 `{"abs_path": ...}`, which the router now treats differently from a real `list_stale` result. After
 merging, give that probe a real `list_stale` result shape (with `threshold_hours`), and delete the
 waiver token; this branch has neither the gate nor the token, so nothing was edited in `mod.rs`.
+
+Done at integration: Gate 2 probes `doc.list_stale` with `threshold_hours` added
+(`probe_as_the_shape_returns`, `src/server.rs`) and the `doc.list_stale` token and its pointer to this
+entry are deleted from `TRACKER_DOC_SHAPES_UNSERVED`. Red first: with only the token deleted, Gate 2
+failed with `doc.list_stale` -> `tracker-conventions` on the three path-shaped probes; green once the
+probe carried `threshold_hours`.
 
 ## Tests added
 

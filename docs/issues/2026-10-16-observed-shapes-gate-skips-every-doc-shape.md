@@ -8,7 +8,7 @@ tags:
 - section-grain-delivery
 opened: 2026-10-16
 closed: 2026-10-17
-unverified: 'Gate 2 still cannot judge shapes added after the census was recorded (doc.rekey_prefix, doc.state_at, doc.graft, librarian.audit_log); the census was not regenerated. doc.list_stale is waived while its own issue is open.'
+unverified: 'Gate 2 still cannot judge shapes added after the census was recorded (doc.rekey_prefix, doc.state_at, doc.graft, librarian.audit_log); the census was not regenerated.'
 owner: marius
 severity: low
 related:
@@ -149,8 +149,9 @@ Fixed in the sense the issue named as the guard: the next tool rename fails
 `every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement` instead of narrowing Gate 2. Open
 remainders: the census is not regenerated and does not hold `doc.rekey_prefix`, `doc.state_at`, `doc.graft`
 or `librarian.audit_log`, so Gate 2 cannot judge them (regenerating it would need the transcripts the
-generator reads, and is likely to demand sections or waivers for every shape it adds); and
-`doc.list_stale` is waived while its own issue is open (see References).
+generator reads, and is likely to demand sections or waivers for every shape it adds).
+`doc.list_stale` was waived until its own issue was fixed; the waiver token is deleted and Gate 2 now
+probes that shape with a real result (`threshold_hours`, `probe_as_the_shape_returns` in `src/server.rs`).
 
 ## References
 

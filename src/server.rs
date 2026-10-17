@@ -7358,7 +7358,14 @@ mod tests {
             // ever evaluated against `librarian`, and a shape whose real results route
             // elsewhere was never checked against the topic it actually reaches.
             // That is the runtime relationship this gate exists to model.
-            for probe in &probes {
+            for generic_probe in &probes {
+                // The generic probes stand for results that name a tracker path, which is
+                // all a `find` or `get` returns. A real `list_stale` result also carries
+                // `threshold_hours`, which the router reads (`names_tracker_path`) to send it
+                // to `librarian`; probing it with the bare path shape judged a call that
+                // cannot happen, and needed a waiver to excuse it.
+                // docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md
+                let probe = &probe_as_the_shape_returns(shape, generic_probe);
                 let Some(topic) = tool.relevant_guide_topic(probe) else {
                     continue;
                 };
@@ -7405,6 +7412,20 @@ mod tests {
             );
         }
     }
+    /// The result shape a real call of `shape` returns, given a generic probe that names a path.
+    ///
+    /// Only `doc.list_stale` differs: its result carries `threshold_hours` (a key no other
+    /// librarian result has, `refresh_stale.rs`), which is what `names_tracker_path` reads to
+    /// keep it off `tracker-conventions`. Every other shape is probed as given.
+    #[cfg(feature = "librarian")]
+    fn probe_as_the_shape_returns(shape: &str, probe: &serde_json::Value) -> serde_json::Value {
+        let mut probe = probe.clone();
+        if shape == "doc.list_stale" {
+            probe["threshold_hours"] = serde_json::json!(24);
+        }
+        probe
+    }
+
     /// How a `shape_census.txt` row stands against the tool registry today.
     #[cfg(feature = "librarian")]
     #[derive(Debug, PartialEq, Eq)]
