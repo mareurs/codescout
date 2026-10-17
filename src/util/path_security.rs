@@ -411,9 +411,26 @@ pub fn classify_write_path(
 /// permission error on an ancestor) yields no root at all, so no write is allowed under it. A
 /// temp dir that canonicalizes to `/` is refused too: it would admit the whole filesystem.
 ///
+/// A temp dir that is not an absolute path, or that has a `..` component, yields no root either:
+/// it is environment input that does not name the directory it resolves to.
+///
 /// A temp dir ABOVE `$HOME` (`TMPDIR=/tmp` with `HOME=/tmp/home`) is kept as a root, but see
 /// `temp_root_admits`: it admits nothing inside the home directory.
 fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
+    // `$TMPDIR` is environment input. A RELATIVE value would be canonicalized against the process
+    // cwd, and a `..` would be collapsed by `canonicalize` into a directory the operator never
+    // named; either way the root is not what `$TMPDIR` says it is, so there is no root. An empty
+    // value is refused twice over: it is not absolute, and `canonicalize("")` fails
+    // (`an_empty_temp_dir_is_not_a_write_root` pins the outcome, whichever rule fires). A
+    // SYMLINKED `$TMPDIR` is deliberately still
+    // followed: see `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`.
+    if !temp_dir.is_absolute()
+        || temp_dir
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+    {
+        return None;
+    }
     let canon = std::fs::canonicalize(temp_dir).ok()?;
     if canon == Path::new("/") {
         return None;
@@ -7077,6 +7094,107 @@ EOF"#;
         assert_eq!(
             canonical_temp_write_root(dir.path()),
             Some(std::fs::canonicalize(dir.path()).unwrap())
+        );
+    }
+    // ── a TMPDIR that is relative, empty or spelled with `..` is not a write root ────────────────
+    //
+    // `$TMPDIR` comes straight from the environment. A relative value was canonicalized against
+    // the process cwd (so the "temp root" was wherever the server started), and a `..` spelling was
+    // collapsed by `fs::canonicalize` to a directory the operator never named (`F5`, `F1-..` in
+    // `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`). Both used to be admitted.
+    //
+    // NOT closed, by design: a `$TMPDIR` that is, or sits under, a SYMLINK is followed to wherever
+    // it really is (`TMPDIR=link -> /etc` admits `/etc`). It cannot be told apart from macOS's own
+    // `/var -> /private/var`, and whoever sets `$TMPDIR` can already set it to that directory
+    // literally. See the same issue file.
+
+    #[test]
+    fn a_relative_temp_dir_is_not_a_write_root() {
+        assert_eq!(
+            canonical_temp_write_root(Path::new(".")),
+            None,
+            "`TMPDIR=.` must not make the process cwd a write root"
+        );
+    }
+
+    #[test]
+    fn a_temp_dir_spelled_with_dotdot_is_not_a_write_root() {
+        let scratch = tempdir().unwrap();
+        std::fs::create_dir(scratch.path().join("real")).unwrap();
+        std::fs::create_dir(scratch.path().join("sibling")).unwrap();
+        let spelled = scratch.path().join("real/../sibling");
+        assert!(
+            std::fs::canonicalize(&spelled).is_ok(),
+            "fixture: {spelled:?} must resolve, or this proves nothing about the `..` rule"
+        );
+        assert_eq!(canonical_temp_write_root(&spelled), None);
+    }
+
+    /// Refused whichever rule fires: it is not absolute, and `fs::canonicalize("")` fails. It was
+    /// refused before the absolute/`..` rule existed, and stays so if the rule is reordered or
+    /// removed: `Path::starts_with("")` is true for every path, so an empty root would admit the
+    /// whole filesystem.
+    #[test]
+    fn an_empty_temp_dir_is_not_a_write_root() {
+        assert_eq!(canonical_temp_write_root(Path::new("")), None);
+    }
+
+    #[test]
+    fn a_dotdot_temp_dir_admits_no_write_through_classification() {
+        let scratch = tempdir().unwrap();
+        std::fs::create_dir(scratch.path().join("real")).unwrap();
+        std::fs::create_dir(scratch.path().join("sibling")).unwrap();
+        let spelled = scratch.path().join("real/../sibling");
+        let project = tempdir().unwrap();
+        let target = scratch.path().join("sibling/x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&spelled, None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "a `..` TMPDIR must add no root, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn a_relative_temp_dir_admits_no_write_through_classification() {
+        // Only the temp dir is injected as ".": it would resolve against the process cwd. The
+        // target is built from that same cwd, so the old behaviour admitted it.
+        let cwd = std::env::current_dir().unwrap();
+        let target = cwd.join("ce_relative_tmpdir_probe.txt");
+        let project = tempdir().unwrap();
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(Path::new("."), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "`TMPDIR=.` must add no root, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_temp_dir_admits_no_write_through_classification() {
+        let scratch = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let target = scratch.path().join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(Path::new(""), None, None),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { .. }),
+            "an empty TMPDIR must add no root, got: {decision:?}"
         );
     }
 
