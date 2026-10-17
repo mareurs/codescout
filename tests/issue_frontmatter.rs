@@ -166,7 +166,7 @@ fn block_problems(file_name: &str, block: &str) -> Vec<String> {
         }
     }
     for required in ["kind", "status"] {
-        if seen.get(required).map_or(true, |v| v.is_empty()) {
+        if seen.get(required).is_none_or(|v| v.is_empty()) {
             out.push(format!("missing `{required}`"));
         }
     }
