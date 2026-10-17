@@ -383,6 +383,47 @@ async fn doc_augment_still_publishes_through_a_sidecar_dir_link_that_stays_insid
     assert!(on_disk.contains("NEW-PROMPT"), "{on_disk}");
 }
 
+/// A committed sidecar that is a link to a file INSIDE the repo resolves fine, so the containment
+/// check lets it through; only the leaf rule refuses it, and `doc(augment)` must refuse it BEFORE
+/// the catalog moves, like the escapes above, not after.
+#[tokio::test]
+async fn doc_augment_refuses_a_sidecar_that_is_an_in_repo_link_before_the_catalog_moves() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join(".git")).unwrap();
+    std::fs::create_dir_all(root.path().join("docs/augmentations")).unwrap();
+    std::fs::write(root.path().join("shared.yaml"), "prompt: OLD\n").unwrap();
+    std::os::unix::fs::symlink(
+        root.path().join("shared.yaml"),
+        root.path().join("docs/augmentations/t.yaml"),
+    )
+    .unwrap();
+    let art = root.path().join("t.md");
+    std::fs::write(
+        &art,
+        "---\nkind: tracker\nstatus: active\nexpects_augmentation: docs/augmentations/t.yaml\n---\n\n# T\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &art);
+
+    let err = augment::call(&ctx, json!({"id": id, "prompt": "NEW-PROMPT"}))
+        .await
+        .expect_err("a sidecar that is a link is never written through");
+
+    assert!(
+        err.downcast_ref::<LibrarianRecoverableError>().is_some(),
+        "{err:?}"
+    );
+    assert!(msg(&err).contains("symbolic link"), "{}", msg(&err));
+    assert!(augmentation::get(&ctx.catalog.lock(), &id)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("shared.yaml")).unwrap(),
+        "prompt: OLD\n"
+    );
+}
+
 /// `doctor fix=export_augmentations` CREATES sidecars through `docs/augmentations`; with that
 /// directory a link out of the repo it would create files in the outside directory.
 #[tokio::test]
