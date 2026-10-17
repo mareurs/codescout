@@ -6696,6 +6696,27 @@ EOF"#;
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn cwd_not_yet_created_under_a_symlinked_ancestor_admits_its_files() {
+        let scratch = tempdir().unwrap();
+        let (_real, link) = real_and_link(scratch.path());
+        let project = tempdir().unwrap();
+        let cwd = link.join("gone");
+        let target = cwd.join("x.txt");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &[],
+            &env_of(&scratch.path().join("no-temp"), None, Some(&cwd)),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(_)),
+            "a cwd that does not exist must resolve like the target, got: {decision:?}"
+        );
+    }
+
     #[test]
     fn temp_dir_that_is_an_ancestor_of_home_adds_no_root() {
         let scratch = tempdir().unwrap();
