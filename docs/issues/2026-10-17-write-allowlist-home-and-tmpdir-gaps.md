@@ -161,8 +161,12 @@ item 6 in `2026-10-17-extra-write-roots-entry-is-not-validated-an-empty-one-admi
    `PASSWD_BUF_MAX` carries `cap-class: NOT_A_CAP` (`tests/result_caps.rs` classifies every `_MAX`
    constant; it failed on this one until annotated). `tests/env_mutation_isolation.rs` bans
    `set_var` outside an allowlist; `resolved_home_dir_is_not_stale_after_home_changes` needs one
-   (its subject is a `$HOME` that changes), so `src/platform/mod.rs` was ADDED to that allowlist
-   with the reason (the mutation runs only in a child process). That is a repo-policy decision for
+   (its subject is a `$HOME` that changes), so `src/platform/test_child.rs` was ADDED to that
+   allowlist with the reason (the mutation runs only in a child process). The first version
+   allowlisted the whole `src/platform/mod.rs`, so a future production `set_var` there would have
+   passed silently (measured: injecting one into `mod.rs` left the gate at `5 passed`); review
+   follow-up moved `test_child` and that one test into their own test-only file and allowlisted only
+   it (the same injection now fails the gate). That is a repo-policy decision for
    the owner to accept or refuse; the alternative is dropping that one test.
 3. `WriteEnv.home: Option<PathBuf>` became `WriteEnv.homes: Vec<PathBuf>` (`$HOME` resolved plus the
    account home, the home as given AND its canonical form (through the existing ancestor), deduplicated: `protected_homes_of`).

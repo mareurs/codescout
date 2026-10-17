@@ -79,12 +79,13 @@ const ALLOWED: &[(&str, &str)] = &[
          was a knob and now passes a value to custom_with instead",
     ),
     (
-        "src/platform/mod.rs",
+        "src/platform/test_child.rs",
         "resolved_home_dir_is_not_stale_after_home_changes: its SUBJECT is that a changed $HOME is \
          seen by the next call even after the account lookup is cached, which needs $HOME to \
          change inside one process. The mutation runs only in a CHILD re-executed on that single \
-         test (platform::test_child, --exact, one thread, marker variable), where no second \
-         thread reads the environment; the shared test process never mutates it",
+         test (--exact, one thread, marker variable), where no second thread reads the \
+         environment; the shared test process never mutates it. The entry names the test-only \
+         file, not src/platform/mod.rs, so a production set_var in the module still fails this gate",
     ),
 ];
 
