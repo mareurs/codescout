@@ -132,6 +132,10 @@ pub enum SeverityReason {
     BasenameMatch,
     /// The basename matched more than one file, so the ref is ambiguous rather than broken.
     BasenameAmbiguous,
+    /// A bare-basename ref found nothing — or, for a `path:line` / `path::symbol` ref, only
+    /// a single copy that could not be judged — but the basename index was cut off at its file
+    /// cap, so "nothing" means "not reached" and a lone copy is not proof of uniqueness.
+    BasenameIndexTruncated,
     /// The LSP answered without the symbol but tree-sitter finds it — the server is
     /// mid-index, so the scan is degraded rather than the reference wrong.
     LspBehindAst,
@@ -164,10 +168,11 @@ pub enum SeverityReason {
 impl SeverityReason {
     /// Every variant. Kept in step with the type by [`Self::as_str`]'s exhaustive match:
     /// a new variant fails to compile there long before anyone notices this array.
-    pub const ALL: [SeverityReason; 13] = [
+    pub const ALL: [SeverityReason; 14] = [
         SeverityReason::PolicyDefault,
         SeverityReason::BasenameMatch,
         SeverityReason::BasenameAmbiguous,
+        SeverityReason::BasenameIndexTruncated,
         SeverityReason::LspBehindAst,
         SeverityReason::InferredPath,
         SeverityReason::CodeBlock,
@@ -186,6 +191,7 @@ impl SeverityReason {
             SeverityReason::PolicyDefault => "policy_default",
             SeverityReason::BasenameMatch => "basename_match",
             SeverityReason::BasenameAmbiguous => "basename_ambiguous",
+            SeverityReason::BasenameIndexTruncated => "basename_index_truncated",
             SeverityReason::LspBehindAst => "lsp_behind_ast",
             SeverityReason::InferredPath => "inferred_path",
             SeverityReason::CodeBlock => "code_block",
@@ -214,6 +220,11 @@ impl SeverityReason {
             }
             SeverityReason::BasenameAmbiguous => {
                 "the basename matches several files — ambiguous, not broken; name the path"
+            }
+            SeverityReason::BasenameIndexTruncated => {
+                "the basename index stopped at its file cap — the file, or a same-named twin \
+                 the doc may mean, can sit in the un-indexed part of the tree; name its path \
+                 to verify"
             }
             SeverityReason::LspBehindAst => {
                 "the LSP is mid-index and tree-sitter disagrees with it — the scan is \
@@ -268,10 +279,11 @@ pub struct ScanMeta {
     pub last_scan_commit: Option<String>,
     pub n_files_scanned: u32,
     pub n_refs_found: u32,
-    /// Coverage was incomplete. Accurate as-is, and deliberately unchanged: a mid-index
+    /// LSP coverage was incomplete. Accurate as-is, and deliberately unchanged: a mid-index
     /// server really does cost resolutions, which is why
     /// `docs/issues/archive/2026-08-06-audit-doc-refs-gate-is-nondeterministic.md` made
-    /// this true for that case.
+    /// this true for that case. It covers the LSP ONLY: a truncated basename index is
+    /// reported by [`ScanMeta::basename_index_truncated`], not folded in here.
     pub degraded: bool,
     /// Languages whose resolutions were incomplete.
     ///
@@ -291,6 +303,15 @@ pub struct ScanMeta {
     /// had to guess — and guessed wrong.
     #[serde(default)]
     pub degraded_causes: std::collections::BTreeMap<String, Vec<String>>,
+    /// The basename index stopped at its file cap, so a bare-basename ref that found
+    /// nothing was reported `unknown`, not `missing`.
+    ///
+    /// This must reach the PERSISTED tracker, not only the call response: the merger never
+    /// opens an issue from an `unknown` verdict, so on a truncated scan a newly broken
+    /// bare-basename ref is simply absent from the tracker, and without this flag the
+    /// tracker header would read as a complete scan.
+    #[serde(default)]
+    pub basename_index_truncated: bool,
 }
 
 /// A scan's degradation state: which languages came back incomplete, and why.
@@ -305,10 +326,16 @@ pub struct Degradation {
     /// Per-language causes, sorted and deduplicated.
     /// See [`resolver::DegradedCause`] for what each one means and what it implies.
     pub causes: std::collections::BTreeMap<String, Vec<String>>,
+    /// Whether the basename index stopped at its file cap. Carried here, beside the other
+    /// "this scan saw less than the whole tree" facts, but deliberately NOT part of
+    /// [`Degradation::is_degraded`]: that flag reports the LSP, and a truncated index has its
+    /// own marker (`scan_meta.basename_index_truncated`) and its own per-finding verdict.
+    pub basename_index_truncated: bool,
 }
 
 impl Degradation {
-    /// Whether coverage was incomplete — the `scan_meta.degraded` flag.
+    /// Whether the LSP left resolutions incomplete — the `scan_meta.degraded` flag. LSP
+    /// only: a truncated basename index is [`Degradation::basename_index_truncated`].
     pub fn is_degraded(&self) -> bool {
         !self.languages.is_empty()
     }
@@ -494,6 +521,13 @@ pub const DEFAULT_AUDIT_EXCLUDES: &[&str] = &[
 // cap-class: RESULT_CAP audit_doc_refs.files — probed
 pub const MAX_FILES_DEFAULT: usize = 10_000;
 
+/// Cap on files walked into the basename index — typical projects (1k–10k files)
+/// fit comfortably. Past it the index is a prefix, and a bare-basename miss is
+/// reported `Unknown`, never `Missing` (see `build_basename_index`). Override with
+/// `LIBRARIAN_AUDIT_MAX_INDEXED_FILES`.
+// cap-class: RESULT_CAP audit_doc_refs.basename_index — probed
+pub const MAX_INDEXED_FILES_DEFAULT: usize = 50_000;
+
 /// Live artifact ids for this run, or `None` when the catalog cannot answer the question.
 ///
 /// **An empty artifact table is `None`, not an empty set**, and that distinction is the whole
@@ -523,6 +557,20 @@ fn live_ids_or_disabled(
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
+    let max_indexed = std::env::var("LIBRARIAN_AUDIT_MAX_INDEXED_FILES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(MAX_INDEXED_FILES_DEFAULT);
+    call_with_index_cap(ctx, args, max_indexed).await
+}
+
+/// `call` with the basename-index cap supplied rather than read from the environment, so a
+/// test can drive the cap without `set_var` (UB in a parallel test binary).
+async fn call_with_index_cap(
+    ctx: &ToolContext,
+    args: Value,
+    max_indexed_files: usize,
+) -> Result<Value> {
     let args: AuditArgs = serde_json::from_value(args).map_err(|e| {
         LibrarianRecoverableError::with_hint(
             format!("audit_doc_refs: bad args: {e}"),
@@ -576,7 +624,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         .map(|g| globset::Glob::new(g).unwrap())
         .collect();
 
-    let basename_index = build_basename_index(&repo_root);
+    let (basename_index, basename_index_truncated) =
+        build_basename_index(&repo_root, max_indexed_files);
     // The matcher is only half the answer — see `build_tracked_dirs`. Building the
     // index set only when a `.gitignore` exists keeps the git open off the path of
     // repos that have none.
@@ -613,6 +662,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         lsp: Some(ctx.lsp.clone()),
         degraded_languages: Default::default(),
         basename_index,
+        basename_index_truncated,
         gitignore,
         live_artifact_ids,
     };
@@ -692,6 +742,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         Degradation {
             languages: causes.keys().cloned().collect(),
             causes,
+            basename_index_truncated: resolve_ctx.basename_index_truncated,
         }
     };
 
@@ -744,29 +795,41 @@ fn git_head_commit(repo_root: &std::path::Path) -> Option<String> {
 ///
 /// `ignore::WalkBuilder` honours `.gitignore` so generated artefacts
 /// (`target/`, `node_modules/`, `.venv/`) are skipped naturally. A hard cap
-/// keeps a runaway monorepo from blowing up the audit's runtime; once the
-/// cap is hit we stop indexing (the audit still functions — basename misses
-/// just fall through to `Verdict::Missing` for the un-indexed tail).
+/// (`max_files`) keeps a runaway monorepo from blowing up the audit's runtime;
+/// once it is hit we stop indexing.
+///
+/// The second tuple element is `true` when the walk reached a file it did not
+/// index — the index is then a prefix, and a basename absent from it means
+/// "not reached", not "does not exist". The resolver must not turn such a miss
+/// into a `Verdict::Missing` (`resolver::try_basename_fallback` reports
+/// `Unknown` instead). A walk that ends exactly at the cap, or whose trailing
+/// entries are directories, is complete (`false`).
+///
+/// Walk ERRORS are skipped (`flatten`), not counted as truncation. That is sound only
+/// because `collect_markdown_files` walks the same tree with the same ignore defaults and
+/// `?`-propagates a walk error first, so an unreadable directory aborts the whole audit
+/// before this function runs (verified 2026-10-17 with a mode-000 subdirectory). If the
+/// two walks ever diverge, this skip becomes a silent un-indexed tail again.
 fn build_basename_index(
     repo_root: &std::path::Path,
-) -> std::collections::HashMap<String, Vec<std::path::PathBuf>> {
-    /// Soft cap — typical projects (1k–10k files) fit comfortably; monorepos
-    /// stop indexing past this and degrade gracefully.
-    // cap-class: RESULT_CAP audit_doc_refs.basename_index — probed
-    const MAX_INDEXED_FILES: usize = 50_000;
-
+    max_files: usize,
+) -> (
+    std::collections::HashMap<String, Vec<std::path::PathBuf>>,
+    bool,
+) {
     let mut index: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
         std::collections::HashMap::new();
     let walker = ignore::WalkBuilder::new(repo_root)
         .hidden(true)
         .git_ignore(true)
+        // Sorted, so the indexed prefix of a capped walk is the same on every machine and
+        // filesystem. Unsorted, readdir order decided WHICH files fell in the un-indexed tail.
+        .sort_by_file_name(|a, b| a.cmp(b))
         .build();
 
     let mut count = 0usize;
+    let mut truncated = false;
     for entry in walker.flatten() {
-        if count >= MAX_INDEXED_FILES {
-            break;
-        }
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
@@ -774,11 +837,15 @@ fn build_basename_index(
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
+        if count >= max_files {
+            truncated = true;
+            break;
+        }
         let rel = path.strip_prefix(repo_root).unwrap_or(path).to_path_buf();
         index.entry(name.to_string()).or_default().push(rel);
         count += 1;
     }
-    index
+    (index, truncated)
 }
 /// Compile the repo-root `.gitignore` for the gitignored-path severity cap.
 ///
@@ -974,6 +1041,7 @@ async fn upsert_tracker(
     new_params.scan_meta.degraded = degradation.is_degraded();
     new_params.scan_meta.lsp_languages_degraded = degradation.languages;
     new_params.scan_meta.degraded_causes = degradation.causes;
+    new_params.scan_meta.basename_index_truncated = degradation.basename_index_truncated;
     new_params.parse_warnings = warnings;
 
     write_tracker_params(ctx, &tracker_id, &new_params).await?;
@@ -1305,6 +1373,9 @@ fn build_response(
             // distinction the flat list threw away.
             "lsp_languages_degraded": degradation.languages,
             "degraded_causes": degradation.causes,
+            // True when the basename index stopped at its file cap: a bare-basename ref
+            // that found nothing is then `unknown` ("not reached"), never `missing`.
+            "basename_index_truncated": degradation.basename_index_truncated,
         },
         "exit_code": exit_code,
     }))
@@ -1839,6 +1910,7 @@ mod tests {
             causes: [("rust".to_string(), vec!["lsp_behind_index".to_string()])]
                 .into_iter()
                 .collect(),
+            ..Default::default()
         };
         let r = build_response(&[], &[], &degradation, 1, None, None, "never").unwrap();
         let meta = &r["scan_meta"];
@@ -2089,6 +2161,255 @@ mod tests {
     fn within_the_cap_is_ok() {
         assert!(enforce_file_cap(1, 5).is_ok());
         assert!(enforce_file_cap(5, 5).is_ok(), "the cap itself is allowed");
+    }
+    #[test]
+    fn basename_index_flags_truncation_only_when_a_file_was_left_out() {
+        let tmp = TempDir::new().unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(tmp.path().join(n), "x").unwrap();
+        }
+        // Cap below the file count: a file was left out.
+        let (index, truncated) = build_basename_index(tmp.path(), 2);
+        assert!(truncated, "3 files with cap 2 must report truncation");
+        assert_eq!(index.len(), 2, "exactly cap files are indexed");
+        // Cap equal to the file count: nothing was left out, even though the walk
+        // hit the cap exactly.
+        let (index, truncated) = build_basename_index(tmp.path(), 3);
+        assert!(!truncated, "3 files with cap 3 is a complete index");
+        assert_eq!(index.len(), 3);
+        // Cap above the file count.
+        let (_, truncated) = build_basename_index(tmp.path(), 100);
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn basename_index_trailing_directories_do_not_count_as_truncation() {
+        // The walk may yield directory entries after the cap is reached; only a
+        // FILE left out makes the index incomplete.
+        // Directories named to sort AFTER the file: with the walk sorted, the entries following
+        // the cap-th file are exactly these, so a cap check placed before the `is_file` filter
+        // would trip on the first one and report a truncation that never happened.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("only.txt"), "x").unwrap();
+        for d in ["z1", "z2", "z3"] {
+            std::fs::create_dir_all(tmp.path().join(d)).unwrap();
+        }
+        let (_, truncated) = build_basename_index(tmp.path(), 1);
+        assert!(!truncated);
+    }
+
+    #[tokio::test]
+    async fn existing_file_beyond_index_cap_is_not_reported_missing() {
+        // Bug: a bare-basename ref to a file in the un-indexed tail of a capped
+        // walk was reported as `Missing` (High) — a claim of absence about a file
+        // that exists. The cap is injected through `call_with_index_cap`, so no
+        // 50,000-file fixture and no `set_var` is needed.
+        let tmp = TempDir::new().unwrap();
+        for (dir, name) in [("x", "a.py"), ("y", "b.py"), ("z", "c.py")] {
+            std::fs::create_dir_all(tmp.path().join(dir)).unwrap();
+            std::fs::write(tmp.path().join(dir).join(name), "x = 1\n").unwrap();
+        }
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(
+            tmp.path().join("docs/spec.md"),
+            "See `a.py`, `b.py` and `c.py`.\n",
+        )
+        .unwrap();
+
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"]});
+
+        // Control: an uncapped index resolves all three by basename and says so.
+        let full = call_with_index_cap(&ctx, args.clone(), MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        assert_eq!(full["n_refs_broken"], 0, "{full}");
+        assert_eq!(
+            full["scan_meta"]["basename_index_truncated"], false,
+            "{full}"
+        );
+
+        // Cap of 1: at most one of the four files is indexed.
+        let capped = call_with_index_cap(&ctx, args, 1).await.unwrap();
+
+        assert_eq!(
+            capped["n_refs_broken"], 0,
+            "an existing file must never become a Missing finding: {capped}"
+        );
+        assert!(
+            capped["n_refs_unknown"].as_u64().unwrap() >= 2,
+            "un-indexed refs are Unknown, not Missing: {capped}"
+        );
+        assert_eq!(
+            capped["scan_meta"]["basename_index_truncated"], true,
+            "the truncation must be named in the output: {capped}"
+        );
+        assert!(
+            capped["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|f| f["verdict"] != "missing"),
+            "{capped}"
+        );
+    }
+
+    #[tokio::test]
+    async fn genuinely_absent_ref_stays_missing_when_index_is_complete() {
+        // Silence on a trustworthy negative: a complete index keeps `Missing`.
+        // A BARE basename, so the lookup really goes through the index. Its severity
+        // is capped (inferred path), but the verdict, which `n_refs_broken` counts, is
+        // still `missing`.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See `gone.py`.\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let r = call_with_index_cap(
+            &ctx,
+            serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"]}),
+            MAX_INDEXED_FILES_DEFAULT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["n_refs_broken"], 1, "{r}");
+        assert_eq!(r["scan_meta"]["basename_index_truncated"], false, "{r}");
+    }
+    #[tokio::test]
+    async fn truncated_link_ref_is_unknown_med_and_gates_at_med_but_not_high() {
+        // The link kind was the only `missing`/`high` kind on this path (path/line/symbol refs
+        // were already capped to `low` as inferred paths), so it is the one the truncation must
+        // not let slip under `--fail-on med`. Sorted walk + cap 1: only `docs/spec.md` (the
+        // first file) is indexed, so `b.md` falls in the un-indexed tail.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("y")).unwrap();
+        std::fs::write(tmp.path().join("y/b.md"), "# b\n").unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See [b](b.md).\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = |fail_on: &str| serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"], "fail_on": fail_on});
+
+        let med = call_with_index_cap(&ctx, args("med"), 1).await.unwrap();
+        let finding = &med["findings"][0];
+        assert_eq!(finding["ref_kind"], "link", "{med}");
+        assert_eq!(finding["verdict"], "unknown", "{med}");
+        assert_eq!(finding["severity"], "med", "{med}");
+        assert_eq!(med["n_refs_broken"], 0, "{med}");
+        assert_eq!(
+            med["exit_code"], 1,
+            "a truncated link must still trip fail_on=med: {med}"
+        );
+
+        let high = call_with_index_cap(&ctx, args("high"), 1).await.unwrap();
+        assert_eq!(
+            high["exit_code"], 0,
+            "unproven absence must not gate at high: {high}"
+        );
+
+        // Control: the same ref against a complete index resolves by basename.
+        let full = call_with_index_cap(&ctx, args("med"), MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        assert_eq!(
+            full["findings"][0]["verdict"], "resolved_basename",
+            "{full}"
+        );
+        assert_eq!(full["exit_code"], 0, "{full}");
+    }
+
+    #[tokio::test]
+    async fn genuinely_absent_link_stays_missing_high_when_index_is_complete() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See [g](gone.md).\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let r = call_with_index_cap(
+            &ctx,
+            serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"], "fail_on": "high"}),
+            MAX_INDEXED_FILES_DEFAULT,
+        )
+        .await
+        .unwrap();
+        let finding = &r["findings"][0];
+        assert_eq!(finding["verdict"], "missing", "{r}");
+        assert_eq!(finding["severity"], "high", "{r}");
+        assert_eq!(r["exit_code"], 1, "{r}");
+    }
+
+    #[tokio::test]
+    async fn truncation_reaches_the_persisted_tracker_and_its_rendering() {
+        // The merger never opens an issue from an `unknown` verdict, so on a truncated scan a
+        // newly broken bare-basename ref is ABSENT from the tracker. The only thing that tells a
+        // reader of the tracker is `scan_meta.basename_index_truncated`, rendered in its header.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("y")).unwrap();
+        std::fs::write(tmp.path().join("y/b.py"), "x = 1\n").unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See `b.py`.\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = serde_json::json!({"emit_tracker": true, "paths": ["docs/**/*.md"]});
+        let render = |p: &TrackerParams| {
+            crate::librarian::tools::render::render_params(
+                include_str!("./render_template.j2"),
+                &serde_json::to_value(p).unwrap(),
+            )
+            .unwrap()
+        };
+
+        let capped = call_with_index_cap(&ctx, args.clone(), 1).await.unwrap();
+        let id = capped["tracker_id"].as_str().unwrap().to_string();
+        let params = load_tracker_params(&ctx, &id).await.unwrap();
+        assert!(
+            params.scan_meta.basename_index_truncated,
+            "the persisted scan_meta must record the truncation: {params:?}"
+        );
+        assert!(!params.scan_meta.degraded, "`degraded` stays LSP-only");
+        assert!(
+            params.issues.is_empty(),
+            "no issue is opened from an unknown verdict, which is why the flag matters"
+        );
+        assert!(
+            render(&params).contains("basename index truncated"),
+            "the tracker header must say the scan was incomplete: {}",
+            render(&params)
+        );
+
+        // A later complete scan overwrites the flag, so the warning does not outlive its cause.
+        call_with_index_cap(&ctx, args, MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        let params = load_tracker_params(&ctx, &id).await.unwrap();
+        assert!(!params.scan_meta.basename_index_truncated);
+        assert!(!render(&params).contains("basename index truncated"));
+    }
+    #[tokio::test]
+    async fn single_indexed_copy_on_truncated_index_does_not_give_a_false_line_oob() {
+        // `a/x.py` (3 lines) is the one indexed file under a sorted walk with cap 1; `b/x.py`
+        // (100 lines) is in the un-indexed tail and is what the doc cites. Before the fix the
+        // audit range-checked `a/x.py` and reported `line_oob`/med.
+        let tmp = TempDir::new().unwrap();
+        for d in ["a", "b", "docs"] {
+            std::fs::create_dir_all(tmp.path().join(d)).unwrap();
+        }
+        std::fs::write(tmp.path().join("a/x.py"), "1\n2\n3\n").unwrap();
+        std::fs::write(tmp.path().join("b/x.py"), "l\n".repeat(100)).unwrap();
+        std::fs::write(tmp.path().join("docs/spec.md"), "See `x.py:50`.\n").unwrap();
+        let ctx = mk_smoke_ctx(tmp.path().to_path_buf());
+        let args = serde_json::json!({"emit_tracker": false, "paths": ["docs/**/*.md"]});
+
+        let capped = call_with_index_cap(&ctx, args.clone(), 1).await.unwrap();
+        let f = &capped["findings"][0];
+        assert_eq!(f["verdict"], "unknown", "{capped}");
+        assert_eq!(f["severity_reason"], "basename_index_truncated", "{capped}");
+        assert_eq!(capped["n_refs_broken"], 0, "{capped}");
+
+        // Control: against a complete index the same ref is the honest ambiguity.
+        let full = call_with_index_cap(&ctx, args, MAX_INDEXED_FILES_DEFAULT)
+            .await
+            .unwrap();
+        assert_eq!(
+            full["findings"][0]["verdict"], "ambiguous_basename",
+            "{full}"
+        );
     }
 
     #[tokio::test]
