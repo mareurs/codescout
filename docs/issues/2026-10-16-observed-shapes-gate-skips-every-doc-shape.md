@@ -102,7 +102,7 @@ plan-doc snippet that needs real transcripts); the rows are read through recorde
   is the exception: its result carries `items[].abs_path`, so a real call on an augmented tracker routes to
   `tracker-conventions` and is served only the preamble. Filed as
   `docs/issues/2026-10-17-doc-list-stale-on-an-augmented-tracker-routes-to-tracker-conventions-and-gets-only-the-preamble.md`
-  (open); the waiver names it.
+  (open); the waiver names it.\n  Superseded at integration (2026-10-17): that issue is fixed and its waiver token deleted, and `move` is no\n  longer waived either (the archive sections declare it); the waiver now carries the remaining shapes only.
 
 Fix commits, on branch `worktree-agent-ab7a7e0e672e14d3a` (based on `experiments`): `53a53782` (patch-id
 `7ee22cbb367f42b2039b86af9fe3294f5decc618`) and the review fixes `e5075a12` (patch-id

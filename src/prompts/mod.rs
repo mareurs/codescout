@@ -709,9 +709,12 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
 /// `docs/trackers/` artifact (the gate's probes are synthetic results naming a tracker path,
 /// so they route every shape below here whether or not a real call would):
 ///
-/// - `doc.append_entry`, `doc.update_entry`, `doc.move`, `doc.delete`, `doc.link`, `doc.augment`:
+/// - `doc.append_entry`, `doc.update_entry`, `doc.delete`, `doc.link`, `doc.augment`:
 ///   the real result names no path the router reads (2026-10-16, see
 ///   `TRACKER_SECTION_NEEDS_A_WRITE`), so a real call reaches `librarian`, not here.
+///   (`doc.move` was on this list until 2026-10-17: its result names `old_abs_path` /
+///   `new_abs_path`, which the router now reads, and the archive sections declare it, so it
+///   is served here and needs no waiver.)
 ///   Open ledger entry:
 ///   `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
 /// - `doc.event_create`, `doc.event_list`, `doc.gather`, `doc.graph`: also measured, 2026-10-16
@@ -728,7 +731,7 @@ const TRACKER_DOC_SHAPES_UNSERVED: &str = "These doc.* call shapes route to \
      tracker-conventions in the gate's probes (a result naming a tracker or bug path), and no \
      section here serves them. Real calls that never reach this topic (their results name no \
      tracker path, measured 2026-10-16 and 2026-10-17): doc.append_entry, doc.update_entry, \
-     doc.move, doc.delete, doc.link, doc.augment, doc.event_create, doc.event_list, doc.gather, \
+     doc.delete, doc.link, doc.augment, doc.event_create, doc.event_list, doc.gather, \
      doc.graph, and doc (the bare tool key, a call missing its action); the write ones are \
      tracked in docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md. \
      Surfaced 2026-10-17 when the gate began reading census rows renamed from artifact.* to \
@@ -2066,6 +2069,9 @@ mod tests {
         // `threshold_hours`) and a section there serves it. `doc.gather` still is.
         assert!(!shape_is_waived("tracker-conventions", "doc.list_stale"));
         assert!(shape_is_waived("tracker-conventions", "doc.gather"));
+        // `doc.move` is served by the archive sections (its result names old_abs_path /
+        // new_abs_path, which the router reads); a waiver naming it would claim otherwise.
+        assert!(!shape_is_waived("tracker-conventions", "doc.move"));
         assert!(!shape_is_waived("librarian", "doc.no_such_action"));
     }
 
