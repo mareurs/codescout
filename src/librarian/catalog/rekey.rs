@@ -467,7 +467,11 @@ fn rekey_body(
     } else {
         out
     };
-    std::fs::write(&abs_path, new_doc)?;
+    // `abs_path` is the catalog's: a row can be an in-root link to a file outside the repository,
+    // and a plain write follows it. `write_catalogued_file` refuses a link; past the refusals
+    // above so a preview and a no-op never fail on it, and inside the transaction so a refusal
+    // rolls the params rewrite back with it.
+    crate::librarian::util::write_catalogued_file(std::path::Path::new(&abs_path), new_doc)?;
     Ok(())
 }
 
@@ -1636,6 +1640,42 @@ mod tests {
         assert!(out.contains("## SRI-3 — a"), "got:\n{out}");
         assert!(out.contains("see SRI-4"), "got:\n{out}");
         assert!(out.starts_with("# Notes\n"), "got:\n{out}");
+    }
+
+    /// `abs_path` comes from the catalog row, and the indexer catalogs an in-root link whose
+    /// target is outside the root, so `fs::write` here would rewrite a file the repository does
+    /// not own. Refused inside the transaction: the params rewrite done earlier in the same
+    /// transaction must roll back with it, or the ids and the body part ways.
+    #[cfg(unix)]
+    #[test]
+    fn a_body_rewrite_is_refused_when_the_ledger_is_a_link_to_a_file_outside_the_repo() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let text = "# Notes\n\n## T-3 — a\n\nsee T-4\n";
+        let l = led(&cat, "led", "my-ledger", text);
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-3"}]}),
+            None,
+            "p",
+        );
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.md");
+        std::fs::write(&victim, text).unwrap();
+        std::fs::remove_file(&l.path).unwrap();
+        std::os::unix::fs::symlink(&victim, &l.path).unwrap();
+
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply)
+            .expect_err("the body write must not follow the link");
+
+        assert!(format!("{err:#}").contains("symbolic link"), "got: {err:#}");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), text);
+        assert_eq!(
+            params_of(&cat, "led")["tasks"][0]["id"],
+            "T-3",
+            "the transaction must have rolled the params back with the refused write"
+        );
     }
 
     /// A body with nothing to move must not be rewritten at all — an unnecessary `fs::write`

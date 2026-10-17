@@ -478,6 +478,10 @@ pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![Arc::new(artifact::Artifact), Arc::new(librarian::Librarian)]
 }
 
+/// A catalogued path that is a symbolic link is never written through (see the module doc).
+#[cfg(test)]
+mod link_write_tests;
+
 #[cfg(test)]
 mod containing_root_tests {
     use super::containing_root;

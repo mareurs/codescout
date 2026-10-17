@@ -2008,6 +2008,12 @@ fn export_augmentation_sidecars(
         }
 
         let doc = sidecar::AugmentationSidecar::from_row(&row);
+        // BEFORE the sidecar is written: `stamp_augmentation_declaration` below rewrites the
+        // artifact in place, and failing there would leave a sidecar nothing declares.
+        if let Err(e) = crate::librarian::util::refuse_write_through_symlink(art) {
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
         if let Err(e) = sidecar::write(&sidecar_abs, &doc) {
             // One unwritable file must not abandon the rest of the sweep — the same
             // reasoning as `repair_frontmatter_id`, and it matters more here because the
@@ -2039,7 +2045,10 @@ fn stamp_augmentation_declaration(artifact: &std::path::Path, sidecar_rel: &str)
         "expects_augmentation".to_string(),
         Value::String(sidecar_rel.to_string()),
     );
-    std::fs::write(artifact, crate::librarian::frontmatter::write(&fm, body))?;
+    crate::librarian::util::write_catalogued_file(
+        artifact,
+        crate::librarian::frontmatter::write(&fm, body),
+    )?;
     Ok(())
 }
 
@@ -2204,6 +2213,15 @@ async fn run_fix(
                 // `artifact_id` is always Some for this check — it is built from the
                 // catalog row — but a default beats an unwrap in a repair loop.
                 let id = v.artifact_id.clone().unwrap_or_default();
+                // `repair_frontmatter_id` SKIPS a link rather than failing (a move's rename has
+                // already happened, so it cannot abort), which this loop would read as a repair.
+                // Refuse here so a link is reported under `failed`, not `repaired`.
+                if let Err(err) = crate::librarian::util::refuse_write_through_symlink(
+                    std::path::Path::new(&v.path),
+                ) {
+                    failed.push(json!({ "path": v.path, "error": format!("{err:#}") }));
+                    continue;
+                }
                 match super::mv::repair_frontmatter_id(std::path::Path::new(&v.path), &id) {
                     Ok(_) => repaired.push(json!({ "path": v.path, "id": id })),
                     // One unwritable file must not abandon the rest of the sweep.

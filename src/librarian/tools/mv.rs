@@ -635,7 +635,16 @@ pub(super) fn repair_frontmatter_id(
 
     match crate::librarian::frontmatter::replace_scalar_line(&content, "id", new_id) {
         Some(rewritten) => {
-            std::fs::write(path, &rewritten)?;
+            // Best-effort by design (the rename already happened), so a link is SKIPPED, not
+            // failed: `rename` moved the link itself, and this write follows it to whatever it
+            // points at — possibly a file outside the repository, whose `id:` it would
+            // overwrite. Measured 2026-10-17 on a catalogued outward link. The catalog re-key
+            // stands; `doctor` reports the stale `id:` as `frontmatter_id_mismatch`.
+            if let Err(e) = crate::librarian::util::refuse_write_through_symlink(path) {
+                tracing::warn!("move: {e:#}; frontmatter id left unrepaired");
+                return Ok(content);
+            }
+            crate::librarian::util::write_catalogued_file(path, &rewritten)?;
             Ok(rewritten)
         }
         // The parser found an id the line scan could not: a shape neither anticipated

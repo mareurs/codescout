@@ -1020,12 +1020,16 @@ pub fn append_entry(
             // it has one, `2` only as a declared default.
             let level = body_entry_heading_level(&doc, id_prefix).unwrap_or(2);
             let updated = splice_pending_section(&doc, &new_id, level, s, "append_entry")?;
-            std::fs::write(path, &updated).map_err(|e| {
-                LibrarianRecoverableError::new(format!(
-                    "append_entry: cannot write the section into `{path}`: {e} — no id was \
-                     allocated"
-                ))
-            })?;
+            // `write_catalogued_file` refuses a link: a catalogued row can be an in-root link to a
+            // file outside the repository. Refused with the transaction still open, so no id is
+            // consumed and the params row rolls back.
+            crate::librarian::util::write_catalogued_file(std::path::Path::new(path), &updated)
+                .map_err(|e| {
+                    LibrarianRecoverableError::new(format!(
+                        "append_entry: cannot write the section into `{path}`: {e:#} — no id was \
+                         allocated"
+                    ))
+                })?;
             record_written_file(&tx, artifact_id, path, &updated)?;
             written_section = Some((path.to_string(), doc, updated));
             // `snapshot_missing` was derived from a body read taken BEFORE this write, so
@@ -1088,10 +1092,18 @@ fn restore_section_after_failed_commit(
     written: &str,
 ) -> SectionRollback {
     match std::fs::read_to_string(path) {
-        Ok(current) if current == written => match std::fs::write(path, original) {
-            Ok(()) => SectionRollback::Restored,
-            Err(e) => SectionRollback::Failed(e),
-        },
+        // The write that put `written` there was guarded; the check is repeated because the
+        // file is protected by nothing between the two (see the comment above), and a link
+        // planted in that window would turn this restore into a write through it.
+        Ok(current) if current == written => {
+            match crate::librarian::util::write_catalogued_file(
+                std::path::Path::new(path),
+                original,
+            ) {
+                Ok(()) => SectionRollback::Restored,
+                Err(e) => SectionRollback::Failed(std::io::Error::other(format!("{e:#}"))),
+            }
+        }
         Ok(_) => SectionRollback::ForeignChange,
         Err(e) => SectionRollback::Failed(e),
     }
@@ -1950,12 +1962,16 @@ pub fn allocate_entry_id(
         None => updated,
         Some(s) => splice_pending_section(&updated, &id, level, s, "allocate_entry_id")?,
     };
-    std::fs::write(&abs_path, &updated).map_err(|e| {
-        LibrarianRecoverableError::new(format!(
-            "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e} — no \
-             id was allocated"
-        ))
-    })?;
+    // `abs_path` is the catalog's, and a row can be an in-root link to a file outside the
+    // repository; `write_catalogued_file` refuses a link. Before `tx.commit()`, so the
+    // reservation inserted above rolls back with the transaction.
+    crate::librarian::util::write_catalogued_file(std::path::Path::new(&abs_path), &updated)
+        .map_err(|e| {
+            LibrarianRecoverableError::new(format!(
+                "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e:#} — no \
+                 id was allocated"
+            ))
+        })?;
     record_written_file(&tx, artifact_id, &abs_path, &updated)?;
 
     tx.commit()?;
@@ -2219,12 +2235,16 @@ fn resync_snapshot_row(
     if doc.ends_with('\n') {
         text.push('\n');
     }
-    std::fs::write(&abs_path, &text).map_err(|e| {
-        LibrarianRecoverableError::new(format!(
-            "update_entry: `{entry_id}` was patched, but writing the snapshot row to \
-             {abs_path} failed: {e} — the params change was rolled back"
-        ))
-    })?;
+    // A catalogued row can be an in-root link to a file outside the repository;
+    // `write_catalogued_file` refuses a link, inside the caller's transaction.
+    crate::librarian::util::write_catalogued_file(std::path::Path::new(&abs_path), &text).map_err(
+        |e| {
+            LibrarianRecoverableError::new(format!(
+                "update_entry: `{entry_id}` was patched, but writing the snapshot row to \
+                 {abs_path} failed: {e:#} — the params change was rolled back"
+            ))
+        },
+    )?;
     record_written_file(tx, artifact_id, &abs_path, &text)?;
     Ok(SnapshotRow::Rewritten)
 }
@@ -3002,6 +3022,175 @@ mod tests {
         art.file_sha256 = "abc".to_string();
         art.file_mtime = 1;
         art
+    }
+
+    // ---- a row that is a link to a file outside the repo is never written through -----------
+    //
+    // Every writer below takes `abs_path` from the catalog row, and the indexer deliberately
+    // catalogs an in-root link whose target is outside the root. Fixtures replace the ledger a
+    // helper just wrote with a link to a copy in a SEPARATE tempdir (bound by the caller; an
+    // inline temporary would drop and leave the link dangling). Unix-only: links.
+
+    /// Move `md`'s bytes into a fresh directory and leave a symlink at `md` pointing there.
+    /// Returns the directory (keep it alive) and the victim path.
+    #[cfg(unix)]
+    fn replace_with_outward_link(md: &std::path::Path) -> (tempfile::TempDir, std::path::PathBuf) {
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.md");
+        std::fs::write(&victim, std::fs::read(md).unwrap()).unwrap();
+        std::fs::remove_file(md).unwrap();
+        std::os::unix::fs::symlink(&victim, md).unwrap();
+        (outside, victim)
+    }
+
+    /// The assertions every site shares: refused with the link named, the victim byte-identical,
+    /// and the link still a link.
+    #[cfg(unix)]
+    fn assert_refused_and_untouched(
+        err: &anyhow::Error,
+        md: &std::path::Path,
+        victim: &std::path::Path,
+        victim_before: &str,
+    ) {
+        assert!(
+            format!("{err:#}").contains("symbolic link"),
+            "the refusal must say why: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(victim).unwrap(), victim_before);
+        assert!(std::fs::symlink_metadata(md)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn allocate_entry_id_refuses_a_row_that_is_a_link_to_a_file_outside_the_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, before) = ledger_fixture(dir.path(), &mut cat);
+        let (_outside, victim) = replace_with_outward_link(&md);
+
+        let err = allocate_entry_id(&mut cat, "art1", "F", None)
+            .expect_err("the high-water-mark write must not follow the link");
+
+        assert_refused_and_untouched(&err, &md, &victim, &before);
+        // The reservation was inserted inside the transaction before the refusal; it must have
+        // rolled back, or the next allocation skips an id for a call that wrote nothing.
+        let reserved: Option<i64> = cat
+            .conn
+            .query_row(
+                "SELECT max_allocated FROM entry_reservation WHERE artifact_id='art1'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert_eq!(reserved, None, "a refused allocation consumes no id");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_entry_refuses_to_write_its_section_through_a_link_outside_the_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, before) = ledger_fixture(dir.path(), &mut cat);
+        let (_outside, victim) = replace_with_outward_link(&md);
+        let section = PendingSection {
+            title: "first".to_string(),
+            body: "the prose".to_string(),
+            anchor_heading: "## Template for new entries".to_string(),
+            index_row: None,
+        };
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &[],
+            Some(&section),
+        )
+        .expect_err("the section write must not follow the link");
+
+        assert_refused_and_untouched(&err, &md, &victim, &before);
+        let row = get(&cat, "art1").unwrap().unwrap();
+        let params: Value = serde_json::from_str(&row.params).unwrap();
+        assert_eq!(
+            params["failures"].as_array().unwrap().len(),
+            0,
+            "the params row must roll back with the refused section"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn update_entry_refuses_to_resync_a_snapshot_row_through_a_link_outside_the_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("queue.md");
+        let before = "---\nkind: tracker\nsnapshot_anchor: '| ID | status |'\n---\n\n# Q\n\n\
+                      | ID | status |\n| T-1 | open |\n\ntail\n";
+        std::fs::write(&md, before).unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        art_upsert(&cat, &stale_art("art1", &md)).unwrap();
+        let mut a = aug("art1");
+        a.entry_collection = Some("tasks".to_string());
+        a.params = r#"{"tasks":[{"id":"T-1","status":"open"}]}"#.to_string();
+        a.render_template = Some(
+            "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}"
+                .to_string(),
+        );
+        upsert(&cat, &a).unwrap();
+        let (_outside, victim) = replace_with_outward_link(&md);
+
+        let err = update_entry(&mut cat, "art1", "tasks", "T-1", json!({"status": "done"}))
+            .expect_err("the snapshot resync must not follow the link");
+
+        assert_refused_and_untouched(&err, &md, &victim, before);
+        let row = get(&cat, "art1").unwrap().unwrap();
+        assert!(
+            row.params.contains("open") && !row.params.contains("done"),
+            "the params change is rolled back with the refused write: {}",
+            row.params
+        );
+    }
+
+    /// The restore after a failed commit writes the pre-call bytes back, but only when the file
+    /// still holds exactly what this call wrote. A link whose TARGET holds those bytes passes
+    /// that comparison (`read_to_string` follows it), which is the case the guard exists for.
+    #[cfg(unix)]
+    #[test]
+    fn restoring_a_section_never_writes_through_a_link() {
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.md");
+        std::fs::write(&victim, "WRITTEN").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("ledger.md");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+        let outcome =
+            restore_section_after_failed_commit(link.to_str().unwrap(), "ORIGINAL", "WRITTEN");
+
+        assert!(
+            matches!(outcome, SectionRollback::Failed(_)),
+            "a link must not be written through: {outcome:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "WRITTEN");
+    }
+
+    /// Control for the four above: an ordinary file takes the same restore.
+    #[test]
+    fn restoring_a_section_still_restores_a_regular_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ledger.md");
+        std::fs::write(&path, "WRITTEN").unwrap();
+
+        let outcome =
+            restore_section_after_failed_commit(path.to_str().unwrap(), "ORIGINAL", "WRITTEN");
+
+        assert!(matches!(outcome, SectionRollback::Restored), "{outcome:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ORIGINAL");
     }
 
     #[test]

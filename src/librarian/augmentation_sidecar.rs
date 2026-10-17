@@ -170,12 +170,15 @@ pub fn read(path: &Path) -> Result<AugmentationSidecar> {
 }
 
 pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
+    // A sidecar is a committed file at a repo-relative path, so a repository can ship a link
+    // there; `write_catalogued_file` refuses it rather than following it.
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     let yaml = serde_yml::to_string(sidecar).context("serializing augmentation sidecar")?;
-    std::fs::write(path, yaml).with_context(|| format!("writing {}", path.display()))?;
+    crate::librarian::util::write_catalogued_file(path, yaml)
+        .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
 
@@ -309,7 +312,12 @@ pub fn write_through(
         }
     }
 
-    std::fs::write(&path, rendered).with_context(|| format!("writing {}", path.display()))?;
+    // `path.is_file()` above FOLLOWS a link, so a committed sidecar that is a link to an outside
+    // file reaches this write as an ordinary existing sidecar. Refused by the writer rather than
+    // by tightening `is_file` (which would read as "absent" and silently skip the write-through
+    // instead of saying why).
+    crate::librarian::util::write_catalogued_file(&path, rendered)
+        .with_context(|| format!("writing {}", path.display()))?;
     Ok(WriteThrough {
         written: Some(rel),
         refused: Vec::new(),
@@ -399,6 +407,82 @@ mod tests {
         let p = dir.path().join("x.yaml");
         write(&p, &s).unwrap();
         assert_eq!(read(&p).unwrap(), s);
+    }
+
+    // ---- a sidecar that is a link is never written through ---------------------------------
+    //
+    // A sidecar is a COMMITTED file at a repo-relative path (`docs/augmentations/*.yaml`), so a
+    // repository can ship a link there and `fs::write` follows it. Victims live in a separate
+    // `TempDir` held by the caller.
+
+    #[cfg(unix)]
+    #[test]
+    fn write_refuses_a_link_to_an_existing_file_and_a_dangling_one() {
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.yaml");
+        std::fs::write(&victim, "VICTIM\n").unwrap();
+        let never = outside.path().join("never-created.yaml");
+        let dir = tempfile::tempdir().unwrap();
+        let to_existing = dir.path().join("a.yaml");
+        let to_missing = dir.path().join("b.yaml");
+        std::os::unix::fs::symlink(&victim, &to_existing).unwrap();
+        std::os::unix::fs::symlink(&never, &to_missing).unwrap();
+        let s = AugmentationSidecar::from_row(&row());
+
+        let e1 = write(&to_existing, &s).expect_err("a link to an existing file is refused");
+        let e2 = write(&to_missing, &s).expect_err("a dangling link is refused");
+
+        assert!(format!("{e1:#}").contains("symbolic link"), "{e1:#}");
+        assert!(format!("{e2:#}").contains("symbolic link"), "{e2:#}");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "VICTIM\n");
+        assert!(
+            !never.exists(),
+            "a dangling link must not have its target created"
+        );
+    }
+
+    /// `write_through` sees a committed sidecar through `is_file()`, which follows a link, and
+    /// then rewrites it. The artifact declares the sidecar, the row disagrees with its bytes, and
+    /// `Authored::All` leaves nothing to refuse — so the only thing between the call and the
+    /// outside file is the link check.
+    #[cfg(unix)]
+    #[test]
+    fn write_through_refuses_a_committed_sidecar_that_is_a_link_outside_the_repo() {
+        use crate::librarian::catalog::{artifact, augmentation, Catalog};
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let aug_dir = repo.path().join("docs/augmentations");
+        std::fs::create_dir_all(&aug_dir).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.yaml");
+        std::fs::write(&victim, "prompt: STALE-AND-OUTSIDE\n").unwrap();
+        std::os::unix::fs::symlink(&victim, aug_dir.join("t.yaml")).unwrap();
+        let art = repo.path().join("tracker.md");
+        std::fs::write(
+            &art,
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n\n# T\n",
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &artifact::TestArtifactRowBuilder::new("abc123")
+                .with_abs_path(&art)
+                .build(),
+        )
+        .unwrap();
+        augmentation::upsert(&cat, &row()).unwrap();
+        // Precondition: without it this passes because the call returned early.
+        assert!(aug_dir.join("t.yaml").is_file());
+
+        let err = write_through(&cat, "abc123", Authored::All)
+            .expect_err("the rewrite must not follow the committed link");
+
+        assert!(format!("{err:#}").contains("symbolic link"), "{err:#}");
+        assert_eq!(
+            std::fs::read_to_string(&victim).unwrap(),
+            "prompt: STALE-AND-OUTSIDE\n"
+        );
     }
 
     /// The load-bearing exclusion. `params` is live state; committing it would recreate the

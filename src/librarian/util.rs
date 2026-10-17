@@ -18,6 +18,73 @@ pub fn normalize_rel_path(rel: &str) -> String {
     rel.replace('\\', "/")
 }
 
+/// Refuse a write whose TARGET PATH is itself a symbolic link, dangling or not.
+///
+/// **Why a refusal, not a replace and not a conditional write-through.** Every librarian writer
+/// takes its path from the catalog (`row.abs_path`), from a frontmatter declaration or from
+/// `base_dir.join(rel_path)` — none of them passes through `validate_write_path`, so nothing else
+/// asks where the write lands. `std::fs::write` follows a leaf link, and the indexer deliberately
+/// catalogs an in-root `.md` link whose target is OUTSIDE the root (`indexer.rs`, the
+/// `is_symlink` block: skipping it would trade a silent duplicate for a silent omission), so a
+/// catalogued row can name a file the repository does not own.
+///
+/// * Replacing the link with a regular file (what `util::fs::atomic_write` does for the
+///   `create_file` / `edit_*` tools) is wrong HERE: the caller asked to update a document and the
+///   call would report success while the real document stayed unchanged and the user's link
+///   silently became a stale copy.
+/// * Writing through "only when the target is inside the root" supports a case the indexer never
+///   produces: a link that resolves inside the root is skipped as a duplicate name and gets no
+///   row, so such a row exists only from before that skip or after a link was re-pointed. Through
+///   it, the write would also leave the TARGET's own catalog row behind its file
+///   (`row_behind_file`). The target is addressable under its own id, and that is the route.
+///
+/// So any path that is a link is refused, naming the link and where it points. A missing path is
+/// `Ok` (a create has nothing to refuse until it exists), and so is an `lstat` that fails for any
+/// other reason: the write that follows will fail by itself and say why.
+///
+/// Limit, stated so it is not read as a guarantee: this checks the LEAF only. A link in a parent
+/// directory component is not detected, and the check and the write are two syscalls, so a link
+/// planted between them still wins. `fs::write` has no `O_NOFOLLOW` form in `std`.
+pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Result<()> {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if !meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    let target = std::fs::read_link(path)
+        .map(|t| t.display().to_string())
+        .unwrap_or_else(|_| "<unreadable>".to_string());
+    Err(
+        crate::librarian::tools::LibrarianRecoverableError::with_hint(
+            format!(
+            "refusing to write `{}`: it is a symbolic link (-> `{target}`), so the write would \
+             modify a file the link points at rather than this path",
+            path.display()
+        ),
+            "Nothing was written. Update the file the link points at under its own path (it is \
+         catalogued there when it lives in this repository), or replace the link with a regular \
+         file if this path should hold its own content.",
+        ),
+    )
+}
+
+/// Write `contents` to `path` — a path the CATALOG (or a document's frontmatter) supplied — unless
+/// the path is a symbolic link ([`refuse_write_through_symlink`]).
+///
+/// The one door the librarian's "rewrite a catalogued file in place" writers go through, so a
+/// fourth writer added later takes the guard by calling this rather than by remembering it.
+/// Returns `anyhow::Error` (the refusal is a recoverable error, an `io::Error` is wrapped) so a
+/// caller's `?` and `.with_context` read the same as they did over `std::fs::write`.
+pub(crate) fn write_catalogued_file(
+    path: &std::path::Path,
+    contents: impl AsRef<[u8]>,
+) -> anyhow::Result<()> {
+    refuse_write_through_symlink(path)?;
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
 /// Escape SQL `LIKE` wildcard characters (`%`, `_`) and the escape character
 /// itself (`\`) in a *needle* (user-supplied pattern) before interpolating it
 /// into a `LIKE` clause. Callers MUST pair this with `ESCAPE '\\'` on the SQL
