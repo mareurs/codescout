@@ -14,7 +14,7 @@ related:
 - docs/issues/2026-08-26-index-status-claims-complete-without-checking-coverage.md
 - docs/issues/archive/2026-08-26-force-reindex-cannot-migrate-embedding-dimensions.md
 severity: medium
-unverified: `embedding_count`, `db_path` and `by_source` were dropped by the same 79e0e4f2 sweep and are still absent; only the two fields the manual's recipe named were restored. The superseded design plan listing all five is deliberately left unedited as a historical snapshot.
+unverified: "`embedding_count`, `db_path` and `by_source` were dropped by the same 79e0e4f2 sweep and are still absent; only the two fields the manual's recipe named were restored. The superseded design plan listing all five is deliberately left unedited as a historical snapshot."
 ---
 
 # BUG: `index(action="status")` dropped the two model fields its own manual tells users to compare
