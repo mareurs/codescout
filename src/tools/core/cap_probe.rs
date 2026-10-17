@@ -587,21 +587,40 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     ProbeRow {
         id: "format.shape_keys",
         coverage: Coverage::Untested(
-            "no test references describe_payload_shape's key-count cap or seeds an object \
-             with enough keys to reach it",
+            "no test seeds an OBJECT with more than MAX_KEYS keys to drive describe_payload_shape's \
+             key line past its bound; its '… +N more' marker exists, so a test is writable. \
+             Covers the object branch only: the array branch's `item keys:` cut is \
+             format.shape_item_keys",
         ),
+    },
+    ProbeRow {
+        // Split from `format.shape_keys` (2026-10-17): the array branch of
+        // `describe_payload_shape` cuts its `item keys:` line at its own constant and, unlike the
+        // object key line, prints no count when it bites — so a marker does not exist to test
+        // for, and `Untested` (whose contract requires one) would hide a production defect
+        // behind a worklist item. Verified by running it: an array whose first item has 30 keys
+        // prints `item keys: k00 … k23` and nothing about the other six.
+        id: "format.shape_item_keys",
+        coverage: Coverage::NoMarker {
+            reason: "the array branch's `item keys:` line is cut with .take(MAX_ITEM_KEYS) and \
+             prints no count, unlike the object key line's '… +N more'; an array whose first \
+             item has 30 keys names 24 and says nothing of the other six, and no test could \
+             assert a marker that is not emitted",
+            bug: "docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md",
+        },
     },
     ProbeRow {
         // Was `NoMarker` until `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`:
         // an over-length string was filtered out of the scalar line with no count. The line
-        // now ends `… +N more scalars`, and the cited test seeds a 60-byte string (admitted)
+        // now ends `… +N more entries`, and the cited test seeds a 60-byte string (admitted)
         // beside a 61-byte one (dropped) with FOUR scalar candidates against a cap of eight,
-        // so only this bound can bite. Mutation: dropping `too_long` from `cap_scalars`' count,
-        // and separately zeroing it at the top-level and at the nested (`flat_scalars`) call
-        // site, each reds the cited test.
+        // so only this bound can bite. Mutation: dropping `too_long` from `cap_scalars`' count
+        // reds the cited test, and so does zeroing it at the top-level call. The nested
+        // (`flat_scalars`) call site is NOT exercised by this test — that site is killed by
+        // `describe_payload_shape_counts_what_it_drops_inside_a_nested_object`.
         id: "format.shape_scalar_len",
         coverage: Coverage::Probed {
-            marker: Marker::TextContains("more scalars"),
+            marker: Marker::TextContains("more entries"),
             mutation: Mutation::Killed,
             cited_test: "describe_payload_shape_counts_over_length_scalars_it_drops",
         },
@@ -609,11 +628,11 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     ProbeRow {
         // Was `NoMarker` until the same fix: `.take(MAX_SCALARS)` cut every scalar past the
         // eighth silently. The cited test seeds ELEVEN short numbers (none over-length, so
-        // only the count cap bites) and asserts the line ends `… +3 more scalars`. Mutation:
+        // only the count cap bites) and asserts the line ends `… +3 more entries`. Mutation:
         // dropping the `cut` term from `cap_scalars`' count reds it.
         id: "format.shape_scalars",
         coverage: Coverage::Probed {
-            marker: Marker::TextContains("more scalars"),
+            marker: Marker::TextContains("more entries"),
             mutation: Mutation::Killed,
             cited_test: "describe_payload_shape_counts_scalars_past_the_cap",
         },

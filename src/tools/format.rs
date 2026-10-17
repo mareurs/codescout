@@ -126,11 +126,19 @@ pub(crate) fn insert_below_header(body: String, extra: &str) -> String {
 /// outright (`status`, `title`, a count).
 ///
 /// Bounded on purpose: a wide object must not spend the whole summary budget listing keys.
-/// **Every bound discloses itself:** the key line ends `… +N more`, and the scalar line ends
-/// `… +N more scalars` — counting both the over-length strings it filtered and the scalars it
-/// cut past `MAX_SCALARS` (inside the braces, for an object-valued key's descent). The marker
-/// is absent when nothing was dropped. See
+/// Two bounds disclose themselves: an object's key line ends `… +N more`, and its scalar
+/// line ends `… +N more entries` — N counts the line's own entries that were held back: an
+/// over-length string filtered, or an entry (a scalar, or a nested object's `k: {…}` group)
+/// cut past `MAX_SCALARS`. The marker is absent when nothing was dropped. See
 /// `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`.
+///
+/// Two things are still silent and are filed, not fixed here: an array's `item keys:` line is
+/// cut at `MAX_ITEM_KEYS` with no count
+/// (`docs/issues/2026-10-17-describe-payload-shape-item-keys-cut-without-a-count.md`), and the
+/// one-level descent names nothing for a nested object's non-scalar members — arrays, objects,
+/// nulls
+/// (`docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`).
+///
 /// Returns `None` for a payload with no describable shape (a bare scalar), leaving the
 /// caller its own wording.
 ///
@@ -150,6 +158,10 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// crowd out the arrays and scalars below, which carry more per byte.
     // cap-class: RESULT_CAP format.shape_keys — probed
     const MAX_KEYS: usize = 24;
+    /// The element-key list of an array's first item. Its own constant, and its own
+    /// `PROBE_ROWS` row, because unlike `MAX_KEYS` it prints no count when it bites.
+    // cap-class: RESULT_CAP format.shape_item_keys — no marker, see the row
+    const MAX_ITEM_KEYS: usize = 24;
     /// Long enough for a title or a status, short enough that a stray blob cannot
     /// monopolise the line.
     // cap-class: RESULT_CAP format.shape_scalar_len — probed
@@ -163,8 +175,10 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
         Shown(String),
         /// A string over the length bound: a scalar the line COULD have carried and did not.
         TooLong,
-        /// Not a scalar (array, null, object) — the key line and `arrays:` already cover
-        /// it, so it is not a drop and must not inflate the count.
+        /// Not a scalar (array, null, object). At the top level the key line and `arrays:`
+        /// already name it, so it is not a drop and must not inflate the count. Inside
+        /// `flat_scalars` nothing names it at all — it vanishes from the output uncounted
+        /// (`docs/issues/2026-10-17-describe-payload-shape-nested-object-drops-its-non-scalar-members.md`).
         NotScalar,
     }
 
@@ -179,9 +193,11 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
         }
     }
 
-    /// Cap `shown` at `max_count`, returning what survived and how many scalar fields were
-    /// removed in all — the `too_long` ones filtered earlier plus the ones cut here. The
-    /// count is what lets the rendered line say it is partial, as the key line does.
+    /// Cap `shown` at `max_count`, returning what survived and how many entries were held
+    /// back in all — the `too_long` ones filtered earlier plus the ones cut here. The unit is
+    /// the line's own ENTRY: an object-valued key cut here is one entry however many scalars
+    /// it held. The count is what lets the rendered line say it is partial, as the key line
+    /// does.
     fn cap_scalars(
         mut shown: Vec<String>,
         too_long: usize,
@@ -192,11 +208,12 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
         (shown, too_long + cut)
     }
 
-    /// Join rendered scalars and, when any were dropped, end with `… +N more scalars` —
-    /// the scalar-line counterpart of the key line's `… +N more`. Silent at zero.
+    /// Join rendered entries and, when any were dropped, end with `… +N more entries` (`entry`
+    /// at one) — the scalar-line counterpart of the key line's `… +N more`. Silent at zero.
     fn join_scalars(mut shown: Vec<String>, dropped: usize) -> String {
         if dropped > 0 {
-            shown.push(format!("… +{dropped} more scalars"));
+            let noun = if dropped == 1 { "entry" } else { "entries" };
+            shown.push(format!("… +{dropped} more {noun}"));
         }
         shown.join(", ")
     }
@@ -204,8 +221,8 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
     /// Render a flat object's own scalar fields as `k=v` pairs, bounded the same way the
     /// top-level scalar pass is. Used for the one-level descent into an object-valued key —
     /// never called a second level down, which is what keeps the descent narrow rather than
-    /// a general recursive walk. Returns the pairs that fit and the number of scalar fields
-    /// it dropped (over-length or past `max_count`).
+    /// a general recursive walk. Returns the pairs that fit and the number of entries it
+    /// dropped (over-length or past `max_count`).
     fn flat_scalars(
         map: &serde_json::Map<String, Value>,
         max_len: usize,
@@ -251,7 +268,8 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
                     // the narrow-fix boundary, not a silent regression, since it is no
                     // worse than the prior behavior for that shape. What the descent
                     // itself drops is counted inside the braces, and the object holds
-                    // ONE slot of the top-level cap however many scalars it carries.
+                    // ONE slot (one entry) of the top-level cap however many scalars it
+                    // carries.
                     Value::Object(o) if !o.is_empty() => {
                         let (nested, nested_dropped) = flat_scalars(o, MAX_SCALAR_LEN, MAX_SCALARS);
                         if !nested.is_empty() || nested_dropped > 0 {
@@ -276,7 +294,11 @@ pub(crate) fn describe_payload_shape(val: &Value) -> Option<String> {
             let mut out = format!("array of {} items", items.len());
             // The element keys are what a `[*]` projection needs to name a field.
             if let Some(Value::Object(first)) = items.first() {
-                let keys: Vec<&str> = first.keys().map(String::as_str).take(MAX_KEYS).collect();
+                let keys: Vec<&str> = first
+                    .keys()
+                    .map(String::as_str)
+                    .take(MAX_ITEM_KEYS)
+                    .collect();
                 out.push_str(&format!("\n  item keys: {}", keys.join(", ")));
             }
             Some(out)
@@ -535,6 +557,7 @@ mod tests {
             "every flat scalar inside the nested object must surface, not just the first: {shape}"
         );
     }
+
     /// The shape's scalar line is the LAST line of the description (the `keys:` and
     /// `arrays:` lines precede it), so a marker asserted on it cannot be satisfied by the
     /// key line's own `… +N more`.
@@ -548,7 +571,7 @@ mod tests {
     /// Regression test for
     /// `docs/issues/2026-10-16-describe-payload-shape-drops-scalars-without-a-count.md`
     /// (the `MAX_SCALAR_LEN` half): a string over the length bound is filtered out of the
-    /// scalar line, and the line must say how many fields that removed — the key line
+    /// scalar line, and the line must say how many entries that removed — the key line
     /// above it ends `… +N more`, this one used to end in silence.
     ///
     /// Built so only the LENGTH bound can bite: four scalar candidates against a cap of
@@ -578,7 +601,7 @@ mod tests {
             "over-length strings are named in the key line, never inlined: {shape}"
         );
         assert!(
-            line.ends_with("… +2 more scalars"),
+            line.ends_with("… +2 more entries"),
             "two over-length strings were dropped and the line must say so: {shape}"
         );
     }
@@ -602,26 +625,36 @@ mod tests {
         );
         assert!(!line.contains("n08="), "the ninth is cut: {shape}");
         assert!(
-            line.ends_with("n07=7, … +3 more scalars"),
+            line.ends_with("n07=7, … +3 more entries"),
             "three scalars were cut past the cap and the line must say so: {shape}"
         );
     }
 
     /// Both bounds firing on one object must report the SUM — a counter that only sees one
     /// of the two filters would pass each single-bound test above and fail here.
+    ///
+    /// **The order is load-bearing: the over-length strings come FIRST.** Were they last, a
+    /// mutant in which over-length strings occupy cap slots would still show the first eight
+    /// numbers and count the same total, and survive; with them first, such a mutant shows
+    /// only six numbers, so `n07=7` going missing is what reds it.
     #[test]
     fn describe_payload_shape_counts_both_scalar_bounds_together() {
         let mut obj = serde_json::Map::new();
+        obj.insert("long_a".into(), serde_json::json!("a".repeat(61)));
+        obj.insert("long_b".into(), serde_json::json!("b".repeat(61)));
         for i in 0..10 {
             obj.insert(format!("n{i:02}"), serde_json::json!(i));
         }
-        obj.insert("long_a".into(), serde_json::json!("a".repeat(61)));
-        obj.insert("long_b".into(), serde_json::json!("b".repeat(61)));
         let shape = describe_payload_shape(&serde_json::Value::Object(obj)).expect("a shape");
+        let line = scalar_line(&shape);
 
+        assert!(
+            line.contains("n07=7") && !line.contains("n08="),
+            "over-length strings must not take cap slots: exactly n00..n07 show: {shape}"
+        );
         // 10 numbers, cap 8 -> 2 cut; 2 over-length -> 2 filtered; 4 in all.
         assert!(
-            scalar_line(&shape).ends_with("… +4 more scalars"),
+            line.ends_with("… +4 more entries"),
             "2 over-length + 2 past the cap must read +4: {shape}"
         );
     }
@@ -641,11 +674,11 @@ mod tests {
 
         // 10 numbers, cap 8 -> 2 cut; 1 over-length -> 1 filtered; 3 in all, INSIDE the braces.
         assert!(
-            scalar_line(&shape).contains("h07=7, … +3 more scalars}"),
+            scalar_line(&shape).contains("h07=7, … +3 more entries}"),
             "the nested object's own elision must be counted inside its braces: {shape}"
         );
         assert_eq!(
-            shape.matches("more scalars").count(),
+            shape.matches("more entr").count(),
             1,
             "the top level dropped nothing, so it must add no marker of its own: {shape}"
         );
@@ -655,8 +688,48 @@ mod tests {
         let all_long = serde_json::json!({"id": "x", "meta": {"a": "z".repeat(100)}});
         let shape = describe_payload_shape(&all_long).expect("an object has a shape");
         assert!(
-            scalar_line(&shape).contains("meta: {… +1 more scalars}"),
+            scalar_line(&shape).contains("meta: {… +1 more entry}"),
             "a nested object with only over-length scalars must not be silently empty: {shape}"
+        );
+    }
+
+    /// The `|| dropped > 0` half of the top-level condition: when EVERY scalar candidate was
+    /// dropped nothing is left to show, and a line that vanishes is the silent drop again.
+    /// The array is there so the `arrays:` line sits above and `scalar_line` cannot be
+    /// satisfied by it.
+    #[test]
+    fn describe_payload_shape_reports_a_line_whose_every_scalar_was_dropped() {
+        let val = serde_json::json!({"body": "x".repeat(100), "tags": [1]});
+        let shape = describe_payload_shape(&val).expect("an object has a shape");
+
+        assert_eq!(
+            scalar_line(&shape).trim(),
+            "… +1 more entry",
+            "the only scalar was over-length: the line must exist and say so: {shape}"
+        );
+    }
+
+    /// The unit is the line's ENTRY, not the scalar: an object-valued key cut by the top-level
+    /// cap is one entry however many scalars it held, and the label must not claim three
+    /// (testing-discipline: a count arrives with its unit). Eight numbers fill the cap, so the
+    /// trailing `hints` group is the one cut.
+    #[test]
+    fn describe_payload_shape_counts_a_cut_nested_object_as_one_entry() {
+        let mut obj = serde_json::Map::new();
+        for i in 0..8 {
+            obj.insert(format!("n{i:02}"), serde_json::json!(i));
+        }
+        obj.insert("hints".into(), serde_json::json!({"a": 1, "b": 2, "c": 3}));
+        let shape = describe_payload_shape(&serde_json::Value::Object(obj)).expect("a shape");
+        let line = scalar_line(&shape);
+
+        assert!(
+            !line.contains("hints:"),
+            "the group is past the cap and must not show: {shape}"
+        );
+        assert!(
+            line.ends_with("n07=7, … +1 more entry"),
+            "one entry (the hints group) was cut, however many scalars it held: {shape}"
         );
     }
 
@@ -678,7 +751,7 @@ mod tests {
         let shape = describe_payload_shape(&val).expect("an object has a shape");
 
         assert!(
-            !shape.contains("more scalars"),
+            !shape.contains("more entr"),
             "nothing scalar was dropped, so nothing may be claimed: {shape}"
         );
     }
