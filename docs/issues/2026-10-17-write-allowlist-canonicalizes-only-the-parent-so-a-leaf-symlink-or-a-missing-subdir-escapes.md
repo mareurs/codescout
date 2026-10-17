@@ -65,8 +65,12 @@ Linux, codescout worktree branch cut from `experiments` at 299395e5.
 
 `canonicalize_write_target` canonicalized `path.parent()` best-effort and joined `file_name()`.
 It did not walk up to the deepest existing ancestor when the parent was missing (shape 2, fixed), and
-it does not resolve the leaf if the leaf is itself a symlink (shape 1, open). The project root, the cwd,
-extra roots and session roots go through the same function, so this was never specific to the temp dir.
+it does not resolve the leaf if the leaf is itself a symlink (shape 1, open). The allowed roots were a
+separate matter and not "the same function": the project root, the cwd, the extra roots and the session
+roots went through `best_effort_canonicalize`, which keeps a missing path literal, so a root that did not
+exist yet under a symlinked ancestor never matched a target resolved through its existing ancestors
+(fixed in `abdb0b03`: every root, and the deny-list entries, now use
+`canonicalize_through_existing_ancestor` too).
 
 ## Evidence
 
@@ -114,6 +118,20 @@ Shape 1: measure a leaf symlink against `create_file` with `overwrite` and `edit
 `edit_file` was run, and it did not follow the link). If any follows it, this is an escape and shape
 1 needs the leaf check above plus a red test. Otherwise lower the severity and decide whether the
 classifier should still name the resolved leaf.
+
+Other follow-ups from the review of this branch, none fixed here:
+
+- `validate_approve_path` still compares the approved directory with `$HOME` by equality
+  (`best_effort_canonicalize(&h) == resolved`), so `approve_write` accepts a directory ABOVE the home
+  such as `/home` or `/`. The temp and cwd roots now refuse an ancestor of the canonical home;
+  `validate_approve_path` does not.
+- A path with a DANGLING symlink or an unreadable (EACCES) component is not followed by
+  `canonicalize_through_existing_ancestor`: `fs::canonicalize` fails for it, the walk stops above it and
+  keeps it as written. Measured for a dangling directory link with `create_dir_all`: it returned
+  `AlreadyExists` and created nothing outside, so no escape came of it; the EACCES case was not run.
+- Separate, pre-existing and independent of the allowlist: `atomic_write` follows a planted
+  `<target>.tmp` symlink. See
+  `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`.
 
 ## References
 
