@@ -265,6 +265,35 @@ never observed surviving: m3f1/m3f2 (the two deny-list forms are unioned, so a p
 covered by either; only a symlinked directory entry needs the resolved form and only a symlinked
 file entry the leaf form) and m4c in the other issue file.
 
+### Review follow-up: mutation results (2026-10-17)
+
+Two independent reviews of the branch led to follow-up commits; mutants for the ones whose guard
+lives in this file's subject. Same method as above. Items 1 and 2 of the follow-up
+(`..` / file approval, ack-path wording) are in
+`2026-10-17-approve-write-accepts-an-unresolved-dotdot-that-collapses-onto-the-home.md` and
+`2026-10-17-a-write-directly-in-home-has-no-working-approve-write-remedy.md`.
+
+| follow-up | mutant | killed by |
+|---|---|---|
+| config error names the file | mC1 parse error unnamed | `a_config_that_fails_to_load_names_the_project_toml`: KILLED |
+| config error names the file | mC2 validation error unnamed | same test: KILLED |
+| deny entries under both spellings | mD1 only the canonical spelling | `a_missing_deny_entry_is_matched_under_the_symlink_spelling_of_the_home`, `a_read_through_a_symlinked_home_of_a_missing_deny_entry_is_refused`: KILLED |
+| deny entries under both spellings | mD2 `canonical_homes` not deduplicated | `two_spellings_of_one_home_are_both_kept_but_collapse_to_one_canonical_home`: KILLED |
+| failure TTL | mF1 boundary `<` to `<=` | `a_failed_lookup_is_retried_after_the_ttl_and_a_success_then_sticks`: KILLED |
+| failure TTL | mF2 failure not remembered | `a_failed_lookup_is_not_repeated_before_the_ttl`: KILLED |
+| failure TTL | mF3 failure never expires | `a_failed_lookup_is_retried_after_the_ttl_and_a_success_then_sticks`: KILLED |
+| failure TTL | mF4 no re-check of the answer after taking the lock | `concurrent_first_callers_make_one_lookup_between_them`: KILLED |
+| failure TTL | mF5 a kept answer takes the lock | `a_kept_answer_is_served_without_taking_the_lock`: KILLED |
+| failure TTL | mF6 TTL of zero | `a_failed_lookup_is_not_repeated_before_the_ttl`: KILLED |
+| env-mutation gate narrowed to `test_child.rs` | g production `set_var` injected into `src/platform/mod.rs` | before the move: SURVIVED (`5 passed`); after: `no_site_outside_the_allowlist_mutates_the_process_environment` FAILED, KILLED |
+| account lookup injected | mD ambient write env drops the account home, host-independent tests only (the real-passwd child tests skipped, as on a host with no passwd entry) | before: SURVIVED; after: `the_ambient_homes_include_the_injected_account_home` and `a_write_to_the_injected_account_homes_ssh_is_denied_through_the_ambient_wiring`: KILLED |
+| account lookup injected | mH1 `protected_homes_from` drops the account | `the_ambient_homes_include_the_injected_account_home`: KILLED |
+| account lookup injected | mH3 `validate_read_path_in` ignores the injected homes | `a_read_of_the_injected_account_homes_ssh_is_refused`: KILLED |
+
+`lookup_account_home_with` as an `unsafe fn` is a compile-time property: calling it without `unsafe`
+is E0133, which no mutant run can exercise. The stale `$HOME` test and the child-process tests run
+with `$HOME` as set by the harness; every other follow-up guard above has a host-independent test.
+
 ## Workarounds
 
 Do not export a relative or `..` `$TMPDIR`; keep `$HOME` an absolute path.

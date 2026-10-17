@@ -25,6 +25,14 @@ the decoy's content, which `read_file` then returned. `read_file` on the link it
 victim file is not modified. This is a READ of a deny-listed file; the write side of the same leaf
 shape is in the related issue, which is owned by another session and is not touched here.
 
+**Ownership and status.** Owned elsewhere, fix pending: another session owns the leaf-symlink
+fix, and this branch deliberately does not touch it. The peer session filed a duplicate of this
+issue on its own branch (`79de60eb`):
+`docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md`.
+To be unified at merge: this file is the one kept (its probe drives the real tools against a decoy
+under a fixture `HOME` and also measures the not-found echo, `std::fs::write` through a link and the
+librarian write sites); the peer's file becomes the duplicate. Status stays open.
+
 ## Class fit
 
 The deny list is enforced on the spelling of a path the caller supplied, and a leaf symlink
@@ -121,7 +129,10 @@ project root.
 
 ## Resume
 
-Decide with the owner of the leaf-symlink work whether the classifier or the readers close this,
+Owned elsewhere, fix pending (see the Summary): the leaf-symlink fix belongs to the peer session.
+When it lands, re-run the probe described under Reproduction against it; at merge unify this file with the peer's
+duplicate named in the Summary, keeping this one. Meanwhile: decide with the owner of the
+leaf-symlink work whether the classifier or the readers close this,
 and measure the librarian write sites and `create_file`/`edit_code` against a leaf link before
 choosing.
 
