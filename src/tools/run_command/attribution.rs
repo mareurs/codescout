@@ -1003,6 +1003,29 @@ mod tests {
             }
         }
 
+        /// The fallback is verified like any other directory before it is used, and removed
+        /// again when it fails. Reached through the uid seam, because a `mkdtemp` directory
+        /// that this process just created at 0700 cannot fail the check any other way on a
+        /// filesystem that honours modes: without the seam, deleting the re-verification
+        /// SURVIVED the mutation set.
+        #[test]
+        fn a_fallback_that_fails_verification_is_refused_and_removed() {
+            let base = tempfile::tempdir().expect("tmp");
+            let me = effective_uid();
+            assert!(fresh_private_dir(base.path(), me.wrapping_add(1)).is_none());
+            let left: Vec<_> = std::fs::read_dir(base.path())
+                .expect("readable")
+                .filter_map(Result::ok)
+                .collect();
+            assert!(
+                left.is_empty(),
+                "a refused fallback must not be left behind"
+            );
+            // CONTROL: with the right uid the same call succeeds.
+            let ok = fresh_private_dir(base.path(), me).expect("control");
+            assert_eq!(verify_private_dir(&ok, me), Ok(()));
+        }
+
         /// Two users of one shared `/tmp` must not contend for one name: a squatter would
         /// otherwise push every other user's engine into the leaking fallback.
         #[test]
