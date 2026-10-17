@@ -1392,9 +1392,13 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let reply = read_message(&mut BufReader::new(&mut peer_read))
-            .await
-            .unwrap();
+        let reply = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            read_message(&mut BufReader::new(&mut peer_read)),
+        )
+        .await
+        .expect("the mux must answer a client's shutdown, not leave it waiting")
+        .unwrap();
         assert_eq!(reply["id"], 1);
         drop(peer_write);
         drop(peer_read); // the client hangs up
