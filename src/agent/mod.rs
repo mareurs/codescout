@@ -3843,28 +3843,38 @@ mod tests {
     }
 
     /// The guard's whole purpose: a panic while the cwd is changed must not leave it changed.
+    ///
+    /// Runs in a CHILD process (`platform::test_child`): the test changes the process cwd, and in
+    /// the child the shared test binary never sees that change. (Unix only, like the helper.)
+    #[cfg(unix)]
     #[test]
-    #[serial_test::serial]
     fn the_cwd_guard_restores_the_cwd_when_the_guarded_code_panics() {
-        let original = std::env::current_dir().unwrap();
-        let elsewhere = tempdir().unwrap();
-        let elsewhere = elsewhere.path().canonicalize().unwrap();
+        crate::platform::test_child::run(
+            module_path!(),
+            "the_cwd_guard_restores_the_cwd_when_the_guarded_code_panics",
+            &[],
+            || {
+                let original = std::env::current_dir().unwrap();
+                let elsewhere = tempdir().unwrap();
+                let elsewhere = elsewhere.path().canonicalize().unwrap();
 
-        let outcome = std::panic::catch_unwind(|| {
-            let _guard = CwdGuard::change_to(&elsewhere);
-            assert_eq!(
-                std::env::current_dir().unwrap(),
-                elsewhere,
-                "fixture: moved"
-            );
-            panic!("the guarded code fails");
-        });
+                let outcome = std::panic::catch_unwind(|| {
+                    let _guard = CwdGuard::change_to(&elsewhere);
+                    assert_eq!(
+                        std::env::current_dir().unwrap(),
+                        elsewhere,
+                        "fixture: moved"
+                    );
+                    panic!("the guarded code fails");
+                });
 
-        assert!(outcome.is_err(), "fixture: the closure must have panicked");
-        assert_eq!(
-            std::env::current_dir().unwrap(),
-            original,
-            "the guard must put the cwd back during the unwind"
+                assert!(outcome.is_err(), "fixture: the closure must have panicked");
+                assert_eq!(
+                    std::env::current_dir().unwrap(),
+                    original,
+                    "the guard must put the cwd back during the unwind"
+                );
+            },
         );
     }
 

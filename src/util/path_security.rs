@@ -189,7 +189,14 @@ fn home_dir() -> Option<PathBuf> {
 /// home unprotected (`F2e`/`F2f` in
 /// `docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`).
 fn protected_homes() -> Vec<PathBuf> {
-    protected_homes_of(home_dir(), crate::platform::account_home_dir())
+    protected_homes_from(crate::platform::account_home_dir)
+}
+
+/// `protected_homes` with the account lookup supplied: the seam that lets a test prove the
+/// ambient wiring includes the ACCOUNT's home on every host, not only on one whose uid has a
+/// passwd entry. `$HOME` is still read from the process, fresh, on every call.
+fn protected_homes_from(account: impl FnOnce() -> Option<PathBuf>) -> Vec<PathBuf> {
+    protected_homes_of(home_dir(), account())
 }
 
 /// `protected_homes` over explicit inputs: `resolved` first, then `account`; for each, the home
@@ -238,18 +245,6 @@ fn expand_home_all(pattern: &str, homes: &[PathBuf]) -> Vec<PathBuf> {
     } else {
         vec![PathBuf::from(pattern)]
     }
-}
-
-/// Build the full list of denied read paths (defaults + user-configured).
-///
-/// Each entry is canonicalized once here so that a `$HOME` symlink (e.g.
-/// `/home/user -> /var/users/user` on some macOS FileVault / NFS-mounted
-/// setups) cannot bypass the deny-list. Input paths get canonicalized by
-/// `validate_read_path`; without canonicalizing the deny-list too, the
-/// `starts_with` check compares a resolved input against an unresolved
-/// prefix and silently passes.
-fn denied_read_paths(_config: &PathSecurityConfig) -> Vec<PathBuf> {
-    denied_paths_with(&protected_homes(), best_effort_canonicalize)
 }
 
 /// The deny list with the protected homes and the entry resolver supplied. A caller that compares
@@ -383,6 +378,18 @@ pub fn validate_read_path(
     project_root: Option<&Path>,
     config: &PathSecurityConfig,
 ) -> Result<PathBuf> {
+    validate_read_path_in(raw, project_root, config, &protected_homes())
+}
+
+/// `validate_read_path` over an explicit list of protected homes, so a test can inject them
+/// (including an account home, which the ambient lookup only finds on a host whose uid has a
+/// passwd entry).
+fn validate_read_path_in(
+    raw: &str,
+    project_root: Option<&Path>,
+    config: &PathSecurityConfig,
+    homes: &[PathBuf],
+) -> Result<PathBuf> {
     if raw.is_empty() {
         bail!("path must not be empty");
     }
@@ -414,7 +421,7 @@ pub fn validate_read_path(
     // Canonicalize to resolve symlinks and `..` components.
     let resolved = best_effort_canonicalize(&resolved);
 
-    let denied = denied_read_paths(config);
+    let denied = denied_paths_with(homes, best_effort_canonicalize);
     if is_denied(&resolved, &denied) {
         bail!("access denied: '{}' is in a protected location", raw);
     }
@@ -533,9 +540,14 @@ struct WriteEnv {
 
 impl WriteEnv {
     fn ambient() -> Self {
+        Self::ambient_with(crate::platform::account_home_dir)
+    }
+
+    /// `ambient` with the account lookup supplied (see `protected_homes_from`).
+    fn ambient_with(account: impl FnOnce() -> Option<PathBuf>) -> Self {
         Self {
             temp_dir: crate::platform::temp_dir(),
-            homes: protected_homes(),
+            homes: protected_homes_from(account),
             cwd: std::env::current_dir().ok(),
         }
     }
@@ -7782,6 +7794,11 @@ EOF"#;
     #[cfg(unix)]
     fn assert_the_accounts_home_is_protected() {
         let Some(account) = crate::platform::account_home_dir() else {
+            eprintln!(
+                "SKIPPED the real-passwd check: this uid has no usable account home on this host; \
+                 the injected-account tests (`the_ambient_homes_include_the_injected_account_home`, \
+                 ...) cover the same guards"
+            );
             return;
         };
         let project = tempdir().unwrap();
@@ -7875,6 +7892,89 @@ EOF"#;
                 // And the account's real home is protected as well.
                 assert_the_accounts_home_is_protected();
             },
+        );
+    }
+
+    // ── the account home, injected: guarded on EVERY host ───────────────────────────────────────
+    //
+    // `assert_the_accounts_home_is_protected` and the child tests above read the real passwd entry and
+    // do nothing on a host whose uid has none (a container with an arbitrary uid), so a guard that
+    // dropped the account home was killed only on hosts that have one. These inject the account
+    // lookup instead (`protected_homes_from`, `WriteEnv::ambient_with`, `validate_read_path_in`).
+
+    fn injected_account(base: &Path) -> PathBuf {
+        let acct = base.join("acct-home");
+        std::fs::create_dir_all(acct.join(".ssh")).unwrap();
+        acct
+    }
+
+    #[test]
+    fn the_ambient_homes_include_the_injected_account_home() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let acct = injected_account(&base);
+        assert!(
+            protected_homes_from(|| Some(acct.clone())).contains(&acct),
+            "the account home must be one of the protected homes"
+        );
+        assert!(
+            WriteEnv::ambient_with(|| Some(acct.clone()))
+                .homes
+                .contains(&acct),
+            "the ambient write environment must carry the account home"
+        );
+        assert!(
+            !protected_homes_from(|| None).contains(&acct),
+            "control: with no account the injected home is not there"
+        );
+    }
+
+    #[test]
+    fn a_read_of_the_injected_account_homes_ssh_is_refused() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let acct = injected_account(&base);
+        let project = tempdir().unwrap();
+        let key = acct.join(".ssh/id_probe");
+        let with = validate_read_path_in(
+            key.to_str().unwrap(),
+            Some(project.path()),
+            &default_config(),
+            &protected_homes_from(|| Some(acct.clone())),
+        );
+        assert!(
+            with.as_ref()
+                .is_err_and(|e| e.to_string().contains("protected location")),
+            "reading {key:?} must be refused, got: {with:?}"
+        );
+        let without = validate_read_path_in(
+            key.to_str().unwrap(),
+            Some(project.path()),
+            &default_config(),
+            &protected_homes_from(|| None),
+        );
+        // Control: without the account lookup (and with this process's real `HOME` elsewhere) nothing
+        // protects the injected home, which is exactly what the account lookup exists to prevent.
+        assert!(without.is_ok(), "control: {without:?}");
+    }
+
+    #[test]
+    fn a_write_to_the_injected_account_homes_ssh_is_denied_through_the_ambient_wiring() {
+        let scratch = tempdir().unwrap();
+        let base = canonical_base(scratch.path());
+        let acct = injected_account(&base);
+        let project = tempdir().unwrap();
+        let target = acct.join(".ssh/authorized_keys");
+        let decision = classify_write_path_in(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            std::slice::from_ref(&acct),
+            &WriteEnv::ambient_with(|| Some(acct.clone())),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+            "{target:?} must be a deny-list refusal, got: {decision:?}"
         );
     }
 

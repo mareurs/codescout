@@ -355,19 +355,26 @@ mod tests {
     }
 
     /// `account_home_dir` against the passwd file, where the file names this process's user. When
-    /// the file does not (LDAP, a container uid with no entry) there is nothing to compare and the
-    /// test says nothing: the lookup itself is then unproven on that host.
+    /// the file does not (LDAP, a container uid with no entry) there is nothing to compare: the test
+    /// SAYS it was skipped (stderr) rather than passing silently, and the lookup is then unproven on
+    /// that host. The logic around the lookup (retry, ERANGE, cache, TTL) is tested without a passwd
+    /// entry by the injected-closure tests, and the guards that USE the account home by the
+    /// injected-account tests in `util::path_security`.
     #[test]
     fn account_home_dir_matches_the_passwd_entry_for_this_user() {
         // SAFETY: `geteuid` has no preconditions and cannot fail.
         let uid = unsafe { libc::geteuid() }.to_string();
         let Ok(passwd) = std::fs::read_to_string("/etc/passwd") else {
+            eprintln!("SKIPPED: /etc/passwd is unreadable; the real lookup is unproven here");
             return;
         };
         let Some(expected) = passwd.lines().find_map(|l| {
             let f: Vec<&str> = l.split(':').collect();
             (f.len() >= 6 && f[2] == uid).then(|| PathBuf::from(f[5]))
         }) else {
+            eprintln!(
+                "SKIPPED: uid {uid} has no /etc/passwd entry; the real lookup is unproven here"
+            );
             return;
         };
         // A non-absolute `pw_dir` is not a home directory: the lookup reports none.
