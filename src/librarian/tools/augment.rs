@@ -63,18 +63,33 @@ fn validate_merged_against_schema(
 /// the write-through declined to publish a field this call never authored over a committed
 /// value that disagrees with it. See [`crate::librarian::augmentation_sidecar::write_through`].
 fn sidecar_write_through(
+    ctx: &ToolContext,
     cat: &crate::librarian::catalog::Catalog,
     id: &str,
     authored: crate::librarian::augmentation_sidecar::Authored<'_>,
 ) -> Result<()> {
+    crate::librarian::tools::arm_write_roots(ctx, cat);
     let outcome = crate::librarian::augmentation_sidecar::write_through(cat, id, authored)
         .map_err(|e| {
-            // A REFUSAL is the caller's input, not a failed write: keep its type so it reaches
-            // the agent as recoverable (`isError: false`), with its own remedy text. Wrapping it
-            // in a plain `anyhow!` made it fatal and told the caller to "re-run once the path is
-            // writable", which is wrong for a path that was refused on purpose.
-            if e.downcast_ref::<LibrarianRecoverableError>().is_some() {
-                return e;
+            // A REFUSAL is the caller's input, not a failed write: keep it RECOVERABLE
+            // (`isError: false`). Wrapping it in a plain `anyhow!` made it fatal and told the
+            // caller to "re-run once the path is writable", which is wrong for a path that was
+            // refused on purpose.
+            //
+            // But it can only arrive HERE after the catalog row was upserted (the preflight at
+            // the top of `call` passed, and the filesystem changed underneath it), so its own
+            // text ("Nothing was changed") would be false. Say what DID change.
+            if let Some(refusal) = e.downcast_ref::<LibrarianRecoverableError>() {
+                return LibrarianRecoverableError::with_hint(
+                    format!(
+                        "the augmentation WAS updated in the catalog, but its committed sidecar \
+                         was NOT written: {}",
+                        refusal.message
+                    ),
+                    "The catalog row now disagrees with the committed sidecar, and a fresh clone \
+                     would restore the superseded shape. Fix the declared sidecar path (see \
+                     above), then re-run doc(augment) to publish it.",
+                );
             }
             anyhow::anyhow!(
                 "the augmentation WAS updated, but its committed sidecar could not be written: \
@@ -253,6 +268,7 @@ fn create_or_replace_augmentation(ctx: &ToolContext, a: Args) -> Result<Value> {
     // Replace semantics: the caller speaks for the entire shape, including the fields it
     // omitted — those reset to None by documented design. So nothing here is unauthored.
     sidecar_write_through(
+        ctx,
         &cat,
         &a.id,
         crate::librarian::augmentation_sidecar::Authored::All,
@@ -340,6 +356,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // BEFORE any row moves: `sidecar_write_through` runs after the upsert (it renders the new
         // row), so a refusal found only there left the catalog ahead of the repository. A declared
         // sidecar that leaves the repository, or is a link, is refused here with nothing written.
+        crate::librarian::tools::arm_write_roots(ctx, &cat);
         crate::librarian::augmentation_sidecar::preflight_write_through(&cat, &a.id)?;
     }
 
@@ -448,6 +465,7 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         authored.push("history_cap");
                     }
                     sidecar_write_through(
+                        ctx,
                         &cat,
                         &a.id,
                         crate::librarian::augmentation_sidecar::Authored::Only(&authored),
@@ -1380,6 +1398,7 @@ mod tests {
         .unwrap();
 
         let err = sidecar_write_through(
+            &ctx,
             &cat,
             "art1",
             crate::librarian::augmentation_sidecar::Authored::All,
@@ -1393,6 +1412,10 @@ mod tests {
         let text = format!("{err:#}");
         assert!(text.contains("outside the repository root"), "{text}");
         assert!(!text.contains("re-run once the path is writable"), "{text}");
+        // Arriving HERE means the catalog row was already upserted, so the text must say what
+        // changed, not repeat "Nothing was changed" (the first version locked that falsehood in).
+        assert!(text.contains("WAS updated in the catalog"), "{text}");
+        assert!(!text.contains("Nothing was"), "{text}");
         assert_eq!(
             std::fs::read_to_string(outside.path().join("t.yaml")).unwrap(),
             "prompt: OUTSIDE\n"

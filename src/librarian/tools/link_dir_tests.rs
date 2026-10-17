@@ -592,3 +592,448 @@ fn a_row_below_a_directory_link_that_stays_inside_is_not_reclaimed() {
 
     assert!(artifact::get(&ctx.catalog.lock(), &id).unwrap().is_some());
 }
+
+// ======================= round 3: ONE root for "outside" =====================================
+//
+// Round 2 used three roots for the same question (the managed root, git root first, in move and
+// delete; the spelled git root at the write door; the walk root in reclamation) and they disagree
+// exactly where it matters: a monorepo project, a project reached through a link, a sibling
+// directory whose name differs only in case or in a LIKE wildcard.
+
+/// A monorepo: `mono/.git`, project `mono/pkg`, `pkg/docs -> ../shared/docs` (INSIDE the repo,
+/// OUTSIDE the project). The context is the production shape: `current_project` holds the git
+/// root and the project dir, so `managed_roots` lists the git root first.
+fn monorepo() -> (TempDir, ToolContext) {
+    use crate::librarian::current_project::CurrentProject;
+    let mono = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(mono.path().join(".git")).unwrap();
+    std::fs::create_dir_all(mono.path().join("pkg")).unwrap();
+    std::fs::create_dir_all(mono.path().join("shared/docs")).unwrap();
+    std::os::unix::fs::symlink("../shared/docs", mono.path().join("pkg/docs")).unwrap();
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_root(Root {
+            name: "r".into(),
+            path: mono.path().join("pkg"),
+        })
+        .with_current_project(std::sync::Arc::new(CurrentProject {
+            abs_path: mono.path().join("pkg"),
+            git_root: mono.path().to_path_buf(),
+            main_root: None,
+            umbrella: None,
+        }))
+        .build();
+    (mono, ctx)
+}
+
+/// `doc(move)` to `pkg/docs/x.md` succeeds (the managed root is the GIT root, and the link
+/// stays inside it), and the next reindex of the PROJECT must not then reclaim the row it just
+/// minted: reclamation compared against the walk root (`mono/pkg`), under which the same path
+/// "escapes". The row, its augmentation and the grafted history were deleted.
+#[tokio::test]
+async fn a_row_moved_below_an_in_repo_link_survives_a_reindex_of_the_project() {
+    let (mono, ctx) = monorepo();
+    let v = create::call(
+        &ctx,
+        json!({"repo": "r", "rel_path": "doc.md", "kind": "spec", "title": "T", "body": "b"}),
+    )
+    .await
+    .unwrap();
+    let id = v["id"].as_str().unwrap();
+    let moved = mv::call(&ctx, json!({"id": id, "new_rel_path": "pkg/docs/x.md"}))
+        .await
+        .expect("a link that stays inside the git root is a legitimate destination");
+    let new_id = moved["id"].as_str().unwrap().to_string();
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&new_id)).unwrap();
+    assert!(
+        mono.path().join("shared/docs/x.md").is_file(),
+        "precondition: the file moved"
+    );
+
+    let report = index(&ctx, &mono.path().join("pkg"));
+
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &new_id)
+            .unwrap()
+            .is_some(),
+        "the reindex must not delete the row `doc(move)` just created"
+    );
+    assert!(augmentation::get(&ctx.catalog.lock(), &new_id)
+        .unwrap()
+        .is_some());
+    assert_eq!(report.removed, 0);
+    assert!(
+        report.reclaimed_escaping_ids.is_empty(),
+        "{:?}",
+        report.reclaimed_escaping_ids
+    );
+}
+
+/// The same disagreement through `force_include`: the walk skipped (and recorded for
+/// reclamation) a file whose path resolves outside the PROJECT but inside the repository.
+#[test]
+fn force_include_through_a_link_that_stays_inside_the_git_root_is_catalogued_from_a_subproject() {
+    let (mono, ctx) = monorepo();
+    std::fs::write(mono.path().join("shared/docs/x.md"), DOC).unwrap();
+    force_include(&mono.path().join("pkg"), "docs/**");
+
+    index(&ctx, &mono.path().join("pkg"));
+
+    let id = crate::librarian::ids::artifact_id_from_abs(&mono.path().join("pkg/docs/x.md"));
+    assert!(artifact::get(&ctx.catalog.lock(), &id).unwrap().is_some());
+}
+
+/// An augmentation row (a stand-in for "history that exists nowhere else").
+fn aug_row(id: &str) -> augmentation::AugmentationRow {
+    augmentation::AugmentationRow {
+        artifact_id: id.into(),
+        prompt: "p".into(),
+        params: r#"{"keep":"me"}"#.into(),
+        last_refreshed_at: None,
+        refresh_count: 0,
+        created_at: "2026-08-01T00:00:00Z".into(),
+        updated_at: "2026-08-01T00:00:00Z".into(),
+        render_template: None,
+        params_schema: None,
+        append_mode: false,
+        history_cap: None,
+        entry_collection: None,
+        refreshed_at_commit: None,
+    }
+}
+
+/// Reclamation selected candidates with `abs_path LIKE '<root>/%'`: no `ESCAPE`, so `_` matched any
+/// character, and SQLite's `LIKE` ignores ASCII case. Reindexing `b/my_app` therefore saw the rows of
+/// `b/myXapp` and `b/MY_APP` as ITS rows, and round 2's escape test then deleted them (with their
+/// augmentation) although the files were on disk.
+#[test]
+fn a_reindex_never_reclaims_the_rows_of_a_sibling_whose_name_matches_a_like_pattern() {
+    let b = tempfile::tempdir().unwrap();
+    let mut rows = Vec::new();
+    let ctx = mk_ctx(&b.path().join("my_app"));
+    for name in ["my_app", "myXapp", "MY_APP"] {
+        std::fs::create_dir_all(b.path().join(name).join("docs")).unwrap();
+        std::fs::write(b.path().join(name).join("docs/n.md"), DOC).unwrap();
+    }
+    for name in ["myXapp", "MY_APP"] {
+        let id = catalog_row(&ctx, &b.path().join(name).join("docs/n.md"));
+        augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id)).unwrap();
+        rows.push(id);
+    }
+
+    let report = index(&ctx, &b.path().join("my_app"));
+
+    for id in &rows {
+        assert!(
+            artifact::get(&ctx.catalog.lock(), id).unwrap().is_some(),
+            "a sibling's row must survive a reindex of another root"
+        );
+        assert!(augmentation::get(&ctx.catalog.lock(), id)
+            .unwrap()
+            .is_some());
+    }
+    assert_eq!(report.removed, 0);
+}
+
+/// A path containing `'` never matched: the prefix was doubled (`''`) for SQL text and then BOUND
+/// as a parameter, where the doubling is literal. Its rows could neither be reclaimed when the
+/// file vanished nor counted as vectorless.
+#[test]
+fn a_row_under_a_root_with_an_apostrophe_is_reclaimed_when_its_file_is_deleted() {
+    let b = tempfile::tempdir().unwrap();
+    let root = b.path().join("o'brien");
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/n.md"), DOC).unwrap();
+    let ctx = mk_ctx(&root);
+    assert_eq!(index(&ctx, &root).added, 1, "precondition: the row exists");
+    std::fs::remove_file(root.join("docs/n.md")).unwrap();
+
+    let report = index(&ctx, &root);
+
+    assert_eq!(
+        report.removed, 1,
+        "the row of a deleted file must be reclaimed"
+    );
+}
+
+/// H3: the project root is reached THROUGH a link (`home/proj -> data/proj`) and something above
+/// that link is a repository (`home/.git`). The door took `home` for the root, so every write
+/// below the project resolved to `data/proj/...` "outside the repository". The door now takes the
+/// containing MANAGED root, as move and delete do.
+#[tokio::test]
+async fn a_project_reached_through_a_link_under_another_repository_is_still_writable() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    let project = home.join("proj");
+    std::fs::write(project.join("x.md"), DOC).unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("x.md"));
+
+    update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect("a write inside the managed project is not 'outside the repository'");
+
+    assert!(std::fs::read_to_string(data.join("proj/x.md"))
+        .unwrap()
+        .contains("status: fixed"));
+}
+
+/// …and `doc(move)` in that project must not fail AFTER its rename: the id repair writes through
+/// the door with a `?`, so a refusal there left the move half done.
+#[tokio::test]
+async fn doc_move_in_a_project_reached_through_a_link_completes() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    let project = home.join("proj");
+    let ctx = mk_ctx(&project);
+    let v = create::call(
+        &ctx,
+        json!({"repo": "r", "rel_path": "doc.md", "kind": "spec", "title": "T", "body": "b"}),
+    )
+    .await
+    .unwrap();
+    let id = v["id"].as_str().unwrap();
+
+    mv::call(&ctx, json!({"id": id, "new_rel_path": "docs/moved.md"}))
+        .await
+        .expect("the move, including its id repair, must complete");
+
+    assert!(data.join("proj/docs/moved.md").is_file());
+}
+
+/// A project with no `.git` anywhere above it had NO containment at the door (86 live rows in
+/// the reviewer's catalog): with nothing to compare against, only the leaf rule applied. The
+/// managed root is the fallback.
+#[tokio::test]
+async fn a_project_without_a_git_dir_is_still_confined_at_the_door() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("x.md"), DOC).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("linkdir")).unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &root.path().join("linkdir/x.md"));
+
+    let err = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("no .git does not mean no boundary");
+
+    assert!(
+        msg(&err).contains("outside the repository root"),
+        "{}",
+        msg(&err)
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("x.md")).unwrap(),
+        DOC
+    );
+}
+
+/// M1: `R/sub` is a link to ANOTHER repository `S` whose artifact declares an EXISTING sidecar.
+/// The preflight resolved the sidecar against `lookup_git_root(artifact)` (= `R/sub`, the link
+/// followed to `S`) and passed; the catalog row was then upserted; the door, using another root,
+/// refused, and the response said "Nothing was changed". Preflight and door now share one root.
+#[tokio::test]
+async fn doc_augment_refuses_before_the_upsert_when_the_artifact_lives_behind_a_link_to_another_repo(
+) {
+    let base = tempfile::tempdir().unwrap();
+    let r = base.path().join("R");
+    let s = base.path().join("S");
+    std::fs::create_dir_all(r.join(".git")).unwrap();
+    std::fs::create_dir_all(s.join(".git")).unwrap();
+    std::fs::create_dir_all(s.join("docs/aug")).unwrap();
+    std::fs::write(s.join("docs/aug/t.yaml"), "prompt: OLD\n").unwrap();
+    std::fs::write(
+        s.join("t.md"),
+        "---\nkind: tracker\nstatus: active\nexpects_augmentation: docs/aug/t.yaml\n---\n\n# T\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&s, r.join("sub")).unwrap();
+    let ctx = mk_ctx(&r);
+    let id = catalog_row(&ctx, &r.join("sub/t.md"));
+
+    let err = augment::call(&ctx, json!({"id": id, "prompt": "NEW-PROMPT"}))
+        .await
+        .expect_err("the sidecar resolves into another repository");
+
+    assert!(
+        err.downcast_ref::<LibrarianRecoverableError>().is_some(),
+        "{err:?}"
+    );
+    assert!(
+        augmentation::get(&ctx.catalog.lock(), &id)
+            .unwrap()
+            .is_none(),
+        "the refusal must come BEFORE the catalog moves, or its text must say what changed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(s.join("docs/aug/t.yaml")).unwrap(),
+        "prompt: OLD\n"
+    );
+}
+
+/// M2: rows a pre-round-2 `force_include` catalogued through an outward directory link are
+/// reclaimed on the first reindex after the upgrade, with augmentation params that exist nowhere
+/// else. A row carrying an augmentation or events is now KEPT and reported; one without is
+/// reclaimed and reported (`reclaimed_escaping`), so the deletion has a stated reason.
+#[test]
+fn reclaiming_an_escaping_row_is_reported_and_spares_one_that_carries_history() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("plain.md"), DOC).unwrap();
+    std::fs::write(outside.path().join("rich.md"), DOC).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("docs")).unwrap();
+    let ctx = mk_ctx(root.path());
+    let plain = catalog_row(&ctx, &root.path().join("docs/plain.md"));
+    let rich = catalog_row(&ctx, &root.path().join("docs/rich.md"));
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&rich)).unwrap();
+
+    let report = index(&ctx, root.path());
+
+    assert!(artifact::get(&ctx.catalog.lock(), &plain)
+        .unwrap()
+        .is_none());
+    assert_eq!(report.reclaimed_escaping, 1);
+    assert_eq!(report.reclaimed_escaping_ids, vec![plain.clone()]);
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &rich).unwrap().is_some(),
+        "history that exists nowhere else is not deleted for a policy reason"
+    );
+    assert!(augmentation::get(&ctx.catalog.lock(), &rich)
+        .unwrap()
+        .is_some());
+    assert_eq!(report.escaping_kept_ids, vec![rich]);
+}
+
+/// LOW 1: a LEAF link inside an outward `force_include` anchor was catalogued (the walk's escape
+/// test exempted symlinks), and the row was then stuck: `doc(delete)` is refused because the
+/// parent escapes. The test is on the PARENT now, for every kind of leaf.
+#[test]
+fn force_include_does_not_catalog_a_leaf_link_inside_an_anchor_that_leaves_the_repo() {
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("real.md"), DOC).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("real.md"), outside.path().join("l.md"))
+        .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("docs")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("docs/trackers")).unwrap();
+    force_include(root.path(), "docs/trackers/**");
+    let ctx = mk_ctx(root.path());
+
+    let report = index(&ctx, root.path());
+
+    let id = crate::librarian::ids::artifact_id_from_abs(&root.path().join("docs/trackers/l.md"));
+    assert!(artifact::get(&ctx.catalog.lock(), &id).unwrap().is_none());
+    assert_eq!(report.added, 0);
+}
+
+/// LOW 2: `rename` moves a link without retargeting it, so a RELATIVE link moved to another depth
+/// dangles; the id repair's read then failed with ENOENT and left the move half done. Refused
+/// up front. The control (an absolute link) is `doc_move_of_a_catalogued_outward_link_...`.
+#[tokio::test]
+async fn doc_move_refuses_a_relative_leaf_link_that_would_dangle_at_the_new_depth() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(base.path().join("elsewhere.md"), DOC).unwrap();
+    std::os::unix::fs::symlink("../elsewhere.md", root.join("outward.md")).unwrap();
+    let ctx = mk_ctx(&root);
+    let (report, _) = crate::librarian::indexer::index_repo_sync(
+        &ctx.catalog.lock(),
+        &md_rules(),
+        &root,
+        &globset::GlobSet::empty(),
+        false,
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        report.added, 1,
+        "precondition: the relative outward link is catalogued"
+    );
+    let id = crate::librarian::ids::artifact_id_from_abs(&root.join("outward.md"));
+
+    let err = mv::call(
+        &ctx,
+        json!({"id": id, "new_rel_path": "docs/deeper/moved.md"}),
+    )
+    .await
+    .expect_err("the link would dangle at the new depth");
+
+    assert!(msg(&err).contains("RELATIVE target"), "{}", msg(&err));
+    assert!(
+        std::fs::symlink_metadata(root.join("outward.md")).is_ok(),
+        "nothing was moved"
+    );
+}
+
+/// LOW 5: the export's own containment call was load-bearing only where the write door has no
+/// root to compare against, which this fixture is (no `.git`). And a row BELOW an outward link
+/// directory wrote its sidecar and then failed to stamp the declaration; refused up front.
+#[tokio::test]
+async fn doctor_export_confines_a_project_with_no_git_dir_and_a_row_below_a_link_directory() {
+    let outside = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("docs")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("docs/augmentations")).unwrap();
+    let art = root.path().join("t.md");
+    std::fs::write(&art, "---\nkind: tracker\nstatus: active\n---\n\n# T\n").unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &art);
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id)).unwrap();
+    let root_s = crate::util::fs::RepoPath::from_path(root.path()).into_string();
+
+    let applied = doctor::call(
+        &ctx,
+        json!({"fix": "export_augmentations", "root": root_s, "confirm": true}),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        std::fs::read_dir(outside.path()).unwrap().next().is_none(),
+        "{applied}"
+    );
+    assert_eq!(applied["totals"]["exported"], 0, "{applied}");
+}
+
+/// The other half: an ordinary `docs/augmentations`, but the ARTIFACT sits below a link directory
+/// out of the repository. The sidecar is written inside the repo and the stamp then lands in the
+/// OUTSIDE file (no `.git`, so the write door has nothing to compare against), or, with a
+/// `.git`, the stamp is refused AFTER the sidecar was written and an orphan is left.
+#[tokio::test]
+async fn doctor_export_refuses_an_artifact_below_a_link_directory_before_writing_its_sidecar() {
+    let linked = tempfile::tempdir().unwrap();
+    let outside_art = "---\nkind: tracker\nstatus: active\n---\n\n# U\n";
+    std::fs::write(linked.path().join("u.md"), outside_art).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(linked.path(), root.path().join("linkdir")).unwrap();
+    let ctx = mk_ctx(root.path());
+    let id = catalog_row(&ctx, &root.path().join("linkdir/u.md"));
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id)).unwrap();
+    let root_s = crate::util::fs::RepoPath::from_path(root.path()).into_string();
+
+    let applied = doctor::call(
+        &ctx,
+        json!({"fix": "export_augmentations", "root": root_s, "confirm": true}),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(linked.path().join("u.md")).unwrap(),
+        outside_art
+    );
+    assert!(
+        !root.path().join("docs/augmentations").exists(),
+        "no orphan sidecar for an artifact that cannot be stamped: {applied}"
+    );
+    assert_eq!(applied["totals"]["exported"], 0, "{applied}");
+}

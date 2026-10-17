@@ -414,6 +414,7 @@ pub fn update_entry(
         ));
     }
 
+    let roots = cat.write_roots();
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -561,6 +562,7 @@ pub fn update_entry(
     // any artifact that declares no `snapshot_anchor` — see `resync_snapshot_row`.
     let snapshot_row = resync_snapshot_row(
         &tx,
+        &roots,
         artifact_id,
         entry_id,
         &params,
@@ -810,6 +812,7 @@ pub fn append_entry(
     cites: &[String],
     section: Option<&PendingSection>,
 ) -> Result<AppendOutcome> {
+    let roots = cat.write_roots();
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1023,13 +1026,17 @@ pub fn append_entry(
             // `write_catalogued_file` refuses a link: a catalogued row can be an in-root link to a
             // file outside the repository. Refused with the transaction still open, so no id is
             // consumed and the params row rolls back.
-            crate::librarian::util::write_catalogued_file(std::path::Path::new(path), &updated)
-                .map_err(|e| {
-                    LibrarianRecoverableError::new(format!(
-                        "append_entry: cannot write the section into `{path}`: {e:#} — no id was \
+            crate::librarian::util::write_catalogued_file(
+                &roots,
+                std::path::Path::new(path),
+                &updated,
+            )
+            .map_err(|e| {
+                LibrarianRecoverableError::new(format!(
+                    "append_entry: cannot write the section into `{path}`: {e:#} — no id was \
                          allocated"
-                    ))
-                })?;
+                ))
+            })?;
             record_written_file(&tx, artifact_id, path, &updated)?;
             written_section = Some((path.to_string(), doc, updated));
             // `snapshot_missing` was derived from a body read taken BEFORE this write, so
@@ -1097,6 +1104,10 @@ fn restore_section_after_failed_commit(
         // planted in that window would turn this restore into a write through it.
         Ok(current) if current == written => {
             match crate::librarian::util::write_catalogued_file(
+                // Empty on purpose: this restores a path the SAME call just wrote through the door
+                // (leaf and containment already passed), so the only thing left to defend is a link
+                // planted in between, which the leaf rule and the spelled-repo fallback cover.
+                &[],
                 std::path::Path::new(path),
                 original,
             ) {
@@ -1806,6 +1817,7 @@ pub fn allocate_entry_id(
     id_prefix: &str,
     section: Option<&PendingSection>,
 ) -> Result<AllocateOutcome> {
+    let roots = cat.write_roots();
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1965,13 +1977,17 @@ pub fn allocate_entry_id(
     // `abs_path` is the catalog's, and a row can be an in-root link to a file outside the
     // repository; `write_catalogued_file` refuses a link. Before `tx.commit()`, so the
     // reservation inserted above rolls back with the transaction.
-    crate::librarian::util::write_catalogued_file(std::path::Path::new(&abs_path), &updated)
-        .map_err(|e| {
-            LibrarianRecoverableError::new(format!(
-                "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e:#} — no \
+    crate::librarian::util::write_catalogued_file(
+        &roots,
+        std::path::Path::new(&abs_path),
+        &updated,
+    )
+    .map_err(|e| {
+        LibrarianRecoverableError::new(format!(
+            "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e:#} — no \
                  id was allocated"
-            ))
-        })?;
+        ))
+    })?;
     record_written_file(&tx, artifact_id, &abs_path, &updated)?;
 
     tx.commit()?;
@@ -2141,6 +2157,7 @@ pub(crate) enum SnapshotRow {
 /// that has not opted in cannot reach the new failure mode.
 fn resync_snapshot_row(
     tx: &rusqlite::Transaction<'_>,
+    roots: &[std::path::PathBuf],
     artifact_id: &str,
     entry_id: &str,
     params: &Value,
@@ -2237,14 +2254,13 @@ fn resync_snapshot_row(
     }
     // A catalogued row can be an in-root link to a file outside the repository;
     // `write_catalogued_file` refuses a link, inside the caller's transaction.
-    crate::librarian::util::write_catalogued_file(std::path::Path::new(&abs_path), &text).map_err(
-        |e| {
+    crate::librarian::util::write_catalogued_file(roots, std::path::Path::new(&abs_path), &text)
+        .map_err(|e| {
             LibrarianRecoverableError::new(format!(
                 "update_entry: `{entry_id}` was patched, but writing the snapshot row to \
                  {abs_path} failed: {e:#} — the params change was rolled back"
             ))
-        },
-    )?;
+        })?;
     record_written_file(tx, artifact_id, &abs_path, &text)?;
     Ok(SnapshotRow::Rewritten)
 }

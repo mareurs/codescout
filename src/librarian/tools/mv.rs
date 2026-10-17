@@ -220,6 +220,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if let Some(src_parent) = old_full.parent() {
             crate::librarian::util::refuse_path_outside_root(src_parent, root_path, "move from")?;
         }
+        // `rename` moves a LINK without retargeting it, so a link whose target is spelled
+        // RELATIVELY would resolve against the new directory and dangle (the id repair's read then
+        // failed with ENOENT, after the rename, leaving the move half done).
+        if old_full.parent() != new_full.parent() {
+            if let Ok(target) = std::fs::read_link(&old_full) {
+                if target.is_relative() {
+                    return Err(super::LibrarianRecoverableError::with_hint(
+                        format!(
+                            "refusing to move `{}`: it is a symbolic link with the RELATIVE target `{}`, \
+                             and a move does not retarget a link, so it would dangle in a different directory",
+                            old_full.display(),
+                            target.display()
+                        ),
+                        "Nothing was moved. Move it within its own directory, or replace the link with \
+                         one whose target is absolute, or move the file it points at.",
+                    ));
+                }
+            }
+        }
+
         if new_full.exists() {
             // A destination that exists WHILE THIS ID'S OWN OLD PATH DOES NOT is a
             // half-completed move, not an occupied path. `mv` renames before it re-keys the
@@ -294,7 +314,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // routes both guard on the frontmatter id; `doc(update)`'s `extra`
         // writes custom keys but never `id`), so a later repair pass has no route to
         // the file. BL-23.
-        let content = repair_frontmatter_id(&new_full, &new_id)?;
+        let content = repair_frontmatter_id(&roots, &new_full, &new_id)?;
 
         // Both derived AFTER the repair. A digest taken before it describes a file
         // that no longer exists on disk, which leaves the row looking dirty on every
@@ -616,6 +636,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 ///
 /// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
 pub(super) fn repair_frontmatter_id(
+    roots: &[std::path::PathBuf],
     path: &std::path::Path,
     new_id: &str,
 ) -> anyhow::Result<String> {
@@ -654,7 +675,7 @@ pub(super) fn repair_frontmatter_id(
                 tracing::warn!("move: {e:#}; frontmatter id left unrepaired");
                 return Ok(content);
             }
-            crate::librarian::util::write_catalogued_file(path, &rewritten)?;
+            crate::librarian::util::write_catalogued_file(roots, path, &rewritten)?;
             Ok(rewritten)
         }
         // The parser found an id the line scan could not: a shape neither anticipated

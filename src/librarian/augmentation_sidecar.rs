@@ -183,6 +183,26 @@ pub fn read(path: &Path) -> Result<AugmentationSidecar> {
 /// Every reader and writer of a declared sidecar goes through here (`read_in`, `write_through`,
 /// the export), so the refusal reads the same wherever it surfaces and never echoes file content.
 pub(crate) fn confined_path(root: &Path, rel: &str, verb: &str) -> Result<PathBuf> {
+    refuse_lexical_escape(rel, verb)?;
+    let path = root.join(rel);
+    crate::librarian::util::refuse_path_outside_root(&path, root, verb)?;
+    Ok(path)
+}
+
+/// [`confined_path`] for a WRITE, judged by the same rule as the write door
+/// (`util::refuse_catalogued_path_outside_repo` over the caller's managed `roots`), so the
+/// preflight in `doc(augment)` and the door inside `write_through` cannot disagree about what
+/// "outside" means. `base` is where the declared path is joined (the artifact's git root).
+fn confined_write_path(roots: &[PathBuf], base: &Path, rel: &str, verb: &str) -> Result<PathBuf> {
+    refuse_lexical_escape(rel, verb)?;
+    let path = base.join(rel);
+    crate::librarian::util::refuse_catalogued_path_outside_repo(roots, &path, verb)?;
+    Ok(path)
+}
+
+/// The LEXICAL half of the declared-path rule: an absolute path (which `join` lets replace the
+/// base outright) or a `..` segment.
+fn refuse_lexical_escape(rel: &str, verb: &str) -> Result<()> {
     use std::path::Component;
     if Path::new(rel).components().any(|c| {
         matches!(
@@ -201,9 +221,7 @@ pub(crate) fn confined_path(root: &Path, rel: &str, verb: &str) -> Result<PathBu
             ),
         );
     }
-    let path = root.join(rel);
-    crate::librarian::util::refuse_path_outside_root(&path, root, verb)?;
-    Ok(path)
+    Ok(())
 }
 
 /// Read the sidecar a document declares, confined to `root` ([`confined_path`]). A declared path
@@ -260,7 +278,7 @@ fn declared_target(
     let Some(root) = crate::librarian::current_project::lookup_git_root(&art.abs_path) else {
         return Ok(None);
     };
-    let path = confined_path(&root, &rel, "write")?;
+    let path = confined_write_path(&cat.write_roots(), &root, &rel, "write")?;
     Ok(Some((rel, path)))
 }
 
@@ -272,7 +290,7 @@ pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     let yaml = serde_yml::to_string(sidecar).context("serializing augmentation sidecar")?;
-    crate::librarian::util::write_catalogued_file(path, yaml)
+    crate::librarian::util::write_catalogued_file(&[], path, yaml)
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
@@ -395,7 +413,7 @@ pub fn write_through(
     // file reaches this write as an ordinary existing sidecar. Refused by the writer rather than
     // by tightening `is_file` (which would read as "absent" and silently skip the write-through
     // instead of saying why).
-    crate::librarian::util::write_catalogued_file(&path, rendered)
+    crate::librarian::util::write_catalogued_file(&cat.write_roots(), &path, rendered)
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(WriteThrough {
         written: Some(rel),

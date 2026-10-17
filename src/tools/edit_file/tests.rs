@@ -232,6 +232,7 @@ fn edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_noth
             "--nocapture",
         ])
         .env("HOME", &home)
+        .env("CS_LEAF_PROBE_HOME", &home)
         .env("CS_LEAF_PROBE_RECORD", &record)
         .output()
         .unwrap();
@@ -247,6 +248,8 @@ fn edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_noth
     // Preconditions: the fixture is the one the issue measured. The key is readable at all, and
     // `read_file` refuses BOTH spellings of the link (so the deny-list sees the fake key).
     assert_eq!(rec["key_readable"], true, "{rec}");
+    assert_eq!(rec["markdown_heading_refused_by_deny_list"], true, "{rec}");
+    assert_eq!(rec["markdown_leaf_is_still_a_link"], true, "{rec}");
     for name in ["abs.txt", "rel.txt"] {
         let r = &rec[name];
         assert_eq!(r["read_file_refused"], true, "{name}: {rec}");
@@ -273,6 +276,13 @@ async fn edit_file_leaf_link_probe_child() {
         std::env::var("CS_LEAF_PROBE_RECORD").expect("only the parent test sets this"),
     );
     let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    // Refuse to run on a HOME this test does not own: a manual `--ignored` run would otherwise
+    // point the deny-list at the REAL home and plant links against it.
+    assert_eq!(
+        std::env::var("CS_LEAF_PROBE_HOME").ok().as_deref(),
+        home.to_str(),
+        "only the parent test, which owns a throwaway HOME, may run this"
+    );
     let key = home.join(".ssh/id_rsa");
     let (dir, ctx) = project_ctx().await;
     // Two spellings of the same link: the absolute target, and the RELATIVE one a repository
@@ -377,6 +387,31 @@ async fn edit_file_leaf_link_probe_child() {
             }),
         );
     }
+    // The heading-addressed markdown grammar reaches the file through its OWN resolver call
+    // (`markdown::edit`), so it needs its own link and its own assertion. (Round 1 had a test
+    // for it, and deleting that test left the branch unguarded.)
+    let md_leaf = dir.path().join("abs-md.md");
+    std::os::unix::fs::symlink(&key, &md_leaf).unwrap();
+    let md = EditFile
+        .call(
+            json!({"path": "abs-md.md", "heading": "# x", "action": "replace", "body": "X"}),
+            &ctx,
+        )
+        .await;
+    rec.insert(
+        "markdown_heading_refused_by_deny_list".into(),
+        json!(match &md {
+            Err(e) => format!("{e:#}").contains("protected location"),
+            Ok(_) => false,
+        }),
+    );
+    rec.insert(
+        "markdown_leaf_is_still_a_link".into(),
+        json!(std::fs::symlink_metadata(&md_leaf)
+            .unwrap()
+            .file_type()
+            .is_symlink()),
+    );
     std::fs::write(record, serde_json::Value::Object(rec).to_string()).unwrap();
 }
 

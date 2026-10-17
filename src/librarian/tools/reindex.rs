@@ -327,6 +327,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut total_removed = 0usize;
     let mut total_unchanged = 0usize;
     let mut all_unknown_ids: Vec<String> = Vec::new();
+    // Rows reclaimed because their path RESOLVES OUTSIDE the repository (a link in a parent
+    // directory), and escaping rows kept because they carry history: a policy deletion needs a
+    // stated reason in the response, not just a bumped `removed`.
+    let mut total_reclaimed_escaping = 0usize;
+    let mut reclaimed_escaping_ids: Vec<String> = Vec::new();
+    let mut escaping_kept_ids: Vec<String> = Vec::new();
     let mut backfill_errors: Vec<String> = Vec::new();
     // Roots the walk deliberately did NOT enter, with the reason. Without this the response for
     // such a root is `added: 0, updated: 0, removed: 0, unchanged: 0` and
@@ -388,6 +394,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             total_vectorless = Some(total_vectorless.unwrap_or(0) + n);
         }
         all_unknown_ids.extend(report.unknown_ids);
+        total_reclaimed_escaping += report.reclaimed_escaping;
+        reclaimed_escaping_ids.extend(report.reclaimed_escaping_ids);
+        escaping_kept_ids.extend(report.escaping_kept_ids);
 
         if let (Some(svc), Some(store)) = (ctx.embedding.as_ref(), ctx.artifact_store.as_ref()) {
             // project_id = the target being indexed, which IS the project. Still
@@ -645,6 +654,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "added": total_added,
         "updated": total_updated,
         "removed": total_removed,
+        "reclaimed_escaping": total_reclaimed_escaping,
+        "reclaimed_escaping_ids": reclaimed_escaping_ids
+            .iter()
+            .take(indexer::ESCAPING_ID_CAP)
+            .collect::<Vec<_>>(),
+        "escaping_kept_ids": escaping_kept_ids
+            .iter()
+            .take(indexer::ESCAPING_ID_CAP)
+            .collect::<Vec<_>>(),
+        "escaping_note": if total_reclaimed_escaping > 0 || !escaping_kept_ids.is_empty() {
+            json!("Some catalogued paths resolve OUTSIDE their repository through a symlinked \
+                directory. Rows without an augmentation or events were reclaimed \
+                (`reclaimed_escaping`); rows that carry either were KEPT (`escaping_kept_ids`) \
+                and are reported on every reindex until the link is removed or re-pointed.")
+        } else {
+            Value::Null
+        },
         "unchanged": total_unchanged,
         "embedded": total_embedded,
         "skipped_roots": skipped_roots,

@@ -289,6 +289,15 @@ pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
     roots
 }
 
+/// Arm `cat`'s write roots with the caller's managed roots. Call it right after taking the catalog
+/// lock in any tool that reaches a catalog-level writer (`allocate_entry_id`, `append_entry`,
+/// `update_entry`, `rekey_prefix_rows`, the sidecar write-through): those have no `ToolContext`,
+/// and the write door judges "outside" against the SAME roots `doc(move)` and `doc(delete)` use.
+/// The lock is held for the whole call, so nothing else can observe or replace the roots.
+pub(crate) fn arm_write_roots(ctx: &ToolContext, cat: &Catalog) {
+    cat.set_write_roots(managed_roots(ctx));
+}
+
 /// A path reduced to a form that can be compared across the two spellings
 /// Windows hands us for the same location.
 ///

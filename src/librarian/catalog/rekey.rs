@@ -354,6 +354,7 @@ fn rekey_augmentation(
 /// have is recoverable; rewriting a token you should not have is not.
 fn rekey_body(
     tx: &rusqlite::Transaction<'_>,
+    roots: &[std::path::PathBuf],
     artifact_id: &str,
     from_prefix: &str,
     to_prefix: &str,
@@ -471,7 +472,7 @@ fn rekey_body(
     // and a plain write follows it. `write_catalogued_file` refuses a link; past the refusals
     // above so a preview and a no-op never fail on it, and inside the transaction so a refusal
     // rolls the params rewrite back with it.
-    crate::librarian::util::write_catalogued_file(std::path::Path::new(&abs_path), new_doc)?;
+    crate::librarian::util::write_catalogued_file(roots, std::path::Path::new(&abs_path), new_doc)?;
     Ok(())
 }
 
@@ -585,6 +586,7 @@ pub fn rekey_prefix_rows(
         )?;
     }
 
+    let roots = cat.write_roots();
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -739,6 +741,7 @@ pub fn rekey_prefix_rows(
     )?;
     rekey_body(
         &tx,
+        &roots,
         artifact_id,
         from_prefix,
         to_prefix,

@@ -717,6 +717,7 @@ mod tests {
                 "--nocapture",
             ])
             .env("HOME", &home)
+            .env("CS_FS_PROBE_HOME", &home)
             .output()
             .unwrap();
 
@@ -738,6 +739,13 @@ mod tests {
     #[ignore = "subprocess helper: run by a_leaf_link_to_a_deny_listed_file_is_refused_under_both_policies_in_both_spellings with a fake $HOME"]
     async fn fs_leaf_link_probe_child() {
         let home = PathBuf::from(std::env::var("HOME").unwrap());
+        // This helper writes siblings of $HOME. Refuse to run on a HOME the parent test does not
+        // own, so a manual `--ignored` run cannot plant fixtures beside the REAL home.
+        assert_eq!(
+            std::env::var("CS_FS_PROBE_HOME").ok().as_deref(),
+            home.to_str(),
+            "only the parent test, which owns a throwaway HOME, may run this"
+        );
         let key = home.join(".ssh/id_rsa");
         assert!(key.is_file(), "the parent must have planted the fake key");
         // Siblings of the fake home, inside the directory the parent test created, so the whole

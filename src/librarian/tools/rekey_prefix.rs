@@ -56,6 +56,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         RekeyMode::Preview
     };
     let mut cat = ctx.catalog.lock();
+    super::arm_write_roots(ctx, &cat);
     let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
     let report = rekey::rekey_prefix_rows(&mut cat, &target, &a.from, &a.to, mode)?;
 

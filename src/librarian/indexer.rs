@@ -59,7 +59,20 @@ pub struct IndexReport {
     /// leaking on the default one.
     /// `docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`
     pub removed_ids: Vec<String>,
+    /// Rows this walk reclaimed because the path they name RESOLVES OUTSIDE the repository
+    /// (a directory in its parent chain is a link out), as opposed to a file that vanished. A
+    /// policy deletion, so it is counted and named: the ids are capped at [`ESCAPING_ID_CAP`]
+    /// and `reclaimed_escaping` is the true count. Also included in `removed` / `removed_ids`.
+    pub reclaimed_escaping: usize,
+    pub reclaimed_escaping_ids: Vec<String>,
+    /// Escaping rows that were KEPT because they carry an augmentation or events, which exist
+    /// nowhere else. Reported on every run until the link is removed or re-pointed (the file
+    /// then no longer exists and the row is reclaimed as an ordinary vanished one).
+    pub escaping_kept_ids: Vec<String>,
 }
+
+/// How many ids a report carries for the escaping-row fields; the counts are exact.
+pub const ESCAPING_ID_CAP: usize = 50;
 
 /// One item queued for embedding — one per CHUNK, not per artifact.
 ///
@@ -360,6 +373,22 @@ pub fn index_repo_sync(
     // cannot be resolved, which the check reads as "do not skip".
     let canonical_root = std::fs::canonicalize(abs_root).ok();
 
+    // The root "outside" is judged against: the GIT root of the walk root, resolved, and the walk
+    // root itself when there is none. NOT the walk root alone: under `scope=project` the walk root
+    // is the project directory, while `doc(move)`, `doc(delete)` and the write door judge against
+    // the managed root with the git root first, so in a monorepo a row legitimately moved to
+    // `pkg/docs/x.md` (a link to `../shared/docs`, inside the repository) "escaped" the project
+    // and was reclaimed, with its augmentation, by the next reindex of that project.
+    let escape_root: Option<std::path::PathBuf> =
+        crate::librarian::current_project::lookup_git_root(abs_root)
+            .or_else(|| Some(abs_root.to_path_buf()))
+            .and_then(|r| std::fs::canonicalize(r).ok());
+    // Ids of files this walk skipped because their parent chain resolves outside `escape_root`.
+    // Kept apart from `skipped_duplicate_ids`: a duplicate name carries no history of its own,
+    // while an ESCAPING row may carry an augmentation or events that exist nowhere else, which
+    // reclamation reports and spares instead of deleting.
+    let mut skipped_escaping_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     // Ids of paths this walk DELIBERATELY skipped as duplicates, so the reclamation pass
     // below can tell them from paths it merely did not reach.
     //
@@ -439,15 +468,14 @@ pub fn index_repo_sync(
         let rel = crate::librarian::util::normalize_rel_path(
             &path.strip_prefix(abs_root)?.to_string_lossy(),
         );
-        if !path.is_symlink() {
-            if let (Ok(real), Some(root)) = (std::fs::canonicalize(path), &canonical_root) {
-                if !real.starts_with(root) {
-                    // Recorded like a skipped duplicate, for the same reason: a row may already
-                    // exist for this path and reclamation cannot re-derive why it was skipped.
-                    skipped_duplicate_ids.insert(crate::librarian::ids::artifact_id_from_abs(path));
-                    continue;
-                }
-            }
+        // The PARENT chain, for every kind of leaf: `force_include_candidates` walks
+        // `WalkBuilder::new(<anchor>)` and a walker follows a symlinked ROOT, so a file (or a link)
+        // below an anchor that is a link out of the repository reaches here. A leaf link inside
+        // such an anchor used to be exempt and was catalogued, and the row was then stuck:
+        // `doc(delete)` refuses it because the parent escapes.
+        if parent_escapes(path, escape_root.as_deref()) {
+            skipped_escaping_ids.insert(crate::librarian::ids::artifact_id_from_abs(path));
+            continue;
         }
         if ignore.is_match(&rel) {
             continue;
@@ -644,16 +672,20 @@ pub fn index_repo_sync(
     // were sitting right there on disk the whole time (found live, 2026-07-07,
     // debugging Mercury BOM's "reindex succeeds but find/get come back empty"
     // — the docs/trackers/*.md rows were being deleted by this exact path).
-    let root_prefix = format!(
-        "{}/",
-        crate::util::fs::RepoPath::from(abs_root)
-            .as_str()
-            .replace('\'', "''")
+    // The prefix is BOUND as a parameter, so it must not be SQL-quoted (`'` -> `''` made every
+    // path containing an apostrophe match nothing), and it is a LIKE pattern, so `_`, `%` and `\`
+    // in the path are escaped (`ESCAPE '\'`): unescaped, `_` matched any character and the rows of
+    // `b/myXapp` were "under" `b/my_app`. LIKE is also case-INSENSITIVE for ASCII, which no escape
+    // fixes, so the candidates are filtered again below with `Path::starts_with`.
+    let root_prefix = format!("{}/", crate::util::fs::RepoPath::from(abs_root).as_str());
+    let root_like = format!(
+        "{}%",
+        crate::librarian::util::escape_like_pattern(&root_prefix)
     );
-    let candidates: Vec<(String, String)> = if seen_ids.is_empty() {
+    let mut candidates: Vec<(String, String)> = if seen_ids.is_empty() {
         cat.conn
-            .prepare("SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1")?
-            .query_map(rusqlite::params![format!("{root_prefix}%")], |r| {
+            .prepare("SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 ESCAPE '\\'")?
+            .query_map(rusqlite::params![root_like], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<rusqlite::Result<_>>()?
@@ -665,10 +697,10 @@ pub fn index_repo_sync(
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 AND id NOT IN ({})",
+            "SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 ESCAPE '\\' AND id NOT IN ({})",
             placeholders
         );
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("{root_prefix}%"))];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(root_like.clone())];
         for id in &seen_ids {
             params.push(Box::new(id.clone()));
         }
@@ -681,31 +713,47 @@ pub fn index_repo_sync(
             .collect::<rusqlite::Result<_>>()?
     };
 
+    // Case-insensitive LIKE (and a root spelled differently from the stored path) can still hand
+    // back a sibling's row; only a row whose path really is under `abs_root` is this walk's.
+    candidates.retain(|(_, p)| std::path::Path::new(p).starts_with(abs_root));
+
     let mut removed = 0usize;
-    // A row whose path resolves OUTSIDE the root through a link in a parent directory: the main
-    // walk does not descend a link directory, so a directory swapped for a link after indexing
+    // A row whose path resolves OUTSIDE the repository through a link in a parent directory: the
+    // main walk does not descend a link directory, so a directory swapped for a link after indexing
     // leaves its rows unseen, and `exists()` follows the link and answers `true` for the outside
-    // file. A LEAF link is exempt: an outward file link is the one thing the walk keeps on
-    // purpose, and the walk does see it, so it is never an unseen candidate for this reason.
-    let escapes_root = |p: &str| -> bool {
-        let p = std::path::Path::new(p);
-        if p.is_symlink() {
-            return false;
-        }
-        match (std::fs::canonicalize(p), &canonical_root) {
-            (Ok(real), Some(root)) => !real.starts_with(root),
-            _ => false,
-        }
+    // file. The test is on the PARENT chain for every kind of leaf (an outward FILE link in the
+    // walk root's own directory is judged by its parent, which is inside, and is kept).
+    let escapes_root = |p: &str| parent_escapes(std::path::Path::new(p), escape_root.as_deref());
+    // Does this row carry state that exists nowhere else (an augmentation, or events)?
+    let has_history = |id: &str| -> bool {
+        cat.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM artifact_augmentation WHERE artifact_id = ?1) \
+                     OR EXISTS(SELECT 1 FROM events WHERE artifact_id = ?1)",
+                rusqlite::params![id],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap_or(true)
     };
     for (cand_id, cand_abs_path) in &candidates {
+        let gone = !std::path::Path::new(cand_abs_path).exists();
+        let escaping =
+            !gone && (skipped_escaping_ids.contains(cand_id) || escapes_root(cand_abs_path));
+        // An escaping row is reclaimed for a POLICY reason, with augmentation params and events
+        // that may exist nowhere else. One that carries any is KEPT and reported (every run, until
+        // the link is removed or re-pointed, after which the file is gone and it goes as an
+        // ordinary vanished row); one that carries none is reclaimed and reported.
+        if escaping && has_history(cand_id) {
+            if report.escaping_kept_ids.len() < ESCAPING_ID_CAP {
+                report.escaping_kept_ids.push(cand_id.clone());
+            }
+            continue;
+        }
         // Two disjoint reasons a row must go, and `exists()` can only see the first:
         // the file is gone, or this walk deliberately skipped the path as a duplicate
         // (where `exists()` answers `true` via the symlink's target). Neither subsumes
         // the other; `skipped_duplicate_ids` says why the second is not a re-derivation.
-        if !std::path::Path::new(cand_abs_path).exists()
-            || skipped_duplicate_ids.contains(cand_id)
-            || escapes_root(cand_abs_path)
-        {
+        if gone || skipped_duplicate_ids.contains(cand_id) || escaping {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE id = ?1",
                 rusqlite::params![cand_id],
@@ -715,6 +763,12 @@ pub fn index_repo_sync(
             // and its trigger; Qdrant has no FK and keeps them, so this id is
             // the only thing that can reach them.
             report.removed_ids.push(cand_id.clone());
+            if escaping {
+                report.reclaimed_escaping += 1;
+                if report.reclaimed_escaping_ids.len() < ESCAPING_ID_CAP {
+                    report.reclaimed_escaping_ids.push(cand_id.clone());
+                }
+            }
             removed += 1;
         }
     }
@@ -751,11 +805,11 @@ pub fn index_repo_sync(
     if want_embeddings {
         let vectorless: i64 = cat.conn.query_row(
             "SELECT COUNT(*) FROM artifact a \
-             WHERE a.abs_path LIKE ?1 \
+             WHERE a.abs_path LIKE ?1 ESCAPE '\\' \
                AND NOT EXISTS ( \
                  SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
                )",
-            rusqlite::params![format!("{root_prefix}%")],
+            rusqlite::params![root_like],
             |r| r.get(0),
         )?;
         report.vectorless = Some(vectorless.max(0) as usize);
@@ -831,6 +885,20 @@ fn chunk_grain_for_file(
     };
     cache.insert(dir.to_path_buf(), grain);
     grain
+}
+
+/// Does the PARENT chain of `path` resolve outside `root`? `root` is already canonical; `None`
+/// (the root could not be resolved) reads as "no", like the symlink check beside it. A parent
+/// that cannot be resolved (it is gone) is not an escape: the row is then reclaimed as vanished.
+///
+/// The PARENT, not the path: an outward FILE link is the one thing the walk keeps on purpose, so
+/// the leaf is allowed to resolve anywhere, while a directory in its chain that leaves the
+/// repository makes every file below it someone else's.
+fn parent_escapes(path: &Path, root: Option<&Path>) -> bool {
+    let (Some(root), Some(parent)) = (root, path.parent()) else {
+        return false;
+    };
+    std::fs::canonicalize(parent).is_ok_and(|real| !real.starts_with(root))
 }
 
 /// The literal (non-glob) prefix of a glob pattern — the portion before the

@@ -34,6 +34,13 @@ impl rusqlite::ToSql for crate::util::fs::RepoPath {
 
 pub struct Catalog {
     pub conn: Connection,
+    /// The caller's MANAGED roots (`tools::managed_roots`, git root first) for the duration of the
+    /// tool call that holds this catalog's lock. Catalog-level writers (`allocate_entry_id`,
+    /// `append_entry`, `update_entry`, `rekey_prefix_rows`, the sidecar write-through) have no
+    /// `ToolContext`, and the write door needs a root to judge "outside" against; the tool arms it
+    /// right after taking the lock (`arm_write_roots`). Empty means "no managed root known" and the
+    /// door falls back to the repository the path spells. Interior-mutable so a `&Catalog` can arm it.
+    write_roots: parking_lot::Mutex<Vec<std::path::PathBuf>>,
 }
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -587,6 +594,23 @@ pub(crate) fn catalog_db_path(conn: &rusqlite::Connection) -> Option<std::path::
 }
 
 impl Catalog {
+    fn from_conn(conn: Connection) -> Self {
+        Self {
+            conn,
+            write_roots: parking_lot::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Arm the managed roots for the tool call that holds this catalog's lock (see the field).
+    pub(crate) fn set_write_roots(&self, roots: Vec<std::path::PathBuf>) {
+        *self.write_roots.lock() = roots;
+    }
+
+    /// The managed roots armed by the current tool call; empty when none was armed.
+    pub(crate) fn write_roots(&self) -> Vec<std::path::PathBuf> {
+        self.write_roots.lock().clone()
+    }
+
     pub fn open(db_path: &Path) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
@@ -605,7 +629,7 @@ impl Catalog {
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
             .context("installing audit session")?;
-        Ok(Self { conn })
+        Ok(Self::from_conn(conn))
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -617,7 +641,7 @@ impl Catalog {
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
             .context("installing audit session")?;
-        Ok(Self { conn })
+        Ok(Self::from_conn(conn))
     }
 
     pub fn open_with_workspace(db_path: &Path, ws: &WorkspaceConfig) -> Result<Self> {
@@ -645,7 +669,7 @@ impl Catalog {
         audit::install(&conn).context("installing audit triggers")?;
         audit::install_session(&conn, &audit::resolve_actor())
             .context("installing audit session")?;
-        Ok(Self { conn })
+        Ok(Self::from_conn(conn))
     }
 
     /// Best-effort verb tag for subsequent audit rows on this connection.

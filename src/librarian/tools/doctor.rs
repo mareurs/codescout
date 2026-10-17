@@ -2014,6 +2014,14 @@ fn export_augmentation_sidecars(
             failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
             continue;
         }
+        // The ARTIFACT too, before its sidecar is written: a row below a link directory out of the
+        // repository would otherwise get its sidecar written and its declaration stamped into the
+        // OUTSIDE file (no `.git`: nothing at the door to stop it), or, with one, an orphan sidecar
+        // and a refused stamp.
+        if let Err(e) = crate::librarian::util::refuse_path_outside_root(art, scope_root, "stamp") {
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
         // The sidecar is CREATED below `scope_root/docs/augmentations`; with that directory a
         // link out of the repository the file (and the directory) would land outside it.
         if let Err(e) = sidecar::confined_path(scope_root, &sidecar_rel, "write") {
@@ -2027,7 +2035,11 @@ fn export_augmentation_sidecars(
             failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
             continue;
         }
-        match stamp_augmentation_declaration(art, &sidecar_rel) {
+        match stamp_augmentation_declaration(
+            std::slice::from_ref(&scope_root.to_path_buf()),
+            art,
+            &sidecar_rel,
+        ) {
             Ok(()) => exported.push(json!({ "path": abs_path, "sidecar": sidecar_rel })),
             Err(e) => failed.push(json!({
                 "path": abs_path,
@@ -2043,7 +2055,11 @@ fn export_augmentation_sidecars(
 /// Goes through `frontmatter::parse` + `frontmatter::write` rather than a line edit, because
 /// that pair already owns the reserved-key and scalar-quoting rules a hand-written
 /// `expects_augmentation: <path>` line would have to re-learn.
-fn stamp_augmentation_declaration(artifact: &std::path::Path, sidecar_rel: &str) -> Result<()> {
+fn stamp_augmentation_declaration(
+    roots: &[std::path::PathBuf],
+    artifact: &std::path::Path,
+    sidecar_rel: &str,
+) -> Result<()> {
     let content = std::fs::read_to_string(artifact)?;
     let (fm, body) = crate::librarian::frontmatter::parse(&content)?;
     let mut fm = fm.ok_or_else(|| anyhow::anyhow!("no frontmatter block"))?;
@@ -2052,6 +2068,7 @@ fn stamp_augmentation_declaration(artifact: &std::path::Path, sidecar_rel: &str)
         Value::String(sidecar_rel.to_string()),
     );
     crate::librarian::util::write_catalogued_file(
+        roots,
         artifact,
         crate::librarian::frontmatter::write(&fm, body),
     )?;
@@ -2228,7 +2245,11 @@ async fn run_fix(
                     failed.push(json!({ "path": v.path, "error": format!("{err:#}") }));
                     continue;
                 }
-                match super::mv::repair_frontmatter_id(std::path::Path::new(&v.path), &id) {
+                match super::mv::repair_frontmatter_id(
+                    std::slice::from_ref(&scope_root),
+                    std::path::Path::new(&v.path),
+                    &id,
+                ) {
                     Ok(_) => repaired.push(json!({ "path": v.path, "id": id })),
                     // One unwritable file must not abandon the rest of the sweep.
                     Err(err) => failed.push(json!({ "path": v.path, "error": format!("{err:#}") })),
@@ -6773,13 +6794,32 @@ fn scan_augmentation_declared_but_absent(
         // A declared sidecar that EXISTS on disk is a different finding from one that does
         // not: the first is one command from repaired, the second needs a machine that
         // still holds the row. Reporting both under one detail would hide that.
-        let recoverable = sidecar_rel.as_deref().is_some_and(|rel| {
-            crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
-                .map(|root| root.join(rel).is_file())
-                .unwrap_or(false)
+        //
+        // A third state: the declared path is REFUSED (it leaves the repository, lexically or
+        // through a link). `reindex` refuses it too, so "Run reindex" would be wrong advice, and
+        // `root.join(rel).is_file()` followed the link and called an outside file "present".
+        let refusal: Option<String> = sidecar_rel.as_deref().and_then(|rel| {
+            let root =
+                crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))?;
+            crate::librarian::augmentation_sidecar::confined_path(&root, rel, "attach")
+                .err()
+                .map(|e| format!("{e:#}"))
         });
+        let recoverable = refusal.is_none()
+            && sidecar_rel.as_deref().is_some_and(|rel| {
+                crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
+                    .map(|root| root.join(rel).is_file())
+                    .unwrap_or(false)
+            });
 
-        let detail = if recoverable {
+        let detail = if let Some(why) = refusal {
+            let rel = sidecar_rel.unwrap_or_default();
+            format!(
+                "frontmatter declares `expects_augmentation: {rel}`, but that path is refused: \
+                 {why}. Nothing will attach it, so `reindex` is not the remedy. Declare a \
+                 repo-relative sidecar that stays inside the repository."
+            )
+        } else if recoverable {
             let rel = sidecar_rel.unwrap_or_default();
             format!(
                 "frontmatter declares `expects_augmentation: {rel}` and that sidecar is \
@@ -6943,14 +6983,26 @@ fn scan_sidecar_shape_drift(
                     "sidecar_unparseable",
                     Some(id.clone()),
                     abs_path.clone(),
-                    format!(
+                    if e.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+                        .is_some()
+                    {
+                        // A REFUSAL (the declared path leaves the repository), not a parse failure:
+                        // "repair the YAML / delete it" would point at a file outside the repo.
+                        format!(
+                            "the declared sidecar `{rel}` is refused: {e:#}. It was not opened. \
+                             Declare a repo-relative sidecar that stays inside the repository; do \
+                             not edit or delete the file behind the link."
+                        )
+                    } else {
+                        format!(
                         "`{rel}` is declared and present but does not parse: {e:#}. Nothing else \
                              reports this — `reindex` skips an artifact that already has a row, so a \
                              corrupt committed shape stays unread until the machine holding the row \
                              loses it, which is the one moment it is needed. Repair the YAML by hand, \
                              or delete it and re-run librarian(action=\"doctor\", \
                              fix=\"export_augmentations\") on a machine whose row is correct."
-                    ),
+                        )
+                    },
                 ));
                 continue;
             }
@@ -22039,6 +22091,63 @@ root = "work/elsewhere/ghost"
             rendered.contains("outside the repository root"),
             "{rendered}"
         );
+    }
+
+    /// LOW 3: a read-side REFUSAL is not a parse failure. `sidecar_unparseable` carried the remedy
+    /// "Repair the YAML by hand, or delete it", which for a directory link targets a file OUTSIDE
+    /// the repository. And `augmentation_declared_but_absent` checked `root.join(rel).is_file()`
+    /// unconfined, so it called an outside sidecar "present" and said "Run reindex", which now
+    /// refuses.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_sidecar_is_not_advised_as_a_file_to_repair_or_to_reindex() {
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        let outside = base.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("t.yaml"), "prompt: x\n").unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("docs/augmentations")).unwrap();
+
+        // Declared, with a row: the read-side scan.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, &repo, "t", Some("docs/augmentations/t.yaml"), true);
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
+        assert_eq!(v.len(), 1, "{v:#?}");
+        let detail = &v[0].detail;
+        assert!(
+            !detail.contains("Repair the YAML") && !detail.contains("delete it"),
+            "the remedy for a REFUSED path must not point at the file behind the link: {detail}"
+        );
+        assert!(detail.contains("outside the repository root"), "{detail}");
+
+        // Declared, no row: the declared-but-absent scan.
+        let cat2 = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat2, &repo, "u", Some("docs/augmentations/t.yaml"), false);
+        let mut ds2 = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let all = scan_augmentation_declared_but_absent(&mut ds2, &cat2.conn).unwrap();
+        let d = &all
+            .iter()
+            .find(|x| x.artifact_id.as_deref() == Some("u"))
+            .expect("the declaration is still a finding")
+            .detail;
+        assert!(
+            !d.contains("Run librarian(action=\"reindex\")"),
+            "reindex refuses an outside sidecar, so it must not be the advice: {d}"
+        );
+        assert!(d.contains("outside the repository root"), "{d}");
     }
 
     #[tokio::test]

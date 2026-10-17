@@ -777,7 +777,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `updated: true`. `write_catalogued_file` refuses a link; this is before the catalog
     // upsert below, so a refusal leaves the row describing the file as it was.
     // docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-and-rewrites-a-file-outside-the-root.md
-    crate::librarian::util::write_catalogued_file(&full, &new_content)?;
+    crate::librarian::util::write_catalogued_file(&super::managed_roots(ctx), &full, &new_content)?;
 
     let now = chrono::Utc::now().timestamp_millis();
     let file_mtime = std::fs::metadata(&full)
@@ -1005,7 +1005,7 @@ pub(crate) fn write_field_to_frontmatter(
     // Same refusal as `call`'s, through the same door: this is the writer behind `status_change`
     // and `field_patch` events (`event_create`) and `doc(link)`, which record their event only
     // after this returns.
-    crate::librarian::util::write_catalogued_file(&full, &new_content)?;
+    crate::librarian::util::write_catalogued_file(&super::managed_roots(ctx), &full, &new_content)?;
     Ok(())
 }
 fn trim_history(body: &str, cap: usize) -> String {

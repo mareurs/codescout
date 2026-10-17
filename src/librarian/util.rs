@@ -63,29 +63,30 @@ pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Re
              modify a file the link points at rather than this path",
             path.display()
         ),
-            "Nothing was written. The librarian never writes through a link, so a document \
-         catalogued through one is READ-ONLY here. If the link points at a file inside this \
-         repository, update that file under its own id; if it points outside, edit the target \
-         directly with your file tools, or replace the link with a regular file if this path \
-         should hold its own content.",
+            "Nothing was written. A symbolic link is never written through, so the librarian \
+         refuses to write this path (it can still move or delete a catalogued link itself). If the link points at a file inside this repository, change that file \
+         under its own id; if it points outside, edit the target directly with your file tools, \
+         or replace the link with a regular file if this path should hold its own content.",
         ),
     )
 }
 
 /// Write `contents` to `path` — a path the CATALOG (or a document's frontmatter) supplied — unless
-/// the path is a symbolic link ([`refuse_write_through_symlink`]) or resolves outside the
-/// repository that holds it ([`refuse_catalogued_path_outside_repo`]).
+/// the path is a symbolic link ([`refuse_write_through_symlink`]) or resolves outside the root the
+/// caller manages ([`refuse_catalogued_path_outside_repo`]; `roots` is `tools::managed_roots`, or
+/// empty where the caller has none, in which case the spelled repository is the fallback).
 ///
 /// The one door the librarian's "rewrite a catalogued file in place" writers go through, so a
 /// fourth writer added later takes the guard by calling this rather than by remembering it.
 /// Returns `anyhow::Error` (the refusal is a recoverable error, an `io::Error` is wrapped) so a
 /// caller's `?` and `.with_context` read the same as they did over `std::fs::write`.
 pub(crate) fn write_catalogued_file(
+    roots: &[std::path::PathBuf],
     path: &std::path::Path,
     contents: impl AsRef<[u8]>,
 ) -> anyhow::Result<()> {
     refuse_write_through_symlink(path)?;
-    refuse_catalogued_path_outside_repo(path, "write")?;
+    refuse_catalogued_path_outside_repo(roots, path, "write")?;
     std::fs::write(path, contents)?;
     Ok(())
 }
@@ -112,8 +113,8 @@ pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::Pat
     }
 }
 
-/// [`refuse_path_outside_root`] for a catalog-supplied path, against the repository it spells
-/// ([`spelled_repo_root`]); a path with no such repository is not checked.
+/// [`refuse_path_outside_root`] for a catalog-supplied path, against ONE root chosen by
+/// [`confinement_root`]; a path with no root at all is not checked.
 ///
 /// This is the question the LEAF rule cannot ask: a row whose parent directory is a link out of
 /// the repository. The indexer can mint one two ways, both shippable by a repository
@@ -122,14 +123,46 @@ pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::Pat
 /// takes `row.abs_path` would then write, move or delete a file the repository does not own.
 /// A link whose target stays INSIDE the repository is untouched: a symlinked tracker directory
 /// is a legitimate setup.
+///
+/// `roots` are the caller's MANAGED roots (`tools::managed_roots`, git root first), the same list
+/// `doc(move)` and `doc(delete)` consult, so the three agree on what "outside" means. The
+/// first design used a root found by walking the spelled ancestors for a `.git`, which cannot
+/// tell "a link to ANOTHER repository" (outside) from "my own project reached through a link"
+/// (inside) — the two are the same input, and only the managed roots say which one this is.
 pub(crate) fn refuse_catalogued_path_outside_repo(
+    roots: &[std::path::PathBuf],
     path: &std::path::Path,
     verb: &str,
 ) -> anyhow::Result<()> {
+    if let Some(root) = confinement_root(roots, path) {
+        return refuse_path_outside_root(path, &root, verb);
+    }
+    // No managed root contains the SPELLING. A project reached through a link is registered under
+    // its canonical path while rows keep the spelled one (`home/proj/x.md` against a root of
+    // `data/proj`), so before falling back, accept a path whose RESOLUTION lies under a managed
+    // root: it is inside something the caller manages.
+    let resolved = resolve_through_existing_ancestor(path);
+    if roots
+        .iter()
+        .any(|r| resolved.starts_with(resolve_through_existing_ancestor(r)))
+    {
+        return Ok(());
+    }
     match spelled_repo_root(path) {
         Some(root) => refuse_path_outside_root(path, &root, verb),
         None => Ok(()),
     }
+}
+
+/// The root a catalogued path is judged against: the first managed root that contains its
+/// spelling (`tools::containing_root`, the guard move and delete use), else `None`. Shared by
+/// the write door, the sidecar preflight and `doc(augment)`, so a refusal found late cannot
+/// disagree with the check made early.
+pub(crate) fn confinement_root(
+    roots: &[std::path::PathBuf],
+    path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    crate::librarian::tools::containing_root(roots, path).cloned()
 }
 
 /// Refuse a `path` that does not resolve to somewhere under `root`.
