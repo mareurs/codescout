@@ -6805,12 +6805,11 @@ fn scan_augmentation_declared_but_absent(
                 .err()
                 .map(|e| format!("{e:#}"))
         });
-        let recoverable = refusal.is_none()
-            && sidecar_rel.as_deref().is_some_and(|rel| {
-                crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
-                    .map(|root| root.join(rel).is_file())
-                    .unwrap_or(false)
-            });
+        let recoverable = sidecar_rel.as_deref().is_some_and(|rel| {
+            crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
+                .map(|root| root.join(rel).is_file())
+                .unwrap_or(false)
+        });
 
         let detail = if let Some(why) = refusal {
             let rel = sidecar_rel.unwrap_or_default();

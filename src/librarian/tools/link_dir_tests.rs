@@ -705,33 +705,36 @@ fn aug_row(id: &str) -> augmentation::AugmentationRow {
 /// character, and SQLite's `LIKE` ignores ASCII case. Reindexing `b/my_app` therefore saw the rows of
 /// `b/myXapp` and `b/MY_APP` as ITS rows, and round 2's escape test then deleted them (with their
 /// augmentation) although the files were on disk.
+///
+/// The case-only sibling carries NO history on purpose: with history round 2's reclaim merely KEPT
+/// it, so a fixture where both siblings had an augmentation let the missing `starts_with` filter
+/// survive a mutation.
 #[test]
 fn a_reindex_never_reclaims_the_rows_of_a_sibling_whose_name_matches_a_like_pattern() {
     let b = tempfile::tempdir().unwrap();
-    let mut rows = Vec::new();
     let ctx = mk_ctx(&b.path().join("my_app"));
     for name in ["my_app", "myXapp", "MY_APP"] {
         std::fs::create_dir_all(b.path().join(name).join("docs")).unwrap();
         std::fs::write(b.path().join(name).join("docs/n.md"), DOC).unwrap();
     }
-    for name in ["myXapp", "MY_APP"] {
-        let id = catalog_row(&ctx, &b.path().join(name).join("docs/n.md"));
-        augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id)).unwrap();
-        rows.push(id);
-    }
+    let with_history = catalog_row(&ctx, &b.path().join("myXapp").join("docs/n.md"));
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&with_history)).unwrap();
+    let plain = catalog_row(&ctx, &b.path().join("MY_APP").join("docs/n.md"));
 
     let report = index(&ctx, &b.path().join("my_app"));
 
-    for id in &rows {
+    for id in [&with_history, &plain] {
         assert!(
             artifact::get(&ctx.catalog.lock(), id).unwrap().is_some(),
             "a sibling's row must survive a reindex of another root"
         );
-        assert!(augmentation::get(&ctx.catalog.lock(), id)
-            .unwrap()
-            .is_some());
     }
+    assert!(augmentation::get(&ctx.catalog.lock(), &with_history)
+        .unwrap()
+        .is_some());
     assert_eq!(report.removed, 0);
+    assert_eq!(report.reclaimed_escaping, 0);
+    assert!(report.escaping_kept_ids.is_empty());
 }
 
 /// A path containing `'` never matched: the prefix was doubled (`''`) for SQL text and then BOUND
@@ -1122,4 +1125,84 @@ async fn doc_move_still_renames_a_relative_leaf_link_within_its_own_directory() 
         .expect("a rename inside the same directory leaves the relative target valid");
 
     assert!(std::fs::read_to_string(root.join("renamed.md")).is_ok());
+}
+
+// ---- the arming of the catalog-level writers, in the H3 shape ---------------------------------
+//
+// A project reached through a link under another repository (`home/proj -> data/proj`, `home/.git`)
+// is the input on which the spelled-`.git` root is wrong and the managed roots are right. Each
+// tool that reaches a writer without a `ToolContext` must arm `Catalog::write_roots`; these are
+// the cases that fail when it does not.
+
+fn linked_project() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("home");
+    let data = base.path().join("data");
+    std::fs::create_dir_all(home.join(".git")).unwrap();
+    std::fs::create_dir_all(data.join("proj/.git")).unwrap();
+    std::os::unix::fs::symlink(data.join("proj"), home.join("proj")).unwrap();
+    let project = home.join("proj");
+    (base, project, data.join("proj"))
+}
+
+#[tokio::test]
+async fn doc_augment_publishes_a_sidecar_in_a_project_reached_through_a_link() {
+    let (_base, project, real) = linked_project();
+    std::fs::create_dir_all(project.join("docs/aug")).unwrap();
+    std::fs::write(project.join("docs/aug/t.yaml"), "prompt: OLD\n").unwrap();
+    std::fs::write(
+        project.join("t.md"),
+        "---\nkind: tracker\nstatus: active\nexpects_augmentation: docs/aug/t.yaml\n---\n\n# T\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("t.md"));
+
+    augment::call(&ctx, json!({"id": id, "prompt": "NEW-PROMPT"}))
+        .await
+        .expect("the sidecar is inside the managed project");
+
+    let on_disk = std::fs::read_to_string(real.join("docs/aug/t.yaml")).unwrap();
+    assert!(on_disk.contains("NEW-PROMPT"), "{on_disk}");
+}
+
+#[tokio::test]
+async fn a_status_change_event_writes_in_a_project_reached_through_a_link() {
+    let (_base, project, real) = linked_project();
+    std::fs::write(project.join("x.md"), DOC).unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("x.md"));
+
+    super::event_create::call(
+        &ctx,
+        json!({"artifact_id": id, "kind": "status_change", "payload": {"to": "fixed"}}),
+    )
+    .await
+    .expect("the frontmatter writer judges against the managed project");
+
+    assert!(std::fs::read_to_string(real.join("x.md"))
+        .unwrap()
+        .contains("status: fixed"));
+}
+
+#[tokio::test]
+async fn rekey_prefix_rewrites_a_ledger_in_a_project_reached_through_a_link() {
+    let (_base, project, real) = linked_project();
+    std::fs::write(
+        project.join("ledger.md"),
+        "---\nkind: tracker\nentry_prefix: T\n---\n\n## T-1 — a\n\nsee T-1\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("ledger.md"));
+
+    super::rekey_prefix::call(
+        &ctx,
+        json!({"id": id, "from": "T", "to": "SRI", "force": true}),
+    )
+    .await
+    .expect("the ledger body rewrite judges against the managed project");
+
+    let body = std::fs::read_to_string(real.join("ledger.md")).unwrap();
+    assert!(body.contains("## SRI-1"), "{body}");
 }
