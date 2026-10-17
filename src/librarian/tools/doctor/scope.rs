@@ -98,17 +98,20 @@ pub(super) struct DoctorScope {
     /// different set of checks.
     scoped_out: BTreeMap<String, BTreeMap<String, usize>>,
     /// Candidates the entry-validity family withheld for want of exposure, tallied by
-    /// CHECK NAME — the exposure floor's own count, kept apart from [`Self::scoped_out`].
+    /// CHECK NAME and split by whether the active scope would have shown them: the
+    /// exposure floor's own count, kept apart from [`Self::scoped_out`].
     ///
     /// The two answer different questions and must not be summed: `scoped_out` is rows
     /// refused because they live outside the active project (a property of WHERE a row
     /// is); this is rows that belong to the worklist's class and are cited fewer than
-    /// `EXPOSURE_THRESHOLD` times (a property of how much anyone leans on it). It is
-    /// tallied BEFORE `admit` runs and never narrowed by it, so it is catalog-wide, and
-    /// `summary.below_exposure_floor.scope` says so. Lives on the scope because it is the
-    /// one mutable carrier every scan already receives; a separate out-parameter would
-    /// touch every direct-scan call site for no semantic gain.
-    below_floor: BTreeMap<String, usize>,
+    /// `EXPOSURE_THRESHOLD` times (a property of how much anyone leans on it). Tallied
+    /// BEFORE `admit` and never mutating `scoped_out`; the in/out split comes from the
+    /// pure [`Self::would_admit`]. Lives on the scope because it is the one mutable
+    /// carrier every scan already receives; a separate out-parameter would touch every
+    /// direct-scan call site for no semantic gain.
+    below_floor_in_scope: BTreeMap<String, usize>,
+    /// See [`Self::below_floor_in_scope`]: the candidates `would_admit` refused.
+    below_floor_out_of_scope: BTreeMap<String, usize>,
     /// Task 7 (relevance exemption): artifact ids living OUTSIDE `roots` that are
     /// cited, `rel="cites"`, by an artifact INSIDE `roots` — computed once in
     /// [`Self::new`] from BOTH cites tables (`artifact_link`, artifact grain, and
@@ -239,7 +242,8 @@ impl DoctorScope {
             scope,
             roots,
             scoped_out: BTreeMap::new(),
-            below_floor: BTreeMap::new(),
+            below_floor_in_scope: BTreeMap::new(),
+            below_floor_out_of_scope: BTreeMap::new(),
             cited_from_here,
             cross_root_cites_edges,
             umbrella_roots,
@@ -293,9 +297,13 @@ impl DoctorScope {
             "undeclared doctor check name {check:?} — add it to declare_checks! or \
              scoped_out() will hold a bucket no fold ever reads"
         );
-        if self.contains(Path::new(abs_path)) {
+        if self.would_admit(check, id, abs_path) {
             return true;
         }
+        // The relevance exemption is applied by `would_admit` (above), which used to be
+        // inline here; it moved so the exposure-floor tally can ask the same question
+        // WITHOUT tallying a refusal. Its rationale and history stay with this refusal:
+        //
         // Task 7 (relevance exemption): a row otherwise scoped OUT is admitted anyway
         // — WITHOUT tallying into `scoped_out` — when `id` names an artifact a local
         // (in-scope) artifact actively cites AND `abs_path` resolves under a declared
@@ -335,11 +343,6 @@ impl DoctorScope {
         // three `admit_exempts_*`/`admit_refuses_cited_prefix_*` tests stay green under
         // either form, because they only prove the exemption still fires for an actual
         // umbrella member, not that it is gated on one.
-        if super::Check::from_wire(check).is_some_and(super::Check::admits_relevance_exemption)
-            && self.known_elsewhere_row_is_relevant(id, Path::new(abs_path))
-        {
-            return true;
-        }
         *self
             .scoped_out
             .entry(check.to_string())
@@ -390,22 +393,49 @@ impl DoctorScope {
     /// Records one candidate of `check` that the exposure floor withheld — the entry
     /// belongs to the check's class (declared `conditional`, or `dated` past the horizon,
     /// or undeclared) but is cited fewer than `EXPOSURE_THRESHOLD` times. Called by the
-    /// scan itself at the point it `continue`s past the entry, BEFORE [`Self::admit`], so
-    /// the count is catalog-wide rather than narrowed to the active project.
-    pub(super) fn note_below_floor(&mut self, check: &str) {
+    /// scan itself at the point it `continue`s past the entry, BEFORE [`Self::admit`]; the
+    /// candidate lands in the in-scope or out-of-scope tally by [`Self::would_admit`].
+    pub(super) fn note_below_floor(&mut self, check: &str, id: &str, abs_path: &str) {
         debug_assert!(
             super::Check::from_wire(check).is_some(),
             "undeclared doctor check name {check:?} — add it to declare_checks! or \
              below_floor() will hold a bucket no fold ever reads"
         );
-        *self.below_floor.entry(check.to_string()).or_insert(0) += 1;
+        // Asked WITHOUT `admit`, so a withheld candidate that is also out of scope is not
+        // double-tallied into `scoped_out` (whose sub-maps feed `entry_validity_scoped_by_
+        // project` and the worklist-narrowing hint, and mean "rows refused by scope").
+        let bucket = if self.would_admit(check, id, abs_path) {
+            &mut self.below_floor_in_scope
+        } else {
+            &mut self.below_floor_out_of_scope
+        };
+        *bucket.entry(check.to_string()).or_insert(0) += 1;
     }
 
-    /// Candidates withheld by the exposure floor, keyed by check name. A check that
-    /// withheld nothing is absent; a caller publishing the figure fills the zeros in so
-    /// that `0` reads as "the floor bit nothing" rather than "not measured".
-    pub(super) fn below_floor(&self) -> &BTreeMap<String, usize> {
-        &self.below_floor
+    /// In-scope candidates withheld by the exposure floor, keyed by check name. A check
+    /// that withheld nothing is absent; a caller publishing the figure fills the zeros in
+    /// so that `0` reads as "the floor bit nothing" rather than "not measured".
+    pub(super) fn below_floor_in_scope(&self) -> &BTreeMap<String, usize> {
+        &self.below_floor_in_scope
+    }
+
+    /// The same tally for candidates the active scope would have refused anyway — they
+    /// live under another project root, so they would not have reached this report's
+    /// worklist even above the floor. Reported apart so the in-scope figure answers "how
+    /// many of MY candidates did the floor withhold" and is not inflated by other repos.
+    pub(super) fn below_floor_out_of_scope(&self) -> &BTreeMap<String, usize> {
+        &self.below_floor_out_of_scope
+    }
+
+    /// The scope predicate [`Self::admit`] applies, without its side effect: lexically
+    /// inside `roots`, or exempted by the relevance rule (a cited row under a declared
+    /// umbrella member, for a check on the allow-list). Pure, so a caller can classify a
+    /// row's scope without tallying a refusal into `scoped_out`.
+    pub(super) fn would_admit(&self, check: &str, id: &str, abs_path: &str) -> bool {
+        self.contains(Path::new(abs_path))
+            || (super::Check::from_wire(check)
+                .is_some_and(super::Check::admits_relevance_exemption)
+                && self.known_elsewhere_row_is_relevant(id, Path::new(abs_path)))
     }
 
     /// Task 7 (relevance exemption): how many `cites` edges — summed across

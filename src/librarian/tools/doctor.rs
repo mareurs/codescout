@@ -1464,21 +1464,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     });
 
-    // What the exposure floor withheld from the three floor-gated worklists, by check.
-    // Every check is listed, zeros included: a `0` has to read as "the floor withheld
-    // nothing", which an absent key cannot distinguish from "never measured". Read from
-    // `doctor_scope`, which the scans tallied into BEFORE their project scoping, so these
-    // are catalog-wide counts — the `scope` string below says so on the wire.
-    let below_floor_by_check: std::collections::BTreeMap<&str, usize> = [
+    // What the exposure floor withheld from the three floor-gated worklists, by check, split
+    // by whether the active scope would have shown the candidate. Every check is listed,
+    // zeros included: a `0` has to read as "the floor withheld nothing", which an absent key
+    // cannot distinguish from "never measured". `in_scope` is the figure a reader acts on —
+    // it is the candidates that would have been rows in THIS report's worklists had they been
+    // cited more — and `out_of_scope` is every other root's, so a reader standing in one
+    // repo is not shown other repos' candidates as their own.
+    let floor_checks = [
         Check::EntryConditionalPastDue.as_str(),
         Check::EntryDatedStale.as_str(),
         Check::EntryCitedFromOutsideButUndeclared.as_str(),
-    ]
-    .into_iter()
-    .map(|c| (c, doctor_scope.below_floor().get(c).copied().unwrap_or(0)))
-    .collect();
-    let below_floor_total: usize = below_floor_by_check.values().sum();
-
+    ];
+    let below_floor_by_check = |tally: &std::collections::BTreeMap<String, usize>| {
+        floor_checks
+            .iter()
+            .map(|c| (*c, tally.get(*c).copied().unwrap_or(0)))
+            .collect::<std::collections::BTreeMap<&str, usize>>()
+    };
+    let below_floor_in_scope = below_floor_by_check(doctor_scope.below_floor_in_scope());
+    let below_floor_out_of_scope = below_floor_by_check(doctor_scope.below_floor_out_of_scope());
     let mut hint_parts: Vec<String> = Vec::new();
     if elided_outside > 0 {
         let total_outside = shown_outside + elided_outside;
@@ -1544,14 +1549,29 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
              repos' work."
         ));
     }
-    if below_floor_total > 0 {
+    // An empty worklist is the one reading of the exposure floor a reader cannot recover
+    // from the lists themselves: "no rows" is true of the entries at or above the floor and
+    // false of the check's whole class. So the hint names exactly the checks that returned
+    // NO rows while the floor withheld IN-SCOPE candidates, and stays silent otherwise — a
+    // check with rows is already being read as a worklist, the count is in
+    // `summary.below_exposure_floor`, and a sentence on every call (undeclared entries
+    // below the floor always exist) would be noise attached to every result.
+    let empty_but_withheld: Vec<String> = floor_checks
+        .iter()
+        .filter_map(|c| {
+            let reported = by_check.get(*c).copied().unwrap_or(0);
+            let withheld = below_floor_in_scope.get(*c).copied().unwrap_or(0);
+            (reported == 0 && withheld > 0).then(|| format!("{c} ({withheld})"))
+        })
+        .collect();
+    if !empty_but_withheld.is_empty() {
         hint_parts.push(format!(
-            "{below_floor_total} candidate(s) were withheld from the entry_conditional_past_due / \
-             entry_dated_stale / entry_cited_from_outside_but_undeclared worklists because each \
-             is cited fewer than {EXPOSURE_THRESHOLD} times — see summary.below_exposure_floor. \
-             Those three lists are the entries ABOVE that floor, not every conditional, stale or \
-             undeclared entry; the floor is catalog-wide, so the count is not narrowed to the \
-             active project."
+            "{} returned no rows in this scope, but the exposure floor withheld in-scope \
+             candidate(s) — count in parentheses — because each is cited fewer than \
+             {EXPOSURE_THRESHOLD} times. An empty list here is the list of entries at or \
+             above that floor, not of every such entry in the project; \
+             summary.below_exposure_floor.in_scope has the per-check counts.",
+            empty_but_withheld.join(" / ")
         ));
     }
     if !cited_prefix_scoped.is_empty() {
@@ -1817,16 +1837,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             "by_check": by_check,
             // How many candidates the exposure floor withheld from the three worklists
             // above, so those lists cannot read as the complete population. Always
-            // present, zeros included. `scope` names what the figure ranges over: the
-            // floor is applied before project scoping, so it is NOT narrowed to the
-            // active project the way `by_check` is.
+            // present, zeros included. Split by scope: `in_scope` counts the candidates
+            // this report's worklists would have shown had they been cited at least
+            // `floor` times (the figure to act on); `out_of_scope` counts the ones under
+            // other project roots, which `by_check` never showed in any case.
             "below_exposure_floor": {
                 "floor": EXPOSURE_THRESHOLD,
-                "by_check": below_floor_by_check,
-                "scope": "catalog-wide: every non-archived entry that belongs to the check's \
-                          class (declared conditional; dated past the horizon; undeclared) and \
-                          is cited fewer than `floor` times, counted before project scoping — \
-                          the listed rows are the entries at or above `floor`",
+                "in_scope": below_floor_in_scope,
+                "out_of_scope": below_floor_out_of_scope,
+                "scope": "per check: every non-archived entry that belongs to the check's \
+                          class (declared conditional; dated past the horizon; undeclared), \
+                          counted once per file and id, and is cited fewer than `floor` \
+                          times. `in_scope` is those the active scope would admit; \
+                          `out_of_scope` those under other roots. Together they are \
+                          catalog-wide. The listed rows are the in-scope entries at or \
+                          above `floor`",
             },
         },
         "catalog_health": catalog_health,
@@ -4795,6 +4820,11 @@ fn scan_conditional_past_due(
         .collect::<rusqlite::Result<_>>()?;
 
     let mut out = Vec::new();
+    // `(file, entry id)` pairs already tallied as withheld. A file with a duplicated heading
+    // (`## R-3` twice) yields two `EntrySection` instances sharing one exposure; the reported
+    // rows are deliberately NOT deduplicated here (that is `scan_entry_defined_twice`'s
+    // finding), but the withheld COUNT is of entries, so each is counted once.
+    let mut withheld_seen = std::collections::HashSet::<(String, String)>::new();
     for (aid, path, status) in rows {
         // An archived row is excluded from the REPORTED population, mirroring what
         // `entry_indegree` already does on the citing side (Ruling 15/16) — otherwise
@@ -4825,10 +4855,12 @@ fn scan_conditional_past_due(
             // The floor is applied AFTER the class test, not before it: what it
             // withheld is a count of CANDIDATES (declared conditional entries), and
             // counting at the old position would tally every below-floor entry in
-            // the catalog whatever it declares. Counted before `scope.admit`, so the
-            // figure is catalog-wide — see `summary.below_exposure_floor.scope`.
+            // the catalog whatever it declares. Counted before `scope.admit` and split
+            // in/out of scope by `would_admit` — see `summary.below_exposure_floor`.
             if exposure < EXPOSURE_THRESHOLD {
-                scope.note_below_floor("entry_conditional_past_due");
+                if withheld_seen.insert((path.clone(), s.id.clone())) {
+                    scope.note_below_floor("entry_conditional_past_due", &aid, &path);
+                }
                 continue;
             }
             // Exposure stays global — `entry_indegree` is not scoped, and must not
@@ -4950,6 +4982,9 @@ fn scan_dated_stale(
     // TOTAL sort key so no two rows can ever compare equal.
     type DatedStaleSortKey = (std::cmp::Reverse<usize>, String, String);
     let mut scored: Vec<(DatedStaleSortKey, Violation)> = Vec::new();
+    // Withheld entries already tallied, keyed `(file, entry id)` — see
+    // `scan_conditional_past_due` for why the count is deduplicated and the rows are not.
+    let mut withheld_seen = std::collections::HashSet::<(String, String)>::new();
     for (aid, path, status) in rows {
         // An archived row is excluded from the REPORTED population — same guard as
         // `scan_conditional_past_due` and `scan_cited_but_undeclared`; MF-2, 2026-08-20.
@@ -4985,7 +5020,9 @@ fn scan_dated_stale(
             // entry is no candidate and is not counted. See
             // `scan_conditional_past_due` for why the count is catalog-wide.
             if exposure < EXPOSURE_THRESHOLD {
-                scope.note_below_floor("entry_dated_stale");
+                if withheld_seen.insert((path.clone(), s.id.clone())) {
+                    scope.note_below_floor("entry_dated_stale", &aid, &path);
+                }
                 continue;
             }
             // Exposure stays global; only the emitted worklist is scoped. See
@@ -5115,7 +5152,7 @@ fn scan_cited_but_undeclared(
             // the honest answer to "how much of the undeclared population does this
             // worklist leave out". See `scan_conditional_past_due` for its scope.
             if exposure < EXPOSURE_THRESHOLD {
-                scope.note_below_floor("entry_cited_from_outside_but_undeclared");
+                scope.note_below_floor("entry_cited_from_outside_but_undeclared", &aid, &path);
                 continue;
             }
             // Exposure stays global; only the emitted worklist is scoped. See
@@ -7802,6 +7839,30 @@ fn cited_issue_paths(content: &str) -> std::collections::BTreeSet<String> {
     out
 }
 
+/// What [`paths_touched_since`] read, and the walk's disclosure of its own bounds.
+///
+/// - `ceiling_reached`: a commit existed beyond `max_commits` that was never read. On a long
+///   history this is the ORDINARY state (measured 2026-10-17: `true` on every call on this
+///   repo, 7,739 commits against 4,000) and says nothing about whether an answer could
+///   change, so it must not be read as a warning. A history of exactly `max_commits`
+///   commits is complete and returns `false`.
+/// - `ceiling_reached_in_window`: the ceiling was reached AND the last commit walked is still
+///   at or after `cutoff_epoch_secs`, so the unread tail may hold commits inside the window
+///   and `paths` is a LOWER BOUND on "touched since the cutoff". This is the harmful case.
+///   It is conservative: committer times are not monotonic, so an unread commit newer than
+///   the last walked one cannot be ruled out by this walk — `true` means "may be partial",
+///   never "is wrong". When the last walked commit is older than the cutoff, the walk has
+///   passed the whole window and the unread tail is only older history.
+/// - `unavailable`: the history could not be opened at all (`revwalk` or `push_head` failed,
+///   e.g. an unborn HEAD), so `paths` is empty because nothing was READ, not because nothing
+///   was touched. Distinct from both flags above, and from a walk that completed.
+struct TouchedWalk {
+    paths: std::collections::HashSet<String>,
+    ceiling_reached: bool,
+    ceiling_reached_in_window: bool,
+    unavailable: bool,
+}
+
 /// Repo-relative paths touched by any commit newer than `cutoff_epoch_secs`.
 ///
 /// **Bounded twice, and both bounds matter.** By time, because the question is only about
@@ -7815,38 +7876,44 @@ fn cited_issue_paths(content: &str) -> std::collections::BTreeSet<String> {
 /// files count as touched. Missing that made a one-commit fixture report *nothing* recent,
 /// which is the state every test repo is in.
 ///
-/// **Returns `(paths, truncated)`, and `truncated` is the walk's disclosure of its own
-/// ceiling.** `true` means a commit existed beyond `max_commits` that was never read, so
-/// `paths` is a LOWER BOUND on "touched since the cutoff", not that set. Consumers that
-/// read absence from `paths` as "not recently touched" must carry the flag to whoever
-/// reads their result. A history of exactly `max_commits` commits is complete and returns
-/// `false`. Whether the unreached tail could actually have held a commit newer than the
-/// cutoff is NOT determined here — it would take reading the tail, which is the cost the
-/// ceiling exists to avoid — so `true` means "may be partial", never "is wrong".
+/// The returned [`TouchedWalk`] says whether the ceiling bit, and whether it bit INSIDE the
+/// window (the only case where `paths` can be wrong); consumers that read absence from
+/// `paths` as "not recently touched" must carry those flags to whoever reads their result.
 fn paths_touched_since(
     repo: &git2::Repository,
     cutoff_epoch_secs: i64,
     max_commits: usize,
-) -> (std::collections::HashSet<String>, bool) {
-    let mut touched = std::collections::HashSet::new();
+) -> TouchedWalk {
+    let mut out = TouchedWalk {
+        paths: std::collections::HashSet::new(),
+        ceiling_reached: false,
+        ceiling_reached_in_window: false,
+        unavailable: false,
+    };
     let Ok(mut walk) = repo.revwalk() else {
-        return (touched, false);
+        out.unavailable = true;
+        return out;
     };
     if walk.push_head().is_err() {
-        return (touched, false);
+        out.unavailable = true;
+        return out;
     }
     let _ = walk.set_sorting(git2::Sort::TIME);
-    let mut truncated = false;
+    // Committer time of the last commit actually read; `None` until one is.
+    let mut last_walked_secs: Option<i64> = None;
     for (seen, oid) in walk.flatten().enumerate() {
         if seen >= max_commits {
             // Reached only when a commit exists BEYOND the ceiling, so a history of exactly
-            // `max_commits` is complete and is not flagged.
-            truncated = true;
+            // `max_commits` is complete and is not flagged. A walk that read no commit at all
+            // cannot show it passed the window, so it counts as in-window.
+            out.ceiling_reached = true;
+            out.ceiling_reached_in_window = last_walked_secs.is_none_or(|t| t >= cutoff_epoch_secs);
             break;
         }
         let Ok(commit) = repo.find_commit(oid) else {
             continue;
         };
+        last_walked_secs = Some(commit.time().seconds());
         if commit.time().seconds() < cutoff_epoch_secs {
             continue;
         }
@@ -7858,12 +7925,12 @@ fn paths_touched_since(
         for delta in diff.deltas() {
             for file in [delta.new_file(), delta.old_file()] {
                 if let Some(p) = file.path().and_then(|p| p.to_str()) {
-                    touched.insert(p.replace('\\', "/"));
+                    out.paths.insert(p.replace('\\', "/"));
                 }
             }
         }
     }
-    (touched, truncated)
+    out
 }
 
 /// `open_bug_cited_from_source` and `open_bug_under_live_edit`, with the production walk
@@ -8069,7 +8136,8 @@ fn scan_open_bug_cited_from_source_walking(
 
     let now = chrono::Utc::now().timestamp();
     let cutoff = now - SETTLE_DAYS * 24 * 60 * 60;
-    let (recently_touched, walk_truncated) = paths_touched_since(&repo, cutoff, max_walk_commits);
+    let walk = paths_touched_since(&repo, cutoff, max_walk_commits);
+    let recently_touched = &walk.paths;
 
     let mut unsettled = 0usize;
     let mut out = Vec::new();
@@ -8196,14 +8264,23 @@ fn scan_open_bug_cited_from_source_walking(
         "bugs_cited_from_source": citations.len(),
         "suppressed_as_unsettled": unsettled,
         "settle_days": SETTLE_DAYS,
-        // The recently-touched walk's own bound, published where the reader of
+        // The recently-touched walk's own bounds, published where the reader of
         // `suppressed_as_unsettled` and of a zero in `open_bug_cited_from_source` looks.
-        // `true` means `paths_touched_since` stopped at `walk_max_commits` with commits
-        // still unread, so a citing file's absence from the recently-touched set is a
-        // lower bound: this check may read a file as settled that a later commit touched.
-        // Always present, `false` included, so "walked to the end of history" is
-        // distinguishable from "field not emitted".
-        "walk_truncated": walk_truncated,
+        // Three fields, because one boolean cannot carry them:
+        // - `walk_truncated`: the commit ceiling was reached while the last commit read was
+        //   still inside the settle window, so a citing file's absence from the
+        //   recently-touched set is a LOWER BOUND — this check may read a file as settled
+        //   that a later, unread commit touched. The harmful case. `false` here does NOT
+        //   mean the walk saw all of history; see `walk_ceiling_reached`.
+        // - `walk_ceiling_reached`: the ceiling stopped the walk with commits unread. The
+        //   ordinary state on a long history (every call on this repo, 2026-10-17), and
+        //   harmless when `walk_truncated` is `false`: the walk had already passed the window.
+        // - `walk_unavailable`: history could not be opened, so the set is empty because
+        //   nothing was READ. Distinct from "walked to the end".
+        // All always present, `false` included, so absence is never ambiguous.
+        "walk_truncated": walk.ceiling_reached_in_window,
+        "walk_ceiling_reached": walk.ceiling_reached,
+        "walk_unavailable": walk.unavailable,
         "walk_max_commits": max_walk_commits,
         "bugs_under_live_edit": under_live_edit,
         "slug_resolved_citations": slug_citations.len(),
@@ -12728,11 +12805,25 @@ mod tests {
         first_content: &str,
         fillers: usize,
     ) -> (tempfile::TempDir, std::path::PathBuf) {
+        git_fixture_with_history_aged(first_rel, first_content, fillers, 120, 60)
+    }
+
+    /// [`git_fixture_with_history`] with the clock chosen: the NEWEST commit is `newest_age_secs`
+    /// old and each earlier commit is `step_secs` older than the one after it, so a test can put
+    /// the settle-window cutoff between two chosen commits and ask whether the ceiling bit
+    /// before or after it.
+    fn git_fixture_with_history_aged(
+        first_rel: &str,
+        first_content: &str,
+        fillers: usize,
+        newest_age_secs: i64,
+        step_secs: i64,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("repo");
         std::fs::create_dir_all(&root).unwrap();
         let repo = git2::Repository::init(&root).unwrap();
-        let base = chrono::Utc::now().timestamp() - 60 * (fillers as i64 + 2);
+        let now = chrono::Utc::now().timestamp();
         let mut parent: Option<git2::Oid> = None;
         for i in 0..=fillers {
             let rel = if i == 0 {
@@ -12747,7 +12838,8 @@ mod tests {
             index.add_path(std::path::Path::new(&rel)).unwrap();
             index.write().unwrap();
             let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-            let when = git2::Time::new(base + 60 * i as i64, 0);
+            let age = newest_age_secs + step_secs * (fillers - i) as i64;
+            let when = git2::Time::new(now - age, 0);
             let sig = git2::Signature::new("Test", "test@test.com", &when).unwrap();
             let parents: Vec<git2::Commit> = parent
                 .map(|p| repo.find_commit(p).unwrap())
@@ -12762,55 +12854,182 @@ mod tests {
         (tmp, root)
     }
 
-    /// The walk's commit ceiling is a bound; a set returned at it must say so.
+    /// A repo of `total` commits that all sit inside the settle window and all share ONE tree
+    /// (the first commit adds `first_rel`; the rest change nothing), so building past the
+    /// production ceiling of 4,000 is cheap enough to drive `call()` with the real bound.
+    fn git_fixture_with_many_commits(
+        first_rel: &str,
+        first_content: &str,
+        total: usize,
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        let full = root.join(first_rel);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, first_content).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new(first_rel)).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let mut parent: Option<git2::Oid> = None;
+        for i in 0..total {
+            let when = git2::Time::new(now - 3600 + i as i64, 0);
+            let sig = git2::Signature::new("Test", "test@test.com", &when).unwrap();
+            let parents: Vec<git2::Commit> = parent
+                .map(|p| repo.find_commit(p).unwrap())
+                .into_iter()
+                .collect();
+            let refs: Vec<&git2::Commit> = parents.iter().collect();
+            parent = Some(
+                repo.commit(Some("HEAD"), &sig, &sig, "step", &tree, &refs)
+                    .unwrap(),
+            );
+        }
+        (tmp, root)
+    }
+
+    /// The walk's commit ceiling is a bound; a result returned at it must say so.
     ///
     /// Drives `paths_touched_since` with a ceiling small enough that a 5-commit fixture
     /// reaches it (the `max_commits` parameter exists for this — no 4,000-commit repo
     /// needed). The three ceilings bracket the boundary on purpose: one BELOW the history
-    /// (truncated), one EXACTLY at it (the walk saw every commit, so it is NOT truncated —
-    /// a flag raised on `seen >= max` instead of on an actual unreached commit would read
-    /// `true` here), and one above it. The set is also checked, so a flag that is right
-    /// while the walk silently does something else cannot pass.
+    /// (reached), one EXACTLY at it (the walk saw every commit, so the ceiling is NOT
+    /// reached — a flag raised on `seen >= max` instead of on an actual unread commit would
+    /// read `true` here), and one above it. The SET is pinned exactly at the first ceiling
+    /// (`len == 3`, the oldest file absent), so a ceiling moved by one commit
+    /// (`seen > max_commits`) cannot pass on its flags alone.
     #[test]
     fn paths_touched_since_reports_whether_its_commit_ceiling_cut_the_walk_short() {
         let (_tmp, root) = git_fixture_with_history("src/first.rs", "//! first\n", 4);
         let repo = git2::Repository::open(&root).unwrap();
 
-        let (set, truncated) = paths_touched_since(&repo, 0, 3);
+        let walk = paths_touched_since(&repo, 0, 3);
         assert!(
-            truncated,
-            "5 commits against a ceiling of 3: the set is a lower bound and must say so"
+            walk.ceiling_reached,
+            "5 commits against a ceiling of 3: the walk stopped with commits unread and must \
+             say so"
+        );
+        assert_eq!(
+            walk.paths.len(),
+            3,
+            "exactly the newest 3 commits are walked — one more means the ceiling moved: {:?}",
+            walk.paths
         );
         assert!(
-            set.contains("filler-4.txt")
-                && set.contains("filler-3.txt")
-                && set.contains("filler-2.txt")
-                && !set.contains("src/first.rs"),
-            "the newest 3 commits are walked and the oldest is not: {set:?}"
+            walk.paths.contains("filler-4.txt")
+                && walk.paths.contains("filler-3.txt")
+                && walk.paths.contains("filler-2.txt")
+                && !walk.paths.contains("filler-1.txt")
+                && !walk.paths.contains("src/first.rs"),
+            "the newest 3 commits are walked and no older one is: {:?}",
+            walk.paths
         );
 
-        let (set, truncated) = paths_touched_since(&repo, 0, 5);
+        let walk = paths_touched_since(&repo, 0, 5);
         assert!(
-            !truncated,
-            "a ceiling EQUAL to the history length reaches no unwalked commit, so the set is \
+            !walk.ceiling_reached && !walk.ceiling_reached_in_window,
+            "a ceiling EQUAL to the history length reaches no unread commit, so the set is \
              complete and must not be flagged"
         );
-        assert_eq!(set.len(), 5, "every commit's file is present: {set:?}");
+        assert_eq!(
+            walk.paths.len(),
+            5,
+            "every commit's file is present: {:?}",
+            walk.paths
+        );
 
-        let (_, truncated) = paths_touched_since(&repo, 0, 4000);
-        assert!(!truncated, "a ceiling above the history never bites");
+        let walk = paths_touched_since(&repo, 0, 4000);
+        assert!(
+            !walk.ceiling_reached,
+            "a ceiling above the history never bites"
+        );
+        assert!(!walk.unavailable, "a readable history is not unavailable");
+    }
+
+    /// Reaching the ceiling is harmful only when it happens INSIDE the settle window; reached
+    /// after the walk has passed the cutoff it is the ordinary state of any long history, and
+    /// a flag that is `true` on both sides tells a reader nothing (it was `true` on every call
+    /// on this repo). Six commits aged 0.5, 2.5, 4.5, 6.5, 8.5, 10.5 days against a 7-day
+    /// cutoff — no commit sits on the cutoff, so the verdict cannot flap on a test's clock.
+    #[test]
+    fn the_ceiling_is_only_harmful_when_it_bites_inside_the_settle_window() {
+        const DAY: i64 = 86_400;
+        let (_tmp, root) =
+            git_fixture_with_history_aged("src/first.rs", "//! first\n", 5, DAY / 2, 2 * DAY);
+        let repo = git2::Repository::open(&root).unwrap();
+        let cutoff = chrono::Utc::now().timestamp() - 7 * DAY;
+
+        // Ceiling 3 stops after the 4.5-day commit; the 6.5-day commit is unread and inside
+        // the window. The harmful case.
+        let walk = paths_touched_since(&repo, cutoff, 3);
+        assert!(walk.ceiling_reached, "6 commits against a ceiling of 3");
+        assert!(
+            walk.ceiling_reached_in_window,
+            "the last commit read is 4.5 days old, inside the 7-day window, with the \
+             6.5-day commit unread: the set is a lower bound and must say so"
+        );
+
+        // Ceiling 5 stops after the 8.5-day commit — already past the cutoff. The ceiling
+        // bit, and the unread tail is only older history: harmless, and must read so.
+        let walk = paths_touched_since(&repo, cutoff, 5);
+        assert!(
+            walk.ceiling_reached,
+            "the ceiling still bit: the 10.5-day commit is unread"
+        );
+        assert!(
+            !walk.ceiling_reached_in_window,
+            "the last commit read is 8.5 days old, past the cutoff: nothing in the window is \
+             unread, so this must NOT read as truncation"
+        );
+
+        // Ceiling 6 reads all six commits: complete.
+        let walk = paths_touched_since(&repo, cutoff, 6);
+        assert!(
+            !walk.ceiling_reached && !walk.ceiling_reached_in_window,
+            "the whole history was read"
+        );
+    }
+
+    /// `(empty, false)` used to be returned when the history could not be opened, which the
+    /// health block's own comment defined as "walked to the end". An unborn HEAD fails
+    /// `push_head`; the result must say the history was unavailable instead.
+    #[test]
+    fn an_unreadable_history_is_reported_unavailable_not_complete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(tmp.path()).unwrap();
+
+        let walk = paths_touched_since(&repo, 0, 4000);
+        assert!(
+            walk.unavailable,
+            "a repository with no HEAD commit was not read at all"
+        );
+        assert!(walk.paths.is_empty());
+        assert!(
+            !walk.ceiling_reached && !walk.ceiling_reached_in_window,
+            "no ceiling was reached: nothing was read"
+        );
     }
 
     /// The same disclosure as it reaches the caller: the health block `doctor` publishes at
     /// `catalog_health.open_bug_source_citations`. The ceiling is injected through the
     /// `_walking` seam (the production wrapper pins it at `MAX_WALK_COMMITS`), because the
-    /// real bound is 4,000 commits.
+    /// real bound is 4,000 commits. Both sides of the harm distinction are asserted:
+    /// `walk_truncated` is `true` only when the ceiling bit inside the window, while
+    /// `walk_ceiling_reached` is `true` on both — so `walk_truncated` has a reading that
+    /// `walk_ceiling_reached` lacks.
     #[tokio::test]
     async fn open_bug_cited_from_source_health_says_when_the_walk_was_truncated() {
-        let (_tmp, root) = git_fixture_with_history(
+        const DAY: i64 = 86_400;
+        // Ages 0.5, 2.5, 4.5, 6.5, 8.5, 10.5 days against the check's 7-day settle window.
+        let (_tmp, root) = git_fixture_with_history_aged(
             "src/thing.rs",
             "//! Shaped this way because of docs/issues/stale.md\npub fn f() {}\n",
-            4,
+            5,
+            DAY / 2,
+            2 * DAY,
         );
         let cat = Catalog::open_in_memory().unwrap();
         seed_live_bug(
@@ -12831,17 +13050,32 @@ mod tests {
                 .1
         };
 
-        let health = scan(2);
+        let health = scan(3);
         assert_eq!(
             health["walk_truncated"],
             json!(true),
-            "5 commits against a walk ceiling of 2: `recently_touched` is a lower bound, and \
-             a reader of this block must be told: {health}"
+            "the ceiling bit with the 4.5-day commit last read and the 6.5-day one unread: \
+             `recently_touched` is a lower bound, and a reader of this block must be told: \
+             {health}"
         );
+        assert_eq!(health["walk_ceiling_reached"], json!(true), "{health}");
         assert_eq!(
             health["walk_max_commits"],
-            json!(2),
+            json!(3),
             "the ceiling is part of the disclosure: {health}"
+        );
+
+        let health = scan(5);
+        assert_eq!(
+            health["walk_ceiling_reached"],
+            json!(true),
+            "the ceiling still bit: {health}"
+        );
+        assert_eq!(
+            health["walk_truncated"],
+            json!(false),
+            "the walk had passed the 7-day cutoff (8.5-day commit last read), so the unread \
+             tail is only older history and this must not read as truncation: {health}"
         );
 
         let health = scan(4000);
@@ -12850,6 +13084,44 @@ mod tests {
             json!(false),
             "a walk that reached the end of history says so, rather than omitting the field: \
              {health}"
+        );
+        assert_eq!(health["walk_ceiling_reached"], json!(false), "{health}");
+        assert_eq!(health["walk_unavailable"], json!(false), "{health}");
+    }
+
+    /// The disclosure as the CALLER reads it, through `call()` with the production ceiling:
+    /// `catalog_health.open_bug_source_citations.walk_truncated`. The scan-level test above
+    /// proves the field with an injected ceiling; this one proves it survives to the response
+    /// shape the `Marker` of the `doctor.recently_touched_walk` probe row names. 4,002 commits
+    /// inside the settle window against the real 4,000 bound is the harmful case.
+    #[tokio::test]
+    async fn call_publishes_walk_truncated_when_the_production_ceiling_bites_in_the_window() {
+        let (_tmp, root) = git_fixture_with_many_commits(
+            "src/thing.rs",
+            "//! Shaped this way because of docs/issues/stale.md\npub fn f() {}\n",
+            4002,
+        );
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_live_bug(
+            &cat,
+            &root,
+            "stale",
+            "open",
+            "",
+            "## Fix\n\nNot implemented.",
+        );
+        let ctx = ctx_rooted_at(cat, &root);
+        let out = call(&ctx, json!({})).await.unwrap();
+
+        assert_eq!(
+            out.pointer("/catalog_health/open_bug_source_citations/walk_truncated"),
+            Some(&json!(true)),
+            "4,002 in-window commits against the 4,000 ceiling: {out:#?}"
+        );
+        assert_eq!(
+            out.pointer("/catalog_health/open_bug_source_citations/walk_max_commits"),
+            Some(&json!(4000)),
+            "the production ceiling is published beside the flag: {out:#?}"
         );
     }
 
@@ -19823,7 +20095,7 @@ root = "work/elsewhere/ghost"
                 + scan_cited_but_undeclared(&mut ds, &cat.conn, &deg)
                     .unwrap()
                     .len();
-            (reported, ds.below_floor().clone())
+            (reported, ds.below_floor_in_scope().clone())
         };
 
         let (reported, withheld) = run(EXPOSURE_THRESHOLD);
@@ -20417,18 +20689,18 @@ root = "work/elsewhere/ghost"
             );
         }
         assert_eq!(
-            out["summary"]["below_exposure_floor"]["by_check"]["entry_conditional_past_due"],
+            out["summary"]["below_exposure_floor"]["in_scope"]["entry_conditional_past_due"],
             json!(1),
             "R-2 is a conditional the floor withheld, and nothing else is: {out:#?}"
         );
         assert_eq!(
-            out["summary"]["below_exposure_floor"]["by_check"]["entry_dated_stale"],
+            out["summary"]["below_exposure_floor"]["in_scope"]["entry_dated_stale"],
             json!(1),
             "D-1 is the one past-horizon dated entry the floor withheld; D-3 is not a \
              candidate and must not be counted: {out:#?}"
         );
         assert_eq!(
-            out["summary"]["below_exposure_floor"]["by_check"]
+            out["summary"]["below_exposure_floor"]["in_scope"]
                 ["entry_cited_from_outside_but_undeclared"],
             json!(1),
             "U-1 is the one undeclared entry the floor withheld; R-4 declares a class and \
@@ -20443,9 +20715,181 @@ root = "work/elsewhere/ghost"
             .as_str()
             .unwrap_or_default();
         assert!(
-            scope.contains("catalog-wide"),
-            "the count ranges over the whole catalog, not the active project's worklist; \
-             the field must say so: {out:#?}"
+            scope.contains("in_scope")
+                && scope.contains("out_of_scope")
+                && scope.contains("catalog-wide"),
+            "the field must name what the counts range over, and that they split by scope: \
+             {out:#?}"
+        );
+        for check in [
+            "entry_conditional_past_due",
+            "entry_dated_stale",
+            "entry_cited_from_outside_but_undeclared",
+        ] {
+            assert_eq!(
+                out["summary"]["below_exposure_floor"]["out_of_scope"][check],
+                json!(0),
+                "no active project means everything is in scope: {check}: {out:#?}"
+            );
+        }
+        let hint = out["catalog_health"]["hint"].as_str().unwrap_or_default();
+        assert!(
+            !hint.contains("exposure floor"),
+            "every floor-gated check returned a row, so the worklists are being read as \
+             worklists and the hint must stay silent (ADR 2026-08-27 clause 2): {hint}"
+        );
+    }
+    /// The count must answer "how many of MY candidates did the floor withhold", so it splits
+    /// by the active scope. `doctor` defaults to `Scope::Project`; an entry under another
+    /// workspace's root is a withheld candidate of THAT workspace, not of this report.
+    ///
+    /// Rooted in a real project (`ctx_rooted_at`), unlike the test above, whose
+    /// `current_project: None` resolves to `Scope::All` where `admit` is always true — a
+    /// tally moved after `admit` would pass every `None`-rooted test. Here the sibling's three
+    /// candidates are never admitted, so only a tally taken BEFORE `admit` and classified by
+    /// `would_admit` can report them under `out_of_scope`.
+    #[tokio::test]
+    async fn call_splits_the_withheld_count_by_the_active_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let active_root = tmp.path().join("active-project");
+        let sibling = tmp.path().join("sibling");
+        std::fs::create_dir_all(&active_root).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "mine",
+            &active_root.join("led.md"),
+            "## R-2 — mine, unexposed conditional\n\n**Valid:** conditional — until my edit lands\n",
+        );
+        seed_ledger(
+            &cat,
+            "theirs",
+            &sibling.join("led.md"),
+            "## X-1 — theirs, conditional\n\n**Valid:** conditional — until their edit\n\n\
+             ## X-2 — theirs, stale\n\n**Valid:** dated 2020-01-01\n\n\
+             ## X-3 — theirs, undeclared\n\nno class\n",
+        );
+
+        let ctx = ctx_rooted_at(cat, &active_root);
+        let out = call(&ctx, json!({})).await.unwrap();
+        let floor = &out["summary"]["below_exposure_floor"];
+
+        assert_eq!(
+            floor["in_scope"]["entry_conditional_past_due"],
+            json!(1),
+            "R-2 is this project's withheld conditional: {out:#?}"
+        );
+        assert_eq!(
+            floor["in_scope"]["entry_dated_stale"],
+            json!(0),
+            "the only dated candidate is the sibling's, so it must not inflate this \
+             project's count: {out:#?}"
+        );
+        assert_eq!(
+            floor["in_scope"]["entry_cited_from_outside_but_undeclared"],
+            json!(0),
+            "the only undeclared candidate is the sibling's: {out:#?}"
+        );
+        for check in [
+            "entry_conditional_past_due",
+            "entry_dated_stale",
+            "entry_cited_from_outside_but_undeclared",
+        ] {
+            assert_eq!(
+                floor["out_of_scope"][check],
+                json!(1),
+                "{check}: the sibling's withheld candidate is counted, apart: {out:#?}"
+            );
+        }
+        // A candidate withheld for want of exposure was not refused for living elsewhere,
+        // and `entry_validity_scoped_by_project` counts only the latter. Nothing above the
+        // floor exists here to be scoped out, so that map must not exist at all.
+        assert!(
+            out["catalog_health"]["entry_validity_scoped_by_project"].is_null(),
+            "withheld candidates must not leak into the scope-refusal map: {out:#?}"
+        );
+
+        // The hint fires for the check that returned nothing while in-scope candidates were
+        // withheld, and names only that one: the sibling's dated/undeclared are not in scope.
+        let hint = out["catalog_health"]["hint"].as_str().unwrap_or_default();
+        assert!(
+            hint.contains("entry_conditional_past_due (1)"),
+            "an empty in-scope worklist beside withheld in-scope candidates must say so: {hint}"
+        );
+        assert!(
+            !hint.contains("entry_dated_stale (")
+                && !hint.contains("entry_cited_from_outside_but_undeclared ("),
+            "out-of-scope candidates must not trigger the in-scope hint: {hint}"
+        );
+        assert!(
+            hint.contains("at or above that floor") && !hint.contains("ABOVE"),
+            "wording must agree with the scope string's `at or above`: {hint}"
+        );
+    }
+
+    /// The withheld count is of ENTRIES. A duplicated heading yields two `EntrySection`
+    /// instances sharing one exposure, and the two scans without a `seen_ids` dedup
+    /// (`scan_conditional_past_due`, `scan_dated_stale`) would tally it twice. The REPORTED
+    /// rows are left alone (`scan_entry_defined_twice` owns that anomaly), which the last two
+    /// assertions pin so the dedup cannot creep into them.
+    #[test]
+    fn a_duplicated_heading_is_withheld_once_not_once_per_instance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("led.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_ledger(
+            &cat,
+            "led",
+            &p,
+            "## R-3 — first\n\n**Valid:** conditional — one\n\n\
+             ## R-3 — again\n\n**Valid:** conditional — two\n\n\
+             ## D-3 — first\n\n**Valid:** dated 2020-01-01\n\n\
+             ## D-3 — again\n\n**Valid:** dated 2020-01-01\n",
+        );
+        let new_scope = || {
+            scope::DoctorScope::new(
+                super::super::scope::Scope::All,
+                &unscoped_ctx(),
+                &unscoped_conn(),
+            )
+            .unwrap()
+        };
+
+        let none = std::collections::BTreeMap::new();
+        let mut ds = new_scope();
+        scan_conditional_past_due(&mut ds, &cat.conn, &none).unwrap();
+        scan_dated_stale(&mut ds, &cat.conn, &none, i64::MAX / 2).unwrap();
+        assert_eq!(
+            ds.below_floor_in_scope().get("entry_conditional_past_due"),
+            Some(&1),
+            "two `## R-3` headings are one entry: {:?}",
+            ds.below_floor_in_scope()
+        );
+        assert_eq!(
+            ds.below_floor_in_scope().get("entry_dated_stale"),
+            Some(&1),
+            "two `## D-3` headings are one entry: {:?}",
+            ds.below_floor_in_scope()
+        );
+
+        let mut above = std::collections::BTreeMap::new();
+        above.insert(deg_key(&p, "R-3"), EXPOSURE_THRESHOLD);
+        above.insert(deg_key(&p, "D-3"), EXPOSURE_THRESHOLD);
+        let mut ds = new_scope();
+        assert_eq!(
+            scan_conditional_past_due(&mut ds, &cat.conn, &above)
+                .unwrap()
+                .len(),
+            2,
+            "reported rows are NOT deduplicated by this change"
+        );
+        assert_eq!(
+            scan_dated_stale(&mut ds, &cat.conn, &above, i64::MAX / 2)
+                .unwrap()
+                .len(),
+            2,
+            "reported rows are NOT deduplicated by this change"
         );
     }
 
