@@ -345,6 +345,51 @@ pub fn classify_write_path(
     config: &PathSecurityConfig,
     session_roots: &[PathBuf],
 ) -> WritePathDecision {
+    classify_write_path_with_temp(
+        raw,
+        project_root,
+        config,
+        session_roots,
+        &crate::platform::temp_dir(),
+    )
+}
+
+/// The canonical form of the system temp directory as a write-allowlist root, or `None`.
+///
+/// The write target is canonicalized before it is compared (`canonicalize_write_target`), so a
+/// root held in its literal form never matches when `$TMPDIR` is, or sits under, a symlink
+/// (macOS `/var` -> `/private/var`; a symlinked `TMPDIR` on Linux). The root is therefore
+/// canonicalized too.
+///
+/// **Fails closed.** This uses `fs::canonicalize` directly, NOT `best_effort_canonicalize`, which
+/// falls back to the literal path on error: a temp dir that cannot be resolved (missing, or a
+/// permission error on an ancestor) yields no root at all, so no write is allowed under it.
+/// A canonical root that is `/` or `$HOME` is refused as well, for the reason the cwd root is: a
+/// `TMPDIR` symlink must not turn "scratch space" into "the whole filesystem".
+fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
+    let canon = std::fs::canonicalize(temp_dir).ok()?;
+    if is_overly_broad_write_root(&canon) {
+        return None;
+    }
+    Some(canon)
+}
+
+/// `/` and `$HOME` are never acceptable implicit write roots: either would allow writes anywhere
+/// on the filesystem, or inside the whole home directory. `canon` must already be canonical.
+fn is_overly_broad_write_root(canon: &Path) -> bool {
+    canon == Path::new("/") || home_dir().is_some_and(|h| canon == h)
+}
+
+/// `classify_write_path` with the temp directory supplied, so tests can exercise a symlinked or
+/// missing one without mutating the process-global `TMPDIR`
+/// (`docs/conventions/test-env-isolation.md`).
+fn classify_write_path_with_temp(
+    raw: &str,
+    project_root: &Path,
+    config: &PathSecurityConfig,
+    session_roots: &[PathBuf],
+    temp_dir: &Path,
+) -> WritePathDecision {
     if raw.is_empty() {
         return WritePathDecision::Denied("path must not be empty".to_string());
     }
@@ -409,8 +454,9 @@ pub fn classify_write_path(
     let mut allowed = vec![project_root];
     // System temp directory is always writable — useful for scratch files,
     // intermediate output, and cross-process coordination without polluting
-    // the project root.
-    allowed.push(crate::platform::temp_dir());
+    // the project root. Held CANONICALIZED (the target above is), and absent when it cannot
+    // be canonicalized — see `canonical_temp_write_root`.
+    allowed.extend(canonical_temp_write_root(temp_dir));
     // CWD at server startup — Claude Code launches MCP servers from the
     // project directory, so this covers the case where an absolute path
     // targets the user's working directory even when --project points
@@ -421,8 +467,7 @@ pub fn classify_write_path(
     // the filesystem or inside the entire home directory.
     if let Ok(cwd) = std::env::current_dir() {
         let cwd_canon = best_effort_canonicalize(&cwd);
-        let is_broad = cwd_canon == Path::new("/") || home_dir().is_some_and(|h| cwd_canon == h);
-        if !is_broad {
+        if !is_overly_broad_write_root(&cwd_canon) {
             allowed.push(cwd_canon);
         }
     }
@@ -2811,10 +2856,6 @@ mod tests {
         target_os = "windows",
         ignore = "Windows lacks /tmp; absolute Unix-path test inputs need a portable rewrite. See docs/issues/archive/2026-05-24-ci-windows-test-portability-rot.md"
     )]
-    #[cfg_attr(
-        target_os = "macos",
-        ignore = "/tmp → /private/tmp symlink; allowlist comparison happens before canonicalization on macOS, see docs/issues/archive/2026-05-24-ci-macos-tempdir-canonicalization.md"
-    )]
     #[test]
     fn write_to_tmp_allowed() {
         let project = tempdir().unwrap();
@@ -2837,7 +2878,15 @@ mod tests {
             "writes to the temp dir ({tmp:?}) should be allowed: {:?}",
             result.err()
         );
-        assert_eq!(result.unwrap(), target);
+        // The result is the CANONICAL target: where `$TMPDIR` sits behind a symlink (macOS
+        // `/var` -> `/private/var`) the literal and resolved paths differ, and the resolved one
+        // is what the allowlist admitted.
+        assert_eq!(
+            result.unwrap(),
+            std::fs::canonicalize(&tmp)
+                .unwrap()
+                .join("codescout-test-write.txt")
+        );
     }
 
     #[test]
@@ -6209,6 +6258,145 @@ EOF"#;
         assert!(
             matches!(decision, WritePathDecision::Allowed(_)),
             "got: {decision:?}"
+        );
+    }
+
+    // ── temp-dir allowlist root: canonicalized, fail closed ─────────────
+    //
+    // `docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md`. The temp dir
+    // is injected (`classify_write_path_with_temp`) rather than set through `TMPDIR`, because
+    // `set_var` is process-global and races every other test (`docs/conventions/test-env-isolation.md`).
+    // `project` and every other tempdir below sit as siblings in the real temp dir, so none of them
+    // is covered by another allowlist root: the only root that can admit a write is the injected one.
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_temp_dir_allows_a_write_inside_it() {
+        let project = tempdir().unwrap();
+        let real = tempdir().unwrap();
+        let holder = tempdir().unwrap();
+        let link = holder.path().join("tmplink");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+
+        let target = link.join("x.txt");
+        let decision = classify_write_path_with_temp(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            &link,
+        );
+        // The write resolves to the REAL directory behind the link; that is what is admitted.
+        let expected = std::fs::canonicalize(real.path()).unwrap().join("x.txt");
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == expected),
+            "a write inside a symlinked temp dir must be allowed as {expected:?}, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_inside_temp_dir_pointing_outside_is_still_refused() {
+        let project = tempdir().unwrap();
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let escape = temp.path().join("escape");
+        std::os::unix::fs::symlink(outside.path(), &escape).unwrap();
+
+        let target = escape.join("x.txt");
+        let decision = classify_write_path_with_temp(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            temp.path(),
+        );
+        let expected = std::fs::canonicalize(outside.path()).unwrap().join("x.txt");
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == expected),
+            "a symlink out of the temp dir must resolve to its target and be refused, got: {decision:?}"
+        );
+    }
+
+    #[test]
+    fn nonexistent_temp_dir_fails_closed() {
+        let project = tempdir().unwrap();
+        let holder = tempdir().unwrap();
+        // Never created. `best_effort_canonicalize` would fall back to this literal path and the
+        // target below (also unresolvable, so also literal) would match it: that is the hole.
+        let missing = holder.path().join("no-such-temp");
+        assert!(!missing.exists(), "fixture: {missing:?} must not exist");
+
+        let target = missing.join("x.txt");
+        let decision = classify_write_path_with_temp(
+            target.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            &missing,
+        );
+        assert!(
+            matches!(decision, WritePathDecision::OutsideRoot { .. }),
+            "a temp dir that cannot be canonicalized must allow nothing, got: {decision:?}"
+        );
+        assert_eq!(canonical_temp_write_root(&missing), None);
+    }
+
+    #[test]
+    fn dotdot_traversal_out_of_the_temp_dir_is_still_refused() {
+        let project = tempdir().unwrap();
+        let temp = tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("sub")).unwrap();
+
+        // `sub` exists, so the parent canonicalizes and `..` resolves to OUTSIDE the temp dir.
+        let resolved_escape = temp.path().join("sub/../../x.txt");
+        let decision = classify_write_path_with_temp(
+            resolved_escape.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            temp.path(),
+        );
+        assert!(
+            matches!(decision, WritePathDecision::OutsideRoot { .. }),
+            "resolvable `..` escaping the temp dir must be refused, got: {decision:?}"
+        );
+
+        // `nope` does not exist, so the parent cannot be canonicalized and `..` survives. A
+        // component-wise `starts_with` would match the temp root; the unresolved-`..` arm must not.
+        let unresolved_escape = temp.path().join("nope/../../x.txt");
+        let decision = classify_write_path_with_temp(
+            unresolved_escape.to_str().unwrap(),
+            project.path(),
+            &default_config(),
+            &default_session_roots(),
+            temp.path(),
+        );
+        assert!(
+            matches!(decision, WritePathDecision::Denied(_)),
+            "unresolved `..` must be a hard denial, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temp_dir_symlinked_to_filesystem_root_adds_no_allowlist_root() {
+        let holder = tempdir().unwrap();
+        let link = holder.path().join("rootlink");
+        std::os::unix::fs::symlink("/", &link).unwrap();
+        assert_eq!(
+            canonical_temp_write_root(&link),
+            None,
+            "a TMPDIR symlink to `/` must not turn scratch space into the whole filesystem"
+        );
+    }
+
+    #[test]
+    fn canonical_temp_write_root_is_the_canonical_path_of_an_existing_dir() {
+        let dir = tempdir().unwrap();
+        assert_eq!(
+            canonical_temp_write_root(dir.path()),
+            Some(std::fs::canonicalize(dir.path()).unwrap())
         );
     }
 
