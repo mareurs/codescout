@@ -371,8 +371,9 @@ fn a_floor_is_a_result_cap_only_when_it_drops_rows_of_the_result() {
         .find(|r| r.id == "doctor.exposure_threshold")
         .expect("doctor's floor drops worklist rows, so it keeps a RESULT_CAP row");
     assert!(
-        matches!(doctor.coverage, Coverage::NoMarker { .. }),
-        "doctor's floor drops rows and reports no count of them — a NoMarker row, not an untested one"
+        matches!(doctor.coverage, Coverage::Probed { .. }),
+        "doctor's floor drops rows and now counts them in `summary.below_exposure_floor` — a \
+         Probed row; a revert to NoMarker means the count was lost"
     );
 
     assert!(

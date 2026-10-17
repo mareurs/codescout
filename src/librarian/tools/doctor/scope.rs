@@ -97,6 +97,18 @@ pub(super) struct DoctorScope {
     /// that check's own destination — never into a shared map built for a
     /// different set of checks.
     scoped_out: BTreeMap<String, BTreeMap<String, usize>>,
+    /// Candidates the entry-validity family withheld for want of exposure, tallied by
+    /// CHECK NAME — the exposure floor's own count, kept apart from [`Self::scoped_out`].
+    ///
+    /// The two answer different questions and must not be summed: `scoped_out` is rows
+    /// refused because they live outside the active project (a property of WHERE a row
+    /// is); this is rows that belong to the worklist's class and are cited fewer than
+    /// `EXPOSURE_THRESHOLD` times (a property of how much anyone leans on it). It is
+    /// tallied BEFORE `admit` runs and never narrowed by it, so it is catalog-wide, and
+    /// `summary.below_exposure_floor.scope` says so. Lives on the scope because it is the
+    /// one mutable carrier every scan already receives; a separate out-parameter would
+    /// touch every direct-scan call site for no semantic gain.
+    below_floor: BTreeMap<String, usize>,
     /// Task 7 (relevance exemption): artifact ids living OUTSIDE `roots` that are
     /// cited, `rel="cites"`, by an artifact INSIDE `roots` — computed once in
     /// [`Self::new`] from BOTH cites tables (`artifact_link`, artifact grain, and
@@ -227,6 +239,7 @@ impl DoctorScope {
             scope,
             roots,
             scoped_out: BTreeMap::new(),
+            below_floor: BTreeMap::new(),
             cited_from_here,
             cross_root_cites_edges,
             umbrella_roots,
@@ -373,6 +386,26 @@ impl DoctorScope {
     /// single shared one.
     pub(super) fn scoped_out(&self) -> &BTreeMap<String, BTreeMap<String, usize>> {
         &self.scoped_out
+    }
+    /// Records one candidate of `check` that the exposure floor withheld — the entry
+    /// belongs to the check's class (declared `conditional`, or `dated` past the horizon,
+    /// or undeclared) but is cited fewer than `EXPOSURE_THRESHOLD` times. Called by the
+    /// scan itself at the point it `continue`s past the entry, BEFORE [`Self::admit`], so
+    /// the count is catalog-wide rather than narrowed to the active project.
+    pub(super) fn note_below_floor(&mut self, check: &str) {
+        debug_assert!(
+            super::Check::from_wire(check).is_some(),
+            "undeclared doctor check name {check:?} — add it to declare_checks! or \
+             below_floor() will hold a bucket no fold ever reads"
+        );
+        *self.below_floor.entry(check.to_string()).or_insert(0) += 1;
+    }
+
+    /// Candidates withheld by the exposure floor, keyed by check name. A check that
+    /// withheld nothing is absent; a caller publishing the figure fills the zeros in so
+    /// that `0` reads as "the floor bit nothing" rather than "not measured".
+    pub(super) fn below_floor(&self) -> &BTreeMap<String, usize> {
+        &self.below_floor
     }
 
     /// Task 7 (relevance exemption): how many `cites` edges — summed across
