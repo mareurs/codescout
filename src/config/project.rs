@@ -1,6 +1,6 @@
 //! Per-project configuration loaded from `.codescout/project.toml`.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -637,7 +637,7 @@ impl ProjectConfig {
                 );
             }
             let text = std::fs::read_to_string(&config_path)?;
-            toml::from_str(&text)?
+            toml::from_str(&text).with_context(|| format!("parsing {}", config_path.display()))?
         } else {
             let name = root
                 .file_name()
@@ -653,7 +653,14 @@ impl ProjectConfig {
 
         let merged = merge_toml(global_base, project_overlay);
         let config: Self = toml::Value::try_into(merged)?;
-        config.validate_list_limits()?;
+        // Name the file: the merged config may also carry the global config, and a reader with
+        // several projects cannot tell which one stopped.
+        config.validate_list_limits().with_context(|| {
+            format!(
+                "invalid configuration for {} (merged with the global config)",
+                config_path.display()
+            )
+        })?;
         Ok(config)
     }
 
@@ -1343,6 +1350,49 @@ model = "local:test"
             "the error must name the field and the `..` rule, got {msg}"
         );
         assert!(msg.contains(&spelled), "the entry is named, got {msg}");
+    }
+
+    /// The stderr line for a project that will not start must name the file: before, it read
+    /// `Error: security.extra_write_roots entry 0 ("~/scratch") is not an absolute path ...` and a
+    /// reader with several projects (or a global config in the merge) had to guess which.
+    #[test]
+    fn a_config_that_fails_to_load_names_the_project_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let path = cfg_dir.join("project.toml");
+
+        std::fs::write(
+            &path,
+            "[project]\nname = \"x\"\n\n[security]\nextra_write_roots = [\"~/scratch\"]\n",
+        )
+        .unwrap();
+        let err = ProjectConfig::load_with_global_base(
+            dir.path(),
+            toml::Value::Table(Default::default()),
+        )
+        .expect_err("a `~` extra root is refused");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains(&path.display().to_string()),
+            "the file is named: {msg}"
+        );
+        assert!(
+            msg.contains("extra_write_roots"),
+            "the cause is kept: {msg}"
+        );
+
+        // A TOML syntax error is named the same way.
+        std::fs::write(&path, "[project\nname = ").unwrap();
+        let err = ProjectConfig::load_with_global_base(
+            dir.path(),
+            toml::Value::Table(Default::default()),
+        )
+        .expect_err("invalid TOML");
+        assert!(
+            format!("{err:#}").contains(&path.display().to_string()),
+            "the file is named for a parse error too: {err:#}"
+        );
     }
 
     // docs/issues/archive/2026-10-16-default-ignore-patterns-skip-a-project-with-no-ignored-paths-section.md

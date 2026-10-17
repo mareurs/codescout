@@ -135,10 +135,24 @@ indexing_enabled = true
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `profile` | string | `"default"` | `"default"` enforces the built-in read deny-list; `"root"` skips it entirely for absolute-path reads (see [Security & Permissions](../concepts/security.md)). Not a stronger sandbox — a bypass. |
-| `extra_write_roots` | array of strings | `[]` | Additional directories where file write tools are allowed. By default writes are restricted to the project root. |
+| `extra_write_roots` | array of strings | `[]` | Additional directories where file write tools are allowed. By default writes are restricted to the project root. Each entry must be an absolute path with no `..` component; see below. |
 | `shell_command_mode` | string | `"warn"` | Controls `run_command` behaviour. One of `"unrestricted"`, `"warn"`, or `"disabled"`. `"disabled"` also hides the tool from `list_tools`. An unrecognised value leaves the tool visible and fails the call with an error naming the bad value. |
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
 | `indexing_enabled` | bool | `true` | Enables `index(action: build)` and `workspace(action: status)`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
+
+### `extra_write_roots` entries
+
+Each entry must be an absolute path with no `..` component. An empty or relative entry, a `~`
+path (a leading `~` is **not** expanded) and an absolute entry spelled with `..` are refused
+when the project config loads, and the error names `.codescout/project.toml` and the entry.
+At startup that stops the server for that project.
+
+In a **running** session an edit that fails to load is ignored without a message: the last
+configuration that loaded stays in force until the file is fixed (`reload_config_from_disk`;
+the stamp advances so a file that stays broken is parsed once). So a tightening saved in the same
+edit as an invalid entry (for example `file_write_enabled = false` together with
+`extra_write_roots = ["~/scratch"]`) does **not** take effect. Restart the server after editing
+security settings, and fix any entry the loader names first.
 
 ### Built-in Read Deny-List
 

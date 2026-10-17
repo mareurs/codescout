@@ -93,6 +93,10 @@ Commit e80bc432 (item 6), patch-id 003d5ccf8a212122ae0defd36c6122acf05da61a:
   project then fails to load, as it already does for an oversized list.
 - `classify_write_path_in` ignores any entry that is not absolute, because a config can change
   after it was validated. Only narrows.
+- Review follow-up: an absolute entry with a `..` component (`/home/u/work/..` is `/home/u`) is
+  refused at load and skipped by the classifier too. Measured with the real binary before and
+  after: `extra_write_roots = ["<home>/work/../"]` let `edit_file` append to `<home>/.bashrc`;
+  after, the server stops at load naming the entry.
 - `docs/manual/src/concepts/security.md` says entries must be absolute.
 
 Behaviour change to expect: a project whose `project.toml` carries a relative or `~` entry stops
@@ -126,8 +130,20 @@ Do not write an empty or relative entry.
 
 ## Resume
 
-Decide whether an absolute entry that is `/`, a home or above one should be refused or warned
-about; nothing else is open.
+OPEN DESIGN QUESTION for the user, not switched: should a non-absolute `extra_write_roots` entry
+stop the project from loading (current), or be skipped with a warning?
+
+- For the loud refusal (peer reviewer): a warning has no reader here (the server's stderr is not
+  surfaced to the model or, for most users, to anyone), and the classifier already skips such an
+  entry, so a skip-and-warn would change nothing visible while hiding the typo.
+- For skip-and-warn (our reviewer): one bad line in a project.toml should not make the whole
+  project unusable, and the refusal also turns a running-session edit into a silent ignore (see
+  `2026-10-17-an-invalid-project-toml-reload-is-ignored-silently-so-a-tightening-saved-with-it-never-applies.md`).
+
+The error now names `.codescout/project.toml` (follow-up commit), and
+`docs/manual/src/configuration/project-toml.md` documents the rule, the startup stop and the
+running-session silent ignore. Decide whether an absolute entry that is `/`, a home or above one
+should be refused or warned about; nothing else is open.
 
 ## References
 
