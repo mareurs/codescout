@@ -273,6 +273,30 @@ pub fn write_through(
     let Some(root) = crate::librarian::current_project::lookup_git_root(&art.abs_path) else {
         return Ok(WriteThrough::default());
     };
+    // `rel` is the DOCUMENT's own text, and `parse_declaration` gates it on a `.yaml`/`.yml`
+    // extension only. `root.join` lets an absolute `rel` replace the root outright and `..` climb
+    // out of it, so without this an artifact could name any existing `.yaml` on the machine and
+    // have it rewritten with the rendered sidecar (measured 2026-10-17).
+    if std::path::Path::new(&rel).components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err(
+            crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                format!(
+                    "refusing to write the sidecar `{rel}` declared by `{}`: it leaves the \
+                     repository root (an absolute path or a `..` segment)",
+                    art.abs_path.display()
+                ),
+                "Nothing was written. Declare a repo-relative sidecar path such as \
+                 `docs/augmentations/<name>.yaml` in `expects_augmentation:`.",
+            ),
+        );
+    }
     let path = root.join(&rel);
     if !path.is_file() {
         return Ok(WriteThrough::default());
@@ -407,6 +431,91 @@ mod tests {
         let p = dir.path().join("x.yaml");
         write(&p, &s).unwrap();
         assert_eq!(read(&p).unwrap(), s);
+    }
+
+    /// The declared sidecar path is the DOCUMENT's own frontmatter (`expects_augmentation:`), gated
+    /// only by a `.yaml`/`.yml` extension, and `write_through` joined it onto the repo root and
+    /// rewrote whatever existing file that named — `../outside.yaml`, or an absolute path (which
+    /// `join` lets replace the root outright). Measured 2026-10-17 by a throwaway probe: an
+    /// existing `.yaml` outside the repository was overwritten with the rendered sidecar and the
+    /// call returned `written: Some("../outside.yaml")`.
+    #[cfg(unix)]
+    #[test]
+    fn write_through_refuses_a_declared_sidecar_path_that_leaves_the_repo() {
+        use crate::librarian::catalog::{artifact, augmentation, Catalog};
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let victim = base.path().join("outside.yaml");
+        std::fs::write(&victim, "prompt: OUTSIDE-ORIGINAL\n").unwrap();
+        let abs_victim = victim.to_string_lossy().to_string();
+
+        for declared in ["../outside.yaml".to_string(), abs_victim] {
+            let art = repo.join("tracker.md");
+            std::fs::write(
+                &art,
+                format!("---\nkind: tracker\nexpects_augmentation: {declared}\n---\n\n# T\n"),
+            )
+            .unwrap();
+            let cat = Catalog::open_in_memory().unwrap();
+            artifact::upsert(
+                &cat,
+                &artifact::TestArtifactRowBuilder::new("abc123")
+                    .with_abs_path(&art)
+                    .build(),
+            )
+            .unwrap();
+            augmentation::upsert(&cat, &row()).unwrap();
+            // Precondition: the declaration parses and the target exists, so a refusal is the
+            // guard's doing and not an early return.
+            assert!(repo.join(&declared).is_file());
+
+            let err = write_through(&cat, "abc123", Authored::All).expect_err(&format!(
+                "`{declared}` leaves the repository and must be refused"
+            ));
+
+            assert!(
+                format!("{err:#}").contains("leaves the repository root"),
+                "{err:#}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&victim).unwrap(),
+                "prompt: OUTSIDE-ORIGINAL\n",
+                "{declared}: the outside file must be byte-identical"
+            );
+        }
+    }
+
+    /// The control: a declared sidecar inside the repository is still kept true.
+    #[test]
+    fn write_through_still_rewrites_a_declared_sidecar_inside_the_repo() {
+        use crate::librarian::catalog::{artifact, augmentation, Catalog};
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let aug_dir = repo.path().join("docs/augmentations");
+        std::fs::create_dir_all(&aug_dir).unwrap();
+        std::fs::write(aug_dir.join("t.yaml"), "prompt: STALE\n").unwrap();
+        let art = repo.path().join("tracker.md");
+        std::fs::write(
+            &art,
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n\n# T\n",
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        artifact::upsert(
+            &cat,
+            &artifact::TestArtifactRowBuilder::new("abc123")
+                .with_abs_path(&art)
+                .build(),
+        )
+        .unwrap();
+        augmentation::upsert(&cat, &row()).unwrap();
+
+        let out = write_through(&cat, "abc123", Authored::All).unwrap();
+
+        assert_eq!(out.written.as_deref(), Some("docs/augmentations/t.yaml"));
+        let on_disk = std::fs::read_to_string(aug_dir.join("t.yaml")).unwrap();
+        assert!(on_disk.contains("Maintain the T-N table."), "{on_disk}");
     }
 
     // ---- a sidecar that is a link is never written through ---------------------------------
