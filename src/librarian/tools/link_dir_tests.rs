@@ -1206,3 +1206,68 @@ async fn rekey_prefix_rewrites_a_ledger_in_a_project_reached_through_a_link() {
     let body = std::fs::read_to_string(real.join("ledger.md")).unwrap();
     assert!(body.contains("## SRI-1"), "{body}");
 }
+
+fn aug_with_collection(id: &str, collection: &str, params: &str) -> augmentation::AugmentationRow {
+    let mut a = aug_row(id);
+    a.entry_collection = Some(collection.to_string());
+    a.params = params.to_string();
+    a
+}
+
+#[tokio::test]
+async fn update_entry_resyncs_a_snapshot_row_in_a_project_reached_through_a_link() {
+    let (_base, project, real) = linked_project();
+    std::fs::write(
+        project.join("queue.md"),
+        "---\nkind: tracker\nsnapshot_anchor: '| ID | status |'\n---\n\n# Q\n\n| ID | status |\n| T-1 | open |\n\ntail\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("queue.md"));
+    let mut a = aug_with_collection(&id, "tasks", r#"{"tasks":[{"id":"T-1","status":"open"}]}"#);
+    a.render_template = Some(
+        "| ID | status |\n{% for t in tasks %}| {{ t.id }} | {{ t.status }} |\n{% endfor %}"
+            .to_string(),
+    );
+    augmentation::upsert(&ctx.catalog.lock(), &a).unwrap();
+
+    super::update_entry::call(
+        &ctx,
+        json!({"id": id, "entry_collection": "tasks", "entry_id": "T-1",
+               "fields": {"status": "done"}}),
+    )
+    .await
+    .expect("the snapshot resync judges against the managed project");
+
+    let text = std::fs::read_to_string(real.join("queue.md")).unwrap();
+    assert!(text.contains("| T-1 | done |"), "{text}");
+}
+
+#[tokio::test]
+async fn append_entry_writes_its_section_in_a_project_reached_through_a_link() {
+    let (_base, project, real) = linked_project();
+    std::fs::write(
+        project.join("ledger.md"),
+        "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n## Template for new entries\n\nboilerplate\n",
+    )
+    .unwrap();
+    let ctx = mk_ctx(&project);
+    let id = catalog_row(&ctx, &project.join("ledger.md"));
+    augmentation::upsert(
+        &ctx.catalog.lock(),
+        &aug_with_collection(&id, "failures", r#"{"failures":[]}"#),
+    )
+    .unwrap();
+
+    super::append_entry::call(
+        &ctx,
+        json!({"id": id, "entry_collection": "failures", "id_prefix": "F", "entry": {},
+               "anchor_heading": "## Template for new entries", "title": "first",
+               "body": "the prose"}),
+    )
+    .await
+    .expect("the params path's section write judges against the managed project");
+
+    let text = std::fs::read_to_string(real.join("ledger.md")).unwrap();
+    assert!(text.contains("F-1 — first"), "{text}");
+}
