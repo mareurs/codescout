@@ -375,9 +375,12 @@ fn canonical_temp_write_root(temp_dir: &Path) -> Option<PathBuf> {
 }
 
 /// `/` and `$HOME` are never acceptable implicit write roots: either would allow writes anywhere
-/// on the filesystem, or inside the whole home directory. `canon` must already be canonical.
+/// on the filesystem, or inside the whole home directory. `canon` must already be canonical, so
+/// `$HOME` is compared in both its literal and its canonical form (a symlinked home would
+/// otherwise never equal a canonical `canon`).
 fn is_overly_broad_write_root(canon: &Path) -> bool {
-    canon == Path::new("/") || home_dir().is_some_and(|h| canon == h)
+    canon == Path::new("/")
+        || home_dir().is_some_and(|h| canon == h || canon == best_effort_canonicalize(&h))
 }
 
 /// `classify_write_path` with the temp directory supplied, so tests can exercise a symlinked or
@@ -6388,6 +6391,23 @@ EOF"#;
             canonical_temp_write_root(&link),
             None,
             "a TMPDIR symlink to `/` must not turn scratch space into the whole filesystem"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temp_dir_symlinked_to_home_adds_no_allowlist_root() {
+        // Reads `$HOME`, never sets it. Without a home there is nothing to assert.
+        let Some(home) = home_dir().filter(|h| h.is_dir()) else {
+            return;
+        };
+        let holder = tempdir().unwrap();
+        let link = holder.path().join("homelink");
+        std::os::unix::fs::symlink(&home, &link).unwrap();
+        assert_eq!(
+            canonical_temp_write_root(&link),
+            None,
+            "a TMPDIR symlink to $HOME must not make the home directory scratch space"
         );
     }
 
