@@ -2,7 +2,7 @@
 status: open
 opened: 2026-10-17
 closed:
-severity: low
+severity: medium
 owner: marius
 related: [docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicalized.md]
 tags:
@@ -18,9 +18,10 @@ kind: bug
 immediate parent only, then joined the file name. Two shapes therefore kept their literal,
 in-root spelling while the OS would resolve them outside the root. Measured at the classifier, and
 for the second shape at a write tool (it wrote outside the root). **Shape 2 is fixed (`2c71a473`);
-shape 1, a leaf that is itself a symlink, is classified in-root but did not escape through any write tool
-run against it (`edit_file`, `create_file` overwrite, `edit_code`): the issue stays open for the classifier
-question and the follow-ups below.**
+shape 1, a leaf that is itself a symlink, is classified in-root. The write tools that reach `atomic_write`
+(`edit_file`, `create_file`, `edit_code`) do not write through it. The librarian's writes DO, and `edit_file`
+on a link to a deny-listed path discloses that file; both measured 2026-10-17 and filed as their own issues
+(see Resume). The issue stays open, at medium.**
 
 ## Class fit
 
@@ -52,8 +53,9 @@ under `$HOME/.cache`, all removed afterwards:
   `overwrite` and `edit_code` (replace) against an in-project leaf link to an outside file ALSO do not
   escape. Both reach `atomic_write`, whose rename replaces the link with a regular file; the victim keeps its
   bytes. A DANGLING leaf link did not make `create_file` create the file it names. So shape 1 is not an
-  escape through any write tool that routes through `atomic_write`; the classifier still reports the in-root
-  spelling for the leaf.
+  out-of-root WRITE through any tool that routes through `atomic_write`. It is not safe overall: the librarian
+  writes with plain `std::fs::write` and the deny list is applied to the spelling, not the resolved path. See
+  the three issues under Resume, each measured the same day.
 
 ## Reproduction
 
@@ -91,7 +93,8 @@ nonexist-subdir: Allowed("<temp>/esc/new/x.txt")
 ## Hypotheses tried
 
 None needed for the classification result. The write-tool consequence was measured for shape 2
-(escape) and for shape 1 through `edit_file` only (no escape).
+(escape) and, for shape 1, through `edit_file`, `create_file`, `edit_code` (no write-through), `doc(update)`
+(escape), `doc(create)` on a dangling link (escape) and `edit_file` onto a deny-listed target (disclosure).
 
 ## Fix
 
@@ -103,15 +106,23 @@ subdirectory of a symlinked temp dir or project root was refused, which went gre
 `299395e5` for `classify_in_project_is_allowed` and `create_text_file_creates_parent_dirs` with a
 symlinked TMPDIR.
 
-Shape 1 (a leaf that is itself a symlink): classifier NOT changed. Measured instead of fixed: no write tool
-writes through the leaf (see Symptom), because `atomic_write` renames over the link. Decision, written into
+Shape 1 (a leaf that is itself a symlink): classifier NOT changed. For the tools that reach `atomic_write`,
+measured instead of fixed: they do not write through the leaf (see Symptom), because `atomic_write` renames over
+the link. Decision, written into
 `atomic_write`'s doc and pinned by tests (`b493599d`, patch-id `4c9425528fab3aae53dac1ce079719843750e93c`, which
 also fixes `2026-10-17-atomic-write-follows-a-planted-staging-symlink...`): a target that is a symlink is
-replaced, never written through. The classifier answering `Allowed(<root>/leaf)` is therefore safe today, but
-it is safe only because of that property of the writer, not because the classifier resolved the link. A
-future writer that opens the target directly (`OpenOptions::open(path)`, `fs::write(path)`) would reopen it.
-The candidate `symlink_metadata` check in the classifier is still the defence in depth; not done, not needed
-for an escape that was not found.
+replaced, never written through. For those tools the classifier answering `Allowed(<root>/leaf)` is safe only
+because of that property of the writer, not because the classifier resolved the link: a writer that opens the
+target directly (`OpenOptions::open(path)`, `fs::write(path)`) reopens it, and the librarian is exactly that
+(next paragraph). The candidate `symlink_metadata` check in the classifier remains open and is now needed for the
+deny-list case below.
+
+Not every writer routes through `atomic_write`. Measured 2026-10-17 (throwaway tests, removed): `doc(update)` on a
+catalogued in-root symlink rewrote the outside file; `doc(create)` on a dangling link created the file outside
+the root; `edit_file` on a link to a deny-listed path read it (error text contained the file's lines) and could
+copy it into the project. Each is filed separately and NOT fixed here.
+`MemoryStore` writes use `tempfile::NamedTempFile::persist` (`src/memory/write_transaction.rs`), not
+`atomic_write`; not run against a leaf link.
 
 ## Tests added
 
@@ -128,14 +139,21 @@ the link) killed all three (mutation-probe, 7 tests red in total).
 
 ## Workarounds
 
-Shape 1: none needed for the write tools measured; a writer that bypasses `atomic_write` is not covered.
+Shape 1: do not keep symlinks to files outside the project root, or to credential files, inside a project root;
+and do not keep `.md` links that point outside the root in a repository that uses the librarian.
 
 ## Resume
 
-Shape 1: DONE 2026-10-17, none of `edit_file`, `create_file` (overwrite), `edit_code` follows a leaf link, so
-severity is lowered to low. Open: decide whether the classifier should still name the resolved leaf (defence
-in depth), and the other tools that write (`edit_markdown`, memory writes, the librarian) were not run against
-a leaf link; they route through `atomic_write` (read from the callers, not run). The follow-ups below stay open.
+Shape 1: measured 2026-10-17. `edit_file`, `create_file` (overwrite) and `edit_code` do not write through a leaf
+link (they reach `atomic_write`); severity stays medium because three other behaviours did escape and are filed:
+
+- `docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-and-rewrites-a-file-outside-the-root.md` (high)
+- `docs/issues/2026-10-17-doc-create-on-a-dangling-symlink-creates-a-file-outside-the-root.md` (medium)
+- `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md` (high)
+
+Still open here: whether the classifier should resolve the leaf (the deny-list case wants it), and the other
+tools that write (`edit_markdown`, memory writes) were not run against a leaf link; `edit_markdown` reaches
+`atomic_write` (read from the caller, not run), memory writes do not (see Fix). The follow-ups below stay open.
 
 Other follow-ups from the review of this branch, none fixed here:
 

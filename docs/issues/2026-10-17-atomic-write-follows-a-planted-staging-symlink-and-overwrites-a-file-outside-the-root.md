@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md, docs/issues/archive/2026-08-31-atomic-write-tmp-path-collides-across-same-stem-files.md]
 tags:
 - cluster/unclassified
-unverified: 'Windows behaviour of CREATE_NEW against a planted reparse point was not run; the fix is on branch worktree-agent-a26646b8b970ff11a (b493599d, 7b1d719a), not yet merged to experiments; no end-to-end plant was run against edit_file, edit_markdown or memory writes (read from callers).'
+unverified: 'Windows behaviour of CREATE_NEW against a planted reparse point was not run; no end-to-end plant was run against edit_file, edit_markdown or memory writes (read from callers). The fix SHAs recorded here are those of the review branch and may not survive a rebase: use the patch-ids.'
 kind: bug
 ---
 
@@ -67,8 +67,8 @@ was read from the callers, not run.
 
 ## Fix
 
-FIXED on branch `worktree-agent-a26646b8b970ff11a` (not yet on `experiments`): `b493599d` (fix and
-tests) and `7b1d719a` (one more test). patch-ids (`git show <sha> | git patch-id --stable`):
+FIXED on the review branch `worktree-agent-a26646b8b970ff11a` (`b493599d` fix and tests, `7b1d719a` a test,
+`417c4d3e` private staging, mode and name-closure tests, doc corrections). patch-ids (`git show <sha> | git patch-id --stable`):
 `b493599d` -> `4c9425528fab3aae53dac1ce079719843750e93c`, `7b1d719a` -> `e9aaed1e8092c028f27e12bc8edde9a86bceb9f3`.
 
 `src/util/fs.rs`:
@@ -92,17 +92,34 @@ tests) and `7b1d719a` (one more test). patch-ids (`git show <sha> | git patch-id
   first candidate die).
 - Cleanup: a write failure or rename failure removes the staging file, which is always one this call
   created.
-- Not changed: no fsync (the code never had one), mode preservation, the rename-over-target semantics.
+- The guarantee is AT THE FINAL COMPONENT of the staging path only. A symlinked parent directory redirects the
+  create and the rename alike (measured by the reviewer); for the write tools the classifier resolves the parent,
+  while a caller that bypasses it (`memory/mod.rs` `ensure_gitignored`) gets no parent protection from
+  `atomic_write`.
+- Leftovers: a kill between the create and the rename leaves `<name prefix>.<32 hex>.tmp` that nothing reclaims,
+  and a stale legacy `<name>.tmp` is never touched again. `.tmp` is not gitignored here (`git check-ignore` exit
+  1), so leftovers show in `git status`; not embedded (`retrieval/sync.rs`), not catalogued (`indexer.rs` takes
+  `.md` only). No reaper built.
+- Staging is `0600` while the content is written when the target exists, and takes the target's mode afterwards;
+  a new file keeps `0666 & !umask`. The final mode is unchanged in every case (existing incl. setuid, new,
+  symlink target, dangling), pinned by `the_final_mode_is_unchanged_for_every_kind_of_target`. Before, a `0600`
+  target's new content sat in a `0644` staging file for the length of the write. Red first:
+  `the_staging_file_of_a_private_target_is_private_while_it_is_written` saw mode `0o044` in group/other.
+  (Commit `417c4d3e`.)
+- Not changed: no fsync (the code never had one), the rename-over-target semantics.
 
 **A target that is itself a symlink is replaced, not written through** (decision, pinned by test): the
 rename swaps the directory entry, so the pointed-at file keeps its bytes. The mode is still read with
 `metadata` (follows the link), so the new regular file takes the pointed-at file's permission bits; for a
 dangling link the default applies.
 
-Same pattern, fixed: `src/tools/run_command/attribution.rs::materialize_into` staged each embedded script at
+Same STAGING pattern, fixed: `src/tools/run_command/attribution.rs::materialize_into` staged each embedded script at
 `<name>.<pid>.tmp` in the shared temp dir with `std::fs::write` (predictable name, link followed). It now
 calls `atomic_write`. Measured red first: with `<name>.<pid>.tmp` planted as a symlink the script body was
-written into the symlink's target.
+written into the symlink's target. **Only the staging file is fixed there.** The directory itself
+(`$TMPDIR/codescout-attribution-<hash>`, a computable name that is reused without an owner check, and from which
+`python3` runs with its directory importable) is a separate and measured problem, filed as
+`docs/issues/2026-10-17-attribution-helper-runs-python-from-a-predictable-shared-temp-directory.md` and NOT fixed.
 
 The existing ENOSPC test planted `<target>.tmp -> /dev/full` to make `atomic_write` itself open it, which is
 the vulnerability, so it can no longer be the way in. `atomic_write_removes_its_tmp_file_when_the_write_itself_fails`
@@ -115,16 +132,33 @@ Checked, same pattern absent or not reachable from a write tool:
   `tests/memory_write_history.rs::an_existing_legacy_tmp_symlink_is_never_followed` covers it.
 - `atomic_write` callers: `tools/edit_file/mod.rs` (3 sites), `tools/symbol/edit_code.rs`,
   `tools/markdown/edit_markdown.rs`, `symbol/edit.rs`, `library/registry.rs`, `memory/anchors.rs`,
-  `memory/mod.rs`, `operator_rules/mod.rs`, `write_utf8` (-> `create_file`, `guide_ledger::persist`).
+  `memory/mod.rs`, `operator_rules/mod.rs`, `write_utf8` (-> `create_file`, `guide_ledger::persist`,
+  `rendezvous::publish` at `tools/rendezvous.rs:136`).
   All gain the fix; none stages on its own.
 - `src/librarian/tools/mv.rs`, `src/logging.rs` and `src/platform/*::rename_overwrite` rename user or log
   files, they do not stage content.
-- `scripts/measure/run.py::_write_atomic` and `scripts/measure/label.py` stage at `<name>.tmp` in Python,
-  but they are measurement scripts, not reachable from an MCP write tool. NOT changed.
+- `scripts/measure/run.py::_write_atomic` unlinks its `<name>.tmp` first and then creates it with `O_EXCL`
+  (`_write_new`), so it does not follow a planted link; `_write_exclusive` uses a dot-named pid temp the same
+  way. `scripts/measure/label.py:359-365` (`relabel_pick.json.tmp`, `open(tmp, "w")` then `os.replace`) DOES follow
+  one. They are measurement scripts, not reachable from an MCP write tool, and were NOT changed.
 
 ## Tests added
 
-`src/util/fs.rs` (tests module). Red = failing at `65fc6d6a` (before the fix, run 2026-10-17):
+`src/util/fs.rs` (tests module). Red = failing at `65fc6d6a` (before the fix, run 2026-10-17).
+
+**What the tests prove and do not.** The three planted-`x.txt.tmp` tests (symlink, dangling symlink, regular
+file) are regression checks against the OLD fixed name only: with random names a planted `x.txt.tmp` is never
+opened, so they pass against any implementation that merely renames its staging file (measured: mutating
+`create_new(true)` to `create(true).truncate(true)` leaves all three green). The exclusive-create guarantee is
+carried by the seam tests, which offer the planted entries as the FIRST candidate names
+(`every_kind_of_planted_entry_at_a_candidate_name_is_refused_and_left_alone`,
+`staging_gives_up_after_a_bounded_number_of_collisions_and_changes_nothing`). The seam is `atomic_write_with`; the
+real write closure is not driven with an injected fault. The real name closure IS covered without a seam by
+`the_real_staging_file_is_created_on_the_targets_filesystem` (target on `/dev/shm` or `/var/tmp`; staging in
+`temp_dir()` would fail the rename with EXDEV; killed by a mutant that stages in `temp_dir()`; it asserts, rather
+than skips, that such a directory exists). A seam-free fault for the real write closure needs an `RLIMIT_FSIZE`
+child or a thread-only seccomp filter; both are heavy and fragile on CI, so they were not adopted and the seam
+test pins it.
 
 - `a_planted_staging_symlink_is_not_followed_and_the_victim_is_untouched` RED (`victim` held `WRITTEN`).
 - `a_planted_dangling_staging_symlink_does_not_create_the_file_it_points_at` RED (the outside file was created).
@@ -140,6 +174,11 @@ Checked, same pattern absent or not reachable from a write tool:
 - Edited, not weakened: `staging_paths_are_distinct_for_files_that_share_a_stem` and
   `the_staging_path_stays_beside_its_target` now pass one constant nonce (with a random one every name is
   distinct and the first could not fail); `atomic_write_removes_its_tmp_file_when_the_write_itself_fails`, see Fix.
+- Mode work (`417c4d3e`): `the_staging_file_of_a_private_target_is_private_while_it_is_written` (RED before,
+  group/other bits `0o044`), `the_final_mode_is_unchanged_for_every_kind_of_target` (existing `0600/0640/0755/04755`,
+  new file, symlink target takes the pointed-at mode, dangling; green before and after),
+  `the_real_staging_file_is_created_on_the_targets_filesystem` (green before and after). The window test asserts
+  the environment's umask can discriminate (it fails loudly under `umask 077`).
 
 `src/tools/run_command/attribution.rs`: `materialize_does_not_follow_a_planted_staging_symlink` (RED before the fix).
 
@@ -153,6 +192,9 @@ Mutation probe (`scripts/mutation-probe.sh`, isolated, tests `util::fs::tests` a
 char-boundary loop disabled (1); `set_permissions` removed (1, the exec-bit test); write-failure cleanup
 removed (1, the ENOSPC test); rename-failure cleanup removed (1); `rename` -> `copy` (7, including both
 tool-level leaf tests).
+Second round, all KILLED: private staging disabled (window test); `metadata` -> `symlink_metadata` for the mode
+(the final-mode test, via the symlink row); mode application removed (2: exec bit and final-mode); real name
+closure staged in `temp_dir()` (cross-filesystem test); staging mode `0600` -> `0666` (window test).
 
 ## Workarounds
 
@@ -161,7 +203,10 @@ None needed after the fix. Before it: do not open a repository that ships `*.tmp
 ## Resume
 
 Fixed on the branch; awaiting review and merge. Windows (`CREATE_NEW` refusing a planted reparse point)
-was not run: only `cargo test` on Linux. After it reaches `experiments`, archive this file
+was not run: only `cargo test` on Linux. Related findings from the review, filed and NOT fixed:
+`2026-10-17-attribution-helper-runs-python-from-a-predictable-shared-temp-directory.md`. The zombie
+`2026-08-14-atomic-write-rename-not-detected-by-file-watchers.md` cites `atomic_write`'s old shape and line range;
+it carries a one-line note, status unchanged. After it reaches `experiments`, archive this file
 (`doc(action="move")`), keeping the SHA and patch-ids above. Not run: an end-to-end plant against
 `edit_file`, `edit_markdown`, a memory write; they route through `atomic_write` (read from the callers),
 and `create_file` and `edit_code` were run only for the leaf-symlink case.
