@@ -1,13 +1,13 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'Gate 2 (every_observed_shape_of_a_declaring_topic_has_a_section) iterates a census of artifact.* shapes, no tool is named artifact any more, so every doc.* shape is skipped'
 tags:
 - cluster/selector-narrower-than-its-population
 - guides
 - section-grain-delivery
 opened: 2026-10-16
-closed:
+closed: 2026-10-17
 owner: marius
 severity: low
 related:
@@ -74,13 +74,33 @@ reads the registry rather than the census, so it is not affected; this is Gate 2
 
 ## Fix
 
-Not started. Either regenerate the census under the current tool names (its header points at the
-script), or have the gate fail when a census row's tool resolves to nothing, so the next rename is
-loud. The second is the guard; the first only refreshes the data.
+Both, with the guard first. Verified 2026-10-17 on `experiments` + `299395e5`: 33 census rows named no registered
+tool (rows `artifact.*`, `artifact_augment`, `artifact_event.*`, `artifact_refresh.*`, plus `read_markdown`,
+`edit_markdown.*`, `Edit`, `peer.list`, `replace_all`, `run_file`), the census had no `doc.` row, and the gate
+`continue`d past all of them. Fix in `src/server.rs` (tests):
+
+- `resolve_census_row` classifies each census row as `Live` (registered, after `CENSUS_RENAMED_SHAPES` /
+  `CENSUS_RENAMED_TOOLS`), `Retired` (in `CENSUS_RETIRED_TOOLS`, each with a reason) or `Unresolved`.
+- Gate 2 now reads `artifact.*` rows as the `doc.*` shapes they became, panics on `Unresolved`, collects
+  every uncovered shape into one message, and asserts it evaluated rows for both `doc` and `librarian`.
+- The `doc.*` shapes no `tracker-conventions` section serves (append_entry, update_entry, move, delete,
+  link, augment, event_create, event_list, gather, list_stale, graph) are waived by shape in
+  `SECTION_WAIVERS` (`TRACKER_DOC_SHAPES_UNSERVED`, `src/prompts/mod.rs`). The write shapes are waived on the
+  2026-10-16 measurement that their real results route to `librarian`; the read-side shapes were not measured
+  per result and the waiver says so.
+
+Fix commit, on branch `worktree-agent-ab7a7e0e672e14d3a` (based on `experiments`): `53a53782`;
+patch-id `7ee22cbb367f42b2039b86af9fe3294f5decc618`.
 
 ## Tests added
 
-None.
+`server::tests::every_census_row_resolves_to_a_live_tool_or_a_recorded_retirement` (red before the
+tables were filled: listed 33 unresolved rows; green after), `server::tests::census_renames_and_retirements_are_not_stale`
+(rename targets registered, retired tools not registered, resolver fails an unknown name, maps `artifact.update`
+to `doc.update`), and the strengthened `every_observed_shape_of_a_declaring_topic_has_a_section` (red with the
+11 `doc.*` shapes uncovered until waived; now also asserts it evaluated rows for `doc` and `librarian`).
+
+Not done: no mutation probe (`scripts/mutation-probe.sh`) was run; only the targeted tests and clippy.
 
 ## Workarounds
 
