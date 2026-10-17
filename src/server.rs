@@ -15475,21 +15475,23 @@ mod guide_hint_tests {
     /// scanned those keys the call routed to `librarian` and these sections -- stage both
     /// halves, re-point the citations -- were declared nowhere and reached nobody.
     /// Driven through real `doc` calls because what routes is the RESULT's content, which a
-    /// `match_sections` probe bypasses. Each step asserts body text unique to its section and
-    /// that the create's sections are not repeated.
+    /// `match_sections` probe bypasses.
+    ///
+    /// Two deliveries are asserted separately, because they come from different topics at
+    /// different times: the FIRST destructive `doc.move` of a session is held BEFORE it runs
+    /// and served `librarian` § Archiving / Moving Trackers (input-derivable, so the gate
+    /// cannot see the result); the identical re-issue executes and ships the
+    /// `tracker-conventions` sections the result's paths select. Each tracker case gets a
+    /// fresh server, since sections already spent in a session are not served again.
     /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
     #[tokio::test]
     async fn moving_a_bug_file_or_a_tracker_ships_the_archive_sections() {
-        let (_dir, server) = make_server().await;
-
-        async fn create_then_move(
-            server: &CodeScoutServer,
-            kind: &str,
-            from: &str,
-            to: &str,
-        ) -> Vec<String> {
+        /// `(guide text served with the hold, guide text served after the executed move,
+        /// text of the create call's guide)`.
+        async fn create_then_move(kind: &str, from: &str, to: &str) -> (String, String, String) {
+            let (_dir, server) = make_server().await;
             let created = call_tool(
-                server,
+                &server,
                 "doc",
                 json!({
                     "action": "create",
@@ -15506,67 +15508,110 @@ mod guide_hint_tests {
                 .expect("create returns an id")
                 .to_string();
             let move_call = json!({"action": "move", "id": id, "new_rel_path": to});
-            let mut moved = call_tool(server, "doc", move_call.clone()).await;
-            // The FIRST destructive call of a shape is held before it runs, to serve the
-            // `librarian` section that `serves: doc.move` declares (input-derivable, so
-            // the gate cannot see the result). The identical re-issue executes, and its
-            // post-call emission is what routes on the result's paths.
-            let first: Value = serde_json::from_str(&moved[0].as_text().unwrap().text)
+
+            let held = call_tool(&server, "doc", move_call.clone()).await;
+            let first: Value = serde_json::from_str(&held[0].as_text().unwrap().text)
                 .expect("primary block is JSON");
-            if first.get("executed") == Some(&json!(false)) {
-                moved = call_tool(server, "doc", move_call).await;
-            }
+            assert_eq!(
+                first.get("executed"),
+                Some(&json!(false)),
+                "the first destructive doc.move of a session must be held, got {first}"
+            );
+
+            let moved = call_tool(&server, "doc", move_call).await;
             let primary: Value = serde_json::from_str(&moved[0].as_text().unwrap().text)
                 .expect("primary block is JSON");
             assert!(
                 primary.get("new_abs_path").is_some(),
-                "the move must have succeeded, got {primary}"
+                "the re-issued move must have executed, got {primary}"
             );
-            guide_blocks(&moved)
+            (
+                guide_blocks(&held).join(""),
+                guide_blocks(&moved).join(""),
+                guide_blocks(&created).join(""),
+            )
         }
 
-        let guide = create_then_move(
-            &server,
+        fn assert_ships(guide: &str, what: &str, wants: &[&str]) {
+            for want in wants {
+                assert!(
+                    guide.contains(want),
+                    "{what} must ship `{want}`, got {} B: {}",
+                    guide.len(),
+                    guide.chars().take(300).collect::<String>()
+                );
+            }
+            assert!(
+                !guide.contains("NOT auto-injected"),
+                "{what}: a section set is not a pointer"
+            );
+            assert!(
+                !guide.contains("Never suffix an id"),
+                "{what}: the whole guide must not ship"
+            );
+        }
+
+        // The hold serves `librarian`, never a tracker-conventions section.
+        let librarian_hold = "**Stage both halves: `git add -- <old> <new>`";
+        let tracker_stage = "**And stage BOTH halves of the move together";
+
+        let (held, after, created) = create_then_move(
             "bug",
             "docs/issues/2026-10-16-archive-probe.md",
             "docs/issues/archive/2026-10-16-archive-probe.md",
         )
-        .await
-        .join("");
-        for want in [
-            "Archive through the catalog",
-            "**And stage BOTH halves of the move together",
-            "**Then re-point the citations, in the same commit as the move",
-        ] {
-            assert!(
-                guide.contains(want),
-                "move of a bug file must ship `{want}`, got {} B: {}",
-                guide.len(),
-                guide.chars().take(300).collect::<String>()
-            );
-        }
+        .await;
+        assert_ships(&held, "the hold of a bug move", &[librarian_hold]);
         assert!(
-            !guide.contains("NOT auto-injected"),
-            "a section set is not a pointer"
+            !held.contains(tracker_stage),
+            "the hold is input-derived and cannot carry a path-qualified section"
+        );
+        assert_ships(
+            &after,
+            "the executed move of a bug file",
+            &[
+                // one distinctive sentence per section, in document order
+                "Archive through the catalog",
+                tracker_stage,
+                "**Then re-point the citations, in the same commit as the move",
+                "**Verifying the sweep afterward needs a different pattern",
+                "sees BOTH forms, and tells you which is",
+                "Be precise about *why* a green run proves nothing here",
+            ],
         );
         assert!(
-            !guide.contains("Never suffix an id"),
-            "the whole guide must not ship on a move"
+            !after.contains(librarian_hold),
+            "the librarian section was spent at the hold and must not repeat"
+        );
+        assert!(
+            !after.contains("One file per bug."),
+            "the create's sections must not repeat on the move"
+        );
+        assert!(
+            created.contains("One file per bug."),
+            "premise: create ships it"
         );
 
-        let guide = create_then_move(
-            &server,
+        let (held, after, _) = create_then_move(
             "tracker",
             "docs/trackers/archive-probe.md",
             "docs/trackers/archive/archive-probe.md",
         )
-        .await
-        .join("");
+        .await;
+        assert_ships(&held, "the hold of a tracker move", &[librarian_hold]);
+        assert_ships(
+            &after,
+            "the executed move of a tracker",
+            &[
+                "Archive through the catalog",
+                tracker_stage,
+                "**Then re-point the citations, in the same commit as the move",
+            ],
+        );
+        // Its lead instruction is `doc.update`, the call that needs it; it stays pull-only.
         assert!(
-            guide.contains("preferred path is in-place archival"),
-            "move of a tracker must ship \u{a7} Archiving a tracker, got {} B: {}",
-            guide.len(),
-            guide.chars().take(300).collect::<String>()
+            !after.contains("preferred path is in-place archival"),
+            "\u{a7} Archiving a tracker is waived and must not ship after a move"
         );
     }
 

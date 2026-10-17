@@ -1,7 +1,7 @@
 ---
 kind: bug
 status: open
-title: 'tracker-conventions sections that a write needs are declared-but-unreachable: update, append_entry and move results route to librarian, and doctor cannot be served per violation class'
+title: 'tracker-conventions sections that a write needs are declared-but-unreachable: update and append_entry results route to librarian (move was fixed 2026-10-17), and doctor cannot be served per violation class'
 tags:
 - cluster/declared-not-wired
 - guides
@@ -20,12 +20,15 @@ related:
 
 ## Summary
 
-`tracker-conventions` now declares `serves:` sections (d34c398e), but only for the four call shapes
+`tracker-conventions` declared `serves:` sections (d34c398e) for only four call shapes, the ones
 whose RESULT names a `docs/issues/` or `docs/trackers/` path: `doc.create`, `doc.get`, `doc.find`
-and `librarian.doctor`. Every other call that needs the guide is a write whose result names no such
-path, so `LibrarianAdapter::relevant_guide_topic` never chooses this topic for it and the
-sections written for it (13 of 24, about 43 KB of the 61 KB guide) are waived in
-`prompts::SECTION_WAIVERS` and reachable only by an explicit `get_guide("tracker-conventions")`.
+and `librarian.doctor`. A fifth, `doc.move`, was added 2026-10-17 (its result names the file as
+`old_abs_path`/`new_abs_path`, which the scan now reads). Every other call that needs the guide is
+a write whose result names no such path (`update`, `append_entry`, `delete`, ...), so
+`LibrarianAdapter::relevant_guide_topic` never chooses this topic for it and the sections written
+for it are waived in `prompts::SECTION_WAIVERS` and reachable only by an explicit
+`get_guide("tracker-conventions")`. (Measured 2026-10-16, before the `move` fix: 13 of 24
+sections, about 43 KB of the 61 KB guide.)
 `librarian.doctor` does route here but ships only the preamble, because `Shape` cannot qualify on
 the violation class.
 
@@ -107,18 +110,33 @@ What landed:
   `tracker-conventions` instead of `librarian`.
 - The 15 KB `Closing a bug` section was split at its natural boundary: the fix-provenance half keeps
   that heading (renamed `Closing a bug — patch-id and fix provenance`, 5.5 KB, still waived: its
-  call is `update`), and the archive flow became five `###` sections, each under the 2,500 B cap
-  (`Archiving a bug — through the catalog, never git mv`, `… stage both halves of the move`,
-  `… re-point the citations`, `Verifying the citation sweep`, `Reading move's inbound_path_citations`),
-  each declared `serves: doc.move(path~docs/issues/)`. A sixth, `Citing an archive path — where the
-  file is, not where it will go`, is the fix-time half and stays waived.
-- `Archiving a tracker` (401 B) now declares `serves: doc.move(path~docs/trackers/)`; its waiver row
-  is gone, and `TRACKER_SECTION_NEEDS_A_WRITE` no longer names `move`.
+  call is `update`), and the archive flow became `###` sections, each under the 2,500 B cap and
+  each declared `serves: doc.move(path~docs/issues/)`: `Archiving a bug or tracker — through the
+  catalog, never git mv` (0.8 KB), `… stage both halves of the move` (2.1 KB), `… re-point the
+  citations` (2.2 KB), `Verifying the citation sweep` (1.4 KB), `Reading move's
+  inbound_path_citations` (1.7 KB) and `Why a green gate proves nothing about the sweep` (1.3 KB,
+  the explanation that completes the re-point section's "so the grep is the check"). The first
+  three also declare `doc.move(path~docs/trackers/)`. A seventh, `Citing an archive path — where
+  the file is, not where it will go`, is the fix-time half and stays waived.
+- `Archiving a tracker` (0.4 KB) keeps its waiver and has no `serves:`. Its lead instruction is
+  `doc(action="update", patch={status: "archived"})`, and `update` still routes to `librarian`, so
+  declaring it on `doc.move` served the right text after the wrong call, and let Gate 5 count it
+  reachable on a technicality. A tracker move is instead served the three generic archive sections
+  above (new-id warning, stage both halves, re-point paths and ids: 5.1 KB), which is what
+  `librarian` § Archiving / Moving Trackers told it before the routing change; a guide_index test
+  asserts a tracker move does not receive `Archiving a tracker`.
 
-What a `move` of a bug file now ships: about 9.5 KB of sections (a bound of 16 KB and a quarter of the
-guide are both asserted). That is a deliberate change to which guide arrives on `move`: `librarian`
-§ *Archiving / Moving Trackers* used to; it still arrives on the fallthrough once the
-`tracker-conventions` sections are spent.
+What a `move` ships now, and what it displaces:
+
+- **Identified sessions** (the normal case): the first destructive `doc.move` is held before it
+  runs and served `librarian` § Archiving / Moving Trackers (that gate is input-derived and cannot
+  see the result); after the identical re-issue executes, `tracker-conventions` adds about 9.6 KB
+  for a bug file (about 5.1 KB for a tracker). Nothing is displaced; the cost is that added
+  volume. A bug-archive step is not in the p50 session budget fixture, which is filed separately.
+- **Anonymous tier** (no session id, so the hold never fires): the move's post-call emission is now
+  `tracker-conventions` sections, where it used to be `librarian` § Archiving / Moving Trackers.
+  The tracker-conventions sections carry the same stage-both-halves and re-point guidance, so the
+  content is replaced rather than lost, but `librarian`'s section is displaced there.
 
 Still open, each a decision rather than an edit:
 
@@ -127,8 +145,9 @@ Still open, each a decision rather than an edit:
 3. **A `check~<name>` predicate in `Shape`** so `librarian.doctor` can serve the section that
    remediates the check a violation names (a grammar amendment).
 
-The remaining waived sections (`Entry ids` 6.5 KB, `Closing a bug`, and the entry-level sections) need
-option 2 first, and the large ones must be split at `###` before they can be declared.
+The remaining waived sections (`Entry ids` 6.5 KB, `Closing a bug`, `Archiving a tracker` and the
+entry-level sections) need option 2 first, and the large ones must be split at `###` before they can
+be declared.
 
 ## Tests added
 
@@ -138,9 +157,20 @@ For the `move` half (2026-10-17), red before the fix, green after:
 - `librarian::adapter::tests::tracker_paths_route_to_the_tracker_guide_and_nothing_else_does`
   (extended: `move` routes, `update` does not)
 - `prompts::guide_index::tests::tracker_conventions_ships_sections_to_each_shape_that_routes_to_it`
-  (extended with `doc.move` for a bug file and a tracker; asserts the byte bounds)
+  (extended with `doc.move` for a bug file and a tracker, the byte bounds, and a negative: a tracker
+  move is not served `Archiving a tracker`)
 - `server::guide_hint_tests::moving_a_bug_file_or_a_tracker_ships_the_archive_sections`
-  (real `doc` create + move calls, asserting section body text and that the whole guide does not ship)
+  (real `doc` create + move calls on a fresh server per case; hard-asserts the pre-call hold fires
+  and serves the `librarian` section and no tracker-conventions section; asserts one distinctive
+  sentence from each of the six bug-move sections and the three tracker-move sections after the
+  re-issue, that the spent `librarian` and create sections do not repeat, and that
+  `Archiving a tracker` does not ship)
+- `prompts::tests::section_waivers_are_registered_with_real_reasons` (extended: a waiver's heading
+  must exist in its guide, so a rename cannot leave a dead row)
+- `librarian::tools::mv::tests::the_archive_confirmation_names_staged_ness_and_content_on_every_surface`
+  (not new: its tracker-conventions slice now reads the staging section through `GUIDE_INDEX`, since
+  the slice anchored on `**Then re-point` absorbed the new heading and `serves:` comment and broke
+  the 2,000 B ceiling, which was not raised)
 
 The `update`/`append_entry` half is still pinned by absence only. The routed side of the other shapes
 is pinned by `the_first_call_of_each_routed_shape_ships_a_tracker_conventions_section`.
@@ -160,5 +190,7 @@ cap, so the large ones (`Entry ids` 6.5 KB, `Closing a bug` 5.5 KB) must be spli
 
 ## References
 
+- `docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md`
+  (no session-level byte budget covers a bug-file archive move)
 - `docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md` (the residual this follows)
 - `src/prompts/mod.rs` `SECTION_WAIVERS`, `TRACKER_SECTION_NEEDS_A_WRITE`

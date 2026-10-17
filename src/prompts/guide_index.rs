@@ -1091,14 +1091,23 @@ Body Mu.
                 "doc.move",
                 &move_issue,
                 &[
-                    "Archiving a bug \u{2014} through the catalog, never git mv",
-                    "Archiving a bug \u{2014} stage both halves of the move",
-                    "Archiving a bug \u{2014} re-point the citations",
+                    "Archiving a bug or tracker \u{2014} through the catalog, never git mv",
+                    "Archiving a bug or tracker \u{2014} stage both halves of the move",
+                    "Archiving a bug or tracker \u{2014} re-point the citations",
                     "Verifying the citation sweep",
                     "Reading move's inbound_path_citations",
+                    "Why a green gate proves nothing about the sweep",
                 ],
             ),
-            ("doc.move", &move_tracker, &["Archiving a tracker"]),
+            (
+                "doc.move",
+                &move_tracker,
+                &[
+                    "Archiving a bug or tracker \u{2014} through the catalog, never git mv",
+                    "Archiving a bug or tracker \u{2014} stage both halves of the move",
+                    "Archiving a bug or tracker \u{2014} re-point the citations",
+                ],
+            ),
             (
                 "doc.find",
                 &find_issue,
@@ -1128,6 +1137,14 @@ Body Mu.
                 "`{sel}` on {result} ships {bytes} B of a {whole} B guide; that is not section grain"
             );
         }
+        // `Archiving a tracker` leads with `doc(action="update", patch={status: archived})`,
+        // the call that needs it, and `update` still routes to `librarian`: serving it
+        // after a MOVE has run is the late, wrong-call delivery that its waiver records.
+        let moved = idx.match_sections("tracker-conventions", Some("doc.move"), &move_tracker);
+        assert!(
+            !moved.iter().any(|s| s.heading == "Archiving a tracker"),
+            "a tracker move must not be served the update-first § Archiving a tracker"
+        );
     }
 
     /// A `path~` shape can never match a result-less call, which is what keeps the
