@@ -1,7 +1,7 @@
 ---
 id: c84f03cdce18e33b
 kind: adr
-status: proposed
+status: accepted
 title: ADR-2026-10-16 — The reasoning for a class member lives in the member's own bug file, not on a shared line
 owners:
 - marius
@@ -18,10 +18,9 @@ time_scope: '2026-10-16'
 
 ## Status
 
-**Proposed.** Settled with the owner on 2026-10-16: legacy entries are **frozen, not migrated**; **no
-generated class view in version 1**; this ADR and its companion bug are both filed. Not yet
-implemented. The measurements below are **dated snapshots**; each carries its derivation so a
-reader re-checks it instead of re-deriving it.
+**Accepted and implemented, 2026-10-17.** Settled with the owner on 2026-10-16: legacy entries are **frozen, not migrated**; **no generated class view in version 1**. On 2026-10-17 the owner relaxed the content rule (see Decision) because the first wording was too much work for a rule specific to this repo, and the design should generalize beyond it.
+
+Implemented by `0da91b3d` (the write-time mechanism in `src/librarian/requirements.rs`, hooked in `doc(create)`), `9c4609c8` (`CHECK 3` reads the staged bug file; patch-id `896d3fcee31b698b36d837685b2143f9e1cde47e`), `ff186ccf` (`.codescout/requirements.toml`, the template) and `20c1a2d9` (the CI scan test). The Context and Consequences sections below describe the state when the ADR was proposed. The measurements are **dated snapshots**; each carries its derivation so a reader re-checks it instead of re-deriving it.
 
 Companion bug (the gate's text and code disagree): `docs/issues/archive/2026-10-16-the-growth-gate-accepts-a-bare-stem-while-its-refusal-demands-the-plus-one-shape.md`.
 Session measurements: `docs/trackers/cluster-promotion-session-log.md` `F-9`.
@@ -94,21 +93,18 @@ id and cannot be attributed). The transcripts of all three profiles show no nati
 
 ## Decision
 
-**A bug file that gains a `cluster/<slug>` tag, by filing or by retag, must contain a `## Class
-fit` section stating what this member shows about the class relative to earlier members and where
-the class's boundary against its nearest neighbour lies.** It does not restate the mechanism; the
-bug's own Summary holds that. `CHECK 3` reads that section from the **staged bug file** instead of
-reading the class's `**Members:**` field. A class file's `**Members:**` keeps its query, and its
-history is **frozen**: no new `+1` entries, no migration of the existing ones.
+**A bug file that gains a `cluster/<slug>` tag, by filing or by retag, must contain a `## Class fit` section of at least 40 letters or digits.** The section says why the bug fits that class. It does not restate the mechanism; the bug's own Summary holds that. `CHECK 3` reads that section from the **staged bug file** instead of reading the class's `**Members:**` field. A class file's `**Members:**` keeps its query, and its history is **frozen**: no new `+1` entries, no migration of the existing ones.
+
+**The floor is the whole rule.** It shows that something was written, as the old gate did, and it does not judge quality. The first draft of this ADR also required the section to compare the member with earlier members and to place the class's boundary against its nearest neighbour. The owner dropped that on 2026-10-17: it was too much work for a rule specific to this repo, and the design should generalize. What a writer puts in the section is guidance, carried by `section_hint` in `.codescout/requirements.toml`, not enforced text.
+
+**Mechanism and policy are separate.** The mechanism is generic. `src/librarian/requirements.rs` reads `.codescout/requirements.toml`, which names an artifact kind, a tag prefix, where the tag values are declared, the required sections and a floor, and `doc(create)` refuses a write that breaks them. A project without that file is untouched, and another project could require a `## Rollback` section on every ADR with no code change. The `cluster/` tag and the `## Class fit` title are this repo's policy, set in that one file.
 
 Specifics:
 
 - The heading is exactly `## Class fit`, an H2 outside any code fence. The 43 class-related H2 headings in existing bug files, under 22 distinct names, are not renamed.
 - `cluster/unclassified` requires it too: its section says why the bug fits no class.
-- The same check runs as a **test** over tracked bug files dated on or after a cutoff date set at
-  implementation, so a `--no-verify` commit is caught in CI. Today `CHECK 3` runs only in the
-  local pre-commit hook; CI exercises the hook script only through fixtures (the divergence suite and the
-  refusal-routing test); it does not run `CHECK 3` over the corpus.
+- **Two readers apply the policy.** The server applies it at `doc(create)`. The commit hook `CHECK 3` applies it to files that never pass through `doc(create)`, such as `create_file` into `docs/issues/` or a retag. The hook holds the title and the floor as constants, and the test `the_commit_hook_and_the_requirements_file_agree_on_the_class_fit_policy` fails if they differ from the policy file.
+- The same check runs as a **test** over tracked bug files dated on or after 2026-10-17, so a `--no-verify` commit is caught in CI: `every_bug_filed_since_the_class_fit_rule_carries_one` in `src/librarian/requirements.rs`.
 - **No generated class view in version 1.** The roster and Index stay the reading surface.
 
 ## Alternatives considered
@@ -134,6 +130,8 @@ rejected. Cheap, but the contention incidents recur (three in seven weeks that l
 **6. Migrate the existing entries into their bug files.** Rejected for now. It writes history into
 about 22 class files and many bug files at once, and the entries stay correct as frozen text. The
 strangler approach: new members use the new form, and old lines age out.
+
+**7. A `codescout check-requirements --staged` command, so the hook reads the policy file and the Python constants go.** Rejected for now (2026-10-17). `scripts/pre-commit-dead-artifact-ids.sh` skips with a warning when no runnable binary exists, so a binary-backed hook fails open on a machine without a build. `CHECK 3` is plain Python and runs everywhere. The command would also add a CLI surface to remove two constants that a test already pins. Revisit when a second project adopts `requirements.toml`.
 
 ## Consequences
 
@@ -168,6 +166,7 @@ strangler approach: new members use the new form, and old lines age out.
   query.
 - `## Class fit` sections turn out empty or placeholder in practice.
 - The check cannot read the staged bug blob reliably in the hook.
+- A second project adopts `.codescout/requirements.toml` and wants a commit-time check. Then build alternative 7, and make the hook fail open the way `pre-commit-dead-artifact-ids.sh` does.
 
 **Explicitly not a trigger:** the old lines continuing to exist. They are frozen by design.
 
@@ -188,7 +187,7 @@ of quality, which neither design has.
 - The usage window is 30 days and `usage.db` records only codescout calls; the transcript check
   found no native `Read` or `Grep`, and about 116 read-like native `Bash` calls, mostly greps of
   the Index.
-- No prototype of the new check exists.
+- The floor shows that text exists, not that it is the right text. Nothing measures whether `## Class fit` sections are useful once written; the revisit trigger about empty or placeholder sections is the only watch on that.
 
 ## How each number was derived
 
