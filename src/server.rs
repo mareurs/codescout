@@ -15615,6 +15615,114 @@ mod guide_hint_tests {
         );
     }
 
+    /// The WORST-CASE `doc.move` delivery has its own byte budget, separate from the p50
+    /// session's.
+    ///
+    /// Archiving a bug file is the largest real draw of any single `doc` call: the hold
+    /// serves `librarian` § Archiving / Moving Trackers before the move runs, and the
+    /// re-issue then ships six `tracker-conventions` sections selected by the result's
+    /// paths. The p50 fixture cannot carry it: its `move` goes `docs/specs/` to
+    /// `docs/specs/`, which names no tracked path, and a p50 session does not archive bugs,
+    /// so folding a rare worst case into it would either raise its derived ceiling (a spec
+    /// amendment, and these budgets only move down) or hide a regression in the common
+    /// case behind the slack the rare one needs. Two populations, two ceilings.
+    ///
+    /// Counts every block after the primary on BOTH `move` calls (the hold and the
+    /// executed re-issue), in an identified session, which is the one that pays both. The
+    /// create that makes the target file is not counted: its sections are another shape's
+    /// and are disjoint from these (the move test above asserts they do not repeat).
+    ///
+    /// Same discipline as the p50 ceiling: the number is MEASURED, set a fixed margin
+    /// above, and raising it is a decision, not a fix; when it fires, shrink or split a
+    /// section. The fixture root must not reach the counted bytes (asserted), so the total
+    /// is a property of the guides and not of this machine's temp path.
+    /// docs/issues/2026-10-17-p50-emission-budget-fixture-never-archives-a-bug-file-so-the-largest-doc-move-delivery-is-unbudgeted.md
+    #[tokio::test]
+    async fn a_bug_archive_move_stays_under_its_own_emission_byte_ceiling() {
+        // MEASURED 2026-10-17: 13,758 B (hold 2,271 B + executed 11,487 B), read from this
+        // test's own failure message at ceiling 0, plus the same 128 B margin the p50
+        // ceiling carries over its measurement. Not derived from section sizes: the six
+        // sections sum to about 9.6 KB and the rest is block wrappers and the librarian
+        // hold, which is why it is read off a run. Never raise it to fit.
+        const CEILING: usize = 13_886;
+
+        let (dir, server) = make_server().await;
+        let created = call_tool(
+            &server,
+            "doc",
+            json!({
+                "action": "create",
+                "rel_path": "docs/issues/2026-10-17-budget-probe.md",
+                "kind": "bug",
+                "title": "archive budget probe",
+                "body": "probe body"
+            }),
+        )
+        .await;
+        let id = serde_json::from_str::<Value>(&created[0].as_text().unwrap().text)
+            .expect("primary block is JSON")["id"]
+            .as_str()
+            .expect("create returns an id")
+            .to_string();
+        let move_call = json!({
+            "action": "move", "id": id,
+            "new_rel_path": "docs/issues/archive/2026-10-17-budget-probe.md"
+        });
+
+        let held = call_tool(&server, "doc", move_call.clone()).await;
+        let first: Value =
+            serde_json::from_str(&held[0].as_text().unwrap().text).expect("primary is JSON");
+        assert_eq!(
+            first.get("executed"),
+            Some(&json!(false)),
+            "premise: the first destructive doc.move is held, got {first}"
+        );
+        let moved = call_tool_checked(&server, "doc", move_call, "move").await;
+
+        let (held_blocks, moved_blocks) = (guide_blocks(&held), guide_blocks(&moved));
+        let (held_bytes, moved_bytes): (usize, usize) = (
+            held_blocks.iter().map(String::len).sum(),
+            moved_blocks.iter().map(String::len).sum(),
+        );
+        let total = held_bytes + moved_bytes;
+
+        let root = dir.path().to_string_lossy().into_owned();
+        for b in held_blocks.iter().chain(&moved_blocks) {
+            assert!(
+                !b.contains(&root),
+                "a counted block carries the fixture root, so the total would measure this \
+                 machine's temp path: {}",
+                b.chars().take(200).collect::<String>()
+            );
+        }
+        // Non-vacuity, in the payload: a vanished section lowers the total, so a byte
+        // count alone moves the safe way when content disappears.
+        let all = held_blocks
+            .iter()
+            .chain(&moved_blocks)
+            .cloned()
+            .collect::<String>();
+        for want in [
+            "**Stage both halves: `git add -- <old> <new>`",
+            "**And stage BOTH halves of the move together",
+            "**Then re-point the citations, in the same commit as the move",
+            "**Verifying the sweep afterward needs a different pattern",
+            "sees BOTH forms, and tells you which is",
+            "Be precise about *why* a green run proves nothing here",
+        ] {
+            assert!(all.contains(want), "the worst case must ship `{want}`");
+        }
+
+        assert!(
+            total <= CEILING,
+            "a bug-archive move emitted {total} B after the primary (hold {held_bytes} B + \
+             executed {moved_bytes} B), ceiling {CEILING} B, margin {} B. Raising CEILING is \
+             a decision, not a fix: shrink or split a `doc.move` section in \
+             tracker-conventions or librarian, or narrow a `serves:` declaration.",
+            CEILING.saturating_sub(total)
+        );
+    }
+
     /// A guide too large to auto-inject is delivered by SECTION, never whole, and the
     /// bare topic is stamped only by a deliberate explicit fetch.
     ///
