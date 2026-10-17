@@ -1426,7 +1426,7 @@ mod tests {
             .unwrap();
         }
 
-        let (restored, errors) = restore_declared_augmentations(&cat, &[repo.clone()]);
+        let (restored, errors) = restore_declared_augmentations(&cat, std::slice::from_ref(&repo));
 
         assert_eq!(
             restored, 1,

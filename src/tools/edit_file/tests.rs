@@ -321,7 +321,7 @@ async fn edit_file_leaf_link_probe_child() {
             )
             .await;
         // Every other grammar, and create_file: each reaches the file through its own branch.
-        let others = vec![
+        let others = [
             (
                 "batch",
                 EditFile

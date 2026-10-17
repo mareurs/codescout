@@ -216,9 +216,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // The SOURCE is the mirror: a row below a link directory would have the OUTSIDE file
         // renamed into the repository. The leaf may be a link (a rename moves the link itself),
         // so the source is checked through its parent. Both before anything is created.
-        crate::librarian::util::refuse_path_outside_root(&new_full, &root_path, "move to")?;
+        crate::librarian::util::refuse_path_outside_root(&new_full, root_path, "move to")?;
         if let Some(src_parent) = old_full.parent() {
-            crate::librarian::util::refuse_path_outside_root(src_parent, &root_path, "move from")?;
+            crate::librarian::util::refuse_path_outside_root(src_parent, root_path, "move from")?;
         }
         if new_full.exists() {
             // A destination that exists WHILE THIS ID'S OWN OLD PATH DOES NOT is a

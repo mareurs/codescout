@@ -99,7 +99,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // is exactly this shape. The check is on the parent so that a LEAF link (an outward-link
         // row) still deletes: unlinking drops the link and never touches its target.
         if let Some(parent) = abs_path.parent() {
-            crate::librarian::util::refuse_path_outside_root(parent, &managed_root, "delete from")?;
+            crate::librarian::util::refuse_path_outside_root(parent, managed_root, "delete from")?;
         }
 
         // Dry-run gate. The catalog delete cascades to this artifact's augmentation, links,
