@@ -925,9 +925,13 @@ mod tests {
                 }
             } else if c == 'r'
                 && (next == Some('"') || next == Some('#'))
-                && !(i > 0 && (b[i - 1].is_alphanumeric() || b[i - 1] == '_'))
+                && (i == 0
+                    || !(b[i - 1].is_alphanumeric() || b[i - 1] == '_')
+                    || (b[i - 1] == 'b'
+                        && !(i > 1 && (b[i - 2].is_alphanumeric() || b[i - 2] == '_'))))
             {
-                // A raw string: r"..." or r#"..."#.
+                // A raw string: r"..." or r#"..."#, or a raw BYTE string (br"..." / br#"..."#),
+                // whose leading `b` is an ident character the plain test would stop at.
                 let mut j = i + 1;
                 let mut hashes = 0;
                 while j < b.len() && b[j] == '#' {
@@ -1045,87 +1049,125 @@ mod tests {
         (out.into_iter().collect(), test_mods)
     }
 
-    const RAW_READS: &[&str] = &[
-        "fs::read(",
-        "fs::read_to_string(",
-        "File::open(",
-        "OpenOptions::new(",
-        "tokio::fs::read",
-        "File::options(",
-        "io::read_to_string(",
-    ];
-
-    /// Raw content reads per line of LEXED production code (`production_code`): how many each line
-    /// holds. The one definition of "a raw read" the gate counts.
-    fn read_counts(code: &str) -> Vec<usize> {
-        let mut counts: Vec<usize> = code
-            .lines()
-            .map(|line| RAW_READS.iter().map(|p| line.matches(p).count()).sum())
-            .collect();
-        // Imports, which a bare call later uses without any of the patterns above. Each `use` item
-        // (to its `;`, across lines) is one count on the line it starts, when it brings in a
-        // reading function or type, or aliases the module. Fail closed: `*` and `as` count.
-        let bytes = code.as_bytes();
-        let mut i = 0;
-        while let Some(off) = code[i..].find("use ") {
-            let at = i + off;
-            i = at + 4;
-            let boundary =
-                at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
-            if !boundary {
-                continue;
-            }
-            let Some(end) = code[at..].find(';') else {
-                break;
-            };
-            let item: String = code[at + 4..at + end]
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .collect();
-            let item = item.trim_start_matches("::");
-            // A grouped root import (`use std::{fs::File, io}`) names the module inside braces:
-            // judged on all its tokens together, which over-counts rather than misses.
-            let grouped = item.starts_with("std::{") || item.starts_with("tokio::{");
-            let (fs, io) = (
-                item.starts_with("std::fs") || item.starts_with("tokio::fs") || grouped,
-                item.starts_with("std::io") || grouped,
-            );
-            if !fs && !io {
-                continue;
-            }
-            // Tokens from the item AS WRITTEN (whitespace kept), so `std::fs as f` yields `as`.
-            let tokens: Vec<&str> = code[at + 4..at + end]
-                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '*'))
-                .filter(|t| !t.is_empty())
-                .collect();
-            let reads = if grouped {
-                tokens.iter().any(|t| {
-                    matches!(
-                        *t,
-                        "read" | "read_to_string" | "File" | "OpenOptions" | "*" | "as"
-                    )
-                }) || (item.starts_with("tokio::{") && tokens.contains(&"fs"))
-            } else if fs {
-                item.starts_with("tokio::fs")
-                    || tokens.iter().any(|t| {
-                        matches!(
-                            *t,
-                            "read" | "read_to_string" | "File" | "OpenOptions" | "*" | "as"
-                        )
-                    })
-            } else {
-                tokens
-                    .iter()
-                    .any(|t| matches!(*t, "read_to_string" | "*" | "as"))
-            };
-            if reads {
-                let line = code[..at].matches('\n').count();
-                if let Some(c) = counts.get_mut(line) {
-                    *c += 1;
+    /// Tokens of LEXED code (strings and comments already blanked), each with its 0-based line:
+    /// identifiers, `::` as one token, and every other non-space character on its own. Whitespace
+    /// separates nothing that matters, so `File :: open` and `read_to_string\n(p)` read as their
+    /// tight spellings do.
+    fn tokens(code: &str) -> Vec<(usize, String)> {
+        let b: Vec<char> = code.chars().collect();
+        let mut out = Vec::new();
+        let (mut i, mut line) = (0, 0);
+        while i < b.len() {
+            let c = b[i];
+            if c == '\n' {
+                line += 1;
+                i += 1;
+            } else if c.is_whitespace() {
+                i += 1;
+            } else if c.is_ascii_alphanumeric() || c == '_' {
+                let start = i;
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == '_') {
+                    i += 1;
                 }
+                out.push((line, b[start..i].iter().collect()));
+            } else if c == ':' && b.get(i + 1) == Some(&':') {
+                out.push((line, "::".to_string()));
+                i += 2;
+            } else {
+                out.push((line, c.to_string()));
+                i += 1;
             }
         }
+        out
+    }
+
+    /// Does a path expression (its identifier segments, in order) name a content read? Judged on
+    /// the PATH, whatever follows it (a call, a turbofish, nothing at all when it is passed as a
+    /// function value): `fs::read`, `fs::read_to_string`, `fs::OpenOptions`, `File::open`,
+    /// `File::options`, `OpenOptions::new`, `io::read_to_string`, `tokio::fs`. Naming `fs::File`
+    /// alone is not a read (`File::create` is a write); its `open`/`options` are.
+    fn path_reads(segs: &[&str]) -> bool {
+        segs.windows(2).any(|w| {
+            matches!(
+                (w[0], w[1]),
+                ("fs", "read" | "read_to_string" | "OpenOptions")
+                    | ("File", "open" | "options")
+                    | ("OpenOptions", "new")
+                    | ("io", "read_to_string")
+                    | ("tokio", "fs")
+            )
+        })
+    }
+
+    /// Raw content reads per line of LEXED production code (`production_code`): how many each line
+    /// holds. The one definition of "a raw read" the gate counts. A PATH expression (identifiers
+    /// joined by `::`, a qualified `<T>::` included) that names a read counts once on its line, so
+    /// `std::fs::File::open` is one read; a `use` item counts once on the line it starts when it
+    /// imports a reading function or type or aliases the module (fail closed on `*` and `as`).
+    fn read_counts(code: &str) -> Vec<usize> {
+        let mut counts = vec![0usize; code.lines().count().max(1)];
+        let toks = tokens(code);
+        let is_ident = |t: &str| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let mut i = 0;
+        while i < toks.len() {
+            let (line, t) = (&toks[i].0, toks[i].1.as_str());
+            if t == "use" {
+                let end = toks[i..]
+                    .iter()
+                    .position(|(_, t)| t == ";")
+                    .map_or(toks.len(), |e| i + e);
+                let item: Vec<&str> = toks[i + 1..end].iter().map(|(_, t)| t.as_str()).collect();
+                if use_item_reads(&item) {
+                    counts[*line] += 1;
+                }
+                i = end + 1;
+                continue;
+            }
+            if !is_ident(t) {
+                i += 1;
+                continue;
+            }
+            let mut segs = vec![t];
+            let mut j = i + 1;
+            loop {
+                let at = |k: usize| toks.get(k).map(|(_, t)| t.as_str());
+                match (at(j), at(j + 1), at(j + 2)) {
+                    (Some("::"), Some(n), _) if is_ident(n) => {
+                        segs.push(n);
+                        j += 2;
+                    }
+                    (Some(">"), Some("::"), Some(n)) if is_ident(n) => {
+                        segs.push(n);
+                        j += 3;
+                    }
+                    _ => break,
+                }
+            }
+            if path_reads(&segs) {
+                counts[*line] += 1;
+            }
+            i = j;
+        }
         counts
+    }
+
+    /// Does a `use` item (its tokens after `use`, to the `;`) import a reading function or type,
+    /// or alias a reading module? Grouped root imports (`use std::{fs::File, io}`) are judged on
+    /// all their names together, which over-counts rather than misses.
+    fn use_item_reads(item: &[&str]) -> bool {
+        let item: Vec<&str> = item.iter().copied().skip_while(|t| *t == "::").collect();
+        let (root, module) = (item.first().copied(), item.get(2).copied());
+        let names = &item[item.len().min(3)..];
+        let any = |set: &[&str]| names.iter().any(|t| set.contains(t));
+        let fs_names = ["read", "read_to_string", "File", "OpenOptions", "*", "as"];
+        match (root, module) {
+            (Some("tokio"), Some("fs")) => true,
+            (Some("tokio"), Some("{")) => names.contains(&"fs"),
+            (Some("std"), Some("{")) => any(&fs_names),
+            (Some("std"), Some("fs")) => any(&fs_names),
+            (Some("std"), Some("io")) => any(&["read_to_string", "*", "as"]),
+            _ => false,
+        }
     }
 
     /// Every production read of file content in `src/librarian` goes through this module. A raw
@@ -1290,6 +1332,153 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             let (code, _) = production_code(clean);
             let n: usize = read_counts(&code).iter().sum();
             assert_eq!(n, 0, "`{clean}` is not a content read");
+        }
+    }
+    /// Review round 2, R2-8: spellings the pattern lists missed. Each must be counted; a sturdier
+    /// lexer reads PATHS (a run of tokens joined by `::`), not call shapes.
+    #[test]
+    fn the_gate_counts_a_read_however_its_path_is_spelled() {
+        let probes = [
+            "fn a() { let v: Vec<_> = ps.iter().map(std::fs::read_to_string).collect(); }",
+            "fn a2() { let v = p.map(fs::read); }",
+            "fn a3() { let f = ps.map(File::open); }",
+            "fn b() { let s = std::fs::read_to_string (p); }",
+            "fn b2() { let s = std::fs::read_to_string\n(p); }",
+            "fn c() { let s = std::fs::read::<&Path>(p); }",
+            "fn c2() { let s = std::fs::read_to_string::<&Path>(p); }",
+            "fn d() { let f = <std::fs::File>::open(p); }",
+            "fn d2() { let f = std::fs::File :: open(p); }",
+            "fn e() { let x = br#\"a\"b\"#; let y = std::fs::read(p); let z = \"\"; }",
+            "fn g() { let o = std::fs::OpenOptions :: new(); }",
+            "fn g2() { let o = OpenOptions::new().read(true).open(p); }",
+            "fn h() { let x = b'\"'; let y = std::fs::read(p); let z = \"\"; }",
+            "use std :: fs :: read;",
+        ];
+        for probe in probes {
+            let (code, _) = production_code(probe);
+            let n: usize = read_counts(&code).iter().sum();
+            assert!(n > 0, "the gate does not count `{probe}` as a read");
+        }
+        for clean in [
+            "fn w() { std::fs::write(p, b); std::fs::File::create(p); fs::read_dir(p); }",
+            "fn x() { let s = br#\"std::fs::read(p)\"#; }",
+        ] {
+            let (code, _) = production_code(clean);
+            let n: usize = read_counts(&code).iter().sum();
+            assert_eq!(n, 0, "`{clean}` is not a content read");
+        }
+        // One path expression is one read, whatever names it holds: the allow-list counts reads.
+        let (code, _) = production_code("fn o() { let f = std::fs::File::open(p); }");
+        assert_eq!(read_counts(&code).iter().sum::<usize>(), 1);
+    }
+
+    /// Review round 2, R2-6: the fallback path (no descriptor path: macOS's only path) through a
+    /// STATIC directory link out of the repository. Judging the spelling instead of its
+    /// canonical form survived every other test.
+    #[cfg(unix)]
+    #[test]
+    fn the_fallback_refuses_a_static_directory_link_out() {
+        let t = tempfile::tempdir().unwrap();
+        let base = canon(t.path());
+        let root = base.join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let out = base.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("x.md"), "SECRET-FALLBACK").unwrap();
+        std::os::unix::fs::symlink(&out, root.join("d")).unwrap();
+        NO_FD_PATH.with(|c| c.set(true));
+        let got = ReadDoor::new(vec![root.clone()]).bytes(&root.join("d/x.md"));
+        NO_FD_PATH.with(|c| c.set(false));
+        assert!(
+            matches!(got, Err(ReadError::Refused(_))),
+            "fallback admitted a directory link out: {:?}",
+            got.map(|b| String::from_utf8_lossy(&b).into_owned())
+        );
+    }
+
+    /// Review round 2, R2-7: one door (a doctor run, a walk) reading one spelling twice, the link
+    /// re-pointed out of the repository between the reads. The verdict memo is keyed on the
+    /// resolved path too, so the second read is judged afresh.
+    #[cfg(unix)]
+    #[test]
+    fn one_door_judges_a_spelling_again_after_its_link_changes() {
+        let t = tempfile::tempdir().unwrap();
+        let base = canon(t.path());
+        let root = base.join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        std::fs::write(root.join("real/x.md"), "inside").unwrap();
+        std::fs::write(base.join("out/x.md"), "SECRET").unwrap();
+        let l = root.join("x.md");
+        std::os::unix::fs::symlink(root.join("real/x.md"), &l).unwrap();
+        let door = ReadDoor::new(vec![root.clone()]);
+        assert!(door.bytes(&l).is_ok(), "control: an in-repo link reads");
+        std::fs::remove_file(&l).unwrap();
+        std::os::unix::fs::symlink(base.join("out/x.md"), &l).unwrap();
+        assert!(matches!(door.bytes(&l), Err(ReadError::Refused(_))));
+        assert!(door.refusal(&l).is_some());
+    }
+
+    /// Review round 2, R2-2: a stored path holding U+FFFD that names no file is a lossy record of
+    /// a non-UTF-8 name, and cannot be judged: refused for stored text. A real file whose name
+    /// holds U+FFFD is judged as any other.
+    #[cfg(unix)]
+    #[test]
+    fn a_lossy_stored_path_cannot_be_judged() {
+        let t = tempfile::tempdir().unwrap();
+        let root = canon(t.path()).join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let door = ReadDoor::new(vec![root.clone()]);
+        assert!(door.refusal(&root.join("d\u{FFFD}/x.md")).is_some());
+        std::fs::create_dir_all(root.join("e\u{FFFD}")).unwrap();
+        std::fs::write(root.join("e\u{FFFD}/x.md"), "ok").unwrap();
+        assert!(door.refusal(&root.join("e\u{FFFD}/x.md")).is_none());
+        assert!(door.refusal(&root.join("never-existed.md")).is_none());
+    }
+    /// Each field a walk takes from the file is, alone, enough for a row to "hold file values"; a
+    /// row the indexer cleared (`kind`/`status` `unknown`, everything else empty) holds none.
+    #[test]
+    fn any_one_file_field_is_enough_to_hold_file_values() {
+        use crate::librarian::catalog::artifact::ArtifactRow;
+        let cleared = ArtifactRow {
+            id: "r".into(),
+            abs_path: PathBuf::from("/r/x.md"),
+            kind: "unknown".into(),
+            status: "unknown".into(),
+            title: None,
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: Some("walk".into()),
+            created_at: 1,
+            updated_at: 2,
+            file_mtime: 3,
+            file_sha256: "aa".into(),
+            confidence: 1.0,
+        };
+        assert!(
+            !super::holds_file_values(&cleared),
+            "a cleared row holds nothing"
+        );
+        type SetOne = fn(&mut ArtifactRow);
+        let one_field: [(&str, SetOne); 7] = [
+            ("title", |r| r.title = Some("t".into())),
+            ("kind", |r| r.kind = "doc".into()),
+            ("status", |r| r.status = "open".into()),
+            ("owners", |r| r.owners = vec!["o".into()]),
+            ("tags", |r| r.tags = vec!["t".into()]),
+            ("topic", |r| r.topic = Some("t".into())),
+            ("time_scope", |r| r.time_scope = Some("2026".into())),
+        ];
+        for (name, set) in one_field {
+            let mut row = cleared.clone();
+            set(&mut row);
+            assert!(
+                super::holds_file_values(&row),
+                "`{name}` alone is a file value"
+            );
         }
     }
 }
