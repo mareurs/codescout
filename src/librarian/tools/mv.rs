@@ -215,10 +215,31 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // outside, `rename` moved the document there and `moved: true` came back (measured).
         // The SOURCE is the mirror: a row below a link directory would have the OUTSIDE file
         // renamed into the repository. The leaf may be a link (a rename moves the link itself),
-        // so the source is checked through its parent. Both before anything is created.
-        crate::librarian::util::refuse_path_outside_root(&new_full, root_path, "move to")?;
+        // so the source is checked through its parent. Both before anything is created. Both go
+        // through the SAME decision `doc(update)` and `doc(delete)` make (`util::door_root`): the
+        // id repair that follows the rename writes through that door, so a destination it would
+        // refuse must be refused HERE, while nothing has moved. (Judged against the managed root
+        // alone, a destination below a nested repository's link back into the superproject passed
+        // here, the file was renamed, and the repair was then refused: a half-done move.)
+        crate::librarian::util::refuse_catalogued_path_outside_repo(&roots, &new_full, "move to")?;
         if let Some(src_parent) = old_full.parent() {
-            crate::librarian::util::refuse_path_outside_root(src_parent, root_path, "move from")?;
+            crate::librarian::util::refuse_catalogued_dir_outside_repo(
+                &roots,
+                src_parent,
+                "move from",
+            )?;
+        }
+        // A link whose target does not exist cannot be moved: the id repair that follows the
+        // rename reads through it and fails with ENOENT, after the link has already moved and
+        // before the catalog row has. Refused up front, for relative and absolute targets alike.
+        if std::fs::read_link(&old_full).is_ok() && std::fs::metadata(&old_full).is_err() {
+            return Err(super::LibrarianRecoverableError::with_hint(
+                format!(
+                    "refusing to move `{}`: it is a dangling symbolic link (its target does not exist)",
+                    old_full.display()
+                ),
+                "Nothing was moved. Repair or remove the link first, or move the file it should point at.",
+            ));
         }
         // `rename` moves a LINK without retargeting it, so a link whose target is spelled
         // RELATIVELY resolves against the new directory. It still means the same file when both
@@ -328,7 +349,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // routes both guard on the frontmatter id; `doc(update)`'s `extra`
         // writes custom keys but never `id`), so a later repair pass has no route to
         // the file. BL-23.
-        let content = repair_frontmatter_id(&roots, &new_full, &new_id)?;
+        let content = repair_frontmatter_id(&roots, &new_full, &new_id).map_err(|e| {
+            // By now the file HAS been renamed and the catalog row still names the old path, so
+            // the door's own text ("Nothing was changed") would be false. Reachable only if the
+            // filesystem changed after the up-front check (the same door), since a destination
+            // it refuses never gets this far.
+            let said = match e.downcast_ref::<super::LibrarianRecoverableError>() {
+                Some(refusal) => refusal.message.clone(),
+                None => format!("{e:#}"),
+            };
+            super::LibrarianRecoverableError::with_hint(
+                format!(
+                    "the file WAS renamed to `{}`, but repairing its frontmatter id failed, so the \
+                     catalog row still names the old path: {said}",
+                    new_full.display()
+                ),
+                "The move is half done. Put the file back at its old path and re-run, or finish \
+                 it by hand and run librarian(action=\"reindex\"); `doctor` reports the state as \
+                 `missing_file` against the old path.",
+            )
+        })?;
 
         // Both derived AFTER the repair. A digest taken before it describes a file
         // that no longer exists on disk, which leaves the row looking dirty on every

@@ -1705,3 +1705,780 @@ async fn rekey_prefix_refuses_a_ledger_whose_declared_sidecar_leaves_the_repo_be
         "prompt: OUTSIDE\n"
     );
 }
+
+// ======================= round 5: the door's layout table =======================================
+//
+// The door (`util::door_root`) moved in each of rounds 2-4 because each round's review found a
+// layout the last rule answered wrongly. This table is the permanent statement of every answer,
+// so a fifth change that breaks one is red here rather than in a review. Each row names a layout
+// and its expected verdict; "ADMIT" means the write door accepts the path, "REFUSE" that it is
+// outside. The same layouts also run through the DIRECTORY door that `doc(move)` (source) and
+// `doc(delete)` use, and the two must agree: one decision, three verbs.
+mod door_table {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn git(p: &Path) {
+        std::fs::create_dir_all(p.join(".git")).unwrap();
+    }
+    fn ln(target: impl AsRef<Path>, link: &Path) {
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+    fn file(p: &Path) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, DOC).unwrap();
+    }
+    fn canon(p: &Path) -> PathBuf {
+        std::fs::canonicalize(p).unwrap()
+    }
+
+    /// (name, expected admit, file-door admit, directory-door admit on the parent)
+    struct Rows(Vec<(String, bool, bool, bool)>);
+
+    impl Rows {
+        fn row(&mut self, name: &str, expect_admit: bool, roots: &[PathBuf], p: &Path) {
+            let file =
+                crate::librarian::util::refuse_catalogued_path_outside_repo(roots, p, "write")
+                    .is_ok();
+            let dir = crate::librarian::util::refuse_catalogued_dir_outside_repo(
+                roots,
+                p.parent().unwrap(),
+                "delete from",
+            )
+            .is_ok();
+            self.0.push((name.to_string(), expect_admit, file, dir));
+        }
+    }
+
+    #[test]
+    fn door_layout_table() {
+        let mut t = Rows(Vec::new());
+
+        // ---- A: umbrella U{A,B}; C an unrelated active project.
+        let ut = tempfile::tempdir().unwrap();
+        let u = canon(ut.path());
+        let (a, b) = (u.join("A"), u.join("B"));
+        git(&a);
+        git(&b);
+        file(&b.join("docs/x.md"));
+        file(&a.join("real/y.md"));
+        file(&a.join("docs/z.md"));
+        ln(b.join("docs"), &a.join("linkdir"));
+        ln(&u, &a.join("up"));
+        ln("..", &a.join("up2"));
+        ln(a.join("real"), &a.join("inlink"));
+        let c = tempfile::tempdir().unwrap();
+        git(c.path());
+        let roots_c = vec![c.path().to_path_buf(), u.clone()];
+        let roots_a = vec![a.clone(), u.clone()];
+        t.row(
+            "A1 umbrella, C active, A/linkdir -> B/docs",
+            false,
+            &roots_c,
+            &a.join("linkdir/x.md"),
+        );
+        t.row(
+            "A2 A active, A/up -> U (absolute), row A/up/B/docs/x.md",
+            false,
+            &roots_a,
+            &a.join("up/B/docs/x.md"),
+        );
+        t.row(
+            "A3 C active, same row as A2",
+            false,
+            &roots_c,
+            &a.join("up/B/docs/x.md"),
+        );
+        t.row(
+            "A4 A active, A/up2 -> .. (relative), row A/up2/B/docs/x.md",
+            false,
+            &roots_a,
+            &a.join("up2/B/docs/x.md"),
+        );
+        t.row(
+            "A5 control: A/inlink -> A/real",
+            true,
+            &roots_a,
+            &a.join("inlink/y.md"),
+        );
+        t.row(
+            "A6 control: plain row, C active",
+            true,
+            &roots_c,
+            &a.join("docs/z.md"),
+        );
+
+        // ---- B: no umbrella; W holds sibling repos P (active) and S; P links up and to `/`.
+        let wt0 = tempfile::tempdir().unwrap();
+        let w = canon(wt0.path());
+        let (pp, s) = (w.join("P"), w.join("S"));
+        git(&pp);
+        git(&s);
+        file(&s.join("docs/x.md"));
+        ln(&w, &pp.join("up"));
+        ln("/", &pp.join("rootlink"));
+        let roots_p = vec![pp.clone()];
+        t.row(
+            "B1 P active, P/up -> W, row P/up/S/docs/x.md (S a sibling repo)",
+            false,
+            &roots_p,
+            &pp.join("up/S/docs/x.md"),
+        );
+        let via_root = pp
+            .join("rootlink")
+            .join(s.strip_prefix("/").unwrap())
+            .join("docs/x.md");
+        t.row(
+            "B2 P active, P/rootlink -> /, row reaching sibling repo S",
+            false,
+            &roots_p,
+            &via_root,
+        );
+
+        // ---- C: project registered canonically (data/proj), rows spelled through home/proj.
+        let bt = tempfile::tempdir().unwrap();
+        let base = canon(bt.path());
+        let (home, data) = (base.join("home"), base.join("data"));
+        std::fs::create_dir_all(&home).unwrap();
+        git(&data.join("proj"));
+        git(&data.join("other"));
+        file(&data.join("other/x.md"));
+        file(&data.join("proj/docs/x.md"));
+        file(&data.join("proj/real/y.md"));
+        ln(data.join("proj"), &home.join("proj"));
+        let outside = tempfile::tempdir().unwrap();
+        file(&outside.path().join("x.md"));
+        ln(outside.path(), &data.join("proj/linkdir"));
+        ln(data.join("proj/real"), &data.join("proj/inlink"));
+        ln(&data, &data.join("proj/up"));
+        let m2 = base.join("m2");
+        std::fs::create_dir_all(&m2).unwrap();
+        file(&m2.join("x.md"));
+        ln(&m2, &data.join("proj/tom2"));
+        // Two ancestors of one spelling resolving to the same root, and a nested repository
+        // whose link goes back into the project: the shallowest ancestor is the anchor.
+        ln(data.join("proj"), &data.join("proj/self"));
+        git(&data.join("proj/sub"));
+        file(&data.join("proj/sub/docs/y.md"));
+        ln(data.join("proj/docs"), &data.join("proj/sub/linkdir"));
+        let cproj = data.join("proj");
+        let roots_cp = vec![cproj.clone()];
+        let roots_cp_m2 = vec![cproj.clone(), m2.clone()];
+        let roots_m2_first = vec![m2.clone(), cproj.clone()];
+        t.row(
+            "C1 canonical P, plain row via home/proj",
+            true,
+            &roots_cp,
+            &home.join("proj/docs/x.md"),
+        );
+        t.row(
+            "C2 canonical P, outward linkdir via home/proj",
+            false,
+            &roots_cp,
+            &home.join("proj/linkdir/x.md"),
+        );
+        t.row(
+            "C3 canonical P, in-repo link via home/proj",
+            true,
+            &roots_cp,
+            &home.join("proj/inlink/y.md"),
+        );
+        t.row(
+            "C4 canonical P, P/up -> data, row via home/proj/up/other (sibling repo)",
+            false,
+            &roots_cp,
+            &home.join("proj/up/other/x.md"),
+        );
+        t.row(
+            "C5 canonical P then m2, P/tom2 -> m2, spelled home/proj/tom2",
+            false,
+            &roots_cp_m2,
+            &home.join("proj/tom2/x.md"),
+        );
+        t.row(
+            "C5b same layout, spelled data/proj/tom2",
+            false,
+            &roots_cp_m2,
+            &cproj.join("tom2/x.md"),
+        );
+        t.row(
+            "C5c m2 listed FIRST, spelled home/proj/tom2: the root is m2",
+            true,
+            &roots_m2_first,
+            &home.join("proj/tom2/x.md"),
+        );
+        t.row(
+            "C5d m2 listed FIRST, spelled data/proj/tom2: same verdict as C5c",
+            true,
+            &roots_m2_first,
+            &cproj.join("tom2/x.md"),
+        );
+        t.row("C8 two resolving ancestors (home/proj, home/proj/self): shallowest anchors, the nested repo is behind a link", true, &roots_cp, &home.join("proj/self/sub/linkdir/x.md"));
+        t.row(
+            "C9 same nested repo reached without the extra link: its link back into P is refused",
+            false,
+            &roots_cp,
+            &home.join("proj/sub/linkdir/x.md"),
+        );
+        t.row(
+            "C9b same, canonical spelling",
+            false,
+            &roots_cp,
+            &cproj.join("sub/linkdir/x.md"),
+        );
+        git(&home);
+        t.row(
+            "C6 home/.git above the link, plain row via home/proj",
+            true,
+            &roots_cp,
+            &home.join("proj/docs/x.md"),
+        );
+        t.row(
+            "C7 home/.git above the link, outward linkdir",
+            false,
+            &roots_cp,
+            &home.join("proj/linkdir/x.md"),
+        );
+
+        // ---- D: a home directory under git, a project without .git below it.
+        let ht = tempfile::tempdir().unwrap();
+        let h = canon(ht.path());
+        git(&h);
+        let dp = h.join("work/p");
+        file(&dp.join("docs/x.md"));
+        file(&h.join("other/x.md"));
+        ln(h.join("other"), &dp.join("tohome"));
+        let out2 = tempfile::tempdir().unwrap();
+        file(&out2.path().join("x.md"));
+        ln(out2.path(), &dp.join("linkdir"));
+        let roots_d = vec![h.clone(), dp.clone()];
+        let roots_d_only = vec![dp.clone()];
+        t.row(
+            "D1 home/.git, p without .git, plain",
+            true,
+            &roots_d,
+            &dp.join("docs/x.md"),
+        );
+        t.row(
+            "D2 home is the first root, p/tohome -> home/other (inside home)",
+            true,
+            &roots_d,
+            &dp.join("tohome/x.md"),
+        );
+        t.row(
+            "D2b only p is managed, same link (outside p)",
+            false,
+            &roots_d_only,
+            &dp.join("tohome/x.md"),
+        );
+        t.row(
+            "D3 home/.git, p/linkdir -> outside",
+            false,
+            &roots_d,
+            &dp.join("linkdir/x.md"),
+        );
+
+        // ---- E: the managed root is itself a link.
+        let et = tempfile::tempdir().unwrap();
+        let eb = canon(et.path());
+        git(&eb.join("data2/proj"));
+        file(&eb.join("data2/proj/docs/x.md"));
+        ln(eb.join("data2/proj"), &eb.join("l/proj"));
+        let out3 = tempfile::tempdir().unwrap();
+        file(&out3.path().join("x.md"));
+        ln(out3.path(), &eb.join("data2/proj/linkdir"));
+        let roots_e = vec![eb.join("l/proj")];
+        t.row(
+            "E1 root is a link, row spelled through it",
+            true,
+            &roots_e,
+            &eb.join("l/proj/docs/x.md"),
+        );
+        t.row(
+            "E2 root is a link, row canonical",
+            true,
+            &roots_e,
+            &eb.join("data2/proj/docs/x.md"),
+        );
+        t.row(
+            "E3 root is a link, outward link, spelled through it",
+            false,
+            &roots_e,
+            &eb.join("l/proj/linkdir/x.md"),
+        );
+        t.row(
+            "E4 root is a link, outward link, canonical",
+            false,
+            &roots_e,
+            &eb.join("data2/proj/linkdir/x.md"),
+        );
+
+        // ---- F: nested repository, submodule (a .git FILE), linked-worktree root.
+        let ft = tempfile::tempdir().unwrap();
+        let fp = canon(ft.path());
+        git(&fp);
+        file(&fp.join("docs/x.md"));
+        git(&fp.join("sub"));
+        file(&fp.join("sub/docs/y.md"));
+        ln(fp.join("docs"), &fp.join("sub/linkdir"));
+        std::fs::create_dir_all(fp.join("sm")).unwrap();
+        std::fs::write(fp.join("sm/.git"), "gitdir: ../.git/modules/sm\n").unwrap();
+        file(&fp.join("sm/docs/y.md"));
+        ln(fp.join("docs"), &fp.join("sm/linkdir"));
+        ln(fp.join("sub/docs"), &fp.join("tosub"));
+        let roots_f = vec![fp.clone()];
+        t.row(
+            "F1 nested repo, plain",
+            true,
+            &roots_f,
+            &fp.join("sub/docs/y.md"),
+        );
+        t.row("F2 nested repo linking into its superproject (inside the managed root): refused by choice", false, &roots_f, &fp.join("sub/linkdir/x.md"));
+        t.row(
+            "F3 submodule (.git file), plain",
+            true,
+            &roots_f,
+            &fp.join("sm/docs/y.md"),
+        );
+        t.row(
+            "F4 submodule linking into its superproject: refused by choice",
+            false,
+            &roots_f,
+            &fp.join("sm/linkdir/x.md"),
+        );
+        t.row(
+            "F5 superproject link into the nested repo's docs",
+            true,
+            &roots_f,
+            &fp.join("tosub/y.md"),
+        );
+        let wtt = tempfile::tempdir().unwrap();
+        let wt = canon(wtt.path());
+        std::fs::write(wt.join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").unwrap();
+        file(&wt.join("real/y.md"));
+        ln(wt.join("real"), &wt.join("inlink"));
+        let out4 = tempfile::tempdir().unwrap();
+        file(&out4.path().join("x.md"));
+        ln(out4.path(), &wt.join("linkdir"));
+        let roots_wt = vec![wt.clone()];
+        t.row(
+            "F6 linked-worktree root (.git file), in-repo link",
+            true,
+            &roots_wt,
+            &wt.join("inlink/y.md"),
+        );
+        t.row(
+            "F7 linked-worktree root, outward link",
+            false,
+            &roots_wt,
+            &wt.join("linkdir/x.md"),
+        );
+
+        // ---- G: project without .git whose link goes up to a directory holding a repository.
+        let gt = tempfile::tempdir().unwrap();
+        let g = canon(gt.path());
+        let gp = g.join("P");
+        file(&gp.join("docs/x.md"));
+        git(&g.join("S2"));
+        file(&g.join("S2/x.md"));
+        ln(&g, &gp.join("up"));
+        let out5 = tempfile::tempdir().unwrap();
+        file(&out5.path().join("x.md"));
+        ln(out5.path(), &gp.join("linkdir"));
+        let roots_g = vec![gp.clone()];
+        t.row("G1 no .git, plain", true, &roots_g, &gp.join("docs/x.md"));
+        t.row(
+            "G2 no .git, outward link",
+            false,
+            &roots_g,
+            &gp.join("linkdir/x.md"),
+        );
+        t.row(
+            "G3 no .git, P/up -> parent, row P/up/S2/x.md (S2 a repo)",
+            false,
+            &roots_g,
+            &gp.join("up/S2/x.md"),
+        );
+
+        // ---- H: a FOREIGN repository Q (not managed) linking into the managed project P.
+        let hqt = tempfile::tempdir().unwrap();
+        let hq = canon(hqt.path());
+        let (hp, q) = (hq.join("P"), hq.join("Q"));
+        git(&hp);
+        git(&q);
+        file(&hp.join("docs/x.md"));
+        ln(&hp, &q.join("linkP"));
+        ln(hp.join("docs"), &q.join("linkdocs"));
+        let roots_h = vec![hp.clone()];
+        t.row(
+            "H1 foreign Q/linkdocs -> P/docs (a subdirectory of the managed root)",
+            false,
+            &roots_h,
+            &q.join("linkdocs/x.md"),
+        );
+        // Decided, not derived: a foreign link to the managed root ITSELF is the same input as
+        // `home/proj -> data/proj` (C1), so one cannot be refused without the other.
+        t.row(
+            "H2 foreign Q/linkP -> P (the managed root itself): admitted, ambiguous with C1",
+            true,
+            &roots_h,
+            &q.join("linkP/docs/x.md"),
+        );
+
+        // ---- J: a foreign repository linking up to a directory holding another repository.
+        let jt = tempfile::tempdir().unwrap();
+        let j = canon(jt.path());
+        let (jq, js) = (j.join("Q"), j.join("S"));
+        git(&jq);
+        git(&js);
+        file(&js.join("docs/x.md"));
+        file(&jq.join("docs/x.md"));
+        ln("..", &jq.join("up"));
+        let unrelated = tempfile::tempdir().unwrap();
+        git(unrelated.path());
+        let roots_j = vec![unrelated.path().to_path_buf()];
+        t.row(
+            "J1 foreign Q/up -> .., row Q/up/S/docs/x.md (S a sibling repo)",
+            false,
+            &roots_j,
+            &jq.join("up/S/docs/x.md"),
+        );
+        t.row(
+            "J2 foreign Q, plain row",
+            true,
+            &roots_j,
+            &jq.join("docs/x.md"),
+        );
+
+        let mut bad = Vec::new();
+        for (name, expect, file, dir) in &t.0 {
+            if file != expect || dir != file {
+                bad.push(format!(
+                    "{name}: expected {} file-door {} dir-door {}",
+                    if *expect { "ADMIT" } else { "REFUSE" },
+                    if *file { "ADMIT" } else { "REFUSE" },
+                    if *dir { "ADMIT" } else { "REFUSE" },
+                ));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} of {} rows wrong:\n{}",
+            bad.len(),
+            t.0.len(),
+            bad.join("\n")
+        );
+    }
+
+    /// B1 end to end: the same layout through the three verbs. `doc(update)` and `doc(delete)`
+    /// refuse, and the sibling repository's file is untouched.
+    #[tokio::test]
+    async fn a_link_to_the_parent_cannot_reach_a_sibling_repository_through_any_verb() {
+        let wt0 = tempfile::tempdir().unwrap();
+        let w = canon(wt0.path());
+        let (pp, s) = (w.join("P"), w.join("S"));
+        git(&pp);
+        git(&s);
+        file(&s.join("docs/x.md"));
+        ln("..", &pp.join("up"));
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(cp(&pp))
+            .build();
+        let id = catalog_row(&ctx, &pp.join("up/S/docs/x.md"));
+
+        let upd = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}})).await;
+        let del = delete::call(&ctx, json!({"id": id, "force": true})).await;
+        let mvd = mv::call(&ctx, json!({"id": id, "new_rel_path": "moved.md"})).await;
+
+        assert!(upd.is_err(), "update must refuse: {upd:?}");
+        assert!(del.is_err(), "delete must refuse: {del:?}");
+        assert!(mvd.is_err(), "move must refuse: {mvd:?}");
+        assert_eq!(std::fs::read_to_string(s.join("docs/x.md")).unwrap(), DOC);
+        assert!(!pp.join("moved.md").exists());
+    }
+
+    /// M-1: a destination below a nested repository's link back into the superproject used to pass
+    /// `doc(move)`'s check (judged against the managed root: inside), the rename ran, and the id
+    /// repair was then refused by the deeper door: file moved, catalog row not, and an error
+    /// saying "Nothing was changed". Now the destination is judged by the SAME door, up front.
+    #[tokio::test]
+    async fn doc_move_into_a_nested_repositorys_link_back_to_the_superproject_moves_nothing() {
+        let base = tempfile::tempdir().unwrap();
+        let root = canon(base.path()).join("repo");
+        git(&root);
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        git(&root.join("sub"));
+        ln(root.join("docs"), &root.join("sub/linkdir"));
+        let old = root.join("a.md");
+        let old_id = crate::librarian::ids::artifact_id_from_abs(&old);
+        std::fs::write(
+            &old,
+            format!("---\nid: {old_id}\nkind: spec\nstatus: draft\ntitle: T\n---\n\nbody\n"),
+        )
+        .unwrap();
+        let ctx = mk_ctx(&root);
+        let id = catalog_row(&ctx, &old);
+
+        let err = mv::call(&ctx, json!({"id": id, "new_rel_path": "sub/linkdir/a.md"}))
+            .await
+            .expect_err("the door refuses the destination");
+
+        assert!(
+            msg(&err).contains("outside the repository root"),
+            "{}",
+            msg(&err)
+        );
+        assert!(old.is_file(), "the file stays where it was");
+        assert!(
+            !root.join("docs/a.md").exists(),
+            "nothing landed in the superproject"
+        );
+        let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+        assert_eq!(row.abs_path, old, "the row still names the old path");
+    }
+
+    /// M-2: a link whose target does not exist cannot be moved: the id repair reads through it
+    /// after the rename and fails with ENOENT, leaving the link moved and the row not.
+    #[tokio::test]
+    async fn doc_move_refuses_a_dangling_link_up_front_whatever_its_target_spelling() {
+        for (label, target_abs) in [("relative", false), ("absolute", true)] {
+            let base = tempfile::tempdir().unwrap();
+            let root = canon(base.path()).join("repo");
+            for d in [".git", "real", "a", "b"] {
+                std::fs::create_dir_all(root.join(d)).unwrap();
+            }
+            let target: PathBuf = if target_abs {
+                root.join("real/gone.md")
+            } else {
+                PathBuf::from("../real/gone.md")
+            };
+            ln(&target, &root.join("a/x.md"));
+            let ctx = mk_ctx(&root);
+            let id = catalog_row(&ctx, &root.join("a/x.md"));
+
+            let err = mv::call(&ctx, json!({"id": id, "new_rel_path": "b/x.md"}))
+                .await
+                .expect_err("a dangling link is not moved");
+
+            assert!(msg(&err).contains("dangling"), "{label}: {}", msg(&err));
+            assert!(
+                std::fs::symlink_metadata(root.join("a/x.md")).is_ok(),
+                "{label}: still in place"
+            );
+            assert!(
+                std::fs::symlink_metadata(root.join("b/x.md")).is_err(),
+                "{label}: nothing moved"
+            );
+            let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+            assert_eq!(row.abs_path, root.join("a/x.md"), "{label}: row unchanged");
+        }
+    }
+
+    /// M5 (a surviving mutant): a `./` segment must not move the landing. `./real.md` next to the
+    /// link names `a/real.md`; from `b/` it would name `b/real.md`, which does not exist.
+    #[tokio::test]
+    async fn doc_move_refuses_a_dot_slash_relative_target_that_would_not_resolve_there() {
+        let base = tempfile::tempdir().unwrap();
+        let root = canon(base.path()).join("repo");
+        for d in [".git", "a", "b"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("a/real.md"), DOC).unwrap();
+        ln("./real.md", &root.join("a/x.md"));
+        let ctx = mk_ctx(&root);
+        let id = catalog_row(&ctx, &root.join("a/x.md"));
+
+        let err = mv::call(&ctx, json!({"id": id, "new_rel_path": "b/x.md"}))
+            .await
+            .expect_err("`./real.md` would not resolve from b/");
+
+        assert!(msg(&err).contains("would not resolve"), "{}", msg(&err));
+        assert!(std::fs::symlink_metadata(root.join("b/x.md")).is_err());
+    }
+
+    /// L-2: arms are independent. The first version of the guard cleared whatever was armed, so an
+    /// out-of-order drop took a LATER arm's roots with it, and the previous call's roots could not
+    /// be restored by a nested one.
+    #[test]
+    fn overlapping_arms_neither_clear_nor_resurrect_each_others_roots() {
+        let cat = Catalog::open_in_memory().unwrap();
+        assert!(cat.write_roots().is_empty(), "nothing armed: empty");
+        let r1 = vec![PathBuf::from("/r1")];
+        let r2 = vec![PathBuf::from("/r2")];
+
+        // Out of order: dropping the OLDER arm leaves the newer arm's roots in force.
+        let a = cat.set_write_roots(r1.clone());
+        let b = cat.set_write_roots(r2.clone());
+        assert_eq!(
+            cat.write_roots(),
+            r2,
+            "the newest arm's roots are in force, not a union"
+        );
+        drop(a);
+        assert_eq!(
+            cat.write_roots(),
+            r2,
+            "the older arm's drop must not clear the newer arm"
+        );
+        drop(b);
+        assert!(
+            cat.write_roots().is_empty(),
+            "the last drop leaves nothing armed"
+        );
+
+        // Nested: dropping the newer arm restores the older arm's roots.
+        let a = cat.set_write_roots(r1.clone());
+        let b = cat.set_write_roots(r2);
+        drop(b);
+        assert_eq!(
+            cat.write_roots(),
+            r1,
+            "the inner drop restores the outer arm's roots"
+        );
+        drop(a);
+        assert!(cat.write_roots().is_empty());
+    }
+
+    /// L-3: a rekey PREVIEW must agree with the apply about a declared sidecar that is a dangling
+    /// in-repo link: `write_through` skips a path that is not a file, so neither refuses.
+    #[tokio::test]
+    async fn rekey_prefix_preview_and_apply_both_pass_a_dangling_sidecar_link() {
+        for (label, declare, mk_link) in [
+            ("dangling in-repo link sidecar", true, true),
+            ("no sidecar declared", false, false),
+            ("declared, absent, no link", true, false),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(root.path().join(".git")).unwrap();
+            std::fs::create_dir_all(root.path().join("docs/augmentations")).unwrap();
+            if mk_link {
+                ln("gone.yaml", &root.path().join("docs/augmentations/t.yaml"));
+            }
+            let decl = if declare {
+                "expects_augmentation: docs/augmentations/t.yaml\n"
+            } else {
+                ""
+            };
+            let ledger = format!(
+                "---\nkind: tracker\nentry_prefix: T\n{decl}---\n\n## T-1 — a\n\nsee T-1\n"
+            );
+            std::fs::write(root.path().join("ledger.md"), &ledger).unwrap();
+            let ctx = mk_ctx(root.path());
+            let id = catalog_row(&ctx, &root.path().join("ledger.md"));
+            augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id)).unwrap();
+
+            let preview =
+                super::super::rekey_prefix::call(&ctx, json!({"id": id, "from": "T", "to": "SRI"}))
+                    .await;
+            assert!(
+                preview.is_ok(),
+                "{label}: preview refused: {:?}",
+                preview.err().map(|e| msg(&e))
+            );
+            let apply = super::super::rekey_prefix::call(
+                &ctx,
+                json!({"id": id, "from": "T", "to": "SRI", "force": true}),
+            )
+            .await;
+            assert!(
+                apply.is_ok(),
+                "{label}: apply refused: {:?}",
+                apply.err().map(|e| msg(&e))
+            );
+        }
+    }
+
+    fn seed(ctx: &ToolContext, path: &str) -> String {
+        catalog_row(ctx, Path::new(path))
+    }
+
+    /// M-4: `merge_worktree`'s row selection used `LIKE`, which ignores ASCII case, so the
+    /// registration `.worktrees/feat_1` also selected the rows of `.worktrees/FEAT_1`, and
+    /// `abandon=true` deleted them with their cascade (and the dry run counted them).
+    #[tokio::test]
+    async fn merge_worktree_abandon_spares_the_rows_of_a_case_only_sibling_worktree() {
+        let ctx = mk_ctx(Path::new("/nonexistent-r5/main"));
+        let (own, sib_case, sib_wild) = {
+            let cat = ctx.catalog.lock();
+            crate::librarian::catalog::worktree::upsert_active(
+                &cat,
+                "/nonexistent-r5/.worktrees/feat_1",
+                "/nonexistent-r5/main",
+                None,
+                1,
+            )
+            .unwrap();
+            drop(cat);
+            (
+                seed(&ctx, "/nonexistent-r5/.worktrees/feat_1/docs/a.md"),
+                seed(&ctx, "/nonexistent-r5/.worktrees/FEAT_1/docs/a.md"),
+                seed(&ctx, "/nonexistent-r5/.worktrees/featX1/docs/a.md"),
+            )
+        };
+        let root = "/nonexistent-r5/.worktrees/feat_1";
+
+        let dry = super::super::merge_worktree::call(
+            &ctx,
+            json!({"root": root, "abandon": true, "dry_run": true}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            dry["abandoned"], 1,
+            "the dry run counts only this worktree's rows: {dry}"
+        );
+        let done = super::super::merge_worktree::call(&ctx, json!({"root": root, "abandon": true}))
+            .await
+            .unwrap();
+
+        assert_eq!(done["abandoned"], 1);
+        let cat = ctx.catalog.lock();
+        assert!(
+            artifact::get(&cat, &own).unwrap().is_none(),
+            "its own row is gone"
+        );
+        assert!(
+            artifact::get(&cat, &sib_case).unwrap().is_some(),
+            "FEAT_1 survives"
+        );
+        assert!(
+            artifact::get(&cat, &sib_wild).unwrap().is_some(),
+            "featX1 survives"
+        );
+    }
+
+    /// The non-abandon path selects with the same predicate: a merge of `feat_1` must not reseat
+    /// the rows of `FEAT_1` onto the main checkout.
+    #[tokio::test]
+    async fn merge_worktree_merge_does_not_reseat_the_rows_of_a_case_only_sibling_worktree() {
+        let ctx = mk_ctx(Path::new("/nonexistent-r5b/main"));
+        let sib = {
+            let cat = ctx.catalog.lock();
+            crate::librarian::catalog::worktree::upsert_active(
+                &cat,
+                "/nonexistent-r5b/.worktrees/feat_1",
+                "/nonexistent-r5b/main",
+                None,
+                1,
+            )
+            .unwrap();
+            drop(cat);
+            seed(&ctx, "/nonexistent-r5b/.worktrees/feat_1/docs/a.md");
+            seed(&ctx, "/nonexistent-r5b/.worktrees/FEAT_1/docs/a.md")
+        };
+
+        let out = super::super::merge_worktree::call(
+            &ctx,
+            json!({"root": "/nonexistent-r5b/.worktrees/feat_1", "dry_run": true}),
+        )
+        .await
+        .unwrap();
+
+        let touched = out.to_string();
+        assert!(
+            !touched.contains(&sib),
+            "the sibling worktree's row must not be selected: {touched}"
+        );
+    }
+}

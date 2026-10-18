@@ -39,23 +39,30 @@ pub struct Catalog {
     /// `append_entry`, `update_entry`, `rekey_prefix_rows`, the sidecar write-through) have no
     /// `ToolContext`, and the write door needs a root to judge "outside" against; the tool arms it
     /// right after taking the lock (`arm_write_roots`), and holds the returned [`WriteRootsArm`]
-    /// for the call: dropping it CLEARS the roots, so they never outlive the call that armed them.
-    /// Empty means "no managed root known" and the door falls back to the repository the path
-    /// spells. Interior-mutable (and shared with the guard) so a `&Catalog` can arm it.
-    write_roots: std::sync::Arc<parking_lot::Mutex<Vec<std::path::PathBuf>>>,
+    /// for the call. Kept as a STACK of arms: the roots in force are the newest live arm's, and a
+    /// dropped guard removes ITS OWN entry only, so overlapping or out-of-order arms neither
+    /// clear nor resurrect each other's roots. With none live the roots are empty, meaning "no
+    /// managed root known": the door then works from the repositories the spelling names.
+    /// Interior-mutable (and shared with the guards) so a `&Catalog` can arm it.
+    write_roots: ArmedRoots,
 }
-/// Clears a catalog's armed write roots when dropped. Returned by `Catalog::set_write_roots`; hold
-/// it in a named local (`let _armed = ...`, never `let _ = ...`, which drops at once) for the
-/// length of the tool call. It owns a handle on the roots, not a borrow of the catalog, so the
-/// caller can keep using the catalog mutably while it lives.
+
+/// The arms in force, oldest first: `(arm id, roots)`.
+type ArmedRoots = std::sync::Arc<parking_lot::Mutex<Vec<(u64, Vec<std::path::PathBuf>)>>>;
+
+/// Removes its own arm from the catalog's write roots when dropped. Returned by
+/// `Catalog::set_write_roots`; hold it in a named local (`let _armed = ...`, never `let _ = ...`,
+/// which drops at once) for the length of the tool call. It owns a handle on the roots, not a
+/// borrow of the catalog, so the caller can keep using the catalog mutably while it lives.
 #[must_use = "the roots are cleared when this is dropped; bind it for the whole call"]
 pub(crate) struct WriteRootsArm {
-    roots: std::sync::Arc<parking_lot::Mutex<Vec<std::path::PathBuf>>>,
+    roots: ArmedRoots,
+    id: u64,
 }
 
 impl Drop for WriteRootsArm {
     fn drop(&mut self) {
-        self.roots.lock().clear();
+        self.roots.lock().retain(|(id, _)| *id != self.id);
     }
 }
 
@@ -618,17 +625,24 @@ impl Catalog {
     }
 
     /// Arm the managed roots for the tool call that holds this catalog's lock (see the field). The
-    /// returned guard clears them on drop.
+    /// returned guard removes this arm, and only this arm, when dropped.
     pub(crate) fn set_write_roots(&self, roots: Vec<std::path::PathBuf>) -> WriteRootsArm {
-        *self.write_roots.lock() = roots;
+        static NEXT_ARM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT_ARM.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.write_roots.lock().push((id, roots));
         WriteRootsArm {
             roots: std::sync::Arc::clone(&self.write_roots),
+            id,
         }
     }
 
-    /// The managed roots armed by the current tool call; empty when none was armed.
+    /// The managed roots of the newest live arm; empty when none is armed.
     pub(crate) fn write_roots(&self) -> Vec<std::path::PathBuf> {
-        self.write_roots.lock().clone()
+        self.write_roots
+            .lock()
+            .last()
+            .map(|(_, roots)| roots.clone())
+            .unwrap_or_default()
     }
 
     pub fn open(db_path: &Path) -> Result<Self> {

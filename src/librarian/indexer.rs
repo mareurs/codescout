@@ -678,10 +678,8 @@ pub fn index_repo_sync(
     // `b/my_app`) and ignores ASCII case (so did `b/MY_APP`'s), and an `ESCAPE` clause cures only
     // the first. `path_at_or_under_sql` compares bytes, so a sibling is never this walk's row and
     // no Rust-side re-filter is needed (the one that was here masked the SQL being wrong).
-    let root_str = crate::util::fs::RepoPath::from(abs_root)
-        .as_str()
-        .to_string();
-    let root_prefix = format!("{root_str}/");
+    let (root_str, root_prefix) =
+        crate::librarian::util::root_and_prefix(crate::util::fs::RepoPath::from(abs_root).as_str());
     let under_root = crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2");
     let candidates: Vec<(String, String)> = if seen_ids.is_empty() {
         cat.conn

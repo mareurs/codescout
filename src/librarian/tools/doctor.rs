@@ -2587,8 +2587,9 @@ fn reseat_worktree(
 /// pruning `/gone/my_app` deleted the rows (with their cascaded history) of the LIVE
 /// `/gone/myXapp` and `/gone/MY_APP`.
 fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Result<(usize, usize)> {
-    let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
-    let under = format!("{root_fwd}/");
+    let (root_fwd, under) = crate::librarian::util::root_and_prefix(
+        crate::util::fs::RepoPath::from_path(root).as_str(),
+    );
     let artifact_rows = conn.execute(
         &format!(
             "DELETE FROM artifact WHERE {}",
@@ -2652,8 +2653,9 @@ fn count_dead_root(
     conn: &rusqlite::Connection,
     root: &std::path::Path,
 ) -> anyhow::Result<(usize, usize)> {
-    let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
-    let under = format!("{root_fwd}/");
+    let (root_fwd, under) = crate::librarian::util::root_and_prefix(
+        crate::util::fs::RepoPath::from_path(root).as_str(),
+    );
     let arts: i64 = conn.query_row(
         &format!(
             "SELECT COUNT(*) FROM artifact WHERE {}",
@@ -17864,6 +17866,29 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
             .unwrap();
         assert_eq!(left, 2);
+    }
+
+    /// L-5: a trailing separator on the dead root (`doctor(fix=prune_missing, root="/gone/x/")`)
+    /// bound the prefix `/gone/x//`, so the prune and its dry run reported zero rows without saying
+    /// why. Both normalize it.
+    #[test]
+    fn prune_and_count_dead_root_accept_a_trailing_separator() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "own", "/gone/x/docs/a.md");
+        seed_artifact(&cat, "sib", "/gone/xy/docs/a.md");
+        seed_commit(&cat, "ownc", "/gone/x");
+        let root = std::path::Path::new("/gone/x/");
+
+        let counted = count_dead_root(&cat.conn, root).unwrap();
+        let pruned = prune_dead_root(&cat.conn, root).unwrap();
+
+        assert_eq!(counted, (1, 1), "the dry run counts the root's rows");
+        assert_eq!(pruned, (1, 1));
+        let left: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 1, "the sibling survives");
     }
 
     #[test]

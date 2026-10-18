@@ -757,7 +757,11 @@ pub fn rekey_prefix_rows(
 
     // Preview drops the transaction unread. Every refusal above has already fired, so a
     // preview that returns Ok is a statement that the apply would too — which is the only
-    // thing that makes a dry run worth reading.
+    // thing that makes a dry run worth reading. Bounded, and the bound is stated: the sidecar
+    // preflight at the top runs in both modes, but the door that guards the ledger's own BODY
+    // rewrite (`write_catalogued_file` inside `rekey_body`) is skipped in a preview, so an Ok
+    // preview does NOT promise the apply clears a body refusal (a ledger below a link out of its
+    // repo).
     if mode == RekeyMode::Apply {
         tx.commit()?;
     } else {

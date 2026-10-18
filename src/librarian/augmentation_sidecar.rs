@@ -243,7 +243,10 @@ pub(crate) fn preflight_write_through(
     let Some((_, path)) = declared_target(cat, artifact_id)? else {
         return Ok(());
     };
-    if path.exists() || std::fs::symlink_metadata(&path).is_ok() {
+    // Exactly the file `write_through` would write: it skips a path that is not a file (absent, a
+    // directory, or a DANGLING link), so a refusal for those would over-refuse, and a rekey
+    // PREVIEW would fail where the apply succeeds.
+    if path.is_file() {
         crate::librarian::util::refuse_write_through_symlink(&path)?;
     }
     Ok(())

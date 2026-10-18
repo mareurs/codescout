@@ -74,7 +74,8 @@ pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Re
 /// Write `contents` to `path` — a path the CATALOG (or a document's frontmatter) supplied — unless
 /// the path is a symbolic link ([`refuse_write_through_symlink`]) or resolves outside the root the
 /// caller manages ([`refuse_catalogued_path_outside_repo`]; `roots` is `tools::managed_roots`, or
-/// empty where the caller has none, in which case the spelled repository is the fallback).
+/// empty where the caller has none, in which case only the repositories the spelling names are
+/// available to judge by).
 ///
 /// The one door the librarian's "rewrite a catalogued file in place" writers go through, so a
 /// fourth writer added later takes the guard by calling this rather than by remembering it.
@@ -91,30 +92,8 @@ pub(crate) fn write_catalogued_file(
     Ok(())
 }
 
-/// The repository root a catalogued path SPELLS: the nearest ancestor that holds a `.git` and is
-/// not itself a symbolic link.
-///
-/// Lexical on purpose, and the link exclusion is load-bearing. A row below a link directory is
-/// exactly the case this exists for, and `lookup_git_root` would stop at the LINK when the link's
-/// target is itself a repository (`docs -> ~/other-repo`): the "root" would then be the outside
-/// repository and every path below it would read as inside. `None` when no ancestor qualifies
-/// (a workspace that is not a git checkout, or a repository root reached through a link): the
-/// containment checks then have nothing to compare against and the LEAF rule alone applies.
-pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let mut cur = path.parent()?;
-    loop {
-        let is_link = std::fs::symlink_metadata(cur)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false);
-        if !is_link && cur.join(".git").exists() {
-            return Some(cur.to_path_buf());
-        }
-        cur = cur.parent()?;
-    }
-}
-
-/// [`refuse_path_outside_root`] for a catalog-supplied path, against ONE root; a path for which no
-/// root can be named is not checked.
+/// [`refuse_path_outside_root`] for a catalog-supplied FILE path, against the root [`door_root`]
+/// names; a path for which no root can be named is not checked (only the leaf rule applies).
 ///
 /// This is the question the LEAF rule cannot ask: a row whose parent directory is a link out of
 /// the repository. The indexer can mint one two ways, both shippable by a repository
@@ -124,72 +103,143 @@ pub(crate) fn spelled_repo_root(path: &std::path::Path) -> Option<std::path::Pat
 /// A link whose target stays INSIDE the repository is untouched: a symlinked tracker directory
 /// is a legitimate setup.
 ///
-/// **Which root.** Two candidates, and the path is judged against the DEEPER of the two:
-///
-/// 1. the *base*: the first managed root that lexically contains the spelling
-///    ([`confinement_root`]; `roots` is `tools::managed_roots`, the list `doc(move)` and
-///    `doc(delete)` consult), else the deepest ANCESTOR of the spelling that resolves to a
-///    managed root (a project registered under its canonical path while rows keep the spelling
-///    of a link to it: `home/proj/x.md` against a root of `data/proj`);
-/// 2. the *spelled repository* ([`spelled_repo_root`]): the nearest non-link ancestor holding a
-///    `.git`.
-///
-/// Neither alone is sound. The base alone is too wide where a managed root holds several
-/// repositories (a legacy `[[roots]]` umbrella, or an unrelated active project listed first): a
-/// link from repository A into repository B stays inside the umbrella, and the write lands in B.
-/// The spelled repository alone knows nothing of a project reached through a link (its walk
-/// skips both links and finds no `.git`), and so checked nothing. There is deliberately NO
-/// "the resolution lies under some managed root, so accept" shortcut: a foreign repository's row
-/// that resolves into a managed project is the very case that must be refused, and the
-/// shortcut admitted it. A path with neither candidate has nothing to compare against and only
-/// the leaf rule applies.
+/// **One function for every verb.** `doc(update)` and every other writer reach it through
+/// [`write_catalogued_file`]; `doc(move)` calls it for its destination (before the rename, so the
+/// id repair that follows cannot be refused after the file has moved) and
+/// [`refuse_catalogued_dir_outside_repo`], the same decision for a directory, for its source and
+/// for `doc(delete)`. The three verbs therefore cannot disagree about "outside".
 pub(crate) fn refuse_catalogued_path_outside_repo(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
     verb: &str,
 ) -> anyhow::Result<()> {
-    let base =
-        confinement_root(roots, path).or_else(|| ancestor_resolving_to_managed_root(roots, path));
-    let root = match (base, spelled_repo_root(path)) {
-        (Some(base), Some(spelled)) if spelled.starts_with(&base) => spelled,
-        (Some(base), _) => base,
-        (None, Some(spelled)) => spelled,
-        (None, None) => return Ok(()),
+    match door_root(roots, path) {
+        Some(root) => refuse_path_outside_root(path, &root, verb),
+        None => Ok(()),
+    }
+}
+
+/// [`refuse_catalogued_path_outside_repo`] for a DIRECTORY (the parent of a leaf that may itself
+/// be a link, which `doc(move)` and `doc(delete)` act on without following): the same root, the
+/// same containment test, applied to `dir` itself. A probe child names the directory's own
+/// ancestors, `dir` included, as the candidates; it is never created or opened.
+pub(crate) fn refuse_catalogued_dir_outside_repo(
+    roots: &[std::path::PathBuf],
+    dir: &std::path::Path,
+    verb: &str,
+) -> anyhow::Result<()> {
+    let probe = dir.join(".codescout-door-probe");
+    match door_root(roots, &probe) {
+        Some(root) => refuse_path_outside_root(dir, &root, verb),
+        None => Ok(()),
+    }
+}
+
+/// The root a catalogued path is judged against: the one place that decision is made.
+///
+/// **Invariant: the judging root is reachable from the confinement root without crossing a
+/// symbolic link; when no such inner root exists, the confinement root itself is used.**
+///
+/// * The *confinement root* (`managed_base`) is where the spelling says the path lives inside
+///   what the caller manages.
+/// * The *refinement* is the nearest ancestor of the spelling that is a repository (`.git`, not
+///   itself a link) and that is reached from the confinement root by plain directories only. It
+///   narrows the root where a managed root holds several repositories (a legacy `[[roots]]`
+///   umbrella, an unrelated active project listed first, a nested repository or submodule): a
+///   link from one repository into another stays inside the umbrella and must still be refused.
+/// * The "without crossing a link" clause is what keeps the refinement honest. A candidate found
+///   BELOW a link (`P/up -> ..`, row `P/up/S/docs/x.md`) is whatever the link points at, here the
+///   sibling repository `S`; judged against `S` the write looks inside and lands in a repository
+///   the project does not own. Such a candidate is skipped and the walk goes on upward, so the
+///   answer is `P`, and the resolution (`S/...`) is then outside it.
+///
+/// With no confinement root (a row no managed root contains, spelled through no link to one) the
+/// outermost repository on the spelling is the anchor and the same rule applies from there; with
+/// no repository either there is nothing to compare against and `None` is returned.
+///
+/// There is deliberately no "the resolution lies under some managed root, so accept" shortcut: a
+/// foreign repository's row that resolves into a managed project is the very case that must be
+/// refused. Known and accepted: a foreign repository that links to a managed root ITSELF
+/// (`Q/linkP -> P`) is indistinguishable from a project registered under its canonical path and
+/// reached through a link (`home/proj -> data/proj`), and is admitted; a foreign link to a
+/// SUBDIRECTORY of a managed root names no root and is refused. The table of layouts that
+/// pins every verdict is `door_layout_table` in `link_dir_tests.rs`.
+fn door_root(roots: &[std::path::PathBuf], path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let base = managed_base(roots, path);
+    // Nearest first. Candidates above the confinement root are harmless: `descends_without_link`
+    // never accepts one (it is not below the anchor), so they only matter for the no-root case.
+    let repos: Vec<&std::path::Path> = path.ancestors().skip(1).filter(|a| holds_git(a)).collect();
+    let anchor: std::path::PathBuf = match &base {
+        Some(b) => b.clone(),
+        None => (*repos.last()?).to_path_buf(),
     };
-    refuse_path_outside_root(path, &root, verb)
+    let refined = repos.iter().find(|c| descends_without_link(&anchor, c));
+    Some(refined.map_or(anchor, |c| (*c).to_path_buf()))
 }
 
-/// The root a catalogued path is judged against: the first managed root that contains its
-/// spelling (`tools::containing_root`, the guard move and delete use), else `None`. Shared by
-/// the write door, the sidecar preflight and `doc(augment)`, so a refusal found late cannot
-/// disagree with the check made early.
-pub(crate) fn confinement_root(
+/// Do the components from `anchor` down to `candidate` (candidate included) contain no symbolic
+/// link? `candidate` must lie under `anchor` lexically; one that does not is never reachable.
+fn descends_without_link(anchor: &std::path::Path, candidate: &std::path::Path) -> bool {
+    let Ok(below) = candidate.strip_prefix(anchor) else {
+        return false;
+    };
+    let mut cur = anchor.to_path_buf();
+    for c in below.components() {
+        cur.push(c);
+        let is_link = std::fs::symlink_metadata(&cur)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        if is_link {
+            return false;
+        }
+    }
+    true
+}
+
+/// The confinement root of `path`: the FIRST managed root, in the caller's order, that either
+/// lexically contains the spelling (`tools::containing_root`, the guard `doc(move)` and
+/// `doc(delete)` use) or has an ancestor of the spelling that resolves to it. In the second
+/// case the confinement root is the SHALLOWEST such ancestor (a project registered under its
+/// canonical path while rows keep the spelling of a link to it: `home/proj/x.md` against a
+/// root of `data/proj`).
+///
+/// Both clauses live in one loop, in root order, so that two spellings of one file give one
+/// answer: with an unrelated root listed first the lexical test of a LATER root must not win
+/// over a resolving ancestor of an EARLIER one. The shallowest ancestor keeps a link back into
+/// the same project (`home/proj/self -> data/proj`) from shifting the anchor inward and so
+/// admitting candidates the plain spelling would not. Only an ancestor that resolves to a root
+/// EXACTLY counts.
+///
+/// `skip(1)` leaves out the path itself: a leaf that resolves exactly to a managed root is a
+/// link, which the leaf rule refuses first for writes, and for every other verb it is the root
+/// directory judged against itself either way, so `skip(0)` is equivalent (a mutant of it
+/// survives, on purpose, and is recorded in the issue).
+fn managed_base(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
-    crate::librarian::tools::containing_root(roots, path).cloned()
+    for root in roots {
+        if crate::librarian::tools::containing_root(std::slice::from_ref(root), path).is_some() {
+            return Some(root.clone());
+        }
+        let resolved_root = resolve_through_existing_ancestor(root);
+        let shallowest = path
+            .ancestors()
+            .skip(1)
+            .filter(|a| std::fs::canonicalize(a).is_ok_and(|c| c == resolved_root))
+            .last();
+        if let Some(a) = shallowest {
+            return Some(a.to_path_buf());
+        }
+    }
+    None
 }
 
-/// The deepest ancestor of `path`'s SPELLING that resolves to a managed root, if any: the root a
-/// project reached through a link is registered as, found from the spelled side. Only an ancestor
-/// that resolves to a root EXACTLY counts; one that resolves to somewhere merely below a root (a
-/// foreign repository's link into a managed project) names no root, which is the point.
-fn ancestor_resolving_to_managed_root(
-    roots: &[std::path::PathBuf],
-    path: &std::path::Path,
-) -> Option<std::path::PathBuf> {
-    let resolved_roots: Vec<std::path::PathBuf> = roots
-        .iter()
-        .map(|r| resolve_through_existing_ancestor(r))
-        .collect();
-    path.ancestors()
-        .skip(1)
-        .find(|a| {
-            std::fs::canonicalize(a)
-                .map(|c| resolved_roots.contains(&c))
-                .unwrap_or(false)
-        })
-        .map(std::path::Path::to_path_buf)
+/// Does `dir` hold a `.git` (a directory, or a file for a submodule or linked worktree)? A
+/// candidate that is itself a link needs no test of its own here: [`descends_without_link`]
+/// rejects any candidate whose descent from the anchor crosses a link, itself included.
+fn holds_git(dir: &std::path::Path) -> bool {
+    dir.join(".git").exists()
 }
 
 /// SQL predicate (text, with bound parameters) matching a path column that IS `root` or lies
@@ -205,6 +255,16 @@ fn ancestor_resolving_to_managed_root(
 /// interpolate a user string into them.
 pub(crate) fn path_at_or_under_sql(col: &str, root_param: &str, prefix_param: &str) -> String {
     format!("({col} = {root_param} OR substr({col}, 1, length({prefix_param})) = {prefix_param})")
+}
+
+/// The two values [`path_at_or_under_sql`] binds for `root` (a forward-slash path as the catalog
+/// stores it): the root without a trailing separator, and that plus exactly one `/`. A caller that
+/// passed `/gone/x/` used to bind the prefix `/gone/x//`, which no row matches, so the prune and its
+/// dry run reported zero rows without saying why. `/` alone yields `("", "/")`: every absolute row
+/// is under it, and the empty root matches none by equality.
+pub(crate) fn root_and_prefix(root: &str) -> (String, String) {
+    let trimmed = root.trim_end_matches('/');
+    (trimmed.to_string(), format!("{trimmed}/"))
 }
 
 /// Refuse a `path` that does not resolve to somewhere under `root`.
@@ -410,6 +470,58 @@ mod tests {
             .unwrap();
 
         assert_eq!(got, vec![root.to_string(), format!("{root}/docs/a.md")]);
+    }
+
+    /// `length()` counts CHARACTERS and so does `substr`; a byte count (`length(CAST(.. AS BLOB))`)
+    /// would cut a multi-byte root's descendants short and match none of them. Case folding must
+    /// not reach a non-ASCII sibling either (`É_APP` against `é_app`).
+    #[test]
+    fn path_at_or_under_sql_counts_characters_for_a_non_ascii_root() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (p TEXT);").unwrap();
+        for p in [
+            "/tmp/é_app",
+            "/tmp/é_app/docs/a.md",
+            "/tmp/é_appX/docs/a.md",
+            "/tmp/É_APP/docs/a.md",
+            "/tmp/éXapp/docs/a.md",
+        ] {
+            conn.execute("INSERT INTO t VALUES (?1)", [p]).unwrap();
+        }
+        let (root, prefix) = root_and_prefix("/tmp/é_app");
+        let sql = format!(
+            "SELECT p FROM t WHERE {} ORDER BY p",
+            path_at_or_under_sql("p", "?1", "?2")
+        );
+
+        let got: Vec<String> = conn
+            .prepare(&sql)
+            .unwrap()
+            .query_map([&root, &prefix], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert_eq!(got, vec!["/tmp/é_app", "/tmp/é_app/docs/a.md"]);
+    }
+
+    /// `/gone/x/` bound the prefix `/gone/x//` and matched nothing; a bare `/` must still match
+    /// every absolute row by prefix.
+    #[test]
+    fn root_and_prefix_normalizes_one_trailing_separator() {
+        assert_eq!(
+            root_and_prefix("/gone/x"),
+            ("/gone/x".into(), "/gone/x/".into())
+        );
+        assert_eq!(
+            root_and_prefix("/gone/x/"),
+            ("/gone/x".into(), "/gone/x/".into())
+        );
+        assert_eq!(
+            root_and_prefix("/gone/x//"),
+            ("/gone/x".into(), "/gone/x/".into())
+        );
+        assert_eq!(root_and_prefix("/"), (String::new(), "/".into()));
     }
 
     #[test]

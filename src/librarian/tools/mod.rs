@@ -294,10 +294,13 @@ pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
 /// `update_entry`, `rekey_prefix_rows`, the sidecar write-through): those have no `ToolContext`,
 /// and the write door judges "outside" against the SAME roots `doc(move)` and `doc(delete)` use.
 ///
-/// Returns a guard that CLEARS the roots on drop; bind it (`let _armed = ...`) so it lives exactly
-/// as long as the call. The lock is held for the whole call and the guard is declared after it,
-/// so it drops first and nothing sees the roots after the call, whether it returned or failed: an
-/// unarmed writer falls back to the spelled repository instead of inheriting another call's roots.
+/// Returns a guard that removes this arm when dropped; bind it (`let _armed = ...`) so it lives
+/// exactly as long as the call. Declared after the catalog lock guard it drops first, so nothing
+/// sees the roots after the call, whether it returned or failed: an unarmed writer falls back to
+/// the repositories the spelling names instead of inheriting another call's roots. The lock is
+/// held for the guard's whole life in every tool but one: `doc(augment)` releases it between its
+/// preflight and its write-through, and arms again under the lock it re-takes (each arm is its
+/// own guard, scoped to its own lock hold).
 #[must_use = "bind the guard for the whole call: dropping it clears the roots"]
 pub(crate) fn arm_write_roots(
     ctx: &ToolContext,
