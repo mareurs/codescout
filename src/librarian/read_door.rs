@@ -22,18 +22,25 @@
 //! root that is a home directory); containment refuses every other case first.
 //!
 //! **Opened once, then judged.** [`ReadDoor::bytes`] opens the path (following its links once),
-//! requires a regular file, canonicalizes the path, judges THAT path, and then requires that the
-//! canonical path still names the inode it opened (`st_dev` and `st_ino`). It reads from the
-//! descriptor it opened and never reopens by path. On Unix that closes the race between the
-//! check and the read: the open descriptor keeps the inode allocated, so a link swapped between
-//! any two steps gives a different inode or a refused path, and the read fails closed. What is
-//! not covered: a HARD link to an outside file placed inside the repository (same inode, inside
-//! path; `git checkout` cannot create one, and a process that can create one can already read
-//! the target) and a bind mount the operator made. A concurrent change of DIRECTORY links in the
-//! spelling can at worst make the judging root the confinement root instead of a nested
-//! repository; the bytes are then still inside what the caller manages. **macOS uses the same
-//! `std` calls and was not run. Windows has no stable file index in `std`, so there the door
-//! judges and then reads with a race window, and it is unverified (decision D9).**
+//! requires a regular file, and judges the OPENED FILE's location: on Linux the descriptor's own
+//! path (`/proc/self/fd/N`, the kernel's record of where the opened inode lives, which no later
+//! swap of a link in the spelling changes); elsewhere, or with no `/proc`, the canonicalized
+//! spelling. It then requires the judged path to name the opened inode by its OWN `st_dev` and
+//! `st_ino` (`symlink_metadata`: a canonical path is never a link, so following one there was
+//! the hole review round 1 found, a leaf swapped inside for the judgement and back for the check),
+//! and reads from the descriptor it opened, never reopening by path, with a fallible allocation.
+//! On Linux that closes the race between the check and the read. On the fallback path it is
+//! closed for a swap of the LEAF, not for a swap of a PARENT directory to an inside directory for
+//! the judgement and back afterwards (the canonical path then resolves through the restored link
+//! to the opened inode). What is not covered anywhere: a HARD link to an outside file placed
+//! inside the repository (same inode, inside path; `git checkout` cannot create one, and a process
+//! that can create one can already read the target) and a bind mount the operator made. A
+//! concurrent change of DIRECTORY links in the spelling can at worst make the judging root the
+//! confinement root instead of a nested repository; the bytes are then still inside what the
+//! caller manages. **macOS takes the fallback path (`F_GETPATH` is not wired) and was not run.
+//! Windows has no stable file index in `std`, so there the door judges and then reads with a race
+//! window, and it is unverified (decision D9).** A refusal names the spelling and the repository
+//! root, never the resolved location outside it.
 //!
 //! **Bytes the catalog already stored** (chunk text, a title) were read by an older walk;
 //! [`ReadDoor::refusal`] asks the same question of the file as it is now, without opening it, so
@@ -176,9 +183,10 @@ impl ReadDoor {
                 let root_real = crate::librarian::util::resolve_through_existing_ancestor(&root);
                 let climbs = real.components().any(|c| matches!(c, Component::ParentDir));
                 if climbs || !real.starts_with(&root_real) {
+                    // The repository root is named; the resolved location outside it is not (it would
+                    // tell the caller that the target exists, and where).
                     return Some(format!(
-                        "it resolves to `{}`, outside the repository root `{}`",
-                        real.display(),
+                        "it resolves outside the repository root `{}`",
                         root_real.display()
                     ));
                 }
@@ -190,19 +198,16 @@ impl ReadDoor {
                 // fresh `lstat` that a swap could answer differently.
                 let lexical: PathBuf = spelled.components().collect();
                 if real != lexical {
-                    return Some(format!(
-                        "it resolves to `{}` through a symbolic link, and no managed root or \
-                         repository contains it to judge the link against",
-                        real.display()
-                    ));
+                    return Some(
+                        "it reaches its file through a symbolic link, and no managed root or \
+                         repository contains it to judge the link against"
+                            .to_string(),
+                    );
                 }
             }
         }
         if deny_listed(real) {
-            return Some(format!(
-                "it resolves to `{}`, a protected location on the read deny-list",
-                real.display()
-            ));
+            return Some(DENIED.to_string());
         }
         None
     }
@@ -245,17 +250,14 @@ pub(crate) fn for_project(project_root: &Path) -> ReadDoor {
 pub(crate) fn read_agent_named_text(path: &Path) -> Result<String, ReadError> {
     utf8(read_verified(path, |real| {
         if deny_listed(real) {
-            return Err(refused(
-                path,
-                &format!(
-                    "it resolves to `{}`, a protected location on the read deny-list",
-                    real.display()
-                ),
-            ));
+            return Err(refused(path, DENIED));
         }
         Ok(())
     })?)
 }
+
+/// The deny-list refusal, naming no location.
+const DENIED: &str = "it resolves to a protected location on the read deny-list";
 
 fn utf8(bytes: Vec<u8>) -> Result<String, ReadError> {
     String::from_utf8(bytes).map_err(|e| {
@@ -302,10 +304,30 @@ fn read_verified(
     }
     #[cfg(test)]
     tests::between_open_and_check(path);
-    let real = std::fs::canonicalize(path).map_err(|_| changed(path))?;
+    // The path judged is the DESCRIPTOR's own where the kernel can name it (Linux): the opened
+    // file's real location, whatever the spelling's links do after the open. Elsewhere the
+    // spelling is canonicalized and tied back to the opened inode below.
+    let real = match descriptor_path(&file) {
+        Some(p) => p,
+        None => std::fs::canonicalize(path).map_err(|_| changed(path))?,
+    };
     judge(&real).map_err(ReadError::Refused)?;
+    #[cfg(test)]
+    tests::after_judge(path);
     same_file(&opened, &real).map_err(|_| changed(path))?;
-    let mut buf = Vec::with_capacity(opened.len() as usize);
+    // Fallible, as `std::fs::read` is: a file too large to hold (a sparse file can claim any
+    // size) is an error, never an allocation failure that aborts the process.
+    let mut buf = Vec::new();
+    let len = usize::try_from(opened.len()).unwrap_or(usize::MAX);
+    buf.try_reserve_exact(len).map_err(|e| {
+        ReadError::Io(std::io::Error::new(
+            std::io::ErrorKind::OutOfMemory,
+            format!(
+                "the file is too large to read ({} bytes): {e}",
+                opened.len()
+            ),
+        ))
+    })?;
     file.read_to_end(&mut buf).map_err(ReadError::Io)?;
     Ok(buf)
 }
@@ -334,11 +356,35 @@ fn open_for_read(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
 
-/// Does `real` still name the inode that was opened?
+/// The path the kernel records for an open descriptor (`/proc/self/fd/N`), or `None` where it
+/// cannot say (no `/proc`, a non-path descriptor, another OS).
+#[cfg(target_os = "linux")]
+fn descriptor_path(file: &std::fs::File) -> Option<PathBuf> {
+    use std::os::fd::AsRawFd;
+    #[cfg(test)]
+    if tests::fd_path_disabled() {
+        return None;
+    }
+    let p = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).ok()?;
+    p.is_absolute().then_some(p)
+}
+
+/// macOS (`F_GETPATH`) and the other platforms are not wired: the canonicalized spelling is
+/// judged and tied to the opened inode by `same_file`, which a swap of a PARENT directory between
+/// the check and the inode comparison can still defeat (unverified, stated in the module doc).
+#[cfg(not(target_os = "linux"))]
+fn descriptor_path(_file: &std::fs::File) -> Option<PathBuf> {
+    None
+}
+
+/// Does `real` still name the inode that was opened? `real` is canonical, so it is never a link:
+/// its OWN inode is compared (`symlink_metadata`). Following a link here (`metadata`) let a leaf
+/// swapped to an inside file for the judgement and back to the outward link for this check pass
+/// (review round 1, F2).
 #[cfg(unix)]
 pub(crate) fn same_file(opened: &std::fs::Metadata, real: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::MetadataExt;
-    let now = std::fs::metadata(real)?;
+    let now = std::fs::symlink_metadata(real)?;
     if (now.dev(), now.ino()) != (opened.dev(), opened.ino()) {
         anyhow::bail!("not the opened file");
     }
@@ -378,6 +424,209 @@ mod tests {
         });
     }
 
+    std::thread_local! {
+        /// A test's action between the judgement and the inode check: the window for a swap
+        /// BACK, after the judge was shown an inside path.
+        static AFTER_JUDGE: std::cell::RefCell<Option<Hook>> =
+            const { std::cell::RefCell::new(None) };
+        /// Pretend the platform cannot name an open descriptor's path, so the fallback (canonicalize
+        /// then compare inodes) is the one under test.
+        static NO_FD_PATH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    pub(super) fn after_judge(path: &Path) {
+        AFTER_JUDGE.with(|h| {
+            if let Some(f) = h.borrow().as_ref() {
+                f(path)
+            }
+        });
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(super) fn fd_path_disabled() -> bool {
+        NO_FD_PATH.with(|c| c.get())
+    }
+
+    fn set_hooks(between: Option<Hook>, after: Option<Hook>) {
+        BETWEEN.with(|h| *h.borrow_mut() = between);
+        AFTER_JUDGE.with(|h| *h.borrow_mut() = after);
+    }
+
+    /// A repository, an outside directory holding `key.md` (the secret), and `root/notes.md`.
+    #[cfg(unix)]
+    fn flip_flop_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let base = canon(t.path());
+        let root = base.join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        std::fs::write(base.join("out/key.md"), "FAKE-KEY-MARKER").unwrap();
+        let outside = base.join("out/key.md");
+        (t, root, outside, base)
+    }
+
+    #[cfg(unix)]
+    fn assert_refused_without_the_secret(got: Result<Vec<u8>, ReadError>, what: &str) {
+        match got {
+            Err(ReadError::Refused(_)) => {}
+            Ok(b) => panic!(
+                "{what}: the door returned {:?}, the bytes of the file it opened, after judging \
+                 another",
+                String::from_utf8_lossy(&b)
+            ),
+            Err(other) => panic!("{what}: expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// Review round 1, F2: open while the leaf links OUTSIDE (the descriptor holds the outside
+    /// inode); swap the leaf to an inside regular file, so the judged canonical path is inside and
+    /// admitted; swap it BACK to the outward link before the inode check. A check that follows
+    /// links (`metadata`) then finds the outside inode again and admits the bytes it opened.
+    #[cfg(unix)]
+    fn leaf_flip_flop(no_fd_path: bool) -> Result<Vec<u8>, ReadError> {
+        let (_t, root, outside, _base) = flip_flop_fixture();
+        let link = root.join("notes.md");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let o2 = outside.clone();
+        set_hooks(
+            Some(Box::new(|p: &Path| {
+                std::fs::remove_file(p).unwrap();
+                std::fs::write(p, "inside").unwrap();
+            })),
+            Some(Box::new(move |p: &Path| {
+                std::fs::remove_file(p).unwrap();
+                std::os::unix::fs::symlink(&o2, p).unwrap();
+            })),
+        );
+        NO_FD_PATH.with(|c| c.set(no_fd_path));
+        let got = ReadDoor::new(vec![root.clone()]).bytes(&link);
+        NO_FD_PATH.with(|c| c.set(false));
+        set_hooks(None, None);
+        got
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_swapped_inside_for_the_judgement_and_back_is_refused() {
+        assert_refused_without_the_secret(leaf_flip_flop(false), "descriptor path");
+    }
+
+    /// The same flip-flop where the platform cannot name an open descriptor's path: the fallback
+    /// compares the opened inode with the canonical path's OWN inode (`symlink_metadata`), and a
+    /// link there is never the opened file.
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_swapped_inside_and_back_is_refused_by_the_fallback_too() {
+        assert_refused_without_the_secret(leaf_flip_flop(true), "fallback");
+    }
+
+    /// The parent-directory form of the flip-flop, which an inode check on the canonical path
+    /// cannot catch even with `symlink_metadata` (the leaf itself is never a link): the spelling
+    /// is `root/d/key.md`; `d` is a link to the outside directory when the door opens; a real
+    /// directory holding an inside `key.md` when it canonicalizes and judges; the outward link
+    /// again at the inode check, so `root/d/key.md` resolves through it to the opened inode. On
+    /// Linux the door judges the DESCRIPTOR's own path (`/proc/self/fd`), which is the opened
+    /// file's real location whatever the spelling does afterwards.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_parent_directory_swapped_inside_for_the_judgement_and_back_is_refused() {
+        let (_t, root, _outside, base) = flip_flop_fixture();
+        let d = root.join("d");
+        std::os::unix::fs::symlink(base.join("out"), &d).unwrap();
+        let out = base.join("out");
+        let (d1, d2) = (d.clone(), d.clone());
+        let o2 = out.clone();
+        set_hooks(
+            Some(Box::new(move |_p: &Path| {
+                std::fs::remove_file(&d1).unwrap();
+                std::fs::create_dir(&d1).unwrap();
+                std::fs::write(d1.join("key.md"), "inside").unwrap();
+            })),
+            Some(Box::new(move |_p: &Path| {
+                std::fs::remove_dir_all(&d2).unwrap();
+                std::os::unix::fs::symlink(&o2, &d2).unwrap();
+            })),
+        );
+        let got = ReadDoor::new(vec![root.clone()]).bytes(&d.join("key.md"));
+        set_hooks(None, None);
+        assert_refused_without_the_secret(got, "parent flip-flop");
+    }
+
+    /// Review round 1, F4: a refusal names the SPELLING and the repository root, never the
+    /// resolved location outside it (which would tell the caller that the target exists and
+    /// where).
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_names_the_spelling_and_the_root_never_the_outside_target() {
+        let (_t, root, outside, _base) = flip_flop_fixture();
+        std::fs::rename(&outside, outside.with_file_name("secret-place-id_rsa")).unwrap();
+        let target = outside.with_file_name("secret-place-id_rsa");
+        let link = root.join("n.md");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let door = ReadDoor::new(vec![root.clone()]);
+        let texts = [
+            door.text(&link).unwrap_err().to_string(),
+            format!("{:#}", door.refusal(&link).unwrap()),
+            format!("{:#}", ReadDoor::new(Vec::new()).refusal(&link).unwrap()),
+        ];
+        for t in &texts {
+            assert!(t.contains("n.md"), "the spelling is named: {t}");
+            assert!(
+                !t.contains("secret-place"),
+                "the outside target must not be named: {t}"
+            );
+        }
+    }
+
+    /// Review round 1, F3: a sparse file larger than any allocation. `std::fs::read`, which the
+    /// walk used before the door, returns an error; `Vec::with_capacity` aborts the process. Run
+    /// in a child process so an abort is a failed assertion rather than a dead test harness.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_too_large_to_hold_is_an_error_not_an_abort() {
+        let t = tempfile::tempdir().unwrap();
+        let root = canon(t.path()).join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let f = std::fs::File::create(root.join("big.md")).unwrap();
+        if let Err(e) = f.set_len(1u64 << 62) {
+            eprintln!("SKIPPED: this filesystem cannot hold a sparse 4 EiB file ({e})");
+            return;
+        }
+        drop(f);
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "librarian::read_door::tests::huge_file_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("CS_HUGE_FILE", root.join("big.md"))
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("HUGE-CHILD-RAN io-error"),
+            "the door must return an error for an unallocatable file, the child said: {:?}\n{stdout}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "child of a_file_too_large_to_hold_is_an_error_not_an_abort"]
+    fn huge_file_child() {
+        let p = PathBuf::from(std::env::var("CS_HUGE_FILE").expect("run by the parent"));
+        let root = p.parent().unwrap().to_path_buf();
+        match ReadDoor::new(vec![root]).bytes(&p) {
+            Err(ReadError::Io(_)) => println!("HUGE-CHILD-RAN io-error"),
+            other => println!(
+                "HUGE-CHILD-RAN unexpected {:?}",
+                other.map(|v| v.len()).map_err(|e| e.to_string())
+            ),
+        }
+    }
+
     /// The race the inode check exists for, made deterministic: the door opens a link that points
     /// OUTSIDE (the descriptor now holds the outside file), the link is then re-pointed at a file
     /// INSIDE, so the canonical path the door judges is inside and admitted. Only the inode check
@@ -404,7 +653,8 @@ mod tests {
         let got = ReadDoor::new(vec![root.clone()]).bytes(&link);
         BETWEEN.with(|h| *h.borrow_mut() = None);
         match got {
-            Err(ReadError::Refused(e)) => assert!(format!("{e:#}").contains("changed"), "{e:#}"),
+            // Refused by the judgement of the descriptor's path (Linux) or by the inode check.
+            Err(ReadError::Refused(_)) => {}
             Ok(b) => panic!(
                 "the door returned {} bytes of the file it opened, judged on another",
                 b.len()
