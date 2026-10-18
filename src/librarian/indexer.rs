@@ -60,7 +60,8 @@ pub struct IndexReport {
     /// `docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`
     pub removed_ids: Vec<String>,
     /// Rows this walk reclaimed because the path they name RESOLVES OUTSIDE the repository
-    /// (a directory in its parent chain is a link out), as opposed to a file that vanished. A
+    /// (the read door refuses it: a link out, in the leaf or a parent directory), as opposed to a
+    /// file that vanished. A
     /// policy deletion, so it is counted and NAMED. The id list is deliberately NOT capped: it
     /// names exactly what was deleted (a subset of `removed_ids`, which is already unbounded),
     /// and a silent cap would hide ids from the one report that explains the deletion; a large
@@ -70,8 +71,19 @@ pub struct IndexReport {
     pub reclaimed_escaping_ids: Vec<String>,
     /// Escaping rows that were KEPT because they carry an augmentation or events, which exist
     /// nowhere else. Reported on every run until the link is removed or re-pointed (the file
-    /// then no longer exists and the row is reclaimed as an ordinary vanished one).
+    /// then no longer exists and the row is reclaimed as an ordinary vanished one). Each is
+    /// cleared of everything its file supplied (`clear_escaping_row`).
     pub escaping_kept_ids: Vec<String>,
+    /// The PATHS of `reclaimed_escaping_ids` and `escaping_kept_ids`, in the same order: an id of
+    /// a deleted row resolves to nothing afterwards, and the path is what a reader can act on.
+    /// Uncapped for the reason `reclaimed_escaping_ids` is.
+    pub reclaimed_escaping_paths: Vec<String>,
+    pub escaping_kept_paths: Vec<String>,
+    /// Paths THIS walk reached and refused to read because the read door refuses them (a link
+    /// out of the repository, a file below a directory link out, a deny-listed location), whether
+    /// or not a row existed for them. The reported form of what used to be a silent omission (or,
+    /// before 2026-10-18, a read). Uncapped for the same reason.
+    pub escaping_skipped_paths: Vec<String>,
 }
 
 /// One item queued for embedding — one per CHUNK, not per artifact.
@@ -383,7 +395,12 @@ pub fn index_repo_sync(
         crate::librarian::current_project::lookup_git_root(abs_root)
             .or_else(|| Some(abs_root.to_path_buf()))
             .and_then(|r| std::fs::canonicalize(r).ok());
-    // Ids of files this walk skipped because their parent chain resolves outside `escape_root`.
+    // The walk reads every file through the read door, judged against `escape_root` (the
+    // invariant is stated in `read_door`): a file whose path, as opened, resolves outside the
+    // repository is never read, hashed, chunked or queued for the embedder. The same door judges
+    // the unseen rows in reclamation below, so the walk and reclamation cannot disagree.
+    let door = crate::librarian::read_door::ReadDoor::new(escape_root.iter().cloned().collect());
+    // Ids of files this walk skipped because the read door refuses them.
     // Kept apart from `skipped_duplicate_ids`: a duplicate name carries no history of its own,
     // while an ESCAPING row may carry an augmentation or events that exist nowhere else, which
     // reclamation reports and spares instead of deleting.
@@ -423,24 +440,17 @@ pub fn index_repo_sync(
         // `doctor` reported every per-artifact finding for it twice
         // (docs/issues/archive/2026-09-16-a-symlinked-instruction-file-is-cataloged-as-a-second-artifact.md).
         //
-        // A link pointing OUTSIDE the root is deliberately KEPT: it is the only path by
-        // which this walk reaches those bytes, so skipping it would trade a silent
-        // duplicate for a silent omission, which is the worse direction. The main walk never
-        // descends a symlinked directory (see `a_symlinked_directory_is_not_descended_into_by_the_walk`),
-        // so this repo's `.claude/skills/claude-traces`, which IS a directory link, catalogs
-        // nothing, and only FILE links reach here from it. The predicate is "resolves inside", not
-        // "is a symlink", because of the outward FILE links.
-        //
-        // The main walk is not the only walk, though: `force_include_candidates` runs
-        // `WalkBuilder::new(<anchor>)`, and a walker follows a symlinked ROOT, so a repository that
-        // ships `docs/trackers -> <outside>` plus `force_include = ["docs/trackers/**"]` reaches
-        // files whose PARENT is the link. Those are refused by the next block, which is the
-        // other half of the same rule: an outward FILE link is kept; an outward DIRECTORY link is
-        // never a way into the catalog.
-        //
-        // A catalogued outward link is a row whose `abs_path` names a file the repository does
-        // not own, so every writer that takes its path from the catalog refuses a link
-        // (`util::write_catalogued_file`) and so does a path that resolves outside the repository.
+        // A link pointing OUTSIDE the repository is NOT catalogued: the read door below refuses
+        // it, and the walk reports its path (`escaping_skipped_paths`), so the omission is a
+        // reported one rather than a silent one. Until 2026-10-18 such a FILE link was kept on
+        // purpose ("skipping it would trade a silent duplicate for a silent omission"), and its
+        // target, whatever it was (`notes.md -> ~/.ssh/id_rsa`), was read, chunked into the
+        // catalog and sent to the embedder
+        // (docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-catalogued-outward-link.md).
+        // The main walk never descends a symlinked directory (see
+        // `a_symlinked_directory_is_not_descended_into_by_the_walk`); `force_include_candidates`
+        // runs `WalkBuilder::new(<anchor>)`, which follows a symlinked ROOT, so a file below an
+        // anchor that is a link reaches here and the door judges its whole resolved path.
         //
         // BOTH SIDES ARE CANONICALIZED, and that is load-bearing rather than defensive.
         // `abs_root` is whatever the caller held, while `canonicalize` always returns a
@@ -468,20 +478,33 @@ pub fn index_repo_sync(
         let rel = crate::librarian::util::normalize_rel_path(
             &path.strip_prefix(abs_root)?.to_string_lossy(),
         );
-        // The PARENT chain, for every kind of leaf: `force_include_candidates` walks
-        // `WalkBuilder::new(<anchor>)` and a walker follows a symlinked ROOT, so a file (or a link)
-        // below an anchor that is a link out of the repository reaches here. A leaf link inside
-        // such an anchor used to be exempt and was catalogued, and the row was then stuck:
-        // `doc(delete)` refuses it because the parent escapes.
-        if parent_escapes(path, escape_root.as_deref()) {
+        // Judged before the ignore set, so a refused path is recorded as escaping whether or not
+        // the librarian's ignore rules would also have skipped it (its row, if one exists, is
+        // then reclaimed or kept for that reason, not left as an unseen survivor).
+        if door.refusal(path).is_some() {
             skipped_escaping_ids.insert(crate::librarian::ids::artifact_id_from_abs(path));
+            report
+                .escaping_skipped_paths
+                .push(path.to_string_lossy().into_owned());
             continue;
         }
         if ignore.is_match(&rel) {
             continue;
         }
         let id = crate::librarian::ids::artifact_id_from_abs(path);
-        let bytes = std::fs::read(path)?;
+        // The authoritative read: opened once and judged on the opened file (`read_door`). A
+        // refusal here means the path changed after the check above; it is skipped the same way.
+        let bytes = match door.bytes(path) {
+            Ok(b) => b,
+            Err(crate::librarian::read_door::ReadError::Refused(_)) => {
+                skipped_escaping_ids.insert(id);
+                report
+                    .escaping_skipped_paths
+                    .push(path.to_string_lossy().into_owned());
+                continue;
+            }
+            Err(crate::librarian::read_door::ReadError::Io(e)) => return Err(e.into()),
+        };
         let content = String::from_utf8_lossy(&bytes);
         let sha = {
             let mut h = Sha256::new();
@@ -715,12 +738,11 @@ pub fn index_repo_sync(
     };
 
     let mut removed = 0usize;
-    // A row whose path resolves OUTSIDE the repository through a link in a parent directory: the
-    // main walk does not descend a link directory, so a directory swapped for a link after indexing
-    // leaves its rows unseen, and `exists()` follows the link and answers `true` for the outside
-    // file. The test is on the PARENT chain for every kind of leaf (an outward FILE link in the
-    // walk root's own directory is judged by its parent, which is inside, and is kept).
-    let escapes_root = |p: &str| parent_escapes(std::path::Path::new(p), escape_root.as_deref());
+    // A row the read door refuses: a file link out of the repository, a row below a directory
+    // that was swapped for a link after indexing (the main walk does not descend a link directory,
+    // so such rows go unseen and `exists()` follows the link and answers `true`), or a row a
+    // pre-fix walk catalogued through either. Judged by the SAME door the walk read through.
+    let escapes_root = |p: &str| door.refusal(std::path::Path::new(p)).is_some();
     // Does this row carry state that exists nowhere else (an augmentation, or events)?
     let has_history = |id: &str| -> bool {
         cat.conn
@@ -739,9 +761,13 @@ pub fn index_repo_sync(
         // An escaping row is reclaimed for a POLICY reason, with augmentation params and events
         // that may exist nowhere else. One that carries any is KEPT and reported (every run, until
         // the link is removed or re-pointed, after which the file is gone and it goes as an
-        // ordinary vanished row); one that carries none is reclaimed and reported.
+        // ordinary vanished row); one that carries none is reclaimed and reported. A kept row is
+        // CLEARED of everything its file supplied (`clear_escaping_row`), so it shows its id,
+        // path, augmentation and events and nothing read from the file behind the link.
         if escaping && has_history(cand_id) {
+            clear_escaping_row(cat, cand_id)?;
             report.escaping_kept_ids.push(cand_id.clone());
+            report.escaping_kept_paths.push(cand_abs_path.clone());
             continue;
         }
         // Two disjoint reasons a row must go, and `exists()` can only see the first:
@@ -761,6 +787,7 @@ pub fn index_repo_sync(
             if escaping {
                 report.reclaimed_escaping += 1;
                 report.reclaimed_escaping_ids.push(cand_id.clone());
+                report.reclaimed_escaping_paths.push(cand_abs_path.clone());
             }
             removed += 1;
         }
@@ -824,7 +851,9 @@ pub fn index_repo_sync(
 /// self-contained and independent of the config-loading path).
 fn read_force_include(abs_root: &Path) -> Vec<String> {
     let cfg_path = abs_root.join(".codescout").join("project.toml");
-    let Ok(text) = std::fs::read_to_string(&cfg_path) else {
+    // Through the read door, judged against the walk root: a `project.toml` that is a link out of
+    // the repository is refused and reads as absent, like an unparseable one.
+    let Ok(text) = crate::librarian::read_door::for_project(abs_root).text(&cfg_path) else {
         return Vec::new();
     };
     let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
@@ -883,18 +912,53 @@ fn chunk_grain_for_file(
     grain
 }
 
-/// Does the PARENT chain of `path` resolve outside `root`? `root` is already canonical; `None`
-/// (the root could not be resolved) reads as "no", like the symlink check beside it. A parent
-/// that cannot be resolved (it is gone) is not an escape: the row is then reclaimed as vanished.
+/// Clear a KEPT escaping row of everything its file supplied (decision D4 of
+/// `docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-catalogued-outward-link.md`).
 ///
-/// The PARENT, not the path: an outward FILE link is the one thing the walk keeps on purpose, so
-/// the leaf is allowed to resolve anywhere, while a directory in its chain that leaves the
-/// repository makes every file below it someone else's.
-fn parent_escapes(path: &Path, root: Option<&Path>) -> bool {
-    let (Some(root), Some(parent)) = (root, path.parent()) else {
-        return false;
+/// Dropped: the chunk rows, which hold the TEXT (the delete cascades to `artifact_vec_v2` through
+/// its trigger; the reindex tool drops an external store's vectors for every kept id), the title,
+/// every frontmatter-derived field (owners, tags, topic, time scope), the content hash, the mtime
+/// and the embedded stamp; kind and status become `unknown` and confidence that of a file with no
+/// frontmatter. Kept: the id and path (what the row IS), the augmentation and the events (the
+/// history it is kept for, which nothing read from the file produced), and the slug, which is
+/// immutable once minted and is the key entry citations hang on. Idempotent: a row already
+/// cleared is not rewritten, so `updated_at` does not move on every reindex.
+fn clear_escaping_row(cat: &Catalog, id: &str) -> Result<()> {
+    cat.conn.execute(
+        "DELETE FROM artifact_chunk WHERE artifact_id = ?1",
+        rusqlite::params![id],
+    )?;
+    cat.conn.execute(
+        "UPDATE artifact SET embedded_sha256 = NULL WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
+    let Some(mut row) = artifact::get(cat, id)? else {
+        return Ok(());
     };
-    std::fs::canonicalize(parent).is_ok_and(|real| !real.starts_with(root))
+    let already = row.title.is_none()
+        && row.kind == "unknown"
+        && row.status == "unknown"
+        && row.owners.is_empty()
+        && row.tags.is_empty()
+        && row.topic.is_none()
+        && row.time_scope.is_none()
+        && row.file_sha256.is_empty()
+        && row.file_mtime == 0;
+    if !already {
+        row.title = None;
+        row.kind = "unknown".into();
+        row.status = "unknown".into();
+        row.owners.clear();
+        row.tags.clear();
+        row.topic = None;
+        row.time_scope = None;
+        row.file_sha256 = String::new();
+        row.file_mtime = 0;
+        row.confidence = 0.5;
+        row.updated_at = chrono::Utc::now().timestamp_millis();
+        artifact::upsert(cat, &row)?;
+    }
+    Ok(())
 }
 
 /// The literal (non-glob) prefix of a glob pattern — the portion before the
@@ -1230,6 +1294,10 @@ pub struct BackfillReport {
     /// I/O error, a path that is a directory. Deliberately not folded into either
     /// arm above: both of those name a specific remedy, and this one means "go look".
     pub unreadable_other: usize,
+    /// Artifacts the read door refused (`read_door`): the file resolves outside its repository
+    /// or is on the read deny-list. Neither its file NOR its stored chunk text is sent to the
+    /// embedder. `reindex` reclaims such a row, or keeps it cleared when it carries history.
+    pub refused_by_read_door: usize,
     /// Artifacts visited.
     pub artifacts: usize,
     /// Chunks whose embed call failed. The run goes on to the next chunk, so one input the
@@ -1303,12 +1371,18 @@ const BLANK_CHARS: &str = "\t\n\u{b}\u{c}\r \u{85}\u{a0}\u{1680}\u{2000}\u{2001}
 ///
 /// The migration opt-in is read once at this entry point and passed as data to the
 /// implementation, so tests exercise the same recovery path without changing global env.
+///
+/// `roots` are the caller's managed roots for the read door (`read_door`): a row whose file
+/// the door refuses is counted in `refused_by_read_door`, and neither its file nor its stored
+/// chunk text reaches the embedder. Empty where the caller has none (the door then judges each
+/// row against the repository its path spells).
 pub async fn backfill_chunk_vectors(
     catalog: &parking_lot::Mutex<Catalog>,
     svc: &crate::librarian::embedding::EmbeddingService,
     batch: usize,
     root_prefix: Option<&str>,
     target: BackfillTarget<'_>,
+    roots: &[std::path::PathBuf],
 ) -> Result<BackfillReport> {
     let raw = std::env::var(ARTIFACT_VEC_MIGRATE_ENV).ok();
     backfill_chunk_vectors_with(
@@ -1318,6 +1392,7 @@ pub async fn backfill_chunk_vectors(
         root_prefix,
         migrate_opt_in(raw.as_deref()),
         target,
+        roots,
     )
     .await
 }
@@ -1328,8 +1403,10 @@ async fn backfill_chunk_vectors_with(
     root_prefix: Option<&str>,
     allow_dim_migration: bool,
     target: BackfillTarget<'_>,
+    roots: &[std::path::PathBuf],
 ) -> Result<BackfillReport> {
     use crate::librarian::catalog::gc::set_meta;
+    let door = crate::librarian::read_door::ReadDoor::new(roots.to_vec());
 
     let flush = batch.max(1);
     let mut report = BackfillReport::default();
@@ -1448,12 +1525,23 @@ async fn backfill_chunk_vectors_with(
                 let cat = catalog.lock();
                 crate::librarian::catalog::chunk::chunks_for(&cat, &id)?
             };
+            // The read door, for BOTH arms: the disk arm reads through it, and the stored arm
+            // would otherwise send text an older walk read through a link to the embedder
+            // without touching the file at all.
+            if !stored.is_empty() && door.refusal(std::path::Path::new(&abs_path)).is_some() {
+                report.refused_by_read_door += 1;
+                continue;
+            }
             // Whether this run creates the artifact's rows below; see the rollback after the embeds.
             let created_rows = stored.is_empty();
             let mut items = if stored.is_empty() {
-                let content = match std::fs::read_to_string(&abs_path) {
+                let content = match door.text(std::path::Path::new(&abs_path)) {
                     Ok(c) => c,
-                    Err(e) => {
+                    Err(crate::librarian::read_door::ReadError::Refused(_)) => {
+                        report.refused_by_read_door += 1;
+                        continue;
+                    }
+                    Err(crate::librarian::read_door::ReadError::Io(e)) => {
                         match e.kind() {
                             std::io::ErrorKind::NotFound => report.missing_file += 1,
                             std::io::ErrorKind::InvalidData => report.unreadable_encoding += 1,
@@ -1797,15 +1885,15 @@ kind = "memory"
         );
     }
 
-    /// A symlink pointing back INSIDE the walk root is a second name for one document
-    /// and must not become a second artifact; one pointing OUTSIDE is the only route to
-    /// its bytes and must survive.
+    /// A symlink pointing back INSIDE the walk root is a second name for one document and must not
+    /// become a second artifact; one pointing OUTSIDE the repository is refused by the read door, and
+    /// REPORTED, so its omission is a stated one (until 2026-10-18 it was kept and its target read:
+    /// docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-catalogued-outward-link.md).
     ///
-    /// Both halves are in ONE test on purpose. Split apart, the inside case alone is
-    /// killed by `skip every symlink` — a mutation that is wrong in the expensive
-    /// direction (silent omission) and that a passing suite would have called correct.
-    /// The outward fixture is what makes the assertion discriminate between
-    /// `is_symlink()` and `is_symlink() && resolves_inside`.
+    /// Both halves are in ONE test on purpose. Neither link gets a row now, by two different rules,
+    /// and only the REPORT tells them apart: the outward link must be in `escaping_skipped_paths` and
+    /// the inside one must not. A mutation that skips every symlink as a duplicate leaves both rowless
+    /// and reports neither, so the report is what discriminates.
     ///
     /// LOAD-BEARING FIXTURE DETAIL: `outside` is a SEPARATE TempDir, and it is bound to
     /// a named local rather than used inline. A `TempDir` temporary is dropped at the end
@@ -1844,29 +1932,32 @@ kind = "memory"
             index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
 
         assert_eq!(
-            report.added, 2,
-            "expected real.md + outward.md; alias.md resolves inside the root and is a \
-             second name for real.md, so indexing it mints a second artifact id for one \
-             set of bytes"
+            report.added, 1,
+            "expected real.md alone: alias.md is a second name for it, and outward.md resolves \
+         outside the repository, which the read door refuses"
         );
-
-        // Name WHICH two, not just how many. A count of 2 is also what `skip real.md,
-        // keep both links` produces, and that is the opposite defect.
-        let ids: std::collections::HashSet<String> = ["real.md", "outward.md"]
-            .iter()
-            .map(|n| crate::librarian::ids::artifact_id_from_abs(&root.path().join(n)))
-            .collect();
-        let alias_id = crate::librarian::ids::artifact_id_from_abs(&root.path().join("alias.md"));
-        for id in &ids {
-            assert!(
-                artifact::get(&cat, id).unwrap().is_some(),
-                "a path that is not an inside-resolving symlink must still be indexed"
-            );
-        }
+        let id = |n: &str| crate::librarian::ids::artifact_id_from_abs(&root.path().join(n));
+        assert!(artifact::get(&cat, &id("real.md")).unwrap().is_some());
         assert!(
-            artifact::get(&cat, &alias_id).unwrap().is_none(),
+            artifact::get(&cat, &id("alias.md")).unwrap().is_none(),
             "the inside-resolving symlink must have no row of its own"
         );
+        assert!(
+            artifact::get(&cat, &id("outward.md")).unwrap().is_none(),
+            "the outward link's target must not be catalogued"
+        );
+        let outward = root
+            .path()
+            .join("outward.md")
+            .to_string_lossy()
+            .into_owned();
+        let alias = root.path().join("alias.md").to_string_lossy().into_owned();
+        assert_eq!(
+            report.escaping_skipped_paths,
+            vec![outward],
+            "the outward link is reported as refused, and the duplicate name is not"
+        );
+        assert!(!report.escaping_skipped_paths.contains(&alias));
     }
 
     /// A symlinked DIRECTORY is not descended, so a document inside the directory it points at is
@@ -1914,7 +2005,8 @@ kind = "memory"
     /// hand: index a REAL file, then replace it with a symlink. A hand-inserted row would
     /// test the reclamation loop against a catalog shape the indexer never produces.
     ///
-    /// LOAD-BEARING: the first index must report `added == 3`. Without that assertion the
+    /// LOAD-BEARING: the first index must report `added == 2` (real.md and alias.md; outward.md
+    /// resolves outside the repository and the read door refuses it). Without that assertion the
     /// test passes trivially if the first walk never created the alias row at all, and the
     /// second phase's `removed == 1` would then be asserting about a row that never was.
     #[cfg(unix)]
@@ -1940,9 +2032,9 @@ kind = "memory"
         let (first, _) =
             index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
         assert_eq!(
-            first.added, 3,
-            "fixture precondition: real.md, alias.md and outward.md must all be indexed \
-             before alias.md becomes a symlink, or the second phase asserts about nothing"
+            first.added, 2,
+            "fixture precondition: real.md and alias.md must both be indexed before alias.md \
+             becomes a symlink, or the second phase asserts about nothing"
         );
 
         let alias_id = crate::librarian::ids::artifact_id_from_abs(&root.path().join("alias.md"));
@@ -1973,13 +2065,16 @@ kind = "memory"
         // The controls. `removed == 1` alone is also what "reclaim everything unseen"
         // produces if the other two happened to be unseen, and it is what a reclamation
         // that deleted the WRONG row produces too.
-        for name in ["real.md", "outward.md"] {
-            let id = crate::librarian::ids::artifact_id_from_abs(&root.path().join(name));
-            assert!(
-                artifact::get(&cat, &id).unwrap().is_some(),
-                "{name} must survive: it is not a duplicate and the walk still indexes it"
-            );
-        }
+        let real = crate::librarian::ids::artifact_id_from_abs(&root.path().join("real.md"));
+        assert!(
+            artifact::get(&cat, &real).unwrap().is_some(),
+            "real.md must survive: it is not a duplicate and the walk still indexes it"
+        );
+        let outward = crate::librarian::ids::artifact_id_from_abs(&root.path().join("outward.md"));
+        assert!(
+            artifact::get(&cat, &outward).unwrap().is_none(),
+            "outward.md never gets a row: the read door refuses it on every walk"
+        );
     }
 
     #[test]
@@ -2375,6 +2470,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -2433,6 +2529,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -2516,6 +2613,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -2609,6 +2707,7 @@ kind = "memory"
                 None,
                 true,
                 BackfillTarget::SqliteVec,
+                &[],
             )
             .await
             .unwrap_err();
@@ -2682,6 +2781,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap_err();
@@ -2715,6 +2815,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -2779,10 +2880,16 @@ kind = "memory"
         // would correctly find nothing to do — that is the fix, not a fixture bug.
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
-        let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let report = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(report.artifacts, 1);
         assert_eq!(report.skipped_empty, 0);
         assert_eq!(report.missing_file, 0);
@@ -2855,10 +2962,16 @@ kind = "memory"
         ));
         // A failed embed is reported and does not end the run: the run's other chunks still
         // get their turn, so one rejected chunk cannot starve the pages behind it.
-        let failed =
-            backfill_chunk_vectors(&catalog, &failing, 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let failed = backfill_chunk_vectors(
+            &catalog,
+            &failing,
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(failed.embedded, 0);
         assert_eq!(failed.embed_failed, 2, "both chunks were attempted");
         assert_eq!(failed.embed_errors.len(), 2);
@@ -2886,6 +2999,7 @@ kind = "memory"
             100,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -2959,6 +3073,7 @@ kind = "memory"
             1,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3007,6 +3122,7 @@ kind = "memory"
             1,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3043,6 +3159,7 @@ kind = "memory"
             100,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3061,6 +3178,7 @@ kind = "memory"
             100,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3101,6 +3219,7 @@ kind = "memory"
             100,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3151,6 +3270,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3203,6 +3323,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3302,10 +3423,17 @@ kind = "memory"
         let svc = crate::librarian::embedding::EmbeddingService::new(std::sync::Arc::new(
             FailSecondEmbedder(std::sync::atomic::AtomicUsize::new(0)),
         ));
-        let error =
-            backfill_chunk_vectors_with(&catalog, &svc, 2, None, false, BackfillTarget::SqliteVec)
-                .await
-                .unwrap_err();
+        let error = backfill_chunk_vectors_with(
+            &catalog,
+            &svc,
+            2,
+            None,
+            false,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap_err();
         assert!(
             error.to_string().contains("dimension"),
             "the second page must fail at its write: {error:#}"
@@ -3336,6 +3464,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3433,6 +3562,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap_err();
@@ -3464,6 +3594,7 @@ kind = "memory"
             Some(&prefix),
             true,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap_err();
@@ -3472,10 +3603,17 @@ kind = "memory"
             "a shared dimension change must require explicit catalog scope: {scoped_error:#}"
         );
 
-        let retry =
-            backfill_chunk_vectors_with(&catalog, &svc, 100, None, true, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let retry = backfill_chunk_vectors_with(
+            &catalog,
+            &svc,
+            100,
+            None,
+            true,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(
             retry.artifacts, 2,
             "both projects need recovery after a shared-table rebuild"
@@ -3572,6 +3710,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3617,6 +3756,7 @@ kind = "memory"
             Some(&prefix),
             false,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap_err();
@@ -3670,10 +3810,16 @@ kind = "memory"
         // and one embeddings-off run is the whole of it.
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
-        let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let report = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(report.artifacts, 1, "sanity: one artifact was reached");
         assert_eq!(
             report.embedded, 1,
@@ -3703,10 +3849,16 @@ kind = "memory"
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
         std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
 
-        let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let report = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(report.artifacts, 2);
         assert_eq!(report.embedded, 0, "neither had anything to embed");
         assert_eq!(report.skipped_empty, 1, "the blank one");
@@ -3763,6 +3915,7 @@ kind = "memory"
             100,
             Some(&prefix),
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -3787,10 +3940,16 @@ kind = "memory"
         assert_eq!(b_chunks, 0, "projB must be untouched by a projA-scoped run");
 
         // And an unscoped run still reaches it, so the scoping narrowed rather than broke.
-        let wide =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let wide = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(
             wide.artifacts, 1,
             "the catalog-wide run picks up the root the scoped one skipped"
@@ -3841,10 +4000,16 @@ kind = "memory"
         );
         std::fs::remove_file(tmp.path().join("gone.md")).unwrap();
 
-        let report =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let report = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             report.unreadable_encoding, 1,
@@ -3879,10 +4044,16 @@ kind = "memory"
         std::fs::write(tmp.path().join("b.md"), "# B\n\nbeta\n").unwrap();
         index_repo_sync(&m.lock(), &rules, tmp.path(), &ignore, false, false, false).unwrap();
 
-        let first =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let first = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(first.artifacts, 2);
         assert!(first.embedded >= 2);
 
@@ -3894,10 +4065,16 @@ kind = "memory"
             cat.conn.execute("DELETE FROM artifact_vec_v2", []).unwrap();
         }
 
-        let second =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let second = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(
             second.artifacts, 2,
             "a run that parks its cursor at the end of the corpus reports 0 here, and \
@@ -3975,6 +4152,7 @@ kind = "memory"
                 store: &store,
                 project_id: &project_id,
             },
+            &[],
         )
         .await
         .unwrap();
@@ -4000,10 +4178,16 @@ kind = "memory"
         // Control: the same gap IS one for a sqlite-vec process, so the store run above
         // skipped a real candidate rather than finding nothing. `bare.md` is a gap here too:
         // the store run filed its vectors in the store, never in `artifact_vec_v2`.
-        let sqlite =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let sqlite = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(sqlite.artifacts, 2, "{sqlite:?}");
         assert!(sqlite_vectors_of(&m.lock(), &chunked) > 0);
         assert!(sqlite_vectors_of(&m.lock(), &bare) > 0);
@@ -4041,6 +4225,7 @@ kind = "memory"
                 store: &store,
                 project_id: &project_id,
             },
+            &[],
         )
         .await
         .unwrap();
@@ -4101,6 +4286,7 @@ kind = "memory"
                 store: &store,
                 project_id: &project_id,
             },
+            &[],
         )
         .await
         .unwrap();
@@ -4129,6 +4315,7 @@ kind = "memory"
             None,
             false,
             BackfillTarget::Store { store, project_id },
+            &[],
         )
         .await
         .unwrap()
@@ -4269,6 +4456,7 @@ kind = "memory"
             100,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -4281,6 +4469,7 @@ kind = "memory"
             100,
             None,
             BackfillTarget::SqliteVec,
+            &[],
         )
         .await
         .unwrap();
@@ -4316,10 +4505,16 @@ kind = "memory"
             false,
         )
         .unwrap();
-        let first =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let first = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(first.artifacts, 2);
         {
             let cat = m.lock();
@@ -4349,10 +4544,16 @@ kind = "memory"
                 .unwrap();
         }
 
-        let second =
-            backfill_chunk_vectors(&m, &backfill_svc(), 100, None, BackfillTarget::SqliteVec)
-                .await
-                .unwrap();
+        let second = backfill_chunk_vectors(
+            &m,
+            &backfill_svc(),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(
             (second.artifacts, second.embedded, second.skipped_empty),
             (1, 1, 0),

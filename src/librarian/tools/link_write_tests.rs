@@ -3,9 +3,9 @@
 //! Every librarian writer takes its target from the catalog (`row.abs_path`) or from a
 //! frontmatter declaration, never from a caller-supplied path that a write classifier saw, so
 //! none of them is covered by `validate_write_path`. `std::fs::write` follows a leaf link, and
-//! the indexer DELIBERATELY catalogs an in-root link whose target is outside the root
-//! (`indexer.rs`, the `is_symlink` block), so a catalogued row can point anywhere the repo's
-//! author likes. These tests are the measured form of
+//! a catalogued row can be one: the indexer no longer catalogs a link out of the repository (the
+//! read door refuses it), but a pulled commit can turn a catalogued file into a link, so a row can
+//! point anywhere the repo's author likes (`catalogued_outward_link` builds exactly that state). These tests are the measured form of
 //! `docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-and-rewrites-a-file-outside-the-root.md`
 //! and its sibling sites. The `doc(create)` forms live in `create.rs`'s own tests.
 //!
@@ -38,16 +38,18 @@ fn md_rules() -> Vec<crate::librarian::classify::CompiledRule> {
         .unwrap()
 }
 
-/// A project root holding `outward.md`, a link to a document in a SEPARATE directory, and the
-/// real reindex run that catalogs it. Returns the temp dirs (kept alive), the victim path, and
-/// the link's artifact id.
+/// A project root holding `outward.md`, catalogued while it was a regular file and THEN replaced
+/// by a link to a document in a SEPARATE directory: how such a row exists since the walk stopped
+/// cataloguing outward links (the read door refuses them; a pulled commit can still turn a
+/// catalogued file into one). Returns the temp dirs (kept alive), the victim path, and the link's
+/// artifact id.
 fn catalogued_outward_link(victim_text: &str) -> (TempDir, TempDir, ToolContext, PathBuf, String) {
     let outside = tempfile::tempdir().unwrap();
     let victim = outside.path().join("elsewhere.md");
     std::fs::write(&victim, victim_text).unwrap();
     let root = tempfile::tempdir().unwrap();
     let link = root.path().join("outward.md");
-    std::os::unix::fs::symlink(&victim, &link).unwrap();
+    std::fs::write(&link, victim_text).unwrap();
     let ctx = mk_ctx(root.path());
     let ignore = globset::GlobSet::empty();
     let (report, _) = crate::librarian::indexer::index_repo_sync(
@@ -60,8 +62,10 @@ fn catalogued_outward_link(victim_text: &str) -> (TempDir, TempDir, ToolContext,
         false,
     )
     .unwrap();
-    // The precondition the whole file rests on: the reindex really catalogs the outward link.
-    assert_eq!(report.added, 1, "the walk must catalog the outward link");
+    // The precondition the whole file rests on: the row exists before the swap.
+    assert_eq!(report.added, 1, "the walk must catalog the regular file");
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&victim, &link).unwrap();
     let id = crate::librarian::ids::artifact_id_from_abs(&link);
     assert!(artifact::get(&ctx.catalog.lock(), &id).unwrap().is_some());
     (outside, root, ctx, victim, id)

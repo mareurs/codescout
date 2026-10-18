@@ -938,30 +938,18 @@ fn force_include_does_not_catalog_a_leaf_link_inside_an_anchor_that_leaves_the_r
 
 /// LOW 2: `rename` moves a link without retargeting it, so a RELATIVE link moved to another depth
 /// dangles; the id repair's read then failed with ENOENT and left the move half done. Refused
-/// up front. The control (an absolute link) is `doc_move_of_a_catalogued_outward_link_...`.
+/// up front. The control (an absolute link) is `doc_move_of_an_absolute_leaf_link_...`. The link
+/// stays INSIDE the repository (the read door refuses one out of it before this check matters),
+/// and its row is seeded by hand: the walk skips an inside-resolving link as a second name.
 #[tokio::test]
 async fn doc_move_refuses_a_relative_leaf_link_that_would_dangle_at_the_new_depth() {
     let base = tempfile::tempdir().unwrap();
     let root = base.path().join("repo");
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(base.path().join("elsewhere.md"), DOC).unwrap();
-    std::os::unix::fs::symlink("../elsewhere.md", root.join("outward.md")).unwrap();
+    std::fs::create_dir_all(root.join("real")).unwrap();
+    std::fs::write(root.join("real/elsewhere.md"), DOC).unwrap();
+    std::os::unix::fs::symlink("real/elsewhere.md", root.join("outward.md")).unwrap();
     let ctx = mk_ctx(&root);
-    let (report, _) = crate::librarian::indexer::index_repo_sync(
-        &ctx.catalog.lock(),
-        &md_rules(),
-        &root,
-        &globset::GlobSet::empty(),
-        false,
-        false,
-        false,
-    )
-    .unwrap();
-    assert_eq!(
-        report.added, 1,
-        "precondition: the relative outward link is catalogued"
-    );
-    let id = crate::librarian::ids::artifact_id_from_abs(&root.join("outward.md"));
+    let id = catalog_row(&ctx, &root.join("outward.md"));
 
     let err = mv::call(
         &ctx,
@@ -1103,22 +1091,11 @@ async fn append_entry_in_a_project_reached_through_a_link_allocates_an_id() {
 async fn doc_move_still_renames_a_relative_leaf_link_within_its_own_directory() {
     let base = tempfile::tempdir().unwrap();
     let root = base.path().join("repo");
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(base.path().join("elsewhere.md"), DOC).unwrap();
-    std::os::unix::fs::symlink("../elsewhere.md", root.join("outward.md")).unwrap();
+    std::fs::create_dir_all(root.join("real")).unwrap();
+    std::fs::write(root.join("real/elsewhere.md"), DOC).unwrap();
+    std::os::unix::fs::symlink("real/elsewhere.md", root.join("outward.md")).unwrap();
     let ctx = mk_ctx(&root);
-    let (report, _) = crate::librarian::indexer::index_repo_sync(
-        &ctx.catalog.lock(),
-        &md_rules(),
-        &root,
-        &globset::GlobSet::empty(),
-        false,
-        false,
-        false,
-    )
-    .unwrap();
-    assert_eq!(report.added, 1);
-    let id = crate::librarian::ids::artifact_id_from_abs(&root.join("outward.md"));
+    let id = catalog_row(&ctx, &root.join("outward.md"));
 
     mv::call(&ctx, json!({"id": id, "new_rel_path": "renamed.md"}))
         .await
@@ -1554,7 +1531,8 @@ async fn doc_move_of_an_absolute_leaf_link_to_another_directory_completes() {
     let base = tempfile::tempdir().unwrap();
     let root = base.path().join("repo");
     std::fs::create_dir_all(root.join(".git")).unwrap();
-    let target = base.path().join("elsewhere.md");
+    std::fs::create_dir_all(root.join("real")).unwrap();
+    let target = root.join("real/elsewhere.md");
     let content = "---\nid: 0123456789abcdef\nkind: spec\nstatus: draft\ntitle: T\n---\n\nbody\n";
     std::fs::write(&target, content).unwrap();
     std::os::unix::fs::symlink(&target, root.join("outward.md")).unwrap();
@@ -3113,7 +3091,10 @@ mod door_table {
         let base = tempfile::tempdir().unwrap();
         let root = canon(base.path()).join("repo");
         git(&root);
-        let target = canon(base.path()).join("elsewhere.md");
+        // Inside the repository: a move reads the document first, and the read door refuses a
+        // link out of it (the outward case is `doc_move_of_a_catalogued_outward_link_...`).
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        let target = root.join("real/elsewhere.md");
         let old_id = crate::librarian::ids::artifact_id_from_abs(&root.join("outward.md"));
         let content =
             format!("---\nid: {old_id}\nkind: spec\nstatus: draft\ntitle: T\n---\n\nbody\n");

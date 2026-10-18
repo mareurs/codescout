@@ -93,13 +93,16 @@ pub async fn run(args: BackfillChunksArgs) -> Result<()> {
     )?;
 
     // The lock is released across every embedding await inside, so this does not
-    // serialize a long remote run behind a single guard.
+    // serialize a long remote run behind a single guard. The read door judges every row against
+    // the context's managed roots, or, for a row none of them holds, the repository it spells.
+    let roots = crate::librarian::tools::managed_roots(&ctx);
     let report = crate::librarian::indexer::backfill_chunk_vectors(
         &ctx.catalog,
         &svc,
         args.batch,
         root_prefix.as_deref(),
         target,
+        &roots,
     )
     .await?;
 
@@ -118,6 +121,7 @@ fn report_json(
         "missing_file": report.missing_file,
         "unreadable_encoding": report.unreadable_encoding,
         "unreadable_other": report.unreadable_other,
+        "refused_by_read_door": report.refused_by_read_door,
         "embed_failed": report.embed_failed,
         "embed_errors": report.embed_errors,
         // The report names the population it walked. A count whose scope is not stated

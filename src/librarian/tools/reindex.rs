@@ -82,6 +82,9 @@ fn restore_declared_augmentations(
         );
     };
 
+    // Through the read door, judged against the reindex targets: the walk that just ran
+    // reclaimed (or kept and cleared) every row this door refuses, so a refused row is skipped.
+    let door = crate::librarian::read_door::ReadDoor::new(targets.to_vec());
     for (id, abs_path) in rows {
         let path = std::path::Path::new(&abs_path);
         // Component-boundary containment, not a prefix match — `/repo-backup` must not
@@ -89,7 +92,7 @@ fn restore_declared_augmentations(
         if !targets.iter().any(|t| path.starts_with(t)) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Ok(content) = door.text(path) else {
             continue;
         };
         let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
@@ -333,6 +336,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut total_reclaimed_escaping = 0usize;
     let mut reclaimed_escaping_ids: Vec<String> = Vec::new();
     let mut escaping_kept_ids: Vec<String> = Vec::new();
+    let mut reclaimed_escaping_paths: Vec<String> = Vec::new();
+    let mut escaping_kept_paths: Vec<String> = Vec::new();
+    let mut escaping_skipped_paths: Vec<String> = Vec::new();
     let mut backfill_errors: Vec<String> = Vec::new();
     // Roots the walk deliberately did NOT enter, with the reason. Without this the response for
     // such a root is `added: 0, updated: 0, removed: 0, unchanged: 0` and
@@ -395,8 +401,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
         all_unknown_ids.extend(report.unknown_ids);
         total_reclaimed_escaping += report.reclaimed_escaping;
+        // The vectors of every escaping row, reclaimed or kept, leave the store with it: they were
+        // computed from bytes the read door now refuses (decision D4 for a kept row). On sqlite
+        // the chunk delete already took them through `artifact_vec_v2_cascade_delete`; an
+        // external store has no foreign keys, so it is told here.
+        if let Some(store) = ctx.artifact_store.as_ref() {
+            for id in report
+                .reclaimed_escaping_ids
+                .iter()
+                .chain(report.escaping_kept_ids.iter())
+            {
+                store.delete(id).await?;
+            }
+        }
         reclaimed_escaping_ids.extend(report.reclaimed_escaping_ids);
         escaping_kept_ids.extend(report.escaping_kept_ids);
+        reclaimed_escaping_paths.extend(report.reclaimed_escaping_paths);
+        escaping_kept_paths.extend(report.escaping_kept_paths);
+        escaping_skipped_paths.extend(report.escaping_skipped_paths);
 
         if let (Some(svc), Some(store)) = (ctx.embedding.as_ref(), ctx.artifact_store.as_ref()) {
             // project_id = the target being indexed, which IS the project. Still
@@ -656,16 +678,26 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "removed": total_removed,
         "reclaimed_escaping": total_reclaimed_escaping,
         "reclaimed_escaping_ids": reclaimed_escaping_ids,
+        "reclaimed_escaping_paths": reclaimed_escaping_paths,
         "escaping_kept_ids": escaping_kept_ids,
-        "escaping_note": if total_reclaimed_escaping > 0 || !escaping_kept_ids.is_empty() {
-            json!("Some catalogued paths resolve OUTSIDE their repository through a symlinked \
-                 directory. Rows without an augmentation or events were reclaimed \
+        "escaping_kept_paths": escaping_kept_paths,
+        "escaping_skipped_paths": escaping_skipped_paths,
+        "escaping_note": if total_reclaimed_escaping > 0
+            || !escaping_kept_ids.is_empty()
+            || !escaping_skipped_paths.is_empty()
+        {
+            json!("Some paths resolve OUTSIDE their repository through a symbolic link (or into a \
+                 protected location), so the librarian does not read them: nothing of the file \
+                 behind the link is catalogued, chunked or embedded (`escaping_skipped_paths`). \
+                 Their rows without an augmentation or events were reclaimed \
                  (`reclaimed_escaping`); rows that carry either were KEPT (`escaping_kept_ids`) \
+                 with everything read from the file cleared (title, fields, chunk text, vectors), \
                  and are reported on every reindex while the link stands. Removing or \
                  re-pointing the link makes the file vanish from that path, and the next \
                  reindex then deletes the kept row WITH its augmentation and events: to keep \
                  that history, first fold it into the row of the file's real location with \
-                 `doc(action=\"graft\", from_id=<kept id>, into_id=<real id>)`.")
+                 `doc(action=\"graft\", from_id=<kept id>, into_id=<real id>)`. Text an embedder \
+                 already received before this was fixed cannot be recalled.")
         } else {
             Value::Null
         },
