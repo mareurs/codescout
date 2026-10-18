@@ -4,22 +4,25 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// Owed by every refusal whose remedy is an edit to `.codescout/project.toml`.
+/// Owed by every refusal whose remedy is an edit to a `[security]` key of
+/// `.codescout/project.toml`.
 ///
-/// The config is loaded when a project becomes resident and cached for the life of the
-/// process; only codescout's own write tools re-read it, via
-/// `Agent::reload_config_if_project_toml_for`. So "edit the config and retry" is silently
-/// inert for an edit made in an editor, by `Bash`, or by any other process — the call
-/// re-runs and prints the byte-identical refusal, which reads as the remedy not having
-/// been performed. See
-/// `docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`.
+/// Two facts the remedy has to carry. The file is read again when it changes
+/// (`ActiveProject::config_is_stale`), so an edit made in an editor reaches the next tool
+/// call; this used to say the config was cached for the life of the process, which stopped
+/// being true on 2026-09-14
+/// (`docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`).
+/// And codescout's own write tools REFUSE an edit to `[security]`
+/// (`config::protected_files`): the remedy this text used to prescribe, `edit_file`, is now a
+/// refused action for exactly the keys these refusals are about, so naming it would send the
+/// reader to a call that fails. The step that is theirs to take is an editor.
 ///
-/// **The `file_write_enabled` refusal must NOT use this** — it needs a stricter remedy,
-/// because the `edit_file` escape offered here is unreachable exactly when writes are the
-/// thing turned off. That message names the restart alone, in `util::path_security`.
-pub const CONFIG_IS_CACHED_REMEDY: &str = "That file is cached for the life of this process: \
-     make the edit with codescout's own edit_file, which reloads the config — or edit it any \
-     other way and restart the MCP server (`/mcp`).";
+/// **The `file_write_enabled` refusal does not use this** — it has its own text in
+/// `util::path_security`.
+pub const CONFIG_IS_CACHED_REMEDY: &str = "That file is read again when it changes, but \
+     codescout's own write tools cannot edit its [security] section (a session that could would \
+     be able to raise its own privileges): edit it yourself in an editor, or ask the user to. \
+     The next tool call picks the edit up; restarting the MCP server (`/mcp`) always does.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {

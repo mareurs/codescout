@@ -17562,6 +17562,10 @@ mod guide_hint_tests {
 mod config_reload_tests;
 
 #[cfg(test)]
+#[path = "server/protected_config_write_tests.rs"]
+mod protected_config_write_tests;
+
+#[cfg(test)]
 mod resilient_stdin_tests {
     use super::*;
 

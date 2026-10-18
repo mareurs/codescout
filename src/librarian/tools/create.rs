@@ -443,6 +443,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &fm,
         &crate::librarian::frontmatter::render_body(&a.body),
     );
+    // This write does not go through `atomic_write` (the disk write below is a plain
+    // `fs::write`), so the guard on codescout's own config files is asked here, before the
+    // catalog row exists. Measured: `rel_path = ".codescout/project.toml"` was written.
+    crate::config::protected_files::check_write(&full, &content)
+        .map_err(|msg| anyhow::anyhow!(msg))?;
     let now = chrono::Utc::now().timestamp_millis();
     let row = ArtifactRow {
         id: id.clone(),

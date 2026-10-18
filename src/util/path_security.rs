@@ -3746,20 +3746,16 @@ mod tests {
             );
         }
     }
-    /// The two config-off refusals in this file prescribe DIFFERENT remedies, and the
-    /// difference is load-bearing rather than editorial.
+    /// Neither config-off refusal in this file may send its reader to `edit_file`.
     ///
-    /// Both are defeated by the same staleness — `project.toml` is read once when a project
-    /// becomes resident and cached for the life of the process — but the escapes available
-    /// differ. Indexing-off leaves writes ON, so editing the config through codescout's own
-    /// `edit_file` triggers `Agent::reload_config_if_project_toml_for` and genuinely works.
-    /// Writes-off does not: `edit_file` is unreachable precisely because writes are the thing
-    /// disabled, which leaves the restart as the only route.
+    /// Writes-off: `edit_file` is unreachable precisely because writes are the thing disabled.
+    /// Indexing-off: it used to be offered (writes stay on, and `edit_file` on `project.toml`
+    /// reloaded the config), but codescout's write tools now refuse an edit to `[security]`
+    /// (`config::protected_files`), so naming `edit_file` would prescribe a refused call.
+    /// Both must name a remedy that works: an editor, or the restart.
     ///
-    /// So the regression this guards is a TIDY-UP. Unifying the two onto the shared
-    /// `CONFIG_IS_CACHED_REMEDY` would hand the write refusal an escape its reader cannot
-    /// take — a message that is confidently wrong rather than merely unhelpful. Every other
-    /// test here reads one message alone, so nothing else can express the difference.
+    /// The regression this guards is a TIDY-UP in either direction: handing the write refusal
+    /// the shared `CONFIG_IS_CACHED_REMEDY`'s old `edit_file` escape, or restoring it there.
     #[test]
     fn the_write_refusal_withholds_the_edit_file_escape_the_indexing_refusal_offers() {
         let indexing_off = PathSecurityConfig {
@@ -3783,9 +3779,13 @@ mod tests {
             .to_string();
 
         assert!(
-            indexing_err.contains("edit_file"),
-            "indexing-off CAN be cleared through codescout's own editor, and must say so: \
-             {indexing_err}"
+            !indexing_err.contains("edit_file"),
+            "indexing-off is set in [security], which codescout's own editor refuses to change; \
+             naming it prescribes a refused call: {indexing_err}"
+        );
+        assert!(
+            indexing_err.contains("editor"),
+            "indexing-off is cleared by the user's own edit, and must say so: {indexing_err}"
         );
         assert!(
             !write_err.contains("edit_file"),

@@ -351,6 +351,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )?;
         }
 
+        // A rename carries the file's bytes to the destination without passing through
+        // `atomic_write`, so the guard on codescout's own config files has to be asked here
+        // too: otherwise a markdown file holding `[security] profile = "root"` could be moved
+        // onto `.codescout/project.toml` (measured: it landed).
+        crate::config::protected_files::check_write(&new_full, &content_before)
+            .map_err(|msg| anyhow::anyhow!(msg))?;
+
         if let Some(parent) = new_full.parent() {
             std::fs::create_dir_all(parent)?;
         }

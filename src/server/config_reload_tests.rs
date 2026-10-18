@@ -16,7 +16,7 @@ use serde_json::json;
 const BASE_TOML: &str = "[project]\nname = \"t\"\n";
 
 /// One dispatched call: `(is_error, all text blocks joined)`.
-async fn call(server: &CodeScoutServer, name: &str, args: Value) -> (bool, String) {
+pub(super) async fn call(server: &CodeScoutServer, name: &str, args: Value) -> (bool, String) {
     let req: CallToolRequestParams = serde_json::from_value(json!({
         "name": name,
         "arguments": args,
