@@ -1452,7 +1452,10 @@ impl CodeScoutServer {
                     .or_else(|| self.base_ledger_key.clone());
                 if let Some(n) = self.agent.displaced_default_notice(caller.as_deref()).await {
                     err.content
-                        .push(Content::text(format!("\u{26a0} {}", n.text)));
+                        .push(crate::tools::guide_emit::trailing_block(format!(
+                            "\u{26a0} {}",
+                            n.text
+                        )));
                     self.agent.mark_displaced_told(&n).await;
                 }
             }
@@ -1613,7 +1616,9 @@ impl CodeScoutServer {
                                 .notice_once(&format!("refusal-predicate:{}", family.unwrap_or("")))
                         })
                 {
-                    result.content.push(Content::text(text));
+                    result
+                        .content
+                        .push(crate::tools::guide_emit::trailing_block(text));
                 }
                 result
             }
@@ -9861,6 +9866,87 @@ mod tests {
         );
     }
 
+    /// The server's own appended blocks (the paths banner, the status block, the build
+    /// notice) each follow the tool's last line in a reply a client lays end to end.
+    /// The banner and the status block already open with a newline; the build notice did
+    /// not. One reply carrying all three, so the check covers each seam.
+    /// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+    #[tokio::test]
+    async fn post_process_appended_blocks_each_start_on_their_own_line() {
+        let (dir, server) = make_server().await;
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        {
+            let mut st = server
+                .agent
+                .build_check
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            st.state = crate::agent::build_check::BuildCheckState::Done {
+                my_break: Some("  src/mine.rs:12  mismatched types".to_string()),
+                delivered: false,
+            };
+        }
+        let out = server
+            .post_process(
+                CallToolResult::success(vec![Content::text("{\n  \"k\": 1\n}")]),
+                "read_file",
+                Some(&root),
+            )
+            .await;
+        let texts: Vec<String> = out
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect();
+        // Premise: all three appended blocks are present, so each seam is on the table.
+        assert!(
+            texts.iter().any(|t| t.contains("paths are relative to"))
+                && texts
+                    .iter()
+                    .any(|t| t.contains("## Project Status (details)"))
+                && texts.iter().any(|t| t.contains("src/mine.rs:12")),
+            "premise: banner, status block and build notice must all ride this reply: {texts:?}"
+        );
+        assert!(
+            crate::tools::guide_emit::seam_defects(&out.content).is_empty(),
+            "{:?}",
+            crate::tools::guide_emit::seam_defects(&out.content)
+        );
+
+        // The build notice's own newline is invisible in the reply above, because the status
+        // block it follows ends with one. Behind the tool's own block alone (the banner and
+        // the status block are spent after one delivery) its seam is the only one on the table.
+        {
+            let mut st = server
+                .agent
+                .build_check
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            st.state = crate::agent::build_check::BuildCheckState::Done {
+                my_break: Some("  src/mine.rs:12  mismatched types".to_string()),
+                delivered: false,
+            };
+        }
+        let alone = server
+            .post_process(
+                CallToolResult::success(vec![Content::text("{\n  \"k\": 1\n}")]),
+                "read_file",
+                Some(&root),
+            )
+            .await;
+        assert_eq!(
+            alone.content.len(),
+            2,
+            "premise: only the build notice rides this reply: {:?}",
+            alone.content
+        );
+        assert!(
+            crate::tools::guide_emit::seam_defects(&alone.content).is_empty(),
+            "{:?}",
+            crate::tools::guide_emit::seam_defects(&alone.content)
+        );
+    }
+
     #[tokio::test]
     async fn call_tool_inner_grants_write_access_to_a_fresh_pinned_workspace() {
         // FINDING (docs/issues/archive/2026-07-09-edit-code-write-path-ignores-workspace-pin.md,
@@ -12296,6 +12382,14 @@ mod guide_hint_tests {
             "the predicate must name the EXCEPTION, which is the part a refusal \
              cannot convey: {predicate}"
         );
+        // The condition is appended to the refusal text by `call_tool_inner`; a client
+        // that lays the blocks end to end must not glue it onto the refusal's last line.
+        // docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+        assert!(
+            crate::tools::guide_emit::seam_defects(&first.content).is_empty(),
+            "{:?}",
+            crate::tools::guide_emit::seam_defects(&first.content)
+        );
 
         // Same family again: the condition is not repeated.
         let second = server
@@ -13075,23 +13169,35 @@ mod guide_hint_tests {
     async fn dispatch_text(
         server: &CodeScoutServer,
         tool: &str,
-        mut arguments: Value,
+        arguments: Value,
         principal: Option<&str>,
     ) -> String {
+        dispatch_blocks(server, tool, arguments, principal)
+            .await
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The same dispatch with the blocks left as the client receives them. `dispatch_text`
+    /// joins with "\n", which is exactly the separator a seam check must not be given.
+    async fn dispatch_blocks(
+        server: &CodeScoutServer,
+        tool: &str,
+        mut arguments: Value,
+        principal: Option<&str>,
+    ) -> Vec<rmcp::model::Content> {
         if let Some(p) = principal {
             arguments[crate::tools::session_key::PRINCIPAL_ARG_KEY] = json!(p);
         }
         let req: CallToolRequestParams =
             serde_json::from_value(json!({"name": tool, "arguments": arguments})).unwrap();
-        let out = server
+        server
             .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
             .await
-            .expect("dispatch");
-        out.content
-            .iter()
-            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
-            .collect::<Vec<_>>()
-            .join("\n")
+            .expect("dispatch")
+            .content
     }
 
     /// A subagent that switches PROJECTS BY ID inside the home workspace moves where
@@ -13200,6 +13306,45 @@ mod guide_hint_tests {
         )
         .await;
         assert!(!out.contains("workspace=<absolute path>"), "{out}");
+    }
+
+    /// The notice a refused write carries (`call_tool_inner`'s early return, which pushes
+    /// onto the refusal's own content) is a block appended to the refusal text, so it is a
+    /// seam of its own. `dispatch_text` joins with "\n" and cannot see it.
+    /// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+    #[tokio::test]
+    async fn the_displaced_notice_on_a_refused_write_starts_on_its_own_line() {
+        let (_home, server) = make_server().await;
+        let foreign = tempfile::tempdir().unwrap();
+        dispatch_text(
+            &server,
+            "workspace",
+            json!({"action": "activate", "path": foreign.path()}),
+            Some("sess-1/agent-a"),
+        )
+        .await;
+
+        let blocks = dispatch_blocks(
+            &server,
+            "create_file",
+            json!({"path": "x.txt", "content": "hi"}),
+            None,
+        )
+        .await;
+        let texts: Vec<String> = blocks
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+            .collect();
+        // Premise: the notice is its OWN block behind the refusal text.
+        assert!(
+            texts.len() >= 2 && texts[1..].iter().any(|t| t.contains("sess-1/agent-a")),
+            "premise: the notice must ride a block of its own: {texts:?}"
+        );
+        assert!(
+            crate::tools::guide_emit::seam_defects(&blocks).is_empty(),
+            "{:?}",
+            crate::tools::guide_emit::seam_defects(&blocks)
+        );
     }
 
     /// A parent's call after a subagent's restores the PARENT's own ledger,
@@ -15305,6 +15450,14 @@ mod guide_hint_tests {
             held_text.contains("<!-- auto-injected get_guide('librarian') §"),
             "the section that informs the call rides in the held response"
         );
+        // The held reply is its own assembly (`{"executed": false}` + the section blocks,
+        // not the `call_content` tail), so it is its own place for a block to start
+        // mid-line. docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+        assert!(
+            crate::tools::guide_emit::seam_defects(&held.content).is_empty(),
+            "held reply: {:?}",
+            crate::tools::guide_emit::seam_defects(&held.content)
+        );
 
         // The identical re-issue executes, and does not serve the section a second time.
         let ran = server
@@ -17145,8 +17298,12 @@ mod guide_hint_tests {
         // original wrapper, never a re-implementation of it). This is the
         // sole guard on the Phase 1 containment property.
         let body = crate::prompts::topic_body("symbol-navigation").unwrap();
+        // The leading "\n" is the one deliberate difference from the pre-Task-8 wrapper: it
+        // puts the marker on a line of its own when a client lays the blocks end to end
+        // (`trailing_block`). Everything after it is still pinned byte for byte.
+        // docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
         let expected = format!(
-            "<!-- auto-injected get_guide('symbol-navigation') — first call this session \
+            "\n<!-- auto-injected get_guide('symbol-navigation') — first call this session \
          that triggers the topic. Do NOT re-call get_guide for this topic. -->\n\
          \n\
          {body}\n\
@@ -17154,6 +17311,68 @@ mod guide_hint_tests {
          <!-- end auto-injected get_guide('symbol-navigation') -->"
         );
         assert_eq!(*guide_shaped[0], expected);
+    }
+
+    /// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+    ///
+    /// A client that lays a reply's content blocks end to end (Claude Code and the `mcp`
+    /// CLI both do) glues an appended block onto the tool's last line unless the block
+    /// itself begins with a newline. A line-oriented reader that cuts the guide at its
+    /// marker then loses that last line. Measured on the wire before the fix:
+    /// `      }<!-- auto-injected get_guide('project-activation-bootstrap') ...`.
+    ///
+    /// One response per primary shape the injection rides behind. `all_text` joins with
+    /// "\n" and would hide the defect, which is why the check reads the blocks themselves.
+    #[tokio::test]
+    async fn an_injected_block_never_starts_mid_line_whatever_shape_the_primary_has() {
+        use crate::tools::guide_emit::seam_defects;
+
+        // Compact text primary, whole-topic guide (`symbols` routes to `symbol-navigation`),
+        // plus the server's own appended banner and status blocks on a first call.
+        let (_dir, server) = make_server().await;
+        let text = call_tool(&server, "symbols", json!({"path": "."})).await;
+        assert!(
+            content_carries_guide_body(&text, "symbol-navigation"),
+            "premise: a guide block rides this response"
+        );
+        assert!(
+            seam_defects(&text).is_empty(),
+            "text primary: {:?}",
+            seam_defects(&text)
+        );
+
+        // JSON primary, section-grain guide.
+        let (_dir, server) = make_server().await;
+        let json_primary =
+            call_tool(&server, "doc", json!({"action": "find", "kind": "tracker"})).await;
+        assert!(
+            content_carries_guide_body(&json_primary, "librarian"),
+            "premise: a guide section rides this response"
+        );
+        assert!(
+            seam_defects(&json_primary).is_empty(),
+            "JSON primary: {:?}",
+            seam_defects(&json_primary)
+        );
+
+        // Buffered primary (`@cmd_*` envelope), progressive-disclosure guide.
+        let (_dir, server) = make_server().await;
+        let ctx = shared_ctx(&server);
+        warm_ledger(&ctx);
+        let buffered = tool_by_name(&server, "run_command")
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            content_carries_guide_body(&buffered, "progressive-disclosure"),
+            "premise: the overflow guide rides this response; got: {}",
+            render_content(&buffered)
+        );
+        assert!(
+            seam_defects(&buffered).is_empty(),
+            "buffered primary: {:?}",
+            seam_defects(&buffered)
+        );
     }
 
     #[tokio::test]

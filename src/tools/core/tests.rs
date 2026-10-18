@@ -694,6 +694,35 @@ async fn the_displaced_notice_reaches_results_that_are_not_objects_without_resha
     }
 }
 
+/// A result with no object to hold the notice carries it in a block of its own, behind the
+/// tool's answer. A client that lays the blocks end to end must not read it as the tail of
+/// the answer's last line.
+/// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+#[tokio::test]
+async fn a_notice_block_beside_a_non_object_result_starts_on_its_own_line() {
+    let (_h, _f, ctx) = displaced_ctx().await;
+    let tool = EchoTool {
+        result: serde_json::json!([1, 2, 3]),
+        user_summary: None,
+    };
+    let blocks = crate::tools::session_key::scope_caller(
+        Some("sess-1".to_string()),
+        tool.call_content(serde_json::json!({}), &ctx),
+    )
+    .await
+    .unwrap();
+    assert!(
+        blocks.len() >= 2,
+        "premise: the notice must ride a block of its own, got {} block(s)",
+        blocks.len()
+    );
+    assert!(
+        crate::tools::guide_emit::seam_defects(&blocks).is_empty(),
+        "{:?}",
+        crate::tools::guide_emit::seam_defects(&blocks)
+    );
+}
+
 /// The other half of "do not change result shapes for callers who get no notice": the
 /// promotion of a bare string happens ONLY when a notice is being delivered.
 #[tokio::test]
