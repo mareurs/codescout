@@ -275,4 +275,96 @@ mod tests {
             .unwrap();
         assert_eq!(out, input);
     }
+
+    // ---- a LEAF that is itself a symlink: the ack flow follows the classifier -------------------
+    //
+    // `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+    //
+    // The outside targets below do not exist and are never created: a DANGLING link names them, and
+    // the classifier judges the path a write through it would create. They sit under `/var`, which
+    // the ambient environment these tests run in (`resolve_write_or_capture` reads it) does not
+    // cover; the system temp dir does, so a tempdir could not stand in for "outside".
+
+    #[cfg(unix)]
+    fn plant_leaf_link(project: &std::path::Path, target: &str) -> String {
+        let link = project.join("leaf");
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        link.to_str().unwrap().to_string()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_leaf_link_to_an_unapproved_outside_path_captures_an_ack_for_the_targets_directory() {
+        let (dir, ctx) = ctx_with_project().await;
+        let link = plant_leaf_link(dir.path(), "/var/ce_ack_leaf_capture/victim.txt");
+        let input = json!({ "path": link, "content": "x" });
+        let outcome = resolve_write_or_capture(&ctx, "create_file", &input, &link)
+            .await
+            .unwrap();
+        match outcome {
+            WriteOutcome::Pending(env) => {
+                let hint = env["hint"].as_str().expect("hint");
+                assert!(
+                    hint.contains("/var/ce_ack_leaf_capture"),
+                    "the ack must name the TARGET's directory, got: {env}"
+                );
+                assert!(
+                    env["pending_ack"]
+                        .as_str()
+                        .is_some_and(|h| h.starts_with("@ack_")),
+                    "got: {env}"
+                );
+            }
+            other => panic!("a link out of the roots must be captured, got: {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_leaf_link_into_an_approved_directory_is_written_after_the_ack_is_replayed() {
+        let (dir, ctx) = ctx_with_project().await;
+        let link = plant_leaf_link(dir.path(), "/var/ce_ack_leaf_replay/victim.txt");
+        let input = json!({ "path": link, "content": "x" });
+        let handle = match resolve_write_or_capture(&ctx, "create_file", &input, &link)
+            .await
+            .unwrap()
+        {
+            WriteOutcome::Pending(env) => env["pending_ack"].as_str().unwrap().to_string(),
+            other => panic!("expected an ack before approval, got: {other:?}"),
+        };
+        let replayed = maybe_replay_ack(&ctx, json!({ "path": handle }), "create_file")
+            .await
+            .unwrap();
+        assert_eq!(replayed, input);
+        match resolve_write_or_capture(&ctx, "create_file", &input, &link)
+            .await
+            .unwrap()
+        {
+            WriteOutcome::Write(p) => assert!(
+                p.ends_with("leaf"),
+                "the write is handed the link itself, got: {p:?}"
+            ),
+            other => panic!("after approval the write must proceed, got: {other:?}"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_leaf_link_to_a_deny_listed_path_is_refused_and_offers_no_ack() {
+        // `/etc/gshadow` is on the default deny list. Whether or not it exists on this host the
+        // link is refused, and a hard denial must never mint an `@ack_*` handle: the error is
+        // the whole answer.
+        let (dir, ctx) = ctx_with_project().await;
+        let link = plant_leaf_link(dir.path(), "/etc/gshadow");
+        let input = json!({ "path": link, "content": "x" });
+        let err = resolve_write_or_capture(&ctx, "create_file", &input, &link)
+            .await
+            .expect_err("a link to a deny-listed path must be refused");
+        let msg = err.to_string();
+        assert!(msg.contains("protected location"), "got: {msg}");
+        assert!(
+            !msg.contains("@ack_") && !msg.contains("approve_write(path="),
+            "a hard denial must not point at an approval, got: {msg}"
+        );
+    }
 }

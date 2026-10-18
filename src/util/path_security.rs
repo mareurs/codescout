@@ -363,6 +363,12 @@ fn canonicalize_through_existing_ancestor(path: &Path) -> PathBuf {
     }
 }
 
+/// The most symbolic links one write target may chain through before the classifier gives up on
+/// it. It mirrors the kernel's own limit (`MAXSYMLINKS`, 40 on Linux), so a chain the OS would
+/// follow is a chain this follows, and a loop ends in a refusal instead of a hang.
+#[allow(dead_code)]
+const MAX_LEAF_LINK_HOPS: usize = 40;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -8765,6 +8771,509 @@ EOF"#;
         assert!(
             detect_terminal_filter(&mask_heredoc_bodies(cmd)).is_none(),
             "masking must hide the body pipe from the detector"
+        );
+    }
+    // ── a LEAF that is itself a symlink: the classifier judges where the write lands ────────────
+    //
+    // `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+    //
+    // Every case builds its own canonical tree with the temp dir, home and cwd INJECTED
+    // (`LeafTree::env`), so only the roots a case names can admit a write and nothing is read from
+    // the process (`docs/conventions/test-env-isolation.md`).
+
+    /// `<base>/project` (the project root), `<base>/outside` (a directory no root covers) and
+    /// `<base>/home` (the protected home, holding `.ssh/id_rsa`). `base` is canonical.
+    #[cfg(unix)]
+    struct LeafTree {
+        _scratch: tempfile::TempDir,
+        base: PathBuf,
+        project: PathBuf,
+        outside: PathBuf,
+        home: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl LeafTree {
+        fn new() -> Self {
+            let scratch = tempdir().unwrap();
+            let base = std::fs::canonicalize(scratch.path()).unwrap();
+            let project = base.join("project");
+            let outside = base.join("outside");
+            let home = base.join("home");
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            std::fs::create_dir_all(home.join(".ssh")).unwrap();
+            std::fs::write(home.join(".ssh/id_rsa"), "PRIVATE").unwrap();
+            std::fs::write(outside.join("victim.txt"), "victim").unwrap();
+            std::fs::write(project.join("real.txt"), "real").unwrap();
+            Self {
+                _scratch: scratch,
+                base,
+                project,
+                outside,
+                home,
+            }
+        }
+
+        fn env(&self) -> WriteEnv {
+            env_of(&self.base.join("no-temp"), Some(&self.home), None)
+        }
+
+        fn classify(&self, target: &Path, session_roots: &[PathBuf]) -> WritePathDecision {
+            classify_write_path_in(
+                target.to_str().unwrap(),
+                &self.project,
+                &default_config(),
+                session_roots,
+                &self.env(),
+            )
+        }
+    }
+
+    #[cfg(unix)]
+    fn symlink(to: impl AsRef<Path>, at: &Path) {
+        std::os::unix::fs::symlink(to.as_ref(), at).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn assert_denied_as_protected(decision: &WritePathDecision, what: &str) {
+        assert!(
+            matches!(decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+            "{what} must be a deny-list refusal, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_deny_listed_file_is_refused_whatever_roots_are_approved() {
+        // `<root>/leaf -> ~/.ssh/id_rsa`: the leaf kept its in-root spelling, so the deny list never
+        // saw `~/.ssh`. The deny list wins over every root, so approving the project, the key's own
+        // directory or an unrelated directory changes nothing. The second victim does not exist: the
+        // link dangles into the deny-listed directory.
+        let t = LeafTree::new();
+        let existing = t.home.join(".ssh/id_rsa");
+        let missing = t.home.join(".ssh/new_key");
+        for (name, victim) in [("to-existing", &existing), ("to-missing", &missing)] {
+            let leaf = t.project.join(name);
+            symlink(victim, &leaf);
+            for roots in [
+                vec![],
+                vec![t.project.clone()],
+                vec![t.home.join(".ssh")],
+                vec![t.outside.clone()],
+            ] {
+                let decision = t.classify(&leaf, &roots);
+                assert_denied_as_protected(&decision, &format!("{name} with roots {roots:?}"));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_into_the_deny_list_through_a_symlinked_directory_is_refused() {
+        // The link names `<project>/ssh/id_rsa`, and `<project>/ssh` is itself a link to `~/.ssh`:
+        // the landing has to be resolved through the link's own parent too.
+        let t = LeafTree::new();
+        symlink(t.home.join(".ssh"), &t.project.join("ssh"));
+        let leaf = t.project.join("leaf");
+        symlink(t.project.join("ssh/id_rsa"), &leaf);
+        assert_denied_as_protected(&t.classify(&leaf, &[]), "a link through a linked directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_file_inside_the_root_is_allowed_under_the_link_spelling() {
+        // Allowed, and the path carried is the LINK, not its target: the writers replace a link with
+        // a regular file (`a_target_that_is_a_symlink_is_replaced_not_written_through`), so
+        // handing them the target would turn "replace the link" into "rewrite the target".
+        let t = LeafTree::new();
+        let absolute = t.project.join("abs-link");
+        symlink(t.project.join("real.txt"), &absolute);
+        let relative = t.project.join("rel-link");
+        symlink("real.txt", &relative);
+        for leaf in [&absolute, &relative] {
+            let decision = t.classify(leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if p == leaf),
+                "{leaf:?} must be allowed as itself, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_file_outside_every_root_is_outside_root_at_its_target() {
+        // Not deny-listed, so it is APPROVABLE, and `resolved` names the directory to approve:
+        // the target's, not the link's (approving the link's directory, the project, would
+        // change nothing).
+        let t = LeafTree::new();
+        let victim = t.outside.join("victim.txt");
+        let absolute = t.project.join("abs-link");
+        symlink(&victim, &absolute);
+        let relative = t.project.join("rel-link");
+        symlink("../outside/victim.txt", &relative);
+        for leaf in [&absolute, &relative] {
+            let decision = t.classify(leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == victim),
+                "{leaf:?} must be outside the roots at {victim:?}, got: {decision:?}"
+            );
+        }
+        // The relative RAW path (the form the tools receive) is the same question.
+        let decision = t.classify(Path::new("abs-link"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == victim),
+            "a project-relative raw path must be judged the same way, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_leaf_link_is_judged_at_the_path_it_names() {
+        // A write through a dangling link CREATES its target, so the target's location is what
+        // matters, resolved through its deepest existing ancestor.
+        let t = LeafTree::new();
+        let canon_outside = t.outside.clone();
+        let cases: [(&str, PathBuf, Option<PathBuf>); 3] = [
+            // (name, link target, expected OutsideRoot.resolved, None = Allowed as the link)
+            (
+                "missing-file",
+                t.outside.join("missing.txt"),
+                Some(canon_outside.join("missing.txt")),
+            ),
+            (
+                "missing-dirs",
+                t.outside.join("nodir/deep/x.txt"),
+                Some(canon_outside.join("nodir/deep/x.txt")),
+            ),
+            ("missing-inside", t.project.join("nodir/new.txt"), None),
+        ];
+        for (name, target, expected) in cases {
+            let leaf = t.project.join(name);
+            symlink(&target, &leaf);
+            let decision = t.classify(&leaf, &[]);
+            match expected {
+                Some(resolved) => assert!(
+                    matches!(&decision, WritePathDecision::OutsideRoot { resolved: r } if *r == resolved),
+                    "{name}: must be outside the roots at {resolved:?}, got: {decision:?}"
+                ),
+                None => assert!(
+                    matches!(&decision, WritePathDecision::Allowed(p) if *p == leaf),
+                    "{name}: must be allowed as the link, got: {decision:?}"
+                ),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_chain_is_followed_to_its_end() {
+        let t = LeafTree::new();
+        let victim = t.outside.join("victim.txt");
+
+        // a -> b -> outside/victim.txt
+        symlink(&victim, &t.project.join("b1"));
+        symlink("b1", &t.project.join("a1"));
+        let decision = t.classify(&t.project.join("a1"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == victim),
+            "a chain must be followed past its first hop, got: {decision:?}"
+        );
+
+        // a -> b -> project/real.txt stays in the root
+        symlink(t.project.join("real.txt"), &t.project.join("b2"));
+        symlink("b2", &t.project.join("a2"));
+        let decision = t.classify(&t.project.join("a2"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("a2")),
+            "an in-root chain must be allowed as its first link, got: {decision:?}"
+        );
+
+        // a -> b -> ~/.ssh/id_rsa: only the LAST hop is deny-listed
+        symlink(t.home.join(".ssh/id_rsa"), &t.project.join("b3"));
+        symlink("b3", &t.project.join("a3"));
+        assert_denied_as_protected(
+            &t.classify(&t.project.join("a3"), &[]),
+            "a chain's last hop",
+        );
+
+        // The decision is about where the write LANDS: an intermediate hop outside the roots is
+        // not written (a replace touches only the first link, a write-through only the end).
+        symlink(t.project.join("real.txt"), &t.outside.join("mid"));
+        symlink(t.outside.join("mid"), &t.project.join("a4"));
+        let decision = t.classify(&t.project.join("a4"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("a4")),
+            "an intermediate hop outside the roots is not the landing, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_hop_resolves_against_the_directory_of_the_link_that_names_it() {
+        // `project/sub/hop -> ../real.txt` is `project/real.txt`; `project/sub/far ->
+        // ../../outside/victim.txt` is `<base>/outside/victim.txt`. Resolving either against the
+        // project root, or against the link the chain started from, lands somewhere else.
+        let t = LeafTree::new();
+        std::fs::create_dir(t.project.join("sub")).unwrap();
+        symlink("../real.txt", &t.project.join("sub/hop"));
+        symlink("sub/hop", &t.project.join("near"));
+        let decision = t.classify(&t.project.join("near"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("near")),
+            "a relative hop inside a subdirectory must land on real.txt, got: {decision:?}"
+        );
+
+        symlink("../../outside/victim.txt", &t.project.join("sub/far"));
+        symlink("sub/far", &t.project.join("distant"));
+        let decision = t.classify(&t.project.join("distant"), &[]);
+        let victim = t.outside.join("victim.txt");
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == victim),
+            "a relative hop must be resolved from the link's own directory, got: {decision:?}"
+        );
+    }
+
+    /// Run `classify` on its own thread so a loop that is not bounded fails the test instead of
+    /// hanging the suite.
+    #[cfg(unix)]
+    fn classify_with_deadline(t: &LeafTree, target: &Path) -> WritePathDecision {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (target, project, base, home) = (
+            target.to_path_buf(),
+            t.project.clone(),
+            t.base.clone(),
+            t.home.clone(),
+        );
+        std::thread::spawn(move || {
+            let env = env_of(&base.join("no-temp"), Some(&home), None);
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                &project,
+                &default_config(),
+                &[],
+                &env,
+            );
+            let _ = tx.send(decision);
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the classifier must terminate on a symlink loop")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_loop_is_refused_and_does_not_hang() {
+        let t = LeafTree::new();
+        symlink("self", &t.project.join("self"));
+        symlink("two-b", &t.project.join("two-a"));
+        symlink("two-a", &t.project.join("two-b"));
+        for name in ["self", "two-a"] {
+            let decision = classify_with_deadline(&t, &t.project.join(name));
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
+                "{name}: a loop has no landing and must be a hard denial, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_chain_is_followed_for_exactly_the_hop_limit() {
+        // `k` links in a row, the last one naming `real.txt`. The limit is a count of links
+        // followed: `MAX_LEAF_LINK_HOPS` resolve, one more does not.
+        let t = LeafTree::new();
+        let chain = |name: &str, k: usize| {
+            let first = format!("{name}0");
+            for i in 0..k {
+                let at = t.project.join(format!("{name}{i}"));
+                if i + 1 == k {
+                    symlink("real.txt", &at);
+                } else {
+                    symlink(format!("{name}{}", i + 1), &at);
+                }
+            }
+            t.project.join(first)
+        };
+        let at_limit = chain("fits", MAX_LEAF_LINK_HOPS);
+        let decision = t.classify(&at_limit, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == at_limit),
+            "a chain of {MAX_LEAF_LINK_HOPS} links must resolve, got: {decision:?}"
+        );
+        let over = chain("over", MAX_LEAF_LINK_HOPS + 1);
+        let decision = t.classify(&over, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
+            "a chain of {} links must be refused, got: {decision:?}",
+            MAX_LEAF_LINK_HOPS + 1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_whose_target_sits_under_a_symlinked_directory_resolves_through_it() {
+        // `project/dirlink -> outside`, then leaves naming `project/dirlink/...`: the spelling
+        // is in-root, the landing is not. The second leaf also dangles below the linked directory.
+        let t = LeafTree::new();
+        symlink(&t.outside, &t.project.join("dirlink"));
+        let victim = t.outside.join("victim.txt");
+        symlink(t.project.join("dirlink/victim.txt"), &t.project.join("abs"));
+        symlink("dirlink/victim.txt", &t.project.join("rel"));
+        for name in ["abs", "rel"] {
+            let decision = t.classify(&t.project.join(name), &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == victim),
+                "{name}: must land at {victim:?}, got: {decision:?}"
+            );
+        }
+        symlink(
+            t.project.join("dirlink/nodir/x.txt"),
+            &t.project.join("below"),
+        );
+        let decision = t.classify(&t.project.join("below"), &[]);
+        let expected = t.outside.join("nodir/x.txt");
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == expected),
+            "a missing subdirectory below a linked directory must resolve through it, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_into_an_approved_root_is_allowed_and_only_that_root() {
+        let t = LeafTree::new();
+        let elsewhere = t.base.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("other.txt"), "o").unwrap();
+        let to_approved = t.project.join("to-approved");
+        symlink(t.outside.join("victim.txt"), &to_approved);
+        let to_other = t.project.join("to-other");
+        symlink(elsewhere.join("other.txt"), &to_other);
+
+        // Before approval: refused at the target. After `approve_write(outside)` (a session root):
+        // allowed, as the link. The approval does not reach `elsewhere`.
+        let roots = vec![t.outside.clone()];
+        let decision = t.classify(&to_approved, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == t.outside.join("victim.txt")),
+            "before approval the link must be refused at its target, got: {decision:?}"
+        );
+        let decision = t.classify(&to_approved, &roots);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == to_approved),
+            "after approval the link must be allowed, got: {decision:?}"
+        );
+        let decision = t.classify(&to_other, &roots);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == elsewhere.join("other.txt")),
+            "approving one directory must not admit a link into another, got: {decision:?}"
+        );
+
+        // The same holds for a configured extra write root.
+        let config = PathSecurityConfig {
+            extra_write_roots: vec![t.outside.clone()],
+            ..Default::default()
+        };
+        let decision = classify_write_path_in(
+            to_approved.to_str().unwrap(),
+            &t.project,
+            &config,
+            &[],
+            &t.env(),
+        );
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == to_approved),
+            "an extra write root must admit a link into it, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_spelled_outside_the_roots_stays_refused_when_it_points_inside() {
+        // The link ITSELF is what a replacing writer overwrites, so a link outside the roots (or in
+        // the deny list) is refused for where it lives, whatever it points at.
+        let t = LeafTree::new();
+        let outside_link = t.outside.join("ln");
+        symlink(t.project.join("real.txt"), &outside_link);
+        let decision = t.classify(&outside_link, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == outside_link),
+            "a link outside the roots must be refused at its own location, got: {decision:?}"
+        );
+
+        let ssh_link = t.home.join(".ssh/ln");
+        symlink(t.project.join("real.txt"), &ssh_link);
+        assert_denied_as_protected(
+            &t.classify(&ssh_link, &[t.home.join(".ssh")]),
+            "a link inside the deny list",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_whose_target_has_an_unresolvable_dotdot_is_refused() {
+        // `nodir` does not exist, so `nodir/../../x` cannot be collapsed; `starts_with` would
+        // match a root that the `..` escapes.
+        let t = LeafTree::new();
+        let leaf = t.project.join("leaf");
+        symlink(t.project.join("nodir/../../x"), &leaf);
+        let decision = t.classify(&leaf, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("'..'")),
+            "an unresolved '..' in the landing must be a hard denial, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_that_is_not_a_link_is_classified_as_before() {
+        let t = LeafTree::new();
+        let inside_file = t.project.join("real.txt");
+        let inside_missing = t.project.join("new.txt");
+        let inside_dir = t.project.join("a-dir");
+        std::fs::create_dir(&inside_dir).unwrap();
+        for leaf in [&inside_file, &inside_missing, &inside_dir] {
+            let decision = t.classify(leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if p == leaf),
+                "{leaf:?} must be allowed as itself, got: {decision:?}"
+            );
+        }
+        let outside_file = t.outside.join("victim.txt");
+        let decision = t.classify(&outside_file, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == outside_file),
+            "a regular file outside the roots must be refused, got: {decision:?}"
+        );
+        assert_denied_as_protected(
+            &t.classify(&t.home.join(".ssh/id_rsa"), &[]),
+            "a regular deny-listed file",
+        );
+        // A leaf below a regular file (ENOTDIR on the lstat) is not a link either.
+        let decision = t.classify(&inside_file.join("below"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == inside_file.join("below")),
+            "a path below a regular file keeps its old answer, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_root_profile_still_classifies_a_leaf_link_as_itself() {
+        // `SecurityProfile::Root` is the "no restrictions" profile and returns before the
+        // allowlist; it is not given a deny list by this change.
+        let t = LeafTree::new();
+        let leaf = t.project.join("leaf");
+        symlink(t.home.join(".ssh/id_rsa"), &leaf);
+        let config = PathSecurityConfig {
+            profile: SecurityProfile::Root,
+            ..Default::default()
+        };
+        let decision =
+            classify_write_path_in(leaf.to_str().unwrap(), &t.project, &config, &[], &t.env());
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == leaf),
+            "the Root profile must be unchanged, got: {decision:?}"
         );
     }
 }
