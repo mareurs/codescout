@@ -622,3 +622,84 @@ fn an_unreadable_global_config_counts_as_the_strictest_value() {
         },
     );
 }
+
+/// F5. The notice is documented as riding EVERY response. The success path carries it; the
+/// error path returned before the notice was built. One test per error shape a caller meets:
+/// a recoverable error (isError false, JSON body), and a fatal one (plain text).
+#[tokio::test]
+async fn the_failed_reload_notice_rides_a_recoverable_error_response() {
+    let (dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    save(&dir, &with_security(BAD_ENTRY));
+    let (_, text) = call(&server, "read_file", json!({"path": "no-such-file.txt"})).await;
+    assert!(
+        text.contains("no-such-file") && text.contains("FAILED TO LOAD"),
+        "read_file on a missing file is a recoverable error and must carry the notice: {text}"
+    );
+}
+
+#[tokio::test]
+async fn the_failed_reload_notice_rides_an_edit_file_error_response() {
+    let (dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    save(&dir, &with_security(BAD_ENTRY));
+    let (_, text) = call(
+        &server,
+        "edit_file",
+        json!({"path": "no-such-file.txt", "old_string": "a", "new_string": "b"}),
+    )
+    .await;
+    assert!(
+        text.contains("no-such-file") && text.contains("FAILED TO LOAD"),
+        "edit_file on a missing file must carry the notice: {text}"
+    );
+}
+
+#[tokio::test]
+async fn the_failed_reload_notice_rides_a_fatal_error_response() {
+    let (dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    save(&dir, &with_security(BAD_ENTRY));
+    // Refused by the protected-file guard inside the tool: a plain (isError true) error.
+    let (err, text) = call(
+        &server,
+        "create_file",
+        json!({
+            "path": ".codescout/project.toml",
+            "content": "[project]\nname = \"t\"\n\n[security]\nprofile = \"root\"\n",
+            "overwrite": true,
+        }),
+    )
+    .await;
+    assert!(
+        err && text.contains("configuration file"),
+        "control: the guard refused the write, as a fatal error: {text}"
+    );
+    assert!(
+        text.contains("FAILED TO LOAD"),
+        "a fatal error response must carry the notice: {text}"
+    );
+}
+
+/// An error that already carries a param-alias advisory keeps it and gains the notice; the
+/// notice alone wraps a plain error without touching its message; no notice leaves it alone.
+#[test]
+fn the_notice_joins_an_existing_alias_advisory_and_never_rewrites_the_message() {
+    use crate::tools::{
+        attach_param_corrections_to_error, attach_workspace_notice_to_error, AdvisedError,
+    };
+    let advisory = json!({"hint": "alias repaired"});
+    let both = attach_workspace_notice_to_error(
+        attach_param_corrections_to_error(anyhow::anyhow!("boom"), Some(&advisory)),
+        Some("N".to_string()),
+    );
+    let advised = both.downcast_ref::<AdvisedError>().expect("wrapped");
+    assert_eq!(advised.corrections, advisory, "the alias advisory survives");
+    assert_eq!(advised.notice.as_deref(), Some("N"));
+    assert_eq!(both.to_string(), "boom", "the message is untouched");
+
+    let alone = attach_workspace_notice_to_error(anyhow::anyhow!("boom"), Some("N".into()));
+    let advised = alone.downcast_ref::<AdvisedError>().expect("wrapped");
+    assert!(advised.corrections.is_null());
+    assert_eq!(alone.to_string(), "boom");
+
+    let none = attach_workspace_notice_to_error(anyhow::anyhow!("boom"), None);
+    assert!(none.downcast_ref::<AdvisedError>().is_none());
+}

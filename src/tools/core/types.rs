@@ -805,8 +805,49 @@ pub(crate) fn attach_param_corrections_to_error(
         Err(e) => AdvisedError {
             inner: e,
             corrections: c.clone(),
+            notice: None,
         }
         .into(),
+    }
+}
+
+/// The key a workspace notice is spliced under in an object-shaped response body, success or
+/// error: the same address `call_content`'s success path writes (`inject_notice`).
+pub(crate) const WORKSPACE_NOTICE_KEY: &str = "_workspace_notice";
+
+/// Attach the config-load notice to a tool's `Err`, the error-path twin of the success path's
+/// `inject_notice`. The notice is documented as riding every response, and the error path used
+/// to return before it was built (a missing file, a refused write: all showed none).
+///
+/// Same two carriers as [`attach_param_corrections_to_error`], for the same reason: a
+/// [`RecoverableError`] has an `extra` map the router splices into the body, and a plain
+/// `anyhow` error has nowhere to put a field, so it is wrapped in an [`AdvisedError`] whose
+/// `Display`/`Debug`/`source()` still delegate to the inner error unchanged. An error that
+/// already is an `AdvisedError` (it carried a param-alias advisory) keeps that and gains the
+/// notice. `None` leaves the error untouched.
+pub(crate) fn attach_workspace_notice_to_error(
+    e: anyhow::Error,
+    notice: Option<String>,
+) -> anyhow::Error {
+    let Some(notice) = notice else { return e };
+    match e.downcast::<RecoverableError>() {
+        Ok(mut rec) => {
+            rec.extra
+                .insert(WORKSPACE_NOTICE_KEY.to_string(), Value::String(notice));
+            rec.into()
+        }
+        Err(e) => match e.downcast::<AdvisedError>() {
+            Ok(mut advised) => {
+                advised.notice = Some(notice);
+                advised.into()
+            }
+            Err(e) => AdvisedError {
+                inner: e,
+                corrections: Value::Null,
+                notice: Some(notice),
+            }
+            .into(),
+        },
     }
 }
 
@@ -1058,7 +1099,12 @@ impl std::error::Error for RecoverableError {}
 /// walks it).
 pub(crate) struct AdvisedError {
     pub(crate) inner: anyhow::Error,
+    /// The param-alias advisory, or `Value::Null` when this wrapper exists only to carry
+    /// `notice`.
     pub(crate) corrections: Value,
+    /// A workspace notice (the failed-reload one) for the response this error becomes. See
+    /// [`attach_workspace_notice_to_error`].
+    pub(crate) notice: Option<String>,
 }
 
 impl std::fmt::Display for AdvisedError {
@@ -1776,10 +1822,12 @@ pub trait Tool: Send + Sync {
         let mut val = match self.call(input, ctx).await {
             Ok(v) => v,
             Err(e) => {
-                return Err(attach_param_corrections_to_error(
+                let e = attach_param_corrections_to_error(e, param_corrections.as_ref());
+                // The config-load notice is owed to every response, this one included.
+                return Err(attach_workspace_notice_to_error(
                     e,
-                    param_corrections.as_ref(),
-                ))
+                    config_load_notice(ctx).await,
+                ));
             }
         };
 

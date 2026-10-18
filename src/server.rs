@@ -2203,9 +2203,10 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
     // `RecoverableError` arm and the advisory is already spliced into its body by the
     // time we get here. No double attach; `merge_param_corrections` would be
     // idempotent regardless (same key, same value).
-    let advisory = e
-        .downcast_ref::<crate::tools::AdvisedError>()
-        .map(|adv| &adv.corrections);
+    let advised = e.downcast_ref::<crate::tools::AdvisedError>();
+    // `Null` is "no alias advisory": the wrapper may exist only to carry a notice.
+    let advisory = advised.map(|adv| &adv.corrections).filter(|c| !c.is_null());
+    let notice = advised.and_then(|adv| adv.notice.as_deref());
     match select_error_render(&e) {
         ErrorRender::Body(mut body) => {
             if let (Some(c), Some(obj)) = (advisory, body.as_object_mut()) {
@@ -2217,6 +2218,12 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
                 // both facts must arrive together.
                 crate::tools::merge_param_corrections(obj, c);
             }
+            if let (Some(n), Some(obj)) = (notice, body.as_object_mut()) {
+                obj.insert(
+                    crate::tools::WORKSPACE_NOTICE_KEY.to_string(),
+                    serde_json::Value::String(n.to_string()),
+                );
+            }
             let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
             CallToolResult::success(vec![Content::text(text)])
         }
@@ -2225,14 +2232,18 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
             // spliced, matching `call_content`'s own compact-text success renderer's
             // choice for this same `hint` string: the notice changes how the message
             // below it should be read, so it has to arrive first. See
-            // `attach_param_corrections_to_error`.
-            let prefix = advisory
+            // `attach_param_corrections_to_error`. A workspace notice is prefixed the
+            // same way (it is what `inject_notice` does to a `stdout` string).
+            let alias_prefix = advisory
                 .and_then(|c| c.get("hint"))
                 .and_then(|v| v.as_str())
                 .filter(|h| !h.is_empty())
                 .map(|h| format!("⚠ {h}\n\n"))
                 .unwrap_or_default();
-            CallToolResult::error(vec![Content::text(format!("{prefix}{message}"))])
+            let notice_prefix = notice.map(|n| format!("⚠ {n}\n\n")).unwrap_or_default();
+            CallToolResult::error(vec![Content::text(format!(
+                "{notice_prefix}{alias_prefix}{message}"
+            ))])
         }
     }
 }
