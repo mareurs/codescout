@@ -370,7 +370,16 @@ fn symbol_tree_contains(syms: &[crate::lsp::SymbolInfo], name: &str) -> bool {
 /// previous behaviour (`SymbolMissing`) rather than inventing a verdict out of a failed
 /// parse. Erring toward the old answer keeps this change from manufacturing new
 /// `Unknown`s on languages tree-sitter cannot read.
-fn ast_has_symbol(path: &Path, name: &str) -> bool {
+fn ast_has_symbol(repo_root: &Path, path: &Path, name: &str) -> bool {
+    // `extract_symbols` reads the file itself, outside the librarian: the read door is asked
+    // first, so a doc-cited path that resolves outside the repository is never parsed. The
+    // answer is a yes/no, and a refused path answers like an unparseable one.
+    if crate::librarian::read_door::ReadDoor::new(vec![repo_root.to_path_buf()])
+        .refusal(path)
+        .is_some()
+    {
+        return false;
+    }
     crate::ast::extract_symbols(path)
         .map(|syms| symbol_tree_contains(&syms, name))
         .unwrap_or(false)
@@ -412,7 +421,8 @@ fn resolve_file_line(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
         let n: u32 = line_str.parse().unwrap_or(0);
         (n, n)
     };
-    let total = std::fs::read_to_string(&path)
+    let total = crate::librarian::read_door::ReadDoor::new(vec![ctx.repo_root.to_path_buf()])
+        .text(&path)
         .map(|s| s.lines().count() as u32)
         .unwrap_or(0);
     if start == 0 || end == 0 || start > end || end > total {
@@ -442,7 +452,10 @@ fn resolve_link(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
     }
     if let Some(anchor) = c.raw_ref.strip_prefix('#') {
         let target_md = ctx.repo_root.join(&c.md_file);
-        if let Ok(text) = std::fs::read_to_string(&target_md) {
+        if let Ok(text) =
+            crate::librarian::read_door::ReadDoor::new(vec![ctx.repo_root.to_path_buf()])
+                .text(&target_md)
+        {
             let slugs: std::collections::HashSet<String> = text
                 .lines()
                 .filter_map(|l| {
@@ -671,7 +684,7 @@ fn resolve_file_symbol(c: &RefCandidate, ctx: &ResolveCtx<'_>) -> Resolution {
                     severity_reason: SeverityReason::PolicyDefault,
                     notes: None,
                 }
-            } else if ast_has_symbol(&ast_path, name) {
+            } else if ast_has_symbol(ctx.repo_root, &ast_path, name) {
                 // The server ANSWERED, and tree-sitter disagrees with it — so the symbol
                 // exists and the server is behind its own index. `SymbolMissing` here is
                 // a false claim about the code, and it is the mechanism behind the

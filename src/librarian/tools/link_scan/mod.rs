@@ -381,8 +381,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // would double the I/O and risk the two passes seeing different bytes.
     let mut extracts: Vec<(usize, extract::DocExtract, Vec<extract::EntrySection>)> = Vec::new();
     let mut unreadable: Vec<String> = Vec::new();
+    // Through the read door: a row whose file resolves outside its repository counts as
+    // unreadable, so none of its tokens reach the findings.
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
     for (i, row) in rows.iter().enumerate() {
-        match std::fs::read_to_string(&row.abs_path) {
+        match door.text(&row.abs_path) {
             Ok(text) => {
                 let sections = extract::entry_sections(&text);
                 extracts.push((i, extract::extract(&text), sections));

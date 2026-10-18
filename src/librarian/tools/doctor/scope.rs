@@ -159,6 +159,12 @@ pub(super) struct DoctorScope {
     /// the active project declares no umbrella, exactly like `umbrella_member_roots`
     /// itself.
     umbrella_roots: Vec<PathBuf>,
+    /// The read door every scan reads a row's file through (`read_door`), judged against the
+    /// caller's MANAGED roots (`tools::managed_roots`, the write door's input), not against
+    /// `roots` above, which is the scope's report filter. Lives here for the reason
+    /// `below_floor_in_scope` does: the scope is the one carrier every scan already receives,
+    /// and the door remembers each file's deny-list answer for the whole run.
+    door: crate::librarian::read_door::ReadDoor,
 }
 
 impl DoctorScope {
@@ -247,7 +253,20 @@ impl DoctorScope {
             cited_from_here,
             cross_root_cites_edges,
             umbrella_roots,
+            door: crate::librarian::read_door::ReadDoor::new(
+                crate::librarian::tools::managed_roots(ctx),
+            ),
         })
+    }
+    /// The run's read door (see the field doc).
+    pub(super) fn door(&self) -> &crate::librarian::read_door::ReadDoor {
+        &self.door
+    }
+
+    /// A row's file as text through the door, or `None` when it is missing, unreadable or
+    /// refused: every scan treats those three alike, as "nothing to check".
+    pub(super) fn read_text(&self, path: impl AsRef<Path>) -> Option<String> {
+        self.door.text(path.as_ref()).ok()
     }
 
     /// Lexical predicate for a path already in hand. Empty `roots` admits everything, and

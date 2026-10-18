@@ -93,7 +93,9 @@ impl crate::util::librarian_sync::CatalogFrontmatterSync for CatalogFrontmatterS
         let Ok(abs) = std::fs::canonicalize(abs_path) else {
             return false;
         };
-        let Ok(content) = std::fs::read_to_string(&abs) else {
+        // Through the read door. `abs` is already canonical (no link left to judge), so no roots
+        // are needed: the door judges it against the repository it spells.
+        let Ok(content) = crate::librarian::read_door::ReadDoor::new(Vec::new()).text(&abs) else {
             return false;
         };
         // No frontmatter block at all means nothing indexed can have moved.

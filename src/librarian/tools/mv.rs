@@ -324,18 +324,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // repair could not read (mode 000, invalid UTF-8, a link to a directory, a row that is a
         // directory) was renamed and the catalog row kept the old path: a half-done move, measured
         // four ways. A rename does not change the content, so what is read here is what the repair
-        // and the row's digest need afterwards.
-        let content_before = std::fs::read_to_string(&old_full).map_err(|e| {
-            super::LibrarianRecoverableError::with_hint(
-                format!(
-                    "refusing to move `{}`: cannot read it as UTF-8 text ({e})",
-                    old_full.display()
-                ),
-                "Nothing was moved. A move re-keys the document and repairs its frontmatter `id:`, \
-                 which needs its content; make the file readable text (or fix the row that names \
-                 a directory or a link to one) and re-run.",
-            )
-        })?;
+        // and the row's digest need afterwards. Through the read door: a row whose file resolves
+        // outside its repository is refused here, before anything moves (a move re-keys the row
+        // from its content, which the librarian does not read through such a link).
+        let content_before = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
+            .text(&old_full)
+            .map_err(|e| match e {
+                crate::librarian::read_door::ReadError::Refused(r) => r,
+                crate::librarian::read_door::ReadError::Io(e) => {
+                    super::LibrarianRecoverableError::with_hint(
+                        format!(
+                            "refusing to move `{}`: cannot read it as UTF-8 text ({e})",
+                            old_full.display()
+                        ),
+                        "Nothing was moved. A move re-keys the document and repairs its frontmatter `id:`, \
+                         which needs its content; make the file readable text (or fix the row that names \
+                         a directory or a link to one) and re-run.",
+                    )
+                }
+            })?;
 
         // Moving a `fixed`/`mitigated` bug under `archive/` takes it out of doctor's
         // `terminal_status_without_fix_anchor` (which skips archive paths) exactly as
@@ -739,7 +746,10 @@ pub(super) fn repair_frontmatter_id(
 ) -> anyhow::Result<String> {
     let content = match already_read {
         Some(c) => c,
-        None => std::fs::read_to_string(path)?,
+        // The repair rewrites the file, so the write door's refusal comes before the read.
+        None => crate::librarian::read_door::ReadDoor::new(roots.to_vec())
+            .text_for_write(path)
+            .map_err(crate::librarian::read_door::ReadError::into_anyhow)?,
     };
 
     // READ through the parser — it is authoritative about what YAML actually sees,

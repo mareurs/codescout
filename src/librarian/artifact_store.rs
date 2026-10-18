@@ -57,7 +57,10 @@ impl ArtifactBackend {
             let cfg = std::path::Path::new(root)
                 .join(".codescout")
                 .join("project.toml");
-            if let Ok(text) = std::fs::read_to_string(&cfg) {
+            // Through the read door, judged against the project; a refused file reads as absent.
+            if let Ok(text) =
+                crate::librarian::read_door::for_project(std::path::Path::new(root)).text(&cfg)
+            {
                 if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
                     if let Some(v) = parsed
                         .get("librarian")

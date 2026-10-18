@@ -669,9 +669,11 @@ async fn call_with_index_cap(
 
     let mut all_findings: Vec<Finding> = Vec::new();
     let mut all_warnings: Vec<ParseWarning> = Vec::new();
+    // Every scanned file is read through the read door, judged against the repository root.
+    let door = crate::librarian::read_door::ReadDoor::new(vec![repo_root.clone()]);
 
     for md in &files {
-        let text = std::fs::read_to_string(md).unwrap_or_default();
+        let text = door.text(md).unwrap_or_default();
         let rel = md
             .strip_prefix(&repo_root)
             .unwrap_or(md.as_path())

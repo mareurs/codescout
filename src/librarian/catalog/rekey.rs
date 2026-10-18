@@ -374,8 +374,14 @@ fn rekey_body(
         return Ok(());
     };
 
-    let text = match std::fs::read_to_string(&abs_path) {
+    // The write door's refusal BEFORE the read (`ReadDoor::text_for_write`). A refusal fails the
+    // call, as the write door did when it refused the body WRITE; an unreadable file is handled
+    // below.
+    let text = match crate::librarian::read_door::ReadDoor::new(roots.to_vec())
+        .text_for_write(std::path::Path::new(&abs_path))
+    {
         Ok(t) => t,
+        Err(crate::librarian::read_door::ReadError::Refused(e)) => return Err(e),
         Err(e) => {
             // Nothing in params moved, so nothing on disk has to stay in step with the
             // catalog: an unreadable file is `doctor`'s `missing_file` to report, not a
@@ -1656,9 +1662,9 @@ mod tests {
         assert!(out.starts_with("# Notes\n"), "got:\n{out}");
     }
 
-    /// `abs_path` comes from the catalog row, and the indexer catalogs an in-root link whose
-    /// target is outside the root, so `fs::write` here would rewrite a file the repository does
-    /// not own. Refused inside the transaction: the params rewrite done earlier in the same
+    /// `abs_path` comes from the catalog row, and a row can name an in-root link whose target is
+    /// outside the root (a catalogued file replaced by one), so `fs::write` here would rewrite a
+    /// file the repository does not own. Refused inside the transaction: the params rewrite done earlier in the same
     /// transaction must roll back with it, or the ids and the body part ways.
     #[cfg(unix)]
     #[test]

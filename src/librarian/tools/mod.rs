@@ -514,6 +514,10 @@ mod link_write_tests;
 #[cfg(test)]
 mod link_dir_tests;
 
+/// The read door's layout table (see the module doc).
+#[cfg(test)]
+mod read_door_tests;
+
 #[cfg(test)]
 mod containing_root_tests {
     use super::containing_root;

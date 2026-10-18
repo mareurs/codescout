@@ -1524,8 +1524,9 @@ async fn an_unarmed_writer_does_not_inherit_the_previous_calls_roots() {
     );
 }
 
-/// P7: an ABSOLUTE-target leaf link moves to another directory fine; the outside target is
-/// untouched.
+/// P7: an ABSOLUTE-target leaf link moves to another directory fine; the target is untouched. The
+/// target is INSIDE the repository: since 2026-10-18 a move reads the document first and the read
+/// door refuses a link out of the repository (`doc_move_of_a_catalogued_outward_link_...`).
 #[tokio::test]
 async fn doc_move_of_an_absolute_leaf_link_to_another_directory_completes() {
     let base = tempfile::tempdir().unwrap();
@@ -2870,7 +2871,8 @@ mod door_table {
         })
         .await;
         let e = r.expect_err("a link to a directory is not renamed");
-        assert!(msg(&e).contains("cannot read"), "{}", msg(&e));
+        // The read door refuses a target that is not a regular file before anything moves.
+        assert!(msg(&e).contains("not a regular file"), "{}", msg(&e));
         assert_nothing_moved(&root, &ctx, &id, "link to a directory");
     }
 
@@ -2881,7 +2883,7 @@ mod door_table {
         })
         .await;
         let e = r.expect_err("a directory is not renamed");
-        assert!(msg(&e).contains("cannot read"), "{}", msg(&e));
+        assert!(msg(&e).contains("not a regular file"), "{}", msg(&e));
         assert_nothing_moved(&root, &ctx, &id, "row is a directory");
     }
 

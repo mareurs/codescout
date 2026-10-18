@@ -316,8 +316,15 @@ pub(crate) async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "pass at most one of `params` or `params_path`",
             ));
         }
-        let raw = std::fs::read_to_string(&path).map_err(|e| {
-            LibrarianRecoverableError::new(format!("params_path: reading {path}: {e}"))
+        // An AGENT-named path: the read deny-list only, as `read_file` applies it, with the read
+        // door's open-then-verify read (`read_door::read_agent_named_text`). Not a containment
+        // check (decision D5): the documented use is a JSON file in a scratch or temp directory.
+        let raw = crate::librarian::read_door::read_agent_named_text(std::path::Path::new(&path))
+            .map_err(|e| match e {
+            crate::librarian::read_door::ReadError::Refused(r) => r,
+            crate::librarian::read_door::ReadError::Io(io) => {
+                LibrarianRecoverableError::new(format!("params_path: reading {path}: {io}"))
+            }
         })?;
         let parsed: Value = serde_json::from_str(&raw).map_err(|e| {
             LibrarianRecoverableError::new(format!("params_path content is not valid JSON: {e}"))

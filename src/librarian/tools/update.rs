@@ -584,7 +584,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         artifact::get(&cat, &a.id)?.ok_or_else(|| anyhow::anyhow!("unknown id `{}`", a.id))?;
 
     let full = row.abs_path.clone();
-    let original = std::fs::read_to_string(&full)?;
+    // The write door's refusal comes BEFORE the read (`ReadDoor::text_for_write`): an error built
+    // from the content (a parse error, the nested-heading list below) would otherwise reach the
+    // caller for a file the write would refuse anyway, such as a link out of the repository.
+    let original = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
+        .text_for_write(&full)
+        .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
     let patch = &a.patch;
 
     if patch.body.is_some() && patch.body_edits.is_some() {
@@ -963,19 +968,26 @@ pub(crate) fn write_field_to_frontmatter(
     let row = artifact::get(&cat, artifact_id)?
         .ok_or_else(|| anyhow::anyhow!("unknown artifact `{artifact_id}`"))?;
     let full = row.abs_path.clone();
-    let original = std::fs::read_to_string(&full).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            crate::librarian::tools::LibrarianRecoverableError::with_hint(
-                format!("artifact file not found on disk: {}", full.display()),
-                "the file may have been deleted or moved outside of librarian",
-            )
-        } else {
-            crate::librarian::tools::LibrarianRecoverableError::with_hint(
-                format!("failed to read {}: {e}", full.display()),
-                "check file permissions",
-            )
-        }
-    })?;
+    // The write door's refusal BEFORE the read, as in `call` (`ReadDoor::text_for_write`).
+    let original = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
+        .text_for_write(&full)
+        .map_err(|err| match err {
+            crate::librarian::read_door::ReadError::Refused(r) => r,
+            crate::librarian::read_door::ReadError::Io(e)
+                if e.kind() == std::io::ErrorKind::NotFound =>
+            {
+                crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                    format!("artifact file not found on disk: {}", full.display()),
+                    "the file may have been deleted or moved outside of librarian",
+                )
+            }
+            crate::librarian::read_door::ReadError::Io(e) => {
+                crate::librarian::tools::LibrarianRecoverableError::with_hint(
+                    format!("failed to read {}: {e}", full.display()),
+                    "check file permissions",
+                )
+            }
+        })?;
     let new_content = crate::librarian::frontmatter::rewrite_frontmatter_normalizing(
         &original,
         |fm| match field {

@@ -63,7 +63,11 @@ fn load(project_root: &Path) -> Result<Vec<Requirement>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let text = std::fs::read_to_string(&path)
+    // Through the read door, judged against the project: a policy file that is a link out of the
+    // repository is refused, loudly, like a malformed one.
+    let text = crate::librarian::read_door::for_project(project_root)
+        .text(&path)
+        .map_err(crate::librarian::read_door::ReadError::into_anyhow)
         .with_context(|| format!("reading project requirements at {}", path.display()))?;
     let file: RequirementsFile = toml::from_str(&text)
         .with_context(|| format!("parsing project requirements at {}", path.display()))?;
@@ -94,9 +98,16 @@ fn declared_values(req: &Requirement, root: &Path, prefix: &str) -> Result<BTree
             files.push(p);
         }
     }
+    // The declaring files are named by the repository's own policy, `root.join(rel)`, which an
+    // absolute path or a `..` would carry anywhere on the machine: every one is read through the
+    // read door, judged against the project, and a refusal is an error (the policy is broken).
+    let door = crate::librarian::read_door::for_project(root);
     let mut out = BTreeSet::new();
     for f in files {
-        for line in std::fs::read_to_string(&f)?.lines() {
+        let text = door
+            .text(&f)
+            .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
+        for line in text.lines() {
             let Some(rest) = line.strip_prefix(declared_by) else {
                 continue;
             };

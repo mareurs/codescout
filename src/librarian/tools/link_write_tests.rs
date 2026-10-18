@@ -219,36 +219,42 @@ async fn a_field_patch_event_on_a_catalogued_outward_link_fails_and_leaves_the_v
     );
 }
 
-/// `doc(move)` renames the LINK (rename does not follow) and then repairs the file's frontmatter
-/// id by writing the moved path, which follows it. The victim carries a stale 16-hex `id:` so the
-/// repair has something to rewrite; the move itself succeeds, the repair is skipped.
+/// `doc(move)` reads the document before it renames anything (it re-keys the row from the
+/// content). A catalogued outward link's content is the file behind the link, which the read door
+/// refuses, so since 2026-10-18 the move is refused up front: nothing is renamed, the id repair
+/// never runs, and the victim keeps its stale 16-hex `id:`. (Until then the link was renamed and the
+/// repair skipped; the move now refuses for the same reason every reader does.)
 #[tokio::test]
 async fn doc_move_of_a_catalogued_outward_link_does_not_repair_the_id_through_the_link() {
     let victim_text = "---\nid: 0123456789abcdef\nkind: spec\nstatus: draft\n---\n\nbody\n";
     let (_outside, root, ctx, victim, id) = catalogued_outward_link(victim_text);
 
-    let res = mv::call(&ctx, json!({"id": id, "new_rel_path": "docs/moved.md"})).await;
-
-    // The move itself succeeds: the repair is best-effort and a link is skipped, not failed. Also
-    // what makes the skip, not just the write guard, load-bearing (without the skip the guarded
-    // write errors and aborts the move after its rename).
-    assert!(res.is_ok(), "the move must still succeed: {res:?}");
-    // Whatever the move reports, the victim's bytes are what matter.
+    let err = mv::call(&ctx, json!({"id": id, "new_rel_path": "docs/moved.md"}))
+        .await
+        .expect_err("a move reads the file first, and the read door refuses an outward link");
+    assert!(
+        format!("{err:#}").contains("refusing to read"),
+        "the refusal is the read door's: {err:#}"
+    );
     assert_eq!(
         std::fs::read_to_string(&victim).unwrap(),
         victim_text,
-        "the id repair must not write through the moved link: {res:?}"
+        "the id repair must not write through the link"
     );
-    let moved = root.path().join("docs/moved.md");
     assert!(
-        std::fs::symlink_metadata(&moved)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false),
-        "the link itself was renamed, not replaced by a copy: {res:?}"
+        std::fs::symlink_metadata(root.path().join("outward.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "nothing moved: the link is where it was"
     );
+    assert!(!root.path().join("docs/moved.md").exists());
 }
 
-/// `doctor fix=repair_frontmatter_id` is the other caller of the same repair writer.
+/// `doctor fix=repair_frontmatter_id` is the other caller of the same repair writer. Since
+/// 2026-10-18 the sweep reads every row through the read door, so the file behind an outward link
+/// is never read: its `id:` cannot be compared, the row is not a mismatch candidate, and nothing is
+/// repaired or written (it used to be listed, and its repair refused as "symbolic link").
 #[tokio::test]
 async fn doctor_repair_frontmatter_id_does_not_rewrite_the_file_behind_a_catalogued_link() {
     let victim_text = "---\nid: 0123456789abcdef\nkind: spec\nstatus: draft\n---\n\nbody\n";
@@ -263,12 +269,8 @@ async fn doctor_repair_frontmatter_id_does_not_rewrite_the_file_behind_a_catalog
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&victim).unwrap(), victim_text);
-    // Reported as a failure, not as a repair: `repair_frontmatter_id` skips a link quietly (a
-    // move's rename has already happened), so the sweep must refuse it before calling that.
     assert_eq!(applied["totals"]["files"], 0, "{applied}");
-    assert_eq!(applied["totals"]["failed"], 1, "{applied}");
-    let failure = applied["failed"][0]["error"].as_str().unwrap();
-    assert!(failure.contains("symbolic link"), "{applied}");
+    assert_eq!(applied["repaired"], json!([]), "{applied}");
 }
 
 /// `doctor fix=export_augmentations` writes a sidecar and then stamps `expects_augmentation:`

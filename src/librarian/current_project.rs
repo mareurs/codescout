@@ -106,7 +106,9 @@ pub fn load_project_umbrellas(project_root: &Path) -> Vec<Umbrella> {
         umbrellas: Vec<Umbrella>,
     }
     let path = project_root.join(".codescout").join("workspace.toml");
-    std::fs::read_to_string(&path)
+    // Through the read door, judged against the project; a refused file reads as absent.
+    crate::librarian::read_door::for_project(project_root)
+        .text(&path)
         .ok()
         .and_then(|s| toml::from_str::<ProjectUmbrellas>(&s).ok())
         .map(|p| p.umbrellas)

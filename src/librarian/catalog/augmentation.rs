@@ -678,7 +678,9 @@ fn snapshot_stale_note(
         .optional()
         .ok()
         .flatten()?;
-    let body = std::fs::read_to_string(&abs_path).ok()?;
+    let body = crate::librarian::read_door::for_catalog(cat)
+        .text(std::path::Path::new(&abs_path))
+        .ok()?;
     // ROW anchors only, and only rows inside the DECLARED block. Every message
     // below speaks of "the row" and "the committed table", so a body whose ids
     // live in section headings has no snapshot for this note to be about — and a
@@ -750,7 +752,9 @@ fn undefined_in_body_note(cat: &Catalog, artifact_id: &str, entry_id: &str) -> O
         .optional()
         .ok()
         .flatten()?;
-    let body = std::fs::read_to_string(&abs_path).ok()?;
+    let body = crate::librarian::read_door::for_catalog(cat)
+        .text(std::path::Path::new(&abs_path))
+        .ok()?;
     match definition_gap(&body_defined_indices(&body, prefix), num) {
         DefinitionGap::Defined => None,
         DefinitionGap::EntryUndefined => Some(format!(
@@ -867,9 +871,11 @@ pub fn append_entry(
     // `as_deref` rather than a move: `abs_path` is needed again below to write the
     // section, and consuming it here is what made a section write impossible to add
     // without restructuring.
-    let body_text = abs_path
-        .as_deref()
-        .and_then(|p| std::fs::read_to_string(p).ok());
+    let body_text = abs_path.as_deref().and_then(|p| {
+        crate::librarian::read_door::ReadDoor::new(roots.clone())
+            .text(std::path::Path::new(p))
+            .ok()
+    });
     // One read, both directions. The set answers the id-allocation question
     // (its max) AND the durability question (what the body is missing); reading
     // only the max is what left the second one unanswerable for a month.
@@ -1013,12 +1019,18 @@ pub fn append_entry(
                      section cannot be written — no id was allocated"
                 ))
             })?;
-            let doc = std::fs::read_to_string(path).map_err(|e| {
-                LibrarianRecoverableError::new(format!(
-                    "append_entry: cannot read `{path}` to write the section: {e} — no id was \
-                     allocated and nothing was written"
-                ))
-            })?;
+            // The write door's refusal BEFORE the read (`ReadDoor::text_for_write`).
+            let doc = crate::librarian::read_door::ReadDoor::new(roots.clone())
+                .text_for_write(std::path::Path::new(path))
+                .map_err(|e| match e {
+                    crate::librarian::read_door::ReadError::Refused(r) => r,
+                    crate::librarian::read_door::ReadError::Io(e) => {
+                        LibrarianRecoverableError::new(format!(
+                            "append_entry: cannot read `{path}` to write the section: {e} — no id was \
+                             allocated and nothing was written"
+                        ))
+                    }
+                })?;
             // Same observation rule as the prose path: the ledger's own heading level when
             // it has one, `2` only as a declared default.
             let level = body_entry_heading_level(&doc, id_prefix).unwrap_or(2);
@@ -1098,7 +1110,11 @@ fn restore_section_after_failed_commit(
     original: &str,
     written: &str,
 ) -> SectionRollback {
-    match std::fs::read_to_string(path) {
+    // Through the read door with no roots: the bytes are compared with what this same call just
+    // wrote, never returned (see the write below for why the roots are empty).
+    match crate::librarian::read_door::ReadDoor::new(Vec::new())
+        .text_for_write(std::path::Path::new(path))
+    {
         // The write that put `written` there was guarded; the check is repeated because the
         // file is protected by nothing between the two (see the comment above), and a link
         // planted in that window would turn this restore into a write through it.
@@ -1116,7 +1132,7 @@ fn restore_section_after_failed_commit(
             }
         }
         Ok(_) => SectionRollback::ForeignChange,
-        Err(e) => SectionRollback::Failed(e),
+        Err(e) => SectionRollback::Failed(std::io::Error::other(e.to_string())),
     }
 }
 
@@ -1461,11 +1477,12 @@ pub(crate) fn prefix_owners_under(
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     let mut owners: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let door = crate::librarian::read_door::ReadDoor::new(vec![root.to_path_buf()]);
     for path in paths {
         if !std::path::Path::new(&path).starts_with(root) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Ok(text) = door.text(std::path::Path::new(&path)) else {
             continue;
         };
         // Cheap pre-filter: nearly every artifact declares neither key, and a YAML parse per
@@ -1834,12 +1851,17 @@ pub fn allocate_entry_id(
             "allocate_entry_id: unknown artifact `{artifact_id}`"
         )));
     };
-    let doc = std::fs::read_to_string(&abs_path).map_err(|e| {
-        LibrarianRecoverableError::new(format!(
-            "allocate_entry_id: cannot read `{abs_path}`: {e} — the ledger's own body is \
-             where the id maximum is derived from"
-        ))
-    })?;
+    let doc = crate::librarian::read_door::ReadDoor::new(roots.clone())
+        .text_for_write(std::path::Path::new(&abs_path))
+        .map_err(|e| match e {
+            crate::librarian::read_door::ReadError::Refused(r) => r,
+            crate::librarian::read_door::ReadError::Io(e) => {
+                LibrarianRecoverableError::new(format!(
+                    "allocate_entry_id: cannot read `{abs_path}`: {e} — the ledger's own body is \
+                 where the id maximum is derived from"
+                ))
+            }
+        })?;
 
     // One read, three answers: the declaration, the body maximum, and (via the
     // body) the durability check the caller needs.
@@ -2176,8 +2198,15 @@ fn resync_snapshot_row(
     let Some(abs_path) = abs_path else {
         return Ok(SnapshotRow::Undetermined);
     };
-    let Ok(doc) = std::fs::read_to_string(&abs_path) else {
-        return Ok(SnapshotRow::Undetermined);
+    // A refusal (the write door's leaf rule, or the read door) fails the call, as the write door
+    // did when it refused the resync's WRITE: the transaction rolls back. An unreadable file is
+    // undetermined, as before.
+    let doc = match crate::librarian::read_door::ReadDoor::new(roots.to_vec())
+        .text_for_write(std::path::Path::new(&abs_path))
+    {
+        Ok(d) => d,
+        Err(crate::librarian::read_door::ReadError::Refused(e)) => return Err(e),
+        Err(crate::librarian::read_door::ReadError::Io(_)) => return Ok(SnapshotRow::Undetermined),
     };
     let (fm, _) = crate::librarian::frontmatter::parse(&doc).unwrap_or((None, doc.as_str()));
     let Some(anchor) = declared_snapshot_anchor(fm.as_ref()) else {
@@ -3042,8 +3071,8 @@ mod tests {
 
     // ---- a row that is a link to a file outside the repo is never written through -----------
     //
-    // Every writer below takes `abs_path` from the catalog row, and the indexer deliberately
-    // catalogs an in-root link whose target is outside the root. Fixtures replace the ledger a
+    // Every writer below takes `abs_path` from the catalog row, and a row can name a link out of
+    // the repository (a catalogued file replaced by one, or an older catalog). Fixtures replace the ledger a
     // helper just wrote with a link to a copy in a SEPARATE tempdir (bound by the caller; an
     // inline temporary would drop and leave the link dangling). Unix-only: links.
 

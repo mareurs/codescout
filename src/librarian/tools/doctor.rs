@@ -845,7 +845,7 @@ fn scan_rendered_region_drift(
         let Ok(params) = serde_json::from_str::<serde_json::Value>(&params_text) else {
             continue;
         };
-        let Ok(file) = std::fs::read_to_string(&abs_path) else {
+        let Some(file) = scope.read_text(&abs_path) else {
             continue;
         };
         let Ok(Some(drift)) = rendered_region_drift(&file, &params) else {
@@ -1055,7 +1055,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // even though the three checks below now scope their REPORTED population to the
     // active project: narrowing the metric itself would understate real cross-repo
     // exposure and manufacture false negatives.
-    let indegree = entry_indegree(&cat.conn)?;
+    let indegree = entry_indegree(doctor_scope.door(), &cat.conn)?;
     let conditional_violations =
         scan_conditional_past_due(&mut doctor_scope, &cat.conn, &indegree)?;
     all_violations.extend(conditional_violations);
@@ -1325,10 +1325,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         continue;
                     }
                     // Line count, not a parse: a stranded-row COUNT is what an operator
-                    // acts on, and a malformed line is still a stranded line.
-                    let rows = std::fs::read_to_string(entry.path())
-                        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
-                        .unwrap_or(0);
+                    // acts on, and a malformed line is still a stranded line. Through the read
+                    // door: the shard directory is committed, so a repository can ship a link
+                    // there, and a count of a file outside it is not this repository's.
+                    let rows = crate::librarian::read_door::ReadDoor::new(vec![
+                        audit_repo_root.to_path_buf()
+                    ])
+                    .text(&entry.path())
+                    .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+                    .unwrap_or(0);
                     stranded_rows += rows;
                     stranded_files.push(json!({ "file": name, "rows": rows }));
                 }
@@ -2037,10 +2042,23 @@ fn export_augmentation_sidecars(
         let sidecar_abs = sidecar::path_for(scope_root, art);
         let sidecar_rel = sidecar::rel_path_for(scope_root, art);
 
-        let Ok(content) = std::fs::read_to_string(art) else {
-            failed.push(json!({ "path": abs_path, "error": "unreadable" }));
-            continue;
-        };
+        // Through the read door with the write door's leaf rule first: this export STAMPS the
+        // artifact, so a file the stamp would refuse is not read either. The refusal is reported
+        // with its reason.
+        let content =
+            match crate::librarian::read_door::ReadDoor::new(vec![scope_root.to_path_buf()])
+                .text_for_write(art)
+            {
+                Ok(c) => c,
+                Err(e) if e.is_refusal() => {
+                    failed.push(json!({ "path": abs_path, "error": e.to_string() }));
+                    continue;
+                }
+                Err(_) => {
+                    failed.push(json!({ "path": abs_path, "error": "unreadable" }));
+                    continue;
+                }
+            };
         let declared_already = crate::librarian::frontmatter::parse(&content)
             .ok()
             .and_then(|(fm, _)| fm)
@@ -2123,7 +2141,10 @@ fn stamp_augmentation_declaration(
     artifact: &std::path::Path,
     sidecar_rel: &str,
 ) -> Result<()> {
-    let content = std::fs::read_to_string(artifact)?;
+    // The write door's refusal BEFORE the read (`ReadDoor::text_for_write`).
+    let content = crate::librarian::read_door::ReadDoor::new(roots.to_vec())
+        .text_for_write(artifact)
+        .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
     let (fm, body) = crate::librarian::frontmatter::parse(&content)?;
     let mut fm = fm.ok_or_else(|| anyhow::anyhow!("no frontmatter block"))?;
     fm.extra.insert(
@@ -2273,7 +2294,10 @@ async fn run_fix(
             let roots = [scope_root.clone()];
             let stale: Vec<Violation> = {
                 let cat = ctx.catalog.lock();
-                scan_frontmatter_id_mismatches(&cat.conn)?
+                scan_frontmatter_id_mismatches(
+                    &crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)),
+                    &cat.conn,
+                )?
             }
             .into_iter()
             // Component-boundary containment, the same predicate
@@ -2931,7 +2955,7 @@ fn scan_artifact_paths(
         // unreadable file yields None here — `check_missing_file` above already
         // owns that finding. Measured 115 ms to hash this whole catalog (4,943
         // files, 83.2 MB), which is why there is no mtime pre-filter in front of it.
-        if let Some(v) = check_row_behind_file(id, abs_path, stored_sha) {
+        if let Some(v) = check_row_behind_file(scope.door(), id, abs_path, stored_sha) {
             if scope.admit(&v.check, id, abs_path) {
                 violations.push(v);
             }
@@ -2939,7 +2963,7 @@ fn scan_artifact_paths(
         // Reads the file, so it runs after the cheap string checks. A missing or
         // unreadable file yields None here — `check_missing_file` above already
         // owns that finding.
-        if let Some(v) = check_frontmatter_id_matches_catalog(id, abs_path) {
+        if let Some(v) = check_frontmatter_id_matches_catalog(scope.door(), id, abs_path) {
             if scope.admit(&v.check, id, abs_path) {
                 violations.push(v);
             }
@@ -3164,7 +3188,10 @@ fn scan_declared_project_roots(ctx: &ToolContext) -> (Vec<Violation>, Value) {
     };
 
     let config_display = crate::util::fs::RepoPath::from_path(&config_path).into_string();
-    let text = match std::fs::read_to_string(&config_path) {
+    // Through the read door, judged against the directory the config was found under.
+    let text = match crate::librarian::read_door::ReadDoor::new(vec![base.to_path_buf()])
+        .text(&config_path)
+    {
         Ok(t) => t,
         Err(e) => {
             return (
@@ -3802,11 +3829,16 @@ fn check_missing_file(id: &str, abs_path: &str) -> Option<Violation> {
 /// for an unbounded time because nothing reported them. Demoting it to informational
 /// would re-create the exact complaint the bug is about — a repair that exists and is
 /// never triggered.
-fn check_row_behind_file(id: &str, abs_path: &str, stored_sha: &str) -> Option<Violation> {
+fn check_row_behind_file(
+    door: &crate::librarian::read_door::ReadDoor,
+    id: &str,
+    abs_path: &str,
+    stored_sha: &str,
+) -> Option<Violation> {
     if stored_sha.is_empty() {
         return None;
     }
-    let bytes = std::fs::read(abs_path).ok()?;
+    let bytes = door.bytes(std::path::Path::new(abs_path)).ok()?;
     let on_disk = crate::librarian::util::sha_of_bytes(&bytes);
     if on_disk == stored_sha {
         return None;
@@ -3859,8 +3891,12 @@ fn check_row_behind_file(id: &str, abs_path: &str, stored_sha: &str) -> Option<V
 /// - **Unparseable frontmatter** is left alone rather than guessed at.
 /// - **A linked worktree's shadow declaring its MAIN twin's id** is correct, not drift —
 ///   see the block comment at the abstention itself.
-fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Violation> {
-    let content = std::fs::read_to_string(abs_path).ok()?;
+fn check_frontmatter_id_matches_catalog(
+    door: &crate::librarian::read_door::ReadDoor,
+    id: &str,
+    abs_path: &str,
+) -> Option<Violation> {
+    let content = door.text(std::path::Path::new(abs_path)).ok()?;
     let (fm, _) = crate::librarian::frontmatter::parse(&content).ok()?;
     let declared = fm?.id?;
     if declared == id {
@@ -3962,11 +3998,12 @@ fn check_frontmatter_id_matches_catalog(id: &str, abs_path: &str) -> Option<Viol
 ///   the count on precisely the rows nothing can repair.
 /// - **Unparseable frontmatter** is left alone rather than guessed at.
 fn check_frontmatter_status_matches_catalog(
+    door: &crate::librarian::read_door::ReadDoor,
     id: &str,
     abs_path: &str,
     row_status: &str,
 ) -> Option<Violation> {
-    let content = std::fs::read_to_string(abs_path).ok()?;
+    let content = door.text(std::path::Path::new(abs_path)).ok()?;
     let (fm, _) = crate::librarian::frontmatter::parse(&content).ok()?;
     let declared = fm?.status?;
     if declared == row_status {
@@ -4018,7 +4055,8 @@ fn scan_frontmatter_status_mismatches(
         let Some(status) = status.as_deref() else {
             continue;
         };
-        let Some(v) = check_frontmatter_status_matches_catalog(id, abs_path, status) else {
+        let Some(v) = check_frontmatter_status_matches_catalog(scope.door(), id, abs_path, status)
+        else {
             continue;
         };
         if !scope.admit("frontmatter_status_mismatch", id, abs_path) {
@@ -4078,7 +4116,10 @@ struct ParamsBackedLedger {
 /// A ledger with no `status` field on its entries, or no `status` enum in its
 /// `params_schema`, is **not** skipped here — it is carried with those fields empty, so
 /// the three id-set scans still see it and only the status scan opts out.
-fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBackedLedger>> {
+fn params_backed_ledgers(
+    door: &crate::librarian::read_door::ReadDoor,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<ParamsBackedLedger>> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.abs_path, g.entry_collection, g.params, g.params_schema \
          FROM artifact_augmentation g JOIN artifact a ON a.id = g.artifact_id \
@@ -4140,7 +4181,7 @@ fn params_backed_ledgers(conn: &rusqlite::Connection) -> Result<Vec<ParamsBacked
             .as_deref()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|s| declared_status_enum(&s));
-        let Ok(body) = std::fs::read_to_string(&abs_path) else {
+        let Ok(body) = door.text(std::path::Path::new(&abs_path)) else {
             continue;
         };
         out.push(ParamsBackedLedger {
@@ -4274,7 +4315,10 @@ struct CorpusTokens {
 /// actually claims.
 ///
 /// Unreadable files are skipped, as `missing_file` is the finding for those.
-fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<CorpusTokens> {
+fn corpus_cited_tokens(
+    door: &crate::librarian::read_door::ReadDoor,
+    conn: &rusqlite::Connection,
+) -> Result<CorpusTokens> {
     use crate::librarian::tools::link_scan::extract::{extract, CitationKind};
 
     let mut stmt = conn.prepare("SELECT abs_path FROM artifact ORDER BY abs_path")?;
@@ -4284,7 +4328,7 @@ fn corpus_cited_tokens(conn: &rusqlite::Connection) -> Result<CorpusTokens> {
 
     let mut out = CorpusTokens::default();
     for path in paths {
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Ok(text) = door.text(std::path::Path::new(&path)) else {
             continue;
         };
         let doc = extract(&text);
@@ -4453,6 +4497,7 @@ fn row_is_archived(abs_path: &str, status: &str) -> bool {
 /// materialized table reports on whatever the last scan left behind. `entry_cite` is the
 /// right source for a *query*; it is the wrong source for a *gate*.
 fn entry_indegree(
+    door: &crate::librarian::read_door::ReadDoor,
     conn: &rusqlite::Connection,
 ) -> Result<std::collections::BTreeMap<(String, String), usize>> {
     use crate::librarian::tools::link_scan::extract::{entry_sections, extract, CitationKind};
@@ -4489,7 +4534,7 @@ fn entry_indegree(
                 .or_default()
                 .push(path.clone());
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Ok(text) = door.text(std::path::Path::new(&path)) else {
             continue;
         };
         let citable = !row_is_archived(&path, &status);
@@ -4695,7 +4740,7 @@ fn scan_entry_defined_twice(
 
     let mut out = Vec::new();
     for (id, abs_path) in rows {
-        let Ok(text) = std::fs::read_to_string(&abs_path) else {
+        let Some(text) = scope.read_text(&abs_path) else {
             continue;
         };
         let prefixes = crate::util::librarian_guard::declared_entry_prefixes(&text);
@@ -4775,7 +4820,7 @@ fn scan_entry_prefix_declared_twice(
     let mut owners: std::collections::BTreeMap<(PathBuf, String), Vec<(String, String)>> =
         std::collections::BTreeMap::new();
     for (id, abs_path) in rows {
-        let Ok(text) = std::fs::read_to_string(&abs_path) else {
+        let Some(text) = scope.read_text(&abs_path) else {
             continue;
         };
         let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&text) else {
@@ -4899,7 +4944,7 @@ fn scan_conditional_past_due(
         if row_is_archived(&path, &status) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Some(text) = scope.read_text(&path) else {
             continue;
         };
         let sections = entry_sections(&text);
@@ -5056,7 +5101,7 @@ fn scan_dated_stale(
         if row_is_archived(&path, &status) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Some(text) = scope.read_text(&path) else {
             continue;
         };
         let sections = entry_sections(&text);
@@ -5178,7 +5223,7 @@ fn scan_cited_but_undeclared(
         if row_is_archived(&path, &status) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Some(text) = scope.read_text(&path) else {
             continue;
         };
         let sections = entry_sections(&text);
@@ -5297,7 +5342,7 @@ fn scan_validity_unparseable(
         if row_is_archived(&path, &status) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Some(text) = scope.read_text(&path) else {
             continue;
         };
         let sections = entry_sections(&text);
@@ -5363,7 +5408,7 @@ fn scan_snapshot_drift(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
-    for ledger in params_backed_ledgers(conn)? {
+    for ledger in params_backed_ledgers(scope.door(), conn)? {
         // ROW anchors only, and only rows inside the ledger's DECLARED snapshot
         // block. A heading is not a snapshot row, and counting it as one broke
         // this check in both directions at once: a headings-only body was told
@@ -5483,7 +5528,7 @@ fn scan_undefined_entries(
     scope: &mut scope::DoctorScope,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
-    let ledgers = params_backed_ledgers(conn)?;
+    let ledgers = params_backed_ledgers(scope.door(), conn)?;
     // The citation sweep reads every artifact file, so it runs only when there is something
     // to classify. A catalog whose ledgers all define their entries pays nothing for this.
     let any_undefined = ledgers.iter().any(|l| {
@@ -5492,7 +5537,7 @@ fn scan_undefined_entries(
         l.claimed.iter().any(|n| !defined.contains(n))
     });
     let corpus = if any_undefined {
-        corpus_cited_tokens(conn)?
+        corpus_cited_tokens(scope.door(), conn)?
     } else {
         CorpusTokens::default()
     };
@@ -5676,12 +5721,27 @@ fn scan_undefined_entries(
 /// rewritten under another id scheme still exists. Id-SHAPED on purpose: a bare substring test
 /// for the prefix would accept a file mentioning `"suite": "TC"` and holding no case at all.
 /// Falls back to the declaring file's directory only when it is not inside a repo.
-fn external_authority_problem(prefix: &str, declaring: &Path, authority: &str) -> Option<String> {
+pub(crate) fn external_authority_problem(
+    door: &crate::librarian::read_door::ReadDoor,
+    prefix: &str,
+    declaring: &Path,
+    authority: &str,
+) -> Option<String> {
     let dir = declaring.parent().unwrap_or(Path::new("."));
     let root = crate::librarian::current_project::lookup_git_root(dir)
         .unwrap_or_else(|| dir.to_path_buf());
-    let Ok(text) = std::fs::read_to_string(root.join(authority)) else {
-        return Some(format!("`{authority}` does not exist or cannot be read"));
+    // Through the read door: the authority is the declaring file's own text, `root.join` lets an
+    // absolute path or a `..` carry it anywhere, and the answer below is a yes/no about the
+    // file's content. A refused authority is a finding, never a read.
+    let text = match door.text(&root.join(authority)) {
+        Ok(t) => t,
+        Err(e) if e.is_refusal() => {
+            return Some(format!(
+                "`{authority}` is not read: it resolves outside the repository or into a \
+                 protected location"
+            ))
+        }
+        Err(_) => return Some(format!("`{authority}` does not exist or cannot be read")),
     };
     let id = regex::Regex::new(&format!(r"\b{}-\d+\b", regex::escape(prefix)))
         .expect("an escaped prefix is a valid pattern");
@@ -5796,7 +5856,7 @@ fn scan_cited_prefix_with_no_definer(
         std::collections::BTreeMap::new();
 
     for path in &paths {
-        let Ok(text) = std::fs::read_to_string(path) else {
+        let Some(text) = scope.read_text(path) else {
             continue;
         };
         let ex = extract(&text);
@@ -5857,8 +5917,13 @@ fn scan_cited_prefix_with_no_definer(
                 let verdicts: Vec<Option<String>> = decls
                     .iter()
                     .map(|(declaring, authority)| {
-                        external_authority_problem(&prefix, Path::new(declaring), authority)
-                            .map(|why| format!("{declaring} → {why}"))
+                        external_authority_problem(
+                            scope.door(),
+                            &prefix,
+                            Path::new(declaring),
+                            authority,
+                        )
+                        .map(|why| format!("{declaring} → {why}"))
                     })
                     .collect();
                 if verdicts.iter().any(Option::is_none) {
@@ -6073,7 +6138,7 @@ fn scan_premature_archive_citation(
         if path.contains("/archive/") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(path) else {
+        let Some(text) = scope.read_text(path) else {
             continue;
         };
         for name in cited_archive_basenames(&text) {
@@ -6176,7 +6241,7 @@ fn scan_params_behind_body(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
-    for ledger in params_backed_ledgers(conn)? {
+    for ledger in params_backed_ledgers(scope.door(), conn)? {
         let in_body = crate::librarian::catalog::augmentation::body_claimed_indices(
             &ledger.body,
             &ledger.prefix,
@@ -6393,7 +6458,7 @@ fn scan_params_status_drift(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<Violation>> {
     let mut out = Vec::new();
-    for ledger in params_backed_ledgers(conn)? {
+    for ledger in params_backed_ledgers(scope.door(), conn)? {
         let Some(enum_vals) = ledger.status_enum.as_ref() else {
             continue;
         };
@@ -6487,14 +6552,17 @@ fn scan_params_status_drift(
 /// frontmatter names its main twin never becomes a violation, so it never reaches this
 /// function or the sweep it feeds. Pinned by
 /// `repair_frontmatter_id_leaves_a_worktree_shadow_alone_and_still_sweeps_the_stale_row`.
-fn scan_frontmatter_id_mismatches(conn: &rusqlite::Connection) -> Result<Vec<Violation>> {
+fn scan_frontmatter_id_mismatches(
+    door: &crate::librarian::read_door::ReadDoor,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<Violation>> {
     let mut stmt = conn.prepare("SELECT id, abs_path FROM artifact ORDER BY abs_path")?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows
         .iter()
-        .filter_map(|(id, abs_path)| check_frontmatter_id_matches_catalog(id, abs_path))
+        .filter_map(|(id, abs_path)| check_frontmatter_id_matches_catalog(door, id, abs_path))
         .filter(|v| v.check == "frontmatter_id_mismatch")
         .collect())
 }
@@ -6643,7 +6711,7 @@ fn scan_terminal_status_with_caveat(
         // finding or nobody's, never a silent caveat.
         // `content` is bound to a local first because `parse` borrows it — the same shape
         // `check_frontmatter_id_matches_catalog` uses, for the same reason.
-        let Ok(content) = std::fs::read_to_string(abs_path) else {
+        let Some(content) = scope.read_text(abs_path) else {
             continue;
         };
         let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
@@ -6861,7 +6929,7 @@ fn scan_augmentation_declared_but_absent(
         // Best-effort per file, as in `scan_terminal_status_with_caveat`: an unreadable or
         // unparseable artifact is `missing_file`'s finding or nobody's, never a silent
         // declaration. `content` is bound first because `parse` borrows it.
-        let Ok(content) = std::fs::read_to_string(abs_path) else {
+        let Some(content) = scope.read_text(abs_path) else {
             continue;
         };
         let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
@@ -7059,7 +7127,7 @@ fn scan_sidecar_shape_drift(
         // findings fold into the same per-root `sidecar_shape_drift` aggregate in the
         // published report either way, so no published number differs, but `scoped_out`'s
         // keyed-by-check design should not be credited with distinguishing the two here.
-        let Ok(content) = std::fs::read_to_string(abs_path) else {
+        let Some(content) = scope.read_text(abs_path) else {
             continue;
         };
         let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&content) else {
@@ -7451,7 +7519,7 @@ fn scan_archived_fix_sha_unresolvable(
         if !scope.admit("archived_fix_sha_unresolvable", id, abs_path) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Some(content) = scope.read_text(path) else {
             continue;
         };
         let pointers = structured_fix_pointers(&content);
@@ -7640,7 +7708,7 @@ fn scan_terminal_status_without_fix_anchor(
         if in_archive_dir(path) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Some(content) = scope.read_text(path) else {
             continue;
         };
         if declares_fix_pair(&content) {
@@ -7843,7 +7911,7 @@ fn scan_non_terminal_status_with_fix_anchor(
         if in_archive_dir(path) {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Some(content) = scope.read_text(path) else {
             continue;
         };
         // The SAME parser the sibling discharges on, over the SAME input, so the two checks
@@ -8201,7 +8269,7 @@ fn scan_open_bug_cited_from_source_walking(
         if !is_source {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(entry.path()) else {
+        let Some(content) = scope.read_text(entry.path()) else {
             continue;
         };
         source_files_scanned += 1;
@@ -8439,7 +8507,7 @@ fn scan_unterminated_fence(
         }
         // An unreadable file is `missing_file`'s finding or nobody's, never a silent
         // fence report — same best-effort shape as the sibling scans.
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Some(content) = scope.read_text(path) else {
             continue;
         };
 
@@ -8549,7 +8617,7 @@ fn scan_claim_liveness(
     let mut out = Vec::new();
     for (id, abs_path) in &rows {
         let path = Path::new(abs_path);
-        let Ok(content) = std::fs::read_to_string(path) else {
+        let Some(content) = scope.read_text(path) else {
             continue;
         };
         let claimed_by = match crate::librarian::frontmatter::parse(&content) {
@@ -9166,7 +9234,13 @@ mod tests {
         let sha = crate::librarian::util::sha_of_bytes(b"# original\n");
 
         assert!(
-            check_row_behind_file("a1", abs, &sha).is_none(),
+            check_row_behind_file(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "a1",
+                abs,
+                &sha
+            )
+            .is_none(),
             "a row whose stored hash describes the bytes on disk must not be reported"
         );
 
@@ -9175,7 +9249,13 @@ mod tests {
         // `git checkout` leaves behind, which is why the check is named for the state
         // rather than for either cause.
         std::fs::write(&path, "# edited\n").unwrap();
-        let v = check_row_behind_file("a1", abs, &sha).expect("divergence must be reported");
+        let v = check_row_behind_file(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            "a1",
+            abs,
+            &sha,
+        )
+        .expect("divergence must be reported");
         assert_eq!(v.check, "row_behind_file");
         assert_eq!(v.artifact_id.as_deref(), Some("a1"));
         assert!(
@@ -9199,12 +9279,23 @@ mod tests {
         let abs = path.to_str().unwrap();
 
         assert!(
-            check_row_behind_file("a1", abs, "").is_none(),
+            check_row_behind_file(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "a1",
+                abs,
+                ""
+            )
+            .is_none(),
             "a row written by a path that never hashed the file is not BEHIND it"
         );
         assert!(
-            check_row_behind_file("a1", abs, &crate::librarian::util::sha_of_bytes(b"other"))
-                .is_some(),
+            check_row_behind_file(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "a1",
+                abs,
+                &crate::librarian::util::sha_of_bytes(b"other")
+            )
+            .is_some(),
             "non-vacuity: this same fixture must be able to fire, or the abstention above \
              is the fixture's doing rather than the empty hash's"
         );
@@ -9216,7 +9307,13 @@ mod tests {
     fn check_row_behind_file_leaves_an_absent_file_to_missing_file() {
         let absent = "/nonexistent/path/that/will/never/exist.md";
         assert!(
-            check_row_behind_file("a1", absent, "deadbeefdeadbeef").is_none(),
+            check_row_behind_file(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "a1",
+                absent,
+                "deadbeefdeadbeef"
+            )
+            .is_none(),
             "an absent file is not this check's finding"
         );
         // The control: the sibling check DOES own that row, so the silence above is a
@@ -9869,8 +9966,12 @@ mod tests {
             "stale.md",
             "---\nid: aaaaaaaaaaaaaaaa\nkind: bug\n---\n# x\n",
         );
-        let v = check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &stale)
-            .expect("a present-but-wrong id must be flagged");
+        let v = check_frontmatter_id_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            "bbbbbbbbbbbbbbbb",
+            &stale,
+        )
+        .expect("a present-but-wrong id must be flagged");
         assert_eq!(v.check, "frontmatter_id_mismatch");
         assert!(
             v.detail.contains("aaaaaaaaaaaaaaaa") && v.detail.contains("bbbbbbbbbbbbbbbb"),
@@ -9894,7 +9995,12 @@ mod tests {
             ),
         ] {
             assert!(
-                check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &path).is_none(),
+                check_frontmatter_id_matches_catalog(
+                    &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                    "bbbbbbbbbbbbbbbb",
+                    &path
+                )
+                .is_none(),
                 "{label}: must not be flagged"
             );
         }
@@ -9919,14 +10025,25 @@ mod tests {
 
         // Present and differing — the finding.
         let diverged = write("a.md", "---\nid: aaaa\nstatus: active\n---\nbody\n");
-        let v = check_frontmatter_status_matches_catalog("row1", &diverged, "superseded")
-            .expect("a present, differing status must be reported");
+        let v = check_frontmatter_status_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            "row1",
+            &diverged,
+            "superseded",
+        )
+        .expect("a present, differing status must be reported");
         assert_eq!(v.check, "frontmatter_status_mismatch");
 
         // Agreement is not a finding.
         let agreeing = write("b.md", "---\nid: bbbb\nstatus: superseded\n---\nbody\n");
         assert!(
-            check_frontmatter_status_matches_catalog("row2", &agreeing, "superseded").is_none(),
+            check_frontmatter_status_matches_catalog(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "row2",
+                &agreeing,
+                "superseded"
+            )
+            .is_none(),
             "agreement must be silent"
         );
 
@@ -9934,7 +10051,13 @@ mod tests {
         // decision this check has no standing to make.
         let absent = write("c.md", "---\nid: cccc\nkind: spec\n---\nbody\n");
         assert!(
-            check_frontmatter_status_matches_catalog("row3", &absent, "superseded").is_none(),
+            check_frontmatter_status_matches_catalog(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "row3",
+                &absent,
+                "superseded"
+            )
+            .is_none(),
             "an absent status declares nothing and must not read as disagreement"
         );
 
@@ -9942,7 +10065,13 @@ mod tests {
         // the count on precisely the rows nothing can repair.
         let gone = tmp.path().join("nope.md").to_string_lossy().into_owned();
         assert!(
-            check_frontmatter_status_matches_catalog("row4", &gone, "superseded").is_none(),
+            check_frontmatter_status_matches_catalog(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                "row4",
+                &gone,
+                "superseded"
+            )
+            .is_none(),
             "a missing file belongs to check_missing_file, not to this check"
         );
     }
@@ -9961,9 +10090,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("d.md");
         std::fs::write(&p, "---\nid: dddd\nstatus: open\n---\nbody\n").unwrap();
-        let v =
-            check_frontmatter_status_matches_catalog("row5", &p.to_string_lossy(), "superseded")
-                .expect("present and differing");
+        let v = check_frontmatter_status_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            "row5",
+            &p.to_string_lossy(),
+            "superseded",
+        )
+        .expect("present and differing");
         assert!(
             v.detail.contains("'open'"),
             "detail must quote the FILE's value; got: {}",
@@ -10056,8 +10189,12 @@ mod tests {
             "quoted.md",
             "---\nid: 'aaaaaaaaaaaaaaaa'\nkind: bug\n---\n# x\n",
         );
-        let v = check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &quoted_stale)
-            .expect("a quoted-but-stale catalog id is still a stale move");
+        let v = check_frontmatter_id_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            "bbbbbbbbbbbbbbbb",
+            &quoted_stale,
+        )
+        .expect("a quoted-but-stale catalog id is still a stale move");
         assert_eq!(
             v.check, "frontmatter_id_mismatch",
             "quoting is a property of the last writer, never of the artifact"
@@ -10067,8 +10204,12 @@ mod tests {
             "adr-template.md",
             "---\nid: ADR-{NUMBER}\nkind: adr\n---\n# x\n",
         );
-        let v = check_frontmatter_id_matches_catalog("bbbbbbbbbbbbbbbb", &placeholder)
-            .expect("a non-id value still differs from the row and is worth reporting");
+        let v = check_frontmatter_id_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            "bbbbbbbbbbbbbbbb",
+            &placeholder,
+        )
+        .expect("a non-id value still differs from the row and is worth reporting");
         assert_eq!(
             v.check, "frontmatter_id_is_not_a_catalog_id",
             "a template placeholder is not a stale move and must not be filed as one"
@@ -10365,7 +10506,12 @@ mod tests {
         );
 
         assert!(
-            check_frontmatter_id_matches_catalog(&row_id, &shadow_str).is_none(),
+            check_frontmatter_id_matches_catalog(
+                &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+                &row_id,
+                &shadow_str
+            )
+            .is_none(),
             "a shadow naming its main twin is fork-on-first-write, not a move"
         );
     }
@@ -10381,8 +10527,12 @@ mod tests {
         let f_str = crate::util::fs::RepoPath::from_path(&f).into_string();
         let row_id = crate::librarian::ids::artifact_id_from_abs(&f);
 
-        let v = check_frontmatter_id_matches_catalog(&row_id, &f_str)
-            .expect("being inside a worktree does not excuse an unrelated stale id");
+        let v = check_frontmatter_id_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &row_id,
+            &f_str,
+        )
+        .expect("being inside a worktree does not excuse an unrelated stale id");
         assert_eq!(v.check, "frontmatter_id_mismatch");
     }
 
@@ -10403,8 +10553,12 @@ mod tests {
         let f_str = crate::util::fs::RepoPath::from_path(&f).into_string();
         let row_id = crate::librarian::ids::artifact_id_from_abs(&f);
 
-        let v = check_frontmatter_id_matches_catalog(&row_id, &f_str)
-            .expect("a present-but-wrong id must still be flagged");
+        let v = check_frontmatter_id_matches_catalog(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &row_id,
+            &f_str,
+        )
+        .expect("a present-but-wrong id must still be flagged");
         let lower = v.detail.to_lowercase();
         assert!(
             lower.contains("move") && lower.contains("checkout"),
@@ -20133,7 +20287,11 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "b", &b, "see R-1\n");
         seed_ledger(&cat, "c", &c, "and again R-1\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&a, "R-1")).copied(),
             Some(2),
@@ -20151,7 +20309,11 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "a", &a, "## R-9 — the law\n\nprose only\n");
         seed_ledger(&cat, "b", &b, "see other:R-9 from over here\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&a, "R-9")).copied(),
             Some(1),
@@ -20498,7 +20660,11 @@ root = "work/elsewhere/ghost"
         );
         seed_ledger(&cat, "c", &c, "cites F-1 from a third file\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             (deg.get(&deg_key(&a, "F-1")), deg.get(&deg_key(&b, "F-1")),),
             (None, None),
@@ -20544,7 +20710,11 @@ root = "work/elsewhere/ghost"
         // prescribes whenever several ledgers share a prefix.
         seed_ledger(&cat, "c", &c, "see stream-a-log:F-1 for why\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&a, "F-1")).copied(),
             Some(1),
@@ -20574,7 +20744,11 @@ root = "work/elsewhere/ghost"
             "## Index\n| own-log:F-1 | x |\n\n## F-1 — the finding\n\nprose\n",
         );
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&own, "F-1")),
             None,
@@ -20604,7 +20778,11 @@ root = "work/elsewhere/ghost"
         // `resolve`, still exposure here.
         seed_ledger(&cat, "c2", &c2, "see unrelated:R-9\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&def, "R-9")).copied(),
             Some(2),
@@ -20636,7 +20814,11 @@ root = "work/elsewhere/ghost"
         seed_ledger(&cat, "log-b", &log_b, "## F-1 — B's finding\n\nprose\n");
         seed_ledger(&cat, "citer", &citer, "see log:F-1\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             (
                 deg.get(&deg_key(&log_a, "F-1")),
@@ -20677,7 +20859,11 @@ root = "work/elsewhere/ghost"
             .build();
         art_upsert(&cat, &row_c).unwrap();
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&a, "R-1")).copied(),
             Some(1),
@@ -20710,7 +20896,11 @@ root = "work/elsewhere/ghost"
         }
         seed_ledger(&cat, "d", &d, "see R-2\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             (deg.get(&deg_key(&a2, "R-2")), deg.get(&deg_key(&a3, "R-2")),),
             (None, None),
@@ -20749,7 +20939,11 @@ root = "work/elsewhere/ghost"
         );
         seed_ledger(&cat, "citer", &citer, "see R-5\n");
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&active_def, "R-5")).copied(),
             Some(1),
@@ -20782,7 +20976,11 @@ root = "work/elsewhere/ghost"
             .build();
         art_upsert(&cat, &row).unwrap();
 
-        let deg = entry_indegree(&cat.conn).unwrap();
+        let deg = entry_indegree(
+            &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+            &cat.conn,
+        )
+        .unwrap();
         assert_eq!(
             deg.get(&deg_key(&def, "R-1")).copied(),
             Some(1),

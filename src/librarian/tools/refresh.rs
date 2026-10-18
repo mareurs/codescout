@@ -17,8 +17,10 @@ fn read_body(ctx: &ToolContext, artifact_id: &str) -> Result<Option<String>> {
         Some(r) => r,
         None => return Ok(None),
     };
-    let full_path = row.abs_path.clone();
-    match std::fs::read_to_string(&full_path) {
+    // Through the read door: a file that resolves outside its repository (or into a deny-listed
+    // location) yields no body, exactly as a missing one does.
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+    match door.text(&row.abs_path) {
         Ok(s) => Ok(Some(s)),
         Err(_) => Ok(None),
     }

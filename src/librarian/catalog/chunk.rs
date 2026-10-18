@@ -224,7 +224,10 @@ impl ChunkGrain {
         let cfg = std::path::Path::new(root)
             .join(".codescout")
             .join("project.toml");
-        let Ok(text) = std::fs::read_to_string(&cfg) else {
+        // Through the read door, judged against the project; a refused file reads as absent.
+        let Ok(text) =
+            crate::librarian::read_door::for_project(std::path::Path::new(root)).text(&cfg)
+        else {
             return ChunkGrain::default();
         };
         let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {

@@ -208,7 +208,11 @@ pub fn load_project_rules(project_path: &std::path::Path) -> Result<Vec<Compiled
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let s = std::fs::read_to_string(&path)
+    // Through the read door, judged against the project: a rules file that is a link out of the
+    // repository is refused (an error, like a parse failure: a broken override is loud).
+    let s = crate::librarian::read_door::for_project(project_path)
+        .text(&path)
+        .map_err(crate::librarian::read_door::ReadError::into_anyhow)
         .with_context(|| format!("reading project rules at {}", path.display()))?;
     load_rules(&s)
 }

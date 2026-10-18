@@ -112,7 +112,11 @@ type SlugEntry = Option<(
     Vec<crate::librarian::tools::link_scan::extract::EntrySection>,
 )>;
 
-fn load_slug(cat: &crate::librarian::catalog::Catalog, slug: &str) -> Result<SlugEntry> {
+fn load_slug(
+    cat: &crate::librarian::catalog::Catalog,
+    door: &crate::librarian::read_door::ReadDoor,
+    slug: &str,
+) -> Result<SlugEntry> {
     use rusqlite::OptionalExtension;
     let abs: Option<String> = cat
         .conn
@@ -125,9 +129,11 @@ fn load_slug(cat: &crate::librarian::catalog::Catalog, slug: &str) -> Result<Slu
     let Some(abs) = abs else {
         return Ok(None);
     };
-    let Ok(text) = std::fs::read_to_string(&abs) else {
-        // A catalogued row whose file is gone is `doctor`'s `missing_file`, not this
-        // surface's problem — pack what resolves and let the count show the shortfall.
+    // Through the read door. A catalogued row whose file is gone is `doctor`'s `missing_file`,
+    // and one the door refuses (it resolves outside its repository) is `reindex`'s to reclaim:
+    // neither is this surface's problem — pack what resolves and let the count show the
+    // shortfall.
+    let Ok(text) = door.text(std::path::Path::new(&abs)) else {
         return Ok(None);
     };
     Ok(Some((
@@ -139,6 +145,7 @@ fn load_slug(cat: &crate::librarian::catalog::Catalog, slug: &str) -> Result<Slu
 /// Render one section into a packed node, or `None` when the slug or entry does not resolve.
 fn statement_node(
     cat: &crate::librarian::catalog::Catalog,
+    door: &crate::librarian::read_door::ReadDoor,
     cache: &mut std::collections::HashMap<String, SlugEntry>,
     root: Option<&std::path::Path>,
     slug: &str,
@@ -150,7 +157,7 @@ fn statement_node(
     };
 
     if !cache.contains_key(slug) {
-        let loaded = load_slug(cat, slug)?;
+        let loaded = load_slug(cat, door, slug)?;
         cache.insert(slug.to_string(), loaded);
     }
     let Some(Some((abs, sections))) = cache.get(slug) else {
@@ -301,8 +308,9 @@ fn pack_entry_anchor(
     let cat = ctx.catalog.lock();
     let root = current.map(|c| c.git_root.as_path());
     let mut cache: std::collections::HashMap<String, SlugEntry> = Default::default();
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
 
-    let Some(anchor) = statement_node(&cat, &mut cache, root, slug, local, "anchor")? else {
+    let Some(anchor) = statement_node(&cat, &door, &mut cache, root, slug, local, "anchor")? else {
         return Ok(None);
     };
 
@@ -313,7 +321,7 @@ fn pack_entry_anchor(
     let mut unresolved = 0usize;
     for row in crate::librarian::catalog::entry_cite::outgoing_from_entry(&cat, slug, local)? {
         match row.dst_ref.rsplit_once(':') {
-            Some((s, l)) => match statement_node(&cat, &mut cache, root, s, l, "cites")? {
+            Some((s, l)) => match statement_node(&cat, &door, &mut cache, root, s, l, "cites")? {
                 Some(n) => nodes.push(n),
                 None => unresolved += 1,
             },
@@ -337,6 +345,7 @@ fn pack_entry_anchor(
         }
         match statement_node(
             &cat,
+            &door,
             &mut cache,
             root,
             &row.src_slug,
@@ -901,6 +910,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         String::new()
     };
     let mut included_ids: Vec<String> = Vec::new();
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
     // A large anchor otherwise consumes the whole budget before any neighbor is
     // even considered (docs/issues/archive/2026-07-05-context-anchor-starves-neighbors.md):
     // reserve half of char_cap for neighbors whenever the anchor actually has any.
@@ -913,7 +923,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             None => continue,
         };
         let full_path = row.abs_path.clone();
-        let content = match std::fs::read_to_string(&full_path) {
+        // Through the read door: a row whose file resolves outside its repository (or into a
+        // deny-listed location) is left out of the pack, title included, like a row whose file
+        // is gone.
+        let content = match door.text(&full_path) {
             Ok(c) => c,
             Err(_) => continue,
         };

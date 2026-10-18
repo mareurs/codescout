@@ -1052,6 +1052,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // docs/issues/archive/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md
         let row_ids: Vec<String> = rows.iter().map(|it| it.row.id.clone()).collect();
         let augmentation_by_id = augmentation::get_batch(&cat, &row_ids)?;
+        // What a walk stored FROM a file (its title, its chunk text) is withheld for a row whose
+        // file the read door now refuses: an older catalog's outward link (`read_door`). Asked of
+        // the file as it is now, without opening it.
+        let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
 
         let items: Vec<Value> = rows
             .into_iter()
@@ -1061,14 +1065,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     distance,
                     chunk,
                 } = it;
+                let refusal = door.refusal(&r.abs_path);
                 let mut item = json!({
                     "id": r.id,
                     "kind": r.kind,
                     "status": r.status,
-                    "title": r.title,
+                    "title": if refusal.is_some() { None } else { r.title.clone() },
                     "abs_path": r.abs_path.display().to_string(),
                     "updated_at": r.updated_at,
                 });
+                if let Some(e) = &refusal {
+                    item["withheld"] = json!(format!("{e:#}"));
+                }
                 // Artifact-level, so an id lookup is the RIGHT shape here: two
                 // chunks of one ledger share its overlay status and augmentation.
                 if overlay_ids.contains(&r.id) {
@@ -1090,7 +1098,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 // ledger those are the same thing only by accident: the preamble
                 // is the one part of the file that says nothing about the entry
                 // the query actually found.
-                if let Some(chunk) = chunk {
+                if let Some(chunk) = chunk.filter(|_| refusal.is_none()) {
                     // Bounded, and it SAYS SO when it cuts. A 2 KB chunk x a
                     // 50-item page is a 100 KB response, so the bound is not
                     // optional — but an unmarked 480-char snippet is

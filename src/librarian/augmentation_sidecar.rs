@@ -163,7 +163,20 @@ impl AugmentationSidecar {
 /// same silence would mean "this augmentation has no recorded shape", which is exactly the
 /// state this whole mechanism exists to make loud.
 pub fn read(path: &Path) -> Result<AugmentationSidecar> {
-    let text = std::fs::read_to_string(path)
+    read_through(
+        &crate::librarian::read_door::ReadDoor::new(Vec::new()),
+        path,
+    )
+}
+/// [`read`] through a given read door (`read_door`): the callers that know the root a declared
+/// sidecar is confined to pass a door judged against it.
+fn read_through(
+    door: &crate::librarian::read_door::ReadDoor,
+    path: &Path,
+) -> Result<AugmentationSidecar> {
+    let text = door
+        .text(path)
+        .map_err(crate::librarian::read_door::ReadError::into_anyhow)
         .with_context(|| format!("reading augmentation sidecar {}", path.display()))?;
     serde_yml::from_str(&text)
         .with_context(|| format!("parsing augmentation sidecar {}", path.display()))
@@ -228,7 +241,10 @@ fn refuse_lexical_escape(rel: &str, verb: &str) -> Result<()> {
 /// that leaves the repository is refused WITHOUT being opened, so no parser error can echo what
 /// is in a file the repository does not own.
 pub fn read_in(root: &Path, rel: &str) -> Result<AugmentationSidecar> {
-    read(&confined_path(root, rel, "read")?)
+    read_through(
+        &crate::librarian::read_door::ReadDoor::new(vec![root.to_path_buf()]),
+        &confined_path(root, rel, "read")?,
+    )
 }
 
 /// Refuse, BEFORE anything is persisted, a `doc(augment)` whose sidecar publication would be
@@ -264,9 +280,14 @@ fn declared_target(
     let Some(art) = crate::librarian::catalog::artifact::get(cat, artifact_id)? else {
         return Ok(None);
     };
-    // An artifact whose file is unreadable declares nothing; `reindex` owns that case.
-    let Ok(content) = std::fs::read_to_string(&art.abs_path) else {
-        return Ok(None);
+    // An artifact whose file is unreadable declares nothing; `reindex` owns that case. One the
+    // read door REFUSES (it resolves outside its repository) is an error, not "nothing declared":
+    // its declaration cannot be read, so whether a sidecar would be written cannot be known, and
+    // `doc(augment)` refuses before its catalog row moves.
+    let content = match crate::librarian::read_door::for_catalog(cat).text(&art.abs_path) {
+        Ok(c) => c,
+        Err(crate::librarian::read_door::ReadError::Refused(e)) => return Err(e),
+        Err(crate::librarian::read_door::ReadError::Io(_)) => return Ok(None),
     };
     let declared = crate::librarian::frontmatter::parse(&content)
         .ok()
@@ -386,7 +407,8 @@ pub fn write_through(
     // Byte comparison, so a call that changes no shape leaves the file — and its mtime —
     // untouched. `params` are not part of this rendering, so a params-only write is a no-op
     // here by construction rather than by the caller remembering to skip it.
-    if std::fs::read_to_string(&path).is_ok_and(|on_disk| on_disk == rendered) {
+    let door = crate::librarian::read_door::for_catalog(cat);
+    if door.text(&path).is_ok_and(|on_disk| on_disk == rendered) {
         return Ok(WriteThrough::default());
     }
 
@@ -398,7 +420,7 @@ pub fn write_through(
     // before. That case is `sidecar_unparseable`'s, and refusing here would block a repair on
     // a file nothing else can read.
     if let Authored::Only(named) = authored {
-        if let Ok(committed) = read(&path) {
+        if let Ok(committed) = read_through(&door, &path) {
             let refused: Vec<&'static str> = drifting_fields(&row, &committed)
                 .into_iter()
                 .filter(|f| !named.contains(f))

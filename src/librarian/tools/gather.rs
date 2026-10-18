@@ -384,16 +384,20 @@ fn gather_artifacts(
         cutoff_ms,
     )?;
     let truncated = rows.len() > limit;
+    // A stored title and topic were read from the file by a walk; withheld for a row the read
+    // door now refuses (an older catalog's outward link), as `doc(find)` withholds them.
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
     let items: Vec<Value> = rows
         .iter()
         .take(limit)
         .map(|r| {
+            let refused = door.refusal(&r.abs_path).is_some();
             json!({
                 "id": r.id,
                 "kind": r.kind,
                 "status": r.status,
-                "title": r.title,
-                "topic": r.topic,
+                "title": if refused { None } else { r.title.clone() },
+                "topic": if refused { None } else { r.topic.clone() },
                 "abs_path": r.abs_path.display().to_string(),
             })
         })
@@ -450,9 +454,14 @@ fn guard_relative_path(path: &str) -> Result<()> {
 
 fn gather_file(ctx: &ToolContext, path: &str) -> Result<Value> {
     guard_relative_path(path)?;
-    let base = project_root(ctx).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let base = project_root(ctx).unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
     let full = base.join(path);
-    let content = std::fs::read_to_string(&full)
+    // The lexical guard above stops `..` and absolute paths; the read door stops a path that
+    // resolves outside the repository through a link, and a deny-listed location.
+    let content = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
+        .text(&full)
         .map_err(|e| anyhow::anyhow!("cannot read '{}': {e}", full.display()))?;
     Ok(json!(content))
 }
@@ -467,9 +476,18 @@ fn gather_grep(
         guard_relative_path(p)?;
     }
     use walkdir::WalkDir;
-    let base = project_root(ctx).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let base = project_root(ctx).unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
     let search_root = path.map(|p| base.join(p)).unwrap_or(base);
     let re = regex::Regex::new(pattern)?;
+    // `WalkDir` follows a link at its ROOT, so the root is judged first: a directory link out of
+    // the repository is refused before anything below it is opened. Every file is then read
+    // through the door as well (the walk does not follow links below the root).
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+    if let Some(refusal) = door.refusal(&search_root) {
+        return Err(refusal);
+    }
 
     // Collect one past `limit` so a truncated result is distinguishable from a
     // complete one, then trim back to `limit`.
@@ -481,7 +499,7 @@ fn gather_grep(
         .filter(|e| e.file_type().is_file())
     {
         let path_str = entry.path().to_string_lossy().to_string();
-        if let Ok(content) = std::fs::read_to_string(entry.path()) {
+        if let Ok(content) = door.text(entry.path()) {
             for (lineno, line) in content.lines().enumerate() {
                 if re.is_match(line) {
                     matches.push(json!({
@@ -521,9 +539,12 @@ fn gather_config_value(
     key: &str,
 ) -> anyhow::Result<serde_json::Value> {
     guard_relative_path(path)?;
-    let base = project_root(ctx).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let base = project_root(ctx).unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
     let full = base.join(path);
-    let content = std::fs::read_to_string(&full)
+    let content = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
+        .text(&full)
         .map_err(|e| anyhow::anyhow!("cannot read '{}': {e}", full.display()))?;
 
     let ext = full.extension().and_then(|e| e.to_str()).unwrap_or("");

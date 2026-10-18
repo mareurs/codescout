@@ -642,14 +642,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         || a.end_line.is_some();
 
     let file_content = match &file_path {
-        Some(p) => match std::fs::read_to_string(p) {
-            Ok(c) => Some(c),
-            Err(e) => {
-                out["preview"] = Value::Null;
-                out["body_error"] = json!(e.to_string());
-                None
+        // Through the read door (`read_door`): a row whose file resolves outside its repository,
+        // or into a deny-listed location, returns its refusal in `body_error` and nothing read
+        // from the file, not even the title an older walk stored from it.
+        Some(p) => {
+            match crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)).text(p) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    if e.is_refusal() {
+                        // What an older walk stored FROM the file: withheld with the body.
+                        for key in ["title", "owners", "tags", "topic", "time_scope"] {
+                            out[key] = Value::Null;
+                        }
+                    }
+                    out["preview"] = Value::Null;
+                    out["body_error"] = json!(e.to_string());
+                    None
+                }
             }
-        },
+        }
         None => {
             out["preview"] = Value::Null;
             out["body_error"] = json!(format!(
