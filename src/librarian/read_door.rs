@@ -356,6 +356,7 @@ pub(crate) fn same_file(_opened: &std::fs::Metadata, _real: &Path) -> anyhow::Re
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn canon(p: &Path) -> PathBuf {
         std::fs::canonicalize(p).unwrap()
     }
