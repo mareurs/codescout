@@ -373,7 +373,10 @@ pub(crate) fn input_digest(input: &Value) -> String {
 
 /// One served section, wrapped. The text a caller reads, shared by the post-call
 /// delivery and the pre-call gate.
-fn section_block(topic: &str, sec: &crate::prompts::guide_index::GuideSection) -> Content {
+pub(crate) fn section_block(
+    topic: &str,
+    sec: &crate::prompts::guide_index::GuideSection,
+) -> Content {
     Content::text(format!(
         "<!-- auto-injected get_guide('{topic}') § {} — first call this \
              session that serves this section. Do NOT re-call get_guide for \

@@ -272,6 +272,26 @@ pub fn parse_declarations(body: &str) -> Result<(Vec<Shape>, Vec<String>), Strin
 // cap-class: NOT_A_CAP — authoring ceiling asserted by a test; no runtime path truncates a section that exceeds it
 pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
 
+/// Measured delivered bytes (wrapped blocks, as injected) of the FIRST call of each write shape
+/// on a tracker, plus a fixed 128 B (the margin the emission-budget fixtures use): 2026-10-17,
+/// `append_entry` 12,928 B, `update_entry` 9,077 B, `augment` 5,261 B, `link` 2,591 B. `link` is
+/// also bounded on a bug file. Raise one only with a new measurement. They sit under
+/// `MAX_AUTO_INJECT_GUIDE_BYTES` (16,384 B, wrapper included), which the first cut of
+/// `append_entry` met with 40 B to spare (16,344 B) while a body-summing test read 13.5 KB.
+/// `append_entry`'s is also read by the end-to-end test, so there is one number.
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_APPEND_ENTRY: usize = 12_928 + 128;
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_UPDATE_ENTRY: usize = 9_077 + 128;
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_AUGMENT: usize = 5_261 + 128;
+#[cfg(test)]
+pub(crate) const WRITE_CEILING_LINK: usize = 2_591 + 128;
+/// A floor for `append_entry`, between its section BODIES (10,641 B) and what it delivers
+/// wrapped (12,928 B): it fails a delivered-bytes measure that forgot the wrappers.
+#[cfg(test)]
+pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 12_000;
+
 /// A guide section with its declarations resolved.
 #[derive(Debug, Clone)]
 pub struct GuideSection {
@@ -1145,6 +1165,262 @@ Body Mu.
             !moved.iter().any(|s| s.heading == "Archiving a tracker"),
             "a tracker move must not be served the update-first § Archiving a tracker"
         );
+    }
+    /// Every write-shape section of `tracker-conventions` that a write other than `move` needs
+    /// and that can be routed safely is reachable by the call that needs it, and by no call that
+    /// does not.
+    ///
+    /// The routing half is proved separately, against real `doc` calls
+    /// (`server::guide_hint_tests::a_write_to_a_tracker_or_bug_file_is_routed_to_its_section`);
+    /// this table is the declaration half: for each section, the calls that MUST serve it and
+    /// at least one that must NOT. Both directions, because each alone is monotone — "every
+    /// section is served by something" is satisfied by a `serves:` widened to every write
+    /// (over-reporting), and "no section leaks" by an emptied declaration. The `doc.move`
+    /// archive sections have their own cases in
+    /// `tracker_conventions_ships_sections_to_each_shape_that_routes_to_it`; here `move` is not
+    /// a row at all. **`doc.update` is never served from this topic** (asserted at the foot):
+    /// routing it here delays the anti-wipe sections, see
+    /// `prompts::TRACKER_SECTION_NEEDS_A_STATUS_UPDATE`.
+    ///
+    /// The table is closed over the guide, compared as sets: a `serves:` on one of these
+    /// write shapes with no row here fails, rather than passing untested.
+    ///
+    /// **Bytes are measured on what is INJECTED**, the wrapped block (`section_block`), not on
+    /// the section bodies: `MAX_AUTO_INJECT_GUIDE_BYTES` says "wrapper included", and the first
+    /// cut of this test summed bodies, so a call that delivered 16,344 B read as 13.5 KB against
+    /// a 16,384 B bound. The per-call ceilings below are measured delivered bytes plus a margin.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[test]
+    fn tracker_write_shapes_ship_their_sections_and_only_theirs() {
+        let idx = GuideIndex::try_build().unwrap();
+        let whole = crate::prompts::topic_body("tracker-conventions")
+            .unwrap()
+            .len();
+        let t = serde_json::json!({"abs_path": "docs/trackers/x.md"});
+        let i = serde_json::json!({"abs_path": "docs/issues/x.md"});
+        let none = serde_json::json!({});
+        let upd_t = ("doc.update", &t);
+        let app_t = ("doc.append_entry", &t);
+        let app_i = ("doc.append_entry", &i);
+        let ue_t = ("doc.update_entry", &t);
+        let aug_t = ("doc.augment", &t);
+        let aug_i = ("doc.augment", &i);
+        let lnk_t = ("doc.link", &t);
+        let lnk_i = ("doc.link", &i);
+        // A write whose result names no path routes nowhere near this topic.
+        let app_none = ("doc.append_entry", &none);
+
+        type Call<'a> = (&'a str, &'a Value);
+        // (heading, calls that must serve it, calls that must not)
+        let table: Vec<(&str, Vec<Call>, Vec<Call>)> = vec![
+            (
+                "Declaring an augmentation",
+                vec![aug_t],
+                vec![aug_i, app_t, ue_t, lnk_t, upd_t],
+            ),
+            (
+                "Declaring an augmentation — why the sidecar exists, and the check's remedy",
+                vec![aug_t],
+                vec![aug_i, app_t, ue_t, lnk_t, upd_t],
+            ),
+            (
+                "Entry-level standard — the shape INSIDE a tracker",
+                vec![app_t, ue_t],
+                vec![app_i, app_none, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Entry ids",
+                vec![app_t],
+                vec![ue_t, app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Entry ids — refusals: main checkout only, and unpushed ledgers",
+                vec![app_t],
+                vec![ue_t, app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Entry ids — where the counter lives",
+                vec![app_t],
+                vec![ue_t, app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Entry headings — the definition rule",
+                vec![app_t],
+                vec![ue_t, app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Required fields",
+                vec![app_t, ue_t],
+                vec![app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Required fields — Rests on, and detecting the lines",
+                vec![app_t, ue_t],
+                vec![app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Detecting these fields",
+                vec![app_t, ue_t],
+                vec![app_i, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Citing an entry — bare, or qualified",
+                vec![ue_t],
+                vec![app_t, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Citing an entry — a third shape, and mentioning without citing",
+                vec![ue_t],
+                vec![app_t, aug_t, lnk_t, upd_t],
+            ),
+            (
+                "Cross-linking (edges are derived — cite in prose)",
+                vec![lnk_t, lnk_i],
+                vec![app_t, ue_t, aug_t, upd_t],
+            ),
+        ];
+
+        let served = |call: Call| -> Vec<String> {
+            idx.match_sections("tracker-conventions", Some(call.0), call.1)
+                .iter()
+                .map(|s| s.heading.clone())
+                .collect()
+        };
+        for (heading, must, must_not) in &table {
+            for call in must {
+                assert!(
+                    served(*call).iter().any(|h| h == heading),
+                    "`{}` on {} must be served § {heading}",
+                    call.0,
+                    call.1
+                );
+            }
+            for call in must_not {
+                assert!(
+                    !served(*call).iter().any(|h| h == heading),
+                    "`{}` on {} must NOT be served § {heading}",
+                    call.0,
+                    call.1
+                );
+            }
+        }
+
+        // The table is closed over the guide: a section declared for one of these write
+        // shapes that has no row above is untested, and a row naming a heading that is not
+        // declared for one proves nothing. Compared as sets, both ways, so neither a new
+        // section nor a rename can pass silently.
+        let writes = ["update", "append_entry", "update_entry", "augment", "link"];
+        let mut declared: Vec<&str> = idx
+            .topic("tracker-conventions")
+            .unwrap()
+            .declared()
+            .filter(|s| {
+                s.serves
+                    .iter()
+                    .any(|sh| sh.action.as_deref().is_some_and(|a| writes.contains(&a)))
+            })
+            .map(|s| s.heading.as_str())
+            .collect();
+        declared.sort_unstable();
+        let mut tabled: Vec<&str> = table.iter().map(|(h, _, _)| *h).collect();
+        tabled.sort_unstable();
+        assert_eq!(
+            declared, tabled,
+            "the table and the guide's write-shape sections must be the same set"
+        );
+
+        // `doc.update` is never served from this topic, on a tracker, a bug file or no path.
+        for (what, probe) in [("tracker", &t), ("bug file", &i), ("no path", &none)] {
+            assert!(
+                served(("doc.update", probe)).is_empty(),
+                "`doc.update` on a {what} result must serve nothing from tracker-conventions: \
+                 its anti-wipe sections live in librarian"
+            );
+        }
+
+        // What each call DELIVERS: the wrapped blocks, bounded by the auto-inject bound, by the
+        // section-grain ratio, and by a measured ceiling (delivered bytes + 128 B; raise it
+        // deliberately, with the new measurement, never to make this pass).
+        let delivered = |call: Call| -> usize {
+            idx.match_sections("tracker-conventions", Some(call.0), call.1)
+                .iter()
+                .map(|s| {
+                    crate::tools::guide_emit::section_block("tracker-conventions", s)
+                        .as_text()
+                        .map_or(0, |b| b.text.len())
+                })
+                .sum()
+        };
+        let mut calls: Vec<Call> = table
+            .iter()
+            .flat_map(|(_, m, n)| m.iter().chain(n.iter()).copied())
+            .collect();
+        calls.sort_by(|a, b| (a.0, a.1.to_string()).cmp(&(b.0, b.1.to_string())));
+        calls.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+        for call in calls {
+            let bytes = delivered(call);
+            assert!(
+                bytes * 4 < whole,
+                "`{}` on {} delivers {bytes} B of a {whole} B guide; that is not section grain",
+                call.0,
+                call.1
+            );
+        }
+        // The ceilings themselves sit under the auto-inject bound (16,384 B, wrapper included).
+        // A per-call `<= MAX` check would be dominated by the tighter ceilings (the first guard
+        // to refuse owns the input, so a mutation of it survives); bounding the ceilings is the
+        // assertion that fails when one is RAISED past the bound.
+        for ceiling in [
+            WRITE_CEILING_APPEND_ENTRY,
+            WRITE_CEILING_UPDATE_ENTRY,
+            WRITE_CEILING_AUGMENT,
+            WRITE_CEILING_LINK,
+        ] {
+            assert!(
+                ceiling <= crate::tools::guide_emit::MAX_AUTO_INJECT_GUIDE_BYTES,
+                "a measured ceiling of {ceiling} B is over the auto-inject bound"
+            );
+        }
+        // The instrument's own floor: delivered bytes must INCLUDE the wrappers. A measure
+        // that sums section bodies reads ~2.3 KB low for append_entry, which is exactly how
+        // a 16,344 B delivery read as 13.5 KB against a 16,384 B bound.
+        let floor_bytes = delivered(app_t);
+        assert!(
+            floor_bytes >= WRITE_FLOOR_APPEND_ENTRY,
+            "`doc.append_entry` measures {floor_bytes} B, under the {WRITE_FLOOR_APPEND_ENTRY} B \
+             floor: the delivered-bytes instrument has stopped counting what is injected"
+        );
+        for (call, measured_ceiling) in [
+            (app_t, WRITE_CEILING_APPEND_ENTRY),
+            (ue_t, WRITE_CEILING_UPDATE_ENTRY),
+            (aug_t, WRITE_CEILING_AUGMENT),
+            (lnk_t, WRITE_CEILING_LINK),
+            (lnk_i, WRITE_CEILING_LINK),
+        ] {
+            let bytes = delivered(call);
+            assert!(
+                bytes <= measured_ceiling,
+                "`{}` on {} delivers {bytes} B wrapped, over its measured ceiling \
+                 {measured_ceiling} B",
+                call.0,
+                call.1
+            );
+        }
+
+        // A write whose result names no tracker or bug path serves nothing from this topic.
+        for sel in [
+            "doc.update",
+            "doc.append_entry",
+            "doc.update_entry",
+            "doc.augment",
+            "doc.link",
+        ] {
+            assert!(
+                idx.match_sections("tracker-conventions", Some(sel), &none)
+                    .is_empty(),
+                "`{sel}` with a result naming no path must serve no tracker-conventions section"
+            );
+        }
     }
 
     /// A `path~` shape can never match a result-less call, which is what keeps the
