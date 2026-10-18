@@ -728,3 +728,83 @@ async fn a_pin_to_an_unparseable_project_toml_is_recoverable_and_names_project_t
         );
     }
 }
+
+/// F5, attribution: the refused call's row names the same caller an ordinary call of that
+/// caller would. A stamped principal (`<session>/<agent>`) must reach `cc_session_id` and
+/// `agent_id`, because that is how a subagent's refused call is told from its parent's.
+#[tokio::test]
+async fn a_refused_pin_is_attributed_to_its_caller_like_an_ordinary_call() {
+    let (home, server) = make_server().await;
+    let home_root = std::fs::canonicalize(home.path()).unwrap();
+    let host = tempdir().unwrap();
+    let missing = std::fs::canonicalize(host.path())
+        .unwrap()
+        .join("does-not-exist");
+    let pin = missing.to_string_lossy().to_string();
+    let stamped = || {
+        let mut args = serde_json::json!({"action": "list"});
+        args[crate::tools::session_key::PRINCIPAL_ARG_KEY] = serde_json::json!("conv-A/testagent");
+        args
+    };
+
+    dispatch_tool(&server, "memory", serde_json::json!({"action": "list"})).await;
+    dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        &pin,
+    )
+    .await
+    .unwrap();
+    dispatch_tool(&server, "memory", stamped()).await;
+    dispatch_pinned(&server, "memory", stamped(), &pin)
+        .await
+        .unwrap();
+
+    let conn = crate::usage::db::open_db(&home_root).unwrap();
+    let rows: Vec<(String, Option<String>, Option<String>)> = conn
+        .prepare("SELECT outcome, cc_session_id, agent_id FROM tool_calls ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(rows.len(), 4, "one row per call; got {rows:?}");
+    assert_eq!(rows[1].0, "recoverable_error");
+    assert_eq!(rows[3].0, "recoverable_error");
+    assert_eq!(
+        (&rows[1].1, &rows[1].2),
+        (&rows[0].1, &rows[0].2),
+        "unstamped: the refused call is attributed like the ordinary one; got {rows:?}"
+    );
+    assert_eq!(
+        (&rows[3].1, &rows[3].2),
+        (&rows[2].1, &rows[2].2),
+        "stamped: the refused call is attributed like the ordinary one; got {rows:?}"
+    );
+    assert_eq!(
+        rows[3].1.as_deref(),
+        Some("conv-A/testagent"),
+        "got {rows:?}"
+    );
+    assert_eq!(rows[3].2.as_deref(), Some("testagent"), "got {rows:?}");
+}
+
+/// F2, the branch that did NOT change: with no pin, a write gate that cannot resolve the
+/// session's own default project is still the protocol error it always was. Only a pin is the
+/// caller's input; the default project is nobody's choice, so a failure there is the server's.
+#[tokio::test]
+async fn an_unpinned_write_with_no_project_keeps_its_protocol_error() {
+    let (_dir, server) = test_support::make_server_no_project().await;
+    let req = CallToolRequestParams::new("memory".to_string())
+        .with_arguments(serde_json::from_str(WRITE_TOPIC).unwrap());
+    let err = server
+        .call_tool_inner(req, None, None, tokio_util::sync::CancellationToken::new())
+        .await
+        .expect_err("the unpinned write gate must keep failing as a protocol error");
+    assert!(
+        err.message.starts_with("write gate: "),
+        "got: {}",
+        err.message
+    );
+}
