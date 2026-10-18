@@ -418,7 +418,7 @@ pub(crate) fn section_block(
 /// Test instrument: the blocks of one reply whose text would begin MID-LINE when a client
 /// lays the blocks end to end, one entry per block, naming it. Empty means every block
 /// after the first starts a line of its own: it begins with a newline, or the block before
-/// it ends with one. A non-text block is a break by itself.
+/// it ends with one. A non-text block is a break by itself; an empty text block is skipped.
 ///
 /// `pub(crate)` because the seam is crossed from several modules (the engines, the notice
 /// carriers, the server's appended blocks) and one definition of "clean" is the point.
@@ -432,8 +432,13 @@ pub(crate) fn seam_defects(blocks: &[Content]) -> Vec<String> {
             continue;
         };
         let text = t.text.as_str();
+        // An empty block shows nothing: it neither has a seam of its own nor interrupts the
+        // one between the text before it and the text after it.
+        if text.is_empty() {
+            continue;
+        }
         if let Some(p) = prev {
-            if !text.is_empty() && !p.is_empty() && !text.starts_with('\n') && !p.ends_with('\n') {
+            if !text.starts_with('\n') && !p.ends_with('\n') {
                 let head: String = text.chars().take(48).collect();
                 let tail: String = {
                     let n = p.chars().count();
@@ -534,6 +539,25 @@ mod tests {
         assert!(seam_defects(&trailing).is_empty());
         // The first block has nothing in front of it.
         assert!(seam_defects(&[Content::text("<!-- first")]).is_empty());
+        // An empty block shows nothing, so the block after it still follows the last text
+        // on the line: `}` + `` + `<!-- auto-injected` reads `}<!-- auto-injected`.
+        let across_empty = vec![
+            Content::text("}"),
+            Content::text(""),
+            Content::text("<!-- auto-injected"),
+        ];
+        assert_eq!(
+            seam_defects(&across_empty).len(),
+            1,
+            "{:?}",
+            seam_defects(&across_empty)
+        );
+        let across_empty_led = vec![
+            Content::text("}"),
+            Content::text(""),
+            Content::text("\n<!-- auto-injected"),
+        ];
+        assert!(seam_defects(&across_empty_led).is_empty());
     }
 
     /// The constructor itself: one newline added, never two, and the text otherwise
