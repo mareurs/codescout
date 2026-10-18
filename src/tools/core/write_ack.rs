@@ -99,10 +99,13 @@ pub async fn resolve_write_or_capture(
     match classify_write_path(raw_path, &root, &security, &session_roots) {
         WritePathDecision::Allowed(p) => {
             // The classifier judges where a write through a leaf link lands (a link to a
-            // deny-listed file is `Denied` there, a link out of the roots `OutsideRoot`), but it
-            // returns the link's own spelling and the edit tools read the target through it (error
-            // hints echo it, a unique match copies it into the project). Look again at the point
-            // of use: apply the read deny-list to what the link resolves to now.
+            // deny-listed file is `Denied` there), but it returns the link's own spelling and the
+            // edit tools read the target through it (error hints echo it, a unique match copies it
+            // into the project). Look again at the point of use: apply the read deny-list to what
+            // the link resolves to now. UNTESTED defence in depth at THIS call site: no input is
+            // known that the classifier lets through and this refuses (a mutant that discards its
+            // result survives the suite), so it is kept for the window in which a link is
+            // re-pointed between the two looks, not because a test needs it.
             // docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
             crate::fs::validate_leaf_link_target(
                 &p,
@@ -295,48 +298,15 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_leaf_link_to_an_unapproved_outside_path_captures_an_ack_for_the_targets_directory() {
+    async fn a_leaf_link_to_an_outside_path_is_written_as_the_link_and_mints_no_ack() {
+        // POLICY (pending the user's confirmation, see the issue): the writers behind
+        // `resolve_write_or_capture` replace a link and never write to its end, so a link out of
+        // the roots needs no approval, and an `@ack_*` for the END's directory would grant a
+        // session root for a write that never happens there. Before this was a pending ack for
+        // `/var/ce_ack_leaf_capture`, and replaying it left that directory approved.
         let (dir, ctx) = ctx_with_project().await;
         let link = plant_leaf_link(dir.path(), "/var/ce_ack_leaf_capture/victim.txt");
         let input = json!({ "path": link, "content": "x" });
-        let outcome = resolve_write_or_capture(&ctx, "create_file", &input, &link)
-            .await
-            .unwrap();
-        match outcome {
-            WriteOutcome::Pending(env) => {
-                let hint = env["hint"].as_str().expect("hint");
-                assert!(
-                    hint.contains("/var/ce_ack_leaf_capture"),
-                    "the ack must name the TARGET's directory, got: {env}"
-                );
-                assert!(
-                    env["pending_ack"]
-                        .as_str()
-                        .is_some_and(|h| h.starts_with("@ack_")),
-                    "got: {env}"
-                );
-            }
-            other => panic!("a link out of the roots must be captured, got: {other:?}"),
-        }
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_leaf_link_into_an_approved_directory_is_written_after_the_ack_is_replayed() {
-        let (dir, ctx) = ctx_with_project().await;
-        let link = plant_leaf_link(dir.path(), "/var/ce_ack_leaf_replay/victim.txt");
-        let input = json!({ "path": link, "content": "x" });
-        let handle = match resolve_write_or_capture(&ctx, "create_file", &input, &link)
-            .await
-            .unwrap()
-        {
-            WriteOutcome::Pending(env) => env["pending_ack"].as_str().unwrap().to_string(),
-            other => panic!("expected an ack before approval, got: {other:?}"),
-        };
-        let replayed = maybe_replay_ack(&ctx, json!({ "path": handle }), "create_file")
-            .await
-            .unwrap();
-        assert_eq!(replayed, input);
         match resolve_write_or_capture(&ctx, "create_file", &input, &link)
             .await
             .unwrap()
@@ -345,8 +315,12 @@ mod tests {
                 p.ends_with("leaf"),
                 "the write is handed the link itself, got: {p:?}"
             ),
-            other => panic!("after approval the write must proceed, got: {other:?}"),
+            other => panic!("a link out of the roots must be written as the link, got: {other:?}"),
         }
+        assert!(
+            ctx.agent.session_write_roots_snapshot().await.is_empty(),
+            "nothing may have been approved"
+        );
     }
 
     #[cfg(target_os = "linux")]

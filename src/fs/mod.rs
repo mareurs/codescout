@@ -704,28 +704,22 @@ mod tests {
     }
 
     /// `resolve_write_path_for` is the resolver `create_file`, `edit_file` and `edit_code` share.
-    /// A dangling leaf link to a place outside every write root used to resolve (the classifier
-    /// kept the in-root spelling and the read policy lets a dangling link through); it is now
-    /// refused at the classifier, with the approval that would admit it named. The target does not
-    /// exist and is never created, and sits under `/var`, which the ambient environment does not
-    /// cover (the system temp dir is a write root, so a tempdir could not be "outside").
+    /// A dangling leaf link to a place outside every write root resolves, as the link: the writers
+    /// replace a link and never write to its end, so there is nothing to approve. (This branch had
+    /// refused it with an approval for the end's directory; see the policy note in the issue.)
+    /// The target does not exist and is never created.
     #[cfg(unix)]
     #[tokio::test]
-    async fn resolve_write_path_for_refuses_a_leaf_link_out_of_the_write_roots() {
+    async fn resolve_write_path_for_hands_back_a_leaf_link_out_of_the_write_roots_as_the_link() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join(".codescout")).unwrap();
         std::os::unix::fs::symlink("/var/ce_fs_leaf_probe/new.txt", root.path().join("leaf"))
             .unwrap();
         let agent = Agent::new(Some(root.path().to_path_buf())).await.unwrap();
-        let err = resolve_write_path_for(&agent, None, "leaf")
+        let resolved = resolve_write_path_for(&agent, None, "leaf")
             .await
-            .expect_err("a leaf link out of the write roots must not resolve for writing");
-        let msg = format!("{err:#}");
-        assert!(msg.contains("outside the project root"), "got: {msg}");
-        assert!(
-            msg.contains("/var/ce_fs_leaf_probe"),
-            "the approval must name the target's directory, got: {msg}"
-        );
+            .expect("a link out of the write roots is judged by its own location");
+        assert!(resolved.ends_with("leaf"), "got: {resolved:?}");
     }
 
     /// Deny-listed targets, hermetically. The deny list is built from `$HOME`, which a test must
