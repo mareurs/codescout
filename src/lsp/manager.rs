@@ -112,6 +112,10 @@ pub struct LspManager {
     /// lock) has no yield point in the natural flow, so a test cannot land in it otherwise.
     #[cfg(test)]
     after_early_stop: StdMutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Test seam: the program the mux spawn runs instead of `resolve_mux_binary()`, so a test can
+    /// stand a script in for the mux (the test binary cannot be one).
+    #[cfg(test)]
+    mux_binary_for_test: StdMutex<Option<PathBuf>>,
     /// Project root for test-only DB writes. Set by new_for_test_with_root.
     #[cfg(test)]
     project_root_for_test: Option<std::path::PathBuf>,
@@ -756,6 +760,8 @@ impl LspManager {
             #[cfg(test)]
             after_early_stop: StdMutex::new(None),
             #[cfg(test)]
+            mux_binary_for_test: StdMutex::new(None),
+            #[cfg(test)]
             project_root_for_test: None,
         }
     }
@@ -1191,6 +1197,17 @@ impl LspManager {
                 };
 
             if need_spawn {
+                #[cfg(test)]
+                let exe = match self
+                    .mux_binary_for_test
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+                {
+                    Some(fake) => fake,
+                    None => resolve_mux_binary()?,
+                };
+                #[cfg(not(test))]
                 let exe = resolve_mux_binary()?;
 
                 // We observed the ownership flock was free (no live mux). The
@@ -3223,6 +3240,71 @@ mod tests {
             connected.is_ok(),
             "a mux that answers 2 s after accepting is alive: {:?}",
             connected.err().map(|e| e.to_string())
+        );
+    }
+
+    /// F3 through the real spawn branch of `get_or_start_via_mux_waiting` (the test above runs the
+    /// plan against a socket; this runs the call site). A script stands in for the mux: it binds
+    /// the socket named in its arguments, prints `ready`, accepts, and sends its init message 2 s
+    /// after the client connected. The caller's peer wait is 500 ms, which would end a peer round
+    /// in 0.5 s: only the spawned-mux plan (800 ms window, 5 s init floor) connects to it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&lock_path);
+        let fake_mux = dir.path().join("fake-mux.py");
+        std::fs::write(
+            &fake_mux,
+            r#"#!/usr/bin/env python3
+import json, socket, sys, time
+sock_path = sys.argv[sys.argv.index("--socket") + 1]
+s = socket.socket(socket.AF_UNIX)
+s.bind(sock_path)
+s.listen(8)
+sys.stdout.write("ready\n")
+sys.stdout.flush()
+c, _ = s.accept()
+c.settimeout(20)
+time.sleep(2)
+body = json.dumps({"jsonrpc": "2.0", "id": 0, "result": {"capabilities": {}}}).encode()
+c.sendall(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+try:
+    c.recv(1)
+except Exception:
+    pass
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake_mux, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mgr = LspManager::new();
+        *mgr.mux_binary_for_test.lock().unwrap() = Some(fake_mux);
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_millis(500)),
+        )
+        .await
+        .expect("bounded");
+        let _ = std::fs::remove_file(&sock_path);
+        assert!(
+            result.is_ok(),
+            "a mux this call spawned and saw ready is connected to even when it answers late: {:?}",
+            result.err().map(|e| e.to_string())
         );
     }
 
