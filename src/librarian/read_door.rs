@@ -506,4 +506,322 @@ mod tests {
         assert!(door.refusal(&root.join("dangling.md")).is_some());
         assert!(door.refusal(&root.join("never-existed.md")).is_none());
     }
+
+    // ---------------------------------------------------------------------------------------
+    // The source gate.
+    // ---------------------------------------------------------------------------------------
+
+    /// Reads of files NO repository names, each with the reason it is not a door read. An entry
+    /// names the file, a fragment unique to the line, and how many such lines the file holds; the
+    /// gate requires exactly that many (a liveness floor: an entry whose read is gone fails too).
+    const ALLOWED: &[(&str, &str, usize, &str)] = &[
+        ("workspace.rs", "std::fs::read_to_string(path).with_context", 1,
+         "the operator's global ~/.config/librarian/workspace.toml (or LIBRARIAN_WORKSPACE)"),
+        ("workspace.rs", "std::fs::OpenOptions::new()", 1,
+         "creates the default global config with create_new; opens for writing only"),
+        ("session_registry.rs", "/proc/{pid}/stat", 1, "the kernel's process table"),
+        ("session_registry.rs", "std::fs::read_to_string(&path)", 1,
+         "session JSON files under the Claude profile directories, machine state"),
+        ("catalog/audit/host.rs", "/etc/hostname", 1, "the host name"),
+        ("catalog/audit/shard.rs", "std::fs::read_to_string(repo_root.join(\".gitattributes\"))", 1,
+         "audit shard I/O is out of this fix's scope (filed separately)"),
+        ("catalog/audit/shard.rs", "std::fs::OpenOptions::new()", 1,
+         "audit shard I/O is out of this fix's scope (filed separately)"),
+        ("catalog/audit/shard.rs", "std::fs::File::open(&dir)", 1,
+         "audit shard I/O is out of this fix's scope: an fsync of a directory, no content"),
+        ("catalog/audit/shard.rs", "std::fs::read_to_string(e.path())", 1,
+         "audit shard I/O is out of this fix's scope (filed separately)"),
+        ("tools/worktree.rs", "worktree_root.join(\".git\")", 1,
+         "a worktree's `.git` pointer file, parsed for its gitdir"),
+        ("tools/worktree.rs", "join(\"HEAD\")", 1,
+         "the HEAD of the gitdir that pointer names, which lies outside the worktree by construction; only `ref: refs/heads/<name>` is parsed"),
+        ("tools/doctor.rs", "join(\"cc_session_id\")", 1,
+         "a gitignored per-session id file; only a session-id-shaped value is used"),
+        ("tools/doctor.rs", "e.path().join(\"gitdir\")", 1,
+         "git's own .git/worktrees/*/gitdir registration files"),
+    ];
+
+    /// Production code of a Rust source: every `#[cfg(test)]` item blanked, and every string,
+    /// character literal and comment blanked, so a pattern is matched on CODE only and line
+    /// numbers survive. Returns the blanked text and the names of `#[cfg(test)] mod x;`
+    /// declarations (whose files are test code in full).
+    fn production_code(src: &str) -> (String, Vec<String>) {
+        let b: Vec<char> = src.chars().collect();
+        let mut code: Vec<char> = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            let c = b[i];
+            let next = b.get(i + 1).copied();
+            if c == '/' && next == Some('/') {
+                while i < b.len() && b[i] != '\n' {
+                    code.push(' ');
+                    i += 1;
+                }
+            } else if c == '/' && next == Some('*') {
+                let mut depth = 0usize;
+                loop {
+                    if i >= b.len() {
+                        break;
+                    }
+                    if b[i] == '/' && b.get(i + 1) == Some(&'*') {
+                        depth += 1;
+                        code.extend([' ', ' ']);
+                        i += 2;
+                    } else if b[i] == '*' && b.get(i + 1) == Some(&'/') {
+                        depth -= 1;
+                        code.extend([' ', ' ']);
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        code.push(if b[i] == '\n' { '\n' } else { ' ' });
+                        i += 1;
+                    }
+                }
+            } else if c == 'r'
+                && (next == Some('"') || next == Some('#'))
+                && !(i > 0 && (b[i - 1].is_alphanumeric() || b[i - 1] == '_'))
+            {
+                // A raw string: r"..." or r#"..."#.
+                let mut j = i + 1;
+                let mut hashes = 0;
+                while j < b.len() && b[j] == '#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < b.len() && b[j] == '"' {
+                    code.push('r');
+                    code.extend(std::iter::repeat_n(' ', j - i));
+                    i = j + 1;
+                    'raw: while i < b.len() {
+                        if b[i] == '"' && (1..=hashes).all(|k| b.get(i + k) == Some(&'#')) {
+                            code.extend(std::iter::repeat_n(' ', hashes + 1));
+                            i += hashes + 1;
+                            break 'raw;
+                        }
+                        code.push(if b[i] == '\n' { '\n' } else { ' ' });
+                        i += 1;
+                    }
+                } else {
+                    code.push(c);
+                    i += 1;
+                }
+            } else if c == '"' {
+                code.push(' ');
+                i += 1;
+                while i < b.len() && b[i] != '"' {
+                    if b[i] == '\\' {
+                        code.push(' ');
+                        i += 1;
+                    }
+                    if i < b.len() {
+                        code.push(if b[i] == '\n' { '\n' } else { ' ' });
+                        i += 1;
+                    }
+                }
+                code.push(' ');
+                i += 1;
+            } else if c == '\'' {
+                // A char literal ('x', '\n', '\'') or a lifetime ('a): a char literal closes
+                // within a few characters, a lifetime does not.
+                if next == Some('\\') {
+                    let mut j = i + 2;
+                    while j < b.len() && b[j] != '\'' {
+                        j += 1;
+                    }
+                    code.extend(std::iter::repeat_n(' ', j.min(b.len() - 1) + 1 - i));
+                    i = j + 1;
+                } else if b.get(i + 2) == Some(&'\'') {
+                    code.extend([' ', ' ', ' ']);
+                    i += 3;
+                } else {
+                    code.push(c);
+                    i += 1;
+                }
+            } else {
+                code.push(c);
+                i += 1;
+            }
+        }
+        let code: String = code.into_iter().collect();
+        // Blank every `#[cfg(test)]` item: up to its `;` or through its braced body.
+        let mut out: Vec<char> = code.chars().collect();
+        let mut test_mods = Vec::new();
+        let needle: Vec<char> = "#[cfg(test)]".chars().collect();
+        let mut i = 0;
+        while i + needle.len() <= out.len() {
+            if out[i..i + needle.len()] != needle[..] {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            let mut j = i + needle.len();
+            let mut end = None;
+            let mut depth = 0usize;
+            let mut header = String::new();
+            while j < out.len() {
+                match out[j] {
+                    ';' if depth == 0 => {
+                        end = Some(j);
+                        break;
+                    }
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = Some(j);
+                            break;
+                        }
+                    }
+                    ch => {
+                        if depth == 0 {
+                            header.push(ch);
+                        }
+                    }
+                }
+                j += 1;
+            }
+            let end = end.expect("a #[cfg(test)] item ends");
+            let words: Vec<&str> = header.split_whitespace().collect();
+            if out[end] == ';' {
+                if let Some(pos) = words.iter().position(|w| *w == "mod") {
+                    if let Some(name) = words.get(pos + 1) {
+                        test_mods.push(name.to_string());
+                    }
+                }
+            }
+            for ch in &mut out[start..=end] {
+                if *ch != '\n' {
+                    *ch = ' ';
+                }
+            }
+            i = end + 1;
+        }
+        (out.into_iter().collect(), test_mods)
+    }
+
+    const RAW_READS: &[&str] = &[
+        "fs::read(",
+        "fs::read_to_string(",
+        "File::open(",
+        "OpenOptions::new(",
+        "tokio::fs::read",
+        "use std::fs::read",
+    ];
+
+    /// Every production read of file content in `src/librarian` goes through this module. A raw
+    /// read added anywhere else, or a second one in a file the allow-list names, turns this red;
+    /// so does an allow-list entry whose read is gone. The door's own file is exempt, and must
+    /// show its own raw open: that is the proof the scanner sees production code at all.
+    #[test]
+    fn no_librarian_production_read_bypasses_the_read_door() {
+        let lib = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/librarian"));
+        let mut files: Vec<PathBuf> = walkdir::WalkDir::new(&lib)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .map(|e| e.into_path())
+            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+            .collect();
+        files.sort();
+        // Pass 1: the files a `#[cfg(test)] mod x;` declares are test code in full.
+        let mut test_files: std::collections::BTreeSet<PathBuf> = Default::default();
+        for f in &files {
+            let src = std::fs::read_to_string(f).unwrap();
+            let (_, mods) = production_code(&src);
+            let dir = if f.file_name().is_some_and(|n| n == "mod.rs") {
+                f.parent().unwrap().to_path_buf()
+            } else {
+                f.with_extension("")
+            };
+            for m in mods {
+                test_files.insert(dir.join(format!("{m}.rs")));
+                test_files.insert(dir.join(&m).join("mod.rs"));
+            }
+        }
+        let mut hits: Vec<(String, String)> = Vec::new();
+        let mut door_hits = 0usize;
+        for f in &files {
+            if test_files.contains(f) {
+                continue;
+            }
+            let rel = f
+                .strip_prefix(&lib)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let src = std::fs::read_to_string(f).unwrap();
+            let (code, _) = production_code(&src);
+            for (n, line) in code.lines().enumerate() {
+                if RAW_READS.iter().any(|p| line.contains(p)) {
+                    if rel == "read_door.rs" {
+                        door_hits += 1;
+                        continue;
+                    }
+                    let original = src.lines().nth(n).unwrap_or("").trim().to_string();
+                    hits.push((rel.clone(), original));
+                }
+            }
+        }
+        assert!(
+            door_hits >= 2,
+            "the scanner must see the door's own open (and its non-Unix twin): {door_hits}"
+        );
+        let mut problems = Vec::new();
+        let mut matched = vec![false; hits.len()];
+        for (file, fragment, count, why) in ALLOWED {
+            assert!(!why.is_empty(), "every allow-list entry carries a reason");
+            let mine: Vec<usize> = hits
+                .iter()
+                .enumerate()
+                .filter(|(_, (f, l))| f == file && l.contains(fragment))
+                .map(|(i, _)| i)
+                .collect();
+            if mine.len() != *count {
+                problems.push(format!(
+                    "allow-list entry {file} `{fragment}`: expected {count} line(s), found {}",
+                    mine.len()
+                ));
+            }
+            for i in mine {
+                matched[i] = true;
+            }
+        }
+        for (i, (file, line)) in hits.iter().enumerate() {
+            if !matched[i] {
+                problems.push(format!(
+                    "{file}: `{line}` reads a file outside the read door; route it through \
+                     `read_door` (or, for a file no repository names, add it to ALLOWED with a \
+                     reason)"
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// The gate's lexer, on the shapes that would make it lie: a raw read inside a string, a
+    /// comment or a test module is NOT production code, and one in code is.
+    #[test]
+    fn the_gate_sees_code_and_not_strings_comments_or_test_items() {
+        let src = r##"
+fn prod() { let x = std::fs::read_to_string(p); }
+// std::fs::read_to_string(in_a_comment)
+fn s() { let s = "std::fs::read(in_a_string)"; let r = r#"File::open(raw)"#; let c = '{'; }
+/* std::fs::read(block) */
+#[cfg(test)]
+mod tests { fn t() { let _ = std::fs::read(p); let b = '}'; } }
+#[cfg(test)]
+mod declared_tests;
+fn after() -> &'static str { std::fs::File::open(q); "" }
+"##;
+        let (code, mods) = production_code(src);
+        let hit: Vec<usize> = code
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| RAW_READS.iter().any(|p| l.contains(p)))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(hit, vec![1, 9], "{code}");
+        assert_eq!(mods, vec!["declared_tests".to_string()]);
+    }
 }
