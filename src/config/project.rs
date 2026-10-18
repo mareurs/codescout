@@ -336,6 +336,138 @@ impl SecuritySection {
     }
 }
 
+/// Strictness of the `shell_command_mode` values the dispatcher knows
+/// (`run_command_inner`): higher is stricter. `None` for any other string, which that
+/// dispatcher refuses outright.
+fn shell_mode_rank(mode: &str) -> Option<u8> {
+    match mode {
+        "unrestricted" => Some(0),
+        "warn" => Some(1),
+        "disabled" => Some(2),
+        _ => None,
+    }
+}
+
+/// `*field` after a failed reload, for a boolean that is `true` when the gate is OPEN.
+/// Absent keeps the previous value (the global config may be what supplies it); `false`
+/// closes it; a value that is not a boolean cannot be read and counts as closed.
+fn tighten_gate(field: &mut bool, raw: Option<&toml::Value>) {
+    match raw {
+        None => {}
+        Some(toml::Value::Boolean(open)) => *field = *field && *open,
+        Some(_) => *field = false,
+    }
+}
+
+impl SecuritySection {
+    /// The security policy while `project.toml` FAILS TO LOAD: the stricter of the previous
+    /// policy and what the file says, never the previous policy alone.
+    ///
+    /// Keeping the last good config whole (the earlier behaviour) is looser than the file in
+    /// exactly the case that matters: a tightening saved in the same edit as an entry the
+    /// loader refuses never took effect, and nothing said so. A value is read from `file`
+    /// only to TIGHTEN, so a failed reload can never loosen anything:
+    ///
+    /// - `file_write_enabled`, `indexing_enabled`: `false` closes the gate; a value that is
+    ///   not a boolean closes it too; absent leaves it as it was.
+    /// - `shell_command_mode`: a stricter known mode replaces the previous one; a string
+    ///   that is not a known mode, or a non-string, counts as `disabled`; absent leaves it.
+    /// - `profile` and `extra_write_roots` are confirmed or dropped: `Root` stays only if
+    ///   the file still says `profile = "root"`, and a write root stays only if the file
+    ///   still lists that exact entry. Absent or unreadable confirms nothing, because for
+    ///   these two keys absent means the default (sandboxed, no extra roots) and the global
+    ///   config cannot set either. A root the file ADDED is not adopted.
+    ///
+    /// `file` is `None` when the file could not be read as TOML at all (syntax error,
+    /// unreadable, over the size cap). Nothing in it can then be confirmed, so it is treated
+    /// as an empty file AND file writes are disabled: the one gate whose silent survival
+    /// the user cannot see.
+    ///
+    /// Not covered, by design: `shell_dangerous_patterns` added by the file, a lowered
+    /// `max_index_bytes`, and a tightened `shell_command_mode`/`file_write_enabled`/
+    /// `indexing_enabled` that only the GLOBAL config carries.
+    pub(crate) fn tighten_for_unloadable_file(&mut self, file: Option<&toml::Table>) {
+        let empty = toml::Table::new();
+        if file.is_none() {
+            self.file_write_enabled = false;
+        }
+        let security = file
+            .and_then(|f| f.get("security"))
+            .and_then(toml::Value::as_table)
+            .unwrap_or(&empty);
+
+        tighten_gate(
+            &mut self.file_write_enabled,
+            security.get("file_write_enabled"),
+        );
+        tighten_gate(&mut self.indexing_enabled, security.get("indexing_enabled"));
+
+        match security.get("shell_command_mode") {
+            None => {}
+            Some(toml::Value::String(wanted)) => {
+                let wanted_rank = shell_mode_rank(wanted).unwrap_or(2);
+                let current_rank = shell_mode_rank(&self.shell_command_mode).unwrap_or(2);
+                if wanted_rank > current_rank {
+                    self.shell_command_mode = match wanted_rank {
+                        1 => "warn",
+                        _ => "disabled",
+                    }
+                    .into();
+                }
+            }
+            Some(_) => self.shell_command_mode = "disabled".into(),
+        }
+
+        let still_root = matches!(
+            security.get("profile"),
+            Some(toml::Value::String(p)) if p == "root"
+        );
+        if !still_root {
+            self.profile = crate::util::path_security::SecurityProfile::Default;
+        }
+
+        match security.get("extra_write_roots") {
+            Some(toml::Value::Array(listed)) => self
+                .extra_write_roots
+                .retain(|root| listed.iter().any(|v| v.as_str() == Some(root.as_str()))),
+            _ => self.extra_write_roots.clear(),
+        }
+    }
+}
+
+impl ProjectConfig {
+    /// `project.toml` as a bare TOML table, for the failed-reload salvage in
+    /// [`SecuritySection::tighten_for_unloadable_file`]. A missing file is an empty table;
+    /// `None` is a file that exists but cannot be read, is over the same 1 MiB cap the
+    /// loader enforces, or is not TOML.
+    pub(crate) fn read_project_toml_table(root: &Path) -> Option<toml::Table> {
+        let path = root.join(".codescout").join("project.toml");
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(toml::Table::new()),
+            Err(_) => return None,
+        };
+        if metadata.len() > 1024 * 1024 {
+            return None;
+        }
+        toml::from_str(&std::fs::read_to_string(&path).ok()?).ok()
+    }
+}
+
+/// What every response says while `project.toml` fails to load. See
+/// `ActiveProject::config_load_error`; the error text is the loader's own, which names the
+/// entry.
+pub fn failed_reload_notice(error: &str) -> String {
+    format!(
+        "`.codescout/project.toml` FAILED TO LOAD, so none of your last edit is applied: \
+         {error}. The previous settings stay in force; from the file only a security \
+         TIGHTENING is applied (file_write_enabled/indexing_enabled = false, a stricter \
+         shell_command_mode, profile other than \"root\", fewer extra_write_roots), and a \
+         file that is not valid TOML disables file writes. Fix the file in an editor; the \
+         next save is re-read."
+    )
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySection {
     /// Min drift score to trigger reverse-drift staleness flag (0.0-1.0)
@@ -839,6 +971,111 @@ mod tests {
         let cfg: ProjectConfig = toml::from_str(toml).unwrap();
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
+    }
+
+    /// `read_project_toml_table` is the salvage's only eye on the file, and each of its four
+    /// outcomes decides a policy: missing is an empty file (confirms nothing, closes
+    /// nothing), anything unreadable is `None` (which also closes writes).
+    #[test]
+    fn read_project_toml_table_distinguishes_missing_valid_oversized_and_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(root),
+            Some(toml::Table::new()),
+            "a missing file is an empty table, not unreadable"
+        );
+
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let file = root.join(".codescout").join("project.toml");
+        std::fs::write(&file, "[security]\nfile_write_enabled = false\n").unwrap();
+        let table = ProjectConfig::read_project_toml_table(root).expect("valid TOML");
+        assert_eq!(
+            table["security"]["file_write_enabled"].as_bool(),
+            Some(false)
+        );
+
+        std::fs::write(&file, "[security\n").unwrap();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(root),
+            None,
+            "invalid TOML is unreadable"
+        );
+
+        std::fs::write(&file, format!("# {}\n", "x".repeat(1024 * 1024 + 16))).unwrap();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(root),
+            None,
+            "over the loader's 1 MiB cap is unreadable, though it is valid TOML"
+        );
+
+        // A path that cannot be stat'ed for a reason other than "not there" is not "missing".
+        let blocked = tempfile::tempdir().unwrap();
+        std::fs::write(blocked.path().join(".codescout"), "a file, not a directory").unwrap();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(blocked.path()),
+            None,
+            "an unreadable path is not an empty file"
+        );
+    }
+
+    /// `PathSecurityConfig::default()` is the STANDARD policy, whatever a repository says. A
+    /// `project.toml` is repository-controlled content, and `profile = "root"` in one is
+    /// honoured for that project's own config (below) but must never reach the type's
+    /// `default()`, which callers use precisely when they have no trusted per-project config:
+    /// it carries the standard deny-list. Pinned from both sides — the file's `Root` is real
+    /// (a vacuous test would pass with the file ignored), and `default()` stays sandboxed
+    /// after that file has been loaded.
+    #[test]
+    fn a_repository_project_toml_cannot_change_what_path_security_config_default_means() {
+        use crate::util::path_security::{validate_read_path, PathSecurityConfig, SecurityProfile};
+
+        let home = crate::platform::resolved_home_dir()
+            .expect("a home directory, from $HOME or the account");
+        let protected = home.join(".ssh").join("id_rsa");
+        let protected = protected.to_str().unwrap();
+
+        assert_eq!(
+            PathSecurityConfig::default().profile,
+            SecurityProfile::Default
+        );
+        assert!(
+            validate_read_path(protected, None, &PathSecurityConfig::default()).is_err(),
+            "control: the standard deny-list refuses ~/.ssh"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout").join("project.toml"),
+            "[project]\nname = \"t\"\n\n[security]\nprofile = \"root\"\n",
+        )
+        .unwrap();
+        let loaded = ProjectConfig::load_with_global_base(
+            dir.path(),
+            toml::Value::Table(toml::map::Map::new()),
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.security.profile,
+            SecurityProfile::Root,
+            "control: the repository's own project.toml is honoured for that project"
+        );
+        assert!(
+            validate_read_path(protected, None, &loaded.security.to_path_security_config()).is_ok(),
+            "control: the file's Root profile really does lift the deny-list for that config"
+        );
+
+        let standard = PathSecurityConfig::default();
+        assert_eq!(
+            standard.profile,
+            SecurityProfile::Default,
+            "loading a project.toml with profile = \"root\" changed default()"
+        );
+        assert!(
+            validate_read_path(protected, None, &standard).is_err(),
+            "default() no longer carries the standard deny-list after a root-profile project.toml"
+        );
     }
 
     #[test]

@@ -687,8 +687,21 @@ impl CodeScoutServer {
         } else {
             self.agent.security_config_for(workspace_override).await
         };
-        crate::util::path_security::check_tool_access(name, is_write, &security)
-            .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
+        let refusal = match crate::util::path_security::check_tool_access(name, is_write, &security)
+        {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
+        // Read AFTER the gate above: that call is what re-reads a stale file, so a load error
+        // from this very edit is already recorded. A refusal is the one response a writer
+        // cannot miss, and for an unparseable file it would otherwise blame a
+        // `file_write_enabled = false` the file does not contain.
+        let mut text = refusal.to_string();
+        if let Some(load_error) = self.agent.config_load_error_for(workspace_override).await {
+            text.push_str("\n\n");
+            text.push_str(&crate::config::project::failed_reload_notice(&load_error));
+        }
+        Err(CallToolResult::error(vec![Content::text(text)]))
     }
 
     /// `ledger` is the handle adoption resolved for this call. It is a parameter,
@@ -17544,6 +17557,10 @@ mod guide_hint_tests {
 /// warning that said so. Deliberately NOT `#[cfg(feature = "librarian")]` like
 /// `guide_hint_tests` above: `ResilientStdin` is not feature-gated, so this has
 /// to run in the lean lane too.
+#[cfg(test)]
+#[path = "server/config_reload_tests.rs"]
+mod config_reload_tests;
+
 #[cfg(test)]
 mod resilient_stdin_tests {
     use super::*;

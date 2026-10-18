@@ -508,6 +508,20 @@ pub(super) async fn displaced_default_notice(
     ctx.agent.displaced_default_notice(caller.as_deref()).await
 }
 
+/// The notice that this call's project failed to load its last `project.toml` edit, riding
+/// the same `_workspace_notice` channel as the two above. Unlike them it is NOT one-shot and
+/// NOT suppressed by a pin: it describes the policy this very call ran under, which a
+/// pinned caller needs to know as much as an unpinned one, and it holds until a reload
+/// succeeds because the stamp has already advanced past the broken file.
+///
+/// docs/issues/2026-10-17-an-invalid-project-toml-reload-is-ignored-silently-so-a-tightening-saved-with-it-never-applies.md
+pub(super) async fn config_load_notice(ctx: &ToolContext) -> Option<String> {
+    ctx.agent
+        .config_load_error_for(ctx.workspace_override.as_deref())
+        .await
+        .map(|e| crate::config::project::failed_reload_notice(&e))
+}
+
 /// Both notices ride the one `_workspace_notice` channel; a call that earns both
 /// carries both, in that order, rather than the second silently losing.
 fn join_notices(a: Option<String>, b: Option<String>) -> Option<String> {
@@ -1790,8 +1804,11 @@ pub trait Tool: Send + Sync {
         // a block has actually carried it.
         let displaced = displaced_default_notice(ctx).await;
         let workspace_notice = join_notices(
-            worktree_read_notice(ctx, project_root.as_deref()).await,
-            displaced.as_ref().map(|d| d.text.clone()),
+            config_load_notice(ctx).await,
+            join_notices(
+                worktree_read_notice(ctx, project_root.as_deref()).await,
+                displaced.as_ref().map(|d| d.text.clone()),
+            ),
         );
         // Whether the notice rode a block of this response. Every render path below sets
         // it, or fills `notice_block` (a result with no object to hold a field).
