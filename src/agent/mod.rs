@@ -3894,6 +3894,33 @@ mod tests {
             .unwrap();
     }
 
+    /// F12 through the real entry point. A cloned repository whose `.gitignore` is a link
+    /// to a secret must not get the secret's bytes copied into a regular project file by
+    /// merely being activated. `home/` is a fixture directory under the temp root, so
+    /// nothing outside the sandbox is read or written.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn activation_never_copies_a_gitignore_symlink_target_into_the_project() {
+        let sandbox = tempdir().unwrap();
+        let secret = sandbox.path().join("home/.ssh/id_rsa");
+        std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+        std::fs::write(&secret, "PRIVATE\n").unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&secret, root.join(".gitignore")).unwrap();
+
+        let agent = Agent::new(Some(root.clone())).await.unwrap();
+        drop(agent);
+
+        let meta = std::fs::symlink_metadata(root.join(".gitignore")).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            ".gitignore was replaced by a regular file: {:?}",
+            std::fs::read_to_string(root.join(".gitignore"))
+        );
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "PRIVATE\n");
+    }
+
     /// Regression test: after switch_focus to a sub-project, project_root() must
     /// return the sub-project root (same as require_project_root), not None.
     ///

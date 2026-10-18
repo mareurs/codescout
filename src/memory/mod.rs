@@ -13,6 +13,7 @@ pub mod semantic_store;
 pub mod sqlite_semantic_store;
 mod write_transaction;
 
+use crate::tools::RecoverableError;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -91,12 +92,23 @@ impl MemoryStore {
         Ok(Self { memories_dir })
     }
 
+    /// Make sure `entry` is ignored by git, without ever following a link at `.gitignore`.
+    ///
+    /// The root `.gitignore` is read and rewritten only when it is absent or a regular
+    /// file. Anything else (a link — a hostile clone can ship `.gitignore -> ~/.ssh/id_rsa`
+    /// — a dangling link, a directory) is left exactly as found: not read through, and not
+    /// replaced by a regular file carrying the target's bytes, which is what
+    /// [`crate::util::fs::atomic_write`] over an existing link would do. Activation must
+    /// not fail on such a project, so instead the private store ignores itself with a
+    /// `.gitignore` of `*` inside its own directory, created exclusively so a link planted
+    /// at that name is never written through either. A notice is logged.
     fn ensure_gitignored(project_root: &Path, entry: &str) -> Result<()> {
         let gitignore_path = project_root.join(".gitignore");
-        let existing = if gitignore_path.exists() {
-            std::fs::read_to_string(&gitignore_path)?
-        } else {
-            String::new()
+        let existing = match std::fs::symlink_metadata(&gitignore_path) {
+            Ok(m) if m.file_type().is_file() => std::fs::read_to_string(&gitignore_path)?,
+            Ok(_) => return Self::ignore_from_inside(project_root, entry, &gitignore_path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e.into()),
         };
         if existing.lines().any(|l| l.trim() == entry) {
             return Ok(());
@@ -108,6 +120,31 @@ impl MemoryStore {
         content.push_str(entry);
         content.push('\n');
         crate::util::fs::atomic_write(&gitignore_path, &content)?;
+        Ok(())
+    }
+
+    /// The fallback of [`Self::ensure_gitignored`] for a `.gitignore` that is not a regular
+    /// file: ignore the store from inside it. `entry` is the project-relative directory
+    /// whose own `.gitignore` is written.
+    fn ignore_from_inside(project_root: &Path, entry: &str, skipped: &Path) -> Result<()> {
+        tracing::warn!(
+            "{} is not a regular file; left untouched. `{}` is ignored by a .gitignore inside it instead.",
+            skipped.display(),
+            entry
+        );
+        let own = project_root
+            .join(entry.trim_end_matches('/'))
+            .join(".gitignore");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        match options.open(&own) {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(b"*\n")?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.into()),
+        }
         Ok(())
     }
 
@@ -126,13 +163,52 @@ impl MemoryStore {
     }
 
     /// Read a memory entry by topic. Returns `None` if not found.
+    ///
+    /// Refuses, rather than follows, anything that is not a real file below the store
+    /// root: a leaf link, a directory at the topic path, or a linked parent directory.
+    /// `WriteTransaction` already refuses the same shapes for writes, and reading through
+    /// one hands the caller whatever the link points at (a hostile clone can ship
+    /// `.codescout/memories/arch.md -> ~/.ssh/id_rsa`). The store ROOT may itself be a
+    /// link — that is documented (`docs/conventions/memory-write-history.md`) and only
+    /// components below it are inspected. A missing topic, or a missing parent, is still
+    /// `Ok(None)`.
     pub fn read(&self, topic: &str) -> Result<Option<String>> {
         let path = self.topic_path(topic);
-        if path.exists() {
-            Ok(Some(std::fs::read_to_string(path)?))
-        } else {
-            Ok(None)
+        let relative = path.strip_prefix(&self.memories_dir)?;
+        let mut walked = self.memories_dir.clone();
+        let mut components = relative.components().peekable();
+        while let Some(component) = components.next() {
+            walked.push(component.as_os_str());
+            let last = components.peek().is_none();
+            match std::fs::symlink_metadata(&walked) {
+                Ok(m) if last && m.file_type().is_file() => {
+                    return Ok(Some(std::fs::read_to_string(&path)?));
+                }
+                Ok(m) if !last && m.file_type().is_dir() => {}
+                Ok(_) if last => {
+                    return Err(RecoverableError::with_hint(
+                        format!("memory target must be a regular file: {}", walked.display()),
+                        "A memory topic is read only when it is a regular file; replace the \
+                         link or directory with a file, or remove it.",
+                    )
+                    .into());
+                }
+                Ok(_) => {
+                    return Err(RecoverableError::with_hint(
+                        format!(
+                            "memory parent must be a real directory: {}",
+                            walked.display()
+                        ),
+                        "A memory topic is read only through real directories; replace the \
+                         link with a directory, or remove it.",
+                    )
+                    .into());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => return Err(e.into()),
+            }
         }
+        Ok(None)
     }
 
     /// List all memory topics.
@@ -333,6 +409,138 @@ mod tests {
         assert!(content.contains("target/\n"));
         assert!(content.contains(".codescout/private-memories/"));
     }
+    /// A regular `.gitignore` whose last line has no newline keeps that line and gains
+    /// ours on a line of its own — the normal path the leaf-link guard must not disturb.
+    #[test]
+    fn open_private_appends_after_a_gitignore_with_no_trailing_newline() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "target/").unwrap();
+        MemoryStore::open_private(dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+            "target/\n.codescout/private-memories/\n"
+        );
+    }
+
+    /// F12. A hostile repository ships `.gitignore` as a link to a secret. Activation reads
+    /// that file to decide whether to append the private-memories entry, and the append
+    /// used to be written back as a REGULAR file — the target's bytes copied into a
+    /// tracked project file. The link must survive, the target must be untouched, and no
+    /// regular file in the project may carry the target's bytes.
+    #[cfg(unix)]
+    #[test]
+    fn open_private_never_copies_a_gitignore_symlink_target_into_the_project() {
+        let sandbox = tempdir().unwrap();
+        let secret = sandbox.path().join("home/.ssh/id_rsa");
+        std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+        std::fs::write(&secret, "SECRET-BYTES\n").unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&secret, root.join(".gitignore")).unwrap();
+
+        MemoryStore::open_private(&root).expect("a link in .gitignore must not refuse activation");
+
+        let meta = std::fs::symlink_metadata(root.join(".gitignore")).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            ".gitignore must still be the link, not a regular file holding the target's bytes"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&secret).unwrap(),
+            "SECRET-BYTES\n",
+            "the link target must be byte-identical afterwards"
+        );
+        for entry in walkdir::WalkDir::new(&root).into_iter().flatten() {
+            if entry.file_type().is_file() {
+                let body = std::fs::read_to_string(entry.path()).unwrap_or_default();
+                assert!(
+                    !body.contains("SECRET-BYTES"),
+                    "{} carries the link target's bytes",
+                    entry.path().display()
+                );
+            }
+        }
+    }
+
+    /// Declining to touch the root `.gitignore` must not leave the private store
+    /// committable: the store then ignores itself, with a file that is written
+    /// exclusively and so cannot be pointed elsewhere.
+    #[cfg(unix)]
+    #[test]
+    fn open_private_self_ignores_when_the_root_gitignore_is_a_link() {
+        let sandbox = tempdir().unwrap();
+        let target = sandbox.path().join("shared-gitignore");
+        std::fs::write(&target, "target/\n").unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&target, root.join(".gitignore")).unwrap();
+
+        MemoryStore::open_private(&root).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(root.join(".codescout/private-memories/.gitignore")).unwrap(),
+            "*\n"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "target/\n");
+    }
+
+    /// A dangling link is not "missing": creating the file would replace the link.
+    #[cfg(unix)]
+    #[test]
+    fn open_private_leaves_a_dangling_gitignore_link_alone() {
+        let sandbox = tempdir().unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(sandbox.path().join("nowhere"), root.join(".gitignore"))
+            .unwrap();
+
+        MemoryStore::open_private(&root).unwrap();
+
+        assert!(std::fs::symlink_metadata(root.join(".gitignore"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!sandbox.path().join("nowhere").exists());
+    }
+
+    /// A directory at `.gitignore` made activation fail on the read; it must degrade the
+    /// same way a link does.
+    #[test]
+    fn open_private_survives_a_gitignore_that_is_a_directory() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".gitignore")).unwrap();
+
+        MemoryStore::open_private(dir.path()).unwrap();
+
+        assert!(dir.path().join(".gitignore").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".codescout/private-memories/.gitignore"))
+                .unwrap(),
+            "*\n"
+        );
+    }
+
+    /// The fallback file is itself never written through a link planted at its name.
+    #[cfg(unix)]
+    #[test]
+    fn the_self_ignore_fallback_is_never_written_through_a_link() {
+        let sandbox = tempdir().unwrap();
+        let victim = sandbox.path().join("victim");
+        std::fs::write(&victim, "KEEP\n").unwrap();
+        let root = sandbox.path().join("project");
+        let private = root.join(".codescout/private-memories");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::create_dir(root.join(".gitignore")).unwrap();
+        std::os::unix::fs::symlink(&victim, private.join(".gitignore")).unwrap();
+
+        MemoryStore::open_private(&root).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "KEEP\n");
+        assert!(std::fs::symlink_metadata(private.join(".gitignore"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
 
     #[test]
     fn write_and_read_roundtrip() {
@@ -348,6 +556,131 @@ mod tests {
     fn read_missing_returns_none() {
         let (_dir, store) = make_store();
         assert_eq!(store.read("does-not-exist").unwrap(), None);
+    }
+
+    fn assert_refused_as_non_regular(err: &anyhow::Error) {
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
+        assert!(
+            rec.to_string()
+                .contains("memory target must be a regular file"),
+            "got: {rec}"
+        );
+    }
+
+    #[test]
+    fn read_of_a_missing_nested_topic_is_none() {
+        let (_dir, store) = make_store();
+        assert_eq!(store.read("no/such/deep-topic").unwrap(), None);
+    }
+
+    /// F13. `arch.md -> ~/.ssh/id_rsa`: `read` followed the link and returned the bytes.
+    #[cfg(unix)]
+    #[test]
+    fn read_refuses_a_leaf_symlink_to_a_file_outside_the_store() {
+        let (dir, store) = make_store();
+        let secret = dir.path().join("home/.ssh/id_rsa");
+        std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+        std::fs::write(&secret, "PRIVATE").unwrap();
+        std::os::unix::fs::symlink(&secret, store.dir().join("arch.md")).unwrap();
+
+        let err = store.read("arch").expect_err("a leaf link must be refused");
+
+        assert_refused_as_non_regular(&err);
+        assert!(!format!("{err:#}").contains("PRIVATE"));
+    }
+
+    /// Consistency, not only exfiltration: `WriteTransaction` refuses EVERY leaf link, so a
+    /// link to a sibling inside the store is refused for reading too. No shipped flow
+    /// creates one (measured 2026-10-18: 0 tracked symlinks under `.codescout/`).
+    #[cfg(unix)]
+    #[test]
+    fn read_refuses_a_leaf_symlink_to_a_file_inside_the_store() {
+        let (_dir, store) = make_store();
+        store.write("real", "inside").unwrap();
+        std::os::unix::fs::symlink(store.dir().join("real.md"), store.dir().join("alias.md"))
+            .unwrap();
+
+        assert_refused_as_non_regular(&store.read("alias").expect_err("must be refused"));
+        assert_eq!(store.read("real").unwrap().as_deref(), Some("inside"));
+    }
+
+    /// A dangling link is not "no such topic": `WriteTransaction` refuses it too.
+    #[cfg(unix)]
+    #[test]
+    fn read_refuses_a_dangling_leaf_symlink() {
+        let (dir, store) = make_store();
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), store.dir().join("ghost.md"))
+            .unwrap();
+
+        assert_refused_as_non_regular(&store.read("ghost").expect_err("must be refused"));
+    }
+
+    #[test]
+    fn read_refuses_a_directory_at_the_topic_path() {
+        let (_dir, store) = make_store();
+        std::fs::create_dir(store.dir().join("dir.md")).unwrap();
+
+        assert_refused_as_non_regular(&store.read("dir").expect_err("must be refused"));
+    }
+
+    /// The parent-directory twin: `nested -> <outside dir>` made `read("nested/topic")`
+    /// reach `<outside>/topic.md`. `safe_topic_parent` refuses this for writes.
+    #[cfg(unix)]
+    #[test]
+    fn read_refuses_a_topic_below_a_symlinked_directory() {
+        let (dir, store) = make_store();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("topic.md"), "PRIVATE").unwrap();
+        std::os::unix::fs::symlink(&outside, store.dir().join("nested")).unwrap();
+
+        let err = store
+            .read("nested/topic")
+            .expect_err("a linked parent must be refused");
+
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
+        assert!(
+            rec.to_string()
+                .contains("memory parent must be a real directory"),
+            "got: {rec}"
+        );
+    }
+
+    /// The store root itself may be a link (documented in
+    /// `docs/conventions/memory-write-history.md`); only components BELOW it are checked.
+    #[cfg(unix)]
+    #[test]
+    fn read_through_a_symlinked_store_root_still_works() {
+        let dir = tempdir().unwrap();
+        let actual = dir.path().join("actual");
+        std::fs::create_dir_all(&actual).unwrap();
+        std::fs::write(actual.join("topic.md"), "kept").unwrap();
+        let configured = dir.path().join("configured");
+        std::os::unix::fs::symlink(&actual, &configured).unwrap();
+
+        let store = MemoryStore::from_dir_readonly(configured);
+
+        assert_eq!(store.read("topic").unwrap().as_deref(), Some("kept"));
+    }
+
+    /// `list` walks without following links, so a link is simply not a topic. Pinned so a
+    /// switch to `follow_links(true)` cannot silently re-open the read side.
+    #[cfg(unix)]
+    #[test]
+    fn list_does_not_report_or_enter_symlinks() {
+        let (dir, store) = make_store();
+        store.write("real", "x").unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("hidden.md"), "PRIVATE").unwrap();
+        std::os::unix::fs::symlink(outside.join("hidden.md"), store.dir().join("leaf.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, store.dir().join("nested")).unwrap();
+
+        assert_eq!(store.list().unwrap(), vec!["real".to_string()]);
     }
 
     #[test]
