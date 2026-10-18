@@ -15,7 +15,6 @@
 
 use super::config_reload_tests::call;
 use super::test_support::make_server_with_project_toml;
-use super::*;
 use serde_json::json;
 
 const PROJECT_TOML: &str = "[project]\nname = \"t\"\n\n[embeddings]\nmodel = \"local:AllMiniLML6V2Q\"\n\n[security]\nshell_command_mode = \"warn\"\n";
