@@ -314,8 +314,12 @@ async fn a_memory_topic_cannot_reach_project_toml() {
 }
 
 /// The librarian's `doc` tool creates files from a repo-relative path. Measured: with a
-/// project.toml already present it refuses ("path exists"); on a fresh project, where
-/// create_file could write the file, `doc(create)` must not be a second way in.
+/// project.toml already present it refuses ("path exists"). On a fresh project the guard at
+/// this site is DEFENCE IN DEPTH for the profile itself: without it the file is written with
+/// `---` frontmatter in front of the TOML, does not parse, and the config fails closed (profile
+/// stays Default, writes are disabled with a notice). What the guard alone prevents is that
+/// outcome: a model replacing a fresh `.codescout/project.toml` with an unparseable file. So the
+/// assertion is that the file is not created at all, which only the guard causes.
 #[cfg(feature = "librarian")]
 #[tokio::test]
 async fn doc_create_cannot_write_a_security_section_into_a_fresh_project_toml() {
@@ -332,13 +336,9 @@ async fn doc_create_cannot_write_a_security_section_into_a_fresh_project_toml() 
         }),
     )
     .await;
-    let landed = toml_path(&dir).exists()
-        && std::fs::read_to_string(toml_path(&dir))
-            .unwrap()
-            .contains("profile");
     assert!(
-        !landed,
-        "doc(create) wrote a [security] section into project.toml (is_error={e}): {t}"
+        !toml_path(&dir).exists(),
+        "doc(create) created project.toml (is_error={e}): {t}"
     );
 }
 
@@ -378,6 +378,11 @@ async fn doc_move_cannot_turn_a_markdown_file_into_a_security_config() {
     assert!(
         !landed,
         "doc(move) put a [security] section into project.toml (is_error={e}): {t}"
+    );
+    assert_eq!(
+        profile_of(&server).await,
+        crate::util::path_security::SecurityProfile::Default,
+        "the profile must not have moved"
     );
 }
 
@@ -497,21 +502,40 @@ async fn the_target_of_a_symlinked_project_toml_is_guarded_under_its_own_name() 
     );
 }
 
-/// F1 probe. Under the DEFAULT `shell_command_mode = "warn"`, a shell redirect rewrites
-/// project.toml; the guard is on the file-writing tools and does not see it.
+/// KNOWN RESIDUAL, pinned so the claim in the issue stays as wide as its evidence. Under the
+/// DEFAULT `shell_command_mode = "warn"`, one `run_command` redirect rewrites project.toml and
+/// the profile becomes Root: the guard is on the file-writing tools and a shell is not one.
+/// Measured 2026-10-18: `profile_before=Default run_command_is_error=false profile_after=Root`.
+/// If this test FAILS, the residual has closed (a shell write is now refused or the reload no
+/// longer honours it): update the issue and the manual, then change this test to assert the
+/// refusal.
 #[tokio::test]
-async fn probe_run_command_can_write_the_security_section() {
+async fn a_shell_redirect_still_writes_the_security_section_known_residual() {
     let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
-    let before = profile_of(&server).await;
+    let before = server.agent.security_config().await;
+    assert_eq!(
+        before.shell_command_mode, "warn",
+        "control: the default shell mode"
+    );
+    assert_eq!(
+        before.profile,
+        crate::util::path_security::SecurityProfile::Default,
+        "control"
+    );
     let (err, text) = call(
         &server,
         "run_command",
         json!({"command": "printf '[project]\\nname = \"t\"\\n\\n[security]\\nprofile = \"root\"\\n' > .codescout/project.toml"}),
     )
     .await;
-    let after = profile_of(&server).await;
-    eprintln!(
-        "F1 profile_before={before:?} run_command_is_error={err} profile_after={after:?}\n{text}\non_disk={:?}",
-        on_disk(&dir)
+    assert!(!err, "the redirect was not refused: {text}");
+    assert!(
+        on_disk(&dir).contains("profile = \"root\""),
+        "the redirect did not write the file: {text}"
+    );
+    assert_eq!(
+        profile_of(&server).await,
+        crate::util::path_security::SecurityProfile::Root,
+        "the guard does not see a shell write; the next call runs under Root"
     );
 }

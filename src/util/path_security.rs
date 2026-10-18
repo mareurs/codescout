@@ -1135,11 +1135,13 @@ pub fn check_tool_access(
                     root,
                     cause: WriteBlockCause::ConfiguredOff,
                 }) => bail!(
-                    "File writes are disabled for {} by security.file_write_enabled = false in \
-                     its .codescout/project.toml. Re-activating with read_only=false will NOT \
-                     clear this — and neither will editing the file and retrying: the config is \
-                     cached for the life of this process. Edit it, then restart the MCP server \
-                     (`/mcp`) to pick the change up.",
+                    "File writes are disabled for {}: security.file_write_enabled is false in \
+                     its .codescout/project.toml or in the global config, or that project.toml \
+                     failed to load (writes stay off until it does; the response then says so). \
+                     Re-activating with read_only=false will NOT clear this. Fix the file in an \
+                     editor — the write tools are off, and cannot edit [security] in any case. \
+                     The next tool call picks the edit up; restarting the MCP server (`/mcp`) \
+                     always does.",
                     root.display()
                 ),
                 // No project root was available to the config builder, so say
@@ -3757,7 +3759,7 @@ mod tests {
     /// The regression this guards is a TIDY-UP in either direction: handing the write refusal
     /// the shared `CONFIG_IS_CACHED_REMEDY`'s old `edit_file` escape, or restoring it there.
     #[test]
-    fn the_write_refusal_withholds_the_edit_file_escape_the_indexing_refusal_offers() {
+    fn neither_config_off_refusal_sends_its_reader_to_edit_file() {
         let indexing_off = PathSecurityConfig {
             indexing_enabled: false,
             ..PathSecurityConfig::default()

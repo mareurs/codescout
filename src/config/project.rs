@@ -1080,13 +1080,18 @@ mod tests {
         );
     }
 
-    /// `PathSecurityConfig::default()` is the STANDARD policy, whatever a repository says. A
-    /// `project.toml` is repository-controlled content, and `profile = "root"` in one is
-    /// honoured for that project's own config (below) but must never reach the type's
-    /// `default()`, which callers use precisely when they have no trusted per-project config:
-    /// it carries the standard deny-list. Pinned from both sides — the file's `Root` is real
-    /// (a vacuous test would pass with the file ignored), and `default()` stays sandboxed
-    /// after that file has been loaded.
+    /// `PathSecurityConfig::default()` is the STANDARD policy, whatever a repository says.
+    ///
+    /// **What this test is, honestly.** `default()` is a constant literal: no file is read to
+    /// build it, so no `project.toml` can change it, and nothing here observes such a change
+    /// happening. What the test protects is (a) the literal itself (a mutant that makes
+    /// `default()` carry `Root` is killed) and (b) that the repository's own `profile` is
+    /// carried into THAT PROJECT'S config by `SecuritySection::to_path_security_config`, so the
+    /// two values stay distinct, with the standard deny-list on the `default()` side: a refactor
+    /// that dropped the project's profile (so the control fails) or merged the two (so the last
+    /// assertions fail) is caught. A caller that builds a config from a repository file and one
+    /// from `default()` gets two different policies, and this pins which is which. It does not
+    /// pin what a future caller chooses to pass.
     #[test]
     fn a_repository_project_toml_cannot_change_what_path_security_config_default_means() {
         use crate::util::path_security::{validate_read_path, PathSecurityConfig, SecurityProfile};
