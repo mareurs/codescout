@@ -1,6 +1,6 @@
 ---
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a `workspace=` pin that names a path which does not exist creates a codescout project there, so a placeholder pin leaves `x/.codescout/` in the caller''s cwd'
 tags:
 - cluster/unclassified
@@ -9,6 +9,8 @@ owner: marius
 related:
 - docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
 severity: medium
+closed: 2026-10-18
+unverified: The server-stack feature tests and the heavy Python suites were not run (gate.sh reports no lane compiles server-stack here); no platform other than this Linux machine; the fix is on an unpushed branch, not yet verified on experiments.
 ---
 
 # BUG: a `workspace=` pin that names a path which does not exist creates a codescout project there, so a placeholder pin leaves `x/.codescout/` in the caller's cwd
@@ -19,7 +21,7 @@ A tool call whose `workspace=` argument is not an existing directory is not refu
 
 ## Status (2026-10-18)
 
-Fixed on branch `fix/workspace-pin-2026-10-18` (based on `fix/small-items-2026-10-18`, itself on `experiments` 7a09623bd), not pushed, not merged. Fix commit `9bd0df3df` (patch-id `e23b7099d411aa35765db6bb01d8bce2e62139d7`), tests commit `d7f38b3a8` (patch-id `e2629706b2bb48bc0ca3cf482ce4f8a89b514811`). The root cause named below was confirmed at the code and by red tests before the fix (see `## Tests added`): a pin of `x` was served (`memory list` answered `0 topics`) and built a project at `<cwd>/x`; an absolute pin to a missing directory was built the same way; a pin to an existing FILE failed deep in residency with `Not a directory (os error 20)` instead of being refused as a pin. After the fix all three are refused with a `RecoverableError` that names the path, and nothing is created. Live check against a debug build of this tree is under `## Tests added`.
+Fixed on branch `fix/workspace-pin-2026-10-18` (based on `fix/small-items-2026-10-18`, itself on `experiments` 7a09623bd), not pushed, not merged. Fix commit `9bd0df3df` (patch-id `e23b7099d411aa35765db6bb01d8bce2e62139d7`), tests commit `d7f38b3a8` (patch-id `e2629706b2bb48bc0ca3cf482ce4f8a89b514811`). The root cause named below was confirmed at the code and by red tests before the fix (see `## Tests added`): a pin of `x` was served (`memory list` answered `0 topics`) and built a project at `<cwd>/x`; an absolute pin to a missing directory was built the same way; a pin to an existing FILE failed deep in residency with `Not a directory (os error 20)` instead of being refused as a pin. After the fix all three are refused with a `RecoverableError` that names the path, and nothing is created. Live check against a debug build of this tree is under `## Tests added`. `./scripts/gate.sh` on the tree at `067eb506b` (the commit before this status flip) ended `GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed` and `PYTHON LIGHT EXIT -> PYTHON_LIGHT=0`; its own list of what green does not cover (heavy Python suites, server-stack, librarian code in LEAN, the two local ONNX weight tests) applies here too.
 
 The filing agent's "decide separately whether a pin may be relative at all" was decided from the code: a relative pin still resolves against the SERVER's cwd, because `workspace(activate)` (`ActivateProject::call`: `PathBuf::from(path).is_dir()` then `canonicalize`) and `--project` (`server::run`: `canonicalize`) already do exactly that, and a pin that exists keeps working unchanged. The refusal for a relative pin names that cwd.
 
