@@ -178,7 +178,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let cutoff_ts = resolve_cutoff_ts(ctx, a.commit.as_deref(), a.timestamp)?;
 
-    let (state, freshness_now) = {
+    let (state, freshness_now, refusal) = {
         use rusqlite::{params, OptionalExtension};
         let cat = ctx.catalog.lock();
         let art = artifact::get(&cat, &a.artifact_id)?
@@ -214,10 +214,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 freshness_horizon: crate::librarian::freshness::FRESHNESS_HORIZON_DEFAULT,
             });
 
-        (state, fn_now)
+        let refusal = crate::librarian::read_door::listing_refusal(
+            &crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)),
+            &art,
+        );
+        (state, fn_now, refusal)
     };
 
-    Ok(json!({
+    // A row the read door refuses replays from the values a walk took from the file behind the
+    // link: those are withheld (review round 2, R2-3).
+    let mut state = state;
+    let withheld = refusal.map(|why| {
+        for k in crate::librarian::read_door::ROW_FIELDS_FROM_FILE {
+            state.frontmatter.remove(*k);
+        }
+        state.status = Value::Null;
+        format!("{why:#}")
+    });
+
+    let mut out = json!({
         "as_of": cutoff_ts,
         "status_at_as_of": state.status,
         "frontmatter": Value::Object(state.frontmatter),
@@ -226,7 +241,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "freshness_changed": state.freshness_at_as_of != freshness_now,
         "latest_event_at_as_of": state.latest_event_summary,
         "supersession_chain": state.supersession_chain,
-    }))
+    });
+    if let Some(w) = withheld {
+        out["withheld"] = json!(w);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -646,13 +646,20 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // or into a deny-listed location, returns its refusal in `body_error` and nothing read
         // from the file, not even the title an older walk stored from it.
         Some(p) => {
-            match crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)).text(p) {
+            let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+            // The predicate first: it refuses what a read cannot (a dangling link, a lossy
+            // stored path), so those rows withhold their stored fields too (review round 2, R2-4).
+            let read = match door.refusal(p) {
+                Some(why) => Err(crate::librarian::read_door::ReadError::Refused(why)),
+                None => door.text(p),
+            };
+            match read {
                 Ok(c) => Some(c),
                 Err(e) => {
                     if e.is_refusal() {
                         // What an older walk stored FROM the file: withheld with the body.
-                        for key in ["title", "owners", "tags", "topic", "time_scope"] {
-                            out[key] = Value::Null;
+                        for key in crate::librarian::read_door::ROW_FIELDS_FROM_FILE {
+                            out[*key] = Value::Null;
                         }
                     }
                     out["preview"] = Value::Null;

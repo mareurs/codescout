@@ -145,6 +145,32 @@ fn filter_mentions_status(node: &FilterNode) -> bool {
     }
 }
 
+/// Ids of the rows matching `filter` whose file the read door refuses while they still hold file
+/// values (`read_door::listing_refusal`). `find` excludes them by id from the page AND from every
+/// count it derives (hints, the catalog summary), so neither a filter on a withheld field nor a
+/// count names what the row stores (review round 2, R2-3). Each row costs a door judgement.
+fn withheld_ids(
+    cat: &crate::librarian::catalog::Catalog,
+    door: &crate::librarian::read_door::ReadDoor,
+    filter: Option<&FilterNode>,
+    cutoff_ms: i64,
+) -> Result<Vec<String>> {
+    let rows = crate::librarian::catalog::find::find(
+        cat,
+        &crate::librarian::catalog::find::FindOpts {
+            filter: filter.cloned(),
+            limit: i64::MAX as usize,
+            offset: 0,
+        },
+        cutoff_ms,
+    )?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| crate::librarian::read_door::listing_refusal(door, r).is_some())
+        .map(|r| r.id)
+        .collect())
+}
+
 /// The pre-filled claim call for unclaimed bugs on a bug-triage page.
 ///
 /// **Why this exists, and why it is the SECOND-best shape.**
@@ -844,6 +870,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .as_ref()
             .map(filter_mentions_status)
             .unwrap_or(false);
+    // The user's own filter (shortcuts and `augmented` folded in): the rows to scan for withheld ones.
+    let user_filter_for_scan: Option<FilterNode> = user_filter.clone();
     let base =
         combine_user_with_archived_hide(user_filter, a.include_archived, user_constrains_status);
 
@@ -875,6 +903,64 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         current,
         &exclude_worktrees,
     )?;
+
+    // Rows the read door refuses that still hold file values are excluded BY ID from the page and
+    // from every count derived from `base` (hints, the catalog summary): dropping them from the
+    // page alone left `title contains X` answering through `more_in_scope`, and a cold call's
+    // `by_kind` printing the stored kind (review round 2, R2-3). The rows scanned are those the
+    // user's filter matches (in any scope, archived or not: a superset of every count below), or on
+    // a cold call the rows of its scope. A semantic query with no filter is not scanned: its page
+    // drops such rows below, and its counts can still include one, which says at most whether the
+    // stored status is archived (the archived-hide). Each scanned row costs a door judgement, so a
+    // broad filter pays for every row it matches.
+    let scan_filter: Option<Option<FilterNode>> = if user_filter_for_scan.is_some() {
+        Some(user_filter_for_scan)
+    } else if is_cold_call {
+        Some(
+            apply_scope(
+                None,
+                effective_scope,
+                &ctx.workspace,
+                current,
+                &exclude_worktrees,
+            )?
+            .0,
+        )
+    } else {
+        None
+    };
+    let (base, scoped_filter) = match scan_filter {
+        Some(scan) => {
+            let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+            let withheld = {
+                let cat = ctx.catalog.lock();
+                withheld_ids(&cat, &door, scan.as_ref(), cutoff_ms)?
+            };
+            if withheld.is_empty() {
+                (base, scoped_filter)
+            } else {
+                let nin = FilterNode::Leaf(
+                    [("id".to_string(), json!({ "nin": withheld }))]
+                        .into_iter()
+                        .collect(),
+                );
+                let base = Some(match base {
+                    Some(f) => FilterNode::And { and: vec![f, nin] },
+                    None => nin,
+                });
+                let scoped = apply_scope(
+                    base.clone(),
+                    effective_scope,
+                    &ctx.workspace,
+                    current,
+                    &exclude_worktrees,
+                )?
+                .0;
+                (base, scoped)
+            }
+        }
+        None => (base, scoped_filter),
+    };
 
     // Semantic path runs the async store-backed coordinator (it manages its own
     // catalog locking); the sync `find` below handles the non-semantic case.
@@ -1046,16 +1132,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             deduped_main_ids = pairs.into_iter().map(|(main_id, _)| main_id).collect();
         }
 
+        // A row whose file the read door refuses and which still holds values a walk took from
+        // that file (an older catalog's outward link, before the next reindex clears or reclaims
+        // it) is DROPPED, not just masked: its presence under a filter on those fields, under
+        // the default hiding of archived statuses, or in a semantic ranking answers a question
+        // about the outside file (review round 2, R2-3). A cleared row stays, with nothing to leak.
+        let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+        rows.retain(|it| crate::librarian::read_door::listing_refusal(&door, &it.row).is_none());
+
         // Batched, not per-row: a caller deciding "append_entry(entry_collection=…)
         // (rows) or append_entry(anchor_heading=…) (body sections)" needs this fact
         // without a separate `get` probe per candidate tracker.
         // docs/issues/archive/2026-08-16-adding-one-tracker-entry-makes-the-agent-resolve-identity-and-rendering-by-hand.md
         let row_ids: Vec<String> = rows.iter().map(|it| it.row.id.clone()).collect();
         let augmentation_by_id = augmentation::get_batch(&cat, &row_ids)?;
-        // What a walk stored FROM a file (its title, its chunk text) is withheld for a row whose
-        // file the read door now refuses: an older catalog's outward link (`read_door`). Asked of
-        // the file as it is now, without opening it.
-        let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+        // A refused row that is left (a cleared one) still withholds its snippet and title:
+        // asked of the file as it is now, without opening it.
 
         let items: Vec<Value> = rows
             .into_iter()
@@ -1070,12 +1162,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "id": r.id,
                     "kind": r.kind,
                     "status": r.status,
-                    "title": if refusal.is_some() { None } else { r.title.clone() },
+                    "title": r.title,
                     "abs_path": r.abs_path.display().to_string(),
                     "updated_at": r.updated_at,
                 });
                 if let Some(e) = &refusal {
-                    item["withheld"] = json!(format!("{e:#}"));
+                    crate::librarian::read_door::withhold_row_fields(&mut item, e);
                 }
                 // Artifact-level, so an id lookup is the RIGHT shape here: two
                 // chunks of one ledger share its overlay status and augmentation.

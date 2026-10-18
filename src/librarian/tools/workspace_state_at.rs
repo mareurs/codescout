@@ -169,6 +169,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let rows_to_process = &all_rows[..];
 
     let mut artifacts: Vec<Value> = Vec::with_capacity(rows_to_process.len());
+    let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
     for art in rows_to_process {
         let (state, freshness_now) = {
             let cat = ctx.catalog.lock();
@@ -208,6 +209,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             (state, fn_now)
         };
 
+        // Dropped, as `doc(find)` drops it: a row the read door refuses that still holds values a
+        // walk took from the file behind the link (review round 2, R2-3).
+        if crate::librarian::read_door::listing_refusal(&door, art).is_some() {
+            continue;
+        }
         if let Some(ref ff) = a.freshness_filter {
             let fa_str = freshness_to_str(state.freshness_at_as_of);
             if !ff.iter().any(|f| f == fa_str) {

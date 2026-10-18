@@ -128,7 +128,16 @@ impl ReadDoor {
     /// is what keeps an error built from the content (a parse error, a list of headings) from
     /// reaching the caller for a file the write would refuse anyway.
     pub(crate) fn text_for_write(&self, path: &Path) -> Result<String, ReadError> {
-        crate::librarian::util::refuse_write_through_symlink(path).map_err(ReadError::Refused)?;
+        // The write door's leaf rule, worded as a read-door refusal: the write door's own message
+        // names where the link points, which for a link out of the repository says that the
+        // target exists and where (review round 2, R2-9).
+        if crate::librarian::util::refuse_write_through_symlink(path).is_err() {
+            return Err(ReadError::Refused(refused(
+                path,
+                "it is a symbolic link, and a write never goes through one (move or delete the \
+                 link itself, or edit the file it names under that file's own path)",
+            )));
+        }
         self.text(path)
     }
 
@@ -139,6 +148,16 @@ impl ReadDoor {
         let real = match std::fs::canonicalize(path) {
             Ok(r) => r,
             Err(_) => {
+                // A stored path holding U+FFFD that names no file is the lossy record of a name
+                // that is not valid UTF-8 (the catalog stores paths as text): what it names
+                // cannot be judged (review round 2, R2-2).
+                if path.to_string_lossy().contains('\u{FFFD}') {
+                    return Some(refused(
+                        path,
+                        "its stored path is a lossy record of a name that is not valid UTF-8, so \
+                         the file it names cannot be judged",
+                    ));
+                }
                 let is_link = std::fs::symlink_metadata(path)
                     .map(|m| m.file_type().is_symlink())
                     .unwrap_or(false);
@@ -211,6 +230,55 @@ impl ReadDoor {
         }
         None
     }
+}
+
+/// The catalog fields of a row that a walk took from its FILE (frontmatter, first heading). A
+/// surface that prints a row whose file the door refuses withholds these, or, where the row's mere
+/// presence answers a question about them (a filter, a ranking, a status-based hiding), drops the
+/// row while it still holds them.
+pub(crate) const ROW_FIELDS_FROM_FILE: &[&str] = &[
+    "title",
+    "kind",
+    "status",
+    "owners",
+    "tags",
+    "topic",
+    "time_scope",
+];
+
+/// Does `row` still hold values a walk took from its file? `false` for a row the indexer cleared
+/// (`kind`/`status` `unknown`, everything else empty), which then has nothing to leak.
+pub(crate) fn holds_file_values(row: &crate::librarian::catalog::artifact::ArtifactRow) -> bool {
+    row.title.is_some()
+        || !row.owners.is_empty()
+        || !row.tags.is_empty()
+        || row.topic.is_some()
+        || row.time_scope.is_some()
+        || row.kind != "unknown"
+        || row.status != "unknown"
+}
+
+/// Would a listing leak `row`'s stored fields? `Some(refusal)` when the door refuses its file AND
+/// it still holds file values: such a row is dropped from listings (`doc(find)`, `gather`'s
+/// artifacts, `workspace_state_at`) until the next reindex clears or reclaims it.
+pub(crate) fn listing_refusal(
+    door: &ReadDoor,
+    row: &crate::librarian::catalog::artifact::ArtifactRow,
+) -> Option<anyhow::Error> {
+    if !holds_file_values(row) {
+        return None;
+    }
+    door.refusal(&row.abs_path)
+}
+
+/// Null every `ROW_FIELDS_FROM_FILE` key present in `obj` and say why in `withheld`.
+pub(crate) fn withhold_row_fields(obj: &mut serde_json::Value, why: &anyhow::Error) {
+    for k in ROW_FIELDS_FROM_FILE {
+        if obj.get(*k).is_some() {
+            obj[*k] = serde_json::Value::Null;
+        }
+    }
+    obj["withheld"] = serde_json::json!(format!("{why:#}"));
 }
 
 /// The read deny-list, as `read_file` applies it, with the DEFAULT profile (see the module doc).

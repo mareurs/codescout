@@ -383,23 +383,32 @@ fn gather_artifacts(
         },
         cutoff_ms,
     )?;
-    let truncated = rows.len() > limit;
-    // A stored title and topic were read from the file by a walk; withheld for a row the read
-    // door now refuses (an older catalog's outward link), as `doc(find)` withholds them.
+    // A row the read door refuses and which still holds values a walk took from its file is
+    // dropped, as `doc(find)` drops it (its presence under the filter is an oracle on them), and
+    // before `truncated` is judged, which would otherwise count it; a cleared one is listed with
+    // what a walk stored withheld.
     let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|r| crate::librarian::read_door::listing_refusal(&door, r).is_none())
+        .collect();
+    let truncated = rows.len() > limit;
     let items: Vec<Value> = rows
         .iter()
         .take(limit)
         .map(|r| {
-            let refused = door.refusal(&r.abs_path).is_some();
-            json!({
+            let mut item = json!({
                 "id": r.id,
                 "kind": r.kind,
                 "status": r.status,
-                "title": if refused { None } else { r.title.clone() },
-                "topic": if refused { None } else { r.topic.clone() },
+                "title": r.title,
+                "topic": r.topic,
                 "abs_path": r.abs_path.display().to_string(),
-            })
+            });
+            if let Some(why) = door.refusal(&r.abs_path) {
+                crate::librarian::read_door::withhold_row_fields(&mut item, &why);
+            }
+            item
         })
         .collect();
     Ok((json!(items), truncated))
