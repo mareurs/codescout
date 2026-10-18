@@ -23,31 +23,62 @@
 //! function. A `profile = "root"` profile is also unaffected: it already allows every write.
 
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The top-level table this guard keeps out of a tool's reach.
 const PROTECTED_TABLE: &str = "security";
 
-/// Check a write of `new_content` to `path` against the ambient global config location.
+/// Every project root whose config has been loaded in this process.
+///
+/// **Why a process-wide set and not agent state.** The guard sits in `util::fs::atomic_write`,
+/// a free function every write tool shares and which holds no `Agent`; threading one through
+/// would change the signature of the funnel the guard exists to sit in. The set only ever
+/// GROWS and only widens what is protected, so sharing it between concurrent servers (and
+/// between tests) cannot loosen anything: at worst a directory that was once loaded keeps its
+/// `project.toml` guarded after the project is gone. Filled by
+/// `ProjectConfig::load_with_global_base`, which every project's config goes through, so a
+/// project cannot become resident without its root arriving here.
+static PROJECT_ROOTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Record `root` as a project whose `.codescout/project.toml` must be recognised by identity.
+pub(crate) fn register_project_root(root: &Path) {
+    let mut roots = PROJECT_ROOTS.lock().unwrap_or_else(|e| e.into_inner());
+    if !roots.iter().any(|r| r == root) {
+        roots.push(root.to_path_buf());
+    }
+}
+
+/// Check a write of `new_content` to `path` against the ambient global config location and the
+/// project roots loaded so far.
 ///
 /// `Ok` for every path that is not a codescout config file. `Err` carries the message the
 /// caller reads, which names the one step that is theirs to take.
 pub(crate) fn check_write(path: &Path, new_content: &str) -> Result<(), String> {
+    let roots = PROJECT_ROOTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     check_write_with(
         path,
         new_content,
         crate::config::global::global_config_path().as_deref(),
+        &roots,
     )
 }
 
-/// [`check_write`] with the global config path supplied, so a test can name it without
-/// touching the process environment.
+/// [`check_write`] with the global config path and the project roots supplied, so a test can
+/// name them without touching the process environment.
 pub(crate) fn check_write_with(
     path: &Path,
     new_content: &str,
     global_config: Option<&Path>,
+    project_roots: &[PathBuf],
 ) -> Result<(), String> {
-    if !is_project_toml(path) && !is_global_config(path, global_config) {
+    if !is_project_toml(path)
+        && !is_global_config(path, global_config)
+        && !is_a_loaded_projects_config(path, project_roots)
+    {
         return Ok(());
     }
     let new: toml::Table = toml::from_str(new_content).map_err(|e| {
@@ -90,24 +121,45 @@ fn named(name: Option<&OsStr>, expected: &str) -> bool {
         .is_some_and(|n| n.eq_ignore_ascii_case(expected))
 }
 
-/// `path` is the global config file: the same path, or the same file name in a directory
-/// that resolves to the same place (the parent is canonicalized, as the write tools do).
+/// `path` is the global config file: the same path, or a path that resolves to the same file
+/// (`same_file`).
 fn is_global_config(path: &Path, global_config: Option<&Path>) -> bool {
-    let Some(global) = global_config else {
-        return false;
-    };
-    if path == global {
-        return true;
-    }
-    if path.file_name() != global.file_name() {
-        return false;
-    }
-    match (
-        path.parent().and_then(|p| std::fs::canonicalize(p).ok()),
-        global.parent().and_then(|p| std::fs::canonicalize(p).ok()),
-    ) {
-        (Some(a), Some(b)) => a == b,
-        _ => false,
+    global_config.is_some_and(|global| path == global || same_file(path, global))
+}
+
+/// `path` is, by identity, the `.codescout/project.toml` of a project loaded in this process.
+///
+/// The name rule (`is_project_toml`) sees only a spelling, and the write tools hand the guard a
+/// path whose parent is already resolved. So `.codescout` as a link to a directory with another
+/// name (`cfg-real/project.toml`) never matched it, nor did the file a `project.toml` LINK points
+/// at, written under its own name. Both resolve to the same file as
+/// `<root>/.codescout/project.toml`, which is what this compares.
+fn is_a_loaded_projects_config(path: &Path, roots: &[PathBuf]) -> bool {
+    roots
+        .iter()
+        .any(|root| same_file(path, &root.join(".codescout").join("project.toml")))
+}
+
+/// Whether `a` and `b` name the same file once every link is followed, for files that may not
+/// exist yet (resolved through the deepest ancestor that does).
+fn same_file(a: &Path, b: &Path) -> bool {
+    resolve(a) == resolve(b)
+}
+
+/// `path` with every link followed as far as it exists, the remainder appended as written. A
+/// leaf link IS followed (the file it names is the one a write would change).
+fn resolve(path: &Path) -> PathBuf {
+    let mut below: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(canon) = std::fs::canonicalize(cur) {
+            return below.iter().rev().fold(canon, |acc, c| acc.join(c));
+        }
+        let (Some(up), Some(name)) = (cur.parent(), cur.file_name()) else {
+            return path.to_path_buf();
+        };
+        below.push(name.to_os_string());
+        cur = up;
     }
 }
 
@@ -146,7 +198,12 @@ mod tests {
                 .join("sub")
                 .join("project.toml"),
         ] {
-            assert_eq!(check_write_with(&p, root, None), Ok(()), "{}", p.display());
+            assert_eq!(
+                check_write_with(&p, root, None, &[]),
+                Ok(()),
+                "{}",
+                p.display()
+            );
         }
     }
 
@@ -158,7 +215,7 @@ mod tests {
             dir.path().join(".CodeScout").join("Project.TOML"),
         ] {
             assert!(
-                check_write_with(&p, "[security]\nprofile = \"root\"\n", None).is_err(),
+                check_write_with(&p, "[security]\nprofile = \"root\"\n", None, &[]).is_err(),
                 "{}",
                 p.display()
             );
@@ -174,18 +231,20 @@ mod tests {
         assert!(check_write_with(
             &p,
             "[security]\nshell_command_mode = \"unrestricted\"\n",
-            None
+            None,
+            &[]
         )
         .is_err());
         // added key
         assert!(check_write_with(
             &p,
             "[security]\nshell_command_mode = \"warn\"\nprofile = \"root\"\n",
-            None
+            None,
+            &[]
         )
         .is_err());
         // removed table
-        assert!(check_write_with(&p, "[project]\nname = \"t\"\n", None).is_err());
+        assert!(check_write_with(&p, "[project]\nname = \"t\"\n", None, &[]).is_err());
     }
 
     #[test]
@@ -201,8 +260,7 @@ mod tests {
             check_write_with(
                 &p,
                 "# c\n[embeddings]\nmodel = \"m\"\n[project]\nname = \"b\"\n\n[security]\nshell_command_mode = \"warn\"\n",
-                None
-            ),
+                None, &[]),
             Ok(())
         );
     }
@@ -218,7 +276,8 @@ mod tests {
             check_write_with(
                 &p,
                 "[project]\nname = \"b\"\n\n[embeddings]\nmodel = \"m\"\n",
-                None
+                None,
+                &[]
             ),
             Ok(())
         );
@@ -230,9 +289,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = proj(&dir);
         assert!(!p.exists());
-        assert!(check_write_with(&p, "[security]\nprofile = \"root\"\n", None).is_err());
+        assert!(check_write_with(&p, "[security]\nprofile = \"root\"\n", None, &[]).is_err());
         assert_eq!(
-            check_write_with(&p, "[project]\nname = \"t\"\n", None),
+            check_write_with(&p, "[project]\nname = \"t\"\n", None, &[]),
             Ok(())
         );
     }
@@ -242,7 +301,7 @@ mod tests {
     fn content_that_is_not_toml_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let p = proj(&dir);
-        let err = check_write_with(&p, "[security\nprofile = \"root\"\n", None).unwrap_err();
+        let err = check_write_with(&p, "[security\nprofile = \"root\"\n", None, &[]).unwrap_err();
         assert!(err.contains("not valid TOML"), "{err}");
     }
 
@@ -252,9 +311,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = proj(&dir);
         std::fs::write(&p, "[security\n").unwrap();
-        assert!(check_write_with(&p, "[security]\nprofile = \"root\"\n", None).is_err());
+        assert!(check_write_with(&p, "[security]\nprofile = \"root\"\n", None, &[]).is_err());
         assert_eq!(
-            check_write_with(&p, "[project]\nname = \"t\"\n", None),
+            check_write_with(&p, "[project]\nname = \"t\"\n", None, &[]),
             Ok(())
         );
     }
@@ -270,19 +329,19 @@ mod tests {
         std::fs::write(&global, "[security]\nshell_command_mode = \"warn\"\n").unwrap();
         let change = "[security]\nshell_command_mode = \"unrestricted\"\n";
 
-        assert!(check_write_with(&global, change, Some(&global)).is_err());
+        assert!(check_write_with(&global, change, Some(&global), &[]).is_err());
         // not the global config when none is named
-        assert_eq!(check_write_with(&global, change, None), Ok(()));
+        assert_eq!(check_write_with(&global, change, None, &[]), Ok(()));
         // another file in the same directory is not it
         assert_eq!(
-            check_write_with(&real.join("other.toml"), change, Some(&global)),
+            check_write_with(&real.join("other.toml"), change, Some(&global), &[]),
             Ok(())
         );
         // the same file NAME in another directory is not it
         let elsewhere = dir.path().join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
         assert_eq!(
-            check_write_with(&elsewhere.join("config.toml"), change, Some(&global)),
+            check_write_with(&elsewhere.join("config.toml"), change, Some(&global), &[]),
             Ok(())
         );
         // a directory that cannot be resolved is not the global config's directory...
@@ -290,19 +349,22 @@ mod tests {
             check_write_with(
                 &dir.path().join("no-such-dir").join("config.toml"),
                 change,
-                Some(&global)
+                Some(&global),
+                &[]
             ),
             Ok(())
         );
         // ...unless the path IS the one named, which needs no resolving
         let unresolvable = dir.path().join("no-such-global").join("config.toml");
-        assert!(check_write_with(&unresolvable, change, Some(&unresolvable)).is_err());
+        assert!(check_write_with(&unresolvable, change, Some(&unresolvable), &[]).is_err());
         // the same directory reached through a link
         #[cfg(unix)]
         {
             let link = dir.path().join("link");
             std::os::unix::fs::symlink(&real, &link).unwrap();
-            assert!(check_write_with(&link.join("config.toml"), change, Some(&global)).is_err());
+            assert!(
+                check_write_with(&link.join("config.toml"), change, Some(&global), &[]).is_err()
+            );
         }
     }
 }

@@ -761,6 +761,10 @@ impl ProjectConfig {
     /// Inner implementation — accepts an already-resolved global base so tests can
     /// inject it directly without touching environment variables.
     pub(crate) fn load_with_global_base(root: &Path, global_base: toml::Value) -> Result<Self> {
+        // Every project's config goes through here, so a project cannot become resident
+        // without its root reaching the write guard's identity check. Registering is
+        // widening-only: see `protected_files::PROJECT_ROOTS`.
+        crate::config::protected_files::register_project_root(root);
         let config_path = root.join(".codescout").join("project.toml");
 
         let project_overlay: toml::Value = if config_path.exists() {

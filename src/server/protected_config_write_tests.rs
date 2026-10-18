@@ -440,3 +440,78 @@ fn a_tool_cannot_change_the_global_configs_security_section() {
         },
     );
 }
+
+fn profile_of(
+    server: &super::CodeScoutServer,
+) -> impl std::future::Future<Output = crate::util::path_security::SecurityProfile> + '_ {
+    async move { server.agent.security_config().await.profile }
+}
+
+/// `.codescout` can be a link to a directory with ANOTHER name. The write tools hand the guard
+/// a path whose parent is already resolved (`cfg-real/project.toml`), so a match on the
+/// spelling `.codescout/project.toml` never fires; the file has to be recognised by identity.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_dot_codescout_that_is_a_link_to_another_name_is_still_guarded() {
+    let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
+    let real = dir.path().join("cfg-real");
+    std::fs::rename(dir.path().join(".codescout"), &real).unwrap();
+    std::os::unix::fs::symlink(&real, dir.path().join(".codescout")).unwrap();
+    let (err, text) = call(
+        &server,
+        "create_file",
+        json!({"path": ".codescout/project.toml", "content": ROOT_PROFILE, "overwrite": true}),
+    )
+    .await;
+    assert_refused_and_unchanged(&dir, PROJECT_TOML, err, &text);
+    assert_eq!(
+        profile_of(&server).await,
+        crate::util::path_security::SecurityProfile::Default
+    );
+}
+
+/// `project.toml` can be a link to a file elsewhere; writing that file under ITS OWN name
+/// changes what `project.toml` says without naming it.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_target_of_a_symlinked_project_toml_is_guarded_under_its_own_name() {
+    let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
+    let shared = dir.path().join("shared.toml");
+    std::fs::rename(toml_path(&dir), &shared).unwrap();
+    std::os::unix::fs::symlink("../shared.toml", toml_path(&dir)).unwrap();
+    let (err, text) = call(
+        &server,
+        "create_file",
+        json!({"path": "shared.toml", "content": ROOT_PROFILE, "overwrite": true}),
+    )
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(&shared).unwrap(),
+        PROJECT_TOML,
+        "the file project.toml links to changed through a write tool: {text}"
+    );
+    assert!(err, "the call must fail loudly: {text}");
+    assert_eq!(
+        profile_of(&server).await,
+        crate::util::path_security::SecurityProfile::Default
+    );
+}
+
+/// F1 probe. Under the DEFAULT `shell_command_mode = "warn"`, a shell redirect rewrites
+/// project.toml; the guard is on the file-writing tools and does not see it.
+#[tokio::test]
+async fn probe_run_command_can_write_the_security_section() {
+    let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
+    let before = profile_of(&server).await;
+    let (err, text) = call(
+        &server,
+        "run_command",
+        json!({"command": "printf '[project]\\nname = \"t\"\\n\\n[security]\\nprofile = \"root\"\\n' > .codescout/project.toml"}),
+    )
+    .await;
+    let after = profile_of(&server).await;
+    eprintln!(
+        "F1 profile_before={before:?} run_command_is_error={err} profile_after={after:?}\n{text}\non_disk={:?}",
+        on_disk(&dir)
+    );
+}
