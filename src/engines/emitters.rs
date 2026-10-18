@@ -39,7 +39,6 @@
 use super::coordinator::{Emission, Emitted, PostCtx};
 use crate::tools::guide_emit::{guide_block, guide_blocks_for, GuideDeliveryShape};
 use crate::tools::guide_ledger::GuideLedger;
-use rmcp::model::Content;
 
 /// Engine `session-opener`. Fires whenever the bootstrap topic specifically is
 /// absent from the ledger — not merely whenever the ledger is empty, which
@@ -146,6 +145,7 @@ pub(crate) fn emit_operator_rules(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::Content;
     use serde_json::json;
 
     fn ctx<'a>(value: &'a serde_json::Value, sel: Option<&'a str>) -> PostCtx<'a> {
