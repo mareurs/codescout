@@ -519,17 +519,7 @@ async fn resolve_memory_dirs(input: &Value, ctx: &ToolContext) -> anyhow::Result
         ctx.agent
             .ensure_resident(root.to_path_buf())
             .await
-            .map_err(|e| {
-                super::RecoverableError::with_hint(
-                    format!(
-                        "workspace pin {} could not be resolved: {e}",
-                        root.display()
-                    ),
-                    "Fix that project's .codescout/project.toml -- a [project] table with a \
-                     `name` is required -- or drop the workspace= argument to read the active \
-                     project instead.",
-                )
-            })?;
+            .map_err(|e| crate::agent::pin_resolution_refusal(root, e))?;
     }
     let inner = ctx.agent.inner.read().await;
     let ws = match ctx.workspace_override.as_deref() {

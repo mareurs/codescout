@@ -506,9 +506,26 @@ pub(crate) fn existing_project_dir(
     raw: PathBuf,
     what: &str,
 ) -> std::result::Result<PathBuf, crate::tools::RecoverableError> {
-    let root = std::fs::canonicalize(&raw).unwrap_or(raw);
+    // The io error kind is the only cheap way to tell "does not exist" from "cannot be
+    // reached": a mode-000 parent makes `canonicalize` fail with a permission error, and
+    // calling that "not an existing directory" sends the caller looking for a typo.
+    let (root, denied) = match std::fs::canonicalize(&raw) {
+        Ok(canonical) => (canonical, false),
+        Err(e) => (raw, e.kind() == std::io::ErrorKind::PermissionDenied),
+    };
     if root.is_dir() {
         return Ok(root);
+    }
+    if denied {
+        return Err(crate::tools::RecoverableError::with_hint(
+            format!(
+                "{what} '{}' cannot be reached: permission denied on the path or one of its parents",
+                root.display()
+            ),
+            "Pass the absolute path of a project root this server may read, or fix the \
+             permissions on it. Nothing was created at that path and no project was made \
+             resident.",
+        ));
     }
     // A relative path is resolved against the SERVER's cwd, which the caller does not
     // control, so say where that is: it is the most likely reason a relative pin is wrong.
@@ -531,6 +548,53 @@ pub(crate) fn existing_project_dir(
         "Pass the absolute path of an existing project root. Nothing was created at that \
          path and no project was made resident.",
     ))
+}
+
+/// True when `e` came from reading or validating a project's configuration (a TOML parse or
+/// deserialize error, or the loader's own size and limit refusals), as opposed to the
+/// filesystem or anything else. Only these are cured by editing `.codescout/project.toml`.
+fn is_project_config_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause.is::<toml::de::Error>()
+            || cause.to_string().starts_with("invalid configuration for ")
+            || cause.to_string().starts_with("project.toml exceeds ")
+    })
+}
+
+/// The recoverable refusal for a pin whose project could not be made resident, whatever the
+/// route: `ensure_resident` inside a tool body (`memory`) and the write gate both use it, so
+/// the same failure reads the same on every path.
+///
+/// An error that is already a `RecoverableError` (the directory is not there) passes through
+/// untouched. A configuration error is the only one that points at `project.toml`: this used
+/// to say so for ANY failure, so a directory this process may not enter was blamed on a file
+/// that was never read.
+/// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+pub(crate) fn pin_resolution_refusal(
+    root: &Path,
+    e: anyhow::Error,
+) -> crate::tools::RecoverableError {
+    let e = match e.downcast::<crate::tools::RecoverableError>() {
+        Ok(refusal) => return refusal,
+        Err(e) => e,
+    };
+    let message = format!(
+        "workspace pin {} could not be resolved: {e:#}",
+        root.display()
+    );
+    if is_project_config_error(&e) {
+        crate::tools::RecoverableError::with_hint(
+            message,
+            "Fix that project's .codescout/project.toml -- a [project] table with a `name` is \
+             required -- or drop the workspace= argument to use the active project instead.",
+        )
+    } else {
+        crate::tools::RecoverableError::with_hint(
+            message,
+            "Check that the directory is readable and usable as a project root, or drop the \
+             workspace= argument to use the active project instead.",
+        )
+    }
 }
 
 /// Read `workspace.toml` and return the discovery depth and exclude list.

@@ -730,15 +730,32 @@ impl CodeScoutServer {
     /// A pin that does not name an existing directory is REFUSED here, at the dispatch
     /// boundary, with a `RecoverableError`. It used to be kept as a raw (possibly
     /// relative) root, and the first touch built a project there, so a placeholder pin
-    /// such as `workspace="x"` left `x/.codescout/` in the server's cwd. An empty or
-    /// blank value is "no pin", as before. A relative pin that exists still resolves
-    /// against the server's cwd. See [`crate::agent::existing_project_dir`].
+    /// such as `workspace="x"` left `x/.codescout/` in the server's cwd. An absent or
+    /// `null` value, and an empty or blank string, are "no pin". Any OTHER JSON type is
+    /// refused too: it used to be read as "no pin", so `workspace: 5` was answered by the
+    /// session's default project, a different project from the one the caller meant. A
+    /// relative pin that exists still resolves against the server's cwd. See
+    /// [`crate::agent::existing_project_dir`].
     /// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
     fn extract_workspace_override(
         input: &Value,
     ) -> std::result::Result<Option<std::path::PathBuf>, crate::tools::RecoverableError> {
-        let Some(raw) = input.get("workspace").and_then(Value::as_str) else {
-            return Ok(None);
+        let raw = match input.get("workspace") {
+            None | Some(Value::Null) => return Ok(None),
+            Some(Value::String(raw)) => raw,
+            Some(other) => {
+                let kind = match other {
+                    Value::Bool(_) => "a boolean",
+                    Value::Number(_) => "a number",
+                    Value::Array(_) => "an array",
+                    _ => "an object",
+                };
+                return Err(crate::tools::RecoverableError::with_hint(
+                    format!("`workspace` must be a string path, got {kind}"),
+                    "Pass the absolute path of an existing project root as a string, or omit \
+                     `workspace` to use the active project.",
+                ));
+            }
         };
         if raw.trim().is_empty() {
             return Ok(None);
@@ -816,9 +833,14 @@ impl CodeScoutServer {
         //
         // `override_root` is the pin `call_tool_inner` already resolved (and validated as an
         // existing directory) for this call. It is taken as a parameter rather than re-derived
-        // from `input`, so the lock and the tool body cannot disagree about the target, and a
-        // refused pin never reaches `with_project_at` below, whose failure is a protocol error.
-        let (mutex, fd_lock, holder_path, timeout_secs) = self
+        // from `input`, so the lock and the tool body cannot disagree about the target.
+        //
+        // A pin accepted there can still fail HERE: the directory vanished since, it cannot be
+        // entered, or its project.toml does not parse. For a pinned call that is the caller's
+        // input, so it is the same recoverable refusal the tool bodies give
+        // (`agent::pin_resolution_refusal`), never a protocol error. Only the session's own
+        // default project, which no caller chose, keeps the protocol error.
+        let (mutex, fd_lock, holder_path, timeout_secs) = match self
             .agent
             .with_project_at(override_root, |p| {
                 Ok((
@@ -829,7 +851,17 @@ impl CodeScoutServer {
                 ))
             })
             .await
-            .map_err(|e| McpError::internal_error(format!("write gate: {}", e), None))?;
+        {
+            Ok(parts) => parts,
+            Err(e) => match override_root {
+                Some(root) => {
+                    return Ok(Err(route_tool_error(
+                        crate::agent::pin_resolution_refusal(root, e).into(),
+                    )))
+                }
+                None => return Err(McpError::internal_error(format!("write gate: {}", e), None)),
+            },
+        };
         let session = crate::tools::session_key::resolve(
             std::env::var("CODESCOUT_SESSION_ID").ok(),
             crate::tools::session_key::HARNESS_SESSION_VARS
@@ -1421,13 +1453,42 @@ impl CodeScoutServer {
             .map(|(_, agent)| agent.to_string());
 
         // A `workspace=` pin that is not an existing directory is refused HERE, before anything
-        // resolves it: every later consumer (the access gate, the write lock, the usage recorder,
-        // the tool body) would otherwise make that path resident and build a project there.
-        // Returned as the recoverable answer it is, so sibling calls in the turn survive.
+        // resolves it: every later consumer (the access gate, the write lock, the tool body)
+        // would otherwise make that path resident and build a project there. Returned as the
+        // recoverable answer it is, so sibling calls in the turn survive.
+        //
+        // The refusal is still RECORDED, against the session's DEFAULT project (`None` below,
+        // never the pin: nothing may be created at the pinned path). The incident that found
+        // this was diagnosed from a usage row, and a refused call that left none would have
+        // been invisible. The caller is resolved the way the gate refusal below resolves it,
+        // including the one rendezvous poll this early return makes in place of the later one.
         // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
         let workspace_override = match Self::extract_workspace_override(&input) {
             Ok(pin) => pin,
-            Err(refusal) => return Ok(route_tool_error(refusal.into())),
+            Err(refusal) => {
+                let cc_session = asserted_principal
+                    .clone()
+                    .or_else(|| asserted_conversation.clone())
+                    .or_else(|| self.poll_rendezvous())
+                    .unwrap_or_else(|| self.cc_session_id.clone());
+                let recorder = UsageRecorder::new(
+                    self.agent.clone(),
+                    self.debug,
+                    self.session_id.clone(),
+                    cc_session,
+                    asserted_agent,
+                    asserted_tool_use_id,
+                );
+                let refused = recorder
+                    .record_content(&req.name, &input, None, || async move {
+                        Err::<Vec<Content>, anyhow::Error>(refusal.into())
+                    })
+                    .await;
+                return Ok(match refused {
+                    Ok(blocks) => CallToolResult::success(blocks),
+                    Err(e) => route_tool_error(e),
+                });
+            }
         };
 
         // Computed ONCE and threaded to its consumers — the write lock and the access gate

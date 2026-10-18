@@ -73,6 +73,11 @@ fn assert_pin_refused(label: &str, result: &CallToolResult, pin_text: &str) {
         error.contains("not an existing directory"),
         "{label}: the refusal must say what is wrong with it; got: {text}"
     );
+    // Which ARGUMENT is refused: a pin here, not a project root.
+    assert!(
+        error.starts_with("workspace pin "),
+        "{label}: the refusal must name the argument as the workspace pin; got: {text}"
+    );
     assert!(
         body["hint"]
             .as_str()
@@ -247,14 +252,32 @@ fn a_relative_pin_naming_an_existing_directory_still_resolves_against_the_cwd() 
                     )
                     .await
                     .expect("an existing relative pin must be served");
-                    let text = result_text(&result);
-                    assert_ne!(result.is_error, Some(true), "got: {text}");
+                    // The SUCCESS body, not the absence of one refusal's wording: a refusal of
+                    // any other kind is a RecoverableError too (`is_error: false`), and
+                    // residency builds `proj/.codescout` before a later step can fail.
+                    // Measured: with the root left un-canonicalized the call answered
+                    // `{"ok": false, "error": "workspace pin .../proj is not resident"}` and
+                    // every assertion that only looked for "not an existing directory" passed.
+                    assert_eq!(result_text(&result), "0 topics");
+                    // And the pin really targets `proj`: a write through it lands there.
+                    let written = dispatch_pinned(
+                        &server,
+                        "memory",
+                        serde_json::json!({"action": "write", "topic": "t", "content": "c"}),
+                        "proj",
+                    )
+                    .await
+                    .expect("an existing relative pin must be writable");
                     assert!(
-                        !text.contains("not an existing directory"),
-                        "an existing relative pin must not be refused; got: {text}"
+                        !result_text(&written).contains("\"ok\": false"),
+                        "got: {}",
+                        result_text(&written)
                     );
                     assert!(
-                        cwd_root.join("proj").join(".codescout").is_dir(),
+                        cwd_root
+                            .join("proj")
+                            .join(".codescout/memories/t.md")
+                            .is_file(),
                         "the pin resolved against the cwd and made THAT directory the project"
                     );
                     assert_eq!(
@@ -298,11 +321,11 @@ fn a_blank_pin_is_still_no_pin_and_creates_nothing() {
                         )
                         .await
                         .expect("a blank pin is no pin");
-                        let text = result_text(&result);
-                        assert_ne!(result.is_error, Some(true), "{blank:?}: {text}");
-                        assert!(
-                            !text.contains("not an existing directory"),
-                            "{blank:?} is no pin and must not be refused; got: {text}"
+                        // The default project's own answer, not merely "no refusal text".
+                        assert_eq!(
+                            result_text(&result),
+                            "0 topics",
+                            "{blank:?} is no pin and must be answered by the default project"
                         );
                     }
                     assert_eq!(tree_listing(&cwd_root), Vec::<String>::new());
@@ -396,4 +419,312 @@ async fn a_pinned_write_takes_the_pinned_projects_write_lock_not_the_defaults() 
             .exists(),
         "the write landed in the pinned project"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review round 2026-10-18 (F2 to F9). Each of these guards a branch the first round left open.
+// ---------------------------------------------------------------------------------------------
+
+/// The refusal body of a RECOVERABLE answer: `Ok`, not `is_error`, `ok: false`.
+fn recoverable_body(label: &str, result: &CallToolResult) -> serde_json::Value {
+    let text = result_text(result);
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "{label}: must be recoverable; got: {text}"
+    );
+    let body: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|_| panic!("{label}: must be a JSON refusal body; got: {text}"));
+    assert_eq!(body["ok"], false, "{label}: must be refused; got: {text}");
+    body
+}
+
+/// Makes a directory unreadable for the life of the guard, restoring the mode on drop (also on
+/// a panic, so the tempdir can be removed). `None` when the mode has no effect, which is the
+/// case for a process that may read anything (root): the caller then has no premise to test.
+#[cfg(unix)]
+struct Denied(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Denied {
+    fn new(path: &std::path::Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let guard = Self(path.to_path_buf());
+        if std::fs::read_dir(path).is_ok() {
+            eprintln!("mode 000 does not bind this process; skipping");
+            return None;
+        }
+        Some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Denied {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+const WRITE_TOPIC: &str = r#"{"action": "write", "topic": "t", "content": "c"}"#;
+
+/// F9: a `workspace` value that is not a string was silently "no pin", so `workspace: 5` was
+/// answered by the DEFAULT project. Absent and `null` stay "no pin".
+#[tokio::test]
+async fn a_workspace_value_that_is_not_a_string_is_refused() {
+    let (_home, server) = make_server().await;
+    for (label, kind, value) in [
+        ("number", "a number", serde_json::json!(5)),
+        ("bool", "a boolean", serde_json::json!(true)),
+        ("array", "an array", serde_json::json!(["x"])),
+        ("object", "an object", serde_json::json!({"path": "x"})),
+    ] {
+        let mut args = serde_json::json!({"action": "list"});
+        args["workspace"] = value;
+        let result = dispatch_tool(&server, "memory", args).await;
+        let body = recoverable_body(label, &result);
+        let error = body["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains("workspace") && error.contains("string") && error.contains(kind),
+            "{label}: must say `workspace` has to be a string and what it was; got: {error}"
+        );
+        assert!(
+            body["hint"]
+                .as_str()
+                .is_some_and(|h| h.contains("absolute")),
+            "{label}: must say what to do; got: {body}"
+        );
+    }
+    let mut null_pin = serde_json::json!({"action": "list"});
+    null_pin["workspace"] = serde_json::Value::Null;
+    assert_eq!(
+        result_text(&dispatch_tool(&server, "memory", null_pin).await),
+        "0 topics",
+        "null is no pin"
+    );
+    assert_eq!(
+        result_text(&dispatch_tool(&server, "memory", serde_json::json!({"action": "list"})).await),
+        "0 topics",
+        "absent is no pin"
+    );
+}
+
+/// F3 (M4): the pin refusal is the answer, not the write gate's. A default project that is
+/// read-only refuses every write; a write pinned at a missing path must still be told about
+/// the PIN, because the write gate's text would send the caller to the wrong remedy.
+#[tokio::test]
+async fn a_bad_pin_is_refused_before_the_write_gate_speaks() {
+    let (home, server) = make_server().await;
+    let home_root = std::fs::canonicalize(home.path()).unwrap();
+    let armed = dispatch_tool(
+        &server,
+        "workspace",
+        serde_json::json!({
+            "action": "activate", "path": home_root.to_string_lossy(), "read_only": true
+        }),
+    )
+    .await;
+    assert_ne!(
+        armed.is_error,
+        Some(true),
+        "precondition: {}",
+        result_text(&armed)
+    );
+    let control = dispatch_tool(
+        &server,
+        "memory",
+        serde_json::from_str(WRITE_TOPIC).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        control.is_error,
+        Some(true),
+        "control: an unpinned write is refused by the read-only gate; got: {}",
+        result_text(&control)
+    );
+
+    let host = tempdir().unwrap();
+    let missing = std::fs::canonicalize(host.path())
+        .unwrap()
+        .join("does-not-exist");
+    let result = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::from_str(WRITE_TOPIC).unwrap(),
+        &missing.to_string_lossy(),
+    )
+    .await
+    .expect("a refused pin is an Ok result");
+    assert_pin_refused(
+        "pinned write under read-only",
+        &result,
+        &missing.to_string_lossy(),
+    );
+    assert!(
+        !result_text(&result).contains("disabled"),
+        "the write gate must not have spoken; got: {}",
+        result_text(&result)
+    );
+}
+
+/// F5: a refused pin leaves a usage record, against the session's DEFAULT project, and builds
+/// nothing at the pinned path. The incident that found this bug was diagnosed from exactly
+/// such a row; before this, a refused call vanished without one.
+#[tokio::test]
+async fn a_refused_pin_is_recorded_against_the_default_project_and_nowhere_else() {
+    let (home, server) = make_server().await;
+    let home_root = std::fs::canonicalize(home.path()).unwrap();
+    let host = tempdir().unwrap();
+    let host_root = std::fs::canonicalize(host.path()).unwrap();
+    let missing = host_root.join("does-not-exist");
+
+    let result = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        &missing.to_string_lossy(),
+    )
+    .await
+    .expect("a refused pin is an Ok result");
+    assert_pin_refused("memory list", &result, &missing.to_string_lossy());
+
+    let conn = crate::usage::db::open_db(&home_root).unwrap();
+    let rows: Vec<(String, String, String)> = conn
+        .prepare("SELECT tool_name, outcome, project_root FROM tool_calls")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        rows,
+        vec![(
+            "memory".to_string(),
+            "recoverable_error".to_string(),
+            home_root.to_string_lossy().to_string()
+        )],
+        "the refused call is one recoverable row in the DEFAULT project's usage.db"
+    );
+    assert_eq!(
+        tree_listing(&host_root),
+        Vec::<String>::new(),
+        "recording must not build anything at the pinned path"
+    );
+}
+
+/// F2 (route 1): a pin accepted at dispatch can stop being usable before the write lock is
+/// taken (the directory vanishes in between). That is a recoverable refusal, not a protocol
+/// error, and it must not re-create the directory. Driven at the lock acquisition itself,
+/// because the window is too narrow to hit through the full dispatch.
+#[tokio::test]
+async fn a_pin_that_vanishes_before_the_write_lock_is_a_recoverable_refusal() {
+    let (_home, server) = make_server().await;
+    let host = tempdir().unwrap();
+    let host_root = std::fs::canonicalize(host.path()).unwrap();
+    let gone = host_root.join("vanished");
+
+    let outcome = server
+        .acquire_write_guard_if_writing(
+            "memory",
+            &serde_json::from_str(WRITE_TOPIC).unwrap(),
+            Some(&gone),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("must not be a protocol error: {e:?}"));
+    let refusal = match outcome {
+        Err(refusal) => refusal,
+        Ok(_) => panic!("a missing pin must not yield a write guard"),
+    };
+    let body = recoverable_body("write gate", &refusal);
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains(&gone.to_string_lossy().to_string())),
+        "must name the pin; got: {body}"
+    );
+    assert_eq!(tree_listing(&host_root), Vec::<String>::new());
+}
+
+/// F2 (route 2) and F4: an existing directory this process may not enter is accepted at
+/// dispatch and fails in residency. The write must be a recoverable refusal (it was a protocol
+/// error, `write gate: Permission denied`), and neither it nor the read may blame project.toml.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pin_to_an_unreadable_directory_is_recoverable_and_does_not_blame_project_toml() {
+    let (_home, server) = make_server().await;
+    let host = tempdir().unwrap();
+    let noperm = std::fs::canonicalize(host.path()).unwrap().join("noperm");
+    std::fs::create_dir(&noperm).unwrap();
+    let Some(_denied) = Denied::new(&noperm) else {
+        return;
+    };
+    let pin = noperm.to_string_lossy().to_string();
+
+    for (label, tool, args) in [
+        (
+            "memory list",
+            "memory",
+            serde_json::json!({"action": "list"}),
+        ),
+        (
+            "memory write",
+            "memory",
+            serde_json::from_str::<serde_json::Value>(WRITE_TOPIC).unwrap(),
+        ),
+    ] {
+        let result = dispatch_pinned(&server, tool, args, &pin)
+            .await
+            .unwrap_or_else(|e| panic!("{label}: must not be a protocol error: {e:?}"));
+        let body = recoverable_body(label, &result);
+        let error = body["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains(&pin) && error.to_lowercase().contains("permission denied"),
+            "{label}: must name the pin and the real cause; got: {body}"
+        );
+        assert!(
+            !body.to_string().contains("project.toml"),
+            "{label}: an unreadable directory is not a project.toml problem; got: {body}"
+        );
+    }
+}
+
+/// F2 (route 3), the case the existing project.toml hint is FOR: an unparseable config. The
+/// write was a protocol error here (`write gate: parsing .../project.toml`); both calls must
+/// be recoverable and both must point at project.toml.
+#[tokio::test]
+async fn a_pin_to_an_unparseable_project_toml_is_recoverable_and_names_project_toml() {
+    let (_home, server) = make_server().await;
+    let host = tempdir().unwrap();
+    let broken = std::fs::canonicalize(host.path()).unwrap().join("broken");
+    std::fs::create_dir_all(broken.join(".codescout")).unwrap();
+    std::fs::write(
+        broken.join(".codescout/project.toml"),
+        "this is = = not toml [[",
+    )
+    .unwrap();
+    let pin = broken.to_string_lossy().to_string();
+
+    for (label, args) in [
+        (
+            "memory write",
+            serde_json::from_str::<serde_json::Value>(WRITE_TOPIC).unwrap(),
+        ),
+        ("memory list", serde_json::json!({"action": "list"})),
+    ] {
+        let result = dispatch_pinned(&server, "memory", args, &pin)
+            .await
+            .unwrap_or_else(|e| panic!("{label}: must not be a protocol error: {e:?}"));
+        let body = recoverable_body(label, &result);
+        assert!(
+            body["error"].as_str().is_some_and(|e| e.contains(&pin)),
+            "{label}: must name the pin; got: {body}"
+        );
+        assert!(
+            body["hint"]
+                .as_str()
+                .is_some_and(|h| h.contains("project.toml")),
+            "{label}: an unparseable config must point at project.toml; got: {body}"
+        );
+    }
 }

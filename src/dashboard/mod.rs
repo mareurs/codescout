@@ -17,6 +17,11 @@ pub async fn serve(
     port: u16,
     open_browser: bool,
 ) -> Result<()> {
+    // A typo'd `--project` used to be stored unvalidated, and the first `/api/memories`
+    // request built `<typo>/.codescout/memories` through `MemoryStore::open`. Refuse it
+    // before anything binds or reads. Done here, not in the CLI arm, so every caller of
+    // `serve` is covered.
+    let project_root = crate::agent::existing_project_dir(project_root, "project root")?;
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
     tracing::info!("Dashboard server starting at http://{}", addr);
 
@@ -40,4 +45,59 @@ pub async fn serve(
         .await?;
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "dashboard"))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// F6: `codescout dashboard --project <typo>` stored the root unvalidated, and the first
+    /// `/api/memories` request built `<typo>/.codescout/memories` through `MemoryStore::open`.
+    /// The server must refuse a root that is not an existing directory BEFORE it binds, and
+    /// create nothing. The timeout is the red state: unfixed, `serve` starts serving and never
+    /// returns, which is itself the defect.
+    #[tokio::test]
+    async fn serve_refuses_a_project_root_that_is_not_a_directory_and_creates_nothing() {
+        let host = tempfile::tempdir().unwrap();
+        let host_root = std::fs::canonicalize(host.path()).unwrap();
+        let typo = host_root.join("typo");
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            serve(typo.clone(), "127.0.0.1".into(), 0, false),
+        )
+        .await
+        .expect("serve must refuse a missing root, not start serving it");
+        let err = outcome.expect_err("a missing project root must be refused");
+        let refusal = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
+        assert!(
+            refusal.message.starts_with("project root '")
+                && refusal.message.contains("not an existing directory"),
+            "got: {}",
+            refusal.message
+        );
+        assert!(
+            std::fs::read_dir(&host_root).unwrap().next().is_none(),
+            "nothing may be created under the directory the typo pointed into"
+        );
+    }
+
+    /// The other side: a root that exists is served (the call is still running when the
+    /// timeout fires), so the refusal above cannot be an unconditional one.
+    #[tokio::test]
+    async fn serve_still_serves_an_existing_project_root() {
+        let host = tempfile::tempdir().unwrap();
+        let outcome = tokio::time::timeout(
+            Duration::from_millis(800),
+            serve(host.path().to_path_buf(), "127.0.0.1".into(), 0, false),
+        )
+        .await;
+        assert!(
+            outcome.is_err(),
+            "an existing root must be served, not refused: {outcome:?}"
+        );
+    }
 }

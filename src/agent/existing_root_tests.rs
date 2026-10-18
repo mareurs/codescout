@@ -40,7 +40,7 @@ fn tree_listing(root: &Path) -> Vec<String> {
 
 /// The refusal must be a `RecoverableError` (so it routes to `isError: false`) that names the
 /// path and says it is not an existing directory.
-fn assert_refusal_names(err: &anyhow::Error, path: &Path) {
+fn assert_refusal_names(err: &anyhow::Error, path: &Path, what: &str) {
     let recoverable = err
         .downcast_ref::<crate::tools::RecoverableError>()
         .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
@@ -48,6 +48,12 @@ fn assert_refusal_names(err: &anyhow::Error, path: &Path) {
         recoverable.message.contains(&path.display().to_string()),
         "must name {}; got: {}",
         path.display(),
+        recoverable.message
+    );
+    // WHICH argument is refused: asserted per caller, so a swapped label is a red test.
+    assert!(
+        recoverable.message.starts_with(&format!("{what} '")),
+        "must name the argument as `{what}`; got: {}",
         recoverable.message
     );
     assert!(
@@ -77,7 +83,7 @@ async fn ensure_resident_refuses_a_missing_directory_and_creates_nothing() {
     let missing = host_root.join("does-not-exist");
 
     let err = agent.ensure_resident(missing.clone()).await.unwrap_err();
-    assert_refusal_names(&err, &missing);
+    assert_refusal_names(&err, &missing, "workspace pin");
     assert_eq!(tree_listing(&host_root), Vec::<String>::new());
 
     // The pinned accessors reach it through `with_project_at`, which must propagate the same
@@ -86,7 +92,7 @@ async fn ensure_resident_refuses_a_missing_directory_and_creates_nothing() {
         .with_project_at(Some(&missing), |p| Ok(p.root().to_path_buf()))
         .await
         .unwrap_err();
-    assert_refusal_names(&err, &missing);
+    assert_refusal_names(&err, &missing, "workspace pin");
     assert_eq!(tree_listing(&host_root), Vec::<String>::new());
     assert!(
         !agent.inner.read().await.workspaces.contains_key(&missing),
@@ -103,7 +109,7 @@ async fn ensure_resident_refuses_a_file_and_leaves_it_untouched() {
     std::fs::write(&file, "keep").unwrap();
 
     let err = agent.ensure_resident(file.clone()).await.unwrap_err();
-    assert_refusal_names(&err, &file);
+    assert_refusal_names(&err, &file, "workspace pin");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "keep");
     assert_eq!(tree_listing(&host_root), vec!["not-a-dir.txt".to_string()]);
 }
@@ -137,7 +143,7 @@ async fn activate_refuses_a_missing_directory_and_changes_nothing() {
     let missing = host_root.join("does-not-exist");
 
     let err = agent.activate(missing.clone(), None).await.unwrap_err();
-    assert_refusal_names(&err, &missing);
+    assert_refusal_names(&err, &missing, "project root");
     assert_eq!(tree_listing(&host_root), Vec::<String>::new());
     assert_eq!(
         agent.project_root().await,
@@ -156,7 +162,7 @@ async fn new_refuses_a_missing_directory_and_creates_nothing() {
         .await
         .err()
         .expect("a missing --project must be refused");
-    assert_refusal_names(&err, &missing);
+    assert_refusal_names(&err, &missing, "project root");
     assert_eq!(tree_listing(&host_root), Vec::<String>::new());
 }
 
@@ -181,9 +187,125 @@ async fn activate_within_workspace_refuses_a_sub_project_deleted_after_discovery
         .activate_within_workspace("api", None)
         .await
         .unwrap_err();
-    assert_refusal_names(&err, &sub);
+    assert_refusal_names(&err, &sub, "sub-project root");
     assert!(
         !sub.exists(),
         "a refused sub-project activation must not recreate its directory"
     );
+}
+
+/// F3 (M3): residency must not outlive the directory. A workspace that is already resident but
+/// whose directory has since been deleted is refused on the next call, not served from the
+/// cached entry. Residency is checked AFTER the directory, so a stale entry cannot answer.
+#[tokio::test]
+async fn ensure_resident_refuses_a_resident_workspace_whose_directory_was_deleted() {
+    let (_home, _home_root, agent) = agent_at_home().await;
+    let other = tempdir().unwrap();
+    let other_root = std::fs::canonicalize(other.path()).unwrap();
+    agent.ensure_resident(other_root.clone()).await.unwrap();
+    std::fs::remove_dir_all(&other_root).unwrap();
+
+    let err = agent.ensure_resident(other_root.clone()).await.unwrap_err();
+    assert_refusal_names(&err, &other_root, "workspace pin");
+    assert!(
+        !other_root.exists(),
+        "a refused pin must not re-create the deleted directory"
+    );
+}
+
+/// F7: a path that cannot be REACHED is not "not an existing directory". A mode-000 parent
+/// makes `canonicalize` fail with a permission error, and the old message claimed the path did
+/// not exist, which sends the caller looking for a typo.
+#[cfg(unix)]
+#[test]
+fn a_path_behind_an_unreadable_parent_is_refused_as_unreachable_not_as_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let host = tempdir().unwrap();
+    let locked = std::fs::canonicalize(host.path()).unwrap().join("locked");
+    let inner = locked.join("inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+    let _restore = Restore(locked.clone());
+    if std::fs::read_dir(&locked).is_ok() {
+        eprintln!("mode 000 does not bind this process; skipping");
+        return;
+    }
+
+    let err = existing_project_dir(inner.clone(), "workspace pin").unwrap_err();
+    assert!(
+        err.message.contains("permission denied")
+            && err.message.contains(&inner.display().to_string()),
+        "must say the path cannot be reached and name it; got: {}",
+        err.message
+    );
+    assert!(
+        !err.message.contains("not an existing directory"),
+        "must not claim the path is missing; got: {}",
+        err.message
+    );
+
+    // The genuinely missing path keeps its own wording.
+    let missing = existing_project_dir(host.path().join("nope"), "workspace pin").unwrap_err();
+    assert!(
+        missing.message.contains("not an existing directory"),
+        "got: {}",
+        missing.message
+    );
+}
+
+/// F4: only a CONFIGURATION failure may point at project.toml. One case per way the classifier
+/// says yes, and the filesystem failure it must say no to.
+#[test]
+fn only_a_configuration_failure_is_classified_as_a_project_toml_problem() {
+    use anyhow::Context as _;
+    let toml_err = toml::from_str::<toml::Value>("= =").unwrap_err();
+    let wrapped_toml: anyhow::Error = Err::<(), _>(toml_err)
+        .context("parsing project.toml")
+        .unwrap_err();
+    assert!(
+        is_project_config_error(&wrapped_toml),
+        "a TOML error under a context"
+    );
+    assert!(is_project_config_error(&anyhow::anyhow!(
+        "invalid configuration for /p/.codescout/project.toml (merged with the global config)"
+    )));
+    assert!(is_project_config_error(&anyhow::anyhow!(
+        "project.toml exceeds 1 MiB limit (2097152 bytes)"
+    )));
+    let denied: anyhow::Error = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
+    assert!(
+        !is_project_config_error(&denied),
+        "a permission error is not a config error"
+    );
+    assert!(!is_project_config_error(&anyhow::anyhow!("anything else")));
+}
+
+/// `pin_resolution_refusal` keeps an existing refusal exactly as it is (its message already
+/// names the path and the remedy) and gives anything else the generic, project.toml-free hint.
+#[test]
+fn a_pin_refusal_is_passed_through_and_other_failures_get_the_generic_hint() {
+    let root = Path::new("/p");
+    let original = crate::tools::RecoverableError::with_hint("original message", "original hint");
+    let passed = pin_resolution_refusal(root, original.into());
+    assert_eq!(passed.message, "original message");
+    assert_eq!(passed.hint(), Some("original hint"));
+
+    let denied: anyhow::Error = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
+    let generic = pin_resolution_refusal(root, denied);
+    assert!(generic
+        .message
+        .starts_with("workspace pin /p could not be resolved"));
+    assert!(!generic.hint().unwrap().contains("project.toml"));
+
+    let config = pin_resolution_refusal(
+        root,
+        anyhow::anyhow!("invalid configuration for /p/.codescout/project.toml"),
+    );
+    assert!(config.hint().unwrap().contains("project.toml"));
 }
