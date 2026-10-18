@@ -1390,7 +1390,7 @@ async fn backfill_chunk_vectors_with(
             // would otherwise stop every run at its page, and the page's finished vectors in
             // `pending` would be dropped with it. Its row stays, so a sqlite-vec run selects the
             // artifact again; a store or catalog write failing below still ends the run.
-            // docs/issues/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md
+            // docs/issues/archive/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md
             let futures_iter = items.into_iter().map(|item| async move {
                 let embedded = svc.embed_artifact(item.title.as_deref(), &item.text).await;
                 (item.chunk_id, item.artifact_id, embedded)
@@ -2757,7 +2757,7 @@ kind = "memory"
         }
     }
     /// **One chunk the embedder always rejects must not block the artifacts after it.**
-    /// `docs/issues/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md`
+    /// `docs/issues/archive/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md`
     ///
     /// The rejected artifact sorts first and `batch` is 1, so it sits alone in page one: the
     /// shape in which every run used to stop at page one and write nothing behind it.
