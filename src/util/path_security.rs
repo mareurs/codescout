@@ -9201,6 +9201,15 @@ EOF"#;
             matches!(&decision, WritePathDecision::Allowed(p) if *p == at_limit),
             "a chain of {MAX_LEAF_LINK_HOPS} links must resolve, got: {decision:?}"
         );
+        // The limit is not free to shrink: 40 is what the kernel itself follows (`MAXSYMLINKS`), so
+        // a chain of that depth that works everywhere else must not be refused here. A literal, on
+        // purpose: the assertions around it move with the constant, this one does not.
+        let kernel_depth = chain("kernel", 40);
+        let decision = t.classify(&kernel_depth, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == kernel_depth),
+            "a chain of 40 links must resolve, got: {decision:?}"
+        );
         let over = chain("over", MAX_LEAF_LINK_HOPS + 1);
         let decision = t.classify(&over, &[]);
         assert!(
