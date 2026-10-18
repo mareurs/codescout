@@ -410,10 +410,11 @@ fn resolve_leaf_link(target: &Path) -> Result<PathBuf, String> {
         let Ok(link) = std::fs::read_link(&cur) else {
             return Err("whose target could not be read".to_string());
         };
-        let next = match cur.parent() {
-            Some(dir) => dir.join(link),
-            None => link,
-        };
+        // `with_file_name` replaces the link's own name with its target, so a relative target is
+        // read from the directory that holds the link and an absolute one replaces the whole
+        // path (`PathBuf::push` semantics). A link always has a file name, so unlike
+        // `parent().join()` there is no parentless case to invent an answer for.
+        let next = cur.with_file_name(link);
         cur = canonicalize_write_target(&next);
     }
 }
@@ -611,10 +612,13 @@ impl WriteEnv {
 /// `classify_write_path` over an explicit environment.
 ///
 /// When the target's LEAF is a symlink, the answer is also the answer for where a write through
-/// it lands (`resolve_leaf_link`): the deny list and the roots are asked of the link's own
-/// location AND of its resolved end, the stricter wins, and a chain that cannot be followed to an
-/// end (a loop, more than `MAX_LEAF_LINK_HOPS` links) is a hard denial. `Allowed` still carries the
-/// link's own spelling, because the writers replace a link and never write through it.
+/// it lands (`resolve_leaf_link`). The deny list is asked of the link's own location AND of its
+/// resolved end, and a chain that cannot be followed to an end (a loop, more than
+/// `MAX_LEAF_LINK_HOPS` links, a link that cannot be read) or whose end holds an unresolvable `..`
+/// is a hard denial. The ROOTS are asked of the link's own location only, and `Allowed` carries
+/// the link's own spelling: every writer but `edit_code` rename replaces a link and never touches
+/// its end, and rename, which writes through, is gated by `fs::validate_leaf_link_target` (the
+/// policy and its alternative are in the issue file; it is pending the user's confirmation).
 fn classify_write_path_in(
     raw: &str,
     project_root: &Path,
@@ -671,10 +675,9 @@ fn classify_write_path_in(
     let project_root = canonicalize_through_existing_ancestor(project_root);
 
     // The target's LEAF may itself be a symlink, which `canonicalize_write_target` does not
-    // resolve. Where a write through it LANDS is judged below too, by the same deny list and the
-    // same roots, and the answer is the stricter of the two: the link's own location is what a
-    // replacing writer overwrites, its landing is what a raw `fs::write` opens. For a target that
-    // is not a link the landing IS `resolved`, and the second look repeats the first.
+    // resolve. Where a write through it LANDS is asked of the deny list below, in addition to the
+    // link's own location: a link into the deny list is refused whichever writer follows it. For a
+    // target that is not a link the landing IS `resolved`, and the second look repeats the first.
     let landing = match resolve_leaf_link(&resolved) {
         Ok(landing) => landing,
         Err(why) => {
@@ -781,26 +784,24 @@ fn classify_write_path_in(
     // A session root admits what is INSIDE it, never a file named like the root itself:
     // `approve_write(~/.newrc)` names a directory that does not exist yet, and creating a file
     // with that name is not what was approved.
-    let admitted = |p: &Path| {
-        allowed.iter().any(|root| p.starts_with(root))
-            || session_allowed
-                .iter()
-                .any(|root| p != root.as_path() && p.starts_with(root))
-            || temp_root
-                .as_deref()
-                .is_some_and(|t| temp_root_admits(t, &homes, p))
-    };
-    if !admitted(&resolved) {
+    let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root))
+        || session_allowed
+            .iter()
+            .any(|root| resolved != *root && resolved.starts_with(root))
+        || temp_root
+            .as_deref()
+            .is_some_and(|t| temp_root_admits(t, &homes, &resolved));
+    // The roots are asked of the LINK's own location only, never of where it lands. A writer that
+    // replaces a link (`create_file`, `edit_file`, `edit_markdown`, `edit_code` replace, insert and
+    // remove: `util::fs::atomic_write`) never touches the landing, so an `OutsideRoot` for the
+    // landing would mint an `@ack_*` whose replay approves the LANDING'S directory (`pw ->
+    // /etc/passwd` ended with `/etc` a session root) for a write that does not happen there. The one
+    // writer that writes THROUGH a link, `edit_code` rename (`std::fs::write`), is gated by
+    // `fs::validate_leaf_link_target` (`LinkTarget::Writable`), which asks `validate_write_path` of
+    // the landing as a regular file. The deny list, which does cover the landing, was asked above.
+    // The path handed back stays the link's own spelling.
+    if !under_allowed_root {
         return WritePathDecision::OutsideRoot { resolved };
-    }
-    // The link is in a root; where it lands must be in one too. The refusal carries the LANDING as
-    // `resolved`, so the directory an approval would name is the landing's (approving the link's
-    // own directory, which is already in a root, would change nothing). The path handed back on
-    // success stays the link's own spelling: the writers replace a link with a regular file and
-    // never write through it (`util::fs::atomic_write`), and handing them the landing would
-    // rewrite the target instead.
-    if !admitted(&landing) {
-        return WritePathDecision::OutsideRoot { resolved: landing };
     }
 
     WritePathDecision::Allowed(resolved)
