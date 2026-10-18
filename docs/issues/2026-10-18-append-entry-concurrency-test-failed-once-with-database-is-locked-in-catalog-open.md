@@ -49,6 +49,10 @@ Linux, branch `fix/small-items-2026-10-18` (base `experiments` 7a09623bd), `scri
 
 Unknown: not measured. What is established is where it fails (`Catalog::open`, schema application, SQLite error code 5) and that 0 of 960 isolated stress runs failed, so the window needs something the isolated runs lack (the rest of the suite running in the same process, or heavier machine load).
 
+**Second sighting, 2026-10-18** (a whole `cargo test --lib -- --nocapture` run on the same tree, 1363 s under heavy machine load, 7408 passed, 3 failed): `librarian::catalog::augmentation::tests::allocate_entry_id_serializes_across_independent_connections`, the sibling concurrency test in the same file, failed with the same signature: `augmentation.rs:5451:46`, `called Result::unwrap() on an Err value: applying schema ... database is locked ... Error code 5`, then `5459:38` the `join().unwrap()`. Both tests open one fresh catalog file from two threads at once. The other two failures in that run were the known `two-subagent-notice` pair.
+
+What `Catalog::open` does (read, `src/librarian/catalog/mod.rs` ~648): `Connection::open`, then ONE batch `PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;`, then `execute_batch(SCHEMA_SQL)` (the `applying schema` context). So a 5000 ms busy timeout is in force when the schema statement fails; whether it expired under that load, or SQLite did not consult the busy handler for this statement, was not measured.
+
 ## Evidence
 
 The log excerpt above, from `lib.log` of the 2026-10-18 final verification run. A similar `database is locked` flake on a different test is archived as `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` (wontfix, not recurred); this is a different test and a different lane, so it is filed separately, not reopened there.
@@ -71,7 +75,7 @@ Re-run the test alone; it passes.
 
 ## Resume
 
-1. Run the whole `--lib` suite in a loop on a quiet machine to see whether it recurs without external load. 2. Read `Catalog::open` for the order of `busy_timeout` and the schema statements: schema application before a busy timeout is set would fail at once instead of waiting.
+1. Run the whole `--lib` suite in a loop on a quiet machine to see whether it recurs without external load. 2. `busy_timeout` is already set (5000 ms) before the schema statement, so the open question is why `database is locked` surfaces anyway: measure how long a failing open waits (a 5 s wait means the timeout expired; an immediate failure means the busy handler was not consulted), then decide between a longer timeout, retrying the open, or serialising the first schema application.
 
 ## References
 
