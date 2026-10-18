@@ -180,7 +180,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `SqliteVecArtifactStore::refile` re-acquires THIS mutex, and parking_lot's is
     // not reentrant -- so a version that merely silenced the compiler would hang
     // that backend on every move.
-    let (old_full, new_full, new_id, root_path) = {
+    let (old_full, new_full, new_id, root_path, id_repair_error) = {
         let cat = ctx.catalog.lock();
         let row = artifact::get(&cat, &a.id)?.ok_or_else(|| {
             super::LibrarianRecoverableError::new(format!("unknown id `{}`", a.id))
@@ -201,11 +201,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         // Find the managed root that contains this artifact — a workspace
         // `[[roots]]` entry or the active project. `new_rel_path` is interpreted
-        // relative to that root. See `super::managed_roots`.
+        // relative to that root. See `super::managed_roots`. The SAME function the door
+        // uses (`util::managed_base`): it also names a root for a row spelled through a link to
+        // the project (`home/proj/x.md` against a root of `data/proj`), which the purely lexical
+        // `containing_root` did not, so `doc(update)` wrote such a row and `doc(move)` said "no
+        // managed root contains" it.
         let roots = super::managed_roots(ctx);
-        let root_path = super::containing_root(&roots, &row.abs_path).ok_or_else(|| {
-            anyhow::anyhow!("no managed root contains {}", row.abs_path.display())
-        })?;
+        let root_path =
+            crate::librarian::util::managed_base(&roots, &row.abs_path).ok_or_else(|| {
+                anyhow::anyhow!("no managed root contains {}", row.abs_path.display())
+            })?;
 
         let old_full = row.abs_path.clone();
         let new_full = root_path.join(&a.new_rel_path);
@@ -310,14 +315,36 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )));
         }
 
+        // The content is read BEFORE anything moves, and a file that cannot be read as text is
+        // refused here. It used to be read only by the id repair AFTER the rename, so a file the
+        // repair could not read (mode 000, invalid UTF-8, a link to a directory, a row that is a
+        // directory) was renamed and the catalog row kept the old path: a half-done move, measured
+        // four ways. A rename does not change the content, so what is read here is what the repair
+        // and the row's digest need afterwards.
+        let content_before = std::fs::read_to_string(&old_full).map_err(|e| {
+            super::LibrarianRecoverableError::with_hint(
+                format!(
+                    "refusing to move `{}`: cannot read it as UTF-8 text ({e})",
+                    old_full.display()
+                ),
+                "Nothing was moved. A move re-keys the document and repairs its frontmatter `id:`, \
+                 which needs its content; make the file readable text (or fix the row that names \
+                 a directory or a link to one) and re-run.",
+            )
+        })?;
+
         // Moving a `fixed`/`mitigated` bug under `archive/` takes it out of doctor's
         // `terminal_status_without_fix_anchor` (which skips archive paths) exactly as
         // `update`'s flip to `archived` does, so the same guard runs here. A record already
         // under `archive/` was already outside that check, so a move within it is not guarded.
         // docs/issues/archive/2026-09-28-archived-without-fix-provenance-is-unchecked.md
         if super::doctor::in_archive_dir(&new_full) && !super::doctor::in_archive_dir(&old_full) {
-            let content = std::fs::read_to_string(&old_full)?;
-            super::doctor::refuse_unanchored_archive(&row.kind, &row.status, &content, "move")?;
+            super::doctor::refuse_unanchored_archive(
+                &row.kind,
+                &row.status,
+                &content_before,
+                "move",
+            )?;
         }
 
         if let Some(parent) = new_full.parent() {
@@ -349,26 +376,27 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // routes both guard on the frontmatter id; `doc(update)`'s `extra`
         // writes custom keys but never `id`), so a later repair pass has no route to
         // the file. BL-23.
-        let content = repair_frontmatter_id(&roots, &new_full, &new_id).map_err(|e| {
-            // By now the file HAS been renamed and the catalog row still names the old path, so
-            // the door's own text ("Nothing was changed") would be false. Reachable only if the
-            // filesystem changed after the up-front check (the same door), since a destination
-            // it refuses never gets this far.
-            let said = match e.downcast_ref::<super::LibrarianRecoverableError>() {
-                Some(refusal) => refusal.message.clone(),
-                None => format!("{e:#}"),
+        // BEST-EFFORT, as the function's doc always said, and now actually so: the content was read
+        // before the rename, so what can still fail here is the WRITE (a read-only file, a full
+        // disk, the door refusing a path that changed under us). That must not leave the file moved
+        // and the row not, so a failure is reported (`id_repair_error`) and the move completes with
+        // the file's real, unrepaired content; `doctor` reports the stale `id:` as
+        // `frontmatter_id_mismatch`. It used to be returned as an error after the rename.
+        let (content, id_repair_error) =
+            match repair_frontmatter_id(&roots, &new_full, &new_id, Some(content_before.clone())) {
+                Ok(c) => (c, None),
+                Err(e) => {
+                    let said = match e.downcast_ref::<super::LibrarianRecoverableError>() {
+                        Some(refusal) => refusal.message.clone(),
+                        None => format!("{e:#}"),
+                    };
+                    tracing::warn!(
+                        "move: frontmatter id of {} left unrepaired: {said}",
+                        new_full.display()
+                    );
+                    (content_before, Some(said))
+                }
             };
-            super::LibrarianRecoverableError::with_hint(
-                format!(
-                    "the file WAS renamed to `{}`, but repairing its frontmatter id failed, so the \
-                     catalog row still names the old path: {said}",
-                    new_full.display()
-                ),
-                "The move is half done. Put the file back at its old path and re-run, or finish \
-                 it by hand and run librarian(action=\"reindex\"); `doctor` reports the state as \
-                 `missing_file` against the old path.",
-            )
-        })?;
 
         // Both derived AFTER the repair. A digest taken before it describes a file
         // that no longer exists on disk, which leaves the row looking dirty on every
@@ -397,7 +425,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         // Owned rather than borrowed: `containing_root` returns a reference into `roots`,
         // which dies with this block, and the citation scan below needs the root.
-        (old_full, new_full, new_id, root_path.to_path_buf())
+        (
+            old_full,
+            new_full,
+            new_id,
+            root_path.to_path_buf(),
+            id_repair_error,
+        )
     };
 
     // Re-file the artifact's chunk vectors onto the new id, BETWEEN the upsert
@@ -526,6 +560,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // caller that assumed stability would otherwise find out via a later
         // `unknown id` error.
         "previous_id": a.id,
+        // `null` when the file's frontmatter `id:` was repaired (or needed no repair); a message
+        // when the repair's write failed after the rename. The move itself stands.
+        "id_repair_error": id_repair_error,
         "id_changed": grafted.is_some(),
         "history_grafted": grafted.map(|r| json!({
             "events": r.events_repointed,
@@ -683,18 +720,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 /// The skip is silent here, as befits a best-effort post-rename step; `doctor` reports the
 /// condition as `frontmatter_id_is_not_a_catalog_id`.
 ///
-/// **Best-effort by design.** The rename has already happened by the time this
-/// runs, so unparseable frontmatter must not abort the move and strand the
-/// catalog mid-update. A failure is logged and the original content returned; the
-/// catalog still re-keys correctly, and the file is left exactly as it was.
+/// **Best-effort for the PARSE, an error for the WRITE.** Unparseable frontmatter must not abort the
+/// move and strand the catalog mid-update, so a parse failure is logged and the original content
+/// returned (the catalog still re-keys correctly and the file is left exactly as it was). A
+/// failure to READ or WRITE is returned as an error: `doctor`'s `repair_frontmatter_id` fix reports
+/// it as failed, and `doc(move)` (which reads first, before the rename, and passes the content in
+/// as `already_read`) turns a write failure into the `id_repair_error` field rather than an error,
+/// because by then the file has moved.
 ///
 /// BL-23 / `docs/issues/archive/2026-08-16-a-moved-artifacts-frontmatter-asserts-its-pre-move-id.md`
 pub(super) fn repair_frontmatter_id(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
     new_id: &str,
+    already_read: Option<String>,
 ) -> anyhow::Result<String> {
-    let content = std::fs::read_to_string(path)?;
+    let content = match already_read {
+        Some(c) => c,
+        None => std::fs::read_to_string(path)?,
+    };
 
     // READ through the parser — it is authoritative about what YAML actually sees,
     // including quoting and type coercion. WRITE through a line splice: re-emitting

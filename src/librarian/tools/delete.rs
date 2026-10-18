@@ -83,16 +83,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
 
         // Guard: only delete artifacts under a managed root — a workspace
-        // `[[roots]]` entry or the active project. See `super::managed_roots`.
+        // `[[roots]]` entry or the active project. See `super::managed_roots`. The root is named
+        // by `util::managed_base`, the function the door uses, not the lexical `containing_root`:
+        // that one did not know a row spelled through a link to the project, which `doc(update)`
+        // wrote and `doc(delete)` called "outside every managed root".
         let abs_path = row.abs_path.clone();
         let roots = super::managed_roots(ctx);
-        let Some(_managed_root) = super::containing_root(&roots, &abs_path) else {
+        if crate::librarian::util::managed_base(&roots, &abs_path).is_none() {
             return Err(super::LibrarianRecoverableError::new(format!(
                 "artifact '{}' is outside every managed root — refusing to delete {}",
                 a.id,
                 abs_path.display()
             )));
-        };
+        }
         // `remove_file` on a path whose PARENT is a link out of the managed root deletes the
         // OUTSIDE file, and the guard above is lexical, so it cannot see that. A row born through
         // `force_include` on a symlinked anchor, or a directory swapped for a link after indexing,

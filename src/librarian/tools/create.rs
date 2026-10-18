@@ -402,7 +402,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // spelling of `rel_path`, so `esc/new.md` with `esc` an in-root link to a directory outside
     // the root passes it, and `create_dir_all` + `fs::write` would then build and fill the
     // directory outside. Before `create_dir_all`, which would create it before any refusal.
-    crate::librarian::util::refuse_path_outside_root(&full, &base_dir, "create")?;
+    // Judged by the SAME door as `doc(update)`, `doc(move)` and `doc(delete)` (`util::door_root`),
+    // not against `base_dir` alone: against the project root a path below a nested repository's
+    // link back into the superproject was "inside", the file was created, and the new row was then
+    // refused by every other verb; in a monorepo subproject it was stricter than update.
+    crate::librarian::util::refuse_catalogued_path_outside_repo(
+        &super::managed_roots(ctx),
+        &full,
+        "create",
+    )?;
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)?;
     }

@@ -2249,6 +2249,7 @@ async fn run_fix(
                     std::slice::from_ref(&scope_root),
                     std::path::Path::new(&v.path),
                     &id,
+                    None,
                 ) {
                     Ok(_) => repaired.push(json!({ "path": v.path, "id": id })),
                     // One unwritable file must not abandon the rest of the sweep.

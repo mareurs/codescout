@@ -323,20 +323,29 @@ pub(crate) fn arm_write_roots(
 ///
 /// On Unix `\` is a legal filename byte, so only the trailing separator is
 /// trimmed there — rewriting separators would corrupt real names.
-fn comparable_path(path: &std::path::Path) -> String {
-    let raw = path.to_string_lossy();
-
+fn comparable_path(path: &std::path::Path) -> Vec<u8> {
     #[cfg(windows)]
-    let normalized = {
+    let normalized: Vec<u8> = {
+        let raw = path.to_string_lossy();
         let slashed = raw.replace('\\', "/");
         let stripped = slashed.strip_prefix("//?/").unwrap_or(&slashed);
-        stripped.to_string()
+        stripped.as_bytes().to_vec()
     };
+    // On Unix the comparison is over the RAW bytes: a lossy UTF-8 conversion maps every invalid
+    // byte to U+FFFD, so the roots `n\xff` and `n\xfe` compared equal and one "contained" the
+    // other's rows.
     #[cfg(not(windows))]
-    let normalized = raw.into_owned();
+    let normalized: Vec<u8> = {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes().to_vec()
+    };
 
     // Trim trailing separators so `C:/proj/` and `C:/proj` compare equal.
-    normalized.trim_end_matches('/').to_string()
+    let mut out = normalized;
+    while out.last() == Some(&b'/') {
+        out.pop();
+    }
+    out
 }
 
 /// The first managed root that contains `abs_path`, if any.
@@ -362,8 +371,7 @@ pub(crate) fn containing_root<'a>(
     let target = comparable_path(abs_path);
     roots.iter().find(|root| {
         let root = comparable_path(root);
-        target == root
-            || (target.starts_with(&root) && target.as_bytes().get(root.len()) == Some(&b'/'))
+        target == root || (target.starts_with(&root) && target.get(root.len()) == Some(&b'/'))
     })
 }
 

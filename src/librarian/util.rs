@@ -104,10 +104,14 @@ pub(crate) fn write_catalogued_file(
 /// is a legitimate setup.
 ///
 /// **One function for every verb.** `doc(update)` and every other writer reach it through
-/// [`write_catalogued_file`]; `doc(move)` calls it for its destination (before the rename, so the
-/// id repair that follows cannot be refused after the file has moved) and
-/// [`refuse_catalogued_dir_outside_repo`], the same decision for a directory, for its source and
-/// for `doc(delete)`. The three verbs therefore cannot disagree about "outside".
+/// [`write_catalogued_file`]; `doc(create)` and `doc(move)` call it for the path they are about to
+/// create (before the rename or the `create_dir_all`, so the id repair that follows cannot be
+/// refused after the file has moved) and [`refuse_catalogued_dir_outside_repo`], the same
+/// decision for a directory, serves `doc(move)`'s source and `doc(delete)`. `doc(move)` and
+/// `doc(delete)` also name their root with [`managed_base`] rather than the lexical
+/// `containing_root`. The four verbs therefore ask one question; the test
+/// `every_verb_admits_a_row_spelled_through_a_link_to_the_managed_project` (and its F2 twin)
+/// pins one verdict each.
 pub(crate) fn refuse_catalogued_path_outside_repo(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
@@ -178,13 +182,24 @@ fn door_root(roots: &[std::path::PathBuf], path: &std::path::Path) -> Option<std
 }
 
 /// Do the components from `anchor` down to `candidate` (candidate included) contain no symbolic
-/// link? `candidate` must lie under `anchor` lexically; one that does not is never reachable.
+/// link, and nothing but plain names? `candidate` must lie under `anchor` lexically; one that does
+/// not is never reachable. A `..` below the anchor is not "plain": `P/../Q` is a path that merely
+/// STARTS with `P`, and `..` is never a symlink, so without this clause `Q` counted as reached from
+/// `P` by plain directories and the write was judged against it. (`.` and a doubled separator never
+/// appear here: `Path::components` drops them, so `P/./docs` and `P//docs` are the plain paths
+/// they spell.) When `candidate` IS the anchor there is nothing to descend and it is accepted,
+/// even if the anchor was itself reached through a link: that case exists only with no confinement
+/// root, where the anchor is the repository a foreign spelling claims (row Y1a), and a managed root
+/// is never judged this way.
 fn descends_without_link(anchor: &std::path::Path, candidate: &std::path::Path) -> bool {
     let Ok(below) = candidate.strip_prefix(anchor) else {
         return false;
     };
     let mut cur = anchor.to_path_buf();
     for c in below.components() {
+        if !matches!(c, std::path::Component::Normal(_)) {
+            return false;
+        }
         cur.push(c);
         let is_link = std::fs::symlink_metadata(&cur)
             .map(|m| m.file_type().is_symlink())
@@ -204,8 +219,11 @@ fn descends_without_link(anchor: &std::path::Path, candidate: &std::path::Path) 
 /// root of `data/proj`).
 ///
 /// Both clauses live in one loop, in root order, so that two spellings of one file give one
-/// answer: with an unrelated root listed first the lexical test of a LATER root must not win
-/// over a resolving ancestor of an EARLIER one. The shallowest ancestor keeps a link back into
+/// answer FOR A FIXED ROOT ORDER: with an unrelated root listed first the lexical test of a LATER
+/// root must not win over a resolving ancestor of an EARLIER one. The order itself is part of
+/// the input and the verdict can depend on it (rows X6, X6b and C5 against C5c: known, not
+/// changed); the callers fix it (`tools::managed_roots`: the active project's git root and project
+/// root first, then the workspace roots in file order), so one running server asks one question. The shallowest ancestor keeps a link back into
 /// the same project (`home/proj/self -> data/proj`) from shifting the anchor inward and so
 /// admitting candidates the plain spelling would not. Only an ancestor that resolves to a root
 /// EXACTLY counts.
@@ -214,7 +232,7 @@ fn descends_without_link(anchor: &std::path::Path, candidate: &std::path::Path) 
 /// link, which the leaf rule refuses first for writes, and for every other verb it is the root
 /// directory judged against itself either way, so `skip(0)` is equivalent (a mutant of it
 /// survives, on purpose, and is recorded in the issue).
-fn managed_base(
+pub(crate) fn managed_base(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
@@ -235,11 +253,13 @@ fn managed_base(
     None
 }
 
-/// Does `dir` hold a `.git` (a directory, or a file for a submodule or linked worktree)? A
-/// candidate that is itself a link needs no test of its own here: [`descends_without_link`]
-/// rejects any candidate whose descent from the anchor crosses a link, itself included.
+/// Is `dir` a repository, by the marker alone: any `.git` entry (directory, file for a submodule
+/// or linked worktree, or a link, dangling or not) seen WITHOUT following it. One rule for every
+/// kind of marker: `exists()` followed links, so a `.git` link to a directory made a repository
+/// and a dangling one made none (rows X3 and X3b disagreed). A candidate that is itself a link needs
+/// no test here: [`descends_without_link`] rejects it unless it is the anchor.
 fn holds_git(dir: &std::path::Path) -> bool {
-    dir.join(".git").exists()
+    std::fs::symlink_metadata(dir.join(".git")).is_ok()
 }
 
 /// SQL predicate (text, with bound parameters) matching a path column that IS `root` or lies

@@ -2506,4 +2506,444 @@ mod door_table {
             "and keeps its path (it was not reseated onto the main checkout)"
         );
     }
+
+    // ------------------------------- round 6 -----------------------------------------------
+
+    /// Round 6 rows: `..` spellings, odd separators, `.git` markers, root order, raw-byte roots, an
+    /// anchor reached through a link. Same shape as the main table: verdict per row, file door and
+    /// directory door must agree.
+    #[test]
+    fn door_layout_table_round6() {
+        use std::os::unix::ffi::OsStrExt;
+        let mut t = Rows(Vec::new());
+
+        // ---- X1: a `..` in the spelling. W{P, Q} both repositories, P managed.
+        let wt0 = tempfile::tempdir().unwrap();
+        let w = canon(wt0.path());
+        let (p, q) = (w.join("P"), w.join("Q"));
+        git(&p);
+        git(&q);
+        file(&q.join("docs/x.md"));
+        file(&p.join("docs/y.md"));
+        file(&w.join("R/x.md"));
+        ln(q.join("docs"), &p.join("linkq"));
+        let rp = vec![p.clone()];
+        t.row(
+            "X1 roots [P], `P/../Q/docs/x.md`: the spelling claims P, the file is Q's",
+            false,
+            &rp,
+            &p.join("../Q/docs/x.md"),
+        );
+        t.row(
+            "X1b roots [P], `P/docs/../../Q/docs/x.md`",
+            false,
+            &rp,
+            &p.join("docs/../../Q/docs/x.md"),
+        );
+        t.row(
+            "X1c roots [P], the canonical Q row (a foreign repository's own plain row, as J2)",
+            true,
+            &rp,
+            &q.join("docs/x.md"),
+        );
+        t.row("X1d no roots, `P/../Q/docs/x.md`: not normalised, judged against the outermost repository on the spelling", false, &[], &p.join("../Q/docs/x.md"));
+        t.row(
+            "X1e roots [P], `P/../R/x.md` (R holds no .git)",
+            false,
+            &rp,
+            &p.join("../R/x.md"),
+        );
+        t.row(
+            "X1f roots [P], `P/./docs/y.md`: a `.` is dropped lexically, a plain in-root path",
+            true,
+            &rp,
+            &p.join("./docs/y.md"),
+        );
+        t.row(
+            "X1g roots [P], `P//docs/y.md`: a doubled separator is dropped lexically",
+            true,
+            &rp,
+            Path::new(&format!("{}//docs/y.md", p.display())),
+        );
+        let rpw = vec![p.clone(), w.clone()];
+        t.row(
+            "X1h roots [P,W], `P/linkq/x.md` (link into Q)",
+            false,
+            &rpw,
+            &p.join("linkq/x.md"),
+        );
+        t.row(
+            "X1i roots [P,W], `P/../Q/docs/x.md`: refused like the link form",
+            false,
+            &rpw,
+            &p.join("../Q/docs/x.md"),
+        );
+
+        // ---- X3: `.git` markers that are links. One uniform rule: any `.git` entry counts.
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(p.join("subl")).unwrap();
+        ln(elsewhere.path(), &p.join("subl/.git"));
+        ln(p.join("docs"), &p.join("subl/linkdir"));
+        std::fs::create_dir_all(p.join("subd")).unwrap();
+        ln("/nonexistent-leaf6", &p.join("subd/.git"));
+        ln(p.join("docs"), &p.join("subd/linkdir"));
+        t.row(
+            "X3 nested dir whose `.git` is a link to a directory, its link back into P",
+            false,
+            &rp,
+            &p.join("subl/linkdir/y.md"),
+        );
+        t.row(
+            "X3b same with a DANGLING `.git` link: the marker counts, as in X3",
+            false,
+            &rp,
+            &p.join("subd/linkdir/y.md"),
+        );
+        std::fs::create_dir_all(w.join("WT/docs")).unwrap();
+        std::fs::write(
+            w.join("WT/.git"),
+            format!("gitdir: {}/.git/worktrees/wt\n", p.display()),
+        )
+        .unwrap();
+        file(&w.join("WT/docs/x.md"));
+        ln(w.join("WT"), &p.join("towt"));
+        t.row("X3c P/towt -> a linked worktree elsewhere (its `.git` is a file): behind a link, refused", false, &rp, &p.join("towt/docs/x.md"));
+
+        // ---- X6: verdicts depend on the ORDER of the managed roots (known, not changed).
+        let u = w.join("U");
+        git(&u);
+        file(&u.join("other/x.md"));
+        file(&u.join("N/docs/x.md"));
+        ln(u.join("other"), &u.join("N/l"));
+        let n = u.join("N");
+        t.row("X6 roots [U,N], `U/N/l -> U/other`: U is the confinement root, the link stays inside it", true, &[u.clone(), n.clone()], &n.join("l/x.md"));
+        t.row(
+            "X6b roots [N,U], same row: N is the confinement root, the link leaves it",
+            false,
+            &[n.clone(), u.clone()],
+            &n.join("l/x.md"),
+        );
+        t.row(
+            "X6c roots [N] only, same row",
+            false,
+            &[n.clone()],
+            &n.join("l/x.md"),
+        );
+
+        // ---- X8: roots that are not UTF-8 compare as bytes.
+        let ff = w.join(std::ffi::OsStr::from_bytes(b"n\xff"));
+        let fe = w.join(std::ffi::OsStr::from_bytes(b"n\xfe"));
+        git(&ff);
+        git(&fe);
+        file(&fe.join("x.md"));
+        t.row(
+            "X8 roots [n\\xff, n\\xfe], row in n\\xfe: not contained by the OTHER root",
+            true,
+            &[ff.clone(), fe.clone()],
+            &fe.join("x.md"),
+        );
+
+        // ---- Y1: a foreign anchor reached through a link.
+        let yt = tempfile::tempdir().unwrap();
+        let y = canon(yt.path());
+        let (yx, yr) = (y.join("X"), y.join("R"));
+        std::fs::create_dir_all(&yx).unwrap();
+        git(&yr);
+        file(&yr.join("docs/x.md"));
+        ln(&yr, &yx.join("link"));
+        let unrelated = tempfile::tempdir().unwrap();
+        git(unrelated.path());
+        t.row("Y1a roots [unrelated], X (no repo) with X/link -> repo R: no repository is claimed, the leaf rule only", true, &[unrelated.path().to_path_buf()], &yx.join("link/docs/x.md"));
+        t.row(
+            "Y1b roots [X], same row: X is managed and the link leaves it",
+            false,
+            &[yx.clone()],
+            &yx.join("link/docs/x.md"),
+        );
+
+        let mut bad = Vec::new();
+        for (name, expect, file, dir) in &t.0 {
+            if file != expect || dir != file {
+                bad.push(format!(
+                    "{name}: expected {} file-door {} dir-door {}",
+                    if *expect { "ADMIT" } else { "REFUSE" },
+                    if *file { "ADMIT" } else { "REFUSE" },
+                    if *dir { "ADMIT" } else { "REFUSE" },
+                ));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} of {} rows wrong:\n{}",
+            bad.len(),
+            t.0.len(),
+            bad.join("\n")
+        );
+    }
+
+    /// X1 through the tools: with P active, a row spelled `P/../Q/docs/x.md` is refused by every
+    /// verb, and Q's file is neither written, moved nor deleted.
+    #[tokio::test]
+    async fn a_dotdot_spelling_cannot_reach_a_sibling_repository_through_any_verb() {
+        let t = tempfile::tempdir().unwrap();
+        let w = canon(t.path());
+        let (p, q) = (w.join("P"), w.join("Q"));
+        git(&p);
+        git(&q);
+        file(&q.join("docs/x.md"));
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(cp(&p))
+            .build();
+        let id = catalog_row(&ctx, &p.join("../Q/docs/x.md"));
+
+        let upd = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}})).await;
+        let mvd = mv::call(&ctx, json!({"id": id, "new_rel_path": "stolen.md"})).await;
+        let del = delete::call(&ctx, json!({"id": id, "force": true})).await;
+
+        assert!(upd.is_err(), "update: {upd:?}");
+        assert!(mvd.is_err(), "move: {mvd:?}");
+        assert!(del.is_err(), "delete: {del:?}");
+        assert_eq!(std::fs::read_to_string(q.join("docs/x.md")).unwrap(), DOC);
+        assert!(!p.join("stolen.md").exists());
+    }
+
+    /// MED-2, layout C1 (root `data/proj`, row spelled `home/proj/docs/x.md`): every verb ADMITS.
+    /// `doc(move)` and `doc(delete)` gated on the LEXICAL containing root before the door, so the
+    /// same row that `doc(update)` wrote was a plain "no managed root contains ..." for move and
+    /// "outside every managed root" for delete.
+    #[tokio::test]
+    async fn every_verb_admits_a_row_spelled_through_a_link_to_the_managed_project() {
+        let bt = tempfile::tempdir().unwrap();
+        let base = canon(bt.path());
+        let (home, data) = (base.join("home"), base.join("data"));
+        std::fs::create_dir_all(&home).unwrap();
+        git(&data.join("proj"));
+        for f in ["u", "m", "d"] {
+            file(&data.join(format!("proj/docs/{f}.md")));
+        }
+        ln(data.join("proj"), &home.join("proj"));
+        let ctx = mk_ctx(&data.join("proj"));
+        let row = |f: &str| catalog_row(&ctx, &home.join(format!("proj/docs/{f}.md")));
+        let (u, m, d) = (row("u"), row("m"), row("d"));
+
+        let upd = update::call(&ctx, json!({"id": u, "patch": {"status": "fixed"}})).await;
+        let mvd = mv::call(&ctx, json!({"id": m, "new_rel_path": "docs/moved.md"})).await;
+        let del = delete::call(&ctx, json!({"id": d, "force": true})).await;
+        let crt = create::call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/new.md", "kind": "spec", "title": "T", "body": "b"}),
+        )
+        .await;
+
+        assert!(upd.is_ok(), "update: {:?}", upd.err().map(|e| msg(&e)));
+        assert!(mvd.is_ok(), "move: {:?}", mvd.err().map(|e| msg(&e)));
+        assert!(del.is_ok(), "delete: {:?}", del.err().map(|e| msg(&e)));
+        assert!(crt.is_ok(), "create: {:?}", crt.err().map(|e| msg(&e)));
+        assert!(data.join("proj/docs/moved.md").is_file());
+        assert!(!data.join("proj/docs/d.md").exists());
+        assert!(data.join("proj/docs/new.md").is_file());
+    }
+
+    /// MED-2, layout F2 (managed root with a nested repository whose `linkdir` points back into the
+    /// superproject): every verb REFUSES, create included. `doc(create)` judged against the project
+    /// root alone, so a file created at `sub/linkdir/new.md` landed in the superproject and the new
+    /// row was then refused by update, move and delete.
+    #[tokio::test]
+    async fn every_verb_refuses_a_path_below_a_nested_repositorys_link_into_its_superproject() {
+        let ft = tempfile::tempdir().unwrap();
+        let fp = canon(ft.path());
+        git(&fp);
+        for f in ["docs/u.md", "docs/d.md", "plain.md"] {
+            file(&fp.join(f));
+        }
+        git(&fp.join("sub"));
+        ln(fp.join("docs"), &fp.join("sub/linkdir"));
+        let ctx = mk_ctx(&fp);
+        let u = catalog_row(&ctx, &fp.join("sub/linkdir/u.md"));
+        let d = catalog_row(&ctx, &fp.join("sub/linkdir/d.md"));
+        let plain = catalog_row(&ctx, &fp.join("plain.md"));
+
+        let upd = update::call(&ctx, json!({"id": u, "patch": {"status": "fixed"}})).await;
+        let mvd = mv::call(
+            &ctx,
+            json!({"id": plain, "new_rel_path": "sub/linkdir/moved.md"}),
+        )
+        .await;
+        let del = delete::call(&ctx, json!({"id": d, "force": true})).await;
+        let crt = create::call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "sub/linkdir/new.md", "kind": "spec", "title": "T", "body": "b"}),
+        )
+        .await;
+
+        for (verb, r) in [
+            ("update", upd.map(|_| ())),
+            ("move", mvd.map(|_| ())),
+            ("delete", del.map(|_| ())),
+            ("create", crt.map(|_| ())),
+        ] {
+            let e = r.expect_err(verb);
+            assert!(
+                msg(&e).contains("outside the repository root"),
+                "{verb}: {}",
+                msg(&e)
+            );
+        }
+        assert_eq!(std::fs::read_to_string(fp.join("docs/u.md")).unwrap(), DOC);
+        assert!(fp.join("docs/d.md").exists());
+        assert!(fp.join("plain.md").exists());
+        assert!(!fp.join("docs/moved.md").exists());
+        assert!(
+            !fp.join("docs/new.md").exists(),
+            "nothing was created in the superproject"
+        );
+    }
+
+    // ---- MED-3: a move never renames a file whose id repair cannot proceed ------------------
+
+    /// Moves `a/x.md` to `b/x.md` in a fresh repository whose `a/x.md` was made by `make`, and
+    /// returns (root, ctx, id, result).
+    async fn move_a_to_b(
+        make: impl FnOnce(&Path),
+    ) -> (
+        TempDir,
+        PathBuf,
+        ToolContext,
+        String,
+        anyhow::Result<serde_json::Value>,
+    ) {
+        let base = tempfile::tempdir().unwrap();
+        let root = canon(base.path()).join("repo");
+        for d in [".git", "a", "b"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        make(&root);
+        let ctx = mk_ctx(&root);
+        let id = catalog_row(&ctx, &root.join("a/x.md"));
+        let r = mv::call(&ctx, json!({"id": id, "new_rel_path": "b/x.md"})).await;
+        (base, root, ctx, id, r)
+    }
+
+    fn assert_nothing_moved(root: &Path, ctx: &ToolContext, id: &str, what: &str) {
+        assert!(
+            std::fs::symlink_metadata(root.join("a/x.md")).is_ok(),
+            "{what}: source stays"
+        );
+        assert!(
+            std::fs::symlink_metadata(root.join("b/x.md")).is_err(),
+            "{what}: nothing renamed"
+        );
+        let row = artifact::get(&ctx.catalog.lock(), id).unwrap().unwrap();
+        assert_eq!(row.abs_path, root.join("a/x.md"), "{what}: row unchanged");
+    }
+
+    #[tokio::test]
+    async fn doc_move_refuses_up_front_a_file_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_b, root, ctx, id, r) = move_a_to_b(|root| {
+            std::fs::write(root.join("a/x.md"), DOC).unwrap();
+            std::fs::set_permissions(root.join("a/x.md"), std::fs::Permissions::from_mode(0o000))
+                .unwrap();
+        })
+        .await;
+        let readable = std::fs::read(root.join("a/x.md")).is_ok();
+        let _ =
+            std::fs::set_permissions(root.join("a/x.md"), std::fs::Permissions::from_mode(0o644));
+        if readable {
+            eprintln!("SKIPPED: running as root, a mode-000 file is still readable");
+            return;
+        }
+        let e = r.expect_err("an unreadable file is not renamed");
+        assert!(msg(&e).contains("cannot read"), "{}", msg(&e));
+        assert_nothing_moved(&root, &ctx, &id, "mode 000");
+    }
+
+    #[tokio::test]
+    async fn doc_move_refuses_up_front_a_file_that_is_not_utf8() {
+        let (_b, root, ctx, id, r) = move_a_to_b(|root| {
+            std::fs::write(
+                root.join("a/x.md"),
+                b"---\nkind: spec\n---\n\xff\xfe body\n",
+            )
+            .unwrap();
+        })
+        .await;
+        let e = r.expect_err("invalid UTF-8 is not renamed");
+        assert!(msg(&e).contains("cannot read"), "{}", msg(&e));
+        assert_nothing_moved(&root, &ctx, &id, "invalid utf-8");
+    }
+
+    #[tokio::test]
+    async fn doc_move_refuses_up_front_a_leaf_link_to_a_directory() {
+        let (_b, root, ctx, id, r) = move_a_to_b(|root| {
+            std::fs::create_dir_all(root.join("realdir")).unwrap();
+            ln(root.join("realdir"), &root.join("a/x.md"));
+        })
+        .await;
+        let e = r.expect_err("a link to a directory is not renamed");
+        assert!(msg(&e).contains("cannot read"), "{}", msg(&e));
+        assert_nothing_moved(&root, &ctx, &id, "link to a directory");
+    }
+
+    #[tokio::test]
+    async fn doc_move_refuses_up_front_a_row_that_is_a_directory() {
+        let (_b, root, ctx, id, r) = move_a_to_b(|root| {
+            std::fs::create_dir_all(root.join("a/x.md")).unwrap();
+        })
+        .await;
+        let e = r.expect_err("a directory is not renamed");
+        assert!(msg(&e).contains("cannot read"), "{}", msg(&e));
+        assert_nothing_moved(&root, &ctx, &id, "row is a directory");
+    }
+
+    /// The id repair's WRITE can still fail after the rename (here a read-only file, which the
+    /// rename does not care about). The repair is best-effort, as its doc always said: the move
+    /// completes, the catalog is re-keyed with the file's real content, and the response says the
+    /// repair failed. It used to return an error with the file moved and the row not.
+    #[tokio::test]
+    async fn doc_move_completes_and_reports_when_only_the_id_repair_write_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let root = canon(base.path()).join("repo");
+        for d in [".git", "a", "b"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        let old = root.join("a/x.md");
+        let old_id = crate::librarian::ids::artifact_id_from_abs(&old);
+        std::fs::write(
+            &old,
+            format!("---\nid: {old_id}\nkind: spec\nstatus: draft\ntitle: T\n---\n\nbody\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let writable = std::fs::OpenOptions::new().append(true).open(&old).is_ok();
+        if writable {
+            eprintln!("SKIPPED: running as root, a read-only file is still writable");
+            return;
+        }
+        let ctx = mk_ctx(&root);
+        let id = catalog_row(&ctx, &old);
+
+        let v = mv::call(&ctx, json!({"id": id, "new_rel_path": "b/x.md"}))
+            .await
+            .expect("the move completes");
+
+        assert!(
+            v["id_repair_error"].is_string(),
+            "the failure is reported: {v}"
+        );
+        assert!(root.join("b/x.md").is_file());
+        let new_id = crate::librarian::ids::artifact_id_from_abs(&root.join("b/x.md"));
+        assert!(
+            artifact::get(&ctx.catalog.lock(), &new_id)
+                .unwrap()
+                .is_some(),
+            "re-keyed"
+        );
+        let on_disk = std::fs::read_to_string(root.join("b/x.md")).unwrap();
+        assert!(
+            on_disk.contains(&old_id),
+            "the file kept its (stale) id: {on_disk}"
+        );
+    }
 }
