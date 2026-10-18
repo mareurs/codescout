@@ -366,8 +366,56 @@ fn canonicalize_through_existing_ancestor(path: &Path) -> PathBuf {
 /// The most symbolic links one write target may chain through before the classifier gives up on
 /// it. It mirrors the kernel's own limit (`MAXSYMLINKS`, 40 on Linux), so a chain the OS would
 /// follow is a chain this follows, and a loop ends in a refusal instead of a hang.
-#[allow(dead_code)]
 const MAX_LEAF_LINK_HOPS: usize = 40;
+
+/// Where a write to `target` lands when its LEAF may itself be a symlink: `target` itself when it
+/// is not one, otherwise the end of the chain, followed for up to [`MAX_LEAF_LINK_HOPS`] links.
+///
+/// `canonicalize_write_target` resolves only the target's directory, so `<root>/leaf ->
+/// ~/.ssh/id_rsa` kept the in-root spelling `<root>/leaf` and the allowlist and the deny list judged
+/// the link's name, never what the OS would open. Every hop is a `symlink_metadata`/`read_link`,
+/// never `metadata`, which would follow the link and hide that there was one. A relative hop is
+/// resolved against the directory of the link that names it, and every hop goes through
+/// `canonicalize_write_target` again, so a hop that crosses a symlinked directory, or names a file
+/// below a directory that does not exist yet (a dangling link), is resolved the way a first-hand
+/// target is. The landing is held the way `canonicalize_write_target` holds a write target: its
+/// directory resolved through the deepest existing ancestor, the file name as the last link
+/// spelled it.
+///
+/// Only the END of the chain is returned: a write replaces the first link (`atomic_write`) or
+/// lands on the last file (`fs::write`), and an intermediate hop is neither.
+///
+/// An `lstat` that fails (missing file, `ENOTDIR`, `EACCES`) ends the chain: it is not a link
+/// that can be read, and the write that follows fails by itself and says why. A link that was
+/// seen but cannot be read, and a chain longer than the limit (a loop included), have no landing:
+/// `Err` carries the reason, for the refusal.
+///
+/// Limit, stated so it is not read as a guarantee: the check and the write are separate
+/// syscalls, so a link planted between them still wins.
+fn resolve_leaf_link(target: &Path) -> Result<PathBuf, String> {
+    let mut cur = target.to_path_buf();
+    let mut hops = 0usize;
+    loop {
+        let is_link = std::fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            return Ok(cur);
+        }
+        if hops == MAX_LEAF_LINK_HOPS {
+            return Err(format!(
+                "that chains through more than {MAX_LEAF_LINK_HOPS} symbolic links (a loop, or too deep to follow)"
+            ));
+        }
+        hops += 1;
+        let Ok(link) = std::fs::read_link(&cur) else {
+            return Err("whose target could not be read".to_string());
+        };
+        let next = match cur.parent() {
+            Some(dir) => dir.join(link),
+            None => link,
+        };
+        cur = canonicalize_write_target(&next);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -560,6 +608,12 @@ impl WriteEnv {
 }
 
 /// `classify_write_path` over an explicit environment.
+///
+/// When the target's LEAF is a symlink, the answer is also the answer for where a write through
+/// it lands (`resolve_leaf_link`): the deny list and the roots are asked of the link's own
+/// location AND of its resolved end, the stricter wins, and a chain that cannot be followed to an
+/// end (a loop, more than `MAX_LEAF_LINK_HOPS` links) is a hard denial. `Allowed` still carries the
+/// link's own spelling, because the writers replace a link and never write through it.
 fn classify_write_path_in(
     raw: &str,
     project_root: &Path,
@@ -615,6 +669,33 @@ fn classify_write_path_in(
 
     let project_root = canonicalize_through_existing_ancestor(project_root);
 
+    // The target's LEAF may itself be a symlink, which `canonicalize_write_target` does not
+    // resolve. Where a write through it LANDS is judged below too, by the same deny list and the
+    // same roots, and the answer is the stricter of the two: the link's own location is what a
+    // replacing writer overwrites, its landing is what a raw `fs::write` opens. For a target that
+    // is not a link the landing IS `resolved`, and the second look repeats the first.
+    let landing = match resolve_leaf_link(&resolved) {
+        Ok(landing) => landing,
+        Err(why) => {
+            return WritePathDecision::Denied(format!(
+                "write denied: '{}' is a symbolic link {}. approve_write cannot grant this — \
+                 where a write would land cannot be established; point the link at a regular \
+                 file or write to a path that is not a link.",
+                raw, why
+            ));
+        }
+    };
+    // Same reason, same wording family, as the check on `resolved` above: `starts_with` would match
+    // a root that an unresolved `..` in the link's target escapes.
+    if has_parent_dir(&landing) {
+        return WritePathDecision::Denied(format!(
+            "write denied: '{}' is a symbolic link whose target contains '..' that could not be \
+             resolved. approve_write cannot grant this — the link's target is rejected, not its \
+             location; point the link at a path with no unresolved '..' segments.",
+            raw
+        ));
+    }
+
     // Check deny-list first (blocks writes to ~/.ssh even if somehow under
     // an extra_write_root). Each entry is held in TWO forms, because the target is resolved by
     // `canonicalize_write_target` (parent resolved, leaf as written) and an entry can be a symlink
@@ -633,6 +714,15 @@ fn classify_write_path_in(
              this — the deny-list is checked first and holds even inside an approved \
              directory.",
             raw
+        ));
+    }
+    if is_denied(&landing, &denied) {
+        return WritePathDecision::Denied(format!(
+            "write denied: '{}' is a symbolic link to '{}', which is in a protected location. \
+             approve_write cannot grant this — the deny-list is checked first and holds even \
+             inside an approved directory.",
+            raw,
+            landing.display()
         ));
     }
 
@@ -690,15 +780,26 @@ fn classify_write_path_in(
     // A session root admits what is INSIDE it, never a file named like the root itself:
     // `approve_write(~/.newrc)` names a directory that does not exist yet, and creating a file
     // with that name is not what was approved.
-    let under_allowed_root = allowed.iter().any(|root| resolved.starts_with(root))
-        || session_allowed
-            .iter()
-            .any(|root| resolved != *root && resolved.starts_with(root))
-        || temp_root
-            .as_deref()
-            .is_some_and(|t| temp_root_admits(t, &homes, &resolved));
-    if !under_allowed_root {
+    let admitted = |p: &Path| {
+        allowed.iter().any(|root| p.starts_with(root))
+            || session_allowed
+                .iter()
+                .any(|root| p != root.as_path() && p.starts_with(root))
+            || temp_root
+                .as_deref()
+                .is_some_and(|t| temp_root_admits(t, &homes, p))
+    };
+    if !admitted(&resolved) {
         return WritePathDecision::OutsideRoot { resolved };
+    }
+    // The link is in a root; where it lands must be in one too. The refusal carries the LANDING as
+    // `resolved`, so the directory an approval would name is the landing's (approving the link's
+    // own directory, which is already in a root, would change nothing). The path handed back on
+    // success stays the link's own spelling: the writers replace a link with a regular file and
+    // never write through it (`util::fs::atomic_write`), and handing them the landing would
+    // rewrite the target instead.
+    if !admitted(&landing) {
+        return WritePathDecision::OutsideRoot { resolved: landing };
     }
 
     WritePathDecision::Allowed(resolved)
