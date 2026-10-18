@@ -585,15 +585,78 @@ fn a_date_glued_to_letters_is_refused_even_without_a_colon() {
         .any(|p| p.contains("glued")));
 }
 
+/// Comments, blank lines and indented lines are skipped by the grammar rather than judged. The
+/// block is VALID YAML (the earlier fixture here ended in a bare indented `continuation text`
+/// line, which PyYAML and the catalog reader both refuse: "could not find expected ':'"), and
+/// `src/librarian/frontmatter.rs` reads this same block whole
+/// (`the_catalog_reader_refuses_shapes_the_line_grammar_accepts`'s control row).
 #[test]
 fn indented_continuations_comments_and_blank_lines_are_allowed() {
     let ok = repaired().replace(
         "severity: low\n",
-        "severity: low\n# a comment\n\nrelated2:\n  - nested: item\n  continuation text\n",
+        "severity: low\n# a comment\n\nrelated2:\n  - nested: item\nsummary: first line\n  and a continuation\n",
     );
     assert!(
         file_problems(P50_NAME, &ok).is_empty(),
         "{:#?}",
         file_problems(P50_NAME, &ok)
     );
+}
+
+/// A file that is only a block, closed by the final fence with no trailing newline. Without the
+/// fallback in `frontmatter_block` it reads as "no frontmatter block" and is refused.
+#[test]
+fn a_block_closed_by_a_final_fence_with_no_trailing_newline_is_read() {
+    let only_a_block = "---\nkind: bug\nstatus: open\n---";
+    assert_eq!(
+        frontmatter_block(only_a_block),
+        Some("kind: bug\nstatus: open")
+    );
+    assert!(
+        file_problems("2026-09-01-only-a-block.md", only_a_block).is_empty(),
+        "{:#?}",
+        file_problems("2026-09-01-only-a-block.md", only_a_block)
+    );
+}
+
+/// `key:value` with no space is not a mapping entry in YAML (it is a plain scalar), so a line
+/// written that way is refused as not `key: value`, and a bare `key:` (nested block follows) is
+/// still a key.
+#[test]
+fn a_key_with_no_space_after_the_colon_is_refused() {
+    let glued = repaired().replace("severity: low\n", "title:value\nseverity: low\n");
+    assert!(file_problems(P50_NAME, &glued)
+        .iter()
+        .any(|p| p.contains("not `key: value`")));
+    let bare_key = repaired().replace("severity: low\n", "severity: low\nextra:\n  - a\n");
+    assert!(
+        file_problems(P50_NAME, &bare_key).is_empty(),
+        "{:#?}",
+        file_problems(P50_NAME, &bare_key)
+    );
+}
+
+/// `is_date` takes only `YYYY-MM-DD`. A slash date, and a ten-character run of digits, are not
+/// dates: the separator check is what refuses them. Before this test the check was killed only by
+/// three archived files whose hex `id:` looks like a date followed by letters.
+#[test]
+fn a_date_with_the_wrong_separator_is_not_a_date() {
+    assert!(is_date("2026-10-17"));
+    for bad in [
+        "2026/10/17",
+        "2026.10.17",
+        "2026-10/17",
+        "2026/10-17",
+        "2026101789",
+    ] {
+        assert!(!is_date(bad), "{bad:?} must not be a date");
+    }
+    let slash_closed = repaired().replace("closed: 2026-10-17\n", "closed: 2026/10/17\n");
+    assert!(file_problems(P50_NAME, &slash_closed)
+        .iter()
+        .any(|p| p.contains("needs `closed")));
+    let slash_opened = repaired().replace("opened: 2026-10-17\n", "opened: 2026/10/17\n");
+    assert!(file_problems(P50_NAME, &slash_opened)
+        .iter()
+        .any(|p| p.contains("`opened` is not")));
 }
