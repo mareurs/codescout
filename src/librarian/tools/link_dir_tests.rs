@@ -2946,4 +2946,211 @@ mod door_table {
             "the file kept its (stale) id: {on_disk}"
         );
     }
+
+    // ------------------------------- round 7 -----------------------------------------------
+
+    /// A `..` in a root or a spelling must not disable the refinement. The first version of the
+    /// `..` clause rejected every candidate below the anchor that carried one, so with a SHALLOWER
+    /// anchor (an enclosing managed root listed earlier, or the outermost repository when nothing
+    /// is managed) the judgment fell back to the anchor, which admits a write into a sibling nested
+    /// repository (F2 class). A `..` that directly follows a plain name is an exact pop; only one
+    /// that would climb above the anchor, or follow a link, is refused.
+    #[test]
+    fn door_layout_table_round7() {
+        let mut t = Rows(Vec::new());
+
+        // ---- Z: W is a repository holding nested repositories P and Q; P/lq -> Q/docs.
+        let wt = tempfile::tempdir().unwrap();
+        let w = canon(wt.path());
+        let (p, q) = (w.join("P"), w.join("Q"));
+        git(&w);
+        git(&p);
+        git(&q);
+        file(&q.join("docs/x.md"));
+        std::fs::create_dir_all(w.join("Z")).unwrap();
+        ln(q.join("docs"), &p.join("lq"));
+        let dd = w.join("Z/../P");
+        t.row(
+            "Z1 roots [W], canonical `W/P/lq/x.md` (nested P linking into nested Q)",
+            false,
+            std::slice::from_ref(&w),
+            &p.join("lq/x.md"),
+        );
+        t.row(
+            "Z2 roots [W], the same row spelled `W/Z/../P/lq/x.md`",
+            false,
+            std::slice::from_ref(&w),
+            &dd.join("lq/x.md"),
+        );
+        t.row(
+            "Z3 roots [W, W/Z/../P], same row",
+            false,
+            &[w.clone(), dd.clone()],
+            &dd.join("lq/x.md"),
+        );
+        t.row("Z4 no roots, same row", false, &[], &dd.join("lq/x.md"));
+
+        // ---- Z6: a `..` that follows a LINK is not an exact pop.
+        let lt = tempfile::tempdir().unwrap();
+        let l = canon(lt.path());
+        let (lp, ls) = (l.join("P"), l.join("S"));
+        git(&lp);
+        git(&ls);
+        file(&ls.join("x.md"));
+        ln(&ls, &lp.join("lnk"));
+        t.row(
+            "Z6 roots [P], `P/lnk/../y.md` with lnk -> S (the `..` climbs out of S, not out of P)",
+            false,
+            &[lp.clone()],
+            &lp.join("lnk/../y.md"),
+        );
+
+        // ---- Z7/Z8: a directory NAME containing `..` is a plain name.
+        let nt = tempfile::tempdir().unwrap();
+        let n = canon(nt.path()).join("P");
+        git(&n);
+        file(&n.join("docs/y.md"));
+        git(&n.join("a..b"));
+        file(&n.join("a..b/docs/y.md"));
+        ln(n.join("docs"), &n.join("a..b/linkdir"));
+        t.row(
+            "Z7 roots [P], plain row below `P/a..b`",
+            true,
+            &[n.clone()],
+            &n.join("a..b/docs/y.md"),
+        );
+        t.row("Z8 roots [P], nested repo `P/a..b` linking back into P: its name is a plain name, so it is the refinement and the link is refused", false, &[n.clone()], &n.join("a..b/linkdir/y.md"));
+
+        let mut bad = Vec::new();
+        for (name, expect, file, dir) in &t.0 {
+            if file != expect || dir != file {
+                bad.push(format!(
+                    "{name}: expected {} file-door {} dir-door {}",
+                    if *expect { "ADMIT" } else { "REFUSE" },
+                    if *file { "ADMIT" } else { "REFUSE" },
+                    if *dir { "ADMIT" } else { "REFUSE" },
+                ));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} of {} rows wrong:\n{}",
+            bad.len(),
+            t.0.len(),
+            bad.join("\n")
+        );
+    }
+
+    /// The production shape of Z2: active project W plus a `[[roots]]` entry `p` whose path is
+    /// spelled `W/Z/../P`. `doc(create, repo=p, rel_path=lq/new.md)` landed in `W/Q/docs/new.md`
+    /// and `doc(update)` of the row `W/Z/../P/lq/x.md` wrote Q's file.
+    #[tokio::test]
+    async fn a_dotdot_in_a_workspace_root_cannot_reach_a_sibling_nested_repository() {
+        let wt = tempfile::tempdir().unwrap();
+        let w = canon(wt.path());
+        let (p, q) = (w.join("P"), w.join("Q"));
+        git(&w);
+        git(&p);
+        git(&q);
+        file(&q.join("docs/x.md"));
+        std::fs::create_dir_all(w.join("Z")).unwrap();
+        ln(q.join("docs"), &p.join("lq"));
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "p".into(),
+                path: w.join("Z/../P"),
+            })
+            .with_current_project(cp(&w))
+            .build();
+        let id = catalog_row(&ctx, &w.join("Z/../P/lq/x.md"));
+
+        let crt = create::call(
+            &ctx,
+            json!({"repo": "p", "rel_path": "lq/new.md", "kind": "spec", "title": "T", "body": "b"}),
+        )
+        .await;
+        let upd = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}})).await;
+
+        assert!(crt.is_err(), "create: {crt:?}");
+        assert!(upd.is_err(), "update: {upd:?}");
+        assert!(!q.join("docs/new.md").exists(), "nothing was created in Q");
+        assert_eq!(std::fs::read_to_string(q.join("docs/x.md")).unwrap(), DOC);
+    }
+
+    /// LOW-1: the repair of a LINK is skipped (a write would follow it to the target), and that
+    /// skip is reported in `id_repair_error`, not as null, which claims "repaired or not needed".
+    #[tokio::test]
+    async fn doc_move_reports_a_skipped_id_repair_of_a_leaf_link() {
+        let base = tempfile::tempdir().unwrap();
+        let root = canon(base.path()).join("repo");
+        git(&root);
+        let target = canon(base.path()).join("elsewhere.md");
+        let old_id = crate::librarian::ids::artifact_id_from_abs(&root.join("outward.md"));
+        let content =
+            format!("---\nid: {old_id}\nkind: spec\nstatus: draft\ntitle: T\n---\n\nbody\n");
+        std::fs::write(&target, &content).unwrap();
+        ln(&target, &root.join("outward.md"));
+        let ctx = mk_ctx(&root);
+        let id = catalog_row(&ctx, &root.join("outward.md"));
+
+        let v = mv::call(&ctx, json!({"id": id, "new_rel_path": "sub/moved.md"}))
+            .await
+            .expect("the move itself completes");
+
+        let said = v["id_repair_error"]
+            .as_str()
+            .expect("the skipped repair is reported");
+        assert!(said.contains("symbolic link"), "{said}");
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            content,
+            "the target is untouched"
+        );
+    }
+
+    /// LOW-4: the monorepo-subproject half of the create change. `docs` is a link from the
+    /// subproject `mono/pkg` to `mono/shared/docs`, INSIDE the git root. Judged against the project
+    /// root alone `doc(create)` refused `docs/new.md`; judged by the door it is ADMITTED, which is
+    /// right: `doc(update)`, `doc(move)` and `doc(delete)` already admit rows there (the managed
+    /// root is the git root, round 3 H2) and the file lands inside the repository.
+    #[tokio::test]
+    async fn create_in_a_monorepo_subproject_admits_a_link_that_stays_inside_the_git_root() {
+        let (mono, ctx) = monorepo();
+
+        let v = create::call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/new.md", "kind": "spec", "title": "T", "body": "b"}),
+        )
+        .await
+        .expect("a link that stays inside the git root is a legitimate destination");
+
+        assert!(v["id"].is_string(), "{v}");
+        assert!(mono.path().join("shared/docs/new.md").is_file());
+    }
+
+    /// LOW-5: a row no managed root contains is a recoverable refusal for `doc(move)` too, with
+    /// the wording `doc(delete)` uses (it was a fatal `anyhow!`).
+    #[tokio::test]
+    async fn doc_move_of_a_row_outside_every_managed_root_is_a_recoverable_refusal() {
+        let base = tempfile::tempdir().unwrap();
+        let root = canon(base.path()).join("repo");
+        git(&root);
+        let ctx = mk_ctx(&root);
+        let id = catalog_row(&ctx, Path::new("/nonexistent-r7/elsewhere/x.md"));
+
+        let e = mv::call(&ctx, json!({"id": id, "new_rel_path": "moved.md"}))
+            .await
+            .expect_err("outside every managed root");
+
+        assert!(
+            e.downcast_ref::<LibrarianRecoverableError>().is_some(),
+            "{}",
+            msg(&e)
+        );
+        assert!(
+            msg(&e).contains("outside every managed root"),
+            "{}",
+            msg(&e)
+        );
+    }
 }

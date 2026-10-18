@@ -182,38 +182,53 @@ fn door_root(roots: &[std::path::PathBuf], path: &std::path::Path) -> Option<std
 }
 
 /// Do the components from `anchor` down to `candidate` (candidate included) contain no symbolic
-/// link, and nothing but plain names? `candidate` must lie under `anchor` lexically; one that does
-/// not is never reachable. A `..` below the anchor is not "plain": `P/../Q` is a path that merely
-/// STARTS with `P`, and `..` is never a symlink, so without this clause `Q` counted as reached from
-/// `P` by plain directories and the write was judged against it. (`.` and a doubled separator never
-/// appear here: `Path::components` drops them, so `P/./docs` and `P//docs` are the plain paths
-/// they spell.) When `candidate` IS the anchor there is nothing to descend and it is accepted,
-/// even if the anchor was itself reached through a link: that case exists only with no confinement
-/// root, where the anchor is the repository a foreign spelling claims (row Y1a), and a managed root
-/// is never judged this way.
+/// link, and no climb out of the anchor? `candidate` must lie under `anchor` lexically; one that
+/// does not is never reachable.
+///
+/// The walk keeps a lexical cursor and a depth. A name is pushed and must not be a link. A `..`
+/// directly after such a name is an exact pop (the name was a plain directory, so its parent is
+/// the cursor's previous value), which keeps `W/Z/../P` the same place as `W/P`; a `..` at depth
+/// zero would climb out of the anchor (`P/../Q` merely STARTS with `P`) and is refused. A `..`
+/// after a LINK never gets that far: the link is refused when it is pushed, because the link's
+/// target, not its spelled parent, is what `..` would climb out of. Refusing every `..` (the
+/// first version) let a path with one, below a SHALLOWER anchor, fall back to that anchor and
+/// admit a write into a sibling nested repository. (`.` and a doubled separator never appear:
+/// `Path::components` drops them, so `P/./docs` and `P//docs` are the plain paths they spell.)
+/// When `candidate` IS the anchor there is nothing to descend and it is accepted, even if the
+/// anchor was itself reached through a link: that happens when `managed_base` names a link as the
+/// confinement root (a project reached through `home/proj -> data/proj`, row C1) and when, with no
+/// confinement root, the anchor is the repository a foreign spelling claims (row Y1a).
 fn descends_without_link(anchor: &std::path::Path, candidate: &std::path::Path) -> bool {
     let Ok(below) = candidate.strip_prefix(anchor) else {
         return false;
     };
     let mut cur = anchor.to_path_buf();
+    let mut depth = 0usize;
     for c in below.components() {
-        if !matches!(c, std::path::Component::Normal(_)) {
-            return false;
-        }
-        cur.push(c);
-        let is_link = std::fs::symlink_metadata(&cur)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false);
-        if is_link {
-            return false;
+        match c {
+            std::path::Component::Normal(_) => {
+                cur.push(c);
+                depth += 1;
+                let is_link = std::fs::symlink_metadata(&cur)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false);
+                if is_link {
+                    return false;
+                }
+            }
+            std::path::Component::ParentDir if depth > 0 => {
+                cur.pop();
+                depth -= 1;
+            }
+            _ => return false,
         }
     }
     true
 }
 
 /// The confinement root of `path`: the FIRST managed root, in the caller's order, that either
-/// lexically contains the spelling (`tools::containing_root`, the guard `doc(move)` and
-/// `doc(delete)` use) or has an ancestor of the spelling that resolves to it. In the second
+/// lexically contains the spelling (`tools::containing_root`, which this function wraps per root
+/// and which no verb now calls directly) or has an ancestor of the spelling that resolves to it. In the second
 /// case the confinement root is the SHALLOWEST such ancestor (a project registered under its
 /// canonical path while rows keep the spelling of a link to it: `home/proj/x.md` against a
 /// root of `data/proj`).

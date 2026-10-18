@@ -97,12 +97,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )));
         }
         // `remove_file` on a path whose PARENT is a link out of the managed root deletes the
-        // OUTSIDE file, and the guard above is lexical, so it cannot see that. A row born through
+        // OUTSIDE file, and the guard above names a root but does not resolve links, so it cannot see
+        // that. A row born through
         // `force_include` on a symlinked anchor, or a directory swapped for a link after indexing,
         // is exactly this shape. The check is on the parent so that a LEAF link (an outward-link
         // row) still deletes: unlinking drops the link and never touches its target. It is the
-        // SAME decision `doc(update)` and `doc(move)` make (`refuse_catalogued_dir_outside_repo`),
-        // so the three verbs cannot disagree about what is outside.
+        // SAME decision `doc(update)`, `doc(create)` and `doc(move)` make
+        // (`refuse_catalogued_dir_outside_repo`), so the four verbs cannot disagree about what
+        // is outside.
         if let Some(parent) = abs_path.parent() {
             crate::librarian::util::refuse_catalogued_dir_outside_repo(
                 &roots,

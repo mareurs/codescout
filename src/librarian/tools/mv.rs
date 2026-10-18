@@ -209,7 +209,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let roots = super::managed_roots(ctx);
         let root_path =
             crate::librarian::util::managed_base(&roots, &row.abs_path).ok_or_else(|| {
-                anyhow::anyhow!("no managed root contains {}", row.abs_path.display())
+                super::LibrarianRecoverableError::new(format!(
+                    "artifact '{}' is outside every managed root — refusing to move {}",
+                    a.id,
+                    row.abs_path.display()
+                ))
             })?;
 
         let old_full = row.abs_path.clone();
@@ -382,6 +386,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // and the row not, so a failure is reported (`id_repair_error`) and the move completes with
         // the file's real, unrepaired content; `doctor` reports the stale `id:` as
         // `frontmatter_id_mismatch`. It used to be returned as an error after the rename.
+        // `Some(content_before.clone())` saves a second read: a rename does not change the bytes,
+        // so passing `None` (re-read from the new path) gives the same answer unless something
+        // writes the file in between. A mutant of that argument is equivalent for that reason.
         let (content, id_repair_error) =
             match repair_frontmatter_id(&roots, &new_full, &new_id, Some(content_before.clone())) {
                 Ok(c) => (c, None),
@@ -423,15 +430,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         };
         artifact::upsert(&cat, &updated_row)?;
 
-        // Owned rather than borrowed: `containing_root` returns a reference into `roots`,
-        // which dies with this block, and the citation scan below needs the root.
-        (
-            old_full,
-            new_full,
-            new_id,
-            root_path.to_path_buf(),
-            id_repair_error,
-        )
+        // Owned: the citation scan below, outside this block, needs the root. (`managed_base`
+        // already returns an owned path, so no clone is needed here.)
+        (old_full, new_full, new_id, root_path, id_repair_error)
     };
 
     // Re-file the artifact's chunk vectors onto the new id, BETWEEN the upsert
@@ -560,8 +561,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // caller that assumed stability would otherwise find out via a later
         // `unknown id` error.
         "previous_id": a.id,
-        // `null` when the file's frontmatter `id:` was repaired (or needed no repair); a message
-        // when the repair's write failed after the rename. The move itself stands.
+        // `null` when the file's frontmatter `id:` was repaired or needed no repair; a message
+        // when the repair did NOT happen after the rename (its write failed, or the file is a
+        // link and is never written through). The move itself stands.
         "id_repair_error": id_repair_error,
         "id_changed": grafted.is_some(),
         "history_grafted": grafted.map(|r| json!({
@@ -764,15 +766,13 @@ pub(super) fn repair_frontmatter_id(
 
     match crate::librarian::frontmatter::replace_scalar_line(&content, "id", new_id) {
         Some(rewritten) => {
-            // Best-effort by design (the rename already happened), so a link is SKIPPED, not
-            // failed: `rename` moved the link itself, and this write follows it to whatever it
-            // points at — possibly a file outside the repository, whose `id:` it would
-            // overwrite. Measured 2026-10-17 on a catalogued outward link. The catalog re-key
-            // stands; `doctor` reports the stale `id:` as `frontmatter_id_mismatch`.
-            if let Err(e) = crate::librarian::util::refuse_write_through_symlink(path) {
-                tracing::warn!("move: {e:#}; frontmatter id left unrepaired");
-                return Ok(content);
-            }
+            // A link is NOT repaired: `rename` moved the link itself, and a write here would
+            // follow it to whatever it points at, possibly a file outside the repository whose
+            // `id:` it would overwrite (measured 2026-10-17 on a catalogued outward link).
+            // `write_catalogued_file`'s leaf rule refuses it, and that refusal is RETURNED, not
+            // swallowed: `doc(move)` reports it in `id_repair_error` (it used to return the
+            // content as though the repair had happened), `doctor` lists it as failed. The
+            // catalog re-key stands; the stale `id:` is `frontmatter_id_mismatch`.
             crate::librarian::util::write_catalogued_file(roots, path, &rewritten)?;
             Ok(rewritten)
         }
