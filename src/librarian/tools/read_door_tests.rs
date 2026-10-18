@@ -48,7 +48,7 @@ const MARK: &str = "fakekeymarker";
 /// external authority).
 fn doc_text() -> String {
     format!(
-        "---\nid: {MARK}\n---\n\n# {MARK} title\n\n## T-1 — {MARK} entry\n\n{MARK} body line\n\n\
+        "---\nid: {MARK}\nunverified: {MARK} caveat\n---\n\n# {MARK} title\n\n## T-1 — {MARK} entry\n\n{MARK} body line\n\n\
          - `cluster/{MARK}`\n\n[link]({MARK}.md) and {MARK}:T-1\n\nTC-1\n\n## A\n\n### {MARK} nested\n\ntext\n"
     )
 }
@@ -754,6 +754,19 @@ async fn site_backfill_stored(fx: &Fx) -> bool {
 async fn site_doctor(fx: &Fx) -> bool {
     let (ctx, _) = ctx_for(fx, None);
     seed(&ctx, &fx.md, None);
+    // A terminal bug row, so `terminal_status_with_caveat` (a scan that reads through the scope's
+    // door, `DoctorScope::read_text`) echoes the target's `unverified:` caveat; the frontmatter
+    // `id:` is echoed by `check_frontmatter_id_matches_catalog` (a door passed in). Both must stay
+    // silent for a refused layout.
+    let id = crate::librarian::ids::artifact_id_from_abs(&fx.md);
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET kind = 'bug', status = 'fixed' WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .unwrap();
     out_anyhow(doctor::call(&ctx, json!({})).await)
 }
 

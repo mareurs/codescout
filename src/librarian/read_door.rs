@@ -512,8 +512,9 @@ mod tests {
     // ---------------------------------------------------------------------------------------
 
     /// Reads of files NO repository names, each with the reason it is not a door read. An entry
-    /// names the file, a fragment unique to the line, and how many such lines the file holds; the
-    /// gate requires exactly that many (a liveness floor: an entry whose read is gone fails too).
+    /// names the file, a fragment unique to the line, and how many raw reads such lines hold; the
+    /// gate requires exactly that many (a liveness floor: an entry whose read is gone fails too,
+    /// and a second read added to an allowed line is one too many).
     const ALLOWED: &[(&str, &str, usize, &str)] = &[
         ("workspace.rs", "std::fs::read_to_string(path).with_context", 1,
          "the operator's global ~/.config/librarian/workspace.toml (or LIBRARIAN_WORKSPACE)"),
@@ -753,13 +754,19 @@ mod tests {
             let src = std::fs::read_to_string(f).unwrap();
             let (code, _) = production_code(&src);
             for (n, line) in code.lines().enumerate() {
-                if RAW_READS.iter().any(|p| line.contains(p)) {
-                    if rel == "read_door.rs" {
-                        door_hits += 1;
-                        continue;
-                    }
-                    let original = src.lines().nth(n).unwrap_or("").trim().to_string();
-                    hits.push((rel.clone(), original));
+                // Every OCCURRENCE counts, not every line: a second raw read appended to an
+                // allowed line is a second read.
+                let occurrences: usize = RAW_READS.iter().map(|p| line.matches(p).count()).sum();
+                if occurrences == 0 {
+                    continue;
+                }
+                if rel == "read_door.rs" {
+                    door_hits += occurrences;
+                    continue;
+                }
+                let original = src.lines().nth(n).unwrap_or("").trim().to_string();
+                for _ in 0..occurrences {
+                    hits.push((rel.clone(), original.clone()));
                 }
             }
         }
@@ -779,7 +786,7 @@ mod tests {
                 .collect();
             if mine.len() != *count {
                 problems.push(format!(
-                    "allow-list entry {file} `{fragment}`: expected {count} line(s), found {}",
+                    "allow-list entry {file} `{fragment}`: expected {count} read(s), found {}",
                     mine.len()
                 ));
             }
