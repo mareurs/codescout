@@ -89,12 +89,19 @@ pub(crate) enum LinkTarget {
 
 /// Validate what a write target's LEAF symlink resolves to, when it is one.
 ///
-/// `validate_write_path` resolves the PARENT and keeps the leaf as written (a file that may not
-/// exist yet), so `<root>/leaf -> ~/.ssh/id_rsa` classifies as an ordinary in-root file and the
-/// deny-list is applied to the spelling, not to what the OS opens. This closes that for the
-/// callers, without touching the classifier: the resolved target is run through the existing
-/// public validators ([`validate_read_path`](crate::util::path_security::validate_read_path),
+/// `validate_write_path` judges where a write through a leaf link lands (it follows the chain and
+/// asks the deny list and the roots of the link AND of its end), so this is a SECOND look, kept as
+/// defence in depth rather than as the only guard: it asks again at the point of use (the link may
+/// have been re-pointed since the classifier looked), and its policies add what the classifier
+/// does not say. The classifier hands back the link's own spelling, `<root>/leaf ->
+/// ~/.ssh/id_rsa` included when it is allowed, and this runs the resolved target through the
+/// existing public validators ([`validate_read_path`](crate::util::path_security::validate_read_path),
 /// [`validate_write_path`](crate::util::path_security::validate_write_path)).
+///
+/// Not shown redundant, so not removed: the `Writable` policy refuses a dangling link outright, which
+/// the classifier answers by the path the link names, and nothing proves the `ReadableByTools`
+/// read deny-list is a subset of what the classifier's two-form deny list covers on every
+/// filesystem shape.
 ///
 /// A target that is not a link, or a path that does not exist, is `Ok`. A dangling link is `Ok`
 /// under [`LinkTarget::ReadableByTools`] (nothing can be read through it and `atomic_write`
@@ -167,8 +174,9 @@ pub(crate) async fn resolve_write_path_for(
         &security,
         &session_roots,
     )?;
-    // The classifier resolved the parent and kept the leaf as written; a leaf link to a
-    // deny-listed file is read by the edit tools through the link. See `validate_leaf_link_target`.
+    // The classifier judges where a write through a leaf link lands, but hands back the link's own
+    // spelling and the edit tools read the target through it, so look again at the point of use
+    // (defence in depth). See `validate_leaf_link_target`.
     validate_leaf_link_target(
         &resolved,
         &root,
