@@ -366,6 +366,7 @@ fn canonicalize_through_existing_ancestor(path: &Path) -> PathBuf {
 /// The most symbolic links one write target may chain through before the classifier gives up on
 /// it. It mirrors the kernel's own limit (`MAXSYMLINKS`, 40 on Linux), so a chain the OS would
 /// follow is a chain this follows, and a loop ends in a refusal instead of a hang.
+// cap-class: NOT_A_CAP — bounds how many symbolic links the classifier follows before refusing a chain; it limits a walk over the filesystem, never how much of any result is returned
 const MAX_LEAF_LINK_HOPS: usize = 40;
 
 /// Where a write to `target` lands when its LEAF may itself be a symlink: `target` itself when it
