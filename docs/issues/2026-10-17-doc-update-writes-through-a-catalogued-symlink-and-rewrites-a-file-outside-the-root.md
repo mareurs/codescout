@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-ca
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Parent-directory forms reproduced and fixed through round 5; the write door judges by one stated invariant (docs: Round 5) and every layout found so far is a row of door_layout_table. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). A path with no managed root, no .git above it and no ancestor resolving to a managed root gets only the leaf rule. A foreign link to the managed root itself is admitted (row H2, by decision). Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue; the remaining LIKE call sites are listed in docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md.'
+unverified: 'Parent-directory forms reproduced and fixed through round 6; the write door judges by one stated invariant (docs: Round 5, corrected in Round 6) and every layout found so far is a row of door_layout_table or door_layout_table_round6. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). A path with no managed root, no .git above it and no ancestor resolving to a managed root gets only the leaf rule. A foreign link to the managed root itself is admitted (row H2, by decision), and a foreign non-repo directory with a link to a repository is judged inside that repository (Y1a). Verdicts depend on the order of the managed roots (C5/C5c, X6), which tools::managed_roots fixes. A path spelled with .. is refused, not normalised, so a plain-looking Q/../P/x.md is refused when nothing manages it. doc(move) refuses a file it cannot read as UTF-8 text; the mode-000 and read-only tests skip themselves as root. Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue; the remaining LIKE call sites are listed in docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md.'
 ---
 
 # BUG: `doc(update)` writes with `std::fs::write(row.abs_path)`, so a catalogued in-root symlink to a file outside the root has that file rewritten
@@ -306,8 +306,9 @@ fixture and was killed after it was rebuilt. **Not probed, equivalent by constru
 
 ## Round 5 (Opus review of `e51d2d99`): the door fixed to a stated invariant, and a permanent layout table
 
-Commit `0b187952` (patch-id `5e48b25e9e01f0ccb1e18c0a878f8d4b880333eb`), and the follow-up commit that adds table rows K1/K2, the
-non-dry merge pin and these docs (its patch-id is in the report). This is the last round for the door: it is now one function with
+Commit `0b187952` (patch-id `5e48b25e9e01f0ccb1e18c0a878f8d4b880333eb`), then `0dace885` (`7c44cb9e9437fd0ccea56b0519a76b0c5df2fdaa`:
+table rows K1/K2 and the non-dry merge pin) and `af25d0fb` (`7b84e5064bd4b137db331eec9dd7387e4b0fe381`: these docs). Round 6
+corrected several statements below that the next review found false; each is marked. This round was meant to be the last for the door: it is now one function with
 one stated invariant, and every layout any round has found is a row of a table test (`door_table::door_layout_table` in
 `link_dir_tests.rs`), so a fifth change that breaks an answer is red there.
 
@@ -316,15 +317,17 @@ when no such inner root exists the confinement root itself is used.*
 
 - The **confinement root** is the FIRST managed root, in the caller's order, that lexically contains the spelling or has an ancestor of
   the spelling that resolves to it exactly (then the SHALLOWEST such ancestor). One loop for both clauses, so two spellings of a file give
-  one verdict (round 4 took any managed root for the resolving clause and the first lexical match for the other, so `home/proj/tom2` and
+  one verdict **for a fixed root order** (round 6 correction: the order is part of the input, rows X6/X6b/C5c show it; round 4 took any managed root for the resolving clause and the first lexical match for the other, so `home/proj/tom2` and
   `data/proj/tom2` disagreed: C5/C5b/C5c/C5d).
 - The **refinement** is the nearest ancestor of the spelling that holds a `.git` (directory or file) and is reached from the confinement root
-  by plain directories. Round 4's rule picked the nearest `.git` ancestor that was not itself a link, and a repository found BELOW a link
+  by plain directories (**round 6: and plain NAMES; a `..` is not a symlink, so `P/../Q` was wrongly counted as reached from `P`**). Round 4's rule picked the nearest `.git` ancestor that was not itself a link, and a repository found BELOW a link
   (`P/up -> ..`, row `P/up/S/docs/x.md`) is whatever the link points at: the write was judged against `S`, looked inside, and landed in
   `S`. The round-3 behaviour (refuse) was lost to the "deeper of two roots" rule; this restores it without losing P3, P1 or P2.
 - With no confinement root the outermost repository on the spelling is the anchor and the same clause applies; with no repository either,
   only the leaf rule applies.
-- **One function for every verb.** `doc(update)` and the other writers reach `door_root` through `write_catalogued_file`; `doc(move)`
+- **One function for every verb.** (**Round 6 correction: this was FALSE when written.** `doc(move)` and `doc(delete)` still gated on the
+  lexical `containing_root` before the door, so a row the door admitted was refused by them (layout C1), and `doc(create)` judged against the
+  project root alone, a fourth rule (layout F2). Round 6 fixes both; see its section.) `doc(update)` and the other writers reach `door_root` through `write_catalogued_file`; `doc(move)`
   judges its destination before the rename (so the id repair that follows cannot be refused after the file has moved: the half-done move
   of probe MV7) and its source parent, and `doc(delete)` its parent, through `refuse_catalogued_dir_outside_repo`. The table runs every
   row through both the file door and the directory door and requires them to agree.
@@ -335,7 +338,10 @@ when no such inner root exists the confinement root itself is used.*
   no longer admits a write into any checkout on the machine. Test `a_link_to_the_parent_cannot_reach_a_sibling_repository_through_any_verb`
   runs B1 through update, delete and move.
 - **M-1:** `doc(move)` into a nested repository's link back to the superproject now refuses up front, with nothing moved; the message after
-  the rename (reachable only if the filesystem changes after the check) no longer says "Nothing was changed" and says the file WAS renamed.
+  the rename no longer says "Nothing was changed" and says the file WAS renamed. (**Round 6 correction:** I wrote that this message was reachable only if the
+  filesystem changed after the check, and later that it was unreachable. Both were false: the repair's read ran after the rename and failed on a
+  mode-000 file, invalid UTF-8, a link to a directory and a row that is a directory, each leaving the file moved and the row not. Round 6 reads before the rename and
+  makes the repair's write best-effort.)
 - **M-2:** a dangling link (relative or absolute target) is refused up front. Round 4's loosened landing check had let a dangling
   relative link move, and the id repair then failed with ENOENT after the rename.
 - **M-3:** see the confinement root above; C5, C5b, C5c, C5d, and C8 (two resolving ancestors) pin it.
@@ -426,7 +432,81 @@ refusal; `doc(move)`'s destination door replaced by the old managed-root check; 
 guard clearing everything instead of its own arm; the guard taking the oldest arm; the preview's sidecar test widened back to `exists()`;
 `merge_worktree`'s exact predicate replaced by `LIKE`. **Survived:** `skip(1)` to `skip(0)` (equivalent, above); the first run of the lexical
 clause (a layout with an existing root cannot tell it from the resolving clause), killed after row K2 was added. **Not covered by a test:** the
-text of the error after a half-done rename (unreachable once the door runs first).
+text of the error after a half-done rename (**round 6: that error no longer exists; see the round 6 section**).
+
+## Round 6 (Opus review of `af25d0fb`): `..`, four verbs that really agree, and a move that reads before it renames
+
+Commit `afc73ce2f` (patch-id `24b85c3f207e3138088d644c584e9cadd00056bf`). The review found no HIGH, and the live catalog (6170 rows) is refused
+by the door in 0 cases under all three root derivations. Every behavioural item below was written as a test first and seen RED (9 tests red
+at `af25d0fb`: six table rows, the four-verb tests, the `..` end-to-end test, and the move tests), then fixed.
+
+- **MED-1, a `..` spelling defeated the refinement.** `strip_prefix(P)` of `P/../Q` succeeds and `..` is never a symlink, so `P/../Q` counted as
+  "reached from P by plain directories" and the write was judged against `Q`: with `P` active, `doc(update)` wrote `Q`'s file, `doc(move)` moved it into `P`
+  and `doc(delete)` deleted it (reachability was limited: no live row has `..`). `descends_without_link` now accepts plain NAMES only. `.` and `//`
+  need no code: `Path::components` drops them, so `P/./docs/y.md` and `P//docs/y.md` stay the plain paths they spell (rows X1f, X1g ADMIT). A `..`
+  spelling is NOT normalised: `P/../Q/docs/x.md` claims `P`, so it is refused (X1, X1b, X1i), and with no roots it is judged against the outermost
+  repository on the spelling and refused (X1d). The price, stated: a plain-looking `Q/../P/docs/x.md` is also refused when nothing manages it.
+- **MED-2, "the three verbs cannot disagree" was false.** `doc(move)` and `doc(delete)` gated on the lexical `containing_root` before the door, so layout C1
+  (root `data/proj`, row `home/proj/docs/x.md`) was written by update and refused by move ("no managed root contains") and delete ("outside every managed
+  root"); E2 and H2 had the same shape. `doc(create)` called `refuse_path_outside_root(&full, &base_dir)`, a fourth rule: a create at `sub/linkdir/new.md`
+  in layout F2 succeeded and landed in the superproject, after which update, move and delete refused the new row. Now `doc(move)` and `doc(delete)` name
+  their root with `util::managed_base` (the function the door uses) and `doc(create)` goes through the door. Tests
+  `every_verb_admits_a_row_spelled_through_a_link_to_the_managed_project` (C1: update, move, delete and create all ADMIT) and
+  `every_verb_refuses_a_path_below_a_nested_repositorys_link_into_its_superproject` (F2: all four REFUSE, nothing created or moved) state the verdict
+  of each verb. Nothing rounds 1-2 admitted is refused now: the full librarian suite (in-repo link directories, worktree shadow rows, umbrella roots,
+  monorepo subprojects) is green.
+- **MED-3, a half-done move was still reachable.** The id repair read the file AFTER the rename and failed on four causes, each renaming the file while the row
+  kept the old path: a mode-000 file, invalid UTF-8, a leaf link to a directory, a row that is a directory. `doc(move)` now reads the content BEFORE
+  anything moves and refuses a file it cannot read as text ("cannot read it as UTF-8 text", nothing moved); that content feeds the repair and the row's
+  digest. What can still fail after the rename is the repair's WRITE (a read-only file): that is now best-effort as the function's doc said, so the move completes,
+  the row is re-keyed with the file's real content, and the response carries `id_repair_error` (`doctor` reports the stale `id:`). One test per cause (the
+  mode-000 and read-only tests skip themselves when run as root, and say so) and `doc_move_completes_and_reports_when_only_the_id_repair_write_fails`.
+  False statements corrected: the comment at the old `mv.rs:353-356`, round 5's "unreachable once the door runs first", and the `repair_frontmatter_id` doc
+  (only parse errors are logged; a read or write error is returned).
+- **LOW-1, a foreign anchor reached through a link** (non-repo `X`, `X/link -> repo R`): ADMIT with unrelated or no roots (Y1a), REFUSE when `X` is managed (Y1b).
+  Documented, not changed: with no managed root the anchor is the repository a foreign spelling CLAIMS (J2's reasoning), and here that is the one behind the link,
+  so the row is judged inside it; a managed root is never judged this way. `descends_without_link` and `holds_git` now say so (the `holds_git` doc had claimed the
+  descent check covers the candidate "itself included", which is false when the candidate is the anchor).
+- **LOW-2, non-UTF-8 roots.** `comparable_path` compared `to_string_lossy` strings, so the roots `n\xff` and `n\xfe` were equal and one "contained" the other's
+  rows (over-refusal, and `doc(move)`/`doc(delete)` could pick the wrong root). Raw bytes on Unix (X8 ADMIT).
+- **LOW-3, `.git` markers.** One rule: any `.git` entry seen WITHOUT following it marks a repository (`symlink_metadata`). Chosen over "exists()" because a `.git` that is a
+  link or dangling is still the author saying "this directory is a repository"; X3 (link to a directory) and X3b (dangling) now both REFUSE, X3c (a `.git` file in a worktree
+  behind a link) REFUSES.
+- **Known, not changed: verdicts depend on the order of the managed roots** (C5 against C5c; X6: roots `[U,N]` ADMIT the row `U/N/l -> U/other`, `[N,U]` and `[N]` REFUSE it).
+  "Two spellings of one file give one verdict" holds for a FIXED root order, and the callers fix it: `tools::managed_roots` lists the active project's git root and project root
+  first, then the workspace roots in file order.
+
+**New table rows (verdicts; the file door and the directory door agree on all of them).** `door_table::door_layout_table_round6`.
+
+| row | layout | verdict |
+|---|---|---|
+| X1 | roots [P], `P/../Q/docs/x.md` (W{P,Q} both repositories) | REFUSE |
+| X1b | roots [P], `P/docs/../../Q/docs/x.md` | REFUSE |
+| X1c | roots [P], the canonical Q row (a foreign repository's own plain row, as J2) | ADMIT |
+| X1d | no roots, `P/../Q/docs/x.md` (not normalised) | REFUSE |
+| X1e | roots [P], `P/../R/x.md` (R holds no `.git`) | REFUSE |
+| X1f | roots [P], `P/./docs/y.md` | ADMIT |
+| X1g | roots [P], `P//docs/y.md` | ADMIT |
+| X1h | roots [P,W], `P/linkq/x.md` (link into Q) | REFUSE |
+| X1i | roots [P,W], `P/../Q/docs/x.md` | REFUSE |
+| X3 | nested dir whose `.git` is a link to a directory, its link back into P | REFUSE |
+| X3b | same with a DANGLING `.git` link | REFUSE |
+| X3c | `P/towt` -> a linked worktree elsewhere (its `.git` is a file), behind a link | REFUSE |
+| X6 | roots [U,N], `U/N/l -> U/other` | ADMIT |
+| X6b | roots [N,U], same row | REFUSE |
+| X6c | roots [N] only, same row | REFUSE |
+| X8 | roots [n\xff, n\xfe], row in n\xfe | ADMIT |
+| Y1a | roots [unrelated], X (no repo) with `X/link -> repo R` | ADMIT |
+| Y1b | roots [X], same row | REFUSE |
+
+**Decisions of rounds 2-5 that changed:** round 5's claim that update, move, delete (and the unmentioned create) share one decision (now true; create and the root function
+changed); round 5's "plain directories" refinement (now plain NAMES); round 5's handling of an unreadable file in `doc(move)` (refused up front instead of half-moved) and of a
+failing repair write (reported, not an error); `.git` marker detection (`exists()` to `symlink_metadata`). Unchanged: F2/F4 refused, H2 admitted, root-order dependence.
+
+**Mutation probe, round 6** (104-631 tests per run): killed: the non-Normal clause; `holds_git` back to `exists()`; the byte comparison back to lossy; `doc(move)` back to
+`containing_root`; `doc(delete)` back to `containing_root`; `doc(create)` back to the old base-dir check; the read-before-rename; the repair's write failure turned back into an
+error (the old M6, which survived round 5 because nothing could reach it, and is killed by the read-only test). **Survived:** none new; `skip(1)` to `skip(0)` stays equivalent
+(round 5).
 
 ## Tests added
 
