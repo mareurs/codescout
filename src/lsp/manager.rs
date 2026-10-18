@@ -596,11 +596,54 @@ const MUX_CONNECT_ROUNDS: u32 = 3;
 const MUX_INIT_READ_MIN: Duration = Duration::from_millis(500);
 
 /// How long one connect attempt waits for the mux's init message: what is left of the caller's
-/// window, but at least `MUX_INIT_READ_MIN`. The attempt may therefore end up to
-/// `MUX_INIT_READ_MIN` after the window does.
+/// window, but at least `min_init_read`. The attempt may therefore end up to `min_init_read`
+/// after the window does; with the loop's 200 ms pause a call can end up to
+/// `MUX_CONNECT_RETRY_INTERVAL + min_init_read` after its window (derived from the code, not
+/// measured).
 #[cfg(unix)]
-fn mux_init_read_bound(remaining: Duration) -> Duration {
-    remaining.max(MUX_INIT_READ_MIN)
+fn mux_init_read_bound(remaining: Duration, min_init_read: Duration) -> Duration {
+    remaining.max(min_init_read)
+}
+
+/// How one round of `get_or_start_via_mux_waiting` connects: for how long, with what floor for
+/// the init read, and whether the mux lock is checked between attempts.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+struct MuxConnectPlan {
+    window: Duration,
+    min_init_read: Duration,
+    check_holder: bool,
+}
+
+/// The plan for a round. `left` is what is left of the call's one wait budget.
+///
+/// - We spawned the mux and saw its `ready` line: the socket is bound, so the window only absorbs
+///   the accept race, there is no other holder to check, and the init read gets the full default
+///   bound (`MUX_INIT_READ_TIMEOUT`): this path had no bound on that read before 2026-10-18 and
+///   a mux that is up has nothing to wait for but a busy machine.
+/// - A remembered wedge: one attempt (a mux that has come up since still connects).
+/// - Otherwise a peer's mux that may still be starting: what is left of the budget.
+#[cfg(unix)]
+fn plan_mux_connect(need_spawn: bool, remembered_wedge: bool, left: Duration) -> MuxConnectPlan {
+    if need_spawn {
+        MuxConnectPlan {
+            window: MUX_SPAWNED_CONNECT_WINDOW,
+            min_init_read: crate::lsp::client::MUX_INIT_READ_TIMEOUT,
+            check_holder: false,
+        }
+    } else if remembered_wedge {
+        MuxConnectPlan {
+            window: Duration::ZERO,
+            min_init_read: MUX_INIT_READ_MIN,
+            check_holder: true,
+        }
+    } else {
+        MuxConnectPlan {
+            window: left,
+            min_init_read: MUX_INIT_READ_MIN,
+            check_holder: true,
+        }
+    }
 }
 
 /// Why [`connect_to_mux`] gave up: the last connect error, and whether it stopped because the
@@ -629,15 +672,15 @@ impl std::fmt::Display for MuxConnectFailure {
 /// during the last interval is reported gone rather than wedged.
 ///
 /// An attempt that connects but gets no init message (a mux wedged after `bind`) is bounded by
-/// the window still left, but never by less than `MUX_INIT_READ_MIN`
-/// (see [`mux_init_read_bound`]), so it is a failed attempt like any other: the lock is checked,
-/// and the window ends it.
+/// the window still left, but never by less than `min_init_read` (see [`mux_init_read_bound`]),
+/// so it is a failed attempt like any other: the lock is checked, and the window ends it.
 #[cfg(unix)]
 async fn connect_to_mux(
     socket_path: &std::path::Path,
     workspace_root: &Path,
     window: Duration,
     holder_lock: Option<&std::path::Path>,
+    min_init_read: Duration,
 ) -> std::result::Result<LspClient, MuxConnectFailure> {
     // tokio's clock, so a test can serve the production window on a paused clock.
     let deadline = tokio::time::Instant::now() + window;
@@ -646,7 +689,7 @@ async fn connect_to_mux(
         let err = match LspClient::connect_with_init_timeout(
             socket_path,
             workspace_root.to_path_buf(),
-            mux_init_read_bound(remaining),
+            mux_init_read_bound(remaining, min_init_read),
         )
         .await
         {
@@ -1261,23 +1304,21 @@ impl LspManager {
                 .unwrap_or_else(|e| e.into_inner())
                 .get(&wedge_key)
                 .is_some_and(|at| at.elapsed() < MUX_WEDGED_MEMORY);
-            let (window, holder_lock) = if need_spawn {
-                (MUX_SPAWNED_CONNECT_WINDOW, None)
-            } else if remembered_wedge {
-                // This mux just stayed unreachable for a whole wait: one attempt, so a mux
-                // that has come up since still connects, but no second wait (a directory
-                // of files calls this once per file).
-                (Duration::ZERO, Some(lock_path.as_path()))
-            } else {
-                // What is left of the one budget: a replacement holder does not get a second
-                // full wait.
-                let left = wait_deadline.saturating_duration_since(tokio::time::Instant::now());
-                (left, Some(lock_path.as_path()))
-            };
+            let left = wait_deadline.saturating_duration_since(tokio::time::Instant::now());
+            let plan = plan_mux_connect(need_spawn, remembered_wedge, left);
+            let holder_lock = plan.check_holder.then_some(lock_path.as_path());
             // A round that follows a holder's death waits on a REPLACEMENT for what is left of
             // the one budget (possibly about nothing), so its outcome is not a verdict on a mux.
             let waited_on_replacement = last_holder_gone;
-            match connect_to_mux(&socket_path, workspace_root, window, holder_lock).await {
+            match connect_to_mux(
+                &socket_path,
+                workspace_root,
+                plan.window,
+                holder_lock,
+                plan.min_init_read,
+            )
+            .await
+            {
                 Ok(client) => {
                     self.mux_wedged_at
                         .lock()
@@ -2834,6 +2875,7 @@ mod tests {
             dir.path(),
             Duration::from_secs(10),
             Some(&lock_path),
+            MUX_INIT_READ_MIN,
         )
         .await;
         peer.abort();
@@ -2863,7 +2905,13 @@ mod tests {
         let started = Instant::now();
         let returned = tokio::time::timeout(
             Duration::from_secs(5),
-            super::connect_to_mux(&sock_path, dir.path(), Duration::from_secs(1), None),
+            super::connect_to_mux(
+                &sock_path,
+                dir.path(),
+                Duration::from_secs(1),
+                None,
+                MUX_INIT_READ_MIN,
+            ),
         )
         .await
         .is_ok();
@@ -2919,7 +2967,7 @@ mod tests {
         let started = Instant::now();
         let failure = tokio::time::timeout(
             Duration::from_secs(20),
-            super::connect_to_mux(&sock_path, dir.path(), window, None),
+            super::connect_to_mux(&sock_path, dir.path(), window, None, MUX_INIT_READ_MIN),
         )
         .await
         .expect("the window must end the connect by itself")
@@ -2967,16 +3015,28 @@ mod tests {
         let started = Instant::now();
         let failure = tokio::time::timeout(
             Duration::from_secs(20),
-            super::connect_to_mux(&sock_path, dir.path(), window, None),
+            super::connect_to_mux(&sock_path, dir.path(), window, None, MUX_INIT_READ_MIN),
         )
         .await
         .expect("the window must end the connect by itself");
         let elapsed = started.elapsed();
         peer.abort();
 
+        let failure = failure
+            .err()
+            .expect("a socket that never sends init is not a mux");
+        // The last attempt could not start before the socket appeared at 1.5 s, so what was left
+        // of the 3 s window was at most 1.5 s: its bound is at most that (the floor, 0.5 s, is
+        // lower). The whole window (3 s) or anything added to the bound would exceed 1.7 s. This
+        // holds however loaded the machine is, which a wall-clock bound does not.
+        let applied = failure
+            .source
+            .downcast_ref::<crate::lsp::client::MuxInitTimeout>()
+            .expect("the failure is the init timeout")
+            .after;
         assert!(
-            failure.is_err(),
-            "a socket that never sends init is not a mux"
+            applied <= Duration::from_millis(1700),
+            "the last attempt's bound is what is left of the window, got {applied:?}"
         );
         assert!(
             elapsed >= window && elapsed < Duration::from_millis(3900),
@@ -3006,11 +3066,170 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(5)).await;
         });
 
-        let connected = super::connect_to_mux(&sock_path, dir.path(), Duration::ZERO, None).await;
+        let connected = super::connect_to_mux(
+            &sock_path,
+            dir.path(),
+            Duration::ZERO,
+            None,
+            MUX_INIT_READ_MIN,
+        )
+        .await;
         peer.abort();
         assert!(
             connected.is_ok(),
             "a mux that sends its init message 100 ms after accepting is alive: {:?}",
+            connected.err().map(|e| e.to_string())
+        );
+    }
+
+    /// F5 of the review of dd961fe5f. The bound given to an attempt is read from the failure
+    /// itself (`MuxInitTimeout::after`), so it is checked exactly and not through the wall clock
+    /// (a +400 ms mutant at the call site stayed inside every wall-clock slack on a machine at
+    /// load 13): with a 1 s window it never exceeds the window, and with a window of zero it is
+    /// exactly the floor.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_attempts_init_bound_is_what_is_left_of_the_window_and_never_below_the_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let (_accepted, _closed) = silent_mux(&sock_path);
+        let applied = |failure: MuxConnectFailure| {
+            failure
+                .source
+                .downcast_ref::<crate::lsp::client::MuxInitTimeout>()
+                .expect("the failure is the init timeout")
+                .after
+        };
+
+        let window = Duration::from_secs(1);
+        let failure =
+            super::connect_to_mux(&sock_path, dir.path(), window, None, MUX_INIT_READ_MIN)
+                .await
+                .err()
+                .expect("silent");
+        let first = applied(failure);
+        assert!(
+            first <= window && first >= Duration::from_millis(500),
+            "one attempt waits what is left of a 1 s window: {first:?}"
+        );
+
+        let failure = super::connect_to_mux(
+            &sock_path,
+            dir.path(),
+            Duration::ZERO,
+            None,
+            MUX_INIT_READ_MIN,
+        )
+        .await
+        .err()
+        .expect("silent");
+        assert_eq!(
+            applied(failure),
+            Duration::from_millis(500),
+            "a window of zero gives the floor and not a nanosecond more"
+        );
+    }
+
+    /// The constants the docs and the issue files quote, pinned by literals: the tests above
+    /// measure against the constants themselves, so changing one would otherwise move the
+    /// behaviour and the expectation together (review F4: 5 s to 2 s, 500 ms to 150 ms survived).
+    #[test]
+    fn the_mux_connect_constants_have_the_values_the_docs_quote() {
+        assert_eq!(
+            crate::lsp::client::MUX_INIT_READ_TIMEOUT,
+            Duration::from_secs(5)
+        );
+        assert_eq!(MUX_INIT_READ_MIN, Duration::from_millis(500));
+        assert_eq!(MUX_SPAWNED_CONNECT_WINDOW, Duration::from_millis(800));
+        assert_eq!(MUX_CONNECT_RETRY_INTERVAL, Duration::from_millis(200));
+        assert_eq!(MUX_CONNECT_ROUNDS, 3);
+    }
+
+    /// What each kind of round connects with, by literals. The spawned path (F3) is the one that
+    /// had no init bound before 2026-10-18: it gets the 5 s default and checks no lock.
+    #[cfg(unix)]
+    #[test]
+    fn each_kind_of_round_connects_with_the_documented_window_and_init_floor() {
+        let left = Duration::from_secs(7);
+        assert_eq!(
+            plan_mux_connect(true, false, left),
+            MuxConnectPlan {
+                window: Duration::from_millis(800),
+                min_init_read: Duration::from_secs(5),
+                check_holder: false,
+            }
+        );
+        assert_eq!(
+            plan_mux_connect(true, true, left),
+            plan_mux_connect(true, false, left),
+            "a spawned mux ignores the wedge memory"
+        );
+        assert_eq!(
+            plan_mux_connect(false, true, left),
+            MuxConnectPlan {
+                window: Duration::ZERO,
+                min_init_read: Duration::from_millis(500),
+                check_holder: true,
+            }
+        );
+        assert_eq!(
+            plan_mux_connect(false, false, left),
+            MuxConnectPlan {
+                window: left,
+                min_init_read: Duration::from_millis(500),
+                check_holder: true,
+            }
+        );
+        let half = Duration::from_millis(500);
+        assert_eq!(
+            mux_init_read_bound(Duration::from_secs(3), half),
+            Duration::from_secs(3)
+        );
+        assert_eq!(mux_init_read_bound(Duration::from_millis(200), half), half);
+        assert_eq!(mux_init_read_bound(Duration::ZERO, half), half);
+    }
+
+    /// F3 of the review of dd961fe5f. The path that SPAWNED the mux and saw its `ready` line
+    /// (`MUX_SPAWNED_CONNECT_WINDOW`, 800 ms, no lock to check) had NO bound on the init read
+    /// before the fix and got one of about 0.8 s from it, ending in a hard error. The mux is up
+    /// there, so the init read is given the full default bound (5 s): a mux that answers 2 s
+    /// after accepting (a busy machine) must be connected to.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_we_just_spawned_gets_the_full_init_bound_not_the_connect_window() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+            stream
+                .write_all(format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        // The production plan for a mux this call just spawned.
+        let plan = plan_mux_connect(true, false, Duration::ZERO);
+        let connected = tokio::time::timeout(
+            Duration::from_secs(30),
+            super::connect_to_mux(
+                &sock_path,
+                dir.path(),
+                plan.window,
+                None,
+                plan.min_init_read,
+            ),
+        )
+        .await
+        .expect("bounded");
+        peer.abort();
+        assert!(
+            connected.is_ok(),
+            "a mux that answers 2 s after accepting is alive: {:?}",
             connected.err().map(|e| e.to_string())
         );
     }
@@ -3032,7 +3251,7 @@ mod tests {
         let window = Duration::from_millis(600);
         let failure = tokio::time::timeout(
             Duration::from_secs(20),
-            super::connect_to_mux(&sock_path, dir.path(), window, None),
+            super::connect_to_mux(&sock_path, dir.path(), window, None, MUX_INIT_READ_MIN),
         )
         .await
         .expect("the window must end the connect by itself")
@@ -3708,6 +3927,7 @@ mod tests {
             dir.path(),
             Duration::from_secs(1),
             Some(&lock_path),
+            MUX_INIT_READ_MIN,
         )
         .await
         .err()
@@ -3744,6 +3964,7 @@ mod tests {
             dir.path(),
             Duration::from_secs(20),
             Some(&lock_path),
+            MUX_INIT_READ_MIN,
         )
         .await;
         assert!(connected.is_err(), "no socket ever appeared");

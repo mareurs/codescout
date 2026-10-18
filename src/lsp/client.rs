@@ -36,6 +36,26 @@ const MAX_STDERR_LINES: usize = 200;
 /// shorter bound.
 // cap-class: NOT_A_CAP — bound on a wait for a peer's first message; expiry surfaces as a connect error, never as a shorter answer
 pub(crate) const MUX_INIT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// The error of a mux that accepted a connection and sent no init message within `after`. A type
+/// of its own so a caller (and a test) can read the bound that was applied instead of parsing it
+/// out of the message.
+#[derive(Debug)]
+pub(crate) struct MuxInitTimeout {
+    pub(crate) socket_path: std::path::PathBuf,
+    pub(crate) after: std::time::Duration,
+}
+
+impl std::fmt::Display for MuxInitTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "mux accepted the connection at {:?} but sent no init message within {:?}",
+            self.socket_path, self.after
+        )
+    }
+}
+
+impl std::error::Error for MuxInitTimeout {}
 
 use super::call_hierarchy::supports_call_hierarchy;
 
@@ -704,11 +724,10 @@ impl LspClient {
         let init_msg = tokio::time::timeout(init_timeout, transport::read_message(&mut buf_reader))
             .await
             .map_err(|_| {
-                anyhow::anyhow!(
-                    "mux accepted the connection at {:?} but sent no init message within {:?}",
-                    socket_path,
-                    init_timeout
-                )
+                anyhow::Error::new(MuxInitTimeout {
+                    socket_path: socket_path.to_path_buf(),
+                    after: init_timeout,
+                })
             })?
             .context("Failed to read mux init message")?;
 

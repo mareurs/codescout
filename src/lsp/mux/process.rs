@@ -1262,6 +1262,14 @@ mod tests {
         );
     }
 
+    /// The lock constants by literals (review F4: `MUX_LOCK_GRACE` 1 s to 3 s survived, because
+    /// the tests above quote the constant).
+    #[test]
+    fn the_mux_lock_constants_have_the_values_the_docs_quote() {
+        assert_eq!(MUX_LOCK_GRACE, std::time::Duration::from_secs(1));
+        assert_eq!(MUX_LOCK_POLL, std::time::Duration::from_millis(10));
+    }
+
     /// The wiring: `run` itself takes its lock through the grace, so a mux that starts while a
     /// client's probe holds the lock gets as far as spawning its server (which does not exist
     /// here, so that is the failure asserted) instead of exiting "another mux instance holds the
