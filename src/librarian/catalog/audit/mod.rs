@@ -462,14 +462,40 @@ pub(crate) fn elide_values(
     row_id: &str,
     cols: &[&str],
 ) -> Result<usize> {
+    elide_where(conn, tbl, "row_id = ?2", row_id, cols)
+}
+
+/// [`elide_values`] for every audit row of `tbl` whose `row_id` STARTS with `prefix`, compared
+/// byte-exactly (`substr`, never `LIKE`): the cascaded `entry_cite` rows of a removed artifact,
+/// whose ids are `slug:local→dst_ref`.
+pub(crate) fn elide_values_by_row_prefix(
+    conn: &Connection,
+    tbl: &str,
+    prefix: &str,
+    cols: &[&str],
+) -> Result<usize> {
+    elide_where(
+        conn,
+        tbl,
+        "substr(row_id, 1, length(?2)) = ?2",
+        prefix,
+        cols,
+    )
+}
+
+fn elide_where(
+    conn: &Connection,
+    tbl: &str,
+    row_predicate: &str,
+    key: &str,
+    cols: &[&str],
+) -> Result<usize> {
     let rows: Vec<(i64, String)> = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT seq, payload FROM catalog_audit \
-             WHERE tbl = ?1 AND row_id = ?2 AND payload IS NOT NULL",
-        )?
-        .query_map(rusqlite::params![tbl, row_id], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })?
+             WHERE tbl = ?1 AND {row_predicate} AND payload IS NOT NULL"
+        ))?
+        .query_map(rusqlite::params![tbl, key], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let stand_in = serde_json::json!({ "elided": READ_DOOR_ELIDED });
     let mut rewritten = 0usize;

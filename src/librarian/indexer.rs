@@ -778,15 +778,31 @@ pub fn index_repo_sync(
         // (where `exists()` answers `true` via the symlink's target). Neither subsumes
         // the other; `skipped_duplicate_ids` says why the second is not a re-derivation.
         if gone || skipped_duplicate_ids.contains(cand_id) || escaping {
+            // The delete trigger copies the whole old row into the trail. For a row whose file the
+            // door refuses that is the outside file's text, and the door's refusal is not the only
+            // way to know it: a row whose path is still a LINK (dangling: its target removed) or
+            // whose stored path is a lossy record of a non-UTF-8 name was catalogued from a file
+            // nobody can judge now, and is elided the same way (review round 2, R2-1a, R2-2).
+            let elide = escaping || removal_needs_elision(cand_abs_path);
             in_savepoint(&cat.conn, || {
+                let slug: Option<String> = cat
+                    .conn
+                    .query_row(
+                        "SELECT slug FROM artifact WHERE id = ?1",
+                        rusqlite::params![cand_id],
+                        |r| r.get(0),
+                    )
+                    .ok()
+                    .flatten();
                 cat.conn.execute(
                     "DELETE FROM artifact WHERE id = ?1",
                     rusqlite::params![cand_id],
                 )?;
-                // The delete trigger copied the whole old row into the trail; for an escaping
-                // row that is the outside file's text.
-                if escaping {
+                if elide {
                     elide_escaping_audit(cat, cand_id)?;
+                    if let Some(slug) = slug {
+                        elide_cascaded_citations(cat, &slug)?;
+                    }
                 }
                 Ok(())
             })?;
@@ -987,6 +1003,30 @@ fn elide_escaping_audit(cat: &Catalog, id: &str) -> Result<()> {
         "artifact",
         id,
         crate::librarian::catalog::audit::ARTIFACT_FILE_DERIVED,
+    )?;
+    Ok(())
+}
+
+/// Does removing the row at `abs_path` (a stored path) need the audit elision although the read
+/// door did not call it escaping? Yes when the path is itself a symbolic link (a dangling one is
+/// `gone` to `exists()`), and when it is the lossy record (U+FFFD) of a name that is not valid
+/// UTF-8 and names no file. Both rows hold values taken from a file the door cannot judge.
+fn removal_needs_elision(abs_path: &str) -> bool {
+    let p = std::path::Path::new(abs_path);
+    let is_link = std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    is_link || (abs_path.contains('\u{FFFD}') && !p.exists())
+}
+
+/// The `entry_cite` rows of a removed row cascade away with it, and their delete images carry the
+/// row's slug (minted from the file's title) and the cited tokens (from its text). The PAYLOAD
+/// copies are elided; the `row_id` (`slug:local→dst_ref`) is the trail's routing key and stays,
+/// which is recorded as the open part of the issue's Deviation 8.
+fn elide_cascaded_citations(cat: &Catalog, slug: &str) -> Result<()> {
+    crate::librarian::catalog::audit::elide_values_by_row_prefix(
+        &cat.conn,
+        "entry_cite",
+        &format!("{slug}:"),
+        &["src_slug", "src_local", "dst_ref"],
     )?;
     Ok(())
 }
