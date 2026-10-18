@@ -447,6 +447,7 @@ mod tests {
         NO_FD_PATH.with(|c| c.get())
     }
 
+    #[cfg(unix)]
     fn set_hooks(between: Option<Hook>, after: Option<Hook>) {
         BETWEEN.with(|h| *h.borrow_mut() = between);
         AFTER_JUDGE.with(|h| *h.borrow_mut() = after);

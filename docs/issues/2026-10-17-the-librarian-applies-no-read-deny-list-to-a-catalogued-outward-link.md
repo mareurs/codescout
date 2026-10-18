@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-pa
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'macOS not run (same std calls) and Windows unverified: no inode check there, so the door judges then reads with a race window (D9). Not covered by design: a hard link or bind mount placed inside the repository. Kept rows keep their slug and citation edges (Design deviation 8, operator decision open). Rows a pre-fix walk catalogued through an outward link still show a stored title in doc(list_stale), the worktree reports and tracker_design until the next reindex of their project clears or reclaims them. Config-file TOML errors that quote a line were not exercised. The doctor cost on the live catalog is estimated from a release microbenchmark, not measured on it. The external-store vector delete is tested with the in-memory store only.'
+unverified: 'macOS not run (it takes the fallback path: F_GETPATH not wired) and Windows unverified: no inode check there, so the door judges then reads with a race window (D9). On the fallback path (no /proc, macOS, other Unix) a PARENT directory swapped inside for the judgement and back afterwards is still not refused (review round 1, F2). Not covered by design: a hard link or bind mount placed inside the repository. Kept rows keep their slug and citation edges, and a cascaded entry_cite delete keeps its row_id in the audit trail (Design deviation 8, operator decision open). Audit shard lines exported before a removal, text an embedder received, and freed SQLite pages are not recalled. Rows a pre-fix walk catalogued through an outward link still show a stored title in doc(list_stale), the worktree reports and tracker_design until the next reindex of their project clears or reclaims them. Config-file TOML errors that quote a line were not exercised. The doctor cost on the live catalog is estimated, not measured on it. The external-store vector delete is tested with the in-memory store only.'
 ---
 
 # BUG: the librarian applies NO read deny-list, so a repository can ship `notes.md -> ~/.ssh/id_rsa` and have the key catalogued, embedded and returned by `doc(get)`
@@ -322,17 +322,17 @@ already received cannot be recalled; the note says so.
 
 ## Fix (Phase 2)
 
-Branch `worktree-agent-a8918c1498fdd30e8`, on `experiments` `7a09623bd`. The operator answered D1-D9 with the
+Branch `worktree-agent-a8918c1498fdd30e8`, on `experiments` `7a09623bd` (rebased onto `0a8af94d7` for review round 1). The operator answered D1-D9 with the
 recommendations, and D4 with "clear everything derived from the outside file".
 
 | commit | patch-id | what |
 |---|---|---|
-| `45858098a` | `7bfbbd10c5a0a4be4d7dfeb2edb1eaa31f8ae125` | the read door (`src/librarian/read_door.rs`), its unit tests, a read column in the write door's layout tables |
-| `686838dc4` | `b4e72fc7b87485a9d8fe8c39968ee3ad5d85d751` | the walk, reclamation (keep and clear), backfill, and the reindex report |
-| `5b3d834ba` | `23d2abc7aef8f0dcb9c72f8ec90ab24b94b0c961` | every other read site, tiers 1 and 2, and the site table `tools/read_door_tests.rs` |
-| `673859c08` | `394c11fb30be5535bed536a111fb811c7a46729e` | the source gate |
-| `a24fb3b94` | `fea062f37642cd1fed4661de84e9c2b5966d10ca` | two tests strengthened after their mutants survived (below) |
-| `033638f07` | `b24957d48be5ee8443eb1fc14136095779b4f44f` | a clippy fix to the test hook (the gate's clippy lane caught it) |
+| `eae21e694` | `7bfbbd10c5a0a4be4d7dfeb2edb1eaa31f8ae125` | the read door (`src/librarian/read_door.rs`), its unit tests, a read column in the write door's layout tables |
+| `acba669d6` | `b4e72fc7b87485a9d8fe8c39968ee3ad5d85d751` | the walk, reclamation (keep and clear), backfill, and the reindex report |
+| `bbdfca690` | `23d2abc7aef8f0dcb9c72f8ec90ab24b94b0c961` | every other read site, tiers 1 and 2, and the site table `tools/read_door_tests.rs` |
+| `ebb3d5715` | `394c11fb30be5535bed536a111fb811c7a46729e` | the source gate |
+| `e1f5d3ad4` | `fea062f37642cd1fed4661de84e9c2b5966d10ca` | two tests strengthened after their mutants survived (below) |
+| `2903c3747` | `b24957d48be5ee8443eb1fc14136095779b4f44f` | a clippy fix to the test hook (the gate's clippy lane caught it) |
 
 ### The invariant (stated in `read_door.rs` and here)
 
@@ -483,22 +483,98 @@ estimated +1 s for the first reads and +2 s for the rest; estimated, not run on 
 10. **`gather` with no active project** joins paths to the server's absolute working directory (it used `.`), so the
     door can judge them; what is read is unchanged.
 
+## Review round 1 (Opus review of `c6d235ffa`): the audit trail, a swap back, a huge file, wording, the gate
+
+The reviewer read code and ran nothing; every item below was reproduced RED by a test before its fix.
+
+- **F1 (high), the clearing moved the text into the audit trail.** `artifact` is audited: the UPDATE trigger
+  stores `[old, new]` of every changed column, the DELETE trigger the whole old row, and the reindex exports
+  `catalog_audit` to the committed shards. Measured red on the real pre-fix state (below): `catalog_audit.payload:
+  {"slug":[null,"fakekeymarker-title"]}` (the slug minted from the target's title when it was first indexed) and
+  `{"kind":["doc","unknown"],...,"title":["fakekeymarker title",null],...}` (the clear), and for a reclaimed row the
+  whole delete image with the title. **Invariant: removing what the read door refuses never copies it.** When a row
+  is reclaimed or cleared because its file resolves outside its repository, every audit payload of that row loses the
+  values of the columns its file supplied (`audit::ARTIFACT_FILE_DERIVED`: title, kind, status, owners, tags, topic,
+  time scope, file hash, mtime, embedded hash, slug), replaced by `{"elided": "read-door"}`, in the same savepoint as
+  the removal and before the export. Keys and routing keys (`id`, `abs_path`) stay, so the export still attributes the
+  row and a reader sees which columns changed. Historic rows of that id are elided too (the slug-mint row above
+  predates the removal; the trail cannot tell an earlier legitimate value from a target-derived one). **This rewrites
+  rows of an append-only trail**, narrowly: no schema, trigger or shard-format change, no row deleted, no `seq` gap,
+  and the stand-in says why the value is absent. **Not recallable:** shard lines exported before the removal (committed,
+  possibly pushed), text an embedder already received, rows other catalogs hold, and SQLite pages freed but not reused
+  (`catalog.db` and its WAL are not scrubbed at the byte level). Cascaded `entry_cite` delete rows keep their `row_id`
+  (`slug:local→dst_ref`), which can carry the slug; that is Deviation 8's territory and is left open.
+- **F6, the tests could not see F1.** `indexed_then_swapped` indexed `# plain`. The keep, reclaim and directory-swap
+  tests now build the real pre-fix state (`prefix_state`: the target's text indexed, the precondition asserts the
+  title, the chunks and the catalog hold the marker, then the file or its directory is swapped for an outward link)
+  and assert that no table (every text value of every table, `catalog_audit` included, the kept row's own `slug`
+  excepted for Deviation 8) and no exported shard holds it, and that the export ran. Red before the fix (the
+  payloads above), green after; the kept-row test also reindexes twice.
+- **F2 (medium), a swap there and back.** `same_file` used `metadata`, which follows links. Seam test with a second
+  hook (after the judgement): the leaf opened as an outward link, swapped to an inside file for the judgement, swapped
+  back before the inode check; red: `the door returned "FAKE-KEY-MARKER"`. A `symlink_metadata` check alone does not
+  close the same race through a PARENT directory (`root/d` an outward link at the open, a real directory for the
+  judgement, the link again at the check; red the same way). Fix: on Linux the door judges the descriptor's own path
+  (`/proc/self/fd/N`), the opened inode's real location; the inode check compares the canonical path's own inode
+  (`symlink_metadata`). Both flip-flops and the leaf flip-flop on the fallback path (no `/proc`, forced by a test
+  knob) are refused. **The parent flip-flop on the fallback path (macOS, other Unix, Linux without `/proc`) is still
+  open**, stated in the module doc; macOS `F_GETPATH` is not wired and was not run.
+- **F3 (low), a huge file aborted the process.** Child-process test with a sparse 4 EiB file: red `ExitStatus(134)`
+  (SIGABRT from `Vec::with_capacity`). Now `try_reserve_exact`, an `OutOfMemory` I/O error, as `std::fs::read` does.
+  A file that IS allocatable is still read whole (no size cap, as before the door).
+- **F4 (low), the refusal named the target.** Red: `it resolves to <base>/out/secret-place-id_rsa, outside the
+  repository root ...`. Now the read door names the spelling and the repository root only, for the outside, the
+  no-root and the deny-list refusals. **Not changed:** `util::refuse_path_outside_root` (the write door) still names the
+  resolved path; left for the coordinator, as instructed.
+- **F5 (medium), the gate missed equivalent spellings.** Red: `the gate does not count std::fs::File::options()
+  .read(true).open(p)`. The gate now also counts `File::options(`, `io::read_to_string(` and every `use` item that
+  imports a reading function or type from `std::fs`, `tokio::fs` or `std::io` (grouped root imports included) or
+  aliases the module (`as`, `*`), on the line it starts. One probe per shape plus controls (`use std::fs;`,
+  `use std::io::Read;`, `read_dir`, `metadata`). No production read was found by the wider net.
+
+**Mutation probe, round 1** (this worktree's own pool, `…agent-a8918c1498fdd30e8.worktrees/mutation-slot-0`), 19
+mutants. Killed: both elision calls (kept, reclaimed); `elide_values` never rewriting; it rewriting any row of the table;
+`slug` and `title` dropped from the derived columns; no savepoint; the descriptor path disabled; the inode check
+following links again; the infallible allocation; the outside refusal naming the target; the five gate holes
+(`File::options(`, `io::read_to_string(`, imports, grouped imports, `as`). Two survived their first run and were killed
+after a test was added: the savepoint releasing instead of rolling back (`a_failed_elision_rolls_the_removal_back`, a
+unit test of `in_savepoint`) and the no-root refusal naming the target (the wording test now reaches the no-root
+branch through a spelling no repository contains). **Survived, equivalent:** dropping the `is_absolute` check on the
+descriptor path (`readlink` of `/proc/self/fd/N` for an open regular file is always absolute; the check guards a
+pseudo-file name such as `anon_inode:`, which a regular-file descriptor never has).
+
+**Unverified after round 1:** the fallback-path parent flip-flop (open, by construction); macOS and Windows not run;
+the byte-level residue in `catalog.db` and its WAL; the `entry_cite` `row_id` of a cascaded delete.
+
 ## Fix provenance
 
 Branch `worktree-agent-a8918c1498fdd30e8` (not yet on `experiments`).
 
-- **SHA:** `45858098a` (the read door)
+- **SHA:** `eae21e694` (the read door)
 - **patch-id:** `7bfbbd10c5a0a4be4d7dfeb2edb1eaa31f8ae125`
-- **SHA:** `686838dc4` (walk, reclamation, backfill)
+- **SHA:** `acba669d6` (walk, reclamation, backfill)
 - **patch-id:** `b4e72fc7b87485a9d8fe8c39968ee3ad5d85d751`
-- **SHA:** `5b3d834ba` (every other read site)
+- **SHA:** `bbdfca690` (every other read site)
 - **patch-id:** `23d2abc7aef8f0dcb9c72f8ec90ab24b94b0c961`
-- **SHA:** `673859c08` (source gate)
+- **SHA:** `ebb3d5715` (source gate)
 - **patch-id:** `394c11fb30be5535bed536a111fb811c7a46729e`
-- **SHA:** `a24fb3b94` (tests strengthened after two surviving mutants)
+- **SHA:** `e1f5d3ad4` (tests strengthened after two surviving mutants)
 - **patch-id:** `fea062f37642cd1fed4661de84e9c2b5966d10ca`
-- **SHA:** `033638f07` (clippy fix to the test hook)
+- **SHA:** `2903c3747` (clippy fix to the test hook)
 - **patch-id:** `b24957d48be5ee8443eb1fc14136095779b4f44f`
+- **SHA:** `6bf7b1d78` (a Unix-only test helper)
+- **patch-id:** `80ef542f1f8aaef45a7656a447702174eb2c4941`
+- **SHA:** `dbc44f403` (review round 1, F1 and F6: the audit trail)
+- **patch-id:** `b5d252c89da38ed0a0748c27e79e9f169aa7bd0d`
+- **SHA:** `c34a3ed7c` (review round 1, F2-F4: descriptor path, fallible read, refusal wording)
+- **patch-id:** `62059f8abf07ac3131048e1442a6e533ac9a2aec`
+- **SHA:** `d6a2b2124` (review round 1, F5: the gate counts every spelling of a read)
+- **patch-id:** `f7d47519e2b07950845bd6a421cbb803ec1b7b2e`
+- **SHA:** `f13905660` (review round 1: tests for the two surviving mutants)
+- **patch-id:** `8796cd0f5bea62b2e9a6fcd09f459225bb4c7245`
+
+(Commits rebased onto `experiments` `0a8af94d7` on 2026-10-18; the Phase 2 SHAs above are the
+rebased ones, their patch-ids unchanged.)
 
 ## Tests added
 
