@@ -3001,7 +3001,7 @@ mod door_table {
         t.row(
             "Z6 roots [P], `P/lnk/../y.md` with lnk -> S (the `..` climbs out of S, not out of P)",
             false,
-            &[lp.clone()],
+            std::slice::from_ref(&lp),
             &lp.join("lnk/../y.md"),
         );
 
@@ -3033,10 +3033,10 @@ mod door_table {
         t.row(
             "Z7 roots [P], plain row below `P/a..b`",
             true,
-            &[n.clone()],
+            std::slice::from_ref(&n),
             &n.join("a..b/docs/y.md"),
         );
-        t.row("Z8 roots [P], nested repo `P/a..b` linking back into P: its name is a plain name, so it is the refinement and the link is refused", false, &[n.clone()], &n.join("a..b/linkdir/y.md"));
+        t.row("Z8 roots [P], nested repo `P/a..b` linking back into P: its name is a plain name, so it is the refinement and the link is refused", false, std::slice::from_ref(&n), &n.join("a..b/linkdir/y.md"));
 
         let mut bad = Vec::new();
         for (name, expect, file, dir) in &t.0 {
