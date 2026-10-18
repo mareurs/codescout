@@ -85,7 +85,7 @@ Verified three ways, measured 2026-10-17:
 
 None needed in codescout. Status `wontfix`: there is no defect to fix. The two consequences are in the Kotlin smoke script, fixed on branch `worktree-agent-af85b780928eaa450` at `b451979a` (patch-id `a2068783a60e078be34de6abcabd136703aec224`): its `include_body` step targets `Catalog/search` again and asserts the expression-bodied member's last line, and `call()` documents why the marker must be cut by parameter expansion.
 
-Open suggestion, filed rather than done: start the guide block with a newline so no line-oriented reader loses the line before it. It changes emission bytes and the byte-pin test `a_non_declaring_topic_is_byte_identical_to_today`, so it is a proposal: `docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md`. The join is made by clients (`mcp` CLI and Claude Code both), not by codescout's server.
+The suggestion filed here (start the guide block with a newline so no line-oriented reader loses the line before it) landed on 2026-10-18 on `fix/small-items-2026-10-18` at `1f673f644`: `docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md`. The join is made by clients (`mcp` CLI and Claude Code both), not by codescout's server; the server now gives every appended block its own line.
 
 ## Tests added
 
