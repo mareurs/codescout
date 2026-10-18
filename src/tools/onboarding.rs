@@ -93,6 +93,29 @@ pub(crate) fn system_prompt_stale(
     }
 }
 
+/// Change keys in the `[project]` table of an existing `project.toml` and leave every other
+/// table as the file has it.
+///
+/// The two stamping writers used to load the MERGED config (global config under the project's
+/// file), set a field and serialise the whole struct back. That wrote every merged value into
+/// the project's file: a stricter global `[security]` was copied there as the project's own, and
+/// from then on shadowed any later change to the global config. Patching the raw table keeps what
+/// the user wrote and writes nothing they did not.
+fn patch_project_table(
+    config_path: &std::path::Path,
+    set: impl FnOnce(&mut toml::Table),
+) -> anyhow::Result<()> {
+    let mut doc: toml::Table = toml::from_str(&std::fs::read_to_string(config_path)?)?;
+    let project = doc
+        .entry("project")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("[project] in project.toml is not a table"))?;
+    set(project);
+    std::fs::write(config_path, toml::to_string_pretty(&doc)?)?;
+    Ok(())
+}
+
 /// Record the prompt's current content as the baseline a requested refresh must
 /// supersede, **without** stamping the version.
 ///
@@ -107,10 +130,12 @@ async fn record_refresh_request(ctx: &ToolContext) -> anyhow::Result<()> {
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let config_path = p.root.join(".codescout").join("project.toml");
             if config_path.exists() {
-                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                config.project.system_prompt_sha256 = Some(hash_system_prompt(&p.root));
-                let toml_str = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, &toml_str)?;
+                // Still loaded, so a file that does not load is refused here as before.
+                crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+                let baseline = hash_system_prompt(&p.root);
+                patch_project_table(&config_path, |project| {
+                    project.insert("system_prompt_sha256".into(), toml::Value::String(baseline));
+                })?;
             }
             Ok(config_path)
         })
@@ -142,7 +167,7 @@ pub(crate) async fn stamp_witnessed_refresh(ctx: &ToolContext) -> anyhow::Result
             if !config_path.exists() {
                 return Ok((config_path, false));
             }
-            let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+            let config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
             let current = hash_system_prompt(&p.root);
             let stored = config.project.onboarding_version;
             let witnessed = onboarding_version_stale(stored)
@@ -152,10 +177,13 @@ pub(crate) async fn stamp_witnessed_refresh(ctx: &ToolContext) -> anyhow::Result
                     &current,
                 );
             if witnessed {
-                config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                config.project.system_prompt_sha256 = Some(current);
-                let toml_str = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, &toml_str)?;
+                patch_project_table(&config_path, |project| {
+                    project.insert(
+                        "onboarding_version".into(),
+                        toml::Value::Integer(i64::from(ONBOARDING_VERSION)),
+                    );
+                    project.insert("system_prompt_sha256".into(), toml::Value::String(current));
+                })?;
             }
             Ok((config_path, witnessed))
         })
@@ -1064,7 +1092,15 @@ async fn perform_full_onboarding(
             libraries: Default::default(),
             lsp: Default::default(),
         };
-        let toml_str = toml::to_string_pretty(&config)?;
+        // `[security]` is left OUT of the file: the file is merged over the global config, so an
+        // explicit table of defaults here would override a stricter global `shell_command_mode`
+        // or `indexing_enabled` for this project. Absent, the project inherits the global
+        // value or the same defaults it was just given.
+        let mut doc = toml::Value::try_from(&config)?;
+        if let Some(table) = doc.as_table_mut() {
+            table.remove("security");
+        }
+        let toml_str = toml::to_string_pretty(&doc)?;
         std::fs::write(&config_path, &toml_str)?;
         // Reload in-memory config so the version is visible within this session
         ctx.agent
@@ -1370,6 +1406,207 @@ mod tests {
             absent,
             hash_system_prompt(dir.path()),
             "writing content must move the hash, or no regeneration is ever witnessed"
+        );
+    }
+}
+
+/// What onboarding writes into `project.toml` must not override a STRICTER global config.
+///
+/// The file is merged over `~/.config/codescout/config.toml`, so every key written into it
+/// wins. Onboarding serialised a whole `ProjectConfig`, so it wrote an explicit `[security]`
+/// table of DEFAULTS (`shell_command_mode = "warn"`, `indexing_enabled = true`, ...) and
+/// silently relaxed a global `shell_command_mode = "disabled"` / `indexing_enabled = false`
+/// for that project. Each test runs the real onboarding code path in a child process whose
+/// `XDG_CONFIG_HOME` holds the stricter global config.
+#[cfg(all(test, unix))]
+mod global_strictness_tests {
+    use super::*;
+    use crate::agent::Agent;
+
+    const STRICT_GLOBAL: &str =
+        "[security]\nshell_command_mode = \"disabled\"\nindexing_enabled = false\n";
+
+    fn ctx(agent: Agent) -> ToolContext {
+        ToolContext {
+            agent,
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        }
+    }
+
+    /// Run `body(root, ctx)` in a child whose global config is `STRICT_GLOBAL`, over a project
+    /// holding `project_toml` (or none). Bodies assert their own controls: the project's own
+    /// `[security]`, where it has one, legitimately overrides the global config.
+    fn in_strict_global(
+        name: &'static str,
+        project_toml: Option<&'static str>,
+        body: impl for<'a> FnOnce(
+                &'a std::path::Path,
+                &'a ToolContext,
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>
+            + 'static,
+    ) {
+        let fixture = tempfile::tempdir().unwrap();
+        let xdg = fixture.path().canonicalize().unwrap().join("xdg");
+        crate::platform::test_child::run(
+            module_path!(),
+            name,
+            &[("XDG_CONFIG_HOME", Some(xdg.to_str().unwrap()))],
+            move || {
+                let xdg = std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap());
+                std::fs::create_dir_all(xdg.join("codescout")).unwrap();
+                std::fs::write(xdg.join("codescout").join("config.toml"), STRICT_GLOBAL).unwrap();
+                let root = xdg.parent().unwrap().join("proj");
+                std::fs::create_dir_all(root.join(".codescout")).unwrap();
+                std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+                if let Some(t) = project_toml {
+                    std::fs::write(root.join(".codescout").join("project.toml"), t).unwrap();
+                }
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        let agent = Agent::new(Some(root.clone())).await.unwrap();
+                        let ctx = ctx(agent);
+                        body(&root, &ctx).await;
+                    });
+            },
+        );
+    }
+
+    async fn effective(root: &std::path::Path) -> (String, bool) {
+        let c = crate::config::project::ProjectConfig::load_or_default(root).unwrap();
+        (c.security.shell_command_mode, c.security.indexing_enabled)
+    }
+
+    fn file(root: &std::path::Path) -> String {
+        std::fs::read_to_string(root.join(".codescout").join("project.toml")).unwrap()
+    }
+
+    #[test]
+    fn a_created_project_toml_does_not_relax_a_stricter_global_config() {
+        in_strict_global(
+            "a_created_project_toml_does_not_relax_a_stricter_global_config",
+            None,
+            |root, ctx| {
+                Box::pin(async move {
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "control: the stricter global config is in force before onboarding"
+                    );
+                    let result = Onboarding.call(json!({}), ctx).await.unwrap();
+                    assert_eq!(
+                        result["config_created"], true,
+                        "control: onboarding wrote it"
+                    );
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "onboarding's project.toml relaxed the stricter global config; file:\n{}",
+                        file(root)
+                    );
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn recording_a_refresh_request_does_not_freeze_the_global_values_into_project_toml() {
+        in_strict_global(
+            "recording_a_refresh_request_does_not_freeze_the_global_values_into_project_toml",
+            Some("[project]\nname = \"t\"\n"),
+            |root, ctx| {
+                Box::pin(async move {
+                    record_refresh_request(ctx).await.unwrap();
+                    assert!(
+                        file(root).contains("system_prompt_sha256"),
+                        "control: the baseline was recorded: {}",
+                        file(root)
+                    );
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "file:\n{}",
+                        file(root)
+                    );
+                    // Measured: writing the MERGED config back copies the global values into
+                    // the project's file (it does not relax them at that moment), where they
+                    // then shadow any later change to the global config.
+                    assert!(
+                        !file(root).contains("[security]"),
+                        "the global values were frozen into project.toml:\n{}",
+                        file(root)
+                    );
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn stamping_a_witnessed_refresh_does_not_freeze_the_global_values_into_project_toml() {
+        in_strict_global(
+            "stamping_a_witnessed_refresh_does_not_freeze_the_global_values_into_project_toml",
+            Some(
+                "[project]\nname = \"t\"\nonboarding_version = 1\nsystem_prompt_sha256 = \"abc\"\n",
+            ),
+            |root, ctx| {
+                Box::pin(async move {
+                    assert!(
+                        stamp_witnessed_refresh(ctx).await.unwrap(),
+                        "control: the stamp was written"
+                    );
+                    assert!(
+                        file(root).contains(&format!("onboarding_version = {ONBOARDING_VERSION}")),
+                        "control: the version was stamped:\n{}",
+                        file(root)
+                    );
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "file:\n{}",
+                        file(root)
+                    );
+                    assert!(
+                        !file(root).contains("[security]"),
+                        "the global values were frozen into project.toml:\n{}",
+                        file(root)
+                    );
+                })
+            },
+        );
+    }
+
+    /// The control that keeps the fix honest: a project's OWN explicit `[security]` is the
+    /// user's, and a stamp must leave it exactly as written.
+    #[test]
+    fn a_stamp_keeps_the_projects_own_security_table_as_written() {
+        in_strict_global(
+            "a_stamp_keeps_the_projects_own_security_table_as_written",
+            Some("[project]\nname = \"t\"\n\n[security]\nshell_command_mode = \"warn\"\n"),
+            |root, ctx| {
+                Box::pin(async move {
+                    record_refresh_request(ctx).await.unwrap();
+                    let text = file(root);
+                    assert!(
+                        text.contains("shell_command_mode = \"warn\""),
+                        "the project's own key was lost: {text}"
+                    );
+                    assert!(
+                        !text.contains("indexing_enabled"),
+                        "a key the project never wrote was materialised: {text}"
+                    );
+                })
+            },
         );
     }
 }
