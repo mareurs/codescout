@@ -7,7 +7,7 @@
 // relative) root and the first touch built a project there, leaving `<value>/.codescout/` behind.
 // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
 //
-// Isolation: no test here changes the process cwd in the shared test process. The two that must
+// Isolation: no test here changes the process cwd in the shared test process. The ones that must
 // (a RELATIVE pin resolves against the cwd) run in a child process (`platform::test_child`), the
 // documented pattern in docs/conventions/test-env-isolation.md, with the cwd set to a tempdir in
 // the CHILD only. A relative pin therefore cannot create `x/` in the repo even if the guard
@@ -308,5 +308,92 @@ fn a_blank_pin_is_still_no_pin_and_creates_nothing() {
                     assert_eq!(tree_listing(&cwd_root), Vec::<String>::new());
                 });
         },
+    );
+}
+
+/// A relative pin is resolved against the server's cwd, and the refusal says where that is. If
+/// the cwd itself is unreadable (here: deleted under the process, which Linux allows) it must
+/// still be refused, and say that the path is relative without inventing a directory. Guards
+/// the `current_dir()` failure arm of the message, which no other test can reach.
+#[cfg(unix)]
+#[test]
+fn a_relative_pin_is_refused_even_when_the_cwd_is_gone() {
+    crate::platform::test_child::run(
+        module_path!(),
+        "a_relative_pin_is_refused_even_when_the_cwd_is_gone",
+        &[],
+        || {
+            let cwd = tempdir().unwrap();
+            let cwd_root = std::fs::canonicalize(cwd.path()).unwrap();
+            std::env::set_current_dir(&cwd_root).unwrap();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (_home, server) = make_server().await;
+                    std::fs::remove_dir(&cwd_root).unwrap();
+                    assert!(std::env::current_dir().is_err(), "premise: the cwd is gone");
+                    let result = dispatch_pinned(
+                        &server,
+                        "memory",
+                        serde_json::json!({"action": "list"}),
+                        "x",
+                    )
+                    .await
+                    .expect("a refused pin must be an Ok result");
+                    assert_pin_refused("memory list", &result, "x");
+                    let body: serde_json::Value =
+                        serde_json::from_str(&result_text(&result)).unwrap();
+                    let error = body["error"].as_str().unwrap();
+                    assert!(
+                        error.ends_with("working directory)"),
+                        "with no readable cwd the note must end at the words, not name a path; \
+                         got: {error}"
+                    );
+                });
+        },
+    );
+}
+
+/// The write lock is taken on the PINNED project, not the session default. `call_tool_inner`
+/// resolves the pin once and hands it to the lock acquisition; this holds the DEFAULT project's
+/// write mutex and requires a pinned write to another project to complete anyway. Handing the
+/// lock acquisition no pin (or re-deriving it wrongly) makes the pinned write queue behind the
+/// default's lock, and the call never returns.
+#[tokio::test]
+async fn a_pinned_write_takes_the_pinned_projects_write_lock_not_the_defaults() {
+    let (_home, server) = make_server().await;
+    let pinned = tempdir().unwrap();
+    std::fs::create_dir_all(pinned.path().join(".codescout")).unwrap();
+    let pin = std::fs::canonicalize(pinned.path())
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    let default_lock = server
+        .agent
+        .with_project(|p| Ok(p.write_lock.clone()))
+        .await
+        .unwrap();
+    let _default_held = default_lock.lock_owned().await;
+
+    let call = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "write", "topic": "lock-target", "content": "x"}),
+        &pin,
+    );
+    let result = tokio::time::timeout(std::time::Duration::from_secs(20), call)
+        .await
+        .expect("a pinned write must not queue behind the DEFAULT project's write lock")
+        .expect("dispatch");
+    assert_ne!(result.is_error, Some(true), "got: {}", result_text(&result));
+    assert!(
+        pinned
+            .path()
+            .join(".codescout/memories/lock-target.md")
+            .exists(),
+        "the write landed in the pinned project"
     );
 }
