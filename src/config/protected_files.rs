@@ -121,10 +121,10 @@ fn named(name: Option<&OsStr>, expected: &str) -> bool {
         .is_some_and(|n| n.eq_ignore_ascii_case(expected))
 }
 
-/// `path` is the global config file: the same path, or a path that resolves to the same file
-/// (`same_file`).
+/// `path` is the global config file, by identity (`same_file`: the same path, or any path that
+/// resolves to it).
 fn is_global_config(path: &Path, global_config: Option<&Path>) -> bool {
-    global_config.is_some_and(|global| path == global || same_file(path, global))
+    global_config.is_some_and(|global| same_file(path, global))
 }
 
 /// `path` is, by identity, the `.codescout/project.toml` of a project loaded in this process.
