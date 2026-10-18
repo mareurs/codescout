@@ -1532,6 +1532,78 @@ async fn create_file_overwrites_with_explicit_flag() {
     let contents = std::fs::read_to_string(&file).unwrap();
     assert_eq!(contents, "new content");
 }
+
+/// A leaf symlink to a file outside the project, as a `create_file` target with `overwrite`.
+/// `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+/// recorded that only `edit_file` had been run against one. `create_file` reads the existing
+/// target (through the link) for its shrink guard, then writes through `atomic_write`, whose
+/// rename replaces the link: the victim keeps its bytes, the in-project path becomes a
+/// regular file. A DANGLING leaf link must not make the write create the file it names.
+#[cfg(unix)]
+#[tokio::test]
+async fn create_file_overwrite_on_a_leaf_symlink_replaces_the_link_and_spares_the_victim() {
+    let (dir, ctx) = project_ctx().await;
+    let outside = tempfile::tempdir().unwrap();
+    let victim = outside.path().join("victim.txt");
+    std::fs::write(&victim, "ORIGINAL OUTSIDE CONTENT").unwrap();
+    let leaf = dir.path().join("leaf.txt");
+    std::os::unix::fs::symlink(&victim, &leaf).unwrap();
+
+    CreateFile
+        .call(
+            json!({
+                "path": leaf.to_str().unwrap(),
+                "content": "ORIGINAL OUTSIDE CONTENT, now edited",
+                "overwrite": true
+            }),
+            &ctx,
+        )
+        .await
+        .expect("an in-project leaf link is an allowed target");
+
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "ORIGINAL OUTSIDE CONTENT",
+        "create_file wrote THROUGH the leaf symlink into a file outside the project"
+    );
+    assert!(std::fs::symlink_metadata(&leaf)
+        .unwrap()
+        .file_type()
+        .is_file());
+    assert_eq!(
+        std::fs::read_to_string(&leaf).unwrap(),
+        "ORIGINAL OUTSIDE CONTENT, now edited"
+    );
+
+    // Dangling: nothing exists at the link's destination, and none may appear.
+    let never = outside.path().join("never-created.txt");
+    let dangling = dir.path().join("dangling.txt");
+    std::os::unix::fs::symlink(&never, &dangling).unwrap();
+    CreateFile
+        .call(
+            json!({
+                "path": dangling.to_str().unwrap(),
+                "content": "x",
+                "overwrite": true
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a dangling in-project leaf link is an allowed target; the call must succeed");
+    assert!(
+        never.symlink_metadata().is_err(),
+        "create_file created {never:?} through a dangling leaf symlink"
+    );
+    assert!(
+        std::fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_file(),
+        "the dangling link must be replaced by a regular file"
+    );
+    assert_eq!(std::fs::read_to_string(&dangling).unwrap(), "x");
+}
+
 #[tokio::test]
 async fn create_file_refuses_overwrite_shrink_without_force() {
     let (dir, ctx) = project_ctx().await;

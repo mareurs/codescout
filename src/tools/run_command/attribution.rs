@@ -261,13 +261,11 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
         if std::fs::read_to_string(&final_path).is_ok_and(|got| got == body) {
             continue; // already materialized by this or another process
         }
-        let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
-        std::fs::write(&tmp, body).ok()?;
-        // A failed rename leaves the temp file behind rather than a truncated script.
-        if std::fs::rename(&tmp, &final_path).is_err() {
-            let _ = std::fs::remove_file(&tmp);
-            return None;
-        }
+        // `atomic_write` stages under an unpredictable name it creates exclusively, then
+        // renames. The staging name used to be `<name>.<pid>.tmp` written with `fs::write`,
+        // which follows a symlink planted there in this shared temp directory. A failed write
+        // or rename leaves no staging file and no truncated script.
+        crate::util::fs::atomic_write(&final_path, body).ok()?;
     }
     Some(dir.join(EMBEDDED_SCRIPTS[0].0))
 }
@@ -525,6 +523,51 @@ mod tests {
             "stray temp files left behind: {strays:?}"
         );
     }
+
+    /// The same defect `atomic_write` had, in the extraction's own copy of the pattern: the
+    /// staging name `<script>.<pid>.tmp` is predictable, and `std::fs::write` follows a link
+    /// planted there, so extraction overwrote whatever the link pointed at. The directory is
+    /// in the shared temp dir and keyed by a content hash anyone can compute.
+    /// `docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md`
+    #[cfg(unix)]
+    #[test]
+    fn materialize_does_not_follow_a_planted_staging_symlink() {
+        let base = tempfile::tempdir().expect("tmp");
+        let outside = tempfile::tempdir().expect("tmp");
+        let entry = materialize_into(base.path()).expect("materialization must succeed");
+        let dir = entry.parent().expect("entry has a parent");
+
+        // Force a re-extraction, with the staging name for THIS process planted as a link.
+        let mut victims = Vec::new();
+        for (i, (name, _)) in EMBEDDED_SCRIPTS.iter().enumerate() {
+            std::fs::remove_file(dir.join(name)).unwrap();
+            let victim = outside.path().join(format!("victim-{i}"));
+            std::fs::write(&victim, "ORIGINAL").unwrap();
+            std::os::unix::fs::symlink(
+                &victim,
+                dir.join(format!("{name}.{}.tmp", std::process::id())),
+            )
+            .unwrap();
+            victims.push(victim);
+        }
+
+        materialize_into(base.path()).expect("materialization must still succeed");
+
+        for victim in &victims {
+            assert_eq!(
+                std::fs::read_to_string(victim).unwrap(),
+                "ORIGINAL",
+                "extraction wrote through a planted staging symlink"
+            );
+        }
+        for (name, body) in EMBEDDED_SCRIPTS {
+            assert_eq!(
+                std::fs::read_to_string(dir.join(name)).ok(),
+                Some(body.to_string())
+            );
+        }
+    }
+
     /// Every local module the engine imports must be materialized beside it.
     ///
     /// The engine reaches its siblings with `sys.path[0]` set to its own directory, so a

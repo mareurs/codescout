@@ -11028,6 +11028,80 @@ async fn edit_code_replace_splices_the_body_as_written_when_reindent_is_false() 
     );
 }
 
+/// A leaf that is itself a symlink to a file OUTSIDE the project, as an `edit_code` target.
+/// `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+/// recorded that only `edit_file` had been run against one. The write goes through
+/// `atomic_write`, whose rename replaces the link rather than writing through it: the victim
+/// keeps its bytes and the in-project path becomes a regular file holding the edit.
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_code_replace_on_a_leaf_symlink_replaces_the_link_and_spares_the_victim() {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let original =
+        "struct Point { x: f64, y: f64 }\nimpl Point {\n    fn a(&self) -> f64 {\n        1.0\n    }\n}\n";
+    let victim = outside.path().join("victim.rs");
+    std::fs::write(&victim, original).unwrap();
+    let leaf = root.join("src").join("leaf.rs");
+    std::os::unix::fs::symlink(&victim, &leaf).unwrap();
+    let method = SymbolInfo {
+        name: "a".to_string(),
+        name_path: "Point/a".to_string(),
+        kind: SymbolKind::Method,
+        file: leaf.clone(),
+        start_line: 2,
+        end_line: 4,
+        start_col: 7,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let lsp = MockLspProvider::with_client(MockLspClient::new().with_symbols(&leaf, vec![method]));
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+
+    EditCode
+        .call(
+            json!({
+                "action": "replace", "symbol": "Point/a", "path": "src/leaf.rs",
+                "body": "fn a(&self) -> f64 {\n    42.0\n}",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("an in-project leaf link is an allowed target");
+
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        original,
+        "edit_code wrote THROUGH the leaf symlink into a file outside the project"
+    );
+    assert!(
+        std::fs::symlink_metadata(&leaf)
+            .unwrap()
+            .file_type()
+            .is_file(),
+        "the in-project path must now be a regular file, not the link"
+    );
+    assert!(std::fs::read_to_string(&leaf).unwrap().contains("42.0"));
+}
+
 #[tokio::test]
 async fn edit_code_refuses_a_reindent_value_it_cannot_read_instead_of_ignoring_it() {
     // `optional_bool_param` reads an unreadable value as ABSENT. For a switch whose whole

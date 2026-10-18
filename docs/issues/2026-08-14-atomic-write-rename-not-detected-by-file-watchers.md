@@ -116,6 +116,9 @@ Not reproducible from here, so no code change was made. Checked at the bytes:
   (`ls scripts/dev.sh` -> No such file). The `uvicorn --reload` setup lives in the sibling repo, so there is no
   in-repo script to adjust.
 - `atomic_write` is still `src/util/fs.rs:105-128`: sibling `<filename>.tmp`, `std::fs::rename`, no mtime touch.
+  (2026-10-17 note: that shape changed on the review branch of the staging-symlink fix: the staging file is now
+  `<name prefix>.<32 hex>.tmp`, created exclusively, the line range moved, and the rename is still the last step
+  with no mtime touch, so this record's claim about the rename is unchanged. Status not changed.)
 - The host is Linux (`uname`: Linux 7.2.8-zen). `watchfiles` is not installed and the defect is claimed to be
   Windows-only. The 2026-09-25 Linux control already showed the temp-then-rename shape is visible there.
 
