@@ -178,6 +178,19 @@ const NO_PROJECT: &[(&str, &str)] = &[
     ),
 ];
 
+/// Sites that build a relative spelling from the layout (`Fx::rel`), which is lossy for a
+/// non-UTF-8 name, so what they would read is not the layout's file.
+const LOSSY: &[(&str, &str)] = &[
+    ("gather_file", "Fx::rel is lossy for a non-UTF-8 name"),
+    ("gather_grep", "Fx::rel is lossy for a non-UTF-8 name"),
+    ("config_value", "Fx::rel is lossy for a non-UTF-8 name"),
+    ("requirements", "Fx::rel is lossy for a non-UTF-8 name"),
+    (
+        "external_authority",
+        "Fx::rel is lossy for a non-UTF-8 name",
+    ),
+];
+
 /// `gather_grep` walks with `follow_links(false)`, which reports a LEAF link (the root entry
 /// included) by its own type, so a leaf-link spelling is never grepped, inside or out. The
 /// directory-link rows (R4, R6, R8) exercise the site.
@@ -360,6 +373,23 @@ pub(super) fn layouts() -> Vec<Layout> {
                     json: p.join("docs/x.json"),
                     force_include: None,
                 }
+            },
+        },
+        Layout {
+            name: "R15 non-UTF-8 directory name, leaf links out (review round 2, V10)",
+            verdict: Verdict::Refuse,
+            comparable: true,
+            why_not_comparable: "",
+            skip: LOSSY,
+            build: |b| {
+                use std::os::unix::ffi::OsStrExt;
+                let p = project(b);
+                let d = p.join(std::ffi::OsStr::from_bytes(b"d\xff"));
+                let out = b.join("out");
+                target(&out);
+                ln(out.join("x.md"), &d.join("x.md"));
+                ln(out.join("x.json"), &d.join("x.json"));
+                fx(&p, &d, None)
             },
         },
         Layout {
@@ -1233,6 +1263,7 @@ async fn prefix_state(
 /// one exception: the `slug` of `kept` (an escaping row kept for its history keeps its slug, open
 /// decision "Deviation 8" of the issue). The vec0 tables hold vectors, not text, and are skipped.
 fn catalog_hits(ctx: &ToolContext, kept: Option<&str>) -> Vec<String> {
+    let sha = crate::librarian::util::sha_of_bytes(doc_text().as_bytes());
     let cat = ctx.catalog.lock();
     let tables: Vec<String> = cat
         .conn
@@ -1262,7 +1293,9 @@ fn catalog_hits(ctx: &ToolContext, kept: Option<&str>) -> Vec<String> {
                     rusqlite::types::Value::Blob(b) => String::from_utf8_lossy(&b).into_owned(),
                     _ => continue,
                 };
-                if !text.contains(MARK) {
+                // The marker, and the target's content hash (a digest of the outside file is
+                // derived from it as surely as its title is).
+                if !text.contains(MARK) && !text.contains(&sha) {
                     continue;
                 }
                 if t == "artifact" && c == "slug" && row_id.as_deref() == kept && kept.is_some() {
@@ -1474,4 +1507,336 @@ async fn a_row_below_a_directory_swapped_for_an_outward_link_is_kept_and_cleared
         .unwrap();
     assert!(!has(&got), "{got}");
     assert_nothing_of_the_target_remains(&ctx, &p, Some(&id), &v);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review round 2.
+// ---------------------------------------------------------------------------------------------
+
+/// R2-1a: the pre-fix row's link now DANGLES (its target was removed). The row is gone from the
+/// filesystem's point of view, but its path is still a link, so its removal must elide like an
+/// escaping row's.
+#[tokio::test]
+async fn a_dangling_outward_link_row_is_removed_without_copying_its_text() {
+    let (_tmp, ctx, _store, id, p, _link) = prefix_state(false, false).await;
+    std::fs::remove_file(p.parent().unwrap().join("out/x.md")).unwrap();
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &id).unwrap().is_none(),
+        "{v}"
+    );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R2-1b, a KNOWN GAP, kept as an expected failure: the advised remedy (remove the link) turns the
+/// row into an ordinary vanished row, and nothing on the filesystem says any more that it was
+/// ever reached through a link out. The removal then copies its stored values into the trail and
+/// the export. The operator decides the remedy (issue, Review round 2); until then this test
+/// PASSES by panicking with the leak, and must be flipped when a fix lands. Remedy order for a
+/// user meanwhile: reindex FIRST (the door clears or reclaims the row and elides its trail), then
+/// remove the link.
+#[tokio::test]
+#[should_panic(expected = "the target's text survives in the catalog")]
+async fn known_gap_a_removed_outward_link_row_leaves_its_text_in_the_trail() {
+    let (_tmp, ctx, _store, _id, p, link) = prefix_state(false, false).await;
+    std::fs::remove_file(&link).unwrap();
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R2-2: a non-UTF-8 directory name. The catalog stores a LOSSY path (U+FFFD), which names no
+/// file; the door cannot judge it, so its stored text is withheld before the reindex, and its
+/// removal (as a vanished row) elides like an escaping row's.
+#[tokio::test]
+async fn a_non_utf8_path_row_is_withheld_and_removed_without_copying_its_text() {
+    use std::os::unix::ffi::OsStrExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join(std::ffi::OsStr::from_bytes(b"d\xff"));
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("x.md"), doc_text()).unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (e, _) = svc(4);
+    let (ctx, store) = ctx_for(&fxv, Some(e));
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let id = crate::librarian::ids::artifact_id_from_abs(&docs.join("x.md"));
+    assert!(
+        store.chunks_under(&id) > 0 && !catalog_hits(&ctx, None).is_empty(),
+        "precondition: the target's text is in the catalog"
+    );
+    std::fs::write(
+        p.join(".gitattributes"),
+        ".codescout/audit/*.jsonl merge=union\n",
+    )
+    .unwrap();
+    target(&base.join("out"));
+    std::fs::remove_file(docs.join("x.md")).unwrap();
+    ln(base.join("out/x.md"), &docs.join("x.md"));
+    let f = find::call(&ctx, json!({"limit": 50})).await.unwrap();
+    assert!(!has(&f), "find before the reindex: {f}");
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &id).unwrap().is_none(),
+        "{v}"
+    );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R2-5: the reclaimed row's cascaded `entry_cite` delete. Its PAYLOAD must not carry the slug or
+/// the cited tokens; its `row_id` (the routing key, `slug:local→dst_ref`) does, and is recorded
+/// in the issue under Deviation 8.
+#[tokio::test]
+async fn a_reclaimed_rows_cascaded_citation_delete_carries_no_slug_in_its_payload() {
+    let (_tmp, ctx, _store, id, _p, _link) = prefix_state(false, false).await;
+    {
+        let cat = ctx.catalog.lock();
+        let slug: String = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id = ?1", [&id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(
+            slug.contains(MARK),
+            "precondition: the slug derives from the target: {slug}"
+        );
+        cat.conn
+            .execute(
+                "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+                 VALUES (?1, 'T-1', 'other:T-9', 'cites', 'write', 0)",
+                [&slug],
+            )
+            .unwrap();
+    }
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let cat = ctx.catalog.lock();
+    let deletes: i64 = cat
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'entry_cite' AND op = 'delete'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(deletes, 1, "precondition: the cascade wrote its delete row");
+    let leaking: Vec<String> = cat
+        .conn
+        .prepare(
+            "SELECT payload FROM catalog_audit WHERE tbl = 'entry_cite' \
+             AND instr(payload, ?1) > 0",
+        )
+        .unwrap()
+        .query_map([MARK], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(leaking.is_empty(), "{leaking:?}");
+}
+
+/// A refused row (the link out was made after indexing, no reindex yet) whose stored fields are
+/// the target's. Returns the context, its id, and the path.
+fn refused_row_with_stored_fields() -> (tempfile::TempDir, ToolContext, String, Fx) {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&b);
+    target(&b.join("out"));
+    ln(b.join("out/x.md"), &p.join("docs/x.md"));
+    let fxv = fx(&p, &p.join("docs"), None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    let id = seed(&ctx, &fxv.md, Some(&format!("{MARK} title")));
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET kind = ?2, status = ?3, topic = ?4, tags = ?5, owners = ?6 \
+             WHERE id = ?1",
+            rusqlite::params![
+                id,
+                format!("{MARK}kind"),
+                format!("{MARK}status"),
+                format!("{MARK}topic"),
+                format!("[\"{MARK}tag\"]"),
+                format!("[\"{MARK}owner\"]")
+            ],
+        )
+        .unwrap();
+    (tmp, ctx, id, fxv)
+}
+
+/// R2-3: every surface that prints a row's stored fields, for a refused row before the reindex.
+/// `doc(find)` and `gather` drop such a row (its presence under a filter is an oracle on the
+/// fields), `doc(get)` and `doc(state_at)` print it with the fields withheld.
+#[tokio::test]
+async fn no_surface_prints_the_stored_fields_of_a_refused_row() {
+    let (_tmp, ctx, id, fxv) = refused_row_with_stored_fields();
+    let mut leaks: Vec<String> = Vec::new();
+    fn check(leaks: &mut Vec<String>, name: &str, v: String) {
+        if v.contains(MARK) {
+            leaks.push(format!("{name}: {}", &v[..v.len().min(400)]));
+        }
+    }
+    check(
+        &mut leaks,
+        "get",
+        format!("{}", get::call(&ctx, json!({"id": id})).await.unwrap()),
+    );
+    check(
+        &mut leaks,
+        "find",
+        format!("{}", find::call(&ctx, json!({"limit": 50})).await.unwrap()),
+    );
+    // The filter on a withheld field must answer as a filter that matches nothing does: the same
+    // count AND the same hints (a `more_in_scope` of 1 answered it before the count did).
+    let by_title = |needle: &str| json!({"filter": {"title": {"contains": needle}}});
+    let filtered = find::call(&ctx, by_title(MARK)).await.unwrap();
+    let control = find::call(&ctx, by_title("no-row-has-this-title-zq"))
+        .await
+        .unwrap();
+    if filtered["count"] != control["count"] || filtered["hints"] != control["hints"] {
+        leaks.push(format!(
+            "find title-contains oracle: {filtered} (a filter matching nothing: {control})"
+        ));
+    }
+    check(
+        &mut leaks,
+        "state_at",
+        format!(
+            "{}",
+            super::state_at::call(&ctx, json!({"id": id, "timestamp": 9_999_999_999_999i64}))
+                .await
+                .unwrap()
+        ),
+    );
+    check(
+        &mut leaks,
+        "workspace_state_at",
+        format!(
+            "{}",
+            super::workspace_state_at::call(&ctx, json!({"timestamp": 9_999_999_999_999i64}))
+                .await
+                .unwrap()
+        ),
+    );
+    let c = control_row(
+        &ctx,
+        &fxv,
+        json!({"gather_from": [{"source": "artifacts", "limit": 50}]}),
+    );
+    check(
+        &mut leaks,
+        "gather artifacts",
+        format!("{}", refresh::call(&ctx, json!({"id": c})).await.unwrap()),
+    );
+    // Under a filter on a withheld field gather lists nothing: a masked item would still answer.
+    let cf = control_row(
+        &ctx,
+        &fxv,
+        json!({"gather_from": [{"source": "artifacts", "limit": 50,
+                                "filter": {"title": {"contains": MARK}}}]}),
+    );
+    let gathered = format!("{}", refresh::call(&ctx, json!({"id": cf})).await.unwrap());
+    if gathered.contains(&id) {
+        leaks.push(format!(
+            "gather title-contains oracle listed the row: {gathered}"
+        ));
+    }
+    assert!(leaks.is_empty(), "{}", leaks.join("\n"));
+}
+/// R2-3: a semantic `doc(find)` with no filter is not scanned for withheld rows; its page drops a
+/// refused row that still holds file values (a masked item would still say it ranked).
+#[tokio::test]
+async fn a_semantic_find_drops_a_refused_row_that_holds_file_values() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&b);
+    target(&b.join("out"));
+    ln(b.join("out/x.md"), &p.join("docs/x.md"));
+    let fxv = fx(&p, &p.join("docs"), None);
+    let (e, _) = svc(4);
+    let (ctx, store) = ctx_for(&fxv, Some(e));
+    let id = seed(&ctx, &fxv.md, Some(&format!("{MARK} title")));
+    let pid = p.to_string_lossy().into_owned();
+    for item in seed_chunks(&ctx, &id) {
+        store
+            .upsert(&pid, &item.chunk_id, &id, &[0.5, 0.5, 0.5, 0.5])
+            .await
+            .unwrap();
+    }
+    let out = find::call(&ctx, json!({"semantic": "anything", "limit": 20}))
+        .await
+        .unwrap();
+    let text = format!("{out}");
+    assert!(
+        !text.contains(&id) && !text.contains(MARK),
+        "the refused row ranked on the page: {text}"
+    );
+}
+
+/// R2-4: a pre-fix row whose outward link now DANGLES. `doc(get)` withholds its stored title as
+/// `doc(find)` does (the door's predicate refuses a dangling link); it used to return the title
+/// because the read failed with "not found" rather than a refusal.
+#[tokio::test]
+async fn get_withholds_the_stored_title_of_a_dangling_link_row() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&b);
+    std::fs::create_dir_all(b.join("out")).unwrap();
+    ln(b.join("out/x.md"), &p.join("docs/x.md"));
+    let fxv = fx(&p, &p.join("docs"), None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    let id = seed(&ctx, &fxv.md, Some(&format!("{MARK} title")));
+    let g = get::call(&ctx, json!({"id": id})).await.unwrap();
+    assert!(!has(&g), "{g}");
+    assert!(g["body_error"].is_string(), "the refusal is said: {g}");
+}
+
+/// The control for the withholding: a plain row's stored title IS returned by `doc(get)`.
+#[tokio::test]
+async fn get_still_returns_the_title_of_a_plain_row() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&b);
+    target(&p.join("docs"));
+    let fxv = fx(&p, &p.join("docs"), None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    let id = seed(&ctx, &fxv.md, Some(&format!("{MARK} title")));
+    let g = get::call(&ctx, json!({"id": id})).await.unwrap();
+    assert_eq!(g["title"], json!(format!("{MARK} title")), "{g}");
+    let f = find::call(&ctx, json!({"filter": {"title": {"contains": MARK}}}))
+        .await
+        .unwrap();
+    assert_eq!(f["count"].as_u64(), Some(1), "{f}");
+}
+
+/// R2-9: `doc(update)` on an outward leaf link names the spelling and never the target.
+#[tokio::test]
+async fn a_refused_update_names_the_spelling_and_never_the_outside_target() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&b);
+    target(&b.join("out-secret-place"));
+    ln(b.join("out-secret-place/x.md"), &p.join("docs/x.md"));
+    let fxv = fx(&p, &p.join("docs"), None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    let id = seed(&ctx, &fxv.md, None);
+    let err = update::call(&ctx, json!({"id": id, "patch": {"status": "fixed"}}))
+        .await
+        .expect_err("refused");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("x.md"), "{msg}");
+    assert!(
+        !msg.contains("out-secret-place"),
+        "the outside target is named: {msg}"
+    );
 }
