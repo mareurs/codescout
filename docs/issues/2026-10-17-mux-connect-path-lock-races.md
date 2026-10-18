@@ -79,7 +79,7 @@ Done for races (1) and (2). Mutation probes (one per guarded site, each reverted
 Open, not started:
 
 1. Race (3), read from the code and not reproduced: two clients both find the lock free, both spawn a mux, one mux wins the lock and the other exits (`another mux instance holds the lock`, now after the 1 s grace); the loser's call returns the spawn failure instead of connecting to the winner's mux.
-2. `acquire_mux_lock` creates the lock file with `File::create`, which truncates it BEFORE the flock is tried, so a second mux start erases a live mux's PID line. Read from the code, not tested.
+2. `acquire_mux_lock` creates the lock file with `File::create`, which truncates it BEFORE the flock is tried, so a second mux start erases a live mux's PID line (OS behaviour measured with python, Rust path read; filed as `docs/issues/2026-10-18-mux-lock-file-truncated-before-its-flock-is-tried.md`).
 
 ## References
 
