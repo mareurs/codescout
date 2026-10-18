@@ -547,8 +547,25 @@ mod tests {
             "the walk found only {} tracked issue files; it is not reading the population",
             paths.len()
         );
+        let failures = catalog_reader_failures(root, &paths);
+        assert!(
+            failures.is_empty(),
+            "the catalog reader refuses or half-reads {} of {} tracked issue files, which then \
+             drop out of `doc(find)`. Repair the YAML in place; do not loosen the check:\n{}",
+            failures.len(),
+            paths.len(),
+            failures.join("\n")
+        );
+    }
+
+    /// Every file of `paths` (repo-relative, under `root`) the catalog reader refuses or half-reads,
+    /// each prefixed with its path. Its own function so the walk can be tested on files it is handed.
+    fn catalog_reader_failures(
+        root: &std::path::Path,
+        paths: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
         let mut failures = Vec::new();
-        for p in &paths {
+        for p in paths {
             let content = std::fs::read_to_string(root.join(p))
                 .unwrap_or_else(|e| panic!("tracked file {p} is unreadable: {e}"));
             match parse(&content) {
@@ -561,14 +578,44 @@ mod tests {
                 Err(e) => failures.push(format!("{p}: {e}")),
             }
         }
-        assert!(
-            failures.is_empty(),
-            "the catalog reader refuses or half-reads {} of {} tracked issue files, which then \
-             drop out of `doc(find)`. Repair the YAML in place; do not loosen the check:\n{}",
-            failures.len(),
-            paths.len(),
-            failures.join("\n")
+        failures
+    }
+
+    /// The walk above, on files it is handed: the real tree is clean, so a walk that stopped
+    /// reporting (or stopped requiring `kind` and `status`) would stay green there.
+    #[test]
+    fn the_reader_walk_names_each_file_the_reader_refuses_or_half_reads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let write = |name: &str, doc: &str| {
+            std::fs::write(tmp.path().join(name), doc).unwrap();
+            name.to_string()
+        };
+        let good = write("good.md", "---\nkind: bug\nstatus: open\n---\n\nbody\n");
+        let refused = write(
+            "refused.md",
+            "---\nkind: bug\nstatus: open\ntags: cluster/x\n---\n\nb\n",
         );
+        let no_status = write("no-status.md", "---\nkind: bug\nstatus: null\n---\n\nb\n");
+        let no_kind = write("no-kind.md", "---\nstatus: open\n---\n\nb\n");
+        let no_block = write("no-block.md", "# just a heading\n");
+
+        let only_good: std::collections::BTreeSet<String> = [good.clone()].into();
+        assert!(catalog_reader_failures(tmp.path(), &only_good).is_empty());
+
+        for (name, want) in [
+            (&refused, "invalid type"),
+            (&no_status, "status=None"),
+            (&no_kind, "kind=None"),
+            (&no_block, "no frontmatter block"),
+        ] {
+            let paths: std::collections::BTreeSet<String> = [good.clone(), name.clone()].into();
+            let failures = catalog_reader_failures(tmp.path(), &paths);
+            assert_eq!(failures.len(), 1, "{name}: {failures:#?}");
+            assert!(
+                failures[0].starts_with(&format!("{name}: ")) && failures[0].contains(want),
+                "{name} must be named with `{want}`: {failures:#?}"
+            );
+        }
     }
 
     /// What the line grammar in `tests/issue_frontmatter.rs` lets through and the real reader
