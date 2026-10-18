@@ -147,8 +147,24 @@ project root, so codescout's own write tools (`create_file`, `edit_file`, `doc(c
 refuse any write to that file, or to the global `config.toml`, that would change its `[security]`
 table (or whose new content is not valid TOML). The rest of the file stays editable through them;
 the onboarding embedding-model step edits `[embeddings]` that way. Change `[security]` in an editor;
-the server re-reads the file on the next call. This does not cover `run_command`: a shell writes any
-file you can, and is gated by `shell_command_mode`.
+the server re-reads the file on the next call. The file is recognised by identity as well as by name,
+so a `.codescout` that is a link to a directory with another name, or the target of a `project.toml`
+link written under its own name, is guarded too.
+
+**This is not a boundary against a session that can run shell commands.** Under the default
+`shell_command_mode = "warn"`, one `run_command` such as
+`printf '[security]\nprofile = "root"\n' > .codescout/project.toml` rewrites the file and the next
+call runs under `profile = "root"` (measured; `warn` does not flag it, and under `root` no command
+is checked at all). The guard covers the file-writing tools (`create_file`, `edit_file`,
+`doc(create)`, `doc(move)`) only. Treat a project whose session may run shell commands as
+trusting that session with its own sandbox. Making a mid-session reload tighten-only would close
+this, and is an open decision (see the issue
+`2026-10-17-project-toml-under-the-writable-project-root-can-set-security-profile-root.md`).
+
+`[embeddings].url` and `api_key` stay editable through `edit_file`: indexing sends code chunks to
+that URL with that key as a bearer token (an `EMBED_API_KEY` from the environment is sent to a URL
+the project file names, when no URL is set in the environment). Review that table in a project you
+do not trust.
 
 ### `extra_write_roots` entries
 
@@ -158,11 +174,15 @@ when the project config loads, and the error names `.codescout/project.toml` and
 At startup that stops the server for that project.
 
 In a **running** session an edit that fails to load is **not applied, and it is reported**. The
-last configuration that loaded stays in force, with two changes. First, every tool response (the
-`_workspace_notice` field) and every refused write carries the loader's error until a reload
-succeeds, so the failure cannot pass unseen. Second, from the file only a security *tightening* is
+last configuration that loaded stays in force, with two changes. First, every tool response, error
+responses included (the `_workspace_notice` field, or a `⚠` line ahead of a plain-text error), and
+every refused write carries the loader's error until a reload succeeds, so the failure cannot pass
+unseen. Second, from the file only a security *tightening* is
 applied: `file_write_enabled = false`, `indexing_enabled = false`, a stricter `shell_command_mode`,
-a `profile` other than `"root"`, and `extra_write_roots` entries removed. A value that cannot be
+a `profile` other than `"root"`, and `extra_write_roots` entries removed. A key the edit deletes
+reads as what the file would mean without it: the global config's value if it sets one, else the
+built-in default (so deleting `shell_command_mode = "unrestricted"` next to an invalid entry gives
+`warn`); a global config that cannot be read counts as the strictest value. A value that cannot be
 read for one of those gates (for example `file_write_enabled = "no"`) counts as closed, and
 nothing is ever loosened: an added root, `profile = "root"` or `file_write_enabled = true` saved
 next to an invalid entry has no effect. If the file is not valid TOML, is unreadable or is over
@@ -171,9 +191,8 @@ extra write roots are dropped until it loads again. So `file_write_enabled = fal
 with `extra_write_roots = ["~/scratch"]` takes effect, and the response says why the rest of the
 edit did not.
 
-Not covered by that rule: `shell_dangerous_patterns` an invalid edit adds, a lowered
-`max_index_bytes`, and a tightening that only the global config file carries. For those, fix the
-entry the error names, or restart the server.
+Not covered by that rule: `shell_dangerous_patterns` an invalid edit adds and a lowered
+`max_index_bytes`. For those, fix the entry the error names, or restart the server.
 
 ### Built-in Read Deny-List
 

@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: mitigated
 opened: 2026-10-17
 closed: 2026-10-18
 severity: medium
@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-16-write-allowlist-holds-the-temp-dir-uncanonicali
 tags:
 - cluster/unclassified
 kind: bug
-unverified: "The real binary (codescout start, MCP client) was not run against the fix; the tests drive call_tool_inner in process. Not covered by the fix: run_command (a shell writes any file), [embeddings].url, a human edit. Fix is on branch fix/config-security-2026-10-18 (0d81e0138, patch-id 2456cc74c748ef8d5a8d4b5244906f2e234b195a), not yet on experiments."
+unverified: "MITIGATED for the file-writing tools only; NOT a boundary against a session with an enabled shell: under the default shell_command_mode = warn one run_command redirect raises the profile to Root (measured 2026-10-18, see Fix, Open decision). [embeddings].url stays editable (code and credential exfiltration channel, by reading). Windows spellings (trailing dot or space, ::$DATA) of the protected name are unverified. The real binary through an MCP client was not run; tests drive call_tool_inner in process. Fix is on branch fix/config-security-2026-10-18, not yet on experiments."
 ---
 
 # BUG: `.codescout/project.toml` sits under the always-writable project root, and `profile = "root"` in it turns every write gate off
@@ -82,8 +82,40 @@ None.
 
 ## Fix
 
-Fixed on branch `fix/config-security-2026-10-18` (based on `experiments` 7a09623bd): `0d81e0138`, patch-id
-`2456cc74c748ef8d5a8d4b5244906f2e234b195a` (follow-up test commit `242bd66b2`). Not yet on `experiments`.
+**Status: mitigated for the file-writing tools. Not a security boundary against a session that can
+run shell commands.** Fix commits on branch `fix/config-security-2026-10-18` (based on `experiments`
+7a09623bd), not yet on `experiments`:
+
+| What | Commit | patch-id |
+|---|---|---|
+| the guard (name rule) | `0d81e0138` | `2456cc74c748ef8d5a8d4b5244906f2e234b195a` |
+| identity match: symlinked `.codescout`, symlinked `project.toml` (review F2, F3) | `6826b1a9e` | `c31c09d79cb63a11a38af1989a1a92c67cd51f79` |
+
+### OPEN DECISION for the user: tighten-only reload (not implemented)
+
+Under the default `shell_command_mode = "warn"`, `run_command` still raises the profile in ONE
+unacknowledged call. Measured 2026-10-18 (test `a_shell_redirect_still_writes_the_security_section_known_residual`,
+real dispatch; before this run `shell_mode=warn`):
+
+```
+F1 profile_before=Default run_command_is_error=false profile_after=Root
+on_disk="[project]\nname = \"t\"\n\n[security]\nprofile = \"root\"\n"
+```
+
+by `run_command("printf '[project]\\nname = \"t\"\\n\\n[security]\\nprofile = \"root\"\\n' > .codescout/project.toml")`.
+By reading: `is_dangerous_command` returns `None` under `Root` (`src/util/path_security.rs`, the
+`config.profile == SecurityProfile::Root` early return), and no pattern in
+`DEFAULT_DANGEROUS_PATTERNS` matches a redirect onto `project.toml`. So the write tools being guarded
+does not stop a session that can run a shell, and this file must not be read as saying it does.
+
+The change that would close this, and the symlink and onboarding variants below for MID-SESSION edits
+(review F1, F2, F3, F6), is **tighten-only reload** (Alternative 2): a reload of a changed
+`project.toml` during a session may only keep or narrow `[security]`; a loosening takes effect at the
+next server start. It is NOT implemented here because it changes the user's own mid-session
+edit-to-loosen flow (edit the file, the next call picks it up), which is a user decision. It would not
+make a `profile = "root"` left on disk safe at the next start.
+
+### The guard as built
 
 **Decision.** The Resume left the design open. A blanket path-level deny of writes to
 `.codescout/project.toml` was the first reading and was REJECTED after a grep found a legitimate flow
@@ -92,24 +124,41 @@ that writes the file through `edit_file`: the onboarding prompt's embedding-mode
 `.codescout/project.toml`. Change the `model` line ...", and the `url` variant). A deny would have broken
 that step and forced a change to an onboarding prompt surface. So the guard is **content-aware**:
 
-- `config::protected_files::check_write` (`src/config/protected_files.rs`) refuses a write to a file
-  named `project.toml` directly inside a directory named `.codescout` (ASCII-case-insensitive), or to the
-  global config (`global_config_path()`, matched by exact path or by the canonical parent directory),
-  when the `[security]` table the write produces differs from the one on disk, or when the new content
-  is not valid TOML (it cannot then be shown to leave the table alone). An absent or unparseable "before"
-  counts as no table, so a create cannot carry one and a broken file cannot be used to smuggle one in.
-  Everything else in the file stays editable.
+- `config::protected_files::check_write` (`src/config/protected_files.rs`) refuses a write to a protected
+  file when the `[security]` table the write produces differs from the one on disk, or when the new
+  content is not valid TOML (it cannot then be shown to leave the table alone). A file is protected if
+  it is named `project.toml` directly inside a directory named `.codescout` (ASCII-case-insensitive),
+  **or is, by identity, the `.codescout/project.toml` of a project root loaded in this process, or the
+  global config** (`same_file`: every link followed, resolved through the deepest existing ancestor).
+  An absent or unparseable "before" counts as no table, so a create cannot carry one and a broken file
+  cannot be used to smuggle one in. Everything else in the file stays editable.
+- **Why identity (review F2, F3, both reproduced first):** the write tools hand the guard a path whose
+  parent is already resolved. With `.codescout` a link to `cfg-real`, `create_file(.codescout/project.toml,
+  <profile=root>, overwrite)` arrived as `cfg-real/project.toml`, the name rule never fired, and the write
+  landed (red: the file changed). With `project.toml` a link to `../shared.toml`, writing `shared.toml` under
+  its own name changed what `project.toml` says (red: the file changed). Both are now refused.
+- **How the roots reach the guard:** a process-wide, grow-only set (`PROJECT_ROOTS`) filled by
+  `ProjectConfig::load_with_global_base`, which every project's config goes through. Agent state was
+  rejected because the guard sits in `util::fs::atomic_write`, a free function with no `Agent`; threading
+  one through would change the signature of the funnel the guard exists to sit in. The set can only widen
+  what is protected (a directory once loaded keeps its `project.toml` guarded after the project is gone),
+  so sharing it between servers and tests cannot loosen anything.
 - It is called from `util::fs::atomic_write`, the funnel `create_file`, `edit_file` (text, append and
   batch grammars; measured, each reaches it) write through. A write tool added later is covered on the day
   it is added. Two paths do NOT go through `atomic_write` and were measured landing the file before the
-  fix, so they ask the same guard: `doc(create)` (`src/librarian/tools/create.rs`, a plain `fs::write`)
-  and `doc(move)` (`src/librarian/tools/mv.rs`, a `rename`; a markdown file holding `[security] profile =
-  "root"` was moved onto a fresh `project.toml`).
+  fix, so they ask the same guard: `doc(create)` (`src/librarian/tools/create.rs`, a plain `fs::write`;
+  there the guard is defence in depth for the PROFILE, since without it the file starts with `---` and does
+  not parse, so the config fails closed anyway, measured: `exists=true profile=Default`; what the guard
+  alone prevents is replacing a fresh `project.toml` with an unparseable file) and `doc(move)`
+  (`src/librarian/tools/mv.rs`, a `rename`; a markdown file holding `[security] profile = "root"` was
+  moved onto a fresh `project.toml`).
 - The refusal says what is theirs to do ("Ask the user to make that edit in an editor; the server re-reads
   the file on its next call"). `CONFIG_IS_CACHED_REMEDY` (`src/config/project.rs`) used to prescribe
-  `edit_file` for the `[security]` keys its three callers are about (`indexing_enabled`,
-  `shell_command_mode`, `max_index_bytes`); that is now a refused action, so the text names an editor, and
-  it no longer says the config is cached for the life of the process (untrue since 2026-09-14).
+  `edit_file` for the `[security]` keys its three callers are about; that is now a refused action, so the
+  text names an editor and no longer says the config is cached for the life of the process (untrue since
+  2026-09-14). The `ConfiguredOff` refusal in `src/util/path_security.rs` is corrected the same way
+  (strings only; review F8): it no longer blames `file_write_enabled = false` alone (an unparseable file
+  also disables writes) and no longer prescribes a restart as the only route.
 
 **Measured NOT to be entry points for `project.toml`:** `edit_file`'s markdown grammar (heading, action,
 frontmatter: "apply to markdown files only"), `edit_code` ("unsupported file type" for a `.toml`),
@@ -118,31 +167,46 @@ climbs out of `.codescout/memories` (returned ok, `project.toml` unchanged: the 
 Those are pinned only where a test could fail if the guard were removed; the memory test is a pin of
 measured behaviour, not a test of this guard.
 
+**Related, pre-existing, fixed on the same branch (review F6):** onboarding wrote an explicit `[security]`
+table of DEFAULTS into the `project.toml` it creates, which overrides a STRICTER global config for that
+project (red: with a global `shell_command_mode = "disabled"`, `indexing_enabled = false`, the created
+file gave `("warn", true)`). The created file now omits `[security]` (commit `0d3ce795a`, patch-id
+`8eccc515990916b4e6d4bc52267503df43e4bc9a`). The two stamping writers loaded the MERGED config and wrote it
+back; measured: that does not relax the values at the moment of the write, it copies the global values into
+the project's file where they shadow any later change to the global config; they now patch only the raw
+`[project]` table. Not examined: the other default sections onboarding writes (`[ignored_paths]`,
+`[memory]`, `[libraries]`) against the global config's `[ignored_paths]`.
+
 **Alternatives considered.**
 
 1. Blanket path deny in `classify_write_path_in` (one site, covers every path-taking tool, also a future
    one): rejected because it breaks the onboarding embedding step above. Still the simpler choice if that
    step is changed to tell the user to edit the file, or moved into the `onboarding` tool.
-2. Tighten-only reload (a mid-session reload of `[security]` may only tighten): stops a mid-session
-   escalation by ANY writer including the shell, but a `profile = "root"` left on disk applies at the next
-   server start, unreviewed. Not chosen; compatible with this fix if wanted as a second layer.
+2. Tighten-only reload: see OPEN DECISION above.
 3. Do it per tool at each write site: seven sites, and a new writer is unguarded until someone remembers.
 
 **Residual, stated so it is not read as wider.**
 
-- `run_command` can write the file (a shell writes anything the user can); it is gated by
-  `shell_command_mode`, not by this guard. A session with an enabled shell is not stopped from editing
-  `project.toml`.
+- **`run_command` writes the file** (the open decision above). A session with an enabled shell is not
+  stopped from editing `project.toml`; `shell_command_mode = "disabled"` is the only setting that stops it.
+- **`[embeddings].url` and `api_key` stay editable through `edit_file`, which is a code and credential
+  exfiltration channel, not only a redirect of the embedding endpoint** (pre-existing; review F7). Read, not
+  run end to end: `src/retrieval/config.rs` `merge_embed_config` resolves `url = env.or(project)` and
+  `api_key = env.or(project_key)` independently, and `crates/codescout-embed/src/remote.rs` posts each
+  batch of input text to that endpoint with `bearer_auth(key)`. So a project file that names a URL, with no
+  URL in the environment, makes indexing send code chunks to it, and an `EMBED_API_KEY` from the user's
+  environment or dotenv is sent as the bearer token. When a URL is set in the environment it wins and the
+  channel does not exist. Not addressed.
+- Windows spellings of the protected name (a trailing dot or space, an NTFS `::$DATA` stream) may defeat
+  the name rule, and `util::path_security` has no normalisation for them. **Unverified**: not run on
+  Windows. The identity match (`resolve`, `canonicalize`) may or may not catch them.
 - A human editing the file, and `onboarding` itself (it writes `project.toml` with `std::fs::write`), are
   unaffected by design.
-- `[embeddings]` stays model-editable (the flow above), including `url`: a session could point the
-  embedding endpoint elsewhere. Not addressed here.
 - Under `profile = "root"` the classifier already allows every write; the guard does not change that.
-- The global-config match is by exact path or canonical parent and is case-sensitive; a case-insensitive
-  filesystem spelling of the global path is not covered (the project name rule is case-insensitive).
-- A hard link to `project.toml` created by a shell is not detected.
-- The `ConfiguredOff` refusal in `util::path_security` still says the config is cached for the life of the
-  process; that predates this fix and was left alone.
+- A hard link to `project.toml` created by a shell is not detected (identity compares resolved paths, not
+  inodes).
+- A project root that was loaded keeps its `project.toml` guarded for the life of the process; a project
+  whose root is only ever reached through a path no loaded root resolves to is guarded by the name rule alone.
 
 ## Tests added
 
@@ -163,25 +227,41 @@ test server::protected_config_write_tests::a_tool_cannot_change_the_global_confi
 test result: FAILED. 6 passed; 9 failed; 0 ignored; 0 measured; 7431 filtered out
 ```
 
-The `doc(create)` and `doc(move)` tests were added after that run and were red on their own runs (both
-landed the file) before their guards were added. The first run of the tests, before they were
-corrected, also failed some controls for test-side reasons only (`create_file` refusing an existing
-file; an assertion on a config field that an env override wins over).
+Red lines of the review findings, measured on the tree before each fix (2026-10-18):
+
+```
+F2 a_dot_codescout_that_is_a_link_to_another_name_is_still_guarded ... FAILED
+   left:  "[project]\nname = \"t\"\n\n[security]\nprofile = \"root\"\n"   (the file after the write)
+   right: "[project]\nname = \"t\"\n\n[embeddings]\n... [security]\nshell_command_mode = \"warn\"\n"
+F3 the_target_of_a_symlinked_project_toml_is_guarded_under_its_own_name ... FAILED   (same shape)
+F6 a_created_project_toml_does_not_relax_a_stricter_global_config ... FAILED
+   left: ("warn", true)  right: ("disabled", false)
+```
+
+The `doc(create)` and `doc(move)` tests were added after the first red run and were red on their own runs
+(both landed the file) before their guards were added.
 
 After: all pass. Controls that must keep working (they pass before and after): the onboarding embedding
 edit through `edit_file` lands AND reaches the running config; a rewrite that leaves `[security]` equal
 (comment, reordered tables, extra section) is allowed; other files under `.codescout/` and a
 `docs/project.toml` stay writable.
 
-Mutation probes, one literal mutation per guarded site, each reverted: 3 call-site removals
-(`atomic_write`, `doc(create)`, `doc(move)`), 17 inside the guard (every `if`/match arm of the name,
-global-path and equality logic, the TOML-parse refusal, the table name) and 2 on the remedy text. One
-survivor (the "before" for a file with no `[security]` table) got its own test and is killed. No
-unkilled mutants remain from the set run. The mutation set was not re-run after the last test-only
-commit `242bd66b2`, which only adds tests.
+**Mutation probes, re-run on the final tree** (one literal mutation per guarded site, each reverted,
+byte-for-byte): the Bug 2 set is 3 call-site removals (`atomic_write`, `doc(create)`, `doc(move)`), the
+guard's name, global-path, identity and equality logic, the TOML-parse refusal, the table name, the "before"
+reader and the remedy text, plus per-branch mutants for the identity match (identity never, `same_file`
+reduced to spelling, leaf link not followed, root comparison by spelling, `any` replaced by `all`, root
+never registered). 81 mutants were run in all (this file's and the reload issue's, one table), **81
+killed, 0 survived** (two were first REFUSED by a find-string that no longer matched the formatted code,
+and were re-run with the corrected string and killed). The leaf-link mutant is killed by the F3 test
+alone; the symlinked-directory case has no mutant that only its own test kills: it shares the identity
+mutants with F3.
 
 One test (`a_memory_topic_cannot_reach_project_toml`) passes with the guard removed: it pins measured
-behaviour of a path that is not an entry point. Not run: the real binary through an MCP client.
+behaviour of a path that is not an entry point. One test
+(`a_shell_redirect_still_writes_the_security_section_known_residual`) asserts the residual EXISTS; if it
+fails, the residual has closed and the issue and the manual must change. Not run: the real binary through
+an MCP client.
 
 ## Workarounds
 
@@ -190,9 +270,10 @@ directory the session is pointed at.
 
 ## Resume
 
-Nothing outstanding for the write tools. Carry the fix to `experiments`; then archive this file with the
-SHA there and its patch-id. Decide whether to also close the shell route (`shell_command_mode`) and the
-`[embeddings].url` route; see Residual.
+Carry the branch to `experiments`. **Decide the tighten-only reload** (OPEN DECISION above): it is the
+change that closes the shell route and the symlink and onboarding variants for mid-session edits, and it
+changes the user's own mid-session edit-to-loosen flow. **Decide the `[embeddings].url` exposure**
+(Residual). Then archive this file with the SHA on `experiments` and its patch-id.
 
 ## References
 

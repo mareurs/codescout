@@ -20,8 +20,8 @@ re-read fails, advances the file stamp, and says nothing. A user who saves `file
 false` in the same edit as any entry the loader refuses keeps writes ENABLED, silently, until the
 file is fixed or the server restarted. The loader gained new refusals on branch
 `fix/write-allowlist-port-2026-10-17` (a relative, empty, `~` or `..` `extra_write_roots` entry), so
-a class of edits that used to load now takes this path. The reload policy itself is older and is
-not changed here.
+a class of edits that used to load now takes this path. The reload policy itself is older; THIS
+file's Fix section changes it (the sentence read "not changed here" when the issue was filed).
 
 ## Class fit
 
@@ -118,18 +118,36 @@ the file would give with the invalid entry absent.
 4. Treat an unreadable file as the strictest policy on every gate (shell `disabled`, indexing off):
    consistent but turns a typo into a loss of every capability. Not chosen; writes only.
 
+**Review follow-ups (2026-10-18), each reproduced with a failing test first, then fixed:**
+
+- **F4 (reproduced; fixed `2087dac8e`, patch-id `ebe3141680c5b3583db8c3cc9169f71d674711d0`).** An ABSENT
+  key kept the previous value: `before=unrestricted`, the save deleted `shell_command_mode` next to an
+  invalid entry, `after_failed_reload=unrestricted` though the file without the invalid entry means `warn`.
+  That broke this issue's own decision. Now an absent `shell_command_mode`, `file_write_enabled` or
+  `indexing_enabled` reads as the global config's value if it sets one, else the built-in default, and the
+  policy takes the stricter of that and what it was; a global config that cannot be read counts as the
+  strictest value (`config::project::GlobalSecurity`, loaded separately from the project file). Red:
+  `an_invalid_reload_that_deletes_a_looser_shell_mode_reads_the_default` (left `"unrestricted"`, right
+  `"warn"`), and the two child-process global-config tests (`warn` where `disabled` was owed). This
+  retires the earlier residual "an absent key keeps the previous value".
+- **F5 (reproduced; fixed `479cb047f`, patch-id `11a5083a1cf74a0cd264ba74e8312f70b0f6d2be`).** The notice
+  was documented as riding every response, but `call_content` returned from its error path before it was
+  built: a missing `read_file`, a missing `edit_file` target and a `create_file` refused by the guard all
+  carried none (`tree` did). It now rides error responses too: a `RecoverableError` as an `extra` field
+  (object body), a plain error on an `AdvisedError` wrapper rendered as a `⚠` prefix. One test per error
+  shape. The other workspace notices (worktree, displaced default) are still success-path only; not changed.
+
 **Residual, by design.** Not salvaged from an invalid edit: `shell_dangerous_patterns` the file adds
-(an addition is a tightening, but it was left out to keep the rule small), a lowered
-`max_index_bytes`, and a tightening that only the GLOBAL config carries (an absent key keeps the
-previous value, because the global config may be what supplies it). A failure whose cause is the
-GLOBAL config file (not project.toml) takes the same path and was not exercised by a test: the
-salvage reads project.toml only. The text of `CONFIG_IS_CACHED_REMEDY` and the `ConfiguredOff`
-refusal still say the config is cached for the life of the process; that predates this fix and is
-not changed here.
+(an addition is a tightening, but it was left out to keep the rule small) and a lowered `max_index_bytes`.
+The `CONFIG_IS_CACHED_REMEDY` text was changed by commit `0d81e0138` (the Bug 2 fix: it no longer says
+`edit_file`, and no longer says the config is cached for the life of the process); the `ConfiguredOff`
+refusal in `src/util/path_security.rs` was corrected by `1be1ae8dc` (strings only). A failure whose cause is
+the GLOBAL config file takes the same path and is covered by
+`an_unreadable_global_config_counts_as_the_strictest_value`.
 
 ## Tests added
 
-`src/server/config_reload_tests.rs` (19 tests, real dispatch `call_tool_inner`, out-of-band
+`src/server/config_reload_tests.rs` (29 tests, real dispatch `call_tool_inner`, out-of-band
 `std::fs::write` edits) and `read_project_toml_table_distinguishes_missing_valid_oversized_and_invalid`
 in `src/config/project.rs`.
 
@@ -144,16 +162,18 @@ writes were turned off in the same save as the invalid entry; the call must be r
 test result: FAILED. 1 passed; 10 failed; 0 ignored; 0 measured; 7410 filtered out
 ```
 
-After: all pass. Mutation probes, one literal mutation per guarded site, each reverted: 31 mutants
-on the reload path (the whole tighten call removed, then each branch of `tighten_gate`, the shell
-rank and its unknown-value defaults, profile, roots, the file reader's four outcomes, the error
-field's set and clear, the accessor, the notice join and its pin, the refusal append and its pin).
-30 were killed first time; the survivor (the refusal reading the load error for the wrong project)
-got its own test and is now killed. The one test that passes before the fix is the direction guard
-`an_invalid_reload_never_loosens_the_shell_mode`, which pins behaviour the old code already had.
-Eight of the 19 tests were written after that red run and were NOT run against the pre-fix tree;
-their evidence is the mutation probes (the first removes the whole tighten call: 13 of the 17 tests
-then present failed).
+After: all pass. **Mutation probes, re-run on the final tree** (one literal mutation per guarded site, each
+reverted byte-for-byte): the reload set (every branch of the salvage, the global-config read, the file
+reader's four outcomes, the error field's set and clear, the accessor, the notice join and its pin, the
+refusal append and its pin, the error-path attach, the router's body and fatal renderings and its `Null`
+filter) plus one mutant per new branch of F4 (per key: `file_write_enabled`, `indexing_enabled`,
+`shell_command_mode`; global ignored, global key missing, global unreadable, global unknown mode) and F5
+(each of the three error shapes). 81 mutants were run in all (one table with the Bug 2 file's), **81
+killed, 0 survived**. Earlier reload run: 31 mutants, 30 killed first time, the survivor (the refusal
+reading the load error for the wrong project) got its own test. The direction guard
+`an_invalid_reload_never_loosens_the_shell_mode` passes before the fix: it pins behaviour the old code
+already had. Eight of the first 19 tests were written after the first red run and were NOT run against the
+pre-fix tree; their evidence is the mutants.
 
 ## Workarounds
 
