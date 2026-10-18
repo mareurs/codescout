@@ -1528,7 +1528,7 @@ async fn backfill_chunk_vectors_with(
             // artifact with no rows is selected, and the failed run had already created them. So it
             // undoes its own rows, and drops the finished vectors with them: a retry mints new
             // chunk ids, and a vector kept here would sit in the store under an id no row names.
-            // docs/issues/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
+            // docs/issues/archive/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
             if any_failed && created_rows && matches!(target, BackfillTarget::Store { .. }) {
                 let cat = catalog.lock();
                 crate::librarian::catalog::chunk::replace_chunks(&cat, &id, &[])?;
@@ -4158,7 +4158,7 @@ kind = "memory"
     /// `Store` selects only artifacts with no chunk rows, and a failed embed had already
     /// created them, so the artifact was never selected again: the second report read as a
     /// clean no-op while the chunk had no vector in the store search reads.
-    /// BUG docs/issues/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
+    /// BUG docs/issues/archive/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
     #[tokio::test]
     async fn a_store_run_retries_a_chunk_whose_embed_failed() {
         let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
