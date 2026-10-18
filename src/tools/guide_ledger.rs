@@ -523,10 +523,10 @@ impl GuideLedger {
     /// Best-effort write-through. Persistence is an optimization, not a
     /// correctness requirement — failures are logged at debug, never raised.
     ///
-    /// Writes go through `util::fs::write_utf8`, which stages to a sibling
-    /// `.tmp` and renames, so a reader can never observe a file torn by one of
+    /// Writes go through `util::fs::write_utf8`, which stages to a uniquely named sibling
+    /// and renames, so a reader can never observe a file torn by one of
     /// *this process's* writes. This assumes a single writer per session id;
-    /// two live processes racing on the same fixed `.tmp` name is a distinct,
+    /// two live processes writing the same session id is a distinct,
     /// dismissed-as-unreachable case (see below).
     ///
     /// Deliberately NOT read-modify-write: merging the on-disk set back in would

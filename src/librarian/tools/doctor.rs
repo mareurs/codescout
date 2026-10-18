@@ -2071,6 +2071,26 @@ fn export_augmentation_sidecars(
         }
 
         let doc = sidecar::AugmentationSidecar::from_row(&row);
+        // BEFORE the sidecar is written: `stamp_augmentation_declaration` below rewrites the
+        // artifact in place, and failing there would leave a sidecar nothing declares.
+        if let Err(e) = crate::librarian::util::refuse_write_through_symlink(art) {
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
+        // The ARTIFACT too, before its sidecar is written: a row below a link directory out of the
+        // repository would otherwise get its sidecar written and its declaration stamped into the
+        // OUTSIDE file (no `.git`: nothing at the door to stop it), or, with one, an orphan sidecar
+        // and a refused stamp.
+        if let Err(e) = crate::librarian::util::refuse_path_outside_root(art, scope_root, "stamp") {
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
+        // The sidecar is CREATED below `scope_root/docs/augmentations`; with that directory a
+        // link out of the repository the file (and the directory) would land outside it.
+        if let Err(e) = sidecar::confined_path(scope_root, &sidecar_rel, "write") {
+            failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
+            continue;
+        }
         if let Err(e) = sidecar::write(&sidecar_abs, &doc) {
             // One unwritable file must not abandon the rest of the sweep — the same
             // reasoning as `repair_frontmatter_id`, and it matters more here because the
@@ -2078,7 +2098,11 @@ fn export_augmentation_sidecars(
             failed.push(json!({ "path": abs_path, "error": format!("{e:#}") }));
             continue;
         }
-        match stamp_augmentation_declaration(art, &sidecar_rel) {
+        match stamp_augmentation_declaration(
+            std::slice::from_ref(&scope_root.to_path_buf()),
+            art,
+            &sidecar_rel,
+        ) {
             Ok(()) => exported.push(json!({ "path": abs_path, "sidecar": sidecar_rel })),
             Err(e) => failed.push(json!({
                 "path": abs_path,
@@ -2094,7 +2118,11 @@ fn export_augmentation_sidecars(
 /// Goes through `frontmatter::parse` + `frontmatter::write` rather than a line edit, because
 /// that pair already owns the reserved-key and scalar-quoting rules a hand-written
 /// `expects_augmentation: <path>` line would have to re-learn.
-fn stamp_augmentation_declaration(artifact: &std::path::Path, sidecar_rel: &str) -> Result<()> {
+fn stamp_augmentation_declaration(
+    roots: &[std::path::PathBuf],
+    artifact: &std::path::Path,
+    sidecar_rel: &str,
+) -> Result<()> {
     let content = std::fs::read_to_string(artifact)?;
     let (fm, body) = crate::librarian::frontmatter::parse(&content)?;
     let mut fm = fm.ok_or_else(|| anyhow::anyhow!("no frontmatter block"))?;
@@ -2102,7 +2130,11 @@ fn stamp_augmentation_declaration(artifact: &std::path::Path, sidecar_rel: &str)
         "expects_augmentation".to_string(),
         Value::String(sidecar_rel.to_string()),
     );
-    std::fs::write(artifact, crate::librarian::frontmatter::write(&fm, body))?;
+    crate::librarian::util::write_catalogued_file(
+        roots,
+        artifact,
+        crate::librarian::frontmatter::write(&fm, body),
+    )?;
     Ok(())
 }
 
@@ -2267,7 +2299,21 @@ async fn run_fix(
                 // `artifact_id` is always Some for this check — it is built from the
                 // catalog row — but a default beats an unwrap in a repair loop.
                 let id = v.artifact_id.clone().unwrap_or_default();
-                match super::mv::repair_frontmatter_id(std::path::Path::new(&v.path), &id) {
+                // `repair_frontmatter_id` SKIPS a link rather than failing (a move's rename has
+                // already happened, so it cannot abort), which this loop would read as a repair.
+                // Refuse here so a link is reported under `failed`, not `repaired`.
+                if let Err(err) = crate::librarian::util::refuse_write_through_symlink(
+                    std::path::Path::new(&v.path),
+                ) {
+                    failed.push(json!({ "path": v.path, "error": format!("{err:#}") }));
+                    continue;
+                }
+                match super::mv::repair_frontmatter_id(
+                    std::slice::from_ref(&scope_root),
+                    std::path::Path::new(&v.path),
+                    &id,
+                    None,
+                ) {
                     Ok(_) => repaired.push(json!({ "path": v.path, "id": id })),
                     // One unwritable file must not abandon the rest of the sweep.
                     Err(err) => failed.push(json!({ "path": v.path, "error": format!("{err:#}") })),
@@ -2599,15 +2645,27 @@ fn reseat_worktree(
 /// (augmentation / links / events / chunks) and the `artifact_vec_v2` cascade
 /// trigger they reach all fire — a bare `sqlite3` CLI cannot (7ca71bf7). Returns (artifact_rows,
 /// commit_rows) removed.
+///
+/// The match is EXACT ([`crate::librarian::util::path_at_or_under_sql`]), not `LIKE`: `LIKE`
+/// without `ESCAPE` read `_` and `%` in the dead root as wildcards and ignored ASCII case, so
+/// pruning `/gone/my_app` deleted the rows (with their cascaded history) of the LIVE
+/// `/gone/myXapp` and `/gone/MY_APP`.
 fn prune_dead_root(conn: &rusqlite::Connection, root: &std::path::Path) -> Result<(usize, usize)> {
-    let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
-    let under = format!("{root_fwd}/%");
+    let (root_fwd, under) = crate::librarian::util::root_and_prefix(
+        crate::util::fs::RepoPath::from_path(root).as_str(),
+    );
     let artifact_rows = conn.execute(
-        "DELETE FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2",
+        &format!(
+            "DELETE FROM artifact WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
     )?;
     let commit_rows = conn.execute(
-        "DELETE FROM commits WHERE git_root = ?1 OR git_root LIKE ?2",
+        &format!(
+            "DELETE FROM commits WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("git_root", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
     )?;
     Ok((artifact_rows, commit_rows))
@@ -2654,20 +2712,27 @@ fn derive_dead_roots(conn: &rusqlite::Connection) -> anyhow::Result<Vec<std::pat
 }
 
 /// Read-only count of `(artifact_rows, commit_rows)` under `root`, mirroring the
-/// WHERE clauses `prune_dead_root` deletes with.
+/// WHERE clauses `prune_dead_root` deletes with (the same exact predicate).
 fn count_dead_root(
     conn: &rusqlite::Connection,
     root: &std::path::Path,
 ) -> anyhow::Result<(usize, usize)> {
-    let root_fwd = format!("{}", crate::util::fs::RepoPath::from_path(root));
-    let under = format!("{root_fwd}/%");
+    let (root_fwd, under) = crate::librarian::util::root_and_prefix(
+        crate::util::fs::RepoPath::from_path(root).as_str(),
+    );
     let arts: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM artifact WHERE abs_path = ?1 OR abs_path LIKE ?2",
+        &format!(
+            "SELECT COUNT(*) FROM artifact WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
         |r| r.get(0),
     )?;
     let commits: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM commits WHERE git_root = ?1 OR git_root LIKE ?2",
+        &format!(
+            "SELECT COUNT(*) FROM commits WHERE {}",
+            crate::librarian::util::path_at_or_under_sql("git_root", "?1", "?2")
+        ),
         rusqlite::params![root_fwd, under],
         |r| r.get(0),
     )?;
@@ -6841,13 +6906,31 @@ fn scan_augmentation_declared_but_absent(
         // A declared sidecar that EXISTS on disk is a different finding from one that does
         // not: the first is one command from repaired, the second needs a machine that
         // still holds the row. Reporting both under one detail would hide that.
+        //
+        // A third state: the declared path is REFUSED (it leaves the repository, lexically or
+        // through a link). `reindex` refuses it too, so "Run reindex" would be wrong advice, and
+        // `root.join(rel).is_file()` followed the link and called an outside file "present".
+        let refusal: Option<String> = sidecar_rel.as_deref().and_then(|rel| {
+            let root =
+                crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))?;
+            crate::librarian::augmentation_sidecar::confined_path(&root, rel, "attach")
+                .err()
+                .map(|e| format!("{e:#}"))
+        });
         let recoverable = sidecar_rel.as_deref().is_some_and(|rel| {
             crate::librarian::current_project::lookup_git_root(std::path::Path::new(abs_path))
                 .map(|root| root.join(rel).is_file())
                 .unwrap_or(false)
         });
 
-        let detail = if recoverable {
+        let detail = if let Some(why) = refusal {
+            let rel = sidecar_rel.unwrap_or_default();
+            format!(
+                "frontmatter declares `expects_augmentation: {rel}`, but that path is refused: \
+                 {why}. Nothing will attach it, so `reindex` is not the remedy. Declare a \
+                 repo-relative sidecar that stays inside the repository."
+            )
+        } else if recoverable {
             let rel = sidecar_rel.unwrap_or_default();
             format!(
                 "frontmatter declares `expects_augmentation: {rel}` and that sidecar is \
@@ -7001,7 +7084,7 @@ fn scan_sidecar_shape_drift(
             continue;
         }
 
-        let committed = match sidecar::read(&path) {
+        let committed = match sidecar::read_in(&root, &rel) {
             Ok(s) => s,
             Err(e) => {
                 if !scope.admit("sidecar_shape_drift", id, abs_path) {
@@ -7011,14 +7094,26 @@ fn scan_sidecar_shape_drift(
                     "sidecar_unparseable",
                     Some(id.clone()),
                     abs_path.clone(),
-                    format!(
+                    if e.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+                        .is_some()
+                    {
+                        // A REFUSAL (the declared path leaves the repository), not a parse failure:
+                        // "repair the YAML / delete it" would point at a file outside the repo.
+                        format!(
+                            "the declared sidecar `{rel}` is refused: {e:#}. It was not opened. \
+                             Declare a repo-relative sidecar that stays inside the repository; do \
+                             not edit or delete the file behind the link."
+                        )
+                    } else {
+                        format!(
                         "`{rel}` is declared and present but does not parse: {e:#}. Nothing else \
                              reports this — `reindex` skips an artifact that already has a row, so a \
                              corrupt committed shape stays unread until the machine holding the row \
                              loses it, which is the one moment it is needed. Repair the YAML by hand, \
                              or delete it and re-run librarian(action=\"doctor\", \
                              fix=\"export_augmentations\") on a machine whose row is correct."
-                    ),
+                        )
+                    },
                 ));
                 continue;
             }
@@ -18212,6 +18307,88 @@ mod tests {
         assert_eq!(n_com, 1, "only the /tmp commit remains");
     }
 
+    /// H-2: `prune_dead_root` and `count_dead_root` matched `abs_path LIKE '<root>/%'` with NO
+    /// `ESCAPE`, so `_` and `%` in the dead root were wildcards and SQLite's ASCII case-insensitive
+    /// `LIKE` reached other repositories: pruning the dead `/gone/my_app` deleted the rows of the LIVE
+    /// `/gone/myXapp` and `/gone/MY_APP` (and their cascaded augmentation, events and chunks), and
+    /// the dry run counted them too, so it could not warn. A root with an apostrophe must still match
+    /// its own rows.
+    #[test]
+    fn prune_and_count_dead_root_spare_siblings_that_match_a_like_pattern() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "own", "/gone/my_app/docs/a.md");
+        seed_artifact(&cat, "own-root", "/gone/my_app");
+        seed_artifact(&cat, "wild", "/gone/myXapp/docs/a.md");
+        seed_artifact(&cat, "case", "/gone/MY_APP/docs/a.md");
+        seed_artifact(&cat, "pct", "/gone/myAB/docs/a.md");
+        seed_commit(&cat, "ownc", "/gone/my_app");
+        seed_commit(&cat, "wildc", "/gone/myXapp");
+        seed_commit(&cat, "casec", "/gone/MY_APP");
+        let root = std::path::Path::new("/gone/my_app");
+
+        let counted = count_dead_root(&cat.conn, root).unwrap();
+        let pruned = prune_dead_root(&cat.conn, root).unwrap();
+
+        assert_eq!(
+            counted,
+            (2, 1),
+            "the dry run counts only the root's own rows"
+        );
+        assert_eq!(pruned, (2, 1));
+        let left: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 3, "the three siblings' rows survive");
+        let left_commits: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM commits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left_commits, 2);
+    }
+
+    /// The apostrophe half of H-2: a bound parameter is never SQL-quoted, and `%`/`_` in the root are
+    /// literal.
+    #[test]
+    fn prune_dead_root_matches_a_root_with_an_apostrophe_and_wildcards_literally() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "own", "/gone/x%_'y/docs/a.md");
+        seed_artifact(&cat, "sib", "/gone/xAB'y/docs/a.md");
+        seed_artifact(&cat, "case", "/gone/X%_'Y/docs/a.md");
+
+        let pruned = prune_dead_root(&cat.conn, std::path::Path::new("/gone/x%_'y")).unwrap();
+
+        assert_eq!(pruned.0, 1);
+        let left: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 2);
+    }
+
+    /// L-5: a trailing separator on the dead root (`doctor(fix=prune_missing, root="/gone/x/")`)
+    /// bound the prefix `/gone/x//`, so the prune and its dry run reported zero rows without saying
+    /// why. Both normalize it.
+    #[test]
+    fn prune_and_count_dead_root_accept_a_trailing_separator() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_artifact(&cat, "own", "/gone/x/docs/a.md");
+        seed_artifact(&cat, "sib", "/gone/xy/docs/a.md");
+        seed_commit(&cat, "ownc", "/gone/x");
+        let root = std::path::Path::new("/gone/x/");
+
+        let counted = count_dead_root(&cat.conn, root).unwrap();
+        let pruned = prune_dead_root(&cat.conn, root).unwrap();
+
+        assert_eq!(counted, (1, 1), "the dry run counts the root's rows");
+        assert_eq!(pruned, (1, 1));
+        let left: i64 = cat
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 1, "the sibling survives");
+    }
+
     #[test]
     fn derive_dead_roots_groups_gone_subtrees_and_skips_live_dir_files() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -22738,6 +22915,150 @@ root = "work/elsewhere/ghost"
             v[0].check, "sidecar_unparseable",
             "a corrupt sidecar is a different finding from drift, and needs different advice"
         );
+    }
+
+    /// The READ side of `expects_augmentation:`. The declared string is the document's own text,
+    /// extension-gated only, so `sidecar_shape_drift` opened `../secret.yaml` or an absolute path
+    /// and `serde_yml`'s error echoed the value it could not parse (`invalid type: string
+    /// "ghp_…"`), which reached the agent verbatim in `sidecar_unparseable`'s detail.
+    ///
+    /// The control is the first assertion: reading the file directly DOES echo the token, so a
+    /// green result below is the containment's doing and not a parser that never echoes.
+    #[test]
+    fn a_sidecar_declared_outside_the_repo_is_refused_and_its_content_never_echoed() {
+        use crate::librarian::augmentation_sidecar as sc;
+        const TOKEN: &str = "ghp_FAKE_TOKEN_DO_NOT_ECHO";
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let secret = base.path().join("secret.yaml");
+        std::fs::write(&secret, format!("{TOKEN}\n")).unwrap();
+        let direct = format!("{:#}", sc::read(&secret).unwrap_err());
+        assert!(
+            direct.contains(TOKEN),
+            "control: the parser echoes it: {direct}"
+        );
+
+        for decl in [
+            "../secret.yaml".to_string(),
+            secret.to_string_lossy().to_string(),
+        ] {
+            let cat = Catalog::open_in_memory().unwrap();
+            seed_declared(&cat, &repo, "t", Some(&decl), true);
+            assert!(
+                repo.join(&decl).is_file(),
+                "precondition: `{decl}` resolves to the file"
+            );
+            let mut ds = scope::DoctorScope::new(
+                super::super::scope::Scope::All,
+                &unscoped_ctx(),
+                &unscoped_conn(),
+            )
+            .unwrap();
+
+            let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
+
+            let rendered = format!("{v:#?}");
+            assert!(
+                !rendered.contains(TOKEN),
+                "`{decl}` leaked file content: {rendered}"
+            );
+            assert_eq!(v.len(), 1, "the refusal is itself a finding: {rendered}");
+            assert!(
+                rendered.contains("an absolute path or a `..` segment"),
+                "the LEXICAL refusal, not just any containment message: {rendered}"
+            );
+        }
+    }
+
+    /// Same refusal for a declared path that passes through a symlinked directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_sidecar_behind_a_directory_link_out_of_the_repo_is_refused_and_never_echoed() {
+        const TOKEN: &str = "ghp_FAKE_TOKEN_DO_NOT_ECHO";
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        let outside = base.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("t.yaml"), format!("{TOKEN}\n")).unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("docs/augmentations")).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, &repo, "t", Some("docs/augmentations/t.yaml"), true);
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
+
+        let rendered = format!("{v:#?}");
+        assert!(!rendered.contains(TOKEN), "leaked file content: {rendered}");
+        assert_eq!(v.len(), 1, "{rendered}");
+        assert!(
+            rendered.contains("outside the repository root"),
+            "{rendered}"
+        );
+    }
+
+    /// LOW 3: a read-side REFUSAL is not a parse failure. `sidecar_unparseable` carried the remedy
+    /// "Repair the YAML by hand, or delete it", which for a directory link targets a file OUTSIDE
+    /// the repository. And `augmentation_declared_but_absent` checked `root.join(rel).is_file()`
+    /// unconfined, so it called an outside sidecar "present" and said "Run reindex", which now
+    /// refuses.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_sidecar_is_not_advised_as_a_file_to_repair_or_to_reindex() {
+        let base = tempfile::tempdir().unwrap();
+        let repo = base.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        let outside = base.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("t.yaml"), "prompt: x\n").unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("docs/augmentations")).unwrap();
+
+        // Declared, with a row: the read-side scan.
+        let cat = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat, &repo, "t", Some("docs/augmentations/t.yaml"), true);
+        let mut ds = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let v = scan_sidecar_shape_drift(&cat.conn, &mut ds).unwrap();
+        assert_eq!(v.len(), 1, "{v:#?}");
+        let detail = &v[0].detail;
+        assert!(
+            !detail.contains("Repair the YAML") && !detail.contains("delete it"),
+            "the remedy for a REFUSED path must not point at the file behind the link: {detail}"
+        );
+        assert!(detail.contains("outside the repository root"), "{detail}");
+
+        // Declared, no row: the declared-but-absent scan.
+        let cat2 = Catalog::open_in_memory().unwrap();
+        seed_declared(&cat2, &repo, "u", Some("docs/augmentations/t.yaml"), false);
+        let mut ds2 = scope::DoctorScope::new(
+            super::super::scope::Scope::All,
+            &unscoped_ctx(),
+            &unscoped_conn(),
+        )
+        .unwrap();
+        let all = scan_augmentation_declared_but_absent(&mut ds2, &cat2.conn).unwrap();
+        let d = &all
+            .iter()
+            .find(|x| x.artifact_id.as_deref() == Some("u"))
+            .expect("the declaration is still a finding")
+            .detail;
+        assert!(
+            !d.contains("Run librarian(action=\"reindex\")"),
+            "reindex refuses an outside sidecar, so it must not be the advice: {d}"
+        );
+        assert!(d.contains("outside the repository root"), "{d}");
     }
 
     #[tokio::test]

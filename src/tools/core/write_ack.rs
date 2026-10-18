@@ -97,7 +97,22 @@ pub async fn resolve_write_or_capture(
         .await;
 
     match classify_write_path(raw_path, &root, &security, &session_roots) {
-        WritePathDecision::Allowed(p) => Ok(WriteOutcome::Write(p)),
+        WritePathDecision::Allowed(p) => {
+            // The classifier resolves the parent and keeps the leaf as written, so an in-root
+            // leaf link to a deny-listed file is "allowed" here while `read_file` refuses the
+            // same link. The edit tools read the target through it (error hints echo it, a
+            // unique match copies it into the project), so apply the read deny-list to what
+            // the link resolves to. docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
+            crate::fs::validate_leaf_link_target(
+                &p,
+                &root,
+                &security,
+                &session_roots,
+                crate::fs::LinkTarget::ReadableByTools,
+            )
+            .map_err(|e| RecoverableError::new(e.to_string()))?;
+            Ok(WriteOutcome::Write(p))
+        }
         WritePathDecision::Denied(msg) => Err(RecoverableError::new(msg).into()),
         WritePathDecision::OutsideRoot { resolved } => {
             let dir = resolved

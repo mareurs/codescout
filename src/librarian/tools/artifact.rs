@@ -94,6 +94,104 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     }
 }
 
+/// The artifact a `doc` write acts on, for the writes whose RESULT says nothing about where
+/// they wrote. `None` for every other call.
+///
+/// Why a result needs to say it: `LibrarianAdapter::relevant_guide_topic` chooses the guide
+/// from the RESULT, and chooses `tracker-conventions` only when the result names a path under
+/// `docs/issues/` or `docs/trackers/`. `append_entry`, `update_entry`, `augment` and `link`
+/// answer `{id, ...}` or the bare `"ok"` and nothing else, so a write to a tracker never
+/// reached the guide section written for it (`serves: doc.append_entry(path~docs/trackers/)`
+/// and its kin could not be chosen). `move` is not here: it already returns
+/// `old_abs_path`/`new_abs_path`, which `names_path_containing` reads.
+///
+/// **`update` is NOT here, deliberately, and neither is any status change.** An `update` that
+/// changes `status` was named in the first cut of this routing and measured to delay the
+/// anti-wipe warnings: the engine ships ONE topic per call and stops at the first that ships
+/// something (`emit_guide_sections`), so a bug close, then a tracker archive, then a body
+/// edit delivered `librarian` § *Choosing a mode* / § *The shrink guard* only AFTER the third
+/// call had run; and in the anonymous tier (no session identity, so the destructive gate
+/// holds nothing) a forced status update ran unheld and the next forced wholesale
+/// `patch.body` ran without the warning. Safety outranks reachability, so every `update`
+/// keeps routing to `librarian` and the sections only a status change needs stay waived.
+///
+/// **A `link` names the row whose FILE it wrote.** A plain link writes only a catalog edge on
+/// its source (so: the source, through the worktree overlay like every other write). A
+/// `supersedes` link writes the DESTINATION's frontmatter (`status: superseded`,
+/// `link.rs`), and that is the file that changed, so that is the one named. It is named as the
+/// caller passed it, NOT through the overlay, because `link::call` passes `dst_id` to
+/// `write_field_to_frontmatter` unresolved: from a worktree session it writes the MAIN
+/// checkout's file (a bug of its own, filed), and the result must name what was written.
+///
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+struct WriteTarget {
+    id: String,
+    /// Resolve `id` through the worktree overlay (`peek_write_target`) before naming it.
+    through_overlay: bool,
+}
+
+fn write_target_id(action: &str, args: &Value) -> Option<WriteTarget> {
+    let (key, through_overlay) = match action {
+        "append_entry" | "update_entry" | "augment" => ("id", true),
+        "link" if args.get("rel").and_then(Value::as_str) == Some("supersedes") => {
+            ("dst_id", false)
+        }
+        "link" => ("src_id", true),
+        _ => return None,
+    };
+    args.get(key).and_then(Value::as_str).map(|id| WriteTarget {
+        id: id.to_string(),
+        through_overlay,
+    })
+}
+
+/// Put the path of the artifact a write LANDED ON on its result, so the guide router can read
+/// it. `target` is the id the caller passed; unless it says otherwise (`through_overlay`) the
+/// path named is the one [`super::worktree::peek_write_target`] says the write reached, which
+/// in a worktree session is the overlay shadow, not the main-checkout file the caller's id
+/// points at (naming the latter would send an agent to read a file the write never touched).
+///
+/// A bare string answer (`augment`, `link` answer `"ok"`) is promoted to `{"status": ...}` to
+/// hold the path, the same promotion `annotate_write_path` makes for every other write
+/// (`docs/adrs/2026-08-31-write-responses-name-the-path-they-wrote.md`, amended 2026-10-17).
+/// Only when the id resolves and the result names no path of its own: a failed lookup leaves
+/// the result exactly as the tool returned it.
+///
+/// The catalog lock is taken again here, after the write. A `merge_worktree` or abandon that
+/// lands in that window makes the result name the main row's path, or none: cosmetic, the
+/// answer is advisory and routing does not depend on which of the two it names.
+fn name_the_target(ctx: &ToolContext, target: Option<&WriteTarget>, mut out: Value) -> Value {
+    let Some(target) = target else { return out };
+    let landed = {
+        let cat = ctx.catalog.lock();
+        let landed_id = if target.through_overlay {
+            let Ok(landed_id) = super::worktree::peek_write_target(&cat, ctx, &target.id) else {
+                return out;
+            };
+            landed_id
+        } else {
+            target.id.clone()
+        };
+        match crate::librarian::catalog::artifact::get(&cat, &landed_id) {
+            Ok(Some(row)) => row.abs_path,
+            _ => return out,
+        }
+    };
+    if let Some(status) = out.as_str() {
+        out = json!({ "status": status });
+    }
+    let Some(obj) = out.as_object_mut() else {
+        return out;
+    };
+    if !(obj.contains_key("abs_path") || obj.contains_key("rel_path")) {
+        obj.insert(
+            "abs_path".to_string(),
+            json!(crate::util::fs::to_forward_slash(&landed)),
+        );
+    }
+    out
+}
+
 pub struct Artifact;
 
 #[async_trait]
@@ -396,7 +494,9 @@ impl Tool for Artifact {
         if let Err(e) = ctx.catalog.lock().set_audit_verb(&format!("doc.{action}")) {
             tracing::warn!("audit verb stamp failed: {e}");
         }
-        match action {
+        // Taken before `args` moves into an arm: which artifact will this call write?
+        let target = write_target_id(action, &args);
+        let out = match action {
                 "find"     => super::find::call(ctx, args).await,
                 "get"      => super::get::call(ctx, args).await,
                 "create"   => super::create::call(ctx, args).await,
@@ -418,7 +518,8 @@ impl Tool for Artifact {
                 other => Err(LibrarianRecoverableError::new(format!(
                     "unknown action '{other}' — expected one of: find, get, create, update, move, delete, graft, link, graph, state_at, append_entry, update_entry, rekey_prefix, event_create, event_list, augment, gather, list_stale"
                 ))),
-            }
+            };
+        out.map(|v| name_the_target(ctx, target.as_ref(), v))
     }
 }
 
@@ -430,6 +531,257 @@ mod tests {
 
     fn mk_ctx() -> ToolContext {
         TestToolContextBuilder::new(Catalog::open_in_memory().unwrap()).build()
+    }
+
+    /// The path a write names is the file it LANDED ON, not the one the caller's id points at.
+    ///
+    /// In a worktree session a write to a main-checkout artifact lands on its overlay shadow:
+    /// `resolve_write_target` forks it and the write goes there. The first cut of
+    /// `name_the_target` read `args["id"]` before dispatch, so every one of these answered
+    /// `{"abs_path": "/repo/docs/trackers/t.md"}` — the MAIN file, which the write never
+    /// touched — while the row that changed sat at `/repo/.worktrees/feat/docs/trackers/t.md`.
+    /// An agent reading that path would look at the wrong file or conclude its write was lost.
+    ///
+    /// One case per action, each on a FRESH context so no earlier write has already forked the
+    /// shadow (the first write must name the shadow it is about to create, not the main file
+    /// the shadow did not yet exist for); a non-worktree control per action proves the same
+    /// code still names the artifact itself. Mutation sites: `write_target_id` keys,
+    /// `name_the_target`'s `peek_write_target` call.
+    /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+    #[tokio::test]
+    async fn a_write_names_the_row_it_landed_on_in_a_worktree_session_and_the_artifact_otherwise() {
+        use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
+        use crate::librarian::tools::worktree::test_support::{seed_main_tracker, wt_ctx};
+        const MAIN: &str = "/repo/docs/trackers/t.md";
+        const SHADOW: &str = "/repo/.worktrees/feat/docs/trackers/t.md";
+
+        type BuildArgs = fn(&str, &str) -> Value;
+        let cases: [(&str, BuildArgs); 4] = [
+            ("append_entry", |id, _| {
+                json!({"action": "append_entry", "id": id, "entry_collection": "items",
+                       "id_prefix": "F", "entry": {"t": "x"}})
+            }),
+            ("update_entry", |id, _| {
+                json!({"action": "update_entry", "id": id, "entry_collection": "items",
+                       "entry_id": "F-1", "fields": {"t": "b"}})
+            }),
+            ("augment", |id, _| {
+                json!({"action": "augment", "id": id, "merge": true,
+                       "augment": {"params": {"note": "x"}}})
+            }),
+            (
+                "link",
+                |id, dst| json!({"action": "link", "src_id": id, "dst_id": dst, "rel": "implements"}),
+            ),
+        ];
+        for (action, build) in cases {
+            for worktree in [true, false] {
+                let ctx = if worktree {
+                    wt_ctx(Catalog::open_in_memory().unwrap())
+                } else {
+                    mk_ctx()
+                };
+                let (id, dst) = {
+                    let cat = ctx.catalog.lock();
+                    let id = if worktree {
+                        seed_main_tracker(&cat)
+                    } else {
+                        // The same tracker, in a session that is not a worktree.
+                        let id =
+                            crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(MAIN));
+                        upsert(
+                            &cat,
+                            &TestArtifactRowBuilder::new(&id)
+                                .with_abs_path(MAIN)
+                                .with_kind("tracker")
+                                .build(),
+                        )
+                        .unwrap();
+                        crate::librarian::catalog::augmentation::upsert(
+                            &cat,
+                            &crate::librarian::catalog::augmentation::AugmentationRow {
+                                artifact_id: id.clone(),
+                                prompt: "p".into(),
+                                params: r#"{"items":[{"id":"F-1","t":"a"}],"note":"base"}"#.into(),
+                                last_refreshed_at: None,
+                                refresh_count: 0,
+                                created_at: "2026-01-01T00:00:00.000Z".into(),
+                                updated_at: "2026-01-01T00:00:00.000Z".into(),
+                                render_template: None,
+                                params_schema: None,
+                                append_mode: false,
+                                history_cap: None,
+                                entry_collection: Some("items".into()),
+                                refreshed_at_commit: None,
+                            },
+                        )
+                        .unwrap();
+                        id
+                    };
+                    let dst = crate::librarian::ids::artifact_id_from_abs(std::path::Path::new(
+                        "/repo/docs/specs/other.md",
+                    ));
+                    upsert(
+                        &cat,
+                        &TestArtifactRowBuilder::new(&dst)
+                            .with_abs_path("/repo/docs/specs/other.md")
+                            .with_kind("spec")
+                            .build(),
+                    )
+                    .unwrap();
+                    (id, dst)
+                };
+                let out = Artifact
+                    .call(&ctx, build(&id, &dst))
+                    .await
+                    .unwrap_or_else(|e| panic!("{action} (worktree={worktree}) failed: {e:#}"));
+                let named = out["abs_path"].as_str().unwrap_or_else(|| {
+                    panic!("{action} (worktree={worktree}) names no path: {out}")
+                });
+                let want = if worktree { SHADOW } else { MAIN };
+                assert_eq!(
+                    named, want,
+                    "{action} (worktree={worktree}) must name the file it landed on, got {out}"
+                );
+            }
+        }
+    }
+
+    /// `update` names nothing, whether the status arrives as `patch.status` or as the
+    /// top-level shortcut `doc(update, id, status=…)`, which `update::call` lifts into the
+    /// patch. Routing a status change to `tracker-conventions` delayed librarian's anti-wipe
+    /// sections (see `write_target_id`). Both spellings are asserted because they are two
+    /// SITES of one rule: a mutation of the top-level one survived all of `guide_hint_tests`
+    /// when only the other was driven. (Driven end to end, against real files, in
+    /// `guide_hint_tests::a_status_update_keeps_the_librarians_anti_wipe_sections_first`.)
+    #[test]
+    fn an_update_that_changes_status_names_no_path_in_either_spelling() {
+        let id = "b00000000000000a";
+        for args in [
+            json!({"id": id, "patch": {"status": "investigating"}}),
+            json!({"id": id, "status": "open"}),
+            json!({"id": id, "patch": {"title": "t"}}),
+        ] {
+            assert!(write_target_id("update", &args).is_none(), "{args}");
+        }
+        // And the actions that ARE named still are, so the control above is not vacuous.
+        let named = |action: &str, args: Value| {
+            write_target_id(action, &args).map(|t| (t.id, t.through_overlay))
+        };
+        assert_eq!(
+            named("append_entry", json!({"id": id})),
+            Some((id.to_string(), true))
+        );
+        // A link names the row whose FILE it wrote: the source for a plain edge, the
+        // destination (as passed, not through the overlay) for `supersedes`.
+        assert_eq!(
+            named(
+                "link",
+                json!({"src_id": id, "dst_id": "d", "rel": "implements"})
+            ),
+            Some((id.to_string(), true))
+        );
+        assert_eq!(
+            named(
+                "link",
+                json!({"src_id": id, "dst_id": "d", "rel": "supersedes"})
+            ),
+            Some(("d".to_string(), false))
+        );
+    }
+
+    /// A `link` names the row whose FILE it wrote, one case per rel kind, in and out of a worktree
+    /// session. A plain edge (`implements`) writes only a catalog row on its source, so the source
+    /// is named (through the overlay, like every write). A `supersedes` link writes the
+    /// DESTINATION's frontmatter, so the destination is named, and the file on disk is checked to
+    /// be the one that changed, so the assertion is about the write and not about a key choice.
+    /// Out of a worktree session both resolve to the artifacts themselves; in one, `supersedes`
+    /// names the MAIN checkout's destination because `link::call` hands `dst_id` to
+    /// `write_field_to_frontmatter` unresolved (a bug of its own, filed): the result names what
+    /// was written, not what should have been. A mutant keying every link on `src_id` survived
+    /// 2,448 tests before this existed, because every supersedes test called `link::call` directly.
+    #[tokio::test]
+    async fn a_link_names_the_row_whose_file_it_wrote_for_each_rel_in_and_out_of_a_worktree() {
+        use crate::librarian::catalog::artifact::{upsert, TestArtifactRowBuilder};
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+        for rel in ["implements", "supersedes"] {
+            for worktree in [true, false] {
+                let dir = tempfile::tempdir().unwrap();
+                let repo = dir.path().join("repo");
+                let wt = repo.join(".worktrees/feat");
+                std::fs::create_dir_all(repo.join("docs/specs")).unwrap();
+                let dst_path = repo.join("docs/specs/other.md");
+                std::fs::write(&dst_path, "---\nstatus: draft\n---\nbody\n").unwrap();
+                let src_path = repo.join("docs/trackers/t.md");
+
+                let mut builder = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap());
+                if worktree {
+                    builder = builder.with_current_project(Arc::new(CurrentProject {
+                        abs_path: wt.clone(),
+                        git_root: wt.clone(),
+                        main_root: Some(repo.clone()),
+                        umbrella: None,
+                    }));
+                }
+                let ctx = builder.build();
+                let src = crate::librarian::ids::artifact_id_from_abs(&src_path);
+                let dst = crate::librarian::ids::artifact_id_from_abs(&dst_path);
+                {
+                    let cat = ctx.catalog.lock();
+                    for (id, path, kind) in
+                        [(&src, &src_path, "tracker"), (&dst, &dst_path, "spec")]
+                    {
+                        upsert(
+                            &cat,
+                            &TestArtifactRowBuilder::new(id)
+                                .with_abs_path(path.to_str().unwrap())
+                                .with_kind(kind)
+                                .build(),
+                        )
+                        .unwrap();
+                    }
+                }
+                if worktree && rel == "supersedes" {
+                    // The destination already has an overlay shadow, so a name resolved through
+                    // the overlay would be the SHADOW's path while `link::call` writes the main
+                    // file: this is what makes "named as passed" observable.
+                    let mut cat = ctx.catalog.lock();
+                    crate::librarian::tools::worktree::resolve_write_target(&mut cat, &ctx, &dst)
+                        .unwrap();
+                }
+                let out = Artifact
+                    .call(
+                        &ctx,
+                        json!({"action": "link", "src_id": src, "dst_id": dst, "rel": rel}),
+                    )
+                    .await
+                    .unwrap_or_else(|e| panic!("link {rel} (worktree={worktree}) failed: {e:#}"));
+                let named = out["abs_path"]
+                    .as_str()
+                    .unwrap_or_else(|| {
+                        panic!("link {rel} (worktree={worktree}) names no path: {out}")
+                    })
+                    .to_string();
+                let fwd = |p: &std::path::Path| crate::util::fs::to_forward_slash(p);
+                let want = match (rel, worktree) {
+                    ("supersedes", _) => fwd(&dst_path),
+                    ("implements", true) => fwd(&wt.join("docs/trackers/t.md")),
+                    _ => fwd(&src_path),
+                };
+                assert_eq!(
+                    named, want,
+                    "link {rel} (worktree={worktree}) must name the file it wrote, got {out}"
+                );
+                if rel == "supersedes" {
+                    let written = std::fs::read_to_string(&dst_path).unwrap();
+                    assert!(
+                        written.contains("superseded"),
+                        "premise: the supersedes link rewrote the destination file, got {written:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]

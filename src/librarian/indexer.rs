@@ -59,6 +59,19 @@ pub struct IndexReport {
     /// leaking on the default one.
     /// `docs/issues/archive/2026-09-04-artifact-vector-delete-has-no-production-caller-so-every-archive-strands-its-vectors.md`
     pub removed_ids: Vec<String>,
+    /// Rows this walk reclaimed because the path they name RESOLVES OUTSIDE the repository
+    /// (a directory in its parent chain is a link out), as opposed to a file that vanished. A
+    /// policy deletion, so it is counted and NAMED. The id list is deliberately NOT capped: it
+    /// names exactly what was deleted (a subset of `removed_ids`, which is already unbounded),
+    /// and a silent cap would hide ids from the one report that explains the deletion; a large
+    /// response is already buffered by the progressive-disclosure layer. Also included in
+    /// `removed` / `removed_ids`.
+    pub reclaimed_escaping: usize,
+    pub reclaimed_escaping_ids: Vec<String>,
+    /// Escaping rows that were KEPT because they carry an augmentation or events, which exist
+    /// nowhere else. Reported on every run until the link is removed or re-pointed (the file
+    /// then no longer exists and the row is reclaimed as an ordinary vanished one).
+    pub escaping_kept_ids: Vec<String>,
 }
 
 /// One item queued for embedding — one per CHUNK, not per artifact.
@@ -360,6 +373,22 @@ pub fn index_repo_sync(
     // cannot be resolved, which the check reads as "do not skip".
     let canonical_root = std::fs::canonicalize(abs_root).ok();
 
+    // The root "outside" is judged against: the GIT root of the walk root, resolved, and the walk
+    // root itself when there is none. NOT the walk root alone: under `scope=project` the walk root
+    // is the project directory, while `doc(move)`, `doc(delete)` and the write door judge against
+    // the managed root with the git root first, so in a monorepo a row legitimately moved to
+    // `pkg/docs/x.md` (a link to `../shared/docs`, inside the repository) "escaped" the project
+    // and was reclaimed, with its augmentation, by the next reindex of that project.
+    let escape_root: Option<std::path::PathBuf> =
+        crate::librarian::current_project::lookup_git_root(abs_root)
+            .or_else(|| Some(abs_root.to_path_buf()))
+            .and_then(|r| std::fs::canonicalize(r).ok());
+    // Ids of files this walk skipped because their parent chain resolves outside `escape_root`.
+    // Kept apart from `skipped_duplicate_ids`: a duplicate name carries no history of its own,
+    // while an ESCAPING row may carry an augmentation or events that exist nowhere else, which
+    // reclamation reports and spares instead of deleting.
+    let mut skipped_escaping_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     // Ids of paths this walk DELIBERATELY skipped as duplicates, so the reclamation pass
     // below can tell them from paths it merely did not reach.
     //
@@ -396,9 +425,22 @@ pub fn index_repo_sync(
         //
         // A link pointing OUTSIDE the root is deliberately KEPT: it is the only path by
         // which this walk reaches those bytes, so skipping it would trade a silent
-        // duplicate for a silent omission, which is the worse direction. This repo has
-        // exactly one (`.claude/skills/claude-traces`), which is why the predicate is
-        // "resolves inside" and not "is a symlink".
+        // duplicate for a silent omission, which is the worse direction. The main walk never
+        // descends a symlinked directory (see `a_symlinked_directory_is_not_descended_into_by_the_walk`),
+        // so this repo's `.claude/skills/claude-traces`, which IS a directory link, catalogs
+        // nothing, and only FILE links reach here from it. The predicate is "resolves inside", not
+        // "is a symlink", because of the outward FILE links.
+        //
+        // The main walk is not the only walk, though: `force_include_candidates` runs
+        // `WalkBuilder::new(<anchor>)`, and a walker follows a symlinked ROOT, so a repository that
+        // ships `docs/trackers -> <outside>` plus `force_include = ["docs/trackers/**"]` reaches
+        // files whose PARENT is the link. Those are refused by the next block, which is the
+        // other half of the same rule: an outward FILE link is kept; an outward DIRECTORY link is
+        // never a way into the catalog.
+        //
+        // A catalogued outward link is a row whose `abs_path` names a file the repository does
+        // not own, so every writer that takes its path from the catalog refuses a link
+        // (`util::write_catalogued_file`) and so does a path that resolves outside the repository.
         //
         // BOTH SIDES ARE CANONICALIZED, and that is load-bearing rather than defensive.
         // `abs_root` is whatever the caller held, while `canonicalize` always returns a
@@ -426,6 +468,15 @@ pub fn index_repo_sync(
         let rel = crate::librarian::util::normalize_rel_path(
             &path.strip_prefix(abs_root)?.to_string_lossy(),
         );
+        // The PARENT chain, for every kind of leaf: `force_include_candidates` walks
+        // `WalkBuilder::new(<anchor>)` and a walker follows a symlinked ROOT, so a file (or a link)
+        // below an anchor that is a link out of the repository reaches here. A leaf link inside
+        // such an anchor used to be exempt and was catalogued, and the row was then stuck:
+        // `doc(delete)` refuses it because the parent escapes.
+        if parent_escapes(path, escape_root.as_deref()) {
+            skipped_escaping_ids.insert(crate::librarian::ids::artifact_id_from_abs(path));
+            continue;
+        }
         if ignore.is_match(&rel) {
             continue;
         }
@@ -621,16 +672,21 @@ pub fn index_repo_sync(
     // were sitting right there on disk the whole time (found live, 2026-07-07,
     // debugging Mercury BOM's "reindex succeeds but find/get come back empty"
     // — the docs/trackers/*.md rows were being deleted by this exact path).
-    let root_prefix = format!(
-        "{}/",
-        crate::util::fs::RepoPath::from(abs_root)
-            .as_str()
-            .replace('\'', "''")
-    );
+    // The prefix is BOUND as a parameter, so it must not be SQL-quoted (`'` -> `''` made every
+    // path containing an apostrophe match nothing), and the comparison is EXACT, not `LIKE`:
+    // `LIKE` reads `_` and `%` in the path as wildcards (the rows of `b/myXapp` were "under"
+    // `b/my_app`) and ignores ASCII case (so did `b/MY_APP`'s), and an `ESCAPE` clause cures only
+    // the first. `path_at_or_under_sql` compares bytes, so a sibling is never this walk's row and
+    // no Rust-side re-filter is needed (the one that was here masked the SQL being wrong).
+    let (root_str, root_prefix) =
+        crate::librarian::util::root_and_prefix(crate::util::fs::RepoPath::from(abs_root).as_str());
+    let under_root = crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2");
     let candidates: Vec<(String, String)> = if seen_ids.is_empty() {
         cat.conn
-            .prepare("SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1")?
-            .query_map(rusqlite::params![format!("{root_prefix}%")], |r| {
+            .prepare(&format!(
+                "SELECT id, abs_path FROM artifact WHERE {under_root}"
+            ))?
+            .query_map(rusqlite::params![root_str, root_prefix], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<rusqlite::Result<_>>()?
@@ -638,14 +694,14 @@ pub fn index_repo_sync(
         let placeholders = seen_ids
             .iter()
             .enumerate()
-            .map(|(i, _)| format!("?{}", i + 2))
+            .map(|(i, _)| format!("?{}", i + 3))
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT id, abs_path FROM artifact WHERE abs_path LIKE ?1 AND id NOT IN ({})",
-            placeholders
+            "SELECT id, abs_path FROM artifact WHERE {under_root} AND id NOT IN ({placeholders})"
         );
-        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("{root_prefix}%"))];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(root_str.clone()), Box::new(root_prefix.clone())];
         for id in &seen_ids {
             params.push(Box::new(id.clone()));
         }
@@ -659,13 +715,40 @@ pub fn index_repo_sync(
     };
 
     let mut removed = 0usize;
+    // A row whose path resolves OUTSIDE the repository through a link in a parent directory: the
+    // main walk does not descend a link directory, so a directory swapped for a link after indexing
+    // leaves its rows unseen, and `exists()` follows the link and answers `true` for the outside
+    // file. The test is on the PARENT chain for every kind of leaf (an outward FILE link in the
+    // walk root's own directory is judged by its parent, which is inside, and is kept).
+    let escapes_root = |p: &str| parent_escapes(std::path::Path::new(p), escape_root.as_deref());
+    // Does this row carry state that exists nowhere else (an augmentation, or events)?
+    let has_history = |id: &str| -> bool {
+        cat.conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM artifact_augmentation WHERE artifact_id = ?1) \
+                     OR EXISTS(SELECT 1 FROM events WHERE artifact_id = ?1)",
+                rusqlite::params![id],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap_or(true)
+    };
     for (cand_id, cand_abs_path) in &candidates {
+        let gone = !std::path::Path::new(cand_abs_path).exists();
+        let escaping =
+            !gone && (skipped_escaping_ids.contains(cand_id) || escapes_root(cand_abs_path));
+        // An escaping row is reclaimed for a POLICY reason, with augmentation params and events
+        // that may exist nowhere else. One that carries any is KEPT and reported (every run, until
+        // the link is removed or re-pointed, after which the file is gone and it goes as an
+        // ordinary vanished row); one that carries none is reclaimed and reported.
+        if escaping && has_history(cand_id) {
+            report.escaping_kept_ids.push(cand_id.clone());
+            continue;
+        }
         // Two disjoint reasons a row must go, and `exists()` can only see the first:
         // the file is gone, or this walk deliberately skipped the path as a duplicate
         // (where `exists()` answers `true` via the symlink's target). Neither subsumes
         // the other; `skipped_duplicate_ids` says why the second is not a re-derivation.
-        if !std::path::Path::new(cand_abs_path).exists() || skipped_duplicate_ids.contains(cand_id)
-        {
+        if gone || skipped_duplicate_ids.contains(cand_id) || escaping {
             cat.conn.execute(
                 "DELETE FROM artifact WHERE id = ?1",
                 rusqlite::params![cand_id],
@@ -675,6 +758,10 @@ pub fn index_repo_sync(
             // and its trigger; Qdrant has no FK and keeps them, so this id is
             // the only thing that can reach them.
             report.removed_ids.push(cand_id.clone());
+            if escaping {
+                report.reclaimed_escaping += 1;
+                report.reclaimed_escaping_ids.push(cand_id.clone());
+            }
             removed += 1;
         }
     }
@@ -710,12 +797,15 @@ pub fn index_repo_sync(
     // already reports it through `embed_errors` / `embed_note`.
     if want_embeddings {
         let vectorless: i64 = cat.conn.query_row(
-            "SELECT COUNT(*) FROM artifact a \
-             WHERE a.abs_path LIKE ?1 \
-               AND NOT EXISTS ( \
-                 SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
-               )",
-            rusqlite::params![format!("{root_prefix}%")],
+            &format!(
+                "SELECT COUNT(*) FROM artifact a \
+                 WHERE {} \
+                   AND NOT EXISTS ( \
+                     SELECT 1 FROM artifact_chunk c WHERE c.artifact_id = a.id \
+                   )",
+                crate::librarian::util::path_at_or_under_sql("a.abs_path", "?1", "?2")
+            ),
+            rusqlite::params![root_str, root_prefix],
             |r| r.get(0),
         )?;
         report.vectorless = Some(vectorless.max(0) as usize);
@@ -791,6 +881,20 @@ fn chunk_grain_for_file(
     };
     cache.insert(dir.to_path_buf(), grain);
     grain
+}
+
+/// Does the PARENT chain of `path` resolve outside `root`? `root` is already canonical; `None`
+/// (the root could not be resolved) reads as "no", like the symlink check beside it. A parent
+/// that cannot be resolved (it is gone) is not an escape: the row is then reclaimed as vanished.
+///
+/// The PARENT, not the path: an outward FILE link is the one thing the walk keeps on purpose, so
+/// the leaf is allowed to resolve anywhere, while a directory in its chain that leaves the
+/// repository makes every file below it someone else's.
+fn parent_escapes(path: &Path, root: Option<&Path>) -> bool {
+    let (Some(root), Some(parent)) = (root, path.parent()) else {
+        return false;
+    };
+    std::fs::canonicalize(parent).is_ok_and(|real| !real.starts_with(root))
 }
 
 /// The literal (non-glob) prefix of a glob pattern — the portion before the
@@ -1741,6 +1845,38 @@ kind = "memory"
             artifact::get(&cat, &alias_id).unwrap().is_none(),
             "the inside-resolving symlink must have no row of its own"
         );
+    }
+
+    /// A symlinked DIRECTORY is not descended, so a document inside the directory it points at is
+    /// not catalogued through it. Pins what the comment above `is_symlink` claims about this repo
+    /// (".claude/skills/claude-traces" as the one kept outward link) against what the walker does:
+    /// that path is a directory link, `WalkBuilder` does not follow links by default, and
+    /// `is_file()` is false for it — so the walk reaches nothing through it and the only catalogued
+    /// outward links are FILE links. Measured by this test, not by reading the builder's defaults.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_is_not_descended_into_by_the_walk() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("inner.md"), "# Inner\n\nbody\n").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("real.md"), "# Real\n\nbody\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linkdir")).unwrap();
+        // Precondition: the file IS reachable through the link, so a zero is the walker's doing.
+        assert!(root.path().join("linkdir/inner.md").is_file());
+
+        let (report, _) =
+            index_repo_sync(&cat, &rules, root.path(), &ignore, false, false, false).unwrap();
+
+        assert_eq!(
+            report.added, 1,
+            "only real.md: a document under a symlinked directory is not catalogued through it"
+        );
+        let through_link =
+            crate::librarian::ids::artifact_id_from_abs(&root.path().join("linkdir/inner.md"));
+        assert!(artifact::get(&cat, &through_link).unwrap().is_none());
     }
 
     /// A row that ALREADY EXISTS for a path this walk now skips must be reclaimed.

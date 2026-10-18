@@ -352,8 +352,10 @@ fn rekey_augmentation(
 /// tokens inside what the author wrote as code, destroying the one escape this namespace has
 /// (§ *Parsers Over a Namespace* — the fence IS the escape). Reading a heading you should not
 /// have is recoverable; rewriting a token you should not have is not.
+#[allow(clippy::too_many_arguments)] // one transaction's worth of context; a struct would only rename it
 fn rekey_body(
     tx: &rusqlite::Transaction<'_>,
+    roots: &[std::path::PathBuf],
     artifact_id: &str,
     from_prefix: &str,
     to_prefix: &str,
@@ -467,7 +469,11 @@ fn rekey_body(
     } else {
         out
     };
-    std::fs::write(&abs_path, new_doc)?;
+    // `abs_path` is the catalog's: a row can be an in-root link to a file outside the repository,
+    // and a plain write follows it. `write_catalogued_file` refuses a link; past the refusals
+    // above so a preview and a no-op never fail on it, and inside the transaction so a refusal
+    // rolls the params rewrite back with it.
+    crate::librarian::util::write_catalogued_file(roots, std::path::Path::new(&abs_path), new_doc)?;
     Ok(())
 }
 
@@ -581,6 +587,11 @@ pub fn rekey_prefix_rows(
         )?;
     }
 
+    let roots = cat.write_roots();
+    // The sidecar publication after the commit would be refused for a declared path that is a
+    // link or leaves the repository; ask first, in `Preview` too (an Ok preview promises the
+    // apply succeeds), so the refusal comes with nothing rewritten and no half-committed rekey.
+    crate::librarian::augmentation_sidecar::preflight_write_through(cat, artifact_id)?;
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -735,6 +746,7 @@ pub fn rekey_prefix_rows(
     )?;
     rekey_body(
         &tx,
+        &roots,
         artifact_id,
         from_prefix,
         to_prefix,
@@ -745,7 +757,11 @@ pub fn rekey_prefix_rows(
 
     // Preview drops the transaction unread. Every refusal above has already fired, so a
     // preview that returns Ok is a statement that the apply would too — which is the only
-    // thing that makes a dry run worth reading.
+    // thing that makes a dry run worth reading. Bounded, and the bound is stated: the sidecar
+    // preflight at the top runs in both modes, but the door that guards the ledger's own BODY
+    // rewrite (`write_catalogued_file` inside `rekey_body`) is skipped in a preview, so an Ok
+    // preview does NOT promise the apply clears a body refusal (a ledger below a link out of its
+    // repo).
     if mode == RekeyMode::Apply {
         tx.commit()?;
     } else {
@@ -786,9 +802,11 @@ pub fn rekey_prefix_rows(
             format!("rekey_prefix: the catalog moved but its committed sidecar did not: {e}"),
             "The rekey itself is COMMITTED — ids, schema and body have all moved. Only the \
              sidecar under `docs/augmentations/` is behind, which matters on other machines \
-             because `reindex` re-attaches the declared shape from it. Republish with \
-             librarian(action=\"doctor\", fix=\"export_augmentations\") after removing the stale \
-             file; that fix creates rather than refreshes."
+             because `reindex` re-attaches the declared shape from it. If the error above says \
+             the sidecar path is a symbolic link or leaves the repository, fix THAT first (the \
+             file behind a link is not yours to delete). For an ordinary stale file, remove it \
+             and republish with librarian(action=\"doctor\", fix=\"export_augmentations\"); that \
+             fix creates rather than refreshes."
                 .to_string(),
         )
     })?;
@@ -1636,6 +1654,42 @@ mod tests {
         assert!(out.contains("## SRI-3 — a"), "got:\n{out}");
         assert!(out.contains("see SRI-4"), "got:\n{out}");
         assert!(out.starts_with("# Notes\n"), "got:\n{out}");
+    }
+
+    /// `abs_path` comes from the catalog row, and the indexer catalogs an in-root link whose
+    /// target is outside the root, so `fs::write` here would rewrite a file the repository does
+    /// not own. Refused inside the transaction: the params rewrite done earlier in the same
+    /// transaction must roll back with it, or the ids and the body part ways.
+    #[cfg(unix)]
+    #[test]
+    fn a_body_rewrite_is_refused_when_the_ledger_is_a_link_to_a_file_outside_the_repo() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let text = "# Notes\n\n## T-3 — a\n\nsee T-4\n";
+        let l = led(&cat, "led", "my-ledger", text);
+        aug(
+            &cat,
+            "led",
+            Some("tasks"),
+            serde_json::json!({"tasks": [{"id": "T-3"}]}),
+            None,
+            "p",
+        );
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.md");
+        std::fs::write(&victim, text).unwrap();
+        std::fs::remove_file(&l.path).unwrap();
+        std::os::unix::fs::symlink(&victim, &l.path).unwrap();
+
+        let err = rekey_prefix_rows(&mut cat, "led", "T", "SRI", RekeyMode::Apply)
+            .expect_err("the body write must not follow the link");
+
+        assert!(format!("{err:#}").contains("symbolic link"), "got: {err:#}");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), text);
+        assert_eq!(
+            params_of(&cat, "led")["tasks"][0]["id"],
+            "T-3",
+            "the transaction must have rolled the params back with the refused write"
+        );
     }
 
     /// A body with nothing to move must not be rewritten at all — an unnecessary `fs::write`

@@ -561,73 +561,43 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
     ),
     (
         "tracker-conventions",
-        "Settled caveats — STANDING and TRACKED",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Closing a bug — patch-id and fix provenance",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
         "Citing an archive path — where the file is, not where it will go",
         TRACKER_SECTION_NEEDS_A_WRITE,
     ),
     (
         "tracker-conventions",
+        "Settled caveats — STANDING and TRACKED",
+        TRACKER_SECTION_NEEDS_A_STATUS_UPDATE,
+    ),
+    (
+        "tracker-conventions",
+        "Closing a bug — patch-id and fix provenance",
+        TRACKER_SECTION_NEEDS_A_STATUS_UPDATE,
+    ),
+    (
+        "tracker-conventions",
         "Archiving a tracker",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Declaring an augmentation",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Entry-level standard — the shape INSIDE a tracker",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Entry ids",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Entry headings — the definition rule",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Citing an entry — bare, or qualified",
-        TRACKER_SECTION_NEEDS_A_WRITE,
+        TRACKER_SECTION_NEEDS_A_STATUS_UPDATE,
     ),
     (
         "tracker-conventions",
         "One entry format, never two",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Required fields",
-        TRACKER_SECTION_NEEDS_A_WRITE,
-    ),
-    (
-        "tracker-conventions",
-        "Detecting these fields",
-        TRACKER_SECTION_NEEDS_A_WRITE,
+        TRACKER_SECTION_INFORMS_BODY_EDITS,
     ),
     (
         "tracker-conventions",
         "Compaction and archival",
-        TRACKER_SECTION_NEEDS_A_WRITE,
+        TRACKER_SECTION_INFORMS_BODY_EDITS,
     ),
     (
         "tracker-conventions",
-        "Cross-linking (edges are derived — cite in prose)",
-        TRACKER_SECTION_NEEDS_A_WRITE,
+        "Entry ids — when two hosts allocate anyway",
+        TRACKER_SECTION_IS_A_DOCTOR_REMEDY,
+    ),
+    (
+        "tracker-conventions",
+        "Entry headings — a prefix with no definer, or owned outside markdown",
+        TRACKER_SECTION_IS_A_DOCTOR_REMEDY,
     ),
     (
         "tracker-conventions",
@@ -641,34 +611,87 @@ pub const SECTION_WAIVERS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Why a `tracker-conventions` section carries no `serves:` declaration: the call that
-/// needs it is a write, and no write's result can route to this topic.
+/// Why `Citing an archive path` carries no `serves:` declaration: it informs a write made
+/// BEFORE the move, and nothing that write returns carries the destination.
 ///
-/// `LibrarianAdapter::relevant_guide_topic` reads the RESULT, and only for a path under
-/// `docs/issues/` or `docs/trackers/` (`names_path_containing`: top-level
-/// `abs_path`/`rel_path`, `items[].rel_path`, `violations[].path`). Measured 2026-10-16 by
-/// making every `doc` action against a `docs/trackers/` artifact and reading which
-/// results name such a path: `create`, `get` and `find` do; `update` (`{id, updated}`),
-/// `append_entry`, `delete`, `rekey_prefix`, `state_at`, `event_*`, `link` and `augment` do
-/// not. (`move` was on this list until 2026-10-17: it answers `old_abs_path`/`new_abs_path`,
-/// which the scan now reads, so the archive sections are served from `doc.move`; `Archiving
-/// a tracker` stays waived because it leads with `doc.update`, the call that needs it.) Those
-/// calls route to `librarian`, so a `path~`-qualified section here could never be chosen
-/// for them — a declaration nothing reaches, which is the failure section grain exists to
-/// prevent. Until the router is widened further (route on the selector)
-/// the section is pull-only via `get_guide("tracker-conventions")`; before section grain
-/// the same bytes reached nobody either, because the whole topic was over the
-/// auto-inject bound and shipped a pointer.
-/// docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md
+/// The section says to cite a file where it IS, never where the archive flow will put it, so
+/// the call that needs it is the body write (`doc.update`, `doc.append_entry`) that cites an
+/// archive path. Those results do not name the destination, and the move that does is the
+/// call AFTER the citing is done: serving it there is the late, wrong-call delivery the
+/// section exists to prevent. Left pull-only via `get_guide("tracker-conventions")`.
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
 const TRACKER_SECTION_NEEDS_A_WRITE: &str =
-    "Unreachable by auto-injection, not unimportant: the call \
-     that needs this section is a write (doc.update, append_entry, update_entry, delete, \
-     augment, link), and no write's result names a path the router reads — measured \
-     2026-10-16 by making each call against a docs/trackers/ artifact. Such a call routes to \
-     `librarian`, so a path-qualified `serves:` here could never be chosen for it. Needs the \
-     router widened (route on the selector); until then it is pull-only \
-     via get_guide(\"tracker-conventions\"). See \
-     docs/issues/2026-09-24-residual-tracker-conventions-serves-sections.md.";
+    "Unreachable by auto-injection, not unimportant: the call that needs this section is the \
+     body write (an update or an append_entry) that cites an archive path, made BEFORE the \
+     move; neither result carries the destination, and the move that does comes after the \
+     citing is done, so serving it from there would be the late, wrong-call delivery the \
+     section exists to prevent. Pull-only via get_guide(\"tracker-conventions\"). See \
+     docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md.";
+
+/// Why two `tracker-conventions` sections carry no `serves:` declaration: what each explains
+/// is a `doctor` finding, and no write can name which finding it is.
+///
+/// `Entry ids — when two hosts allocate anyway` explains `entry_defined_twice`, and
+/// `Entry headings — a prefix with no definer, or owned outside markdown` explains
+/// `cited_prefix_with_no_definer`. Each is remedied by reading that report, not by any one
+/// write. Serving them per violation class needs a `check~<name>` predicate in `Shape`, a
+/// grammar amendment that `guide_index::Shape` says needs the spec amended; serving them from
+/// `doc.append_entry` instead would ship 3.5 KB to a call that neither creates nor reads the
+/// state. Until then they are pull-only via `get_guide("tracker-conventions")`.
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+const TRACKER_SECTION_IS_A_DOCTOR_REMEDY: &str =
+    "Unreachable by auto-injection, not unimportant: this section explains a \
+     librarian(action=\"doctor\") finding and is remedied by reading that report, not by any \
+     one write. Serving it per violation class needs a check~<name> predicate in Shape, a \
+     grammar amendment (see guide_index::Shape); serving it from a write instead would ship it \
+     to a call that neither creates nor reads the state. Until then it is pull-only via \
+     get_guide(\"tracker-conventions\"). See \
+     docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md.";
+
+/// Why three `tracker-conventions` sections carry no `serves:` declaration: the call that needs
+/// each is a `doc.update` that changes `status`, and routing that call here delays the anti-wipe
+/// warnings.
+///
+/// `Settled caveats`, `Closing a bug` (its fix-provenance half) and `Archiving a tracker` are
+/// written at the moment a bug is closed or a tracker archived, which is an `update` with a
+/// `status`. Naming such an update's result (it was, in the first cut) sends it to this topic,
+/// and the engine ships ONE topic per call and stops at the first that ships something
+/// (`emit_guide_sections`), so `librarian` § *Choosing a mode* and § *The shrink guard* arrived
+/// only after the call that needed them had run. Measured 2026-10-17: bug close -> tracker
+/// archive -> body edit delivered them after the THIRD call; in the anonymous tier a forced
+/// status update ran unheld and shipped 9,048 B of this topic, and the next call, a forced
+/// wholesale `patch.body`, ran with no warning. Safety outranks reachability: `doc.update`
+/// keeps routing to `librarian`. The fix that would serve these is multi-topic emission (one
+/// call shipping the anti-wipe sections AND these), an engine change.
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+const TRACKER_SECTION_NEEDS_A_STATUS_UPDATE: &str =
+    "Unreachable by auto-injection, not unimportant: the call that needs this section is an \
+     update that changes status (closing a bug, archiving a tracker), and routing that call \
+     to this topic delays librarian's anti-wipe sections (Choosing a mode, The shrink guard) \
+     until after it has run: measured 2026-10-17, the warning arrived after the THIRD call of a \
+     close, archive, body-edit sequence, and in the anonymous tier a forced wholesale body \
+     patch ran with no warning at all. Safety outranks reachability. Needs multi-topic \
+     emission, an engine change. Until then it is pull-only via get_guide(\"tracker-conventions\"). \
+     See docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md.";
+
+/// Why two `tracker-conventions` sections carry no `serves:` declaration: they inform body and
+/// index maintenance, not `append_entry`.
+///
+/// `One entry format, never two` (do not hand-maintain an index table beside body sections) and
+/// `Compaction and archival` (never reduce an entry to a bare row; archive into the ledger's
+/// existing archive artifact) are about editing a ledger's body, which is a `doc.update` with
+/// `body_edits`. They were first declared on `doc.append_entry`; that call's delivery measured
+/// 16,344 B against the 16,384 B auto-inject bound (the bound counts the wrapper, the test
+/// summed bodies), and these two do not inform it. Moved off, not deleted; naming `doc.update`
+/// for them is the update-routing decision above.
+/// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
+const TRACKER_SECTION_INFORMS_BODY_EDITS: &str =
+    "Unreachable by auto-injection, not unimportant: this section informs body and index \
+     maintenance (a body_edits update), not append_entry, which first carried it and then \
+     measured 16,344 B delivered against the 16,384 B auto-inject bound. An update stays on \
+     librarian so its anti-wipe sections are not delayed (see \
+     TRACKER_SECTION_NEEDS_A_STATUS_UPDATE). Pull-only via get_guide(\"tracker-conventions\"). \
+     See docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md.";
 
 /// The `librarian.*` census shapes `every_observed_shape_of_a_declaring_topic_has_a_section`
 /// pairs with `tracker-conventions` (a result naming a tracker path routes there), none of
@@ -709,14 +732,15 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
 /// `docs/trackers/` artifact (the gate's probes are synthetic results naming a tracker path,
 /// so they route every shape below here whether or not a real call would):
 ///
-/// - `doc.append_entry`, `doc.update_entry`, `doc.delete`, `doc.link`, `doc.augment`:
-///   the real result names no path the router reads (2026-10-16, see
-///   `TRACKER_SECTION_NEEDS_A_WRITE`), so a real call reaches `librarian`, not here.
-///   (`doc.move` was on this list until 2026-10-17: its result names `old_abs_path` /
-///   `new_abs_path`, which the router now reads, and the archive sections declare it, so it
-///   is served here and needs no waiver.)
-///   Open ledger entry:
-///   `docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md`.
+/// - `doc.append_entry`, `doc.update_entry`, `doc.augment`: served on a result naming
+///   `docs/trackers/` (since 2026-10-17 their results name the tracker they LANDED ON,
+///   `name_the_target` in `src/librarian/tools/artifact.rs`), and NOT on one naming
+///   `docs/issues/` (a bug file carries no ledger and no augmentation), which a shape-level
+///   waiver cannot say: the per-shape table
+///   `guide_index::tests::tracker_write_shapes_ship_their_sections_and_only_theirs` holds that
+///   half, so the waiver does not hide a lost tracker declaration. `doc.link` is served on both.
+/// - `doc.update`: not routed on purpose, see `TRACKER_SECTION_NEEDS_A_STATUS_UPDATE`.
+/// - `doc.delete`: the real result names no path the router reads (2026-10-16).
 /// - `doc.event_create`, `doc.event_list`, `doc.gather`, `doc.graph`: also measured, 2026-10-16
 ///   (`event_*`, `src/librarian/adapter.rs` `names_tracker_path`) and again 2026-10-17
 ///   (`gather`, `graph`); their results name no tracker path, and a real call reaches
@@ -730,10 +754,13 @@ const TRACKER_LIBRARIAN_SHAPES_UNSERVED: &str = "These librarian.* call shapes r
 const TRACKER_DOC_SHAPES_UNSERVED: &str = "These doc.* call shapes route to \
      tracker-conventions in the gate's probes (a result naming a tracker or bug path), and no \
      section here serves them. Real calls that never reach this topic (their results name no \
-     tracker path, measured 2026-10-16 and 2026-10-17): doc.append_entry, doc.update_entry, \
-     doc.delete, doc.link, doc.augment, doc.event_create, doc.event_list, doc.gather, \
-     doc.graph, and doc (the bare tool key, a call missing its action); the write ones are \
-     tracked in docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md. \
+     tracker path, measured 2026-10-16 and 2026-10-17): doc.delete, doc.update, \
+     doc.event_create, doc.event_list, doc.gather, doc.graph, and doc (the bare tool key, a \
+     call missing its action). doc.append_entry, doc.update_entry and doc.augment reach it on a \
+     result naming docs/trackers/ and are served there; the gate's synthetic docs/issues/ probe \
+     has no section for them, which is correct (guide_index::tests::tracker_write_shapes_ship_their_sections_and_only_theirs \
+     holds the tracker half). The write ones are tracked in \
+     docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md. \
      Surfaced 2026-10-17 when the gate began reading census rows renamed from artifact.* to \
      doc.*.";
 

@@ -644,6 +644,16 @@ impl EditCode {
                 &security,
                 &session_roots,
             )?;
+            // This loop's `fs::write` FOLLOWS a leaf link, and the classifier above resolves only
+            // the parent, so a source file that is an in-root link to a file outside the write
+            // roots passes it. The resolved target must itself be writable.
+            crate::fs::validate_leaf_link_target(
+                &path,
+                &root,
+                &security,
+                &session_roots,
+                crate::fs::LinkTarget::Writable,
+            )?;
             let pre_image = std::fs::read_to_string(&path)?;
             let new_content = apply_text_edits(&pre_image, &plain_edits);
             let edit_count = plain_edits.len();

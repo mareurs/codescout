@@ -379,6 +379,251 @@ fn the_ack_path_says_what_is_true_for_a_file_in_a_directory_approve_write_refuse
     );
 }
 
+// ── a leaf symlink to a deny-listed path ──────────────────────────────────
+//
+// `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md`.
+// The write classifier resolves the PARENT and keeps the leaf as written, so `<root>/leaf ->
+// <deny-listed file>` classified as an ordinary in-root write; the edit tools then READ the
+// target through the link (the not-found hint echoes it, a unique match copies it into the
+// project) although `read_file` refuses the same link.
+
+/// The control the refusal must not break, and the behaviour it must not change: a leaf link to
+/// a harmless file OUTSIDE the project still edits, by REPLACING the link with the edited copy
+/// and sparing the file it pointed at (`atomic_write` renames over the link). A fix that refused
+/// every leaf link would pass the test above and fail this one.
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_file_on_a_leaf_link_to_a_harmless_file_still_replaces_the_link_and_spares_it() {
+    let (dir, ctx) = project_ctx().await;
+    let outside = tempdir().unwrap();
+    let victim = outside.path().join("elsewhere.txt");
+    std::fs::write(&victim, "alpha\n").unwrap();
+    std::os::unix::fs::symlink(&victim, dir.path().join("leaf.txt")).unwrap();
+
+    EditFile
+        .call(
+            json!({"path": "leaf.txt", "old_string": "alpha", "new_string": "beta"}),
+            &ctx,
+        )
+        .await
+        .expect("a harmless link is still editable");
+
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "alpha\n");
+    let leaf = dir.path().join("leaf.txt");
+    assert!(!std::fs::symlink_metadata(&leaf)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(std::fs::read_to_string(&leaf).unwrap(), "beta\n");
+}
+
+/// The measured probe of the issue, with a fake `$HOME` and a fake key — the only way to put a
+/// readable deny-listed file under a test without mutating this process's environment
+/// (`docs/conventions/test-env-isolation.md`): the test re-executes ITS OWN binary with
+/// `HOME` set for the child only. The child runs `edit_file_leaf_link_probe_child`, writes what
+/// it observed to a file, and this test asserts on that record.
+#[cfg(unix)]
+#[test]
+fn edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_nothing() {
+    let fake = tempdir().unwrap();
+    let home = fake.path().join("home");
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    let key = home.join(".ssh/id_rsa");
+    const KEY: &str = "FAKE-SECRET-KEY-MARKER\nsecond secret line\nthird secret line\n";
+    std::fs::write(&key, KEY).unwrap();
+    let record = fake.path().join("record.json");
+
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tools::edit_file::tests::edit_file_leaf_link_probe_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("HOME", &home)
+        .env("CS_LEAF_PROBE_HOME", &home)
+        .env("CS_LEAF_PROBE_RECORD", &record)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "the child probe failed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rec: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+
+    // Preconditions: the fixture is the one the issue measured. The key is readable at all, and
+    // `read_file` refuses BOTH spellings of the link (so the deny-list sees the fake key).
+    assert_eq!(rec["key_readable"], true, "{rec}");
+    assert_eq!(rec["markdown_heading_refused_by_deny_list"], true, "{rec}");
+    assert_eq!(rec["markdown_leaf_is_still_a_link"], true, "{rec}");
+    for name in ["abs.txt", "rel.txt"] {
+        let r = &rec[name];
+        assert_eq!(r["read_file_refused"], true, "{name}: {rec}");
+        // The defects, and what refused them: the deny-list, not some other failure.
+        assert_eq!(r["near_miss_error_leaks"], false, "{name}: {rec}");
+        assert_eq!(r["near_miss_refused_by_deny_list"], true, "{name}: {rec}");
+        assert_eq!(r["unique_match_succeeded"], false, "{name}: {rec}");
+        assert_eq!(
+            r["other_grammars_refused_by_deny_list"],
+            json!([true, true, true]),
+            "{name}: batch, insert and create_file: {rec}"
+        );
+        assert_eq!(r["leaf_is_still_a_link"], true, "{name}: {rec}");
+        assert_eq!(r["no_copy_in_project"], true, "{name}: {rec}");
+    }
+    assert_eq!(std::fs::read_to_string(&key).unwrap(), KEY);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "subprocess helper: run by edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_nothing with a fake $HOME"]
+async fn edit_file_leaf_link_probe_child() {
+    let record = std::path::PathBuf::from(
+        std::env::var("CS_LEAF_PROBE_RECORD").expect("only the parent test sets this"),
+    );
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    // Refuse to run on a HOME this test does not own: a manual `--ignored` run would otherwise
+    // point the deny-list at the REAL home and plant links against it.
+    assert_eq!(
+        std::env::var("CS_LEAF_PROBE_HOME").ok().as_deref(),
+        home.to_str(),
+        "only the parent test, which owns a throwaway HOME, may run this"
+    );
+    let key = home.join(".ssh/id_rsa");
+    let (dir, ctx) = project_ctx().await;
+    // Two spellings of the same link: the absolute target, and the RELATIVE one a repository
+    // ships (`../../../home/...`), which resolves against the link's own directory. A
+    // `read_link`-based resolver sees the second as a path relative to the process cwd, finds
+    // nothing, and lets it through.
+    let depth = dir.path().components().count() - 1;
+    let relative_target: std::path::PathBuf = std::iter::repeat_n("..", depth)
+        .collect::<std::path::PathBuf>()
+        .join(key.strip_prefix("/").unwrap());
+    let mut rec = serde_json::Map::new();
+    rec.insert(
+        "key_readable".into(),
+        json!(std::fs::read_to_string(&key).is_ok()),
+    );
+    for (name, target) in [("abs.txt", key.clone()), ("rel.txt", relative_target)] {
+        let leaf = dir.path().join(name);
+        std::os::unix::fs::symlink(&target, &leaf).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&leaf).ok(),
+            std::fs::read_to_string(&key).ok(),
+            "precondition: {name} really resolves to the key"
+        );
+
+        let read = ReadFile
+            .call(json!({"path": name}), &ctx)
+            .await
+            .map(|v| v.to_string());
+        let near_miss = EditFile
+            .call(
+                json!({"path": name,
+                       "old_string": "FAKE-SECRET-KEY-MARKER\nsecond secret LINE",
+                       "new_string": "x"}),
+                &ctx,
+            )
+            .await;
+        let near_miss_text = match &near_miss {
+            Ok(v) => v.to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+        let unique = EditFile
+            .call(
+                json!({"path": name, "old_string": "FAKE-SECRET-KEY-MARKER",
+                       "new_string": "EDITED"}),
+                &ctx,
+            )
+            .await;
+        // Every other grammar, and create_file: each reaches the file through its own branch.
+        let others = [
+            (
+                "batch",
+                EditFile
+                    .call(
+                        json!({"path": name,
+                               "edits": [{"old_string": "second", "new_string": "X"}]}),
+                        &ctx,
+                    )
+                    .await,
+            ),
+            (
+                "insert",
+                EditFile
+                    .call(
+                        json!({"path": name, "insert": "append", "new_string": "X"}),
+                        &ctx,
+                    )
+                    .await,
+            ),
+            (
+                "create_file",
+                CreateFile
+                    .call(
+                        json!({"path": name, "content": "X", "overwrite": true}),
+                        &ctx,
+                    )
+                    .await,
+            ),
+        ];
+        let leaf_meta = std::fs::symlink_metadata(&leaf).unwrap();
+        let copy_in_project = !leaf_meta.file_type().is_symlink()
+            && std::fs::read_to_string(&leaf)
+                .map(|s| s.contains("second secret line"))
+                .unwrap_or(false);
+        let others_refused: Vec<bool> = others
+            .iter()
+            .map(|(_, r)| match r {
+                Err(e) => format!("{e:#}").contains("protected location"),
+                Ok(_) => false,
+            })
+            .collect();
+        rec.insert(
+            name.into(),
+            json!({
+                "read_file_refused": read.is_err(),
+                "near_miss_refused_by_deny_list": near_miss_text.contains("protected location"),
+                "near_miss_error_leaks": near_miss_text.contains("second secret line")
+                    || near_miss_text.contains("third secret line"),
+                "unique_match_succeeded": unique.is_ok(),
+                "other_grammars_refused_by_deny_list": others_refused,
+                "leaf_is_still_a_link": leaf_meta.file_type().is_symlink(),
+                "no_copy_in_project": !copy_in_project,
+            }),
+        );
+    }
+    // The heading-addressed markdown grammar reaches the file through its OWN resolver call
+    // (`markdown::edit`), so it needs its own link and its own assertion. (Round 1 had a test
+    // for it, and deleting that test left the branch unguarded.)
+    let md_leaf = dir.path().join("abs-md.md");
+    std::os::unix::fs::symlink(&key, &md_leaf).unwrap();
+    let md = EditFile
+        .call(
+            json!({"path": "abs-md.md", "heading": "# x", "action": "replace", "body": "X"}),
+            &ctx,
+        )
+        .await;
+    rec.insert(
+        "markdown_heading_refused_by_deny_list".into(),
+        json!(match &md {
+            Err(e) => format!("{e:#}").contains("protected location"),
+            Ok(_) => false,
+        }),
+    );
+    rec.insert(
+        "markdown_leaf_is_still_a_link".into(),
+        json!(std::fs::symlink_metadata(&md_leaf)
+            .unwrap()
+            .file_type()
+            .is_symlink()),
+    );
+    std::fs::write(record, serde_json::Value::Object(rec).to_string()).unwrap();
+}
+
 // ── ReadFile ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -1532,6 +1777,78 @@ async fn create_file_overwrites_with_explicit_flag() {
     let contents = std::fs::read_to_string(&file).unwrap();
     assert_eq!(contents, "new content");
 }
+
+/// A leaf symlink to a file outside the project, as a `create_file` target with `overwrite`.
+/// `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+/// recorded that only `edit_file` had been run against one. `create_file` reads the existing
+/// target (through the link) for its shrink guard, then writes through `atomic_write`, whose
+/// rename replaces the link: the victim keeps its bytes, the in-project path becomes a
+/// regular file. A DANGLING leaf link must not make the write create the file it names.
+#[cfg(unix)]
+#[tokio::test]
+async fn create_file_overwrite_on_a_leaf_symlink_replaces_the_link_and_spares_the_victim() {
+    let (dir, ctx) = project_ctx().await;
+    let outside = tempfile::tempdir().unwrap();
+    let victim = outside.path().join("victim.txt");
+    std::fs::write(&victim, "ORIGINAL OUTSIDE CONTENT").unwrap();
+    let leaf = dir.path().join("leaf.txt");
+    std::os::unix::fs::symlink(&victim, &leaf).unwrap();
+
+    CreateFile
+        .call(
+            json!({
+                "path": leaf.to_str().unwrap(),
+                "content": "ORIGINAL OUTSIDE CONTENT, now edited",
+                "overwrite": true
+            }),
+            &ctx,
+        )
+        .await
+        .expect("an in-project leaf link is an allowed target");
+
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "ORIGINAL OUTSIDE CONTENT",
+        "create_file wrote THROUGH the leaf symlink into a file outside the project"
+    );
+    assert!(std::fs::symlink_metadata(&leaf)
+        .unwrap()
+        .file_type()
+        .is_file());
+    assert_eq!(
+        std::fs::read_to_string(&leaf).unwrap(),
+        "ORIGINAL OUTSIDE CONTENT, now edited"
+    );
+
+    // Dangling: nothing exists at the link's destination, and none may appear.
+    let never = outside.path().join("never-created.txt");
+    let dangling = dir.path().join("dangling.txt");
+    std::os::unix::fs::symlink(&never, &dangling).unwrap();
+    CreateFile
+        .call(
+            json!({
+                "path": dangling.to_str().unwrap(),
+                "content": "x",
+                "overwrite": true
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a dangling in-project leaf link is an allowed target; the call must succeed");
+    assert!(
+        never.symlink_metadata().is_err(),
+        "create_file created {never:?} through a dangling leaf symlink"
+    );
+    assert!(
+        std::fs::symlink_metadata(&dangling)
+            .unwrap()
+            .file_type()
+            .is_file(),
+        "the dangling link must be replaced by a regular file"
+    );
+    assert_eq!(std::fs::read_to_string(&dangling).unwrap(), "x");
+}
+
 #[tokio::test]
 async fn create_file_refuses_overwrite_shrink_without_force() {
     let (dir, ctx) = project_ctx().await;
