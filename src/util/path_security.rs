@@ -9146,15 +9146,27 @@ EOF"#;
     /// hanging the suite.
     #[cfg(unix)]
     fn classify_with_deadline(t: &LeafTree, target: &Path) -> WritePathDecision {
+        classify_with_deadline_in(t, target, &t.base.join("no-temp"), None)
+    }
+
+    /// `classify_with_deadline` with the temp dir and the cwd root injected.
+    #[cfg(unix)]
+    fn classify_with_deadline_in(
+        t: &LeafTree,
+        target: &Path,
+        temp: &Path,
+        cwd: Option<&Path>,
+    ) -> WritePathDecision {
         let (tx, rx) = std::sync::mpsc::channel();
-        let (target, project, base, home) = (
+        let (target, project, home, temp, cwd) = (
             target.to_path_buf(),
             t.project.clone(),
-            t.base.clone(),
             t.home.clone(),
+            temp.to_path_buf(),
+            cwd.map(Path::to_path_buf),
         );
         std::thread::spawn(move || {
-            let env = env_of(&base.join("no-temp"), Some(&home), None);
+            let env = env_of(&temp, Some(&home), cwd.as_deref());
             let decision = classify_write_path_in(
                 target.to_str().unwrap(),
                 &project,
@@ -9439,7 +9451,7 @@ EOF"#;
                 &classify(&key),
                 &format!("{kind}: a link to the deny list"),
             );
-            let decision = classify(&looped);
+            let decision = classify_with_deadline_in(&t, &looped, &temp, Some(&cwd));
             assert!(
                 matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
                 "{kind}: a loop must be denied, got: {decision:?}"
@@ -9497,7 +9509,10 @@ EOF"#;
             t.home.join(".ssh/id_rsa").display()
         );
         assert!(m.contains(&expected), "expected {expected:?} in: {m}");
-        let m = message(&looped);
+        let m = match classify_with_deadline(&t, &looped) {
+            WritePathDecision::Denied(m) => m,
+            other => panic!("{looped:?} must be denied, got: {other:?}"),
+        };
         let expected = format!("'{}' is a symbolic link", looped.display());
         assert!(m.contains(&expected), "expected {expected:?} in: {m}");
         let m = message(&dotdot);
