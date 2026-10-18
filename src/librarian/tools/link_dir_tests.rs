@@ -2151,6 +2151,23 @@ mod door_table {
             &jq.join("docs/x.md"),
         );
 
+        // ---- K: a managed root whose directory does not exist (a deleted project's rows).
+        let kt = tempfile::tempdir().unwrap();
+        let ghost = canon(kt.path()).join("ghost");
+        let roots_k = vec![ghost.clone()];
+        t.row(
+            "K1 root directory gone, row below it",
+            true,
+            &roots_k,
+            &ghost.join("docs/x.md"),
+        );
+        t.row(
+            "K2 root directory gone, an unresolvable `..` below it",
+            false,
+            &roots_k,
+            &ghost.join("sub/../../x.md"),
+        );
+
         let mut bad = Vec::new();
         for (name, expect, file, dir) in &t.0 {
             if file != expect || dir != file {
@@ -2470,7 +2487,7 @@ mod door_table {
 
         let out = super::super::merge_worktree::call(
             &ctx,
-            json!({"root": "/nonexistent-r5b/.worktrees/feat_1", "dry_run": true}),
+            json!({"root": "/nonexistent-r5b/.worktrees/feat_1"}),
         )
         .await
         .unwrap();
@@ -2479,6 +2496,14 @@ mod door_table {
         assert!(
             !touched.contains(&sib),
             "the sibling worktree's row must not be selected: {touched}"
+        );
+        let row = artifact::get(&ctx.catalog.lock(), &sib)
+            .unwrap()
+            .expect("the sibling's row survives the merge of feat_1");
+        assert_eq!(
+            row.abs_path,
+            Path::new("/nonexistent-r5b/.worktrees/FEAT_1/docs/a.md"),
+            "and keeps its path (it was not reseated onto the main checkout)"
         );
     }
 }
