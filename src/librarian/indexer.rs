@@ -1006,6 +1006,38 @@ fn in_savepoint(conn: &rusqlite::Connection, f: impl FnOnce() -> Result<()>) -> 
         }
     }
 }
+#[cfg(test)]
+mod read_door_removal_tests {
+    use super::*;
+
+    /// A removal and its audit elision commit together or not at all: when the closure fails
+    /// after the DELETE, the savepoint rolls the DELETE back (mutating the rollback to a bare
+    /// release survived the integration tests, which never make the elision fail).
+    #[test]
+    fn a_failed_elision_rolls_the_removal_back() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let row = artifact::TestArtifactRowBuilder::new("r1").build();
+        artifact::upsert(&cat, &row).unwrap();
+        let r = in_savepoint(&cat.conn, || {
+            cat.conn
+                .execute("DELETE FROM artifact WHERE id = 'r1'", [])?;
+            anyhow::bail!("the elision failed")
+        });
+        assert!(r.is_err());
+        assert!(
+            artifact::get(&cat, "r1").unwrap().is_some(),
+            "the removal must be rolled back with the failed elision"
+        );
+        // Control: a successful closure keeps its write.
+        in_savepoint(&cat.conn, || {
+            cat.conn
+                .execute("DELETE FROM artifact WHERE id = 'r1'", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(artifact::get(&cat, "r1").unwrap().is_none());
+    }
+}
 
 /// The literal (non-glob) prefix of a glob pattern — the portion before the
 /// first metacharacter. `"docs/trackers/**"` → `"docs/trackers"`;

@@ -569,6 +569,26 @@ mod tests {
             format!("{:#}", door.refusal(&link).unwrap()),
             format!("{:#}", ReadDoor::new(Vec::new()).refusal(&link).unwrap()),
         ];
+        // The no-root branch needs a spelling no repository contains: the same link, outside it.
+        let bare = _base.join("bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::os::unix::fs::symlink(&target, bare.join("n.md")).unwrap();
+        let no_root = format!(
+            "{:#}",
+            ReadDoor::new(Vec::new())
+                .refusal(&bare.join("n.md"))
+                .unwrap()
+        );
+        assert!(
+            no_root.contains("no managed root"),
+            "the no-root branch: {no_root}"
+        );
+        let texts = [
+            texts[0].clone(),
+            texts[1].clone(),
+            texts[2].clone(),
+            no_root,
+        ];
         for t in &texts {
             assert!(t.contains("n.md"), "the spelling is named: {t}");
             assert!(
