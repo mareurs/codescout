@@ -139,7 +139,7 @@ fn ensure_every_chunk_embedded(report: &crate::librarian::indexer::BackfillRepor
     }
     anyhow::bail!(
         "{} chunk(s) could not be embedded and have no vector; the rest of the run is written. \
-         Each failed chunk is retried by the next run on a sqlite-vec host. First failure: {}",
+         Run backfill-chunks again to embed them. First failure: {}",
         report.embed_failed,
         report
             .embed_errors

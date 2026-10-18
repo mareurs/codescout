@@ -1233,8 +1233,9 @@ pub struct BackfillReport {
     /// Artifacts visited.
     pub artifacts: usize,
     /// Chunks whose embed call failed. The run goes on to the next chunk, so one input the
-    /// embedder always rejects holds back only itself. Each such chunk keeps its row and no
-    /// vector, and a later run on a sqlite-vec host selects its artifact again.
+    /// embedder always rejects holds back only itself. The chunk has no vector. A sqlite-vec run
+    /// keeps its row and selects the artifact again; a store run deletes the artifact's rows and
+    /// selects it again as an artifact with none. Either way the next run embeds the chunk.
     pub embed_failed: usize,
     /// The first 20 failures, as `"<chunk_id>: embed failed: <error>"` (the reindex's form).
     /// `embed_failed` is the full count.
@@ -1291,6 +1292,10 @@ const BLANK_CHARS: &str = "\t\n\u{b}\u{c}\r \u{85}\u{a0}\u{1680}\u{2000}\u{2001}
 /// A chunk whose embed call fails is counted in [`BackfillReport::embed_failed`] and the
 /// run goes on, so an input the embedder always rejects holds back only its own chunk. A
 /// failed catalog or store write is a different fault and still ends the run.
+///
+/// A store run keeps no trace of an artifact that had a chunk fail: it deletes the rows it
+/// created for that artifact and stores none of its vectors, because the store target
+/// selects only artifacts without rows and could not otherwise select it again.
 ///
 /// `root_prefix` is the optional path LIKE pattern, already suffixed with `%`.
 /// `None` explicitly walks the whole catalog. A backed-up dimension change requires
@@ -1443,6 +1448,8 @@ async fn backfill_chunk_vectors_with(
                 let cat = catalog.lock();
                 crate::librarian::catalog::chunk::chunks_for(&cat, &id)?
             };
+            // Whether this run creates the artifact's rows below; see the rollback after the embeds.
+            let created_rows = stored.is_empty();
             let mut items = if stored.is_empty() {
                 let content = match std::fs::read_to_string(&abs_path) {
                     Ok(c) => c,
@@ -1492,18 +1499,21 @@ async fn backfill_chunk_vectors_with(
 
             // One failed chunk is counted, not fatal: a chunk the embedder rejects every time
             // would otherwise stop every run at its page, and the page's finished vectors in
-            // `pending` would be dropped with it. Its row stays, so a sqlite-vec run selects the
-            // artifact again; a store or catalog write failing below still ends the run.
+            // `pending` would be dropped with it. A store or catalog write failing below still
+            // ends the run.
             // docs/issues/archive/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md
             let futures_iter = items.into_iter().map(|item| async move {
                 let embedded = svc.embed_artifact(item.title.as_deref(), &item.text).await;
                 (item.chunk_id, item.artifact_id, embedded)
             });
             let mut s = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
+            let mut finished = Vec::new();
+            let mut any_failed = false;
             while let Some((chunk_id, artifact_id, embedded)) = s.next().await {
                 match embedded {
-                    Ok(vec) => pending.push((chunk_id, artifact_id, vec)),
+                    Ok(vec) => finished.push((chunk_id, artifact_id, vec)),
                     Err(e) => {
+                        any_failed = true;
                         report.embed_failed += 1;
                         if report.embed_errors.len() < BACKFILL_ERROR_SAMPLE {
                             report
@@ -1512,6 +1522,18 @@ async fn backfill_chunk_vectors_with(
                         }
                     }
                 }
+            }
+            // A sqlite-vec run selects the artifact again by its chunk row that lacks a vector, so
+            // it keeps the rows and the vectors that landed. A store run has no such arm: only an
+            // artifact with no rows is selected, and the failed run had already created them. So it
+            // undoes its own rows, and drops the finished vectors with them: a retry mints new
+            // chunk ids, and a vector kept here would sit in the store under an id no row names.
+            // docs/issues/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
+            if any_failed && created_rows && matches!(target, BackfillTarget::Store { .. }) {
+                let cat = catalog.lock();
+                crate::librarian::catalog::chunk::replace_chunks(&cat, &id, &[])?;
+            } else {
+                pending.extend(finished);
             }
         }
 
@@ -4092,6 +4114,178 @@ kind = "memory"
             Some(768),
             "the table this run does not write is left as it was"
         );
+    }
+    /// One catalog-wide `Store` backfill, batch 100.
+    async fn store_backfill(
+        m: &parking_lot::Mutex<Catalog>,
+        svc: &crate::librarian::embedding::EmbeddingService,
+        store: &crate::librarian::artifact_store::test_support::InMemoryArtifactStore,
+        project_id: &str,
+    ) -> BackfillReport {
+        backfill_chunk_vectors_with(
+            m,
+            svc,
+            100,
+            None,
+            false,
+            BackfillTarget::Store { store, project_id },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Writes `files` under a fresh directory and indexes them. The embedder is not involved,
+    /// so no artifact has a chunk row afterwards.
+    fn index_files(m: &parking_lot::Mutex<Catalog>, files: &[(&str, &str)]) -> tempfile::TempDir {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for (name, body) in files {
+            std::fs::write(tmp.path().join(name), body).unwrap();
+        }
+        index_repo_sync(
+            &m.lock(),
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        tmp
+    }
+
+    /// **A chunk the embedder rejected is embedded by the next `Store` run.**
+    /// `Store` selects only artifacts with no chunk rows, and a failed embed had already
+    /// created them, so the artifact was never selected again: the second report read as a
+    /// clean no-op while the chunk had no vector in the store search reads.
+    /// BUG docs/issues/2026-10-18-on-a-qdrant-host-backfill-never-retries-a-chunk-whose-embed-failed.md
+    #[tokio::test]
+    async fn a_store_run_retries_a_chunk_whose_embed_failed() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let tmp = index_files(&m, &[("bare.md", "# Bare\n\nbeta\n")]);
+        let bare = artifact_id_named(&m.lock(), "bare.md");
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+
+        let first = store_backfill(&m, &backfill_rejecting_svc("beta"), &store, &project_id).await;
+        assert_eq!(first.embed_failed, 1, "the fixture's one chunk is rejected");
+
+        let again = store_backfill(&m, &backfill_svc_at_dim(768), &store, &project_id).await;
+        assert_eq!(again.embedded, 1, "the second run must embed the chunk");
+        let rows = crate::librarian::catalog::chunk::chunks_for(&m.lock(), &bare).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(
+            store.chunk(&rows[0].chunk_id).is_some(),
+            "the second run must embed the chunk the first run could not"
+        );
+    }
+
+    /// **One rejected chunk leaves its artifact with neither rows nor vectors.**
+    /// The chunk ids of a retry are new, so a vector that the first run stored for the
+    /// artifact's healthy chunk would sit in the store under an id no catalog row names.
+    #[tokio::test]
+    async fn a_store_run_leaves_no_vector_behind_for_an_artifact_with_a_rejected_chunk() {
+        use crate::librarian::catalog::chunk::chunks_for;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let tmp = index_files(&m, &[("two.md", "# Two\n\nalpha\n\n## Second\n\nbeta\n")]);
+        let two = artifact_id_named(&m.lock(), "two.md");
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+
+        let first = store_backfill(&m, &backfill_rejecting_svc("beta"), &store, &project_id).await;
+        assert_eq!(first.embed_failed, 1, "only the `beta` chunk is rejected");
+        assert_eq!(
+            store.chunks_under(&two),
+            0,
+            "the healthy chunk's vector would be an orphan after the retry"
+        );
+        assert!(
+            chunks_for(&m.lock(), &two).unwrap().is_empty(),
+            "an artifact with a rejected chunk keeps no rows, so it is selected again"
+        );
+
+        let again = store_backfill(&m, &backfill_svc_at_dim(768), &store, &project_id).await;
+        assert_eq!(again.embedded, 2, "the retry embeds both chunks");
+        let rows = chunks_for(&m.lock(), &two).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| store.chunk(&r.chunk_id).is_some()));
+        assert_eq!(store.chunks_under(&two), 2, "no vector outside the rows");
+    }
+
+    /// **A rejected chunk costs only its own artifact.**
+    /// Guards the rollback: one that ran for every artifact of the page would delete the
+    /// rows of the artifacts that embedded.
+    #[tokio::test]
+    async fn a_store_run_keeps_the_artifacts_whose_chunks_all_embedded() {
+        use crate::librarian::catalog::chunk::chunks_for;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let tmp = index_files(
+            &m,
+            &[
+                ("bad.md", "# Bad\n\nbeta\n"),
+                ("good.md", "# Good\n\nalpha\n"),
+            ],
+        );
+        let (bad, good) = {
+            let cat = m.lock();
+            (
+                artifact_id_named(&cat, "bad.md"),
+                artifact_id_named(&cat, "good.md"),
+            )
+        };
+        let store =
+            crate::librarian::artifact_store::test_support::InMemoryArtifactStore::default();
+        let project_id = tmp.path().to_string_lossy().into_owned();
+
+        let report = store_backfill(&m, &backfill_rejecting_svc("beta"), &store, &project_id).await;
+        assert_eq!(report.embed_failed, 1);
+        assert_eq!(report.embedded, 1, "the good artifact's one chunk");
+
+        let rows = chunks_for(&m.lock(), &good).unwrap();
+        assert_eq!(rows.len(), 1, "the good artifact keeps its row");
+        assert!(store.chunk(&rows[0].chunk_id).is_some());
+        assert!(chunks_for(&m.lock(), &bad).unwrap().is_empty());
+    }
+
+    /// **A sqlite-vec run keeps the vectors that landed and embeds only the chunk that failed.**
+    /// Its gap arm sees a row without a vector, so it needs no rollback; a rollback there would
+    /// re-embed the healthy chunk too.
+    #[tokio::test]
+    async fn a_sqlite_vec_run_keeps_the_finished_chunks_of_an_artifact_with_a_rejected_chunk() {
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let _tmp = index_files(&m, &[("two.md", "# Two\n\nalpha\n\n## Second\n\nbeta\n")]);
+        let vectors = |m: &parking_lot::Mutex<Catalog>| -> i64 {
+            m.lock()
+                .conn
+                .query_row("SELECT COUNT(*) FROM artifact_vec_v2", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        let first = backfill_chunk_vectors(
+            &m,
+            &backfill_rejecting_svc("beta"),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!((first.embedded, first.embed_failed), (1, 1));
+        assert_eq!(vectors(&m), 1, "the healthy chunk's vector landed");
+
+        let again = backfill_chunk_vectors(
+            &m,
+            &backfill_svc_at_dim(768),
+            100,
+            None,
+            BackfillTarget::SqliteVec,
+        )
+        .await
+        .unwrap();
+        assert_eq!(again.embedded, 1, "only the chunk without a vector");
+        assert_eq!(vectors(&m), 2);
     }
 
     /// **A blank chunk never gets a vector, so lacking one does not mean it needs repair.**
