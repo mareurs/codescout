@@ -3005,6 +3005,23 @@ mod door_table {
             &lp.join("lnk/../y.md"),
         );
 
+        // ---- Z9: a link REACHED AFTER a pop. `W/Z/../Lk` is `W/Lk`, a link to a repository S that
+        // lives outside W: the pop is exact, and the link that follows it is still a link.
+        let kt = tempfile::tempdir().unwrap();
+        let k = canon(kt.path());
+        let (kw, ks) = (k.join("W"), k.join("S"));
+        git(&kw);
+        git(&ks);
+        file(&ks.join("docs/x.md"));
+        std::fs::create_dir_all(kw.join("Z")).unwrap();
+        ln(&ks, &kw.join("Lk"));
+        t.row(
+            "Z9 roots [W], `W/Z/../Lk/docs/x.md` with Lk -> repository S outside W",
+            false,
+            std::slice::from_ref(&kw),
+            &kw.join("Z/../Lk/docs/x.md"),
+        );
+
         // ---- Z7/Z8: a directory NAME containing `..` is a plain name.
         let nt = tempfile::tempdir().unwrap();
         let n = canon(nt.path()).join("P");
