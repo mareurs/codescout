@@ -1529,7 +1529,7 @@ mod global_strictness_tests {
                 Box::pin(async move {
                     record_refresh_request(ctx).await.unwrap();
                     assert!(
-                        file(root).contains("system_prompt_sha256"),
+                        file(root).contains(&hash_system_prompt(root)),
                         "control: the baseline was recorded: {}",
                         file(root)
                     );
@@ -1568,6 +1568,11 @@ mod global_strictness_tests {
                     assert!(
                         file(root).contains(&format!("onboarding_version = {ONBOARDING_VERSION}")),
                         "control: the version was stamped:\n{}",
+                        file(root)
+                    );
+                    assert!(
+                        file(root).contains(&hash_system_prompt(root)),
+                        "control: the baseline was stamped:\n{}",
                         file(root)
                     );
                     assert_eq!(

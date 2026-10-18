@@ -703,3 +703,96 @@ fn the_notice_joins_an_existing_alias_advisory_and_never_rewrites_the_message() 
     let none = attach_workspace_notice_to_error(anyhow::anyhow!("boom"), None);
     assert!(none.downcast_ref::<AdvisedError>().is_none());
 }
+
+/// An absent key reads as the GLOBAL value, and a global value that is not a known mode is the
+/// strictest, like the project's own. Child process: the global path comes from the environment.
+#[cfg(unix)]
+#[test]
+fn an_unknown_global_shell_mode_is_the_strictest_when_the_file_sets_none() {
+    global_child(
+        "an_unknown_global_shell_mode_is_the_strictest_when_the_file_sets_none",
+        "[security]\nshell_command_mode = \"strict\"\n",
+        "shell_command_mode = \"unrestricted\"\n",
+        |after| assert_eq!(after.shell_command_mode, "disabled"),
+    );
+}
+
+/// A global config that sets only SOME of the keys leaves the others at the built-in default:
+/// it must not close gates it never mentioned.
+#[cfg(unix)]
+#[test]
+fn a_global_config_that_sets_one_key_does_not_close_the_others() {
+    global_child(
+        "a_global_config_that_sets_one_key_does_not_close_the_others",
+        "[security]\nshell_command_mode = \"disabled\"\n",
+        "shell_command_mode = \"unrestricted\"\n",
+        |after| {
+            assert_eq!(
+                after.shell_command_mode, "disabled",
+                "the key the global sets"
+            );
+            assert!(
+                after.file_write_enabled,
+                "file_write_enabled was never mentioned"
+            );
+            assert!(
+                after.indexing_enabled,
+                "indexing_enabled was never mentioned"
+            );
+        },
+    );
+}
+
+/// Run, in a child with `global` as the global config: a project whose own file holds
+/// `project_security`, then a save that deletes it next to an invalid entry; `check` reads the
+/// resulting policy.
+#[cfg(unix)]
+fn global_child(
+    name: &'static str,
+    global: &'static str,
+    project_security: &'static str,
+    check: fn(&crate::util::path_security::PathSecurityConfig),
+) {
+    let fixture = tempfile::tempdir().unwrap();
+    let xdg = fixture.path().canonicalize().unwrap().join("xdg");
+    crate::platform::test_child::run(
+        module_path!(),
+        name,
+        &[("XDG_CONFIG_HOME", Some(xdg.to_str().unwrap()))],
+        move || {
+            let global_dir = std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap())
+                .join("codescout");
+            std::fs::create_dir_all(&global_dir).unwrap();
+            std::fs::write(global_dir.join("config.toml"), global).unwrap();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (dir, server) =
+                        make_server_with_project_toml(Some(&with_security(project_security))).await;
+                    save(&dir, &with_security(&format!("{BAD_ENTRY}\n")));
+                    check(&security(&server).await);
+                });
+        },
+    );
+}
+
+/// A notice alone must not add an empty alias-advisory block to an object-shaped error body
+/// (the router's `Null` filter), and rides it as `_workspace_notice`.
+#[test]
+fn a_notice_alone_adds_no_empty_corrections_block_to_an_error_body() {
+    let e = crate::tools::attach_workspace_notice_to_error(
+        anyhow::anyhow!("LSP request failed with code -32800"),
+        Some("N".to_string()),
+    );
+    let result = super::route_tool_error(e);
+    let text = result
+        .content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect::<String>();
+    let body: serde_json::Value = serde_json::from_str(&text).expect("an object body");
+    assert_eq!(body["_workspace_notice"], "N", "{text}");
+    assert!(body.get("corrections").is_none(), "{text}");
+}
