@@ -474,6 +474,35 @@ async fn a_pinned_call_carries_the_failed_reload_notice_too() {
     );
 }
 
+/// The refusal's load error is read for the project the call resolved to, like the notice.
+#[tokio::test]
+async fn a_pinned_write_refusal_carries_the_pinned_projects_load_error() {
+    let (_home, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    let pinned = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(pinned.path().join(".codescout")).unwrap();
+    std::fs::write(project_toml(&pinned), BASE_TOML).unwrap();
+    let root = std::fs::canonicalize(pinned.path()).unwrap();
+    let write =
+        |name: &str| json!({"path": name, "content": "x\n", "workspace": root.to_string_lossy()});
+
+    let (err, text) = call(&server, "create_file", write("ok.txt")).await;
+    assert!(
+        !err && root.join("ok.txt").exists(),
+        "control: a pinned write into the healthy project lands: {text}"
+    );
+
+    save(&pinned, "[project\nname = \"p\"\n");
+    let (err, text) = call(&server, "create_file", write("no.txt")).await;
+    assert!(
+        err && !root.join("no.txt").exists(),
+        "the pinned project's unparseable file must refuse its writes: {text}"
+    );
+    assert!(
+        text.contains("FAILED TO LOAD"),
+        "the refusal must carry the PINNED project's load error: {text}"
+    );
+}
+
 /// A mode the dispatcher does not know is already refused by it, so it is the strictest
 /// state there is; an invalid reload must not replace it with a looser known one.
 #[tokio::test]

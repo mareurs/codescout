@@ -147,12 +147,23 @@ path (a leading `~` is **not** expanded) and an absolute entry spelled with `..`
 when the project config loads, and the error names `.codescout/project.toml` and the entry.
 At startup that stops the server for that project.
 
-In a **running** session an edit that fails to load is ignored without a message: the last
-configuration that loaded stays in force until the file is fixed (`reload_config_from_disk`;
-the stamp advances so a file that stays broken is parsed once). So a tightening saved in the same
-edit as an invalid entry (for example `file_write_enabled = false` together with
-`extra_write_roots = ["~/scratch"]`) does **not** take effect. Restart the server after editing
-security settings, and fix any entry the loader names first.
+In a **running** session an edit that fails to load is **not applied, and it is reported**. The
+last configuration that loaded stays in force, with two changes. First, every tool response (the
+`_workspace_notice` field) and every refused write carries the loader's error until a reload
+succeeds, so the failure cannot pass unseen. Second, from the file only a security *tightening* is
+applied: `file_write_enabled = false`, `indexing_enabled = false`, a stricter `shell_command_mode`,
+a `profile` other than `"root"`, and `extra_write_roots` entries removed. A value that cannot be
+read for one of those gates (for example `file_write_enabled = "no"`) counts as closed, and
+nothing is ever loosened: an added root, `profile = "root"` or `file_write_enabled = true` saved
+next to an invalid entry has no effect. If the file is not valid TOML, is unreadable or is over
+1 MiB, nothing in it can be confirmed, so file writes are disabled and any `root` profile and
+extra write roots are dropped until it loads again. So `file_write_enabled = false` saved together
+with `extra_write_roots = ["~/scratch"]` takes effect, and the response says why the rest of the
+edit did not.
+
+Not covered by that rule: `shell_dangerous_patterns` an invalid edit adds, a lowered
+`max_index_bytes`, and a tightening that only the global config file carries. For those, fix the
+entry the error names, or restart the server.
 
 ### Built-in Read Deny-List
 
