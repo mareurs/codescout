@@ -2626,7 +2626,7 @@ mod door_table {
         t.row(
             "X6c roots [N] only, same row",
             false,
-            &[n.clone()],
+            std::slice::from_ref(&n),
             &n.join("l/x.md"),
         );
 
@@ -2657,7 +2657,7 @@ mod door_table {
         t.row(
             "Y1b roots [X], same row: X is managed and the link leaves it",
             false,
-            &[yx.clone()],
+            std::slice::from_ref(&yx),
             &yx.join("link/docs/x.md"),
         );
 
