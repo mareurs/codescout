@@ -9868,8 +9868,11 @@ mod tests {
 
     /// The server's own appended blocks (the paths banner, the status block, the build
     /// notice) each follow the tool's last line in a reply a client lays end to end.
-    /// The banner and the status block already open with a newline; the build notice did
-    /// not. One reply carrying all three, so the check covers each seam.
+    /// The banner, the status block and the build notice (`render_notice` in
+    /// `src/agent/build_check.rs`) all already open with a newline, so this test is a pin, not
+    /// a catch: it passed before the block-seam fix. One reply carrying all three, so the
+    /// check covers each seam; the second half isolates the build notice, whose own newline
+    /// is masked behind the status block (which ends with one).
     /// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
     #[tokio::test]
     async fn post_process_appended_blocks_each_start_on_their_own_line() {
@@ -16119,8 +16122,8 @@ mod guide_hint_tests {
     /// `the_fallback_for_every_routed_write_is_the_librarians_declaration`).
     ///
     /// The delivered bytes of the first `append_entry` are measured here too: 16,344 B before
-    /// the sections that do not inform it were moved off, 12,928 B after, bounded by
-    /// `MAX_AUTO_INJECT_GUIDE_BYTES` (wrapper included).
+    /// the sections that do not inform it were moved off, 12,928 B after (12,936 B re-measured
+    /// 2026-10-18), bounded by `MAX_AUTO_INJECT_GUIDE_BYTES` (wrapper included).
     ///
     /// Mutations that must kill this: `write_target_id` returning `None` for an action (that
     /// step dies); `name_the_target` not resolving.
@@ -16172,7 +16175,7 @@ mod guide_hint_tests {
         );
         assert!(
             delivered <= crate::prompts::guide_index::WRITE_CEILING_APPEND_ENTRY,
-            "the first append_entry delivers {delivered} B; measured 12,928 B on 2026-10-17"
+            "the first append_entry delivers {delivered} B; measured 12,928 B on 2026-10-17, 12,936 B on 2026-10-18"
         );
 
         // The second append_entry: tracker-conventions is spent for this shape, so the
@@ -16884,6 +16887,12 @@ mod guide_hint_tests {
         // ceiling carries over its measurement. Not derived from section sizes: the six
         // sections sum to about 9.6 KB and the rest is block wrappers and the librarian
         // hold, which is why it is read off a run. Never raise it to fit.
+        //
+        // RE-MEASURED 2026-10-18 (throwaway `eprintln!`): 13,783 B (hold 2,290 B + executed
+        // 11,493 B), margin 103 B against the 13,886 B ceiling below. 25 B over the figure
+        // above: 18 B drifted before the block-seam fix, 7 B from it (`trailing_block`;
+        // with the prefix reverted the same run read 13,776 B = hold 2,289 + executed
+        // 11,487). The ceiling is unchanged.
         const CEILING: usize = 13_886;
 
         let (dir, server) = make_server().await;
@@ -17404,6 +17413,15 @@ mod guide_hint_tests {
         // margin 0, and the section was compressed by -70 B rather than the ceiling
         // raised — `docs/issues/archive/2026-08-28-capped-get-body-round-trips-into-truncating-write.md`.
         // Under a 13,300 ceiling that same draft would have passed silently.
+        //
+        // RE-MEASURED 2026-10-18: total 12,235 B, margin 9 B against this 12,244 B ceiling
+        // (read from a throwaway `eprintln!` of `total`, not from a failure message). That
+        // is 119 B over the 12,116 B derivation above: 112 B of drift before the
+        // block-seam fix, and 7 B from it (every appended block now opens with `\n`,
+        // `trailing_block`; with that prefix reverted the same run read 12,228 B, margin
+        // 16 B). The ceiling is NOT raised. 9 B is a thin margin: the next added line in a
+        // guide section reds this test, and the remedy is the one above, to compress a
+        // section, never to widen the number.
         //
         // POPULATION — what the 244 B of widening is, and is not, stated here
         // because a bound whose scope lives elsewhere gets read as covering
