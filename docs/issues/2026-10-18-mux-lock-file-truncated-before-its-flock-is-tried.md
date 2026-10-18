@@ -9,7 +9,7 @@ owner: marius
 related:
 - docs/issues/2026-10-17-mux-connect-path-lock-races.md
 severity: low
-unverified: 'The OS behaviour was measured with a python script, not through the Rust code: the Rust path (std::fs::File::create in acquire_mux_lock) was read, not run.'
+unverified: 'CLEARED 2026-10-18. Was: the OS behaviour was measured with a python script, not through the Rust code. Now measured through acquire_mux_lock (review F7), see Reproduction.'
 ---
 
 # BUG: a second mux start truncates the lock file before its flock is tried, erasing the PID line of the live mux that holds it
@@ -34,7 +34,15 @@ At the OS level, measured 2026-10-18 with python (`fcntl.flock` as the holder, t
 before='12345\n' second-flock=refused after=''
 ```
 
-Through the Rust code: not run. `a_mux_start_gives_up_on_a_lock_that_stays_held_after_the_grace` in `src/lsp/mux/process.rs` holds the lock and calls `acquire_mux_lock`; reading the lock file after it would show it.
+Through the Rust code, measured 2026-10-18 by the independent review of `fix/mux-connect-2026-10-18`: a lock holder that took the flock with `OpenOptions` (no truncate) and wrote `12345\n`, then `acquire_mux_lock` on the same path:
+
+```
+refused=true before="12345\n" after=""
+```
+
+I reproduced the same line through the Rust path myself (a throwaway test, removed): `MUX1018-F7 refused=true before="12345\n" after=""`.
+
+Nothing in the codebase reads the PID line: holder-gone detection uses the flock (`claim_mux_lock`), not the file's content, so the connect-path fixes of `2026-10-17-mux-connect-path-lock-races.md` are unaffected. The line is a human diagnostic only.
 
 ## Environment
 
@@ -42,11 +50,11 @@ Linux, branch `fix/mux-connect-2026-10-18`.
 
 ## Root cause
 
-inferred from `acquire_mux_lock` (`std::fs::File::create(lock_path)` before `try_lock_exclusive`) and measured at the OS level as above. The flock is advisory and does not stop the truncation.
+inferred from `acquire_mux_lock` (`std::fs::File::create(lock_path)` before `try_lock_exclusive`) and measured both at the OS level and through the Rust function as above. The flock is advisory and does not stop the truncation.
 
 ## Evidence
 
-The python line above.
+The python line above and the Rust-path line.
 
 ## Hypotheses tried
 
