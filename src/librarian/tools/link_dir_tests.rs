@@ -1733,8 +1733,13 @@ mod door_table {
         std::fs::canonicalize(p).unwrap()
     }
 
-    /// (name, expected admit, file-door admit, directory-door admit on the parent)
-    struct Rows(Vec<(String, bool, bool, bool)>);
+    /// (name, expected admit, file-door admit, directory-door admit on the parent, READ-door admit)
+    ///
+    /// The read column (`read_door::ReadDoor::refusal`, the read door's own judgement of the same
+    /// spelling against the same roots) must equal the file door's on every row: the librarian
+    /// reads only where it would write. Its leaves are not links, so the leaf rule, the one place
+    /// the two doors differ on purpose, never applies here.
+    struct Rows(Vec<(String, bool, bool, bool, bool)>);
 
     impl Rows {
         fn row(&mut self, name: &str, expect_admit: bool, roots: &[PathBuf], p: &Path) {
@@ -1747,7 +1752,11 @@ mod door_table {
                 "delete from",
             )
             .is_ok();
-            self.0.push((name.to_string(), expect_admit, file, dir));
+            let read = crate::librarian::read_door::ReadDoor::new(roots.to_vec())
+                .refusal(p)
+                .is_none();
+            self.0
+                .push((name.to_string(), expect_admit, file, dir, read));
         }
     }
 
@@ -2169,13 +2178,14 @@ mod door_table {
         );
 
         let mut bad = Vec::new();
-        for (name, expect, file, dir) in &t.0 {
-            if file != expect || dir != file {
+        for (name, expect, file, dir, read) in &t.0 {
+            if file != expect || dir != file || read != file {
                 bad.push(format!(
-                    "{name}: expected {} file-door {} dir-door {}",
+                    "{name}: expected {} file-door {} dir-door {} read-door {}",
                     if *expect { "ADMIT" } else { "REFUSE" },
                     if *file { "ADMIT" } else { "REFUSE" },
                     if *dir { "ADMIT" } else { "REFUSE" },
+                    if *read { "ADMIT" } else { "REFUSE" },
                 ));
             }
         }
@@ -2662,13 +2672,14 @@ mod door_table {
         );
 
         let mut bad = Vec::new();
-        for (name, expect, file, dir) in &t.0 {
-            if file != expect || dir != file {
+        for (name, expect, file, dir, read) in &t.0 {
+            if file != expect || dir != file || read != file {
                 bad.push(format!(
-                    "{name}: expected {} file-door {} dir-door {}",
+                    "{name}: expected {} file-door {} dir-door {} read-door {}",
                     if *expect { "ADMIT" } else { "REFUSE" },
                     if *file { "ADMIT" } else { "REFUSE" },
                     if *dir { "ADMIT" } else { "REFUSE" },
+                    if *read { "ADMIT" } else { "REFUSE" },
                 ));
             }
         }
@@ -3039,13 +3050,14 @@ mod door_table {
         t.row("Z8 roots [P], nested repo `P/a..b` linking back into P: its name is a plain name, so it is the refinement and the link is refused", false, std::slice::from_ref(&n), &n.join("a..b/linkdir/y.md"));
 
         let mut bad = Vec::new();
-        for (name, expect, file, dir) in &t.0 {
-            if file != expect || dir != file {
+        for (name, expect, file, dir, read) in &t.0 {
+            if file != expect || dir != file || read != file {
                 bad.push(format!(
-                    "{name}: expected {} file-door {} dir-door {}",
+                    "{name}: expected {} file-door {} dir-door {} read-door {}",
                     if *expect { "ADMIT" } else { "REFUSE" },
                     if *file { "ADMIT" } else { "REFUSE" },
                     if *dir { "ADMIT" } else { "REFUSE" },
+                    if *read { "ADMIT" } else { "REFUSE" },
                 ));
             }
         }

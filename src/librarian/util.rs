@@ -23,10 +23,11 @@ pub fn normalize_rel_path(rel: &str) -> String {
 /// **Why a refusal, not a replace and not a conditional write-through.** Every librarian writer
 /// takes its path from the catalog (`row.abs_path`), from a frontmatter declaration or from
 /// `base_dir.join(rel_path)` — none of them passes through `validate_write_path`, so nothing else
-/// asks where the write lands. `std::fs::write` follows a leaf link, and the indexer deliberately
-/// catalogs an in-root `.md` link whose target is OUTSIDE the root (`indexer.rs`, the
-/// `is_symlink` block: skipping it would trade a silent duplicate for a silent omission), so a
-/// catalogued row can name a file the repository does not own.
+/// asks where the write lands. `std::fs::write` follows a leaf link, and a catalogued row can be
+/// one: the indexer no longer catalogs a link out of the repository (the read door refuses it,
+/// `read_door`), but a pulled commit can turn a catalogued file into a link, and a catalog an
+/// older indexer wrote still holds such rows, so a row can name a file the repository does not
+/// own.
 ///
 /// * Replacing the link with a regular file (what `util::fs::atomic_write` does for the
 ///   `create_file` / `edit_*` tools) is wrong HERE: the caller asked to update a document and the
@@ -96,9 +97,9 @@ pub(crate) fn write_catalogued_file(
 /// names; a path for which no root can be named is not checked (only the leaf rule applies).
 ///
 /// This is the question the LEAF rule cannot ask: a row whose parent directory is a link out of
-/// the repository. The indexer can mint one two ways, both shippable by a repository
-/// (`force_include` walks a symlinked anchor directory; a directory swapped for a link after
-/// indexing keeps its rows because reclamation asks `Path::exists()`), and every writer that
+/// the repository. Such a row arises when a directory is swapped for a link after indexing, and
+/// older catalogs hold rows the walk minted through a symlinked `force_include` anchor (the walk
+/// and reclamation now judge both through the read door, `read_door`), and every writer that
 /// takes `row.abs_path` would then write, move or delete a file the repository does not own.
 /// A link whose target stays INSIDE the repository is untouched: a symlinked tracker directory
 /// is a legitimate setup.
@@ -168,7 +169,10 @@ pub(crate) fn refuse_catalogued_dir_outside_repo(
 /// reached through a link (`home/proj -> data/proj`), and is admitted; a foreign link to a
 /// SUBDIRECTORY of a managed root names no root and is refused. The table of layouts that
 /// pins every verdict is `door_layout_table` in `link_dir_tests.rs`.
-fn door_root(roots: &[std::path::PathBuf], path: &std::path::Path) -> Option<std::path::PathBuf> {
+pub(crate) fn door_root(
+    roots: &[std::path::PathBuf],
+    path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
     let base = managed_base(roots, path);
     // Nearest first. Candidates above the confinement root are harmless: `descends_without_link`
     // never accepts one (it is not below the anchor), so they only matter for the no-root case.
@@ -357,7 +361,7 @@ pub(crate) fn refuse_path_outside_root(
 ///
 /// Limit: `canonicalize` also fails for a dangling link or an unreadable component, and the walk
 /// then stops ABOVE it and keeps it as written, so such a link is not followed here.
-fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::path::PathBuf {
+pub(crate) fn resolve_through_existing_ancestor(path: &std::path::Path) -> std::path::PathBuf {
     use std::path::Component;
     let mut below: Vec<std::ffi::OsString> = Vec::new();
     let mut cur = path;
