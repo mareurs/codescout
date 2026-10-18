@@ -558,6 +558,17 @@ mod tests {
             Content::text("\n<!-- auto-injected"),
         ];
         assert!(seam_defects(&across_empty_led).is_empty());
+        // A non-text block is a break by itself: what follows it is not glued to the text before.
+        let across_image = vec![
+            Content::text("}"),
+            Content::image("AA==", "image/png"),
+            Content::text("<!-- auto-injected"),
+        ];
+        assert!(
+            seam_defects(&across_image).is_empty(),
+            "{:?}",
+            seam_defects(&across_image)
+        );
     }
 
     /// The constructor itself: one newline added, never two, and the text otherwise
