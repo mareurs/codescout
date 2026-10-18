@@ -421,6 +421,81 @@ pub(crate) fn prune_before(conn: &Connection, before_ms: i64) -> Result<usize> {
     }
     Ok(n)
 }
+/// The columns of an `artifact` row whose values a walk took from the FILE (its frontmatter, its
+/// first heading, its bytes or its metadata), as opposed to the row's identity (`id`, `abs_path`)
+/// and its bookkeeping. `elide_values` removes exactly these from the audit trail of a row whose
+/// file the read door refuses; `slug` is here because it is minted from the title.
+pub(crate) const ARTIFACT_FILE_DERIVED: &[&str] = &[
+    "title",
+    "kind",
+    "status",
+    "owners",
+    "tags",
+    "topic",
+    "time_scope",
+    "file_sha256",
+    "file_mtime",
+    "embedded_sha256",
+    "slug",
+];
+
+/// The stand-in an elided value becomes, in the style of the triggers' own `{"elided": ...}`.
+pub(crate) const READ_DOOR_ELIDED: &str = "read-door";
+
+/// In every audit payload of `tbl`/`row_id`, replace the value of each key in `cols` (an UPDATE
+/// diff's `[old, new]` pair or a DELETE image's value alike) with
+/// `{"elided": "read-door"}`, keeping the key, so the row still says WHICH columns changed and
+/// the routing keys (`id`, `abs_path`) the shard export attributes a row by are untouched.
+/// Returns how many audit rows were rewritten.
+///
+/// **This rewrites rows of an append-only trail, deliberately and narrowly.** It exists for one
+/// caller: the read door's removal of what a walk read through a link out of the repository
+/// (`indexer::index_repo_sync`, in the same savepoint as the removal, so no other connection and
+/// no export ever sees the unredacted row). The triggers copy every changed value into the trail
+/// (UPDATE: old and new; DELETE: the whole old row), so without this the removal would MOVE the
+/// outside file's text into the trail and from there into the committed shard files. Rows already
+/// exported to a shard file before the removal are not touched and cannot be recalled. No row is
+/// deleted, so `seq` keeps no gap, and the stand-in says why the value is absent.
+pub(crate) fn elide_values(
+    conn: &Connection,
+    tbl: &str,
+    row_id: &str,
+    cols: &[&str],
+) -> Result<usize> {
+    let rows: Vec<(i64, String)> = conn
+        .prepare(
+            "SELECT seq, payload FROM catalog_audit \
+             WHERE tbl = ?1 AND row_id = ?2 AND payload IS NOT NULL",
+        )?
+        .query_map(rusqlite::params![tbl, row_id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let stand_in = serde_json::json!({ "elided": READ_DOOR_ELIDED });
+    let mut rewritten = 0usize;
+    for (seq, payload) in rows {
+        let Ok(serde_json::Value::Object(mut map)) = serde_json::from_str(&payload) else {
+            continue;
+        };
+        let mut changed = false;
+        for c in cols {
+            if let Some(v) = map.get_mut(*c) {
+                if *v != stand_in {
+                    *v = stand_in.clone();
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            conn.execute(
+                "UPDATE catalog_audit SET payload = ?1 WHERE seq = ?2",
+                rusqlite::params![serde_json::Value::Object(map).to_string(), seq],
+            )?;
+            rewritten += 1;
+        }
+    }
+    Ok(rewritten)
+}
 
 /// Rolls up audit-trail size, time span and unknown-actor count for
 /// `doctor`'s `catalog_health` block. `unknown_actor_rows` surfaces writers
@@ -471,6 +546,8 @@ pub(crate) fn health(conn: &Connection) -> Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use crate::librarian::catalog::{artifact, Catalog};
+
+    use super::{elide_values, ARTIFACT_FILE_DERIVED, READ_DOOR_ELIDED};
 
     fn seed(cat: &Catalog, id: &str) {
         let row = artifact::TestArtifactRowBuilder::new(id)
@@ -974,6 +1051,62 @@ mod tests {
         assert!(
             largest > 0 && largest <= total,
             "largest must be a real row's size, bounded by the total: {h}"
+        );
+    }
+    /// `elide_values` rewrites only the named row's payloads and only the named keys, keeping the
+    /// keys themselves and the routing keys (`id`, `abs_path`) the shard export attributes by; a
+    /// second call changes nothing.
+    #[test]
+    fn elide_values_replaces_only_the_named_columns_of_the_named_row() {
+        let cat = Catalog::open_in_memory().unwrap();
+        seed(&cat, "keep-me");
+        seed(&cat, "other");
+        for id in ["keep-me", "other"] {
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET title = 'SECRET-T', tags = '[\"SECRET-G\"]' WHERE id = ?1",
+                    [id],
+                )
+                .unwrap();
+        }
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id = 'keep-me'", [])
+            .unwrap();
+        let n = elide_values(&cat.conn, "artifact", "keep-me", ARTIFACT_FILE_DERIVED).unwrap();
+        assert_eq!(n, 2, "the update diff and the delete image");
+        let payloads = |id: &str| -> Vec<String> {
+            cat.conn
+                .prepare(
+                    "SELECT payload FROM catalog_audit WHERE row_id = ?1 AND payload IS NOT NULL",
+                )
+                .unwrap()
+                .query_map([id], |r| r.get(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        for p in payloads("keep-me") {
+            assert!(!p.contains("SECRET"), "{p}");
+            assert!(p.contains(READ_DOOR_ELIDED), "{p}");
+        }
+        let image: serde_json::Value = serde_json::from_str(
+            payloads("keep-me")
+                .iter()
+                .find(|p| p.contains("abs_path"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(image["id"], "keep-me", "routing keys survive: {image}");
+        assert!(image["abs_path"].is_string(), "{image}");
+        assert!(image.get("title").is_some(), "the key survives: {image}");
+        assert!(
+            payloads("other").iter().any(|p| p.contains("SECRET-T")),
+            "another row's trail is untouched"
+        );
+        assert_eq!(
+            elide_values(&cat.conn, "artifact", "keep-me", ARTIFACT_FILE_DERIVED).unwrap(),
+            0,
+            "idempotent"
         );
     }
 }

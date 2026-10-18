@@ -1167,7 +1167,14 @@ fn repository_config_files_are_read_only_through_the_door() {
 /// A project with a regular `docs/x.md`, indexed; then `docs/x.md` replaced by a link to a file
 /// outside the repository (what a pulled commit can do). Returns the context, the id, the link and
 /// the dirs.
-async fn indexed_then_swapped(
+/// The REAL pre-fix state (review round 1, F6): the old walk read the TARGET, so the row's title,
+/// fields, chunk text and vectors are the target's (`doc_text`, which carries `MARK`). Built by
+/// indexing a regular file holding the target's bytes, then replacing it (`dir == false`: the leaf;
+/// `dir == true`: its directory `docs/sub`) by a link out of the repository. The project opts in to
+/// the audit shard export (`.gitattributes`) only AFTER that first index: shard lines a pre-fix
+/// catalog already exported are not recallable by any fix, and are out of what the test asserts.
+async fn prefix_state(
+    dir: bool,
     with_history: bool,
 ) -> (
     tempfile::TempDir,
@@ -1175,30 +1182,141 @@ async fn indexed_then_swapped(
     Arc<InMemoryArtifactStore>,
     String,
     PathBuf,
+    PathBuf,
 ) {
     let tmp = tempfile::tempdir().unwrap();
     let base = std::fs::canonicalize(tmp.path()).unwrap();
     let p = project(&base);
-    std::fs::create_dir_all(p.join("docs")).unwrap();
-    std::fs::write(p.join("docs/x.md"), "# plain\n\nhello\n").unwrap();
-    let fx = fx(&p, &p.join("docs"), None);
+    let docs = if dir {
+        p.join("docs/sub")
+    } else {
+        p.join("docs")
+    };
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("x.md"), doc_text()).unwrap();
+    let fx = fx(&p, &docs, None);
     let (e, _) = svc(4);
     let (ctx, store) = ctx_for(&fx, Some(e));
     super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
-    let id = crate::librarian::ids::artifact_id_from_abs(&p.join("docs/x.md"));
+    let id = crate::librarian::ids::artifact_id_from_abs(&docs.join("x.md"));
+    let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
     assert!(
-        store.chunks_under(&id) > 0 && chunk_count(&ctx, &id) > 0,
-        "precondition: the regular file was chunked and embedded, or the drop assertions are vacuous"
+        row.title.as_deref().is_some_and(|t| t.contains(MARK))
+            && store.chunks_under(&id) > 0
+            && !catalog_hits(&ctx, None).is_empty(),
+        "precondition: the target's text is in the catalog (title {:?}), or every \"nothing \
+         remains\" assertion below is vacuous",
+        row.title
     );
     if with_history {
         augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id, json!({"note": "mine"}))).unwrap();
     }
-    std::fs::remove_file(p.join("docs/x.md")).unwrap();
+    std::fs::write(
+        p.join(".gitattributes"),
+        ".codescout/audit/*.jsonl merge=union\n",
+    )
+    .unwrap();
     target(&base.join("out"));
-    ln(base.join("out/x.md"), &p.join("docs/x.md"));
-    (tmp, ctx, store, id, p.join("docs/x.md"))
+    if dir {
+        std::fs::remove_dir_all(&docs).unwrap();
+        ln(base.join("out"), &docs);
+    } else {
+        std::fs::remove_file(docs.join("x.md")).unwrap();
+        ln(base.join("out/x.md"), &docs.join("x.md"));
+    }
+    (tmp, ctx, store, id, p, docs.join("x.md"))
+}
+
+/// Every text value in every table of the catalog that carries `MARK`, as `table.column`, with
+/// one exception: the `slug` of `kept` (an escaping row kept for its history keeps its slug, open
+/// decision "Deviation 8" of the issue). The vec0 tables hold vectors, not text, and are skipped.
+fn catalog_hits(ctx: &ToolContext, kept: Option<&str>) -> Vec<String> {
+    let cat = ctx.catalog.lock();
+    let tables: Vec<String> = cat
+        .conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
+             AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'artifact_vec%'",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    let mut hits = Vec::new();
+    for t in tables {
+        let mut st = cat.conn.prepare(&format!("SELECT * FROM \"{t}\"")).unwrap();
+        let cols: Vec<String> = st.column_names().iter().map(|c| c.to_string()).collect();
+        let mut rows = st.query([]).unwrap();
+        while let Some(r) = rows.next().unwrap() {
+            let row_id: Option<String> = cols
+                .iter()
+                .position(|c| c == "id")
+                .and_then(|i| r.get::<_, String>(i).ok());
+            for (i, c) in cols.iter().enumerate() {
+                let v: rusqlite::types::Value = r.get(i).unwrap();
+                let text = match v {
+                    rusqlite::types::Value::Text(s) => s,
+                    rusqlite::types::Value::Blob(b) => String::from_utf8_lossy(&b).into_owned(),
+                    _ => continue,
+                };
+                if !text.contains(MARK) {
+                    continue;
+                }
+                if t == "artifact" && c == "slug" && row_id.as_deref() == kept && kept.is_some() {
+                    continue;
+                }
+                let head: String = text.chars().take(160).collect();
+                hits.push(format!("{t}.{c}: {head}"));
+            }
+        }
+    }
+    hits
+}
+
+/// Lines of the exported audit shards under `<project>/.codescout/audit/` that carry `MARK`.
+fn shard_hits(p: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(p.join(".codescout/audit")) {
+        for e in rd.flatten() {
+            let s = std::fs::read_to_string(e.path()).unwrap_or_default();
+            for l in s.lines().filter(|l| l.contains(MARK)) {
+                out.push(l.chars().take(200).collect());
+            }
+        }
+    }
+    out
+}
+
+/// Review round 1, F1: after the reindex that reclaims or clears an escaping row, nothing the
+/// target supplied is anywhere in the catalog (every table, `catalog_audit` included) or in an
+/// exported shard. Also requires that the export DID run, so an empty shard directory cannot pass
+/// for a clean one.
+fn assert_nothing_of_the_target_remains(
+    ctx: &ToolContext,
+    p: &Path,
+    kept: Option<&str>,
+    v: &serde_json::Value,
+) {
+    let hits = catalog_hits(ctx, kept);
+    assert!(
+        hits.is_empty(),
+        "the target's text survives in the catalog:\n{}",
+        hits.join("\n")
+    );
+    let shards = shard_hits(p);
+    assert!(
+        shards.is_empty(),
+        "the target's text was exported to a shard:\n{}",
+        shards.join("\n")
+    );
+    assert!(
+        v["audit_export"]["exported"].as_u64().unwrap_or(0) > 0,
+        "the audit export must have run for the shard check to mean anything: {}",
+        v["audit_export"]
+    );
 }
 
 fn chunk_count(ctx: &ToolContext, id: &str) -> i64 {
@@ -1215,7 +1333,7 @@ fn chunk_count(ctx: &ToolContext, id: &str) -> i64 {
 
 #[tokio::test]
 async fn a_file_replaced_by_an_outward_link_is_reclaimed_with_its_stored_text() {
-    let (_tmp, ctx, store, id, link) = indexed_then_swapped(false).await;
+    let (_tmp, ctx, store, id, p, link) = prefix_state(false, false).await;
     let v = super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
@@ -1255,11 +1373,12 @@ async fn a_file_replaced_by_an_outward_link_is_reclaimed_with_its_stored_text() 
         !has(&v),
         "the response must carry nothing of the target: {v}"
     );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
 }
 
 #[tokio::test]
 async fn an_outward_row_with_history_is_kept_and_cleared_of_everything_its_target_supplied() {
-    let (_tmp, ctx, store, id, link) = indexed_then_swapped(true).await;
+    let (_tmp, ctx, store, id, p, link) = prefix_state(false, true).await;
     let v = super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
@@ -1313,32 +1432,27 @@ async fn an_outward_row_with_history_is_kept_and_cleared_of_everything_its_targe
         .await
         .unwrap();
     assert!(!has(&got), "a kept row shows nothing of its target: {got}");
+    assert_nothing_of_the_target_remains(&ctx, &p, Some(&id), &v);
+    // Idempotent: a second reindex keeps the row, writes nothing new, and still leaves nothing.
+    let v2 = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        v2["escaping_kept_ids"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(id)),
+        "{v2}"
+    );
+    assert!(catalog_hits(&ctx, Some(&id)).is_empty());
+    assert!(shard_hits(&p).is_empty());
 }
 
 /// The swapped-DIRECTORY form: `docs/sub/` replaced by a link out after indexing. The walk never
 /// descends a directory link, so the row goes unseen and reclamation judges it.
 #[tokio::test]
 async fn a_row_below_a_directory_swapped_for_an_outward_link_is_kept_and_cleared() {
-    let tmp = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(tmp.path()).unwrap();
-    let p = project(&base);
-    std::fs::create_dir_all(p.join("docs/sub")).unwrap();
-    std::fs::write(p.join("docs/sub/x.md"), "# plain sub\n\nhello\n").unwrap();
-    let fx = fx(&p, &p.join("docs/sub"), None);
-    let (e, _) = svc(4);
-    let (ctx, store) = ctx_for(&fx, Some(e));
-    super::reindex::call(&ctx, json!({"scope": "project"}))
-        .await
-        .unwrap();
-    let id = crate::librarian::ids::artifact_id_from_abs(&p.join("docs/sub/x.md"));
-    assert!(
-        store.chunks_under(&id) > 0,
-        "precondition: embedded before the swap"
-    );
-    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id, json!({}))).unwrap();
-    std::fs::remove_dir_all(p.join("docs/sub")).unwrap();
-    target(&base.join("out"));
-    ln(base.join("out"), &p.join("docs/sub"));
+    let (_tmp, ctx, store, id, p, _link) = prefix_state(true, true).await;
     let v = super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
@@ -1359,4 +1473,5 @@ async fn a_row_below_a_directory_swapped_for_an_outward_link_is_kept_and_cleared
         .await
         .unwrap();
     assert!(!has(&got), "{got}");
+    assert_nothing_of_the_target_remains(&ctx, &p, Some(&id), &v);
 }

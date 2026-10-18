@@ -765,7 +765,10 @@ pub fn index_repo_sync(
         // CLEARED of everything its file supplied (`clear_escaping_row`), so it shows its id,
         // path, augmentation and events and nothing read from the file behind the link.
         if escaping && has_history(cand_id) {
-            clear_escaping_row(cat, cand_id)?;
+            in_savepoint(&cat.conn, || {
+                clear_escaping_row(cat, cand_id)?;
+                elide_escaping_audit(cat, cand_id)
+            })?;
             report.escaping_kept_ids.push(cand_id.clone());
             report.escaping_kept_paths.push(cand_abs_path.clone());
             continue;
@@ -775,10 +778,18 @@ pub fn index_repo_sync(
         // (where `exists()` answers `true` via the symlink's target). Neither subsumes
         // the other; `skipped_duplicate_ids` says why the second is not a re-derivation.
         if gone || skipped_duplicate_ids.contains(cand_id) || escaping {
-            cat.conn.execute(
-                "DELETE FROM artifact WHERE id = ?1",
-                rusqlite::params![cand_id],
-            )?;
+            in_savepoint(&cat.conn, || {
+                cat.conn.execute(
+                    "DELETE FROM artifact WHERE id = ?1",
+                    rusqlite::params![cand_id],
+                )?;
+                // The delete trigger copied the whole old row into the trail; for an escaping
+                // row that is the outside file's text.
+                if escaping {
+                    elide_escaping_audit(cat, cand_id)?;
+                }
+                Ok(())
+            })?;
             // Recorded for the async caller to drop the vectors with. On sqlite
             // the DELETE above already took them via the artifact_chunk cascade
             // and its trigger; Qdrant has no FK and keeps them, so this id is
@@ -959,6 +970,41 @@ fn clear_escaping_row(cat: &Catalog, id: &str) -> Result<()> {
         artifact::upsert(cat, &row)?;
     }
     Ok(())
+}
+/// **Invariant (review round 1, F1): removing what the read door refuses never copies it.** When
+/// a row is reclaimed or cleared because its file resolves outside its repository, every audit
+/// payload of that row loses the values of the columns its file supplied
+/// (`audit::ARTIFACT_FILE_DERIVED`), in the same savepoint as the removal, so neither another
+/// connection nor the audit shard export (which runs later in the same reindex) ever reads them.
+/// Historic rows of that id are elided too: they hold the same file-supplied values (the slug a
+/// pre-fix walk minted from the target's title, a title diff from a re-read), and the trail cannot
+/// tell an earlier legitimate value from a target-derived one. What this cannot reach: shard lines
+/// exported before the removal (committed, possibly pushed), text an embedder already received,
+/// and pages SQLite has freed but not yet reused (the database file and its WAL are not scrubbed).
+fn elide_escaping_audit(cat: &Catalog, id: &str) -> Result<()> {
+    crate::librarian::catalog::audit::elide_values(
+        &cat.conn,
+        "artifact",
+        id,
+        crate::librarian::catalog::audit::ARTIFACT_FILE_DERIVED,
+    )?;
+    Ok(())
+}
+
+/// Run `f` inside a SAVEPOINT on `conn`: released on `Ok`, rolled back on `Err`, so a removal and
+/// its audit elision commit together or not at all (and nest inside an outer transaction).
+fn in_savepoint(conn: &rusqlite::Connection, f: impl FnOnce() -> Result<()>) -> Result<()> {
+    conn.execute_batch("SAVEPOINT read_door_removal")?;
+    match f() {
+        Ok(()) => {
+            conn.execute_batch("RELEASE read_door_removal")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO read_door_removal; RELEASE read_door_removal");
+            Err(e)
+        }
+    }
 }
 
 /// The literal (non-glob) prefix of a glob pattern — the portion before the
