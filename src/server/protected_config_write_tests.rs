@@ -446,10 +446,10 @@ fn a_tool_cannot_change_the_global_configs_security_section() {
     );
 }
 
-fn profile_of(
+async fn profile_of(
     server: &super::CodeScoutServer,
-) -> impl std::future::Future<Output = crate::util::path_security::SecurityProfile> + '_ {
-    async move { server.agent.security_config().await.profile }
+) -> crate::util::path_security::SecurityProfile {
+    server.agent.security_config().await.profile
 }
 
 /// `.codescout` can be a link to a directory with ANOTHER name. The write tools hand the guard
