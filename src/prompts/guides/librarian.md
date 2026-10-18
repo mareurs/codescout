@@ -409,20 +409,22 @@ observations and augmentation across, and drops the old row — one call. The re
 reports both ends:
 
 ```
-{"id": "<new>", "previous_id": "<old>", "id_changed": true,
- "history_grafted": {"events": 3, "links": 1, ...},
- "stage_together": ["<old>", "<new>"], "stage_hint": "...", "moved": true}
+{"id": "<new>", "previous_id": "<old>", "id_changed": true, "id_repair_error": null,
+  "history_grafted": {"events": 3, "links": 1, ...},
+  "stage_together": ["<old>", "<new>"], "stage_hint": "...", "moved": true}
 ```
+
+`id_repair_error` is null unless the file's `id:` could not be rewritten after the rename
+(read-only file, symlink); the move stands.
 
 **Stage both halves: `git add -- <old> <new>`; confirm both lettered in column 1 of `git
 status --short` — one `R`, or `D`+`A`. Never `R` alone: a *similarity*
 verdict straddling git's 50% cutoff either way, present when stale.**
 Derivation: get_guide("tracker-conventions") § *Bug files*.
 
-Two consequences worth planning for:
+Two consequences:
 
-- **Re-point prose that cites the old id**, in the same commit as the move — the
-  same discipline the guide already requires for citations of the old *path*.
+- **Re-point prose that cites the old id**, in the same commit as the move.
   `inbound_id_citations` names them.
 - **Do not cache an id across a move.** The old id stops resolving immediately;
   a later call with it returns `unknown id`.
@@ -434,8 +436,7 @@ with the old row.
 To remove an artifact entirely, `doc(action="delete", id=...)` deletes the file **and**
 the catalog row in one step, cascading (FK `ON DELETE CASCADE`) to its augmentation,
 links, observations and events — no orphaned rows. The artifact must live under a managed
-workspace root; a missing file is tolerated (the row is still dropped, so `delete` also
-repairs a stale entry). Prefer `move` for relocation — `delete` is irreversible.
+workspace root; a missing file is tolerated (the row is still dropped). Prefer `move` for relocation — `delete` is irreversible.
 ## Common Mistakes
 
 | Mistake | Fix |

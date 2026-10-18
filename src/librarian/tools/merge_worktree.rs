@@ -68,24 +68,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let now = chrono::Utc::now().timestamp_millis();
 
     // Every catalog row living under `root` — forked shadow twins AND
-    // worktree-born artifacts alike. `root` is bound as a LIKE *pattern*, so
-    // its own `%`/`_` must be escaped; `descendant_path_like` is the one
-    // spelling of that predicate.
-    let under_root = crate::librarian::util::descendant_path_like("?1");
+    // worktree-born artifacts alike. The comparison is EXACT (`path_at_or_under_sql`), not
+    // `LIKE`: `LIKE` is ASCII-case-insensitive, so the registration `.worktrees/feat_1` also
+    // selected the rows of `.worktrees/FEAT_1`, and `abandon` deleted them with their cascade
+    // (and a merge would have reseated them).
+    let (root_exact, root_prefix) = crate::librarian::util::root_and_prefix(&root);
+    let under_root = crate::librarian::util::path_at_or_under_sql("abs_path", "?1", "?2");
     let mut stmt = cat.conn.prepare(&format!(
-        "SELECT id FROM artifact WHERE abs_path = ?1 OR abs_path {under_root} \
-         ORDER BY abs_path"
+        "SELECT id FROM artifact WHERE {under_root} ORDER BY abs_path"
     ))?;
     let shadow_ids: Vec<String> = stmt
-        .query_map([&root], |r| r.get(0))?
+        .query_map([&root_exact, &root_prefix], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     drop(stmt);
 
     if a.abandon {
         if !a.dry_run {
             cat.conn.execute(
-                &format!("DELETE FROM artifact WHERE abs_path = ?1 OR abs_path {under_root}"),
-                [&root],
+                &format!("DELETE FROM artifact WHERE {under_root}"),
+                [&root_exact, &root_prefix],
             )?;
             reg::set_status(&cat, &root, "abandoned", now)?;
         }

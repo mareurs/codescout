@@ -380,8 +380,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &ctx.temp_guard,
     )?;
 
-    validate_rel_path(&a.rel_path)?;
+    // Normalise FIRST: the validator must see the path that will be joined. It used to run on the
+    // raw string, and on Unix `a\..\..\escaped.md` (a backslash is an ordinary name character)
+    // passed it and became `a/../../escaped.md` one line later.
     a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
+    validate_rel_path(&a.rel_path)?;
     let full = base_dir.join(&a.rel_path);
     if full.exists() {
         return Err(LibrarianRecoverableError::new(format!(
@@ -389,6 +392,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             full.display()
         )));
     }
+    // `exists()` follows a link and answers `false` for a DANGLING one, which used to send a
+    // create on to `fs::write` — that follows the link too and CREATES its target, wherever the
+    // link points. Measured 2026-10-17: the file appeared outside the project root holding the
+    // document's content. A link to an existing file is refused by the check above.
+    // docs/issues/2026-10-17-doc-create-on-a-dangling-symlink-creates-a-file-outside-the-root.md
+    crate::librarian::util::refuse_write_through_symlink(&full)?;
+    // The PARENT chain, which the leaf check cannot see: `validate_rel_path` checks only the
+    // spelling of `rel_path`, so `esc/new.md` with `esc` an in-root link to a directory outside
+    // the root passes it, and `create_dir_all` + `fs::write` would then build and fill the
+    // directory outside. Before `create_dir_all`, which would create it before any refusal.
+    // Judged by the SAME door as `doc(update)`, `doc(move)` and `doc(delete)` (`util::door_root`),
+    // not against `base_dir` alone: against the project root a path below a nested repository's
+    // link back into the superproject was "inside", the file was created, and the new row was then
+    // refused by every other verb; in a monorepo subproject it was stricter than update.
+    crate::librarian::util::refuse_catalogued_path_outside_repo(
+        &super::managed_roots(ctx),
+        &full,
+        "create",
+    )?;
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -538,6 +560,240 @@ mod tests {
         assert!(content.contains("title: X"));
         let id = v["id"].as_str().unwrap();
         assert!(artifact::get(&ctx.catalog.lock(), id).unwrap().is_some());
+    }
+
+    // ---- a create never lands outside the repository root through a symbolic link ------------
+    //
+    // `docs/issues/2026-10-17-doc-create-on-a-dangling-symlink-creates-a-file-outside-the-root.md`
+    // plus its wider form: `validate_rel_path` checks only the spelling of `rel_path`. Victims live
+    // in a SEPARATE `TempDir` bound to a local (an inline temporary would drop and leave a link
+    // dangling). Unix-only: links.
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_refuses_a_dangling_leaf_link_instead_of_creating_its_target_outside_the_root() {
+        let outside = TempDir::new().unwrap();
+        let target = outside.path().join("never-created.md");
+        let root = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(&target, root.path().join("dangling.md")).unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+        // Precondition: the shape `Path::exists` misreports as absent.
+        assert!(!root.path().join("dangling.md").exists());
+
+        let err = call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "dangling.md", "kind": "spec",
+                   "title": "T", "body": "CREATED-BY-DOC-CREATE"}),
+        )
+        .await
+        .expect_err("a dangling link is an existing path");
+
+        assert!(format!("{err:#}").contains("symbolic link"), "{err:#}");
+        assert!(
+            !target.exists(),
+            "doc(create) must not create the link's target outside the root"
+        );
+        assert!(std::fs::symlink_metadata(root.path().join("dangling.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    /// A link to an EXISTING outside file was already refused (`exists()` is true); pinned so the
+    /// dangling fix cannot regress it by switching predicates. The fresh path is the control.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_still_refuses_a_link_to_an_existing_file_and_still_creates_a_fresh_path() {
+        let outside = TempDir::new().unwrap();
+        let victim = outside.path().join("elsewhere.md");
+        std::fs::write(&victim, "VICTIM\n").unwrap();
+        let root = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(&victim, root.path().join("outward.md")).unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "outward.md", "kind": "spec",
+                   "title": "T", "body": "b"}),
+        )
+        .await
+        .expect_err("an existing path is refused");
+        assert!(format!("{err:#}").contains("path exists"), "{err:#}");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "VICTIM\n");
+
+        call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "fresh.md", "kind": "spec",
+                   "title": "T", "body": "b"}),
+        )
+        .await
+        .unwrap();
+        assert!(root.path().join("fresh.md").is_file());
+    }
+
+    /// The parent-directory form: `esc/new.md` with `esc` an in-root link to a directory OUTSIDE
+    /// the root has no `..` and no leading `/`, so it passed `validate_rel_path`, and no dangling
+    /// link is involved, so the leaf check alone cannot close it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_refuses_a_path_through_a_symlinked_directory_that_leaves_the_root() {
+        let outside = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("esc")).unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "esc/new.md", "kind": "spec",
+                   "title": "T", "body": "CREATED-OUTSIDE"}),
+        )
+        .await
+        .expect_err("a create through a link to an outside directory must be refused");
+
+        assert!(
+            format!("{err:#}").contains("outside the repository root"),
+            "{err:#}"
+        );
+        assert!(
+            !outside.path().join("new.md").exists(),
+            "nothing may be created in the directory the link points at"
+        );
+        let rows: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "no catalog row for a file that was never created");
+    }
+
+    /// The same escape one directory deeper, through directories that do not exist yet:
+    /// `create_dir_all` would BUILD `outside/sub/deeper` before anything was refused. The refusal
+    /// has to precede it, so the outside directory is left exactly as it was.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_refuses_a_missing_subdirectory_below_a_symlinked_ancestor_before_building_it() {
+        let outside = TempDir::new().unwrap();
+        let root = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("esc")).unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "esc/sub/deeper/new.md", "kind": "spec",
+                   "title": "T", "body": "CREATED-OUTSIDE"}),
+        )
+        .await
+        .expect_err("a create below a symlinked ancestor must be refused");
+
+        assert!(
+            format!("{err:#}").contains("outside the repository root"),
+            "{err:#}"
+        );
+        assert!(
+            !outside.path().join("sub").exists(),
+            "the refusal must come BEFORE create_dir_all builds directories outside the root"
+        );
+    }
+
+    /// The controls the containment check must not break: a nested path in an ordinary
+    /// directory, a not-yet-existing nested path, and a directory link whose target is INSIDE the
+    /// root all still create. Without them "refuse every create with a parent" passes the two
+    /// tests above.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_still_works_under_real_directories_and_under_a_link_that_stays_inside() {
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("docs/real")).unwrap();
+        std::os::unix::fs::symlink(root.path().join("docs/real"), root.path().join("alias"))
+            .unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+
+        for (rel, landed) in [
+            ("docs/real/a.md", "docs/real/a.md"),
+            ("docs/fresh/deeper/b.md", "docs/fresh/deeper/b.md"),
+            ("alias/c.md", "docs/real/c.md"),
+        ] {
+            call(
+                &ctx,
+                json!({"repo": "r", "rel_path": rel, "kind": "spec", "title": "T", "body": "b"}),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{rel} must still be created: {e:#}"));
+            assert!(root.path().join(landed).is_file(), "{rel} -> {landed}");
+        }
+    }
+
+    /// The root itself reached through a link (`/tmp` -> `/private/tmp` on macOS is the everyday
+    /// case): the target is canonicalized, so the ROOT must be resolved the same way or every
+    /// legitimate create is refused as "outside". The mutation that skips the root's resolution
+    /// survived the other tests, none of which has a symlinked root.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_still_works_when_the_repo_root_is_itself_a_symlink() {
+        let real = TempDir::new().unwrap();
+        let holder = TempDir::new().unwrap();
+        let root_link = holder.path().join("repo");
+        std::os::unix::fs::symlink(real.path(), &root_link).unwrap();
+        let ctx = mk_ctx(root_link);
+
+        call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "docs/new/a.md", "kind": "spec",
+                   "title": "T", "body": "b"}),
+        )
+        .await
+        .expect("a create under a symlinked root stays inside it");
+
+        assert!(real.path().join("docs/new/a.md").is_file());
+    }
+
+    /// `validate_rel_path` ran on the RAW string and `normalize_rel_path` after it, so on Unix
+    /// `a\..\..\escaped.md` (a backslash is an ordinary name character there) passed validation
+    /// and became `a/../../escaped.md`. The containment check refused it, but with a message that
+    /// blamed a symlink that does not exist. Normalise first, so the validator sees the path
+    /// that will be used and the refusal names the real cause.
+    #[tokio::test]
+    async fn create_validates_the_rel_path_it_will_actually_use() {
+        let root = TempDir::new().unwrap();
+        let ctx = mk_ctx(root.path().to_path_buf());
+
+        let err = call(
+            &ctx,
+            json!({"repo": "r", "rel_path": "a\\..\\..\\escaped.md", "kind": "spec",
+                   "title": "T", "body": "b"}),
+        )
+        .await
+        .expect_err("a backslash-spelled `..` is still a `..`");
+
+        let text = format!("{err:#}");
+        assert!(text.contains("must not contain `..`"), "{text}");
+        assert!(
+            !text.contains("symbolic link"),
+            "no link is involved, so the refusal must not claim one: {text}"
+        );
+    }
+
+    /// `validate_rel_path` rejects `..`, so this is defence in depth, but the property is the
+    /// reason the check exists at all: below an existing ancestor, `missing/../../x` is KEPT
+    /// as written, and `starts_with` is component-wise, so it still matches the root while the
+    /// OS would resolve it one level above. Refused rather than trusted.
+    #[test]
+    fn an_unresolved_dotdot_below_an_existing_ancestor_is_refused_not_trusted() {
+        let root = TempDir::new().unwrap();
+        let escaping = root.path().join("missing/../../escaped.md");
+        assert!(
+            crate::librarian::util::refuse_path_outside_root(&escaping, root.path(), "create")
+                .is_err(),
+            "a path whose `..` could not be resolved must be refused"
+        );
+        // Control: a plain nested path that does not exist yet is inside the root.
+        assert!(crate::librarian::util::refuse_path_outside_root(
+            &root.path().join("a/b/c.md"),
+            root.path(),
+            "create"
+        )
+        .is_ok());
     }
 
     #[tokio::test]

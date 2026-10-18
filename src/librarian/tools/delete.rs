@@ -83,15 +83,34 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
 
         // Guard: only delete artifacts under a managed root — a workspace
-        // `[[roots]]` entry or the active project. See `super::managed_roots`.
+        // `[[roots]]` entry or the active project. See `super::managed_roots`. The root is named
+        // by `util::managed_base`, the function the door uses, not the lexical `containing_root`:
+        // that one did not know a row spelled through a link to the project, which `doc(update)`
+        // wrote and `doc(delete)` called "outside every managed root".
         let abs_path = row.abs_path.clone();
         let roots = super::managed_roots(ctx);
-        if super::containing_root(&roots, &abs_path).is_none() {
+        if crate::librarian::util::managed_base(&roots, &abs_path).is_none() {
             return Err(super::LibrarianRecoverableError::new(format!(
                 "artifact '{}' is outside every managed root — refusing to delete {}",
                 a.id,
                 abs_path.display()
             )));
+        }
+        // `remove_file` on a path whose PARENT is a link out of the managed root deletes the
+        // OUTSIDE file, and the guard above names a root but does not resolve links, so it cannot see
+        // that. A row born through
+        // `force_include` on a symlinked anchor, or a directory swapped for a link after indexing,
+        // is exactly this shape. The check is on the parent so that a LEAF link (an outward-link
+        // row) still deletes: unlinking drops the link and never touches its target. It is the
+        // SAME decision `doc(update)`, `doc(create)` and `doc(move)` make
+        // (`refuse_catalogued_dir_outside_repo`), so the four verbs cannot disagree about what
+        // is outside.
+        if let Some(parent) = abs_path.parent() {
+            crate::librarian::util::refuse_catalogued_dir_outside_repo(
+                &roots,
+                parent,
+                "delete from",
+            )?;
         }
 
         // Dry-run gate. The catalog delete cascades to this artifact's augmentation, links,

@@ -72,6 +72,82 @@ pub(crate) async fn resolve_read_path_for(
     Ok(full)
 }
 
+/// What a write tool must hold of the file a LEAF symlink resolves to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkTarget {
+    /// The write REPLACES the link with a regular file (`atomic_write` renames over it), so
+    /// nothing is written to the target. The exposure is the READ the tool does first: it reads
+    /// the target's bytes through the link, can echo them in an error, and a successful edit
+    /// copies them into the project. So the target must pass the READ deny-list, exactly as it
+    /// would for `read_file`.
+    ReadableByTools,
+    /// The write FOLLOWS the link (a raw `fs::write`), so the target must be somewhere a write
+    /// could be approved: inside the project, an extra or session root, or the temp dir, and not
+    /// deny-listed.
+    Writable,
+}
+
+/// Validate what a write target's LEAF symlink resolves to, when it is one.
+///
+/// `validate_write_path` resolves the PARENT and keeps the leaf as written (a file that may not
+/// exist yet), so `<root>/leaf -> ~/.ssh/id_rsa` classifies as an ordinary in-root file and the
+/// deny-list is applied to the spelling, not to what the OS opens. This closes that for the
+/// callers, without touching the classifier: the resolved target is run through the existing
+/// public validators ([`validate_read_path`](crate::util::path_security::validate_read_path),
+/// [`validate_write_path`](crate::util::path_security::validate_write_path)).
+///
+/// A target that is not a link, or a path that does not exist, is `Ok`. A dangling link is `Ok`
+/// under [`LinkTarget::ReadableByTools`] (nothing can be read through it and `atomic_write`
+/// replaces it) and refused under [`LinkTarget::Writable`] (a write would CREATE its target
+/// wherever it points, and where that is cannot be established).
+///
+/// docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
+pub(crate) fn validate_leaf_link_target(
+    resolved: &Path,
+    root: &Path,
+    security: &crate::util::path_security::PathSecurityConfig,
+    session_roots: &[PathBuf],
+    policy: LinkTarget,
+) -> anyhow::Result<()> {
+    let Ok(meta) = std::fs::symlink_metadata(resolved) else {
+        return Ok(());
+    };
+    if !meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    let Ok(target) = std::fs::canonicalize(resolved) else {
+        return match policy {
+            LinkTarget::ReadableByTools => Ok(()),
+            LinkTarget::Writable => anyhow::bail!(
+                "write denied: '{}' is a dangling symbolic link, so a write would create its \
+                 target somewhere this tool cannot check. Remove the link or write to a path \
+                 that is not a link.",
+                resolved.display()
+            ),
+        };
+    };
+    let target_str = target.to_string_lossy();
+    let checked = match policy {
+        LinkTarget::ReadableByTools => {
+            crate::util::path_security::validate_read_path(&target_str, Some(root), security)
+                .map(|_| ())
+        }
+        LinkTarget::Writable => crate::util::path_security::validate_write_path(
+            &target_str,
+            root,
+            security,
+            session_roots,
+        )
+        .map(|_| ()),
+    };
+    checked.map_err(|e| {
+        anyhow::anyhow!(
+            "{e} — reached through the symbolic link '{}'",
+            resolved.display()
+        )
+    })
+}
+
 /// Resolve a path for writing, with security validation, against the
 /// workspace named by `workspace_override` (resident-on-demand) rather than
 /// the session default. Pass `None` for the default.
@@ -85,7 +161,22 @@ pub(crate) async fn resolve_write_path_for(
     let session_roots = agent
         .session_write_roots_snapshot_for(workspace_override)
         .await;
-    crate::util::path_security::validate_write_path(relative_path, &root, &security, &session_roots)
+    let resolved = crate::util::path_security::validate_write_path(
+        relative_path,
+        &root,
+        &security,
+        &session_roots,
+    )?;
+    // The classifier resolved the parent and kept the leaf as written; a leaf link to a
+    // deny-listed file is read by the edit tools through the link. See `validate_leaf_link_target`.
+    validate_leaf_link_target(
+        &resolved,
+        &root,
+        &security,
+        &session_roots,
+        LinkTarget::ReadableByTools,
+    )?;
+    Ok(resolved)
 }
 
 /// Resolve which library directories to search for a given scope.
@@ -562,6 +653,207 @@ mod tests {
              session-default B; got {}",
             pinned.display()
         );
+    }
+
+    // ---- validate_leaf_link_target: what a leaf symlink resolves to ---------------------------
+    //
+    // `validate_write_path` resolves the parent and keeps the leaf as written. These pin the
+    // second look the callers now take. The deny-listed victim is `/etc/shadow` (Linux): the
+    // deny list is built from `$HOME`, which a test must not mutate, and `/etc/shadow` is in it
+    // regardless. It is never read — the link is refused before any read — so no privilege is
+    // involved. Unix-only: needs symlinks.
+
+    /// The controls: nothing the check is NOT for may be refused. A regular file, an absent
+    /// path, a link to a harmless file inside the root, and (for the replace-the-link policy)
+    /// a link to a harmless file outside the root — `atomic_write` renames over that link and
+    /// never touches the victim, so refusing it would be a regression.
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_check_leaves_ordinary_targets_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let security = crate::util::path_security::PathSecurityConfig::default();
+        let regular = root.path().join("regular.txt");
+        std::fs::write(&regular, "x").unwrap();
+        let inside = root.path().join("inside-link.txt");
+        std::os::unix::fs::symlink(&regular, &inside).unwrap();
+        let outside_dir = tempfile::tempdir().unwrap();
+        let outside_file = outside_dir.path().join("elsewhere.txt");
+        std::fs::write(&outside_file, "y").unwrap();
+        let outward = root.path().join("outward-link.txt");
+        std::os::unix::fs::symlink(&outside_file, &outward).unwrap();
+        let dangling = root.path().join("dangling.txt");
+        std::os::unix::fs::symlink(outside_dir.path().join("never"), &dangling).unwrap();
+
+        let ok =
+            |p: &Path, policy| validate_leaf_link_target(p, root.path(), &security, &[], policy);
+        assert!(ok(&regular, LinkTarget::ReadableByTools).is_ok());
+        assert!(ok(&regular, LinkTarget::Writable).is_ok());
+        assert!(ok(&root.path().join("absent.txt"), LinkTarget::Writable).is_ok());
+        assert!(ok(&inside, LinkTarget::ReadableByTools).is_ok());
+        assert!(ok(&inside, LinkTarget::Writable).is_ok());
+        assert!(ok(&outward, LinkTarget::ReadableByTools).is_ok());
+        assert!(ok(&dangling, LinkTarget::ReadableByTools).is_ok());
+    }
+
+    /// Deny-listed targets, hermetically. The deny list is built from `$HOME`, which a test must
+    /// not mutate (`docs/conventions/test-env-isolation.md`), and a fixed system path such as
+    /// `/etc/shadow` is absent on some hosts, where a link to it reads as DANGLING and the
+    /// assertion fails for the wrong reason. So this re-executes ITS OWN binary with `HOME` set
+    /// for the child only, over a fake `~/.ssh/id_rsa` that exists and is readable; the child is
+    /// `fs_leaf_link_probe_child` and it exits non-zero on any failed assertion.
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_deny_listed_file_is_refused_under_both_policies_in_both_spellings() {
+        let fake = tempfile::tempdir().unwrap();
+        let home = fake.path().join("home");
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        std::fs::write(home.join(".ssh/id_rsa"), "FAKE-KEY\n").unwrap();
+
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fs::tests::fs_leaf_link_probe_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("HOME", &home)
+            .env("CS_FS_PROBE_HOME", &home)
+            .output()
+            .unwrap();
+
+        assert!(
+            out.status.success(),
+            "the child probe failed:\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "the child must actually have run: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "subprocess helper: run by a_leaf_link_to_a_deny_listed_file_is_refused_under_both_policies_in_both_spellings with a fake $HOME"]
+    async fn fs_leaf_link_probe_child() {
+        let home = PathBuf::from(std::env::var("HOME").unwrap());
+        // This helper writes siblings of $HOME. Refuse to run on a HOME the parent test does not
+        // own, so a manual `--ignored` run cannot plant fixtures beside the REAL home.
+        assert_eq!(
+            std::env::var("CS_FS_PROBE_HOME").ok().as_deref(),
+            home.to_str(),
+            "only the parent test, which owns a throwaway HOME, may run this"
+        );
+        let key = home.join(".ssh/id_rsa");
+        assert!(key.is_file(), "the parent must have planted the fake key");
+        // Siblings of the fake home, inside the directory the parent test created, so the whole
+        // fixture is removed with it and the RELATIVE targets below climb only to the common
+        // ancestor (a target that climbs past `/` is immune to being resolved from the wrong
+        // directory, because `/..` is `/`, which is why the earlier all-the-way-up form could not
+        // tell a correct resolver from a broken one).
+        let base = home.parent().unwrap().to_path_buf();
+        let proj_path = base.join("proj");
+        std::fs::create_dir_all(proj_path.join(".codescout")).unwrap();
+        std::fs::create_dir_all(proj_path.join("sub")).unwrap();
+        std::fs::create_dir_all(base.join("harmless")).unwrap();
+        std::fs::write(base.join("harmless/ok.txt"), "fine\n").unwrap();
+        let proj_path = proj_path.as_path();
+        // The link in `sub/` resolves its target against `proj/sub`: a resolver that took
+        // `read_link` at face value and joined it to the project root (or the cwd) would land one
+        // level off and miss the deny-list.
+        std::os::unix::fs::symlink(&key, proj_path.join("abs.txt")).unwrap();
+        std::os::unix::fs::symlink("../home/.ssh/id_rsa", proj_path.join("rel.txt")).unwrap();
+        std::os::unix::fs::symlink("../../home/.ssh/id_rsa", proj_path.join("sub/rel.txt"))
+            .unwrap();
+        std::os::unix::fs::symlink("../../harmless/ok.txt", proj_path.join("sub/harmless.txt"))
+            .unwrap();
+        for n in ["abs.txt", "rel.txt", "sub/rel.txt", "sub/harmless.txt"] {
+            assert!(
+                std::fs::read_to_string(proj_path.join(n)).is_ok(),
+                "precondition: {n} must resolve"
+            );
+        }
+        let agent = Agent::new(Some(proj_path.to_path_buf())).await.unwrap();
+        let security = agent.security_config_for(None).await;
+
+        for name in ["abs.txt", "rel.txt", "sub/rel.txt"] {
+            let link = proj_path.join(name);
+            for policy in [LinkTarget::ReadableByTools, LinkTarget::Writable] {
+                let err = validate_leaf_link_target(&link, proj_path, &security, &[], policy)
+                    .expect_err(&format!("{name} {policy:?}: a link to a deny-listed file"));
+                let msg = format!("{err:#}");
+                assert!(
+                    msg.contains("protected location"),
+                    "{name} {policy:?}: {msg}"
+                );
+                assert!(
+                    msg.contains(name),
+                    "{name} {policy:?}: names the link: {msg}"
+                );
+            }
+            let err = resolve_write_path_for(&agent, None, name)
+                .await
+                .expect_err(&format!("{name}: the resolver edit_code uses"));
+            assert!(
+                format!("{err:#}").contains("protected location"),
+                "{name}: {err:#}"
+            );
+        }
+        // Control: a RELATIVE link to a harmless file is not refused by the read policy, and the
+        // resolver still hands the path back.
+        validate_leaf_link_target(
+            &proj_path.join("sub/harmless.txt"),
+            proj_path,
+            &security,
+            &[],
+            LinkTarget::ReadableByTools,
+        )
+        .expect("a harmless relative link is not a deny-list hit");
+        resolve_write_path_for(&agent, None, "sub/harmless.txt")
+            .await
+            .expect("control: a harmless relative link still resolves");
+    }
+
+    /// The raw-write policy: the target must be writable, and a dangling link cannot be shown
+    /// to be. `/etc/passwd` is outside the project, outside the temp dir and not deny-listed,
+    /// so it is refused by the ROOT check and not by the deny-list.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn writable_policy_refuses_a_link_that_leaves_the_write_roots_and_a_dangling_one() {
+        // LOUD, not skipped: without this file the link below reads as dangling and the first
+        // assertion would fail for the wrong reason.
+        assert!(
+            Path::new("/etc/passwd").is_file(),
+            "/etc/passwd is missing, so this fixture cannot stand for 'a real file outside the roots'"
+        );
+        let root = tempfile::tempdir().unwrap();
+        let security = crate::util::path_security::PathSecurityConfig::default();
+        let out = root.path().join("passwd-link");
+        std::os::unix::fs::symlink("/etc/passwd", &out).unwrap();
+        let dangling = root.path().join("dangling");
+        std::os::unix::fs::symlink(root.path().join("..").join("nowhere-1234"), &dangling).unwrap();
+
+        let e1 = validate_leaf_link_target(&out, root.path(), &security, &[], LinkTarget::Writable)
+            .expect_err("a link out of the write roots is refused");
+        assert!(
+            format!("{e1:#}").contains("outside the project root"),
+            "{e1:#}"
+        );
+        let e2 =
+            validate_leaf_link_target(&dangling, root.path(), &security, &[], LinkTarget::Writable)
+                .expect_err("a dangling link is refused for a write that follows it");
+        assert!(format!("{e2:#}").contains("dangling"), "{e2:#}");
+        // The read policy has no objection to the same two links.
+        assert!(validate_leaf_link_target(
+            &out,
+            root.path(),
+            &security,
+            &[],
+            LinkTarget::ReadableByTools
+        )
+        .is_ok());
     }
 
     #[tokio::test]

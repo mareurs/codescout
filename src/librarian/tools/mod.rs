@@ -289,6 +289,26 @@ pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
     roots
 }
 
+/// Arm `cat`'s write roots with the caller's managed roots. Call it right after taking the catalog
+/// lock in any tool that reaches a catalog-level writer (`allocate_entry_id`, `append_entry`,
+/// `update_entry`, `rekey_prefix_rows`, the sidecar write-through): those have no `ToolContext`,
+/// and the write door judges "outside" against the SAME roots `doc(move)` and `doc(delete)` use.
+///
+/// Returns a guard that removes this arm when dropped; bind it (`let _armed = ...`) so it lives
+/// exactly as long as the call. Declared after the catalog lock guard it drops first, so nothing
+/// sees the roots after the call, whether it returned or failed: an unarmed writer falls back to
+/// the repositories the spelling names instead of inheriting another call's roots. The lock is
+/// held for the guard's whole life in every tool but one: `doc(augment)` releases it between its
+/// preflight and its write-through, and arms again under the lock it re-takes (each arm is its
+/// own guard, scoped to its own lock hold).
+#[must_use = "bind the guard for the whole call: dropping it clears the roots"]
+pub(crate) fn arm_write_roots(
+    ctx: &ToolContext,
+    cat: &Catalog,
+) -> crate::librarian::catalog::WriteRootsArm {
+    cat.set_write_roots(managed_roots(ctx))
+}
+
 /// A path reduced to a form that can be compared across the two spellings
 /// Windows hands us for the same location.
 ///
@@ -303,20 +323,29 @@ pub(crate) fn managed_roots(ctx: &ToolContext) -> Vec<std::path::PathBuf> {
 ///
 /// On Unix `\` is a legal filename byte, so only the trailing separator is
 /// trimmed there — rewriting separators would corrupt real names.
-fn comparable_path(path: &std::path::Path) -> String {
-    let raw = path.to_string_lossy();
-
+fn comparable_path(path: &std::path::Path) -> Vec<u8> {
     #[cfg(windows)]
-    let normalized = {
+    let normalized: Vec<u8> = {
+        let raw = path.to_string_lossy();
         let slashed = raw.replace('\\', "/");
         let stripped = slashed.strip_prefix("//?/").unwrap_or(&slashed);
-        stripped.to_string()
+        stripped.as_bytes().to_vec()
     };
+    // On Unix the comparison is over the RAW bytes: a lossy UTF-8 conversion maps every invalid
+    // byte to U+FFFD, so the roots `n\xff` and `n\xfe` compared equal and one "contained" the
+    // other's rows.
     #[cfg(not(windows))]
-    let normalized = raw.into_owned();
+    let normalized: Vec<u8> = {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes().to_vec()
+    };
 
     // Trim trailing separators so `C:/proj/` and `C:/proj` compare equal.
-    normalized.trim_end_matches('/').to_string()
+    let mut out = normalized;
+    while out.last() == Some(&b'/') {
+        out.pop();
+    }
+    out
 }
 
 /// The first managed root that contains `abs_path`, if any.
@@ -342,8 +371,7 @@ pub(crate) fn containing_root<'a>(
     let target = comparable_path(abs_path);
     roots.iter().find(|root| {
         let root = comparable_path(root);
-        target == root
-            || (target.starts_with(&root) && target.as_bytes().get(root.len()) == Some(&b'/'))
+        target == root || (target.starts_with(&root) && target.get(root.len()) == Some(&b'/'))
     })
 }
 
@@ -477,6 +505,14 @@ pub use temp_write_guard::TempGuardEnv;
 pub fn all_tools() -> Vec<Arc<dyn Tool>> {
     vec![Arc::new(artifact::Artifact), Arc::new(librarian::Librarian)]
 }
+
+/// A catalogued path that is a symbolic link is never written through (see the module doc).
+#[cfg(test)]
+mod link_write_tests;
+
+/// The parent-directory forms of the same rule (see the module doc).
+#[cfg(test)]
+mod link_dir_tests;
 
 #[cfg(test)]
 mod containing_root_tests {

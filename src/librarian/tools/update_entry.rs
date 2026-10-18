@@ -71,6 +71,7 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
     let mut cat = ctx.catalog.lock();
+    let _armed = super::arm_write_roots(ctx, &cat);
     let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
     let outcome = augmentation::update_entry(
         &mut cat,
