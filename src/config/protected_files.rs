@@ -207,6 +207,23 @@ mod tests {
         );
     }
 
+    /// An existing file with no `[security]` table, edited without adding one: nothing
+    /// protected changes, so the write is ordinary.
+    #[test]
+    fn editing_a_file_that_has_no_security_table_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = proj(&dir);
+        std::fs::write(&p, "[project]\nname = \"a\"\n").unwrap();
+        assert_eq!(
+            check_write_with(
+                &p,
+                "[project]\nname = \"b\"\n\n[embeddings]\nmodel = \"m\"\n",
+                None
+            ),
+            Ok(())
+        );
+    }
+
     /// No file yet: a create is the same question with an empty "before".
     #[test]
     fn creating_the_file_may_not_carry_a_security_table() {
@@ -261,6 +278,25 @@ mod tests {
             check_write_with(&real.join("other.toml"), change, Some(&global)),
             Ok(())
         );
+        // the same file NAME in another directory is not it
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert_eq!(
+            check_write_with(&elsewhere.join("config.toml"), change, Some(&global)),
+            Ok(())
+        );
+        // a directory that cannot be resolved is not the global config's directory...
+        assert_eq!(
+            check_write_with(
+                &dir.path().join("no-such-dir").join("config.toml"),
+                change,
+                Some(&global)
+            ),
+            Ok(())
+        );
+        // ...unless the path IS the one named, which needs no resolving
+        let unresolvable = dir.path().join("no-such-global").join("config.toml");
+        assert!(check_write_with(&unresolvable, change, Some(&unresolvable)).is_err());
         // the same directory reached through a link
         #[cfg(unix)]
         {
