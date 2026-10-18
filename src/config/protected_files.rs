@@ -146,17 +146,52 @@ fn same_file(a: &Path, b: &Path) -> bool {
     resolve(a) == resolve(b)
 }
 
-/// `path` with every link followed as far as it exists, the remainder appended as written. A
-/// leaf link IS followed (the file it names is the one a write would change).
+/// How many links `resolve` follows before it gives up (the kernel's own limit is 40).
+const MAX_LINK_HOPS: usize = 40;
+
+/// `path` with every link followed, the remainder appended as written, **including a link whose
+/// target does not exist** (singly or in a chain). `canonicalize` fails on such a link exactly as
+/// it does for a missing file, so a walk-up alone leaves the link's own name in the result and a
+/// write to its missing TARGET never matches the link: `project.toml -> ../a.toml` with no
+/// `a.toml` yet, then `create_file(a.toml)`. A leaf link IS followed (the file it names is the
+/// one a write would change). After `MAX_LINK_HOPS` the path as it then stands is returned: a
+/// loop cannot spin this, and it names no real file either.
 fn resolve(path: &Path) -> PathBuf {
+    let mut cur = path.to_path_buf();
+    for _ in 0..MAX_LINK_HOPS {
+        let (ancestor, below) = deepest_existing_ancestor(&cur);
+        // `below` is deepest-first; its LAST entry is the component right under `ancestor`,
+        // the first one that could not be resolved.
+        let Some(first_missing) = below.last() else {
+            return ancestor;
+        };
+        let link_at = ancestor.join(first_missing);
+        let Ok(target) = std::fs::read_link(&link_at) else {
+            // Not a link: a genuinely missing component. Nothing more to follow.
+            return below.iter().rev().fold(ancestor, |acc, c| acc.join(c));
+        };
+        // A relative target is relative to the directory holding the link.
+        let mut next = ancestor.join(target);
+        for c in below[..below.len() - 1].iter().rev() {
+            next.push(c);
+        }
+        cur = next;
+    }
+    cur
+}
+
+/// The deepest ancestor of `path` that `canonicalize` accepts (canonical), and the components
+/// below it, deepest first.
+fn deepest_existing_ancestor(path: &Path) -> (PathBuf, Vec<std::ffi::OsString>) {
     let mut below: Vec<std::ffi::OsString> = Vec::new();
     let mut cur = path;
     loop {
         if let Ok(canon) = std::fs::canonicalize(cur) {
-            return below.iter().rev().fold(canon, |acc, c| acc.join(c));
+            return (canon, below);
         }
         let (Some(up), Some(name)) = (cur.parent(), cur.file_name()) else {
-            return path.to_path_buf();
+            // Nothing resolves (a relative path with no existing ancestor): hand it back whole.
+            return (path.to_path_buf(), Vec::new());
         };
         below.push(name.to_os_string());
         cur = up;
@@ -366,5 +401,28 @@ mod tests {
                 check_write_with(&link.join("config.toml"), change, Some(&global), &[]).is_err()
             );
         }
+    }
+
+    /// `resolve` follows a link whose target does not exist, singly and in a chain, relative to
+    /// the link's own directory, and stops at a loop instead of spinning.
+    #[cfg(unix)]
+    #[test]
+    fn resolve_follows_dangling_links_and_stops_at_a_loop() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::os::unix::fs::symlink("gone.toml", root.join("one")).unwrap();
+        assert_eq!(resolve(&root.join("one")), root.join("gone.toml"), "single");
+
+        std::os::unix::fs::symlink("two-b", root.join("two-a")).unwrap();
+        std::os::unix::fs::symlink("end.toml", root.join("two-b")).unwrap();
+        assert_eq!(resolve(&root.join("two-a")), root.join("end.toml"), "chain");
+
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::os::unix::fs::symlink("../up.toml", root.join("sub").join("rel")).unwrap();
+        assert_eq!(resolve(&root.join("sub").join("rel")), root.join("up.toml"));
+
+        std::os::unix::fs::symlink("l2", root.join("l1")).unwrap();
+        std::os::unix::fs::symlink("l1", root.join("l2")).unwrap();
+        let _ = resolve(&root.join("l1")); // terminates
     }
 }

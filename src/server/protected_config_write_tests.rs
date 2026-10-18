@@ -539,3 +539,49 @@ async fn a_shell_redirect_still_writes_the_security_section_known_residual() {
         "the guard does not see a shell write; the next call runs under Root"
     );
 }
+
+/// R2-1. `project.toml` as a link to a file that DOES NOT EXIST YET: writing that target under
+/// its own name creates what `project.toml` then reads. `canonicalize` fails on the leaf, so a
+/// walk-up that keeps the link's own name compares `<root>/.codescout/project.toml` with
+/// `<root>/a.toml` and never matches.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_missing_target_of_a_dangling_project_toml_link_is_guarded() {
+    let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
+    std::fs::remove_file(toml_path(&dir)).unwrap();
+    std::os::unix::fs::symlink("../a.toml", toml_path(&dir)).unwrap();
+    let (err, text) = call(
+        &server,
+        "create_file",
+        json!({"path": "a.toml", "content": ROOT_PROFILE}),
+    )
+    .await;
+    assert!(
+        err && !dir.path().join("a.toml").exists(),
+        "a write that creates what a dangling project.toml link points at must be refused: {text}"
+    );
+    assert_eq!(
+        profile_of(&server).await,
+        crate::util::path_security::SecurityProfile::Default
+    );
+}
+
+/// Same, through a chain of two links ending in a missing file.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_missing_target_of_a_chain_of_links_is_guarded() {
+    let (dir, server) = make_server_with_project_toml(Some(PROJECT_TOML)).await;
+    std::fs::remove_file(toml_path(&dir)).unwrap();
+    std::os::unix::fs::symlink("../hop.toml", toml_path(&dir)).unwrap();
+    std::os::unix::fs::symlink("end.toml", dir.path().join("hop.toml")).unwrap();
+    let (err, text) = call(
+        &server,
+        "create_file",
+        json!({"path": "end.toml", "content": ROOT_PROFILE}),
+    )
+    .await;
+    assert!(
+        err && !dir.path().join("end.toml").exists(),
+        "the end of a link chain must be guarded: {text}"
+    );
+}
