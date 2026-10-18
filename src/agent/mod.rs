@@ -1,6 +1,8 @@
 //! Central orchestrator: manages projects, tool registry, and shared state.
 
 pub(crate) mod build_check;
+#[cfg(test)]
+mod existing_root_tests;
 mod write_guard;
 #[allow(unused_imports)]
 pub(crate) use write_guard::{
@@ -484,6 +486,53 @@ impl ActiveProject {
     }
 }
 
+/// Resolve `raw` to the canonical directory a project would live in, or REFUSE it.
+///
+/// Every path that makes a project resident (`Agent::new`, `Agent::activate`,
+/// `Agent::ensure_resident`, the server's per-call `workspace=` pin) resolves its root
+/// through here. They each used to do `canonicalize(..).unwrap_or(raw)`, which turns "that
+/// path does not exist" into "that path is the root": a relative or missing pin was kept
+/// as-is and the first touch BUILT a project there (`.gitignore` and
+/// `.codescout/{memories, private-memories, usage.db, write.lock}`), so a placeholder such as
+/// `workspace="x"` left a stray `x/.codescout/` in the server's cwd.
+///
+/// A root must be an existing DIRECTORY (`is_dir`, not `exists`: a file is no project root
+/// either). Nothing is created on the refusal path. A path that exists resolves exactly as it
+/// did, so an existing relative path still resolves against the server's cwd, as
+/// `workspace(activate)` and `--project` do. `what` names the argument in the refusal.
+///
+/// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+pub(crate) fn existing_project_dir(
+    raw: PathBuf,
+    what: &str,
+) -> std::result::Result<PathBuf, crate::tools::RecoverableError> {
+    let root = std::fs::canonicalize(&raw).unwrap_or(raw);
+    if root.is_dir() {
+        return Ok(root);
+    }
+    // A relative path is resolved against the SERVER's cwd, which the caller does not
+    // control, so say where that is: it is the most likely reason a relative pin is wrong.
+    let cwd_note = if root.is_relative() {
+        match std::env::current_dir() {
+            Ok(cwd) => format!(
+                " (a relative path resolves against the server's working directory, {})",
+                cwd.display()
+            ),
+            Err(_) => " (a relative path resolves against the server's working directory)".into(),
+        }
+    } else {
+        String::new()
+    };
+    Err(crate::tools::RecoverableError::with_hint(
+        format!(
+            "{what} '{}' is not an existing directory{cwd_note}",
+            root.display()
+        ),
+        "Pass the absolute path of an existing project root. Nothing was created at that \
+         path and no project was made resident.",
+    ))
+}
+
 /// Read `workspace.toml` and return the discovery depth and exclude list.
 ///
 /// From a linked worktree, reads through to the MAIN checkout when the worktree has
@@ -629,7 +678,7 @@ impl Agent {
             // Canonicalize so home_root is always an absolute path.  This prevents
             // path-form drift when activate_project(".") later canonicalizes its
             // argument and compares against home_root.
-            let root = std::fs::canonicalize(&raw).unwrap_or(raw);
+            let root = existing_project_dir(raw, "project root")?;
             // Stamped before the read it describes — see `ConfigStamp::of`.
             let config_stamp = ConfigStamp::of(&root);
             let config = ProjectConfig::load_or_default(&root)?;
@@ -759,7 +808,7 @@ impl Agent {
         // key) sees the same absolute path. Without this, activate(".") would
         // compare unequal to Agent::new's canonicalized home_root, making
         // is_home false on the first re-activation and flipping to read-only.
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root = existing_project_dir(root, "project root")?;
         let res = Self::load_project_resources(&root).await?;
         {
             let mut inner = self.inner.write().await;
@@ -833,8 +882,13 @@ impl Agent {
     ///
     /// Still does not require a full `activate`, which would clear every other resident
     /// workspace — see `Agent::activate`.
+    ///
+    /// `root` must be an existing directory, or this refuses with a `RecoverableError` before
+    /// anything is created ([`existing_project_dir`]). It used to keep a missing path as the
+    /// root and build a project there on first touch.
+    /// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
     pub async fn ensure_resident(&self, root: PathBuf) -> Result<()> {
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root = existing_project_dir(root, "workspace pin")?;
         if self.inner.read().await.workspaces.contains_key(&root) {
             return Ok(());
         }
@@ -1409,6 +1463,11 @@ impl Agent {
         let effective_read_only_snapshot =
             AgentInner::resolve_read_only(read_only, is_home_snapshot);
         let _ = effective_read_only_snapshot; // recomputed under write lock below
+
+        // A sub-project is discovered from a manifest, so its directory existed at discovery;
+        // it may be gone since. `open_lock_file` below `create_dir_all`s, so without this a
+        // deleted sub-project would be silently re-created as an empty project.
+        existing_project_dir(abs_root.clone(), "sub-project root")?;
 
         // Open the lock file before acquiring the write lock — involves blocking
         // fs I/O (create_dir_all + OpenOptions::open) that must not run on the

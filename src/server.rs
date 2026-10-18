@@ -725,15 +725,25 @@ impl CodeScoutServer {
 
     /// Phase 2: extract an optional `workspace` pin from tool input. The value
     /// is a path string, canonicalized to match the registry's canonical-root
-    /// keys. No tool consumes this yet — Phase 3 wires `with_project_at`.
-    /// See docs/plans/2026-05-30-per-request-workspace-pinning.md.
-    fn extract_workspace_override(input: &Value) -> Option<std::path::PathBuf> {
-        let raw = input.get("workspace")?.as_str()?;
+    /// keys. See docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    ///
+    /// A pin that does not name an existing directory is REFUSED here, at the dispatch
+    /// boundary, with a `RecoverableError`. It used to be kept as a raw (possibly
+    /// relative) root, and the first touch built a project there, so a placeholder pin
+    /// such as `workspace="x"` left `x/.codescout/` in the server's cwd. An empty or
+    /// blank value is "no pin", as before. A relative pin that exists still resolves
+    /// against the server's cwd. See [`crate::agent::existing_project_dir`].
+    /// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+    fn extract_workspace_override(
+        input: &Value,
+    ) -> std::result::Result<Option<std::path::PathBuf>, crate::tools::RecoverableError> {
+        let Some(raw) = input.get("workspace").and_then(Value::as_str) else {
+            return Ok(None);
+        };
         if raw.trim().is_empty() {
-            return None;
+            return Ok(None);
         }
-        let p = std::path::PathBuf::from(raw);
-        Some(std::fs::canonicalize(&p).unwrap_or(p))
+        crate::agent::existing_project_dir(std::path::PathBuf::from(raw), "workspace pin").map(Some)
     }
 
     /// Inject the optional `workspace` pin into a pinnable tool's advertised
@@ -791,6 +801,7 @@ impl CodeScoutServer {
         &self,
         name: &str,
         input: &Value,
+        override_root: Option<&std::path::Path>,
     ) -> std::result::Result<
         std::result::Result<Option<crate::agent::WriteGuard>, CallToolResult>,
         McpError,
@@ -802,10 +813,14 @@ impl CodeScoutServer {
         // resolve. A write pinned via `workspace` must acquire that project's
         // write_lock/file_lock, not the session default's — otherwise a
         // concurrent subagent's activate() steals the lock target.
-        let override_root = Self::extract_workspace_override(input);
+        //
+        // `override_root` is the pin `call_tool_inner` already resolved (and validated as an
+        // existing directory) for this call. It is taken as a parameter rather than re-derived
+        // from `input`, so the lock and the tool body cannot disagree about the target, and a
+        // refused pin never reaches `with_project_at` below, whose failure is a protocol error.
         let (mutex, fd_lock, holder_path, timeout_secs) = self
             .agent
-            .with_project_at(override_root.as_deref(), |p| {
+            .with_project_at(override_root, |p| {
                 Ok((
                     p.write_lock.clone(),
                     p.file_lock.clone(),
@@ -1405,7 +1420,15 @@ impl CodeScoutServer {
             .and_then(|p| p.split_once('/'))
             .map(|(_, agent)| agent.to_string());
 
-        let workspace_override = Self::extract_workspace_override(&input);
+        // A `workspace=` pin that is not an existing directory is refused HERE, before anything
+        // resolves it: every later consumer (the access gate, the write lock, the usage recorder,
+        // the tool body) would otherwise make that path resident and build a project there.
+        // Returned as the recoverable answer it is, so sibling calls in the turn survive.
+        // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+        let workspace_override = match Self::extract_workspace_override(&input) {
+            Ok(pin) => pin,
+            Err(refusal) => return Ok(route_tool_error(refusal.into())),
+        };
 
         // Computed ONCE and threaded to its consumers — the write lock and the access gate
         // below. Deriving it twice is how the two halves of this decision drift apart, which
@@ -1547,7 +1570,11 @@ impl CodeScoutServer {
         // the cross-process write lock is released even when the task is parked
         // waiting for rmcp to drop it on connection close.
         let write_guard = match self
-            .acquire_write_guard_if_writing(&req.name, &input_for_record)
+            .acquire_write_guard_if_writing(
+                &req.name,
+                &input_for_record,
+                ctx.workspace_override.as_deref(),
+            )
             .await?
         {
             Ok(g) => g,
@@ -10252,6 +10279,8 @@ mod tests {
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap_or_default()
     }
+
+    include!("server/workspace_pin_tests.rs");
 
     /// docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
     /// (mechanism B, probe rows 5, 7 and 8).
