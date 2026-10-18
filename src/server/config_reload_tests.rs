@@ -521,3 +521,104 @@ async fn an_invalid_reload_never_replaces_an_unknown_shell_mode_with_a_known_one
     );
     assert_eq!(security(&server).await.shell_command_mode, "strict");
 }
+
+/// F4. Deleting a looser value in the same save as an invalid entry must not keep it: with the
+/// key absent the file means the built-in default, and the policy may never be looser than
+/// what the file would give with the invalid entry absent.
+#[tokio::test]
+async fn an_invalid_reload_that_deletes_a_looser_shell_mode_reads_the_default() {
+    let (dir, server) = make_server_with_project_toml(Some(&with_security(
+        "shell_command_mode = \"unrestricted\"\n",
+    )))
+    .await;
+    assert_eq!(
+        security(&server).await.shell_command_mode,
+        "unrestricted",
+        "control"
+    );
+    save(&dir, &with_security(&format!("{BAD_ENTRY}\n")));
+    assert_eq!(
+        security(&server).await.shell_command_mode,
+        "warn",
+        "the file without the invalid entry means the default, warn"
+    );
+}
+
+/// F4 with a GLOBAL config that is stricter than the project's own looser values: the project
+/// overrides it, then the keys are deleted in a save that fails to load. An absent key reads
+/// as the global value. Child process: the global path comes from the environment.
+#[cfg(unix)]
+#[test]
+fn an_invalid_reload_that_deletes_a_looser_key_reads_the_global_value() {
+    let fixture = tempfile::tempdir().unwrap();
+    let xdg = fixture.path().canonicalize().unwrap().join("xdg");
+    crate::platform::test_child::run(
+        module_path!(),
+        "an_invalid_reload_that_deletes_a_looser_key_reads_the_global_value",
+        &[("XDG_CONFIG_HOME", Some(xdg.to_str().unwrap()))],
+        || {
+            let global_dir = std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap())
+                .join("codescout");
+            std::fs::create_dir_all(&global_dir).unwrap();
+            std::fs::write(
+                global_dir.join("config.toml"),
+                "[security]\nshell_command_mode = \"disabled\"\nfile_write_enabled = false\nindexing_enabled = false\n",
+            )
+            .unwrap();
+            let loose = with_security(
+                "shell_command_mode = \"unrestricted\"\nfile_write_enabled = true\nindexing_enabled = true\n",
+            );
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (dir, server) = make_server_with_project_toml(Some(&loose)).await;
+                    let before = security(&server).await;
+                    assert!(
+                        before.shell_command_mode == "unrestricted"
+                            && before.file_write_enabled
+                            && before.indexing_enabled,
+                        "control: the project overrides the stricter global config"
+                    );
+                    save(&dir, &with_security(&format!("{BAD_ENTRY}\n")));
+                    let after = security(&server).await;
+                    assert_eq!(after.shell_command_mode, "disabled", "shell");
+                    assert!(!after.file_write_enabled, "file_write_enabled");
+                    assert!(!after.indexing_enabled, "indexing_enabled");
+                });
+        },
+    );
+}
+
+/// A global config that cannot be read counts as the strictest value for a key the file does
+/// not set, on all three keys.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_global_config_counts_as_the_strictest_value() {
+    let fixture = tempfile::tempdir().unwrap();
+    let xdg = fixture.path().canonicalize().unwrap().join("xdg");
+    crate::platform::test_child::run(
+        module_path!(),
+        "an_unreadable_global_config_counts_as_the_strictest_value",
+        &[("XDG_CONFIG_HOME", Some(xdg.to_str().unwrap()))],
+        || {
+            let global_dir = std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap())
+                .join("codescout");
+            std::fs::create_dir_all(&global_dir).unwrap();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+                    std::fs::write(global_dir.join("config.toml"), "not = valid = toml").unwrap();
+                    save(&dir, &with_security(BAD_ENTRY));
+                    let after = security(&server).await;
+                    assert_eq!(after.shell_command_mode, "disabled", "shell");
+                    assert!(!after.file_write_enabled, "file_write_enabled");
+                    assert!(!after.indexing_enabled, "indexing_enabled");
+                });
+        },
+    );
+}

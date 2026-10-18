@@ -351,15 +351,46 @@ fn shell_mode_rank(mode: &str) -> Option<u8> {
     }
 }
 
-/// `*field` after a failed reload, for a boolean that is `true` when the gate is OPEN.
-/// Absent keeps the previous value (the global config may be what supplies it); `false`
-/// closes it; a value that is not a boolean cannot be read and counts as closed.
-fn tighten_gate(field: &mut bool, raw: Option<&toml::Value>) {
-    match raw {
-        None => {}
-        Some(toml::Value::Boolean(open)) => *field = *field && *open,
-        Some(_) => *field = false,
+/// What the GLOBAL config says about the three keys a project's absence inherits from it, as
+/// read for a failed project reload. `Unreadable` is its own state, not `Absent`: a global
+/// config that cannot be read cannot be shown to be permissive.
+pub(crate) enum GlobalSecurity {
+    Absent,
+    Set(crate::config::global::GlobalSecuritySection),
+    Unreadable,
+}
+
+impl GlobalSecurity {
+    /// Read the global config on its own, apart from the project file that failed.
+    pub(crate) fn load() -> Self {
+        match crate::config::global::GlobalConfig::load() {
+            Ok(Some(g)) => Self::Set(g.security),
+            Ok(None) => Self::Absent,
+            Err(_) => Self::Unreadable,
+        }
     }
+}
+
+/// `*field` after a failed reload, for a boolean that is `true` when the gate is OPEN. The
+/// value the file means: its own when set (a non-boolean cannot be read as open, so counts as
+/// closed); else the global config's, else the built-in default (open); a global config that
+/// cannot be read counts as closed. The gate becomes the stricter of that and what it was.
+fn tighten_gate(
+    field: &mut bool,
+    raw: Option<&toml::Value>,
+    global: &GlobalSecurity,
+    from_global: fn(&crate::config::global::GlobalSecuritySection) -> Option<bool>,
+) {
+    let wanted = match raw {
+        Some(toml::Value::Boolean(open)) => *open,
+        Some(_) => false,
+        None => match global {
+            GlobalSecurity::Absent => true,
+            GlobalSecurity::Set(g) => from_global(g).unwrap_or(true),
+            GlobalSecurity::Unreadable => false,
+        },
+    };
+    *field = *field && wanted;
 }
 
 impl SecuritySection {
@@ -372,9 +403,13 @@ impl SecuritySection {
     /// only to TIGHTEN, so a failed reload can never loosen anything:
     ///
     /// - `file_write_enabled`, `indexing_enabled`: `false` closes the gate; a value that is
-    ///   not a boolean closes it too; absent leaves it as it was.
-    /// - `shell_command_mode`: a stricter known mode replaces the previous one; a string
-    ///   that is not a known mode, or a non-string, counts as `disabled`; absent leaves it.
+    ///   not a boolean closes it too. **Absent means what the file would mean without the
+    ///   invalid entry**: the global config's value if it sets one, else the built-in
+    ///   default, and a global config that cannot be read counts as the strictest value.
+    ///   The gate becomes the stricter of that and what it was (so deleting a looser key in
+    ///   the same save does not keep it).
+    /// - `shell_command_mode`: the same rule; a string that is not a known mode, or a
+    ///   non-string, counts as `disabled`.
     /// - `profile` and `extra_write_roots` are confirmed or dropped: `Root` stays only if
     ///   the file still says `profile = "root"`, and a write root stays only if the file
     ///   still lists that exact entry. Absent or unreadable confirms nothing, because for
@@ -386,10 +421,14 @@ impl SecuritySection {
     /// as an empty file AND file writes are disabled: the one gate whose silent survival
     /// the user cannot see.
     ///
-    /// Not covered, by design: `shell_dangerous_patterns` added by the file, a lowered
-    /// `max_index_bytes`, and a tightened `shell_command_mode`/`file_write_enabled`/
-    /// `indexing_enabled` that only the GLOBAL config carries.
-    pub(crate) fn tighten_for_unloadable_file(&mut self, file: Option<&toml::Table>) {
+    /// Not covered, by design: `shell_dangerous_patterns` added by the file and a lowered
+    /// `max_index_bytes`. (A tightening that only the global config carries is covered, via
+    /// `global`.)
+    pub(crate) fn tighten_for_unloadable_file(
+        &mut self,
+        file: Option<&toml::Table>,
+        global: &GlobalSecurity,
+    ) {
         let empty = toml::Table::new();
         if file.is_none() {
             self.file_write_enabled = false;
@@ -402,23 +441,38 @@ impl SecuritySection {
         tighten_gate(
             &mut self.file_write_enabled,
             security.get("file_write_enabled"),
+            global,
+            |g| g.file_write_enabled,
         );
-        tighten_gate(&mut self.indexing_enabled, security.get("indexing_enabled"));
+        tighten_gate(
+            &mut self.indexing_enabled,
+            security.get("indexing_enabled"),
+            global,
+            |g| g.indexing_enabled,
+        );
 
-        match security.get("shell_command_mode") {
-            None => {}
-            Some(toml::Value::String(wanted)) => {
-                let wanted_rank = shell_mode_rank(wanted).unwrap_or(2);
-                let current_rank = shell_mode_rank(&self.shell_command_mode).unwrap_or(2);
-                if wanted_rank > current_rank {
-                    self.shell_command_mode = match wanted_rank {
-                        1 => "warn",
-                        _ => "disabled",
-                    }
-                    .into();
-                }
+        // The mode the file means, as a rank: its own when set (anything unknown or not a
+        // string is the strictest), else the global config's, else the default `warn`; an
+        // unreadable global config is the strictest. A stricter rank replaces the current one.
+        let wanted_rank = match security.get("shell_command_mode") {
+            Some(toml::Value::String(wanted)) => shell_mode_rank(wanted).unwrap_or(2),
+            Some(_) => 2,
+            None => match global {
+                GlobalSecurity::Absent => 1,
+                GlobalSecurity::Set(g) => g
+                    .shell_command_mode
+                    .as_deref()
+                    .map_or(1, |m| shell_mode_rank(m).unwrap_or(2)),
+                GlobalSecurity::Unreadable => 2,
+            },
+        };
+        let current_rank = shell_mode_rank(&self.shell_command_mode).unwrap_or(2);
+        if wanted_rank > current_rank {
+            self.shell_command_mode = match wanted_rank {
+                1 => "warn",
+                _ => "disabled",
             }
-            Some(_) => self.shell_command_mode = "disabled".into(),
+            .into();
         }
 
         let still_root = matches!(

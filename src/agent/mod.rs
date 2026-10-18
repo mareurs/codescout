@@ -496,9 +496,10 @@ impl ActiveProject {
             Err(e) => {
                 let file =
                     crate::config::project::ProjectConfig::read_project_toml_table(&self.root);
-                self.config
-                    .security
-                    .tighten_for_unloadable_file(file.as_ref());
+                self.config.security.tighten_for_unloadable_file(
+                    file.as_ref(),
+                    &crate::config::project::GlobalSecurity::load(),
+                );
                 tracing::warn!(
                     root = %self.root.display(),
                     error = %format!("{e:#}"),
