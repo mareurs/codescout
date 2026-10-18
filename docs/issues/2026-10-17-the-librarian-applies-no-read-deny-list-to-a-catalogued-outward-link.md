@@ -1,14 +1,14 @@
 ---
-status: open
+status: fixed
 opened: 2026-10-17
-closed:
+closed: 2026-10-18
 severity: high
 owner: marius
 related: [docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md, docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-and-rewrites-a-file-outside-the-root.md]
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Phase 1 (2026-10-18, experiments 44cb3bfe4): every reader listed in Design (Phase 1) was run against a decoy key and leaks, including doc(find) semantic, librarian(context), doc(gather), gather_from sources, params_path and both backfill arms. The earlier claim that the chunk table holds no text was FALSE: artifact_chunk.content stores it. Rows 9 and 17-25 of the path table were read, not run. Not fixed. macOS and Windows not run. Whether the configured embedder is remote on a given install was not checked.'
+unverified: 'macOS not run (same std calls) and Windows unverified: no inode check there, so the door judges then reads with a race window (D9). Not covered by design: a hard link or bind mount placed inside the repository. Kept rows keep their slug and citation edges (Design deviation 8, operator decision open). Rows a pre-fix walk catalogued through an outward link still show a stored title in doc(list_stale), the worktree reports and tracker_design until the next reindex of their project clears or reclaims them. Config-file TOML errors that quote a line were not exercised. The doctor cost on the live catalog is estimated from a release microbenchmark, not measured on it. The external-store vector delete is tested with the in-memory store only.'
 ---
 
 # BUG: the librarian applies NO read deny-list, so a repository can ship `notes.md -> ~/.ssh/id_rsa` and have the key catalogued, embedded and returned by `doc(get)`
@@ -75,7 +75,8 @@ semantic hit returns it from the catalog.)**
 
 ## Fix
 
-Not applied (filed as a follow-up of the symlink-escape work). Options, none free:
+**Applied: see Fix (Phase 2) below.** The three options the issue was filed with (Phase 1 weighs them and a fourth, which
+was chosen):
 
 - Apply the read deny-list where an outward link is KEPT: pass the project's `PathSecurityConfig` into the librarian's
   `ToolContext` and refuse to catalog (or to read) a row whose resolved target is deny-listed. Needs the config plumbed through
@@ -319,20 +320,204 @@ already received cannot be recalled; the note says so.
   refuse-any-leaf-link rule?
 - **D9.** On Windows the door judges and then reads, with a stated race window, and stays unverified. Accept?
 
+## Fix (Phase 2)
+
+Branch `worktree-agent-a8918c1498fdd30e8`, on `experiments` `7a09623bd`. The operator answered D1-D9 with the
+recommendations, and D4 with "clear everything derived from the outside file".
+
+| commit | patch-id | what |
+|---|---|---|
+| `45858098a` | `7bfbbd10c5a0a4be4d7dfeb2edb1eaa31f8ae125` | the read door (`src/librarian/read_door.rs`), its unit tests, a read column in the write door's layout tables |
+| `686838dc4` | `b4e72fc7b87485a9d8fe8c39968ee3ad5d85d751` | the walk, reclamation (keep and clear), backfill, and the reindex report |
+| `5b3d834ba` | `23d2abc7aef8f0dcb9c72f8ec90ab24b94b0c961` | every other read site, tiers 1 and 2, and the site table `tools/read_door_tests.rs` |
+| `673859c08` | `394c11fb30be5535bed536a111fb811c7a46729e` | the source gate |
+| `a24fb3b94` | `fea062f37642cd1fed4661de84e9c2b5966d10ca` | two tests strengthened after their mutants survived (below) |
+| `033638f07` | `b24957d48be5ee8443eb1fc14136095779b4f44f` | a clippy fix to the test hook (the gate's clippy lane caught it) |
+
+### The invariant (stated in `read_door.rs` and here)
+
+*The librarian hands the bytes of a file that a repository or the catalog names (to a caller, to the chunk table or
+to an embedder) only if the file, AS OPENED, lies inside the root `util::door_root` names for its spelling and is not
+on the read deny-list. When no root can be named, it reads only a spelling that crosses no symbolic link at all.*
+
+The root is the write door's root, so the librarian reads only where it would write. The read door adds no second
+notion of inside: the write door's three layout tables (`door_layout_table`, `_round6`, `_round7`, 71 rows) now
+carry a read column that must equal the file door on every row, and it does. The one deliberate difference is the
+leaf rule: a leaf link that resolves inside is read, because its bytes are the repository's own; a write never goes
+through a leaf link.
+
+How a read works (`ReadDoor::bytes`): `metadata` must say regular file (a FIFO would block an open); open once with
+`O_NONBLOCK`; `fstat` the handle (regular file again); canonicalize the path; judge THAT path against
+`door_root(roots, spelling)` and the deny-list (`validate_read_path` with `PathSecurityConfig::default()`, so the
+repository-settable `[security] profile` cannot switch it off, decision D3); `stat` the canonical path and require
+the opened file's `(st_dev, st_ino)`; read from the descriptor, never reopening. A refusal is a
+`LibrarianRecoverableError` naming the path and the reason, never content (D7). Stored bytes (chunk text, a title)
+are guarded by `ReadDoor::refusal`, the same judgement without an open; a dangling leaf link is refused there.
+Agent-named `params_path` gets the deny-list only (`read_agent_named_text`, D5).
+
+### What every site does now
+
+| site (Phase 1 path table) | now |
+|---|---|
+| #1 walk | refused file skipped, path reported in `escaping_skipped_paths`; an outward file link is no longer catalogued (D1) |
+| #2 reclamation | judged by the same door; a refused row without history is reclaimed (its chunk text and vectors go with it), one with history is KEPT and cleared (`clear_escaping_row`): title, kind and status (`unknown`), owners, tags, topic, time scope, content hash, mtime, embedded stamp, every chunk row, and the store's vectors are dropped (D4). It still shows its id, path, slug, augmentation and events |
+| #3, #4 backfill | the disk read goes through the door; stored chunk text of a refused row is not re-embedded; both counted in `refused_by_read_door` |
+| #7 `doc(get)` | refusal in `body_error`; stored title, owners, tags, topic and time scope withheld |
+| #8, #9 `librarian(context)` | a refused row is left out of the pack |
+| #10-#13 `doc(gather)` | `current_body`, `file`, `config_value` through the door; `grep` judges its root and reads every file through the door |
+| #14, #15 `doc(find)` | snippet and stored title withheld for a refused row, with the reason in `withheld` (also `gather` `artifacts`) |
+| #16 `params_path` | deny-list only, open-then-verify read |
+| #17 read-modify-write verbs | `ReadDoor::text_for_write`: the write door's leaf rule, then the read door, BEFORE the read (`doc(update)`, the frontmatter field writer, `append_entry`, `allocate_entry_id`, the snapshot resync, rekey, the export stamp, the id repair). `doc(move)` reads through the door and refuses a row whose file resolves outside its repository before anything moves |
+| #18 doctor | every scan reads through a door on `DoctorScope` (managed roots) or one passed in |
+| #19-#25 | `link_scan`, the sidecar readers (`declared_target` now refuses instead of answering "nothing declared"), `requirements.toml` and its `tag_values_from` files, the `external_prefix` authority (a refused authority is a finding, not a read), the `audit_doc_refs` resolver, and the config loaders (`librarian.toml`, `project.toml` for `force_include`, chunk grain and backend, `workspace.toml` umbrellas) through `read_door::for_project` |
+
+Every remaining raw read in `src/librarian` production code is in the source gate's allow-list
+(`no_librarian_production_read_bypasses_the_read_door`) with its reason: the global `workspace.toml`, the session
+registry, `/etc/hostname`, `/proc/<pid>/stat`, git's worktree pointer files, and the audit shard reads (out of scope;
+filed as `2026-10-18-the-audit-shard-readers-follow-a-link-a-repository-commits-under-codescout-audit.md`).
+
+### The layout table (`read_door_site_table`), every row and its verdict
+
+Each row is run through 16 read sites (walk, get, context, context entry anchor, gather body, gather file, gather
+grep, config_value, find snippet, find title, backfill disk, backfill stored, doctor, link_scan, requirements,
+external authority) plus `doc(update)`. The table asserts that every site gives the row's verdict, that the verdict
+equals the write door's containment answer on every comparable row, and that `doc(update)` reads only what both
+doors admit.
+
+| row | layout | verdict | write door: containment / full | cells that cannot observe the row (and why) |
+|---|---|---|---|---|
+| R1 | plain file in the project | ADMIT: every site and `doc(update)` return the marker | admit / admit | none |
+| R2 | leaf link, absolute target outside the repository | REFUSE: no site, no `doc(update)` | refuse / refuse | none |
+| R3 | leaf link, relative target outside | REFUSE | refuse / refuse | none |
+| R4 | directory link out of the repository, reached by `force_include` | REFUSE | refuse / refuse | none |
+| R5 | leaf link to a file inside the repository | ADMIT; `doc(update)` refuses (leaf rule) | admit / refuse | walk (a second name for a walked file), grep (never follows a leaf link) |
+| R6 | directory link that stays inside | ADMIT | admit / admit | none |
+| R7 | monorepo: leaf link out of the project, inside its git root | ADMIT; `doc(update)` refuses (leaf rule) | admit / refuse | grep (leaf link) |
+| R8 | nested repository whose directory link points into its superproject (F2) | REFUSE (D2) | refuse / refuse | none |
+| R9 | dangling leaf link | NO BYTES, and stored text is withheld | admit / refuse (not comparable: no target to contain) | none |
+| R12 | no managed root, no repository: leaf link out | REFUSE | admit / refuse (not comparable: the write door has only its leaf rule here) | gather file, grep, config_value (paths join the server's cwd), link_scan (reports no cross-repo token without a project) |
+| R13 | no managed root, no repository: plain file | ADMIT | admit / admit | same four |
+| R14 | no managed root, no repository: directory link out | REFUSE | admit / admit (not comparable: the write door cannot judge a parent link here) | same four |
+
+Deny-list rows (child process with `HOME` set): a target in `<home>/.ssh/` inside a managed root that IS the home,
+so containment admits; all 16 sites, `doc(update)` and `params_path` refuse. Config rows
+(`repository_config_files_are_read_only_through_the_door`): six loaders, each a plain file and an in-repo link (take
+effect) and an outward link (refused).
+
+### Tests seen red first, and pins
+
+Measured before any fix (logs kept in the session): the site table had 97 failing cells, with at least one red cell in
+every site; the deny-list child had all 16 sites, `doc(update)` and `params_path` returning the marker; the config
+table had all 6 outward-link loaders taking effect; `a_file_replaced_by_an_outward_link_is_reclaimed_with_its_stored_text`,
+`an_outward_row_with_history_is_kept_and_cleared_of_everything_its_target_supplied` and
+`a_row_below_a_directory_swapped_for_an_outward_link_is_kept_and_cleared` failed. Green from the start (pins):
+`params_path_still_reads_a_json_file_outside_the_repository` (D5), and the walk cells of R4 and R14 (a directory link
+reached by `force_include` was already refused by round 2). The door's unit tests, the read column and the gate
+tests were compile-red only (new API), so each was mutation-checked instead (below).
+
+Existing tests changed by the behaviour change, each saying why in its doc: two indexer tests (outward file links no
+longer indexed, now asserted as reported), `link_write_tests` (rows built by indexing a regular file and then
+swapping it for a link, the only way such a row exists now; the move is refused; the frontmatter-id sweep cannot
+read the target and reports nothing), six `link_dir_tests` move tests (leaf-link moves now use in-repo targets; a
+directory or a link to one is refused as "not a regular file").
+
+### Mutation probe (`scripts/mutation-probe.sh`, this worktree's own pool `…agent-a8918c1498fdd30e8.worktrees/mutation-slot-0`)
+
+42 mutants, all KILLED in the end. Door: containment dropped; deny layer dropped; the inode check's call removed;
+the check reduced to `st_dev`; the spelling judged instead of the canonical path; both regular-file checks removed;
+the dangling-link refusal dropped; the no-root rule dropped; `for_project` without the git root; the verdict memo
+keyed on the resolved path alone. Walk and catalogue: the walk's door replaced by a raw read; the reclaim predicate;
+the kept-row clear; the store delete for kept rows; both backfill arms. Sites: get, context (both), gather (body,
+file, grep root and files, config_value), the find predicate, `params_path`, `doc(update)`, the doctor scope read and
+the doctor frontmatter-id read, `link_scan`, the `requirements` values, the external authority, six config loaders,
+`doc(move)`, the sidecar refusal, the resync refusal. Gate: a raw read added to a production file; a second read
+appended to an allowed line.
+
+Two survived their first run and were killed after the test was strengthened (commit 5): the doctor scope read made
+raw (no scan using `DoctorScope::read_text` echoed content for the probe row, so the row is now a terminal bug with
+an `unverified:` caveat), and a second read on an allowed line (the gate counted lines; it now counts reads). Not
+probed, with the reason: comparing only `st_ino` (equivalent on a single filesystem, which every fixture is); the
+`O_NONBLOCK` flag and each regular-file check alone (the `metadata` pre-check and the handle check each cover the
+other except under a concurrent swap, which no deterministic test makes; removing both is killed).
+
+### Guide and prompt surfaces
+
+No guide or prompt text changed (`git diff 7a09623bd -- src/prompts docs/manual` is empty), so the three margins the
+brief named are where they were: `a_p50_session_stays_under_the_committed_emission_byte_ceiling` 12,228 of 12,244 B,
+the bug-archive move 13,776 of 13,886 B, the librarian reference section 2,486 of 2,500 B (both emission tests pass in
+the gate). The new behaviour explains itself where it happens: the refusal's hint, the reindex `escaping_note`
+(rewritten), and `withheld` in `doc(find)`.
+
+### Cost, measured
+
+Release build, 500 files: the first read of a file through a fresh door costs 161 µs (the judgement and the deny-list's
+~40 canonicalizations), every later read of the same file through the same door 19.6 µs, a raw read 4.5 µs. A
+`doctor` run builds one door for the run. On the live catalog (6,223 rows, about 20 scans reading each) that is an
+estimated +1 s for the first reads and +2 s for the rest; estimated, not run on the live catalog.
+
+### Deviations from the Phase 1 design
+
+1. **No-root rule is stricter**: the design said "reads only a path whose leaf is not a link"; the door reads only a
+   spelling that crosses NO link (leaf or parent). Without it a row with no managed root and no repository above it,
+   below a directory link out, was read (layout R14), while the walk refused it.
+2. **`doc(move)` refuses a row whose file resolves outside its repository.** Round 3 allowed moving an outward link (a
+   move moves the link); a move reads the content to re-key the row, which the read door refuses. An in-repo leaf link
+   still moves.
+3. **Stored titles are withheld** by `doc(get)`, `doc(find)` and `gather`'s `artifacts` for a refused row, not only
+   the snippet. Other surfaces that print a stored title (`doc(list_stale)`, the worktree and `merge_worktree` reports,
+   `tracker_design`) still print one for such a row until the next reindex of its project clears or reclaims it.
+4. **Read-modify-write verbs** use the write door's leaf rule plus the READ door (whose containment equals the write
+   door's, as the table asserts), not the write door's own containment call.
+5. **A verdict memo** per `(spelling, resolved path)` inside a door, for `doctor`'s cost.
+6. **Project-root readers** (`for_project`) judge against the project's git root and the project, the active-project
+   part of `managed_roots`; judging against the project alone disagreed with every other site on the monorepo row R7.
+7. **The reindex deletes store vectors for reclaimed escaping rows too**, not only kept ones. The MCP reindex never
+   deletes them for ordinary vanished rows; that is filed separately
+   (`2026-10-18-librarian-reindex-drops-a-vanished-rows-catalog-entry-but-never-its-external-store-vectors.md`).
+8. **Kept rows keep their slug** (immutable once minted; `entry_cite.src_slug` references it) **and their citation
+   edges**. D4 asked to clear everything derived from the outside file: a slug minted from a title that a pre-fix walk
+   read through an outward link, and `cites` edges a pre-fix `link_scan` derived from its text, survive. They carry at
+   most a 50-character slug and entry tokens. **Decision needed: clear them too (re-keying citations), or accept.**
+9. **`doctor fix=repair_frontmatter_id` no longer lists an outward row** (it cannot read the target's `id:`); nothing is
+   written either way.
+10. **`gather` with no active project** joins paths to the server's absolute working directory (it used `.`), so the
+    door can judge them; what is read is unchanged.
+
+## Fix provenance
+
+Branch `worktree-agent-a8918c1498fdd30e8` (not yet on `experiments`).
+
+- **SHA:** `45858098a` (the read door)
+- **patch-id:** `7bfbbd10c5a0a4be4d7dfeb2edb1eaa31f8ae125`
+- **SHA:** `686838dc4` (walk, reclamation, backfill)
+- **patch-id:** `b4e72fc7b87485a9d8fe8c39968ee3ad5d85d751`
+- **SHA:** `5b3d834ba` (every other read site)
+- **patch-id:** `23d2abc7aef8f0dcb9c72f8ec90ab24b94b0c961`
+- **SHA:** `673859c08` (source gate)
+- **patch-id:** `394c11fb30be5535bed536a111fb811c7a46729e`
+- **SHA:** `a24fb3b94` (tests strengthened after two surviving mutants)
+- **patch-id:** `fea062f37642cd1fed4661de84e9c2b5966d10ca`
+- **SHA:** `033638f07` (clippy fix to the test hook)
+- **patch-id:** `b24957d48be5ee8443eb1fc14136095779b4f44f`
+
 ## Tests added
 
-N/A: filed, not fixed. The probe above becomes the regression test when a fix lands (assert the marker is in neither the queue nor
-the `doc(get)` output).
+See Fix (Phase 2): `src/librarian/tools/read_door_tests.rs` (`read_door_site_table`, the deny-list child
+`deny_listed_target_inside_a_managed_root_reaches_no_read_site`, `repository_config_files_are_read_only_through_the_door`,
+the three reclaim/keep tests, the `params_path` pin), `src/librarian/read_door.rs` tests (inode check through its
+seam, the swap between open and check, non-regular targets, the no-root rule, the stored-bytes predicate, the
+source gate and its lexer test), and the read column of the three write-door layout tables.
 
 ## Workarounds
 
-Do not reindex a repository you do not trust with the librarian enabled; check `find <repo> -type l` first.
+None needed after the fix. Before it: do not reindex a repository you do not trust with the librarian enabled; check
+`find <repo> -type l` first. Text a remote embedder received before the fix cannot be recalled.
 
 ## Resume
 
-Decide between the three options, then add the probe as a red test. Also run `doc(find)`, `librarian(context)`, `gather` and a
-semantic search over a catalogued outward link, which this issue did not. **Done in Design (Phase 1): all of them leak. Next: the
-operator's answers to D1-D9, then Phase 2 (red tests first).**
+Phase 2 is done (Fix (Phase 2)). Open: the operator's decision on Design deviation 8 (kept rows keep their slug and
+citation edges). Follow-ups filed: `2026-10-18-librarian-reindex-drops-a-vanished-rows-catalog-entry-but-never-its-external-store-vectors.md`,
+`2026-10-18-the-audit-shard-readers-follow-a-link-a-repository-commits-under-codescout-audit.md`.
 
 ## References
 
