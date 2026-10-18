@@ -442,7 +442,7 @@ at `af25d0fb`: six table rows, the four-verb tests, the `..` end-to-end test, an
 
 - **MED-1, a `..` spelling defeated the refinement.** `strip_prefix(P)` of `P/../Q` succeeds and `..` is never a symlink, so `P/../Q` counted as
   "reached from P by plain directories" and the write was judged against `Q`: with `P` active, `doc(update)` wrote `Q`'s file, `doc(move)` moved it into `P`
-  and `doc(delete)` deleted it (reachability was limited: no live row has `..`). `descends_without_link` now accepts plain NAMES only. `.` and `//`
+  and `doc(delete)` deleted it (reachability was limited: no live row has `..`). `descends_without_link` now accepts plain NAMES only (**round 7: that refused every `..` and disabled the refinement under a shallower anchor; it now pops on a `..` that follows a plain name**). `.` and `//`
   need no code: `Path::components` drops them, so `P/./docs/y.md` and `P//docs/y.md` stay the plain paths they spell (rows X1f, X1g ADMIT). A `..`
   spelling is NOT normalised: `P/../Q/docs/x.md` claims `P`, so it is refused (X1, X1b, X1i), and with no roots it is judged against the outermost
   repository on the spelling and refused (X1d). The price, stated: a plain-looking `Q/../P/docs/x.md` is also refused when nothing manages it.
@@ -453,8 +453,12 @@ at `af25d0fb`: six table rows, the four-verb tests, the `..` end-to-end test, an
   their root with `util::managed_base` (the function the door uses) and `doc(create)` goes through the door. Tests
   `every_verb_admits_a_row_spelled_through_a_link_to_the_managed_project` (C1: update, move, delete and create all ADMIT) and
   `every_verb_refuses_a_path_below_a_nested_repositorys_link_into_its_superproject` (F2: all four REFUSE, nothing created or moved) state the verdict
-  of each verb. Nothing rounds 1-2 admitted is refused now: the full librarian suite (in-repo link directories, worktree shadow rows, umbrella roots,
-  monorepo subprojects) is green.
+  of each verb. Nothing rounds 1-2 admitted is refused now, with ONE exception that the first wording of this sentence overlooked: `doc(create)` in an umbrella
+  root (`A/lb/new.md` with `lb -> B`, both repositories under the umbrella) was ADMITTED (judged against the umbrella) and is now REFUSED, consistent with
+  `doc(update)` on the same path, which has refused it since round 3. The other change in create's behaviour goes the other way and is tested: in a monorepo
+  subproject (`docs -> ../shared/docs`, inside the git root) a create under the link was REFUSED (judged against the subproject) and is now ADMITTED, which is right
+  because update, move and delete already admit rows there and the file lands inside the repository. The full librarian suite (in-repo link directories, worktree shadow rows,
+  umbrella roots, monorepo subprojects) is green.
 - **MED-3, a half-done move was still reachable.** The id repair read the file AFTER the rename and failed on four causes, each renaming the file while the row
   kept the old path: a mode-000 file, invalid UTF-8, a leaf link to a directory, a row that is a directory. `doc(move)` now reads the content BEFORE
   anything moves and refuses a file it cannot read as text ("cannot read it as UTF-8 text", nothing moved); that content feeds the repair and the row's
@@ -465,7 +469,8 @@ at `af25d0fb`: six table rows, the four-verb tests, the `..` end-to-end test, an
   (only parse errors are logged; a read or write error is returned).
 - **LOW-1, a foreign anchor reached through a link** (non-repo `X`, `X/link -> repo R`): ADMIT with unrelated or no roots (Y1a), REFUSE when `X` is managed (Y1b).
   Documented, not changed: with no managed root the anchor is the repository a foreign spelling CLAIMS (J2's reasoning), and here that is the one behind the link,
-  so the row is judged inside it; a managed root is never judged this way. `descends_without_link` and `holds_git` now say so (the `holds_git` doc had claimed the
+  so the row is judged inside it; a managed root is not judged this way except when `managed_base` itself names a link as the confinement root (C1: `home/proj`, which
+  holds `.git`), where candidate and anchor coincide too. `descends_without_link` and `holds_git` now say so (the `holds_git` doc had claimed the
   descent check covers the candidate "itself included", which is false when the candidate is the anchor).
 - **LOW-2, non-UTF-8 roots.** `comparable_path` compared `to_string_lossy` strings, so the roots `n\xff` and `n\xfe` were equal and one "contained" the other's
   rows (over-refusal, and `doc(move)`/`doc(delete)` could pick the wrong root). Raw bytes on Unix (X8 ADMIT).
@@ -507,6 +512,43 @@ failing repair write (reported, not an error); `.git` marker detection (`exists(
 `containing_root`; `doc(delete)` back to `containing_root`; `doc(create)` back to the old base-dir check; the read-before-rename; the repair's write failure turned back into an
 error (the old M6, which survived round 5 because nothing could reach it, and is killed by the read-only test). **Survived:** none new; `skip(1)` to `skip(0)` stays equivalent
 (round 5).
+
+## Round 7 (narrow Opus review of `ed9cbdfd`): the `..` fix had disabled the refinement under a shallower anchor
+
+Commit `238c8b8e4` (patch-id `135febb5c2e23f6234e42b7cbcaae27b5b868b41`), then a test commit for row Z9 and these docs. Red first: rows Z2, Z3, Z4, the production-shaped
+test, the skipped-repair test and the move-refusal test were seen failing before any code changed.
+
+- **MED-1 (a regression of round 6).** Round 6 made `descends_without_link` refuse every `..`. With an anchor SHALLOWER than the `..` (an enclosing managed root listed
+  earlier, or the outermost repository when nothing is managed) every candidate below the anchor carried the `..` and was rejected, so the judgment fell back to the anchor, which
+  admits: with W a repository holding nested repositories P and Q and `P/lq -> W/Q/docs`, the row `W/Z/../P/lq/x.md` was ADMIT for roots [W], [W, W/Z/../P] and [] (REFUSE at
+  `af25d0fb`), and the production shape (active project W plus a `[[roots]]` entry spelled `W/Z/../P`) created into `W/Q/docs` and updated Q's file. The walk now keeps a cursor and a
+  depth: a name is pushed and must not be a link; a `..` directly after such a name is an EXACT pop (the name was a plain directory, so its parent is the cursor's previous value);
+  a `..` at depth zero would climb out of the anchor and is refused; a `..` after a LINK is never reached, because the link is refused when pushed (its target, not its spelled
+  parent, is what `..` would climb out of). I checked the pop for soundness: the cursor is built from the anchor through non-link names only, so a lexical pop equals the physical
+  parent. X1, X1b, X1d stay REFUSE (their `..` is at depth zero), and X1c, X1f, X1g, X8, Y1a are unchanged. **The only hunk that changed the door this round is
+  `descends_without_link` in `src/librarian/util.rs`** (the `Component::Normal` clause became a match with a depth counter); everything else is a test, a comment, the move/repair
+  reporting or the guide.
+- New table rows (`door_layout_table_round7`; file door and directory door agree): **Z1** roots [W], canonical `W/P/lq/x.md` REFUSE; **Z2** roots [W], `W/Z/../P/lq/x.md` REFUSE;
+  **Z3** roots [W, W/Z/../P] REFUSE; **Z4** no roots REFUSE; **Z6** roots [P], `P/lnk/../y.md` with `lnk -> S` REFUSE; **Z7** roots [P], plain row below a directory named `a..b` ADMIT;
+  **Z8** roots [P], nested repository `P/a..b` linking back into P REFUSE (its name is a plain name, so it is the refinement); **Z9** roots [W], `W/Z/../Lk/docs/x.md` with `Lk -> S`
+  outside W REFUSE (a link reached after a pop is still a link). Z7 alone cannot tell the reviewer's byte-scan mutant from the real check (a plain row is admitted either way), so Z8
+  is the row that kills it; Z9 kills the mutant that drops the pop.
+- **LOW-1.** A link's id repair was skipped with `Ok(content)`, so `id_repair_error` was null while the target kept the old id. The explicit skip is gone: `write_catalogued_file`'s leaf rule
+  refuses the link and that refusal is returned, so `doc(move)` reports it in `id_repair_error` and `doctor` lists it as failed. Test `doc_move_reports_a_skipped_id_repair_of_a_leaf_link`.
+- **LOW-2.** The guide's move response example gains `"id_repair_error": null` and one sentence (`src/prompts/guides/librarian.md`). The p50 emission ceiling test
+  (`a_p50_session_stays_under_the_committed_emission_byte_ceiling`) was at margin 0 B and reddened at +217 B; the shipped text is net **+18 B** on the file after trimming two phrases elsewhere in the
+  same section, and the test passes without touching `CEILING`. The `new_rel_path` schema text in `artifact.rs` was not touched (the tool-surface budget is measured separately and the guide carries the field).
+- **LOW-3.** Comments corrected: `managed_base` (`containing_root` is no longer "the guard move and delete use"), `descends_without_link` (candidate == anchor also happens with a confinement root, C1),
+  `mv.rs` (the stale "owned rather than borrowed" comment and the now redundant `to_path_buf()`), `delete.rs` ("lexical", "the three verbs"). The Round 6 statement that nothing rounds 1-2 admitted is
+  refused now overlooked one change, an umbrella `doc(create)` of `A/lb/new.md` with `lb -> B` (ADMIT before, REFUSE now, consistent with update); it now says so.
+- **LOW-4.** `create_in_a_monorepo_subproject_admits_a_link_that_stays_inside_the_git_root` pins the monorepo half of the create change and kills the mutant that judges create against `[base_dir]`: a create under
+  `docs -> ../shared/docs` was REFUSED (judged against the subproject) and is now ADMITTED, which is right because update, move and delete already admit rows there (round 3 H2) and the file lands inside the repository.
+  The `already_read` argument of `repair_frontmatter_id` is an optimisation (a rename does not change the bytes), so a mutant replacing it with a re-read is equivalent without concurrent writers; said in a comment.
+- **LOW-5.** `doc(move)` of a row no managed root contains is a recoverable refusal with `doc(delete)`'s wording (it was a fatal `anyhow!`; 1079 live rows hit that path with codescout active).
+  Test `doc_move_of_a_row_outside_every_managed_root_is_a_recoverable_refusal`.
+
+**Mutation probe, round 7** (632 tests per run): killed: the depth guard replaced by `if true`; the pop removed (Z9); the `_ => return false` arm made a no-op (X1); the byte scan for `..` (Z8); the repair's write error swallowed
+(the link test); the move refusal turned back into `anyhow!`; create judged against `[base_dir]`. **Survived:** none new; `skip(1)` to `skip(0)` and the `already_read` mutant stay equivalent.
 
 ## Tests added
 
