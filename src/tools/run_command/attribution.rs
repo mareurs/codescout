@@ -21,7 +21,8 @@
 //!
 //! # Why the scripts are EMBEDDED and not read from disk
 //!
-//! `include_str!` at compile time, materialized to a temp dir on first use. The two
+//! `include_str!` at compile time, materialized to a verified per-user temp dir before each
+//! run (`script_dir`). The two
 //! alternatives are both wrong:
 //!
 //! - Resolving `scripts/` under `CARGO_MANIFEST_DIR` at *runtime* points a shipped
@@ -83,14 +84,18 @@
 //!    that swallows a failure into a successful exit never reaches stage 1.
 //! 3. **No `python3`, no answer.** The spawn failing and the tree being clean produce the
 //!    same silence at this layer.
+//! 4. **No private directory, no answer.** When the per-user extraction directory is refused
+//!    (`script_dir`) and a fresh private one cannot be made either — a filesystem that ignores
+//!    modes, an NFS id mapping, sshfs, a relative `$TMPDIR` — the hint goes silent. A `warn`
+//!    in the server log says so; the red itself carries nothing. The same silence as "nothing
+//!    to say", for a reason the reader cannot see.
 //!
-//! Ceiling 1 is measured; 2 and 3 are structural and cost nothing to state. **The tool's
+//! Ceiling 1 is measured; 2, 3 and 4 are structural and cost nothing to state. **The tool's
 //! name is wider than its coverage** — it attributes a red *that came through
 //! `run_command`* — which is `IC-14`, guard-narrower-than-its-name, and is recorded here
 //! rather than left for a reader to discover from the silence.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Every script the engine needs, as `(file name, body)`. The FIRST entry is the entry point.
@@ -220,31 +225,21 @@ impl AttributionEnv {
     }
 }
 
-static SCRIPT_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+type Uid = u32;
 
-/// Write the embedded scripts to a shared temp directory and return the entry point.
-///
-/// Keyed by a hash of the contents, so every process built from the same source shares
-/// one directory and a rebuilt binary lands in a different one. `DefaultHasher` is not
-/// stable across Rust releases and does not need to be: an unstable key costs one extra
-/// extraction of 120 KB, never a wrong answer.
-///
-/// Each file is written to a unique temporary name and then renamed, which is atomic on
-/// every platform we run on. Two servers extracting concurrently is the normal case here
-/// — a rebuild leaves a dozen sessions to re-materialize at once — and a reader must
-/// never observe a half-written script.
-fn materialize() -> Option<PathBuf> {
-    materialize_into(&std::env::temp_dir())
+fn effective_uid() -> Uid {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
 }
 
-/// The body of [`materialize`], with its base directory as a parameter.
-///
-/// Split out because the shared directory is keyed by a content hash, which makes the real
-/// one *sticky across runs*: a test asserting both scripts get written passed against files
-/// an earlier run had left there, and survived a mutation deleting the write entirely. A
-/// test that supplies its own empty base observes this function rather than the
-/// filesystem's memory of it.
-fn materialize_into(base: &Path) -> Option<PathBuf> {
+fn script_set_hash() -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -253,8 +248,246 @@ fn materialize_into(base: &Path) -> Option<PathBuf> {
         name.hash(&mut h);
         body.hash(&mut h);
     }
-    let dir = base.join(format!("codescout-attribution-{:016x}", h.finish()));
-    std::fs::create_dir_all(&dir).ok()?;
+    h.finish()
+}
+
+/// The deterministic extraction directory for `uid` under `base`.
+///
+/// The name carries the effective uid so two users of one shared `/tmp` never contend for
+/// (or can squat on) each other's directory. The hash half stays computable by anyone —
+/// `DefaultHasher::new()` has fixed keys — so the NAME is not a secret and protects nothing
+/// by itself: [`verify_private_dir`] is what makes the directory trustworthy.
+fn extraction_dir(base: &Path, uid: Uid) -> PathBuf {
+    base.join(format!(
+        "codescout-attribution-{uid}-{:016x}",
+        script_set_hash()
+    ))
+}
+
+/// Why [`verify_private_dir`] will not trust a directory. Rendered into the log line that
+/// accompanies a fallback, so each variant names what an operator would act on.
+#[derive(Debug, PartialEq, Eq)]
+enum DirRefusal {
+    /// Missing, unreadable, a symlink (including one to a perfectly good directory), or a
+    /// non-directory squatting on the name. `symlink_metadata` is what makes a link visible:
+    /// plain `metadata` would follow it and report the target's owner and mode.
+    NotARealDirectory,
+    /// Owned by someone other than the effective user, who can therefore put anything in it.
+    #[cfg(unix)]
+    ForeignOwner { owner: Uid, expected: Uid },
+    /// Writable by group or other, so a third party can plant a module beside the scripts.
+    #[cfg(unix)]
+    GroupOrOtherWritable { mode: u32 },
+}
+
+impl std::fmt::Display for DirRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotARealDirectory => write!(f, "not a real directory (missing, symlink or file)"),
+            #[cfg(unix)]
+            Self::ForeignOwner { owner, expected } => {
+                write!(f, "owned by uid {owner}, not by uid {expected}")
+            }
+            #[cfg(unix)]
+            Self::GroupOrOtherWritable { mode } => {
+                write!(f, "mode {mode:04o} is writable by group or other")
+            }
+        }
+    }
+}
+
+/// Is `dir` a directory only `uid` (or root) can put files in?
+///
+/// The scripts in it run as this user, so anyone who can add a file beside them can run code
+/// as this user: Python puts the script's directory first on `sys.path`. Checked on EVERY use,
+/// not only on creation, because on a shared `/tmp` another user may have created the name
+/// first — the check is the trust, the name is not.
+///
+/// Unix only beyond the symlink check: owner and mode bits do not exist elsewhere, and a
+/// Windows `%TEMP%` is per-user to begin with. The `cfg(not(unix))` arm is a subset of the
+/// unix one for TYPES, not for LINTS: the Windows cross-clippy
+/// (`scripts/build-windows.sh clippy --all-targets -- -D warnings`) is what finds the second
+/// kind, and found an `unused_mut` in [`create_private_dir`]. Run it after touching this.
+fn verify_private_dir(dir: &Path, uid: Uid) -> Result<(), DirRefusal> {
+    let meta = std::fs::symlink_metadata(dir).map_err(|_| DirRefusal::NotARealDirectory)?;
+    if !meta.file_type().is_dir() {
+        return Err(DirRefusal::NotARealDirectory);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let owner = meta.uid();
+        if owner != uid {
+            return Err(DirRefusal::ForeignOwner {
+                owner,
+                expected: uid,
+            });
+        }
+        let mode = meta.mode() & 0o777;
+        if mode & 0o022 != 0 {
+            return Err(DirRefusal::GroupOrOtherWritable { mode });
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = uid;
+    Ok(())
+}
+
+/// Create `dir` with mode 0700; an existing entry of that name is NOT an error here — it is
+/// [`verify_private_dir`]'s to judge. Not recursive, so the mode applies to the directory
+/// that matters and never to a parent created on the way.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    // `mut` is needed only where the mode is set; on Windows clippy would call it unused.
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    match builder.create(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        other => other,
+    }
+}
+
+/// The directory the engine is extracted into: the deterministic per-user one when it
+/// passes [`verify_private_dir`] (the normal case, and the cache-reusing one), otherwise a
+/// private directory this process created.
+///
+/// Called before EVERY run, never cached: the directory can be removed while the process
+/// lives (`systemd-tmpfiles` age cleanup, `tmpreaper`, an `rm -rf /tmp/codescout-*`) and its
+/// name recreated by someone else, and a path verified once would then be run unverified.
+/// The price is a few `stat`s and a 120 KB read per failure-shaped command, against a scan
+/// measured at ~7 s.
+///
+/// A relative `base` is refused outright. `std::env::temp_dir` returns `$TMPDIR` as it finds
+/// it (`""` included), the spawn resolves a relative script under `current_dir(work_dir)` —
+/// the workspace being analysed — and a repository could ship a directory of that name.
+///
+/// What a refusal costs: attribution keeps working under an attack on the name, at the price
+/// of one 120 KB extraction and one leaked directory per process (it is reused while it still
+/// verifies; statics are not dropped at exit). The refusal is logged at `warn`, naming the path
+/// and the reason — the observer is whoever reads the server log, since the hint itself has no
+/// channel for "your temp directory was squatted". When even the fallback cannot be made (a
+/// filesystem that ignores modes, an NFS id mapping, sshfs) a second `warn` says so and the
+/// hint goes silent, which is the one case here where silence is not "nothing to say".
+///
+/// Not checked: `base` itself. A `$TMPDIR` that is group/world-writable WITHOUT the sticky bit
+/// lets anyone rename a verified directory away and put their own at the name between this
+/// check and the spawn. A root-owned sticky `/tmp` (1777) does not.
+fn script_dir(base: &Path, uid: Uid) -> Option<PathBuf> {
+    if !base.is_absolute() {
+        tracing::warn!(
+            base = %base.display(),
+            "attribution: the temp directory is not an absolute path; skipping the hint"
+        );
+        return None;
+    }
+    let _ = std::fs::create_dir_all(base);
+    let dir = extraction_dir(base, uid);
+    let refusal = match create_private_dir(&dir) {
+        Ok(()) => match verify_private_dir(&dir, uid) {
+            Ok(()) => return Some(dir),
+            Err(r) => r.to_string(),
+        },
+        Err(e) => format!("cannot create it: {e}"),
+    };
+    tracing::warn!(
+        dir = %dir.display(),
+        "attribution: refusing the extraction directory ({refusal}); trying a fresh private one"
+    );
+    let fallback = fallback_dir(base, uid);
+    if fallback.is_none() {
+        tracing::warn!(
+            base = %base.display(),
+            "attribution: no private directory could be made either; skipping the hint"
+        );
+    }
+    fallback
+}
+
+/// This process's fallback directory under `base`: the one it made earlier if that still
+/// verifies, else a fresh one. Reuse is what bounds the leak to one directory per process
+/// rather than one per failing command.
+fn fallback_dir(base: &Path, uid: Uid) -> Option<PathBuf> {
+    // Keyed by base. One base per process in production; several in a test binary, where a
+    // single slot would be evicted by whichever sibling test ran last.
+    static FALLBACKS: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
+    let mut slots = FALLBACKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, dir)) = slots.iter().find(|(b, _)| b == base) {
+        if verify_private_dir(dir, uid).is_ok() {
+            return Some(dir.clone());
+        }
+    }
+    let dir = fresh_private_dir(base, uid)?;
+    slots.retain(|(b, _)| b != base);
+    slots.push((base.to_path_buf(), dir.clone()));
+    Some(dir)
+}
+
+/// A directory this call created, under a name nobody could have predicted (`mkdtemp`), so
+/// there was nothing to pre-create. Verified like any other, then deliberately kept.
+///
+/// Mode 0700 is requested explicitly: `tempfile` creates DIRECTORIES with the umask's view of
+/// 0777 (measured 2026-10-17: 0755 under umask 022), which under umask 002 is group-writable
+/// and would fail [`verify_private_dir`] — leaving no fallback at all on exactly the hosts
+/// (user-private-group distributions) most likely to have a shared group.
+fn fresh_private_dir(base: &Path, uid: Uid) -> Option<PathBuf> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("codescout-attribution-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    let tmp = builder.tempdir_in(base).ok()?;
+    verify_private_dir(tmp.path(), uid).ok()?;
+    Some(tmp.keep())
+}
+
+/// The engine's command line: `python3 -I <script>`.
+///
+/// `-I` (isolated) drops the script's directory from `sys.path` and ignores `PYTHON*`
+/// variables and the user site, so the engine's OWN imports (`json`, `re`, `subprocess`,
+/// `pathlib`, ...) cannot be satisfied by a file beside it. It is hardening, not the
+/// defence: `file-provenance.py` re-inserts its directory at `sys.path[0]` (line 91) to
+/// import its sibling modules, so a module planted there and first imported AFTER that
+/// line (measured 2026-10-17 on Python 3.14.7, one name planted at a time: `typing`,
+/// `dataclasses`, `decimal`, `annotationlib`, `inspect`, `numbers`, `copy`, `ast`, `tokenize`,
+/// `linecache`, `weakref`) still runs under `-I`. The residual is wide and depends on the
+/// Python version. What makes the directory safe is [`verify_private_dir`]. Built here, once,
+/// so the shipped path and the tests share it.
+fn engine_std_command(script: &Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new("python3");
+    cmd.arg("-I").arg(script);
+    cmd
+}
+
+/// Write the embedded scripts into a verified per-user directory under `base` and return the
+/// entry point. The base is a parameter because the real one is *sticky across runs*: a test
+/// asserting the scripts get written passed against files an earlier run had left there, and
+/// survived a mutation deleting the write entirely.
+///
+/// Keyed by the effective uid and a hash of the contents, so every process of one user built
+/// from the same source shares one directory and a rebuilt binary lands in a different one.
+/// `DefaultHasher` is not stable across Rust releases and does not need to be: an unstable
+/// key costs one extra extraction of 120 KB, never a wrong answer. The directory is created
+/// 0700 and verified on every call — see [`script_dir`] — because the name is computable by
+/// anyone and `/tmp` may be shared.
+///
+/// Each file is written to a unique temporary name and then renamed, which is atomic on
+/// every platform we run on. Two servers extracting concurrently is the normal case here
+/// — a rebuild leaves a dozen sessions to re-materialize at once — and a reader must
+/// never observe a half-written script.
+///
+/// Mode bits of the files inside are not checked: the directory is 0700 and ours, so nobody
+/// else can add or replace one. A pre-existing directory of ours at 0750/0755 is accepted
+/// (not group/other writable), which leaves existing file modes to whoever made them.
+fn materialize_into(base: &Path) -> Option<PathBuf> {
+    let dir = script_dir(base, effective_uid())?;
 
     for (name, body) in EMBEDDED_SCRIPTS {
         let final_path = dir.join(name);
@@ -378,6 +611,18 @@ pub(crate) async fn wip_author_diagnostic_with(
     work_dir: &Path,
     env: &AttributionEnv,
 ) -> Option<String> {
+    wip_author_diagnostic_in(&std::env::temp_dir(), exit_code, red_text, work_dir, env).await
+}
+
+/// The body of [`wip_author_diagnostic_with`], with the directory the engine is extracted
+/// under as a parameter, so a test can drive the SHIPPED spawn path against a base of its own.
+pub(crate) async fn wip_author_diagnostic_in(
+    base: &Path,
+    exit_code: i32,
+    red_text: &str,
+    work_dir: &Path,
+    env: &AttributionEnv,
+) -> Option<String> {
     // Stage 0 — the outermost gate, and the reason the rest can afford to be expensive.
     // A green command with nothing failure-shaped in its output spawns nothing: no
     // python, no git, no extraction.
@@ -399,11 +644,10 @@ pub(crate) async fn wip_author_diagnostic_with(
         return None;
     }
 
-    let script = SCRIPT_DIR.get_or_init(materialize).clone()?;
+    let script = materialize_into(base)?;
 
-    let mut cmd = tokio::process::Command::new("python3");
-    cmd.arg(&script)
-        .current_dir(work_dir)
+    let mut cmd = tokio::process::Command::from(engine_std_command(&script));
+    cmd.current_dir(work_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -564,6 +808,591 @@ mod tests {
             assert_eq!(
                 std::fs::read_to_string(dir.join(name)).ok(),
                 Some(body.to_string())
+            );
+        }
+    }
+
+    /// A module planted beside the entry point must not be importable by the engine.
+    ///
+    /// Python puts the script's own directory first on `sys.path`, and `attribute-red.py`
+    /// imports `json`, `re`, `subprocess` and `pathlib` (lines 51-57), so a `json.py` in the
+    /// extraction directory runs as the codescout user. The CONTROL half runs the same
+    /// directory under a plain `python3 <script>` and requires the plant to FIRE: without it a
+    /// green here would also be what a plant that never fires (a typo in the marker path, a
+    /// module the engine does not import) produces — a test monotone under the very change it
+    /// guards. The guarded half goes through [`engine_std_command`], the constructor the
+    /// shipped path uses, so removing `-I` from it reds this.
+    ///
+    /// What `-I` does NOT close, measured 2026-10-17: `file-provenance.py` re-inserts its own
+    /// directory at `sys.path[0]` (line 91), so a planted `typing.py` still runs under `-I`
+    /// (that is `from typing import Iterable` at line 95, reached only after the insert).
+    /// The directory checks below, not `-I`, are what close the hole; this test pins only the
+    /// half `-I` does close.
+    #[test]
+    fn a_planted_module_beside_the_entry_is_not_imported() {
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let Some(repo) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        let base = tempfile::tempdir().expect("tmp");
+        let entry = materialize_into(base.path()).expect("materialization must succeed");
+        let dir = entry.parent().expect("entry has a parent").to_path_buf();
+        let marker = base.path().join("json-py-ran");
+        std::fs::write(
+            dir.join("json.py"),
+            format!(
+                "open({:?}, 'w').write('ran')\nraise ImportError('planted json')\n",
+                marker.display().to_string()
+            ),
+        )
+        .expect("plant");
+
+        // CONTROL: plain python3 imports the plant.
+        let control = std::process::Command::new("python3")
+            .arg("-B")
+            .arg(&entry)
+            .arg("--explain")
+            .current_dir(repo.path())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("python3 spawns");
+        assert!(
+            marker.exists(),
+            "control: the plant must run under a plain `python3 <script>` or this test proves \
+             nothing; stderr: {}",
+            String::from_utf8_lossy(&control.stderr)
+        );
+        std::fs::remove_file(&marker).expect("clear marker");
+
+        // GUARDED: the shipped constructor.
+        let out = engine_std_command(&entry)
+            .arg("--explain")
+            .current_dir(repo.path())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("python3 spawns");
+        assert!(
+            !marker.exists(),
+            "a json.py planted beside the entry point ran under the shipped command line; \
+             stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // End to end: the engine must still WORK under the isolated command line. A crash or an
+        // import failure would also leave the marker absent.
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && !stdout.contains("could not be imported"),
+            "the engine must run to completion under the shipped command line; \
+             status {:?} stdout: {stdout} stderr: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The same planted-module property, through the SHIPPED spawn path instead of through
+    /// [`engine_std_command`] called by the test: a call site that builds its own
+    /// `Command::new("python3")` would pass the constructor test and fail this one.
+    ///
+    /// The plant goes in after a first successful run, into the directory that run used, so the
+    /// second run is the one that would execute it. Only a module the entry imports BEFORE
+    /// `file-provenance.py` touches `sys.path` is closed by `-I` (see the doc on
+    /// [`engine_std_command`]), which is why this plants `json`.
+    #[tokio::test]
+    async fn a_module_planted_beside_the_entry_does_not_run_through_the_shipped_path() {
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let Some(repo) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        let base = tempfile::tempdir().expect("tmp");
+        let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+        let env = AttributionEnv::default();
+        let first = wip_author_diagnostic_in(base.path(), 101, red, repo.path(), &env).await;
+        assert!(
+            first.as_deref().is_some_and(|t| t.contains("src/held.rs")),
+            "precondition: the engine answers on a clean directory; got {first:?}"
+        );
+        let dir = extraction_dir(base.path(), effective_uid());
+        let marker = base.path().join("json-py-ran");
+        std::fs::write(
+            dir.join("json.py"),
+            format!(
+                "open({:?}, 'w').write('ran')\nraise ImportError('planted json')\n",
+                marker.display().to_string()
+            ),
+        )
+        .expect("plant");
+        let second = wip_author_diagnostic_in(base.path(), 101, red, repo.path(), &env).await;
+        assert!(
+            !marker.exists(),
+            "a json.py planted beside the entry ran through the shipped spawn path"
+        );
+        assert!(
+            second.as_deref().is_some_and(|t| t.contains("src/held.rs")),
+            "the engine must still answer with the plant present; got {second:?}"
+        );
+    }
+
+    /// The half of `-I` that `-P` does not give: `PYTHON*` variables and the user site are
+    /// ignored. CONTROL: the same child environment under a plain `python3` imports the plant.
+    /// (The shipped path inherits the process environment, which a test must not mutate, so
+    /// this goes through the constructor; the test above pins that the shipped path uses it.)
+    #[test]
+    fn the_engine_ignores_pythonpath() {
+        if !python3_present() {
+            eprintln!("skipping: python3 absent");
+            return;
+        }
+        let Some(repo) = dirty_fixture_repo() else {
+            eprintln!("skipping: git unavailable");
+            return;
+        };
+        let base = tempfile::tempdir().expect("tmp");
+        let entry = materialize_into(base.path()).expect("materialize");
+        let pp = base.path().join("pythonpath");
+        std::fs::create_dir(&pp).expect("mkdir");
+        let marker = base.path().join("pythonpath-json-ran");
+        std::fs::write(
+            pp.join("json.py"),
+            format!(
+                "open({:?}, 'w').write('ran')\nraise ImportError('planted json')\n",
+                marker.display().to_string()
+            ),
+        )
+        .expect("plant");
+
+        let mut control = std::process::Command::new("python3");
+        control
+            .arg("-B")
+            .arg(&entry)
+            .arg("--explain")
+            .current_dir(repo.path())
+            .env("PYTHONPATH", &pp)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("python3 spawns");
+        assert!(
+            marker.exists(),
+            "control: a module on PYTHONPATH must run under a plain python3, or this proves nothing"
+        );
+        std::fs::remove_file(&marker).expect("clear");
+
+        engine_std_command(&entry)
+            .arg("--explain")
+            .current_dir(repo.path())
+            .env("PYTHONPATH", &pp)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("python3 spawns");
+        assert!(
+            !marker.exists(),
+            "a module on PYTHONPATH ran under the shipped command line"
+        );
+    }
+
+    /// `std::env::temp_dir` returns `$TMPDIR` as it finds it, including `""` and relative
+    /// paths. A relative base makes the entry point relative, and the spawn resolves it under
+    /// `current_dir(work_dir)` — the workspace being analysed — so a repository shipping a
+    /// directory of that name would have its own script run. Refused, and nothing is created.
+    #[test]
+    fn a_relative_base_is_refused() {
+        let rel = Path::new("attribution-relative-base-probe");
+        let _ = std::fs::remove_dir_all(rel);
+        let got = materialize_into(rel);
+        let created = rel.exists();
+        let _ = std::fs::remove_dir_all(rel);
+        assert_eq!(got, None, "a relative base must not yield an entry point");
+        assert!(!created, "nothing may be created under a relative base");
+        assert_eq!(
+            materialize_into(Path::new("")),
+            None,
+            "TMPDIR=\"\" is relative"
+        );
+    }
+
+    /// The extraction directory is the trust root for code that runs as this user, so every use
+    /// of it is verified. Unix-only: the owner and mode bits do not exist elsewhere, and a
+    /// Windows `%TEMP%` is per-user to begin with.
+    #[cfg(unix)]
+    mod dir_trust {
+        use super::*;
+        use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
+
+        fn mode_of(p: &Path) -> u32 {
+            std::fs::symlink_metadata(p).expect("stat").mode() & 0o777
+        }
+
+        fn script_names_in(dir: &Path) -> Vec<String> {
+            EMBEDDED_SCRIPTS
+                .iter()
+                .map(|(n, _)| n.to_string())
+                .filter(|n| dir.join(n).exists())
+                .collect()
+        }
+
+        fn assert_complete_and_private(dir: &Path) {
+            for (name, body) in EMBEDDED_SCRIPTS {
+                assert_eq!(
+                    std::fs::read_to_string(dir.join(name)).ok().as_deref(),
+                    Some(body),
+                    "{name} must be materialized in {}",
+                    dir.display()
+                );
+            }
+            assert_eq!(
+                verify_private_dir(dir, effective_uid()),
+                Ok(()),
+                "the directory the engine runs from must itself pass the trust check"
+            );
+        }
+
+        #[test]
+        fn a_fresh_extraction_directory_is_private_and_ours() {
+            let base = tempfile::tempdir().expect("tmp");
+            let entry = materialize_into(base.path()).expect("materialize");
+            let dir = entry.parent().expect("parent");
+            assert_eq!(dir, extraction_dir(base.path(), effective_uid()));
+            // Exactly 0700, not merely "not writable by others": umask 022 would turn a
+            // missing mode into 0755, which the write-bit check alone accepts.
+            assert_eq!(
+                mode_of(dir),
+                0o700,
+                "created private, not left to the umask"
+            );
+            assert_eq!(std::fs::metadata(dir).expect("stat").uid(), effective_uid());
+            assert_complete_and_private(dir);
+        }
+
+        /// The normal single-user path keeps its cache: the second call finds the identical
+        /// scripts and rewrites nothing (a rename would change the inode).
+        #[test]
+        fn a_second_call_reuses_the_directory_and_rewrites_nothing() {
+            let base = tempfile::tempdir().expect("tmp");
+            let first = materialize_into(base.path()).expect("first");
+            let inodes = |dir: &Path| -> Vec<u64> {
+                EMBEDDED_SCRIPTS
+                    .iter()
+                    .map(|(n, _)| std::fs::metadata(dir.join(n)).expect("stat").ino())
+                    .collect()
+            };
+            let before = inodes(first.parent().unwrap());
+            let second = materialize_into(base.path()).expect("second");
+            assert_eq!(first, second, "same directory on reuse");
+            assert_eq!(
+                before,
+                inodes(second.parent().unwrap()),
+                "nothing rewritten"
+            );
+        }
+
+        /// CONTROL for the refusals below: a pre-existing directory that IS trustworthy is
+        /// reused, including one that others can read (the scripts are public). Without it the
+        /// refusals are indistinguishable from a function that refuses everything.
+        #[test]
+        fn a_trustworthy_preexisting_directory_is_reused() {
+            for mode in [0o700, 0o755, 0o750] {
+                let base = tempfile::tempdir().expect("tmp");
+                let pre = extraction_dir(base.path(), effective_uid());
+                std::fs::create_dir(&pre).expect("create");
+                std::fs::set_permissions(&pre, std::fs::Permissions::from_mode(mode))
+                    .expect("chmod");
+                let entry = materialize_into(base.path()).expect("materialize");
+                assert_eq!(
+                    entry.parent().unwrap(),
+                    pre,
+                    "a directory of mode {mode:o} owned by us must be reused"
+                );
+            }
+        }
+
+        #[test]
+        fn a_symlinked_extraction_directory_is_refused() {
+            let base = tempfile::tempdir().expect("tmp");
+            let elsewhere = base.path().join("elsewhere");
+            std::fs::create_dir(&elsewhere).expect("create");
+            std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o700))
+                .expect("chmod");
+            std::fs::write(elsewhere.join("json.py"), "raise ImportError('planted')\n")
+                .expect("plant");
+            let link = extraction_dir(base.path(), effective_uid());
+            symlink(&elsewhere, &link).expect("symlink");
+
+            let entry = materialize_into(base.path()).expect("falls back, not fails");
+            let dir = entry.parent().unwrap();
+            assert_ne!(dir, link, "the symlink must not be used");
+            assert!(
+                !dir.starts_with(&elsewhere),
+                "the entry must not live behind the link"
+            );
+            assert!(
+                script_names_in(&elsewhere).is_empty(),
+                "nothing may be written through the link; found {:?}",
+                script_names_in(&elsewhere)
+            );
+            assert_complete_and_private(dir);
+        }
+
+        /// A regular file squatting on the name is refused too.
+        #[test]
+        fn a_file_squatting_on_the_directory_name_is_refused() {
+            let base = tempfile::tempdir().expect("tmp");
+            let squat = extraction_dir(base.path(), effective_uid());
+            std::fs::write(&squat, "x").expect("squat");
+            let entry = materialize_into(base.path()).expect("falls back");
+            assert_ne!(entry.parent().unwrap(), squat);
+            assert_complete_and_private(entry.parent().unwrap());
+        }
+
+        /// One case per write bit, because the check is a mask and a mask can lose a bit
+        /// silently: a test using only 0777 passes with the mask narrowed to either bit alone.
+        #[test]
+        fn a_group_or_world_writable_directory_is_refused() {
+            for mode in [0o777, 0o770, 0o707, 0o720, 0o702] {
+                let base = tempfile::tempdir().expect("tmp");
+                let pre = extraction_dir(base.path(), effective_uid());
+                std::fs::create_dir(&pre).expect("create");
+                std::fs::set_permissions(&pre, std::fs::Permissions::from_mode(mode))
+                    .expect("chmod");
+                std::fs::write(pre.join("json.py"), "raise ImportError('planted')\n")
+                    .expect("plant");
+
+                let entry = materialize_into(base.path()).expect("falls back, not fails");
+                let dir = entry.parent().unwrap();
+                assert_ne!(dir, pre, "a directory of mode {mode:o} must be refused");
+                assert!(
+                    script_names_in(&pre).is_empty(),
+                    "mode {mode:o}: nothing may be written into the refused directory"
+                );
+                assert_complete_and_private(dir);
+            }
+        }
+
+        /// The owner predicate, driven through its seam. This process cannot create a directory
+        /// owned by ANOTHER uid (that needs root), so the comparison is exercised by claiming a
+        /// different expected uid against a directory we really own. What this does not show: a
+        /// directory that really belongs to someone else, end to end through `materialize_into`.
+        #[test]
+        fn a_directory_owned_by_another_uid_is_refused() {
+            let base = tempfile::tempdir().expect("tmp");
+            let dir = base.path().join("mine");
+            create_private_dir(&dir).expect("create");
+            let me = effective_uid();
+            assert_eq!(verify_private_dir(&dir, me), Ok(()));
+            assert_eq!(
+                verify_private_dir(&dir, me.wrapping_add(1)),
+                Err(DirRefusal::ForeignOwner {
+                    owner: me,
+                    expected: me.wrapping_add(1)
+                })
+            );
+        }
+
+        #[test]
+        fn the_verifier_names_what_it_refused() {
+            let base = tempfile::tempdir().expect("tmp");
+            let me = effective_uid();
+            let real = base.path().join("real");
+            create_private_dir(&real).expect("create");
+            let link = base.path().join("link");
+            symlink(&real, &link).expect("symlink");
+            assert_eq!(
+                verify_private_dir(&link, me),
+                Err(DirRefusal::NotARealDirectory)
+            );
+            let file = base.path().join("file");
+            std::fs::write(&file, "x").expect("file");
+            assert_eq!(
+                verify_private_dir(&file, me),
+                Err(DirRefusal::NotARealDirectory)
+            );
+            std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o770)).expect("chmod");
+            assert_eq!(
+                verify_private_dir(&real, me),
+                Err(DirRefusal::GroupOrOtherWritable { mode: 0o770 })
+            );
+        }
+
+        /// The fallback is a directory this process created, under a name nobody could predict
+        /// (`mkdtemp`), so there is nothing for an attacker to pre-create. It is reused while it
+        /// still verifies — one leaked directory per process, not one per failing command — and
+        /// replaced, not trusted, once it no longer does.
+        #[test]
+        fn the_fallback_directory_is_reused_while_valid_and_replaced_when_not() {
+            let base = tempfile::tempdir().expect("tmp");
+            let squat = extraction_dir(base.path(), effective_uid());
+            std::fs::write(&squat, "x").expect("squat");
+            let a = materialize_into(base.path()).expect("a");
+            let b = materialize_into(base.path()).expect("b");
+            assert_eq!(
+                a.parent(),
+                b.parent(),
+                "a valid fallback is reused, not leaked again"
+            );
+            assert_ne!(a.parent(), Some(squat.as_path()));
+            assert_eq!(mode_of(a.parent().unwrap()), 0o700);
+            // Invalidate it: the directory vanishes (a tmp cleaner) and the name is taken by a
+            // symlink to a directory of ours. The next call must not follow it.
+            let gone = a.parent().unwrap().to_path_buf();
+            let other = base.path().join("other");
+            std::fs::create_dir(&other).expect("other");
+            std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o700))
+                .expect("chmod");
+            std::fs::rename(&gone, base.path().join("aside")).expect("aside");
+            symlink(&other, &gone).expect("symlink");
+            let c = materialize_into(base.path()).expect("c");
+            assert_ne!(
+                c.parent(),
+                Some(gone.as_path()),
+                "a cached path is re-verified"
+            );
+            assert_ne!(c.parent(), Some(other.as_path()));
+            assert_complete_and_private(c.parent().unwrap());
+        }
+
+        /// A cached fallback belongs to the base it was made under. Two squatted bases alive at
+        /// once must each get a directory of their own, or a run could execute from a directory
+        /// outside the temp directory it was asked to use.
+        #[test]
+        fn a_fallback_is_never_reused_across_bases() {
+            let squatted = |base: &Path| {
+                std::fs::write(extraction_dir(base, effective_uid()), "x").expect("squat");
+            };
+            let one = tempfile::tempdir().expect("tmp");
+            let two = tempfile::tempdir().expect("tmp");
+            squatted(one.path());
+            squatted(two.path());
+            let a = materialize_into(one.path()).expect("a");
+            let b = materialize_into(two.path()).expect("b");
+            assert!(a.starts_with(one.path()), "{a:?}");
+            assert!(b.starts_with(two.path()), "{b:?}");
+            assert_ne!(a.parent(), b.parent());
+            // Each base keeps its own cached directory.
+            assert_eq!(materialize_into(one.path()).expect("a again"), a);
+            assert_eq!(materialize_into(two.path()).expect("b again"), b);
+        }
+
+        /// The directory is verified before EACH run, not once per process. Probe: use the
+        /// directory, move it aside (what `tmpreaper`, `systemd-tmpfiles` age cleanup or an
+        /// `rm -rf /tmp/codescout-*` does), and put something hostile at its name — a symlink to
+        /// a directory holding an `attribute-red.py` that prints `PWNED`, or a world-writable
+        /// directory holding the same. The run must neither execute it nor go silent: it falls
+        /// back and the engine still answers. Measured before the fix: a cached path ran the
+        /// symlink's script and returned `Some("PWNED")`.
+        #[tokio::test]
+        async fn a_directory_swapped_in_after_first_use_is_not_run() {
+            if !python3_present() {
+                eprintln!("skipping: python3 absent");
+                return;
+            }
+            let Some(repo) = dirty_fixture_repo() else {
+                eprintln!("skipping: git unavailable");
+                return;
+            };
+            let red = "error[E0425]: cannot find value `broken`\n  --> src/held.rs:1:13\n";
+            let env = AttributionEnv::default();
+            for variant in ["symlink", "world-writable"] {
+                let base = tempfile::tempdir().expect("tmp");
+                let first =
+                    wip_author_diagnostic_in(base.path(), 101, red, repo.path(), &env).await;
+                assert!(
+                    first.as_deref().is_some_and(|t| t.contains("src/held.rs")),
+                    "{variant}: precondition, the engine answers on a clean directory; got {first:?}"
+                );
+                let dir = extraction_dir(base.path(), effective_uid());
+                std::fs::rename(&dir, base.path().join("aside")).expect("move aside");
+
+                let marker = base.path().join("pwned-marker");
+                let evil = base.path().join("evil");
+                std::fs::create_dir(&evil).expect("evil dir");
+                std::fs::write(
+                    evil.join("attribute-red.py"),
+                    format!(
+                        "open({:?}, 'w').write('x')\nprint('PWNED')\n",
+                        marker.display().to_string()
+                    ),
+                )
+                .expect("evil script");
+                if variant == "symlink" {
+                    std::fs::set_permissions(&evil, std::fs::Permissions::from_mode(0o700))
+                        .expect("chmod");
+                    symlink(&evil, &dir).expect("symlink");
+                } else {
+                    std::fs::set_permissions(&evil, std::fs::Permissions::from_mode(0o777))
+                        .expect("chmod");
+                    std::fs::rename(&evil, &dir).expect("put it at the name");
+                }
+
+                let second =
+                    wip_author_diagnostic_in(base.path(), 101, red, repo.path(), &env).await;
+                assert!(
+                    !marker.exists(),
+                    "{variant}: the swapped-in script ran as the codescout user"
+                );
+                assert!(
+                    second.as_deref().is_some_and(|t| t.contains("src/held.rs")),
+                    "{variant}: the refusal must fall back, not go silent or run it; got {second:?}"
+                );
+            }
+        }
+
+        /// The fallback is verified like any other directory before it is used, and removed
+        /// again when it fails. Reached through the uid seam, because a `mkdtemp` directory
+        /// that this process just created at 0700 cannot fail the check any other way on a
+        /// filesystem that honours modes: without the seam, deleting the re-verification
+        /// SURVIVED the mutation set.
+        #[test]
+        fn a_fallback_that_fails_verification_is_refused_and_removed() {
+            let base = tempfile::tempdir().expect("tmp");
+            let me = effective_uid();
+            assert!(fresh_private_dir(base.path(), me.wrapping_add(1)).is_none());
+            let left: Vec<_> = std::fs::read_dir(base.path())
+                .expect("readable")
+                .filter_map(Result::ok)
+                .collect();
+            assert!(
+                left.is_empty(),
+                "a refused fallback must not be left behind"
+            );
+            // CONTROL: with the right uid the same call succeeds.
+            let ok = fresh_private_dir(base.path(), me).expect("control");
+            assert_eq!(verify_private_dir(&ok, me), Ok(()));
+        }
+
+        /// Two users of one shared `/tmp` must not contend for one name: a squatter would
+        /// otherwise push every other user's engine into the leaking fallback.
+        #[test]
+        fn the_directory_name_is_per_user() {
+            let base = Path::new("/base");
+            let me = effective_uid();
+            assert_ne!(
+                extraction_dir(base, me),
+                extraction_dir(base, me.wrapping_add(1))
+            );
+            assert!(
+                extraction_dir(base, 4242)
+                    .to_string_lossy()
+                    .contains("-4242-"),
+                "the uid is part of the name"
+            );
+        }
+
+        /// Parity with the `create_dir_all` this replaced: a base that does not exist yet is
+        /// created rather than failing the whole hint into silence.
+        #[test]
+        fn a_missing_base_directory_is_created() {
+            let root = tempfile::tempdir().expect("tmp");
+            let base = root.path().join("not").join("yet");
+            let entry = materialize_into(&base).expect("a missing base must not fail the hint");
+            assert_eq!(
+                entry.parent().unwrap(),
+                extraction_dir(&base, effective_uid())
             );
         }
     }
