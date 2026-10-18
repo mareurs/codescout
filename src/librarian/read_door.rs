@@ -359,10 +359,13 @@ mod tests {
     fn canon(p: &Path) -> PathBuf {
         std::fs::canonicalize(p).unwrap()
     }
+    /// A test's action between the door's open and its check (`read_verified`).
+    type Hook = Box<dyn Fn(&Path)>;
+
     std::thread_local! {
         /// A test's action between the door's open and its check (`read_verified`): the window a
         /// concurrent link swap would use.
-        static BETWEEN: std::cell::RefCell<Option<Box<dyn Fn(&Path)>>> =
+        static BETWEEN: std::cell::RefCell<Option<Hook>> =
             const { std::cell::RefCell::new(None) };
     }
 
