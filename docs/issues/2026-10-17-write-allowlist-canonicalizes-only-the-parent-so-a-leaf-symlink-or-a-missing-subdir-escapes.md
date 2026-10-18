@@ -146,6 +146,21 @@ and do not keep `.md` links that point outside the root in a repository that use
 
 ## Resume
 
+**Status 2026-10-18, on `experiments` `1b9c4dab7`.** Two statements below are out of date.
+
+- The `edit_file` deny-list disclosure is fixed by commit `38a492b4`: the leaf-link target is now run
+  through the read and write validators at the shared write resolvers (record:
+  `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md`,
+  status fixed; the in-root twin of that record is closed too). The fixing tests ran green on this tree.
+  The classifier question stays open: `classify_write_path_in` still answers allowed for
+  `<root>/leaf -> ~/.ssh/id_rsa`, and the refusal comes from the resolvers, not from the classifier.
+- The first follow-up bullet below (`validate_approve_path` accepts a directory above the home, such as
+  `/home`) is closed by `abbd3ec8` and `0d205e1f`: `approve_write` now refuses a filesystem root, a
+  home and any ancestor of one, and a path with an unresolved `..`
+  (`docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md`,
+  `docs/issues/2026-10-17-approve-write-accepts-an-unresolved-dotdot-that-collapses-onto-the-home.md`).
+  The full gate ran both commits' tests green on the landing tree (cfa24995); this session did not re-run that bullet's `/home` shape by hand.
+
 Shape 1: measured 2026-10-17. `edit_file`, `create_file` (overwrite) and `edit_code` do not write through a leaf
 link (they reach `atomic_write`). Severity stays medium on the strength of the `edit_file` deny-list case alone,
 which is a classifier question and so belongs here. Two further behaviours escaped but are NOT classifier

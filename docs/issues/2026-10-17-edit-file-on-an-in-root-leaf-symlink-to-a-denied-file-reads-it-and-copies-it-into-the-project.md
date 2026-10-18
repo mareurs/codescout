@@ -1,14 +1,14 @@
 ---
-status: open
+status: fixed
 opened: 2026-10-17
-closed:
+closed: 2026-10-18
 severity: high
 owner: marius
 related: [docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md, docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md, docs/issues/2026-10-17-write-allowlist-home-and-tmpdir-gaps.md]
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'The librarian write sites were read and std::fs::write was measured to follow a leaf symlink, but no librarian tool was driven against a leaf symlink. edit_code and create_file with overwrite were not run against one. Only a decoy file under a fixture HOME was read, never a real credential.'
+unverified: Fix verified by running the fixing tests on experiments 1b9c4dab7 (12 passed), not by re-running this issue's own probe patch. The classifier in path_security.rs still answers allowed for a leaf link to a denied file; the fix refuses at the write resolvers. edit_code rename wiring is not integration-tested (survived a mutation in the fixing branch). Unix only. The librarian write sites were not re-measured by this session.
 ---
 
 # BUG: `edit_file` on an in-root leaf symlink to a deny-listed file reads the file, and `insert` copies it into the project where `read_file` returns it
@@ -25,13 +25,12 @@ the decoy's content, which `read_file` then returned. `read_file` on the link it
 victim file is not modified. This is a READ of a deny-listed file; the write side of the same leaf
 shape is in the related issue, which is owned by another session and is not touched here.
 
-**Ownership and status.** Owned elsewhere, fix pending: another session owns the leaf-symlink
-fix, and this branch deliberately does not touch it. The peer session filed a duplicate of this
-issue on its own branch (`79de60eb`):
+**Ownership and status.** Fixed on `experiments` by the peer session's commit `38a492b4`, merged in
+`1b9c4dab7`. The peer filed its own record of the same bug:
 `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md`.
-To be unified at merge: this file is the one kept (its probe drives the real tools against a decoy
-under a fixture `HOME` and also measures the not-found echo, `std::fs::write` through a link and the
-librarian write sites); the peer's file becomes the duplicate. Status stays open.
+That file holds the fix, its tests and its mutation table. This file keeps the original measurements
+(the probe output, the not-found echo, `std::fs::write` through a link, the librarian write sites)
+and points at that record. Closed 2026-10-18 after the check under Tests added.
 
 ## Class fit
 
@@ -115,12 +114,24 @@ first was not traced.
 
 ## Fix
 
-Not applied: the leaf-symlink work belongs to another session. Nothing is proposed beyond the
-measurements above.
+Fixed by the peer session, commit `38a492b4` (see its issue file named in the Summary for the
+design: the link target is run through the existing validators at the two shared write resolvers,
+`write_ack::resolve_write_or_capture` and `fs::resolve_write_path_for`). It does not change
+`src/util/path_security.rs`: `classify_write_path_in` still answers allowed for
+`<root>/leaf -> ~/.ssh/id_rsa`, and the refusal comes from the resolvers. Nothing was applied by
+the session that filed this issue.
 
 ## Tests added
 
-N/A. Not fixed. The throwaway probe was removed from the tree.
+None added by this issue's session. Checked 2026-10-18 on `experiments` `1b9c4dab7` (worktree, own
+target slot): `scripts/with-slot.sh cargo test --lib -- leaf_link leaf_link_probe` gave
+`test result: ok. 12 passed; 0 failed; 2 ignored`. The ignored two are subprocess helpers that the
+parent tests run with a fake `$HOME`. The tests that cover this issue's shapes:
+`edit_file_on_a_leaf_link_to_a_readable_deny_listed_file_leaks_and_copies_nothing` (edit_file single,
+batch and insert, and `create_file`, absolute and relative link) and
+`a_leaf_link_to_a_deny_listed_file_is_refused_under_both_policies_in_both_spellings`. This issue's own
+probe (`port/leaf-probe.patch`) was NOT re-run against the fix. Mutation results are in the peer's
+issue file; this session did not repeat them.
 
 ## Workarounds
 
@@ -129,12 +140,11 @@ project root.
 
 ## Resume
 
-Owned elsewhere, fix pending (see the Summary): the leaf-symlink fix belongs to the peer session.
-When it lands, re-run the probe described under Reproduction against it; at merge unify this file with the peer's
-duplicate named in the Summary, keeping this one. Meanwhile: decide with the owner of the
-leaf-symlink work whether the classifier or the readers close this,
-and measure the librarian write sites and `create_file`/`edit_code` against a leaf link before
-choosing.
+Closed. Open residuals, all recorded in the peer's issue file: the classifier itself still answers
+allowed for a leaf link to a denied file (the fix is at the resolvers), and the `edit_code` rename
+wiring is not integration-tested. The librarian write sites listed under Evidence were not
+re-measured by this session; the librarian symlink confinement branch that landed with the fix
+carries its own tests, which ran green in the same filter above.
 
 ## References
 
