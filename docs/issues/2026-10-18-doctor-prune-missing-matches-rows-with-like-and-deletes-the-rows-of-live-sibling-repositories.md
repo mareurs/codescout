@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-doc-update-writes-through-a-catalogued-symlink-
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'The same LIKE-is-case-insensitive class remains at other call sites that were NOT changed: catalog/gc.rs (detect_move_candidates, plan_rehome, rehome_commits), catalog/artifact.rs delete_orphan_repos, catalog/augmentation.rs resolve_cite_ref and list_stale, indexer.rs backfill_chunk_vectors_with. They use ESCAPE (wildcards are literal) but not an exact compare, so a case-only sibling is still matched; reachability and blast radius of each was not measured.'
+unverified: 'Other LIKE call sites are NOT fixed here and are listed accurately in docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md (list_stale, delete_orphan_repos, resolve_cite_ref, backfill_chunk_vectors_with); merge_worktree was fixed in its own issue.'
 ---
 
 # BUG: `librarian(doctor, fix=prune_missing)` matches rows with `LIKE` and no `ESCAPE`, so pruning a dead root deletes the rows of live repositories whose path differs only by case or by a `_`/`%` position
@@ -60,7 +60,7 @@ showed the same.
 
 ## Fix
 
-Commit `a6a293c0` (patch-id `a6a293c00d255ecfab8880b41a1914116edc6722`). `util::path_at_or_under_sql(col, root_param, prefix_param)` builds
+Commit `a6a293c0` (patch-id `934f4d7b7dd4989f5229131d7077fae67fa1da36`). `util::path_at_or_under_sql(col, root_param, prefix_param)` builds
 `(col = ?root OR substr(col, 1, length(?prefix)) = ?prefix)`, byte-exact, with `_`, `%` and `'` literal; `prune_dead_root`
 and `count_dead_root` use it for both tables, and the indexer's reclaim and vectorless count too. A Linux unit test runs the
 helper on Windows-shaped strings (`//?/C:/...`).

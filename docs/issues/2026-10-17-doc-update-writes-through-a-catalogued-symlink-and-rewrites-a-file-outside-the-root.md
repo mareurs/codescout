@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-the-librarian-applies-no-read-deny-list-to-a-ca
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'Parent-directory forms reproduced and fixed through round 4; the write door judges against the deeper of the managed base and the spelled repository. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). A path with no managed root, no .git above it and no ancestor resolving to a managed root gets only the leaf rule. Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue; the remaining LIKE call sites are listed in the doctor-prune issue.'
+unverified: 'Parent-directory forms reproduced and fixed through round 5; the write door judges by one stated invariant (docs: Round 5) and every layout found so far is a row of door_layout_table. Same-class sites NOT fixed: src/librarian/catalog/audit/shard.rs OpenOptions append, and src/tools/onboarding.rs raw fs::write (project.toml, workspace.toml, and .codescout/tmp/*, which is inside the repo; reachability read from the code, not run). edit_code rename wiring is untested (no mock-LSP harness). A path with no managed root, no .git above it and no ancestor resolving to a managed root gets only the leaf rule. A foreign link to the managed root itself is admitted (row H2, by decision). Checks and writes are separate syscalls, so a link planted between them still wins. P8, the librarian applying no READ deny-list, is its own issue; the remaining LIKE call sites are listed in docs/issues/2026-10-18-the-remaining-like-prefix-sites-are-case-folded-or-unbounded-and-none-is-destructive-today.md.'
 ---
 
 # BUG: `doc(update)` writes with `std::fs::write(row.abs_path)`, so a catalogued in-root symlink to a file outside the root has that file rewritten
@@ -248,7 +248,7 @@ and its removal is killed by a test.
 
 ## Round 4 (Opus review of `7a7bfc9b`): the door's two wrong answers, an exact path compare, and arming scoped to the call
 
-Commits `a6a293c0` (patch-id `a6a293c00d255ecfab8880b41a1914116edc6722`) and `c8108ca0` (`c8108ca095d314a52fbbae03c944ce6b6cf32413`, a test fix
+Commits `a6a293c0` (patch-id `934f4d7b7dd4989f5229131d7077fae67fa1da36`) and `c8108ca0` (`208f7cbf040b67669f0b20af71222e162f327595`, a test fix
 found by the mutation probe). Every behavioural item was reproduced red first (`link_dir_tests.rs`, `doctor.rs`; 11 tests red before the
 fix). The others are pins that were green from the start, said plainly: the P1 control, P4 (round 3 already fixed it), the absolute-link move
 (P7), the events-only-history keep (M-A), the vanished-row-below-an-escaping-parent case, and the tool-level reindex response test (M-B,
@@ -260,7 +260,9 @@ the keys existed; nothing pinned them).
   only admit, and the spelled walk skips both links and finds no `.git`, so nothing was checked and the write landed outside every
   managed root. *P1/P2:* with a legacy umbrella root (or an unrelated active project listed first) the first containing managed root
   was the umbrella, and a link from repository A into repository B stayed "inside" it; the shortcut also admitted a FOREIGN
-  repository's row that resolves into the managed project. `refuse_catalogued_path_outside_repo` now judges against the DEEPER of (a) the
+  repository's row that resolves into the managed project. (**Superseded by round 5**: the "deeper of two" rule below reopened a round-3
+  refusal, and its refinement is now accepted only if reached from the confinement root without crossing a link.)
+  `refuse_catalogued_path_outside_repo` now judges against the DEEPER of (a) the
   *base* (the first managed root that lexically contains the spelling, else the deepest ancestor of the spelling that resolves to a
   managed root exactly) and (b) the *spelled repository* (nearest non-link ancestor with a `.git`), and the "resolution lies under some
   managed root, so accept" shortcut is gone. Controls: a link that stays inside its own repository, and the owning project active, still
@@ -301,6 +303,130 @@ the indexer's placeholder offset; the guard's clear; `sidecar_write_through`'s o
 handling; `rekey_prefix`'s preflight; the graft naming in the note. **Survived:** none left; one (the guard's clear) survived on the first
 fixture and was killed after it was rebuilt. **Not probed, equivalent by construction:** `ancestors().skip(1)` in
 `ancestor_resolving_to_managed_root` (a file path cannot canonicalize to a directory root).
+
+## Round 5 (Opus review of `e51d2d99`): the door fixed to a stated invariant, and a permanent layout table
+
+Commit `0b187952` (patch-id `5e48b25e9e01f0ccb1e18c0a878f8d4b880333eb`), and the follow-up commit that adds table rows K1/K2, the
+non-dry merge pin and these docs (its patch-id is in the report). This is the last round for the door: it is now one function with
+one stated invariant, and every layout any round has found is a row of a table test (`door_table::door_layout_table` in
+`link_dir_tests.rs`), so a fifth change that breaks an answer is red there.
+
+**The invariant (`util::door_root`).** *The judging root is reachable from the confinement root without crossing a symbolic link;
+when no such inner root exists the confinement root itself is used.*
+
+- The **confinement root** is the FIRST managed root, in the caller's order, that lexically contains the spelling or has an ancestor of
+  the spelling that resolves to it exactly (then the SHALLOWEST such ancestor). One loop for both clauses, so two spellings of a file give
+  one verdict (round 4 took any managed root for the resolving clause and the first lexical match for the other, so `home/proj/tom2` and
+  `data/proj/tom2` disagreed: C5/C5b/C5c/C5d).
+- The **refinement** is the nearest ancestor of the spelling that holds a `.git` (directory or file) and is reached from the confinement root
+  by plain directories. Round 4's rule picked the nearest `.git` ancestor that was not itself a link, and a repository found BELOW a link
+  (`P/up -> ..`, row `P/up/S/docs/x.md`) is whatever the link points at: the write was judged against `S`, looked inside, and landed in
+  `S`. The round-3 behaviour (refuse) was lost to the "deeper of two roots" rule; this restores it without losing P3, P1 or P2.
+- With no confinement root the outermost repository on the spelling is the anchor and the same clause applies; with no repository either,
+  only the leaf rule applies.
+- **One function for every verb.** `doc(update)` and the other writers reach `door_root` through `write_catalogued_file`; `doc(move)`
+  judges its destination before the rename (so the id repair that follows cannot be refused after the file has moved: the half-done move
+  of probe MV7) and its source parent, and `doc(delete)` its parent, through `refuse_catalogued_dir_outside_repo`. The table runs every
+  row through both the file door and the directory door and requires them to agree.
+
+**What each finding became.**
+
+- **H-1:** rows A2, A3, A4, B1, B2, G3 and C4 are REFUSE again (the reviewer measured them ADMIT at `e51d2d99`); `B2` (`P/rootlink -> /`)
+  no longer admits a write into any checkout on the machine. Test `a_link_to_the_parent_cannot_reach_a_sibling_repository_through_any_verb`
+  runs B1 through update, delete and move.
+- **M-1:** `doc(move)` into a nested repository's link back to the superproject now refuses up front, with nothing moved; the message after
+  the rename (reachable only if the filesystem changes after the check) no longer says "Nothing was changed" and says the file WAS renamed.
+- **M-2:** a dangling link (relative or absolute target) is refused up front. Round 4's loosened landing check had let a dangling
+  relative link move, and the id repair then failed with ENOENT after the rename.
+- **M-3:** see the confinement root above; C5, C5b, C5c, C5d, and C8 (two resolving ancestors) pin it.
+- **M-4:** `merge_worktree` selection, abandon `DELETE` and dry run are exact (own issue, below). The non-abandon path was probed: the
+  selection included the sibling, but `reseat_one` skips it, so it is not harmful (a pin, not a defect).
+- **L-1:** patch-ids corrected in both round-4 issue files (round 4 had cited the commit hash as the patch-id).
+- **L-2:** the write-roots guard is a stack of arms; a dropped guard removes its own entry only, the newest live arm's roots are in force,
+  and an overlapping or out-of-order drop neither clears nor resurrects another arm. `arm_write_roots`' doc no longer claims the lock is
+  held for the whole call (`doc(augment)` releases and re-takes it; each arm is its own guard).
+- **L-3:** `rekey_prefix` preview now agrees with apply on a declared sidecar that is a dangling in-repo link
+  (`preflight_write_through` tests `is_file()`, as `write_through` does). The doc at the preview/apply split says an Ok preview does NOT
+  promise the apply clears a refusal of the ledger BODY (the body door runs only on apply).
+- **L-4:** decided and recorded, not changed: a FOREIGN link to the managed root itself (`Q/linkP -> P`, row H2) is ADMITTED, because it
+  is the same input as a project registered canonically and reached through a link (`home/proj -> data/proj`, row C1); one cannot be
+  refused without the other. A foreign link to a SUBDIRECTORY of the root (H1) is refused. The door's doc comment now says so (round 4's
+  said a foreign link "names no root", which holds only for subdirectories).
+- **L-5:** `doctor(fix=prune_missing, root="/gone/x/")` no longer prunes zero rows silently: `util::root_and_prefix` strips the
+  trailing separator for the prune, its dry run, the indexer and `merge_worktree`.
+- **L-6:** F2 and F4 (a nested repository or submodule linking into its superproject inside the managed root) stay REFUSED by the
+  door, by the author's stated choice; with the shared door, `doc(move)` and `doc(delete)` now refuse them too, so the three verbs agree.
+- Mutation gaps closed: the `length(CAST(.. AS BLOB))` mutant (a non-ASCII root test) and the `CurDir => pop` mutant (a `./real.md` target).
+  The `skip(1)` to `skip(0)` mutant stays alive and is **equivalent**: the path itself differs from its ancestors only when it is a
+  link resolving exactly to a managed root, which the write door's leaf rule refuses first and which no other verb passes (move and delete
+  probe a nonexistent child). Said in the code.
+
+**The table (every row, with its committed verdict).** ADMIT = the door accepts. The file door and the directory door must agree on every row.
+
+| row | layout | verdict |
+|---|---|---|
+| A1 | umbrella U{A,B}, unrelated C active, `A/linkdir -> B/docs` | REFUSE |
+| A2 | A active, `A/up -> U` (absolute), row `A/up/B/docs/x.md` | REFUSE |
+| A3 | C active, same row as A2 | REFUSE |
+| A4 | A active, `A/up2 -> ..` (relative), row `A/up2/B/docs/x.md` | REFUSE |
+| A5 | control, `A/inlink -> A/real` | ADMIT |
+| A6 | control, plain row, C active | ADMIT |
+| B1 | P active, `P/up -> W`, row `P/up/S/docs/x.md` (S a sibling repo) | REFUSE |
+| B2 | P active, `P/rootlink -> /`, row reaching sibling repo S | REFUSE |
+| C1 | canonical P, plain row via `home/proj` | ADMIT |
+| C2 | canonical P, outward linkdir via `home/proj` | REFUSE |
+| C3 | canonical P, in-repo link via `home/proj` | ADMIT |
+| C4 | canonical P, `P/up -> data`, row via `home/proj/up/other` (sibling repo) | REFUSE |
+| C5 | canonical P then m2, `P/tom2 -> m2`, spelled `home/proj/tom2` | REFUSE |
+| C5b | same, spelled `data/proj/tom2` | REFUSE |
+| C5c | m2 listed FIRST, spelled `home/proj/tom2` (the root is m2) | ADMIT |
+| C5d | m2 listed FIRST, spelled `data/proj/tom2` (same verdict as C5c) | ADMIT |
+| C8 | two resolving ancestors (`home/proj`, `home/proj/self`); nested repo behind the extra link | ADMIT |
+| C9 | same nested repo reached without the extra link: its link back into P | REFUSE |
+| C9b | same, canonical spelling | REFUSE |
+| C6 | `home/.git` above the link, plain row via `home/proj` | ADMIT |
+| C7 | `home/.git` above the link, outward linkdir | REFUSE |
+| D1 | `home/.git`, project p without `.git`, plain | ADMIT |
+| D2 | home is the first root, `p/tohome -> home/other` (inside home) | ADMIT |
+| D2b | only p managed, same link (outside p) | REFUSE |
+| D3 | `home/.git`, `p/linkdir -> outside` | REFUSE |
+| E1 | managed root is itself a link, row spelled through it | ADMIT |
+| E2 | same, row canonical | ADMIT |
+| E3 | same, outward link, spelled through it | REFUSE |
+| E4 | same, outward link, canonical | REFUSE |
+| F1 | nested repo, plain | ADMIT |
+| F2 | nested repo linking into its superproject (inside the managed root): refused by choice | REFUSE |
+| F3 | submodule (`.git` file), plain | ADMIT |
+| F4 | submodule linking into its superproject: refused by choice | REFUSE |
+| F5 | superproject link into the nested repo's docs | ADMIT |
+| F6 | linked-worktree root (`.git` file), in-repo link | ADMIT |
+| F7 | linked-worktree root, outward link | REFUSE |
+| G1 | project without `.git`, plain | ADMIT |
+| G2 | project without `.git`, outward link | REFUSE |
+| G3 | project without `.git`, `P/up -> parent`, row `P/up/S2/x.md` (S2 a repo) | REFUSE |
+| H1 | foreign Q, `Q/linkdocs -> P/docs` (a subdirectory of the managed root) | REFUSE |
+| H2 | foreign Q, `Q/linkP -> P` (the managed root itself): decided, ambiguous with C1 | ADMIT |
+| J1 | foreign Q, `Q/up -> ..`, row `Q/up/S/docs/x.md` (S a sibling repo) | REFUSE |
+| J2 | foreign Q, plain row | ADMIT |
+| K1 | managed root directory gone, row below it | ADMIT |
+| K2 | managed root directory gone, an unresolvable `..` below it | REFUSE |
+
+(`I1`, a leaf link inside the repo, is the leaf rule and is covered by `link_write_tests.rs`, not by the door.)
+
+**Decisions of rounds 2-4 that changed:** round 4's "deeper of two roots" selection (the nearest `.git` ancestor not itself a link) is replaced
+by the invariant above; round 4's "deepest ancestor resolving to ANY managed root" is replaced by first-root-in-order, shallowest ancestor;
+`doc(move)` and `doc(delete)` no longer judge against the first containing managed root alone (they use the door), so F2/F4-shaped rows now
+refuse there too; round 4's allowance of a dangling relative link in `doc(move)` is reversed (refused up front, as in round 3). Unchanged:
+refuse any leaf link, reclaim keeps rows with history, one root for the walk, F2/F4 refused by the author's choice, H2 admitted.
+
+**Mutation probe, round 5** (61-567 tests per run): killed: the missing descent check (so the table, B1 end to end and four older tests); the shallowest
+ancestor replaced by the deepest; the no-root anchor replaced by the nearest repository; the lexical clause removed (K2); the resolving
+clause removed; the `strip_prefix` guard flipped; `./` popping; the byte-length `length()`; the trailing-separator trim; the dangling-link
+refusal; `doc(move)`'s destination door replaced by the old managed-root check; `doc(move)`'s source check; `doc(delete)`'s check; the
+guard clearing everything instead of its own arm; the guard taking the oldest arm; the preview's sidecar test widened back to `exists()`;
+`merge_worktree`'s exact predicate replaced by `LIKE`. **Survived:** `skip(1)` to `skip(0)` (equivalent, above); the first run of the lexical
+clause (a layout with an existing root cannot tell it from the resolving clause), killed after row K2 was added. **Not covered by a test:** the
+text of the error after a half-done rename (unreachable once the door runs first).
 
 ## Tests added
 
