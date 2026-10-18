@@ -53,7 +53,7 @@ None needed.
 
 ## Fix
 
-Fixed 2026-10-18 on `fix/small-items-2026-10-18` at `1f673f644`, patch-id `c7f84f3c6ad3395c43a3117a3128421f9a62f18f` (not yet on `experiments`).
+Fixed 2026-10-18 on `fix/small-items-2026-10-18` at `1f673f644`, patch-id `c7f84f3c6ad3395c43a3117a3128421f9a62f18f`, plus `6a94fb1fb` (an import in `engines/emitters.rs` the change left unused, found by the gate's clippy lane). Not yet on `experiments`.
 
 Every block codescout appends BEHIND a tool's answer is now built through one constructor, `trailing_block` (`src/tools/core/guide_emit.rs`), which puts a newline at the head of the text (idempotent: a block that already opens with one is left alone). The sites that were glued, each measured red first (the seam check named the block and the line it followed):
 
@@ -72,7 +72,7 @@ Why a newline at the head of the block and not a separator in the client: the se
 
 Measured on the wire, same call before and after (`symbols name=guide_block include_body=true`, `mcp call`, project = this worktree): before, `      }<!-- auto-injected get_guide('project-activation-bootstrap') ...` and `sed "/get_guide('project-activation-bootstrap')/,\$d"` kept `(out, shape)` as the last line (the function's closing `}` was lost); after, the marker is on line 148 by itself and the same `sed` keeps `      }`.
 
-Byte pins moved, not loosened: `a_non_declaring_topic_is_byte_identical_to_today` (expected text gains the leading `\n`, the rest still pinned byte for byte) and `operator_rules_delivers_a_matching_rule_once_then_dedups` (strips the leading `\n` before splitting the wrapper from the imperative). The emission byte ceiling (`a_p50_session_stays_under_the_committed_emission_byte_ceiling`) and `MAX_AUTO_INJECT_GUIDE_BYTES` were not touched; the whole `cargo test --lib` stayed green with them as they were. The auto-inject bound is measured on the block INCLUDING the new byte, so it is one byte tighter on the body, which no shipped guide is near (largest whole guide ~14.7 KB of 16 KiB).
+Byte pins moved, not loosened: `a_non_declaring_topic_is_byte_identical_to_today` (expected text gains the leading `\n`, the rest still pinned byte for byte) and `operator_rules_delivers_a_matching_rule_once_then_dedups` (strips the leading `\n` before splitting the wrapper from the imperative). The emission byte ceiling (`a_p50_session_stays_under_the_committed_emission_byte_ceiling`) and `MAX_AUTO_INJECT_GUIDE_BYTES` were not touched; whole-suite `cargo test --lib` runs stayed green with them as they were (three runs fully green; one run had three load-sensitive failures that pass in isolation: two are the open `2026-10-17-two-subagent-notice-guide-hint-tests-flake-under-build-load.md`, one is filed as `2026-10-18-append-entry-concurrency-test-failed-once-with-database-is-locked-in-catalog-open.md`). The auto-inject bound is measured on the block INCLUDING the new byte, so it is one byte tighter on the body, which no shipped guide is near (largest whole guide ~14.7 KB of 16 KiB).
 
 ## Tests added
 
