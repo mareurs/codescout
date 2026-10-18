@@ -962,8 +962,82 @@ mod tests {
         "File::open(",
         "OpenOptions::new(",
         "tokio::fs::read",
-        "use std::fs::read",
+        "File::options(",
+        "io::read_to_string(",
     ];
+
+    /// Raw content reads per line of LEXED production code (`production_code`): how many each line
+    /// holds. The one definition of "a raw read" the gate counts.
+    fn read_counts(code: &str) -> Vec<usize> {
+        let mut counts: Vec<usize> = code
+            .lines()
+            .map(|line| RAW_READS.iter().map(|p| line.matches(p).count()).sum())
+            .collect();
+        // Imports, which a bare call later uses without any of the patterns above. Each `use` item
+        // (to its `;`, across lines) is one count on the line it starts, when it brings in a
+        // reading function or type, or aliases the module. Fail closed: `*` and `as` count.
+        let bytes = code.as_bytes();
+        let mut i = 0;
+        while let Some(off) = code[i..].find("use ") {
+            let at = i + off;
+            i = at + 4;
+            let boundary =
+                at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
+            if !boundary {
+                continue;
+            }
+            let Some(end) = code[at..].find(';') else {
+                break;
+            };
+            let item: String = code[at + 4..at + end]
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            let item = item.trim_start_matches("::");
+            // A grouped root import (`use std::{fs::File, io}`) names the module inside braces:
+            // judged on all its tokens together, which over-counts rather than misses.
+            let grouped = item.starts_with("std::{") || item.starts_with("tokio::{");
+            let (fs, io) = (
+                item.starts_with("std::fs") || item.starts_with("tokio::fs") || grouped,
+                item.starts_with("std::io") || grouped,
+            );
+            if !fs && !io {
+                continue;
+            }
+            // Tokens from the item AS WRITTEN (whitespace kept), so `std::fs as f` yields `as`.
+            let tokens: Vec<&str> = code[at + 4..at + end]
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '*'))
+                .filter(|t| !t.is_empty())
+                .collect();
+            let reads = if grouped {
+                tokens.iter().any(|t| {
+                    matches!(
+                        *t,
+                        "read" | "read_to_string" | "File" | "OpenOptions" | "*" | "as"
+                    )
+                }) || (item.starts_with("tokio::{") && tokens.contains(&"fs"))
+            } else if fs {
+                item.starts_with("tokio::fs")
+                    || tokens.iter().any(|t| {
+                        matches!(
+                            *t,
+                            "read" | "read_to_string" | "File" | "OpenOptions" | "*" | "as"
+                        )
+                    })
+            } else {
+                tokens
+                    .iter()
+                    .any(|t| matches!(*t, "read_to_string" | "*" | "as"))
+            };
+            if reads {
+                let line = code[..at].matches('\n').count();
+                if let Some(c) = counts.get_mut(line) {
+                    *c += 1;
+                }
+            }
+        }
+        counts
+    }
 
     /// Every production read of file content in `src/librarian` goes through this module. A raw
     /// read added anywhere else, or a second one in a file the allow-list names, turns this red;
@@ -1007,10 +1081,9 @@ mod tests {
                 .replace('\\', "/");
             let src = std::fs::read_to_string(f).unwrap();
             let (code, _) = production_code(&src);
-            for (n, line) in code.lines().enumerate() {
-                // Every OCCURRENCE counts, not every line: a second raw read appended to an
-                // allowed line is a second read.
-                let occurrences: usize = RAW_READS.iter().map(|p| line.matches(p).count()).sum();
+            // Every OCCURRENCE counts, not every line: a second raw read appended to an allowed
+            // line is a second read.
+            for (n, occurrences) in read_counts(&code).into_iter().enumerate() {
                 if occurrences == 0 {
                     continue;
                 }
@@ -1076,13 +1149,58 @@ mod declared_tests;
 fn after() -> &'static str { std::fs::File::open(q); "" }
 "##;
         let (code, mods) = production_code(src);
-        let hit: Vec<usize> = code
-            .lines()
+        let hit: Vec<usize> = read_counts(&code)
+            .into_iter()
             .enumerate()
-            .filter(|(_, l)| RAW_READS.iter().any(|p| l.contains(p)))
+            .filter(|(_, n)| *n > 0)
             .map(|(i, _)| i)
             .collect();
         assert_eq!(hit, vec![1, 9], "{code}");
         assert_eq!(mods, vec!["declared_tests".to_string()]);
+    }
+
+    /// Review round 1, F5: equivalent spellings of a content read, each of which the gate must
+    /// count. An import of a reading function or type is counted where it is imported (the bare
+    /// call it enables cannot be told from any other function of that name), and so is every
+    /// `.open(` on `File::options()`.
+    #[test]
+    fn the_gate_sees_every_spelling_of_a_content_read() {
+        let probes = [
+            "fn a() { let f = std::fs::File::options().read(true).open(p); }",
+            "use std::fs::{read_to_string};",
+            "use std::fs::{self, read};",
+            "use std::fs::File;",
+            "use std::fs::{File, OpenOptions};",
+            "use std::fs::OpenOptions;",
+            "use std::fs::*;",
+            "fn c() { let s = std::io::read_to_string(f); }",
+            "use std::io::read_to_string;",
+            "use std::io::{self, read_to_string};",
+            "use tokio::fs;",
+            "use std::fs::{\n    read_to_string,\n};",
+            "use std::{fs::read_to_string, io};",
+            "use std::{fs::File, io::Read};",
+            "use std::fs as f;",
+        ];
+        for probe in probes {
+            let probe = probe.replace("\\n", "\n");
+            let (code, _) = production_code(&probe);
+            let n: usize = read_counts(&code).iter().sum();
+            assert!(n > 0, "the gate does not count `{probe}` as a read");
+        }
+        // Controls: what is NOT a content read.
+        for clean in [
+            "use std::fs;",
+            "use std::fs::{self, read_dir};",
+            "use std::io::Read;",
+            "use std::{fs, io::Read};",
+            "use std::io::{self, Write};",
+            "fn reuse() {}",
+            "fn d() { std::fs::read_dir(p); std::fs::metadata(p); }",
+        ] {
+            let (code, _) = production_code(clean);
+            let n: usize = read_counts(&code).iter().sum();
+            assert_eq!(n, 0, "`{clean}` is not a content read");
+        }
     }
 }
