@@ -30,6 +30,13 @@ use crate::tools::RecoverableError;
 // cap-class: NOT_A_CAP — ring-buffer capacity for server stderr used to detect fatal init conditions; diagnostic state, never part of a tool result
 const MAX_STDERR_LINES: usize = 200;
 
+/// Longest [`LspClient::connect`] waits for a mux to send its init message after accepting the
+/// connection. A mux writes it as soon as it accepts, so a socket still silent after this long is
+/// accepting but not serving; the caller of [`LspClient::connect_with_init_timeout`] may pick a
+/// shorter bound.
+// cap-class: NOT_A_CAP — bound on a wait for a peer's first message; expiry surfaces as a connect error, never as a shorter answer
+pub(crate) const MUX_INIT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 use super::call_hierarchy::supports_call_hierarchy;
 
 /// Convert an LSP URI to a filesystem path.
@@ -655,11 +662,28 @@ impl LspClient {
     ///
     /// The mux sends a JSON init message immediately on connect containing
     /// the cached `InitializeResult`. This client does NOT perform the LSP
-    /// initialize handshake.
+    /// initialize handshake. The wait for that message is bounded by
+    /// [`MUX_INIT_READ_TIMEOUT`]; use [`Self::connect_with_init_timeout`] to bound it by a
+    /// caller's remaining window instead.
     #[cfg(unix)]
     pub async fn connect(
         socket_path: &std::path::Path,
         workspace_root: std::path::PathBuf,
+    ) -> Result<Self> {
+        Self::connect_with_init_timeout(socket_path, workspace_root, MUX_INIT_READ_TIMEOUT).await
+    }
+
+    /// [`Self::connect`] with the wait for the mux's init message bounded by `init_timeout`.
+    ///
+    /// A socket that accepts the connection and then says nothing (a mux wedged after `bind`)
+    /// makes this return an error once `init_timeout` has passed. The error path returns before
+    /// the reader task is spawned, so nothing outlives the call: the stream's halves are dropped
+    /// and the connection closes.
+    #[cfg(unix)]
+    pub async fn connect_with_init_timeout(
+        socket_path: &std::path::Path,
+        workspace_root: std::path::PathBuf,
+        init_timeout: std::time::Duration,
     ) -> Result<Self> {
         use tokio::net::UnixStream;
 
@@ -677,8 +701,15 @@ impl LspClient {
         // Read init message from the mux — contains the cached InitializeResult
         // so we skip the full LSP handshake.
         let mut buf_reader = BufReader::new(read_half);
-        let init_msg = transport::read_message(&mut buf_reader)
+        let init_msg = tokio::time::timeout(init_timeout, transport::read_message(&mut buf_reader))
             .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "mux accepted the connection at {:?} but sent no init message within {:?}",
+                    socket_path,
+                    init_timeout
+                )
+            })?
             .context("Failed to read mux init message")?;
 
         let capabilities = if let Some(result) = init_msg.get("result") {
@@ -3587,6 +3618,70 @@ struct Point {
             err_msg.contains("Failed to connect to mux socket"),
             "error should mention mux socket, got: {}",
             err_msg
+        );
+    }
+
+    /// `LspClient::connect` used to read the mux's init message with no bound, so a socket that
+    /// accepted and said nothing held it forever. Its own bound is `MUX_INIT_READ_TIMEOUT`
+    /// (5 s). Real clock (a paused clock jumps over real socket I/O): the call takes at least the
+    /// bound and under 8 s; the outer 20 s bound only makes the pre-fix hang fail the test.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_gives_up_on_a_silent_socket_after_the_default_init_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            LspClient::connect(&sock, dir.path().to_path_buf()),
+        )
+        .await
+        .expect("a silent socket must not hold connect forever");
+        let elapsed = started.elapsed();
+        let err = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("a socket that sends no init message is not a mux"),
+        };
+        assert!(err.contains("no init message"), "got: {err}");
+        assert!(
+            elapsed >= super::MUX_INIT_READ_TIMEOUT
+                && elapsed < super::MUX_INIT_READ_TIMEOUT + std::time::Duration::from_secs(3),
+            "the bound is the constant, took {elapsed:?}"
+        );
+    }
+
+    /// The caller's bound wins over the default: a 300 ms bound ends a silent socket's connect in
+    /// well under the 5 s default (under 3 s asserted).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_with_init_timeout_uses_the_callers_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+
+        let bound = std::time::Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            LspClient::connect_with_init_timeout(&sock, dir.path().to_path_buf(), bound),
+        )
+        .await
+        .expect("a silent socket must not hold connect forever");
+        let elapsed = started.elapsed();
+        assert!(result.is_err());
+        assert!(
+            elapsed >= bound && elapsed < std::time::Duration::from_secs(3),
+            "the caller's {bound:?} bound must apply, took {elapsed:?}"
         );
     }
 

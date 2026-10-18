@@ -557,6 +557,22 @@ const MUX_SPAWNED_CONNECT_WINDOW: Duration = Duration::from_millis(800);
 #[cfg(unix)]
 const MUX_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
+/// The least time one attempt gives a mux to send its init message after accepting, however
+/// little of the window is left: a window of zero (a remembered wedge) still lets a mux that is
+/// up answer. A judgement, not a measurement against a real mux: the stand-ins in the tests
+/// answer at once.
+// cap-class: NOT_A_CAP — floor on a wait for a peer's first message; expiry surfaces as a failed connect attempt, never as a shorter answer
+#[cfg(unix)]
+const MUX_INIT_READ_MIN: Duration = Duration::from_millis(500);
+
+/// How long one connect attempt waits for the mux's init message: what is left of the caller's
+/// window, but at least `MUX_INIT_READ_MIN`. The attempt may therefore end up to
+/// `MUX_INIT_READ_MIN` after the window does.
+#[cfg(unix)]
+fn mux_init_read_bound(remaining: Duration) -> Duration {
+    remaining.max(MUX_INIT_READ_MIN)
+}
+
 /// Why [`connect_to_mux`] gave up: the last connect error, and whether it stopped because the
 /// holder of the mux lock turned out to be gone (the lock was found free) rather than because the
 /// whole window passed. Only the second is evidence of a wedged mux.
@@ -581,6 +597,11 @@ impl std::fmt::Display for MuxConnectFailure {
 /// once so the caller can respawn instead of sitting out the window. The lock is checked after
 /// EVERY failed attempt, including the one that finds the deadline passed, so a holder that died
 /// during the last interval is reported gone rather than wedged.
+///
+/// An attempt that connects but gets no init message (a mux wedged after `bind`) is bounded by
+/// the window still left, but never by less than `MUX_INIT_READ_MIN`
+/// (see [`mux_init_read_bound`]), so it is a failed attempt like any other: the lock is checked,
+/// and the window ends it.
 #[cfg(unix)]
 async fn connect_to_mux(
     socket_path: &std::path::Path,
@@ -591,7 +612,14 @@ async fn connect_to_mux(
     // tokio's clock, so a test can serve the production window on a paused clock.
     let deadline = tokio::time::Instant::now() + window;
     loop {
-        let err = match LspClient::connect(socket_path, workspace_root.to_path_buf()).await {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let err = match LspClient::connect_with_init_timeout(
+            socket_path,
+            workspace_root.to_path_buf(),
+            mux_init_read_bound(remaining),
+        )
+        .await
+        {
             Ok(client) => return Ok(client),
             Err(e) => e,
         };
@@ -2740,13 +2768,12 @@ mod tests {
         );
     }
 
-    /// OPEN BUG, ignored on purpose: a mux that has bound its socket but never sends its init
-    /// message hangs `LspClient::connect` (it reads the init message with no timeout), so the
-    /// window and deadline of `connect_to_mux` are never reached. Run with `--ignored` to see the
-    /// red. docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
+    /// A mux that has bound its socket but never sends its init message used to hang
+    /// `LspClient::connect` (it read the init message with no timeout), so the window and
+    /// deadline of `connect_to_mux` were never reached.
+    /// docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "open bug: docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md"]
     async fn connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message() {
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("mux.sock");
@@ -2768,6 +2795,307 @@ mod tests {
             returned,
             "a 1 s window must end by itself; still waiting after {:?}",
             started.elapsed()
+        );
+    }
+    /// Stand-in for a mux wedged after `bind`: accepts every connection, keeps it open and says
+    /// nothing. Each accepted connection is reported on the returned channel when the client
+    /// closes its end (end of file), so a test can see that no connection was left open.
+    #[cfg(unix)]
+    fn silent_mux(
+        sock_path: &Path,
+    ) -> (
+        Arc<std::sync::atomic::AtomicUsize>,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::UnixListener::bind(sock_path).unwrap();
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (closed_tx, closed_rx) = tokio::sync::mpsc::unbounded_channel();
+        let count = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let closed_tx = closed_tx.clone();
+                tokio::spawn(async move {
+                    let mut sink = Vec::new();
+                    let _ = stream.read_to_end(&mut sink).await;
+                    let _ = closed_tx.send(());
+                });
+            }
+        });
+        (accepted, closed_rx)
+    }
+
+    /// The bound is the caller's window: a socket that accepts and stays silent ends the connect
+    /// when the window ends, not at the default init bound (5 s), and not an attempt-floor later.
+    /// Real clock (a paused clock jumps over real socket I/O, see the issue file), so the proof
+    /// is the number of attempts: one attempt that waits the whole window and ends it, where a
+    /// bound shorter than the window retries and a longer one overruns. The elapsed-time bound
+    /// is generous (3 s of slack). The failure is the connect's, not a lock verdict.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_socket_ends_the_connect_when_the_window_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let (accepted, _closed) = silent_mux(&sock_path);
+
+        let window = Duration::from_secs(1);
+        let started = Instant::now();
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            super::connect_to_mux(&sock_path, dir.path(), window, None),
+        )
+        .await
+        .expect("the window must end the connect by itself")
+        .err()
+        .expect("a socket that never sends its init message is not a mux");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= window && elapsed < window + Duration::from_secs(3),
+            "the connect must end with its {window:?} window, took {elapsed:?}"
+        );
+        assert_eq!(
+            accepted.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "one attempt must wait out the whole window"
+        );
+        assert!(
+            !failure.holder_gone,
+            "no lock was given, so the failure cannot say the holder is gone"
+        );
+        assert!(
+            failure.to_string().contains("no init message"),
+            "the error must say what happened, got: {failure}"
+        );
+    }
+
+    /// The bound is what is LEFT of the window when the attempt starts, not the whole window: the
+    /// socket here appears 1.5 s into a 3 s window, so the attempt that finds it has about 1.5 s
+    /// left and the connect ends with the window (about 3.0 s), where a bound of the whole window
+    /// would end it at about 4.5 s. Real clock; asserted between 3 s and 3.9 s (0.7 s of slack
+    /// either side).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_socket_that_appears_late_still_ends_the_connect_with_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let late = sock_path.clone();
+        let peer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let _mux = silent_mux(&late);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+
+        let window = Duration::from_secs(3);
+        let started = Instant::now();
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            super::connect_to_mux(&sock_path, dir.path(), window, None),
+        )
+        .await
+        .expect("the window must end the connect by itself");
+        let elapsed = started.elapsed();
+        peer.abort();
+
+        assert!(
+            failure.is_err(),
+            "a socket that never sends init is not a mux"
+        );
+        assert!(
+            elapsed >= window && elapsed < Duration::from_millis(3900),
+            "the connect must end with its {window:?} window, took {elapsed:?}"
+        );
+    }
+
+    /// A window of zero is a remembered wedge's one attempt: it still gives a mux that is up the
+    /// floor (`MUX_INIT_READ_MIN`) to send its init message, so a mux that answers 100 ms after
+    /// accepting is connected to, not written off with a 0 s bound. Real clock; 400 ms of slack
+    /// against the 500 ms floor.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_window_of_zero_still_lets_a_live_mux_send_its_init_message() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+            stream
+                .write_all(format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let connected = super::connect_to_mux(&sock_path, dir.path(), Duration::ZERO, None).await;
+        peer.abort();
+        assert!(
+            connected.is_ok(),
+            "a mux that sends its init message 100 ms after accepting is alive: {:?}",
+            connected.err().map(|e| e.to_string())
+        );
+    }
+
+    /// An attempt that timed out leaves nothing behind: its connection is closed (the peer sees
+    /// end of file) and no task outlives it. Before the bound the attempt never returned at all.
+    /// Real clock.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_attempt_that_gets_no_init_message_closes_its_connection_and_leaves_no_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let (accepted, mut closed) = silent_mux(&sock_path);
+        // Let the peer's accept loop start, then count the tasks alive with only it running.
+        tokio::task::yield_now().await;
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let before = metrics.num_alive_tasks();
+
+        let window = Duration::from_millis(600);
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            super::connect_to_mux(&sock_path, dir.path(), window, None),
+        )
+        .await
+        .expect("the window must end the connect by itself")
+        .err()
+        .expect("no init message, no client");
+        assert!(failure.to_string().contains("no init message"), "{failure}");
+        let attempts = accepted.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(attempts >= 1, "the peer must have been connected to");
+
+        // One end-of-file per connection the peer accepted.
+        for n in 0..attempts {
+            tokio::time::timeout(Duration::from_secs(5), closed.recv())
+                .await
+                .unwrap_or_else(|_| panic!("connection {n} of {attempts} was left open"))
+                .expect("peer alive");
+        }
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            metrics.num_alive_tasks(),
+            before,
+            "a failed attempt must not leave a task running"
+        );
+    }
+
+    /// The whole path: a peer mux that holds its lock, accepts and never sends its init message is
+    /// a wedged mux. The caller waits its window, gets the wedged-mux error (no respawn: the lock
+    /// is held), and the next call does not serve the wait again. Real clock (a paused clock jumps
+    /// over real socket I/O); the outer bound is only there so the pre-fix hang fails the test
+    /// instead of hanging it. Bounds: the first call takes at least the 2 s wait and under 5 s;
+    /// the second takes under the wait (it costs one attempt, the 0.5 s floor).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let (_accepted, _closed) = silent_mux(&sock_path);
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        let wait = Duration::from_secs(2);
+        let started = Instant::now();
+        let first = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config(), wait),
+        )
+        .await
+        .expect("a socket that never sends its init message must end the wait by itself");
+        let first_took = started.elapsed();
+        let msg = match first {
+            Ok(_) => panic!("a silent socket must not connect or spawn"),
+            Err(e) => e.to_string(),
+        };
+        assert!(msg.contains("wedged or mid-restart"), "{msg}");
+        assert!(
+            first_took >= wait && first_took < wait + Duration::from_secs(3),
+            "the wait must be served, and no more than it, took {first_took:?}"
+        );
+        assert_eq!(
+            mgr.mux_wedged_at.lock().unwrap().len(),
+            1,
+            "a live holder that accepted and stayed silent for the whole wait is a wedged mux"
+        );
+
+        // Within the memory the next call makes one attempt: it costs the init floor, not the wait.
+        let started = Instant::now();
+        let second = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config(), wait),
+        )
+        .await
+        .expect("the remembered wedge's one attempt must end by itself");
+        let second_took = started.elapsed();
+        let _ = std::fs::remove_file(&lock_path);
+        assert!(second.is_err());
+        assert!(
+            second_took < wait,
+            "inside the memory the wait is not served again, took {second_took:?}"
+        );
+    }
+
+    /// The other side of the same rule: a silent socket whose lock holder died is not a wedged
+    /// mux. The init timeout ends the attempt, the lock check finds the holder gone, and nothing is
+    /// remembered. Real clock: the lock is released by closing a file descriptor.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let (_accepted, _closed) = silent_mux(&sock_path);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            drop(owner); // the holder died, the stand-in socket outlives it
+        });
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        // Round 1 finds the lock free and tries to spawn a mux, which fails in a test binary;
+        // what matters is what was recorded about the wait that ended.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(20),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(1)),
+        )
+        .await
+        .expect("a silent socket must end the wait by itself");
+        let _ = std::fs::remove_file(&lock_path);
+
+        assert!(
+            mgr.mux_wedged_at.lock().unwrap().is_empty(),
+            "a holder that died is not a wedged mux, whatever its socket did"
         );
     }
 
