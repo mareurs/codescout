@@ -140,6 +140,16 @@ indexing_enabled = true
 | `file_write_enabled` | bool | `true` | Enables file write tools: `create_file` and the symbol write tools. Set to `false` for a read-only session. |
 | `indexing_enabled` | bool | `true` | Enables `index(action: build)` and `workspace(action: status)`. Set to `false` to prevent the agent from kicking off potentially long-running indexing. |
 
+### `[security]` is not editable by the write tools
+
+`[security]` decides what the tools may do, and `.codescout/project.toml` sits under the always-writable
+project root, so codescout's own write tools (`create_file`, `edit_file`, `doc(create)`, `doc(move)`)
+refuse any write to that file, or to the global `config.toml`, that would change its `[security]`
+table (or whose new content is not valid TOML). The rest of the file stays editable through them;
+the onboarding embedding-model step edits `[embeddings]` that way. Change `[security]` in an editor;
+the server re-reads the file on the next call. This does not cover `run_command`: a shell writes any
+file you can, and is gated by `shell_command_mode`.
+
 ### `extra_write_roots` entries
 
 Each entry must be an absolute path with no `..` component. An empty or relative entry, a `~`
