@@ -12,13 +12,19 @@
 //! client connecting during the pause (the accept arm), or the watchdog tick landing in it, must
 //! not be able to kill the mux either. Run the ignored ones with `--ignored`:
 //! `scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro -- --ignored`
+//! (nothing under `scripts/` or `.github/` passes `--ignored` or `--include-ignored`.)
 //! docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md
 #![cfg(unix)]
 
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::UnixStream;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+/// How long a mux gets to print `ready`; a mux that neither prints it nor exits fails the test
+/// instead of hanging the gate.
+const READY_DEADLINE: Duration = Duration::from_secs(30);
 
 /// `fake_lsp.py <pre> <gap>`. Exits on its own after 20 s so a mux that was killed leaves nothing
 /// behind for long.
@@ -56,6 +62,46 @@ raw(frame({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 3
 time.sleep(20)
 "#;
 
+/// A spawned child that is stopped on EVERY exit path of the test, panics included: SIGTERM, a
+/// grace of 2 s to let the mux kill its server, then SIGKILL.
+struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        // SAFETY: `kill(2)` on the pid of a child this guard owns and has not reaped (the
+        // `try_wait` above found it still running).
+        unsafe {
+            libc::kill(self.0.id() as libc::pid_t, libc::SIGTERM);
+        }
+        let until = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < until {
+            if matches!(self.0.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Waits up to `deadline` for the first line of the child's stdout. The read runs on a thread so
+/// a child that prints nothing cannot block the caller.
+fn first_stdout_line(child: &mut Child, deadline: Duration) -> Result<String, String> {
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    rx.recv_timeout(deadline)
+        .map_err(|_| format!("no output line within {deadline:?}"))
+}
+
 /// Runs the real mux against the fake server. A client connects `client_at` after `ready`, if
 /// given. Returns when and how the mux exited within `watch` of `ready`, if it did.
 fn run_mux_against_a_split_frame(
@@ -70,27 +116,26 @@ fn run_mux_against_a_split_frame(
     let sock = dir.path().join("m.sock");
     let lock = dir.path().join("m.lock");
 
-    let mut mux = Command::new(env!("CARGO_BIN_EXE_codescout"))
-        .arg("mux")
-        .arg("--socket")
-        .arg(&sock)
-        .arg("--lock")
-        .arg(&lock)
-        .arg("--cwd")
-        .arg(dir.path())
-        .args(["--idle-timeout", "60", "--", "python3"])
-        .arg(&server)
-        .arg(pre.to_string())
-        .arg(gap.to_string())
-        .stdout(Stdio::piped())
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn the mux");
-    let mut ready = String::new();
-    BufReader::new(mux.stdout.take().unwrap())
-        .read_line(&mut ready)
-        .unwrap();
+    let mut mux = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_codescout"))
+            .arg("mux")
+            .arg("--socket")
+            .arg(&sock)
+            .arg("--lock")
+            .arg(&lock)
+            .arg("--cwd")
+            .arg(dir.path())
+            .args(["--idle-timeout", "60", "--", "python3"])
+            .arg(&server)
+            .arg(pre.to_string())
+            .arg(gap.to_string())
+            .stdout(Stdio::piped())
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the mux"),
+    );
+    let ready = first_stdout_line(&mut mux.0, READY_DEADLINE).expect("the mux must print ready");
     assert!(
         ready.starts_with("ready"),
         "the mux must come up: {ready:?}"
@@ -103,30 +148,49 @@ fn run_mux_against_a_split_frame(
         if client.is_none() && client_at.is_some_and(|at| started.elapsed() >= at) {
             client = Some(UnixStream::connect(&sock).expect("connect a client"));
         }
-        if let Some(status) = mux.try_wait().unwrap() {
+        if let Some(status) = mux.0.try_wait().unwrap() {
             exited = Some((started.elapsed(), status));
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-
-    if exited.is_none() {
-        // SAFETY: `kill(2)` on the pid of a child this test spawned and has not reaped: the
-        // `exited` path, which would have reaped it, skips this call.
-        unsafe {
-            libc::kill(mux.id() as libc::pid_t, libc::SIGTERM);
-        }
-    }
-    let _ = mux.wait();
     exited
 }
 
-/// Control: the frame is split 1 s after `ready`, nothing races the read (the watchdog's next
-/// tick is at 10 s), and the mux stays up through the second message, so the exits below are the
-/// cancelled read and not the split frame.
+/// The deadline works: a program that prints nothing and does not exit fails the wait instead of
+/// hanging it, and the guard stops it. (The first version read `ready` with a bare `read_line`.)
+#[test]
+fn a_child_that_never_prints_ready_fails_the_wait_and_is_stopped() {
+    let mut child = ChildGuard(
+        Command::new("sleep")
+            .arg("60")
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn sleep"),
+    );
+    let pid = child.0.id();
+    let started = Instant::now();
+    let result = first_stdout_line(&mut child.0, Duration::from_millis(500));
+    assert!(result.is_err(), "sleep prints nothing: {result:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "the wait must end at its deadline, took {:?}",
+        started.elapsed()
+    );
+    drop(child);
+    assert!(
+        !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+        "the guard must have stopped and reaped the child"
+    );
+}
+
+/// Control: the frame is split 1 s after `ready` and finished 1 s later, nothing races the read
+/// (the watchdog's next tick is at 10 s), and the mux stays up through the second message and a
+/// second more, so the exits below are the cancelled read and not the split frame. 3.5 s watched
+/// (it was 7 s; the frame is finished at about 2 s).
 #[test]
 fn a_split_frame_alone_does_not_kill_the_mux() {
-    let exited = run_mux_against_a_split_frame(1, 3, None, Duration::from_secs(7));
+    let exited = run_mux_against_a_split_frame(1, 1, None, Duration::from_millis(3500));
     assert!(
         exited.is_none(),
         "the mux exited with nothing racing the read: {exited:?}"
