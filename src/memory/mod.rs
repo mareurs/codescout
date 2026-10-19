@@ -785,6 +785,38 @@ mod tests {
         assert!(matches!(outcome, SelfIgnore::Skipped(_)), "got {outcome:?}");
     }
 
+    /// A `.gitignore` of the wrong TYPE inside the store is skipped with a reason, not
+    /// reported as "the store is ignored": the guarantee in `ensure_gitignored`'s doc.
+    #[cfg(unix)]
+    #[test]
+    fn the_self_ignore_fallback_skips_a_link_or_directory_at_its_own_gitignore() {
+        let sandbox = tempdir().unwrap();
+        let victim = sandbox.path().join("victim");
+        std::fs::write(&victim, "KEEP\n").unwrap();
+        for kind in ["link", "dir"] {
+            let root = sandbox.path().join(format!("project-{kind}"));
+            let private = root.join(".codescout/private-memories");
+            std::fs::create_dir_all(&private).unwrap();
+            match kind {
+                "link" => std::os::unix::fs::symlink(&victim, private.join(".gitignore")).unwrap(),
+                _ => std::fs::create_dir(private.join(".gitignore")).unwrap(),
+            }
+
+            let outcome = MemoryStore::ignore_from_inside(
+                &root,
+                ".codescout/private-memories/",
+                &root.join(".gitignore"),
+            )
+            .unwrap();
+
+            assert!(
+                matches!(outcome, SelfIgnore::Skipped(_)),
+                "{kind}: {outcome:?}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "KEEP\n");
+    }
+
     #[test]
     fn write_and_read_roundtrip() {
         let (_dir, store) = make_store();
