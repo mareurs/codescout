@@ -909,3 +909,39 @@ async fn the_activation_refusal_never_quotes_the_file_either() {
     assert!(text.contains("project.toml"), "control: {text}");
     assert!(!text.contains(SECRET), "{text}");
 }
+
+/// Each gate reads ITS OWN global key: a global `file_write_enabled = false` says nothing about
+/// indexing, and a global `indexing_enabled = false` says nothing about writes.
+#[cfg(unix)]
+#[test]
+fn indexing_does_not_read_the_global_file_write_key() {
+    global_child(
+        "indexing_does_not_read_the_global_file_write_key",
+        "[security]\nfile_write_enabled = false\n",
+        "shell_command_mode = \"unrestricted\"\n",
+        |after| {
+            assert!(!after.file_write_enabled, "the key the global sets");
+            assert!(
+                after.indexing_enabled,
+                "indexing_enabled was never closed by anyone"
+            );
+        },
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn file_writes_do_not_read_the_global_indexing_key() {
+    global_child(
+        "file_writes_do_not_read_the_global_indexing_key",
+        "[security]\nindexing_enabled = false\n",
+        "shell_command_mode = \"unrestricted\"\n",
+        |after| {
+            assert!(!after.indexing_enabled, "the key the global sets");
+            assert!(
+                after.file_write_enabled,
+                "file_write_enabled was never closed by anyone"
+            );
+        },
+    );
+}
