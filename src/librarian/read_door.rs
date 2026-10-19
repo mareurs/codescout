@@ -980,6 +980,12 @@ mod tests {
                         code.push(if b[i] == '\n' { '\n' } else { ' ' });
                         i += 1;
                     }
+                } else if hashes == 1 && b.get(j).is_some_and(|ch| ch.is_alphabetic() || *ch == '_')
+                {
+                    // A raw IDENTIFIER (`r#read`): the identifier itself, as code, so a path
+                    // spelled with one (`std::fs::r#read`) reads as the path it is (round 3, R3-9).
+                    code.extend([' ', ' ']);
+                    i += 2;
                 } else {
                     code.push(c);
                     i += 1;
@@ -1035,15 +1041,42 @@ mod tests {
             let start = i;
             let mut j = i + needle.len();
             let mut end = None;
+            // An item ends at its `;` or its braced body; an attributed match ARM, struct-literal
+            // FIELD or list element ends at its `,`, or just before the bracket that closes the
+            // list it is the last element of. Without the `,` and the closing-bracket cases the
+            // blank ran on to the next `}` and swallowed the next, production, arm or field
+            // (review round 3, R3-9). Commas inside `()`, `[]`, `{}` or generics `<>` are not
+            // the item's end.
             let mut depth = 0usize;
+            let mut paren = 0usize;
+            let mut angle = 0usize;
             let mut header = String::new();
             while j < out.len() {
+                let prev = out[j - 1];
                 match out[j] {
-                    ';' if depth == 0 => {
+                    ';' if depth == 0 && paren == 0 => {
                         end = Some(j);
                         break;
                     }
+                    ',' if depth == 0 && paren == 0 && angle == 0 => {
+                        end = Some(j);
+                        break;
+                    }
+                    '(' | '[' => paren += 1,
+                    ')' | ']' if paren == 0 && depth == 0 => {
+                        end = Some(j - 1);
+                        break;
+                    }
+                    ')' | ']' => paren = paren.saturating_sub(1),
+                    '<' if depth == 0 && paren == 0 => angle += 1,
+                    '>' if depth == 0 && paren == 0 && prev != '=' && prev != '-' => {
+                        angle = angle.saturating_sub(1)
+                    }
                     '{' => depth += 1,
+                    '}' if depth == 0 => {
+                        end = Some(j - 1);
+                        break;
+                    }
                     '}' => {
                         depth -= 1;
                         if depth == 0 {
@@ -1382,6 +1415,14 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             "fn g2() { let o = OpenOptions::new().read(true).open(p); }",
             "fn h() { let x = b'\"'; let y = std::fs::read(p); let z = \"\"; }",
             "use std :: fs :: read;",
+            // Review round 3, R3-9: raw identifiers, and a `#[cfg(test)]` arm or field that
+            // must not blank the production arm or field after it.
+            "fn r1() { let s = std::fs::r#read(p); }",
+            "fn r2() { let s = std::fs::r#read_to_string(p); }",
+            "fn r3(k: u8) -> u8 { match k {\n #[cfg(test)]\n 0 => 1,\n _ => { let _ = std::fs::read(p); 2 }\n } }",
+            "fn r4() -> S { S {\n #[cfg(test)]\n probe: 0,\n body: { std::fs::read_to_string(p).unwrap() },\n } }",
+            "fn r5(k: u8) -> u8 { match k {\n _ => { let _ = std::fs::read(p); 2 }\n #[cfg(test)]\n 0 => 1\n } }",
+            "fn r6(#[cfg(test)] a: u8) { let s = std::fs::read(p); }",
         ];
         for probe in probes {
             let (code, _) = production_code(probe);
@@ -1391,6 +1432,10 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
         for clean in [
             "fn w() { std::fs::write(p, b); std::fs::File::create(p); fs::read_dir(p); }",
             "fn x() { let s = br#\"std::fs::read(p)\"#; }",
+            // A `#[cfg(test)]` arm, field or element is still blanked itself.
+            "fn y(k: u8) -> u8 { match k {\n #[cfg(test)]\n 0 => { std::fs::read(p); 1 },\n _ => 2,\n } }",
+            "fn z() -> S { S {\n #[cfg(test)]\n probe: std::fs::read(p),\n body: 1,\n } }",
+            "#[cfg(test)]\nfn t<A, B>(a: A, b: B) -> Result<()> { std::fs::read(p); Ok(()) }",
         ] {
             let (code, _) = production_code(clean);
             let n: usize = read_counts(&code).iter().sum();
@@ -1449,22 +1494,6 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
         assert!(door.refusal(&l).is_some());
     }
 
-    /// Review round 2, R2-2: a stored path holding U+FFFD that names no file is a lossy record of
-    /// a non-UTF-8 name, and cannot be judged: refused for stored text. A real file whose name
-    /// holds U+FFFD is judged as any other.
-    #[cfg(unix)]
-    #[test]
-    fn a_lossy_stored_path_cannot_be_judged() {
-        let t = tempfile::tempdir().unwrap();
-        let root = canon(t.path()).join("repo");
-        std::fs::create_dir_all(root.join(".git")).unwrap();
-        let door = ReadDoor::new(vec![root.clone()]);
-        assert!(door.refusal(&root.join("d\u{FFFD}/x.md")).is_some());
-        std::fs::create_dir_all(root.join("e\u{FFFD}")).unwrap();
-        std::fs::write(root.join("e\u{FFFD}/x.md"), "ok").unwrap();
-        assert!(door.refusal(&root.join("e\u{FFFD}/x.md")).is_none());
-        assert!(door.refusal(&root.join("never-existed.md")).is_none());
-    }
     /// Each field a walk takes from the file is, alone, enough for a row to "hold file values"; a
     /// row the indexer cleared (`kind`/`status` `unknown`, everything else empty) holds none.
     #[test]
@@ -1509,5 +1538,59 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
                 "`{name}` alone is a file value"
             );
         }
+    }
+    /// Review rounds 2 and 3 (R2-2, R3-6): a stored path holding U+FFFD that names no file is the
+    /// lossy record of a non-UTF-8 name. The door does not refuse it at read time (that hid every
+    /// ordinary file below such a name), but the reindex's removal predicate calls it risky. A real
+    /// file whose name holds U+FFFD is judged as any other, and a plain missing path is neither.
+    #[cfg(unix)]
+    #[test]
+    fn a_lossy_stored_path_is_risky_but_not_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let root = canon(t.path()).join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let door = ReadDoor::new(vec![root.clone()]);
+        let lossy = root.join("d\u{FFFD}/x.md");
+        assert!(door.refusal(&lossy).is_none());
+        assert!(door.stored_path_is_risky(&lossy));
+        std::fs::create_dir_all(root.join("e\u{FFFD}")).unwrap();
+        std::fs::write(root.join("e\u{FFFD}/x.md"), "ok").unwrap();
+        assert!(door.refusal(&root.join("e\u{FFFD}/x.md")).is_none());
+        assert!(!door.stored_path_is_risky(&root.join("e\u{FFFD}/x.md")));
+        assert!(door.refusal(&root.join("never-existed.md")).is_none());
+        assert!(!door.stored_path_is_risky(&root.join("never-existed.md")));
+    }
+
+    /// Review round 3, R3-1 and R3-7: a link at ANY component below the root makes a stored path
+    /// risky when it dangles (leaf or parent directory) or resolves out; one that resolves inside the
+    /// root does not.
+    #[cfg(unix)]
+    #[test]
+    fn a_stored_path_is_risky_below_a_dangling_or_outward_link_at_any_component() {
+        let t = tempfile::tempdir().unwrap();
+        let base = canon(t.path());
+        let root = base.join("repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::write(root.join("real/x.md"), "ok").unwrap();
+        std::fs::create_dir_all(base.join("out")).unwrap();
+        let door = ReadDoor::new(vec![root.clone()]);
+        // A parent directory link that dangles: the leaf below it names nothing.
+        std::os::unix::fs::symlink(base.join("gone-dir"), root.join("dangling-dir")).unwrap();
+        assert!(door.refusal(&root.join("dangling-dir/x.md")).is_none());
+        assert!(door.stored_path_is_risky(&root.join("dangling-dir/x.md")));
+        // A leaf link that dangles, inside the root.
+        std::os::unix::fs::symlink(root.join("nowhere.md"), root.join("dangling.md")).unwrap();
+        assert!(door.stored_path_is_risky(&root.join("dangling.md")));
+        // A parent link out of the root, leaf missing.
+        std::os::unix::fs::symlink(base.join("out"), root.join("out-dir")).unwrap();
+        assert!(door.stored_path_is_risky(&root.join("out-dir/x.md")));
+        // Links that resolve inside the root, leaf and parent: a second name, not a risk.
+        std::os::unix::fs::symlink(root.join("real"), root.join("alias-dir")).unwrap();
+        std::os::unix::fs::symlink(root.join("real/x.md"), root.join("alias.md")).unwrap();
+        assert!(!door.stored_path_is_risky(&root.join("alias-dir/x.md")));
+        assert!(!door.stored_path_is_risky(&root.join("alias.md")));
+        // A plain vanished path is an ordinary vanished row.
+        assert!(!door.stored_path_is_risky(&root.join("real/gone.md")));
     }
 }
