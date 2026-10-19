@@ -93,6 +93,48 @@ mod tests {
         assert_eq!(result, msg);
     }
 
+    /// OPEN BUG, ignored on purpose: `read_message` keeps the header it has parsed and the body it
+    /// has read in locals, so a read that is DROPPED part-way (as `select!` does to the losing
+    /// arm; the mux event loop in `lsp/mux/process.rs` races it against accept, the watchdog tick
+    /// and signals) loses the bytes it had consumed, and the next read starts in the middle of a
+    /// frame. Cancel-safe would mean this test passes. Run with `--ignored` to see the red.
+    /// docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md
+    #[tokio::test]
+    #[ignore = "open bug: docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md"]
+    async fn a_read_dropped_mid_body_does_not_lose_the_bytes_it_had_consumed() {
+        let (mut writer, reader) = tokio::io::duplex(4096);
+        let mut reader = BufReader::new(reader);
+        let first = r#"{"jsonrpc":"2.0","method":"a","params":{"k":"0123456789"}}"#;
+        let second = r#"{"jsonrpc":"2.0","method":"b"}"#;
+        let frame = |body: &str| format!("Content-Length: {}\r\n\r\n{body}", body.len());
+        let first_frame = frame(first);
+        let cut = first_frame.len() - 10;
+        writer
+            .write_all(&first_frame.as_bytes()[..cut])
+            .await
+            .unwrap();
+
+        // The read polls first, consumes the header and part of the body, and is pending; the
+        // other arm is ready, so `select!` drops the read with those bytes in its locals.
+        tokio::select! {
+            biased;
+            _ = read_message(&mut reader) => panic!("the frame is incomplete"),
+            _ = std::future::ready(()) => {}
+        }
+
+        writer
+            .write_all(&first_frame.as_bytes()[cut..])
+            .await
+            .unwrap();
+        writer.write_all(frame(second).as_bytes()).await.unwrap();
+        let next = read_message(&mut reader).await;
+        assert_eq!(
+            next.as_ref().ok().and_then(|m| m["method"].as_str()),
+            Some("a"),
+            "the next read must still see the first message whole, got: {next:?}"
+        );
+    }
+
     #[tokio::test]
     async fn read_eof_returns_error() {
         let mut reader = BufReader::new(&b""[..]);

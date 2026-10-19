@@ -107,6 +107,18 @@ pub struct LspManager {
     /// wait; within `MUX_WEDGED_MEMORY` later attempts make one connect attempt and fail fast
     /// (a mux that has come up since still connects). Cleared on a successful connect.
     mux_wedged_at: StdMutex<HashMap<LspKey, tokio::time::Instant>>,
+    /// Test seam: run synchronously when a wait on a peer's mux ends because its holder died,
+    /// before the next round claims the lock. The window it opens (a third process taking the
+    /// lock) has no yield point in the natural flow, so a test cannot land in it otherwise.
+    #[cfg(test)]
+    after_early_stop: StdMutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Test seam: the program (and leading arguments) the mux spawn runs instead of
+    /// `resolve_mux_binary()`, so a test can stand a script in for the mux (the test binary cannot
+    /// be one). A test runs `python3 <script>` and never execs a file it has just written: that
+    /// fails with ETXTBSY ("Text file busy") while another thread's fork holds a copy of the
+    /// write descriptor.
+    #[cfg(test)]
+    mux_binary_for_test: StdMutex<Option<(PathBuf, Vec<String>)>>,
     /// Project root for test-only DB writes. Set by new_for_test_with_root.
     #[cfg(test)]
     project_root_for_test: Option<std::path::PathBuf>,
@@ -500,6 +512,24 @@ fn claim_mux_lock(lock_path: &std::path::Path) -> std::io::Result<Option<std::fs
     }
 }
 
+/// The rounds of one call ran out because the mux lock changed hands in every one of them and the
+/// LAST holder that was waited on exited too. Nothing is known to be wedged and the lock may be
+/// free by now, so unlike [`mux_socket_unreachable_error`] this names no holder and gives no
+/// `fuser` hint. (A last holder that is still alive gets the holder error instead.)
+#[cfg(unix)]
+fn mux_lock_changed_hands_error(language: &str, socket_path: &std::path::Path) -> anyhow::Error {
+    crate::tools::RecoverableError::with_hint(
+        format!(
+            "the mux lock for {language} changed hands in each of {MUX_CONNECT_ROUNDS} rounds \
+             (every holder waited on exited) and no mux is serving {}",
+            socket_path.display(),
+        ),
+        "Muxes for this workspace are starting and exiting in turn. Retry in a moment; if it \
+         repeats, look for a crash loop in the LSP server's own log.",
+    )
+    .into()
+}
+
 /// Actionable error for defect #1: a live process holds the mux flock but its
 /// socket never accepted across the connect retries — a wedged or mid-restart
 /// mux. A respawn is impossible (the held lock blocks it), so name the situation
@@ -557,6 +587,80 @@ const MUX_SPAWNED_CONNECT_WINDOW: Duration = Duration::from_millis(800);
 #[cfg(unix)]
 const MUX_CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
+/// Most lock-arbitration rounds one `get_or_start_via_mux` call makes. Two are the normal ceiling
+/// (wait on a peer, then respawn or report it wedged); the third exists for a lock that changed
+/// hands in between.
+// cap-class: NOT_A_CAP — round ceiling; exhaustion returns the wedged-or-mid-restart error, never a shorter answer
+#[cfg(unix)]
+const MUX_CONNECT_ROUNDS: u32 = 3;
+
+/// The least time one attempt gives a mux to send its init message after accepting, however
+/// little of the window is left: a window of zero (a remembered wedge) still lets a mux that is
+/// up answer. A judgement, not a measurement against a real mux: the stand-ins in the tests
+/// answer at once.
+// cap-class: NOT_A_CAP — floor on a wait for a peer's first message; expiry surfaces as a failed connect attempt, never as a shorter answer
+#[cfg(unix)]
+const MUX_INIT_READ_MIN: Duration = Duration::from_millis(500);
+
+/// How long one connect attempt waits for the mux's init message: what is left of the caller's
+/// window, but at least `min_init_read`. The attempt may therefore end up to `min_init_read`
+/// after the window does; with the loop's 200 ms pause a call can end up to
+/// `MUX_CONNECT_RETRY_INTERVAL + min_init_read` after its window (derived from the code, not
+/// measured).
+#[cfg(unix)]
+fn mux_init_read_bound(remaining: Duration, min_init_read: Duration) -> Duration {
+    remaining.max(min_init_read)
+}
+
+/// How one round of `get_or_start_via_mux_waiting` connects: for how long, with what floor for
+/// the init read, and which mux lock (if any) is checked between attempts. It is the whole of
+/// what `connect_to_mux` is told, so a test that runs the production plan exercises the
+/// production wiring.
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+struct MuxConnectPlan {
+    window: Duration,
+    min_init_read: Duration,
+    holder_lock: Option<PathBuf>,
+}
+
+/// The plan for a round. `left` is what is left of the call's one wait budget; `lock_path` is
+/// the workspace's mux lock.
+///
+/// - We spawned the mux and saw its `ready` line: the socket is bound, so the window only absorbs
+///   the accept race, there is no other holder to check, and the init read gets the full default
+///   bound (`MUX_INIT_READ_TIMEOUT`): this path had no bound on that read before 2026-10-18 and
+///   a mux that is up has nothing to wait for but a busy machine.
+/// - A remembered wedge: one attempt (a mux that has come up since still connects).
+/// - Otherwise a peer's mux that may still be starting: what is left of the budget.
+#[cfg(unix)]
+fn plan_mux_connect(
+    need_spawn: bool,
+    remembered_wedge: bool,
+    left: Duration,
+    lock_path: &Path,
+) -> MuxConnectPlan {
+    if need_spawn {
+        MuxConnectPlan {
+            window: MUX_SPAWNED_CONNECT_WINDOW,
+            min_init_read: crate::lsp::client::MUX_INIT_READ_TIMEOUT,
+            holder_lock: None,
+        }
+    } else if remembered_wedge {
+        MuxConnectPlan {
+            window: Duration::ZERO,
+            min_init_read: MUX_INIT_READ_MIN,
+            holder_lock: Some(lock_path.to_path_buf()),
+        }
+    } else {
+        MuxConnectPlan {
+            window: left,
+            min_init_read: MUX_INIT_READ_MIN,
+            holder_lock: Some(lock_path.to_path_buf()),
+        }
+    }
+}
+
 /// Why [`connect_to_mux`] gave up: the last connect error, and whether it stopped because the
 /// holder of the mux lock turned out to be gone (the lock was found free) rather than because the
 /// whole window passed. Only the second is evidence of a wedged mux.
@@ -574,29 +678,40 @@ impl std::fmt::Display for MuxConnectFailure {
     }
 }
 
-/// Connect to a mux socket, retrying for up to `window`.
+/// Connect to a mux socket, retrying for up to `plan.window`.
 ///
-/// `holder_lock` is the mux's ownership lock when the caller is waiting on ANOTHER process's mux:
-/// once that lock is free its holder has died, no socket will ever appear, and the wait ends at
-/// once so the caller can respawn instead of sitting out the window. The lock is checked after
+/// `plan.holder_lock` is the mux's ownership lock when the caller is waiting on ANOTHER process's
+/// mux: once that lock is free its holder has died, no socket will ever appear, and the wait ends
+/// at once so the caller can respawn instead of sitting out the window. The lock is checked after
 /// EVERY failed attempt, including the one that finds the deadline passed, so a holder that died
 /// during the last interval is reported gone rather than wedged.
+///
+/// An attempt that connects but gets no init message (a mux wedged after `bind`) is bounded by
+/// the window still left, but never by less than `plan.min_init_read` (see
+/// [`mux_init_read_bound`]), so it is a failed attempt like any other: the lock is checked, and
+/// the window ends it.
 #[cfg(unix)]
 async fn connect_to_mux(
     socket_path: &std::path::Path,
     workspace_root: &Path,
-    window: Duration,
-    holder_lock: Option<&std::path::Path>,
+    plan: &MuxConnectPlan,
 ) -> std::result::Result<LspClient, MuxConnectFailure> {
     // tokio's clock, so a test can serve the production window on a paused clock.
-    let deadline = tokio::time::Instant::now() + window;
+    let deadline = tokio::time::Instant::now() + plan.window;
     loop {
-        let err = match LspClient::connect(socket_path, workspace_root.to_path_buf()).await {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let err = match LspClient::connect_with_init_timeout(
+            socket_path,
+            workspace_root.to_path_buf(),
+            mux_init_read_bound(remaining, plan.min_init_read),
+        )
+        .await
+        {
             Ok(client) => return Ok(client),
             Err(e) => e,
         };
         // A free lock means the holder is gone: stop waiting, the caller re-arbitrates.
-        if let Some(lock) = holder_lock {
+        if let Some(lock) = plan.holder_lock.as_deref() {
             if matches!(claim_mux_lock(lock), Ok(Some(_))) {
                 return Err(MuxConnectFailure {
                     source: err,
@@ -645,6 +760,10 @@ impl LspManager {
             startup_failures: StdMutex::new(HashMap::new()),
             cold_start_until: StdMutex::new(HashMap::new()),
             mux_wedged_at: StdMutex::new(HashMap::new()),
+            #[cfg(test)]
+            after_early_stop: StdMutex::new(None),
+            #[cfg(test)]
+            mux_binary_for_test: StdMutex::new(None),
             #[cfg(test)]
             project_root_for_test: None,
         }
@@ -1003,6 +1122,19 @@ impl LspManager {
             .await
     }
 
+    /// Run the [`Self::after_early_stop`] test seam, if one is installed.
+    #[cfg(all(unix, test))]
+    fn run_after_early_stop_hook(&self) {
+        let hook = self
+            .after_early_stop
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
     /// [`Self::get_or_start_via_mux`] with the wait for another process's still-starting mux
     /// (`MUX_PEER_STARTUP_WAIT`) as a parameter, so a test can drive the wedged case in
     /// milliseconds instead of sitting out the production window.
@@ -1025,8 +1157,17 @@ impl LspManager {
         // is unreachable through the connect retries, round 1 re-arbitrates the
         // flock: a now-free lock means the holder died and left a stale `.sock` →
         // respawn; a still-held lock means a live but wedged mux → actionable error.
+        // The exception is a holder that DIED while we waited and a lock that is held again
+        // by the next round: a third process took it in the gap and its mux is starting, so
+        // that one is waited for too (`MUX_CONNECT_ROUNDS` bounds how often this repeats).
         let mut last_err: Option<anyhow::Error> = None;
-        for round in 0..2u32 {
+        // One budget for every wait on a peer's mux in this call, however many holders it
+        // meets: the server's tool timeout is 60 s and one wait must leave room for the rest of
+        // the call (see `MUX_WEDGED_MEMORY`).
+        let wait_deadline = tokio::time::Instant::now() + peer_startup_wait;
+        // Whether the last round's holder was found DEAD (its lock free) rather than wedged.
+        let mut last_holder_gone = false;
+        for round in 0..MUX_CONNECT_ROUNDS {
             let need_spawn =
                 match claim_mux_lock(&lock_path).context("Failed to open mux lock file")? {
                     Some(guard) => {
@@ -1036,10 +1177,13 @@ impl LspManager {
                         true
                     }
                     None => {
-                        if round > 0 {
-                            // Round 1 and the flock is STILL held while the socket stayed
-                            // unreachable through round 0's retries → a wedged mux we
+                        if round > 0 && !last_holder_gone {
+                            // A later round and the flock is STILL held while the socket stayed
+                            // unreachable through the last round's retries → a wedged mux we
                             // cannot replace (the held lock blocks a respawn). Surface it.
+                            // When the last round's holder DIED instead, a lock held now is a
+                            // NEW process (a peer that spawned its own mux in the gap): its mux
+                            // is starting, so it is waited for like any peer's, below.
                             return Err(mux_socket_unreachable_error(
                                 language,
                                 &socket_path,
@@ -1056,7 +1200,18 @@ impl LspManager {
                 };
 
             if need_spawn {
-                let exe = resolve_mux_binary()?;
+                #[cfg(test)]
+                let (exe, lead_args): (PathBuf, Vec<String>) = match self
+                    .mux_binary_for_test
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+                {
+                    Some(fake) => fake,
+                    None => (resolve_mux_binary()?, Vec::new()),
+                };
+                #[cfg(not(test))]
+                let (exe, lead_args): (PathBuf, Vec<String>) = (resolve_mux_binary()?, Vec::new());
 
                 // We observed the ownership flock was free (no live mux). The
                 // analyzer home is codescout-private, so any process still holding
@@ -1078,6 +1233,7 @@ impl LspManager {
                 // index lock) is written there, not to stdout. Without this the caller
                 // only saw a blank "mux process failed to start:".
                 let mut child = tokio::process::Command::new(&exe)
+                    .args(&lead_args)
                     .args(&mux_args)
                     .stdout(std::process::Stdio::piped())
                     .stdin(std::process::Stdio::null())
@@ -1176,17 +1332,12 @@ impl LspManager {
                 .unwrap_or_else(|e| e.into_inner())
                 .get(&wedge_key)
                 .is_some_and(|at| at.elapsed() < MUX_WEDGED_MEMORY);
-            let (window, holder_lock) = if need_spawn {
-                (MUX_SPAWNED_CONNECT_WINDOW, None)
-            } else if remembered_wedge {
-                // This mux just stayed unreachable for a whole wait: one attempt, so a mux
-                // that has come up since still connects, but no second wait (a directory
-                // of files calls this once per file).
-                (Duration::ZERO, Some(lock_path.as_path()))
-            } else {
-                (peer_startup_wait, Some(lock_path.as_path()))
-            };
-            match connect_to_mux(&socket_path, workspace_root, window, holder_lock).await {
+            let left = wait_deadline.saturating_duration_since(tokio::time::Instant::now());
+            let plan = plan_mux_connect(need_spawn, remembered_wedge, left, &lock_path);
+            // A round that follows a holder's death waits on a REPLACEMENT for what is left of
+            // the one budget (possibly about nothing), so its outcome is not a verdict on a mux.
+            let waited_on_replacement = last_holder_gone;
+            match connect_to_mux(&socket_path, workspace_root, &plan).await {
                 Ok(client) => {
                     self.mux_wedged_at
                         .lock()
@@ -1204,26 +1355,53 @@ impl LspManager {
                         // — a genuine startup/connect failure, not a stale-lock case.
                         return Err(e);
                     }
-                    if !remembered_wedge && !holder_gone {
-                        // The WHOLE wait was served and the holder is still alive: the next
-                        // callers need not serve it again. A wait that stopped early because
-                        // the lock turned free found nothing wedged (its holder died), so
-                        // nothing is recorded and round 1 takes over.
+                    if !remembered_wedge && !holder_gone && !waited_on_replacement {
+                        // The WHOLE wait was served on the holder the call started with and it is
+                        // still alive: the next callers need not serve it again. A wait that
+                        // stopped early because the lock turned free found nothing wedged (its
+                        // holder died), so nothing is recorded and the next round takes over.
+                        // A round on a REPLACEMENT holder records nothing either, whatever its
+                        // length: it got the remainder of the budget, which can be about
+                        // nothing, and no threshold for "long enough" has been measured. The
+                        // cost is that when a replacement never binds the next call serves a
+                        // full wait again before the wedge is remembered (pinned by
+                        // `a_replacement_that_never_binds_costs_a_second_full_wait_on_the_next_call`).
                         self.mux_wedged_at
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .insert(wedge_key, tokio::time::Instant::now());
                     }
-                    // Round 0: flock held but socket unreachable. Loop to round 1 to
-                    // re-arbitrate (respawn if the holder is gone, else error).
+                    // Flock held but socket unreachable. Loop to re-arbitrate (respawn if the
+                    // holder is gone, wait for a new holder, else error).
+                    last_holder_gone = holder_gone;
+                    #[cfg(test)]
+                    if holder_gone {
+                        self.run_after_early_stop_hook();
+                    }
                     last_err = Some(e);
                 }
             }
         }
 
-        // Unreachable in practice: round 1 always returns (a spawn→connect result
-        // or the wedged-mux error). Kept as a defensive terminal.
-        Err(last_err.expect("connect failed at least once before exhausting rounds"))
+        // Reached when no round returned: the lock changed hands (a holder died, another
+        // process took it) in every round. If the LAST holder died too, nothing is known to be
+        // wedged and the lock may be free now, so the error names no holder; if the last
+        // replacement is still ALIVE and holding the lock but never answered, it is the wedged
+        // or still-starting holder of `mux_socket_unreachable_error`, as in a plain round 1.
+        if let Some(e) = &last_err {
+            tracing::warn!(
+                "mux connect for {language} gave up after {MUX_CONNECT_ROUNDS} rounds: {e:#}"
+            );
+        }
+        if last_holder_gone {
+            Err(mux_lock_changed_hands_error(language, &socket_path))
+        } else {
+            Err(mux_socket_unreachable_error(
+                language,
+                &socket_path,
+                &lock_path,
+            ))
+        }
     }
 
     /// Record a successful LSP start to `lsp_events` — best-effort, never fails
@@ -2728,8 +2906,7 @@ mod tests {
         let connected = super::connect_to_mux(
             &sock_path,
             dir.path(),
-            Duration::from_secs(10),
-            Some(&lock_path),
+            &peer_plan(Duration::from_secs(10), &lock_path),
         )
         .await;
         peer.abort();
@@ -2740,13 +2917,12 @@ mod tests {
         );
     }
 
-    /// OPEN BUG, ignored on purpose: a mux that has bound its socket but never sends its init
-    /// message hangs `LspClient::connect` (it reads the init message with no timeout), so the
-    /// window and deadline of `connect_to_mux` are never reached. Run with `--ignored` to see the
-    /// red. docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
+    /// A mux that has bound its socket but never sends its init message used to hang
+    /// `LspClient::connect` (it read the init message with no timeout), so the window and
+    /// deadline of `connect_to_mux` were never reached.
+    /// docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md
     #[cfg(unix)]
     #[tokio::test]
-    #[ignore = "open bug: docs/issues/2026-10-17-connect-to-a-mux-that-never-sends-its-init-message-hangs-forever.md"]
     async fn connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message() {
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("mux.sock");
@@ -2760,7 +2936,7 @@ mod tests {
         let started = Instant::now();
         let returned = tokio::time::timeout(
             Duration::from_secs(5),
-            super::connect_to_mux(&sock_path, dir.path(), Duration::from_secs(1), None),
+            super::connect_to_mux(&sock_path, dir.path(), &bare_plan(Duration::from_secs(1))),
         )
         .await
         .is_ok();
@@ -2768,6 +2944,1165 @@ mod tests {
             returned,
             "a 1 s window must end by itself; still waiting after {:?}",
             started.elapsed()
+        );
+    }
+    /// A connect plan that checks no lock, with the peer floor (`MUX_INIT_READ_MIN`).
+    #[cfg(unix)]
+    fn bare_plan(window: Duration) -> MuxConnectPlan {
+        MuxConnectPlan {
+            window,
+            min_init_read: MUX_INIT_READ_MIN,
+            holder_lock: None,
+        }
+    }
+
+    /// A connect plan for waiting on a peer's mux that holds `lock`, with the peer floor.
+    #[cfg(unix)]
+    fn peer_plan(window: Duration, lock: &Path) -> MuxConnectPlan {
+        MuxConnectPlan {
+            window,
+            min_init_read: MUX_INIT_READ_MIN,
+            holder_lock: Some(lock.to_path_buf()),
+        }
+    }
+
+    /// Stand-in for a mux wedged after `bind`: accepts every connection, keeps it open and says
+    /// nothing. Each accepted connection is reported on the returned channel when the client
+    /// closes its end (end of file), so a test can see that no connection was left open.
+    #[cfg(unix)]
+    fn silent_mux(
+        sock_path: &Path,
+    ) -> (
+        Arc<std::sync::atomic::AtomicUsize>,
+        tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::UnixListener::bind(sock_path).unwrap();
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (closed_tx, closed_rx) = tokio::sync::mpsc::unbounded_channel();
+        let count = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let closed_tx = closed_tx.clone();
+                tokio::spawn(async move {
+                    let mut sink = Vec::new();
+                    let _ = stream.read_to_end(&mut sink).await;
+                    let _ = closed_tx.send(());
+                });
+            }
+        });
+        (accepted, closed_rx)
+    }
+
+    /// The bound is the caller's window: a socket that accepts and stays silent ends the connect
+    /// when the window ends, not at the default init bound (5 s), and not an attempt-floor later.
+    /// Real clock (a paused clock jumps over real socket I/O, see the issue file), so the proof
+    /// is the number of attempts: one attempt that waits the whole window and ends it, where a
+    /// bound shorter than the window retries and a longer one overruns. The elapsed-time bound
+    /// is generous (3 s of slack). The failure is the connect's, not a lock verdict.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_socket_ends_the_connect_when_the_window_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let (accepted, _closed) = silent_mux(&sock_path);
+
+        let window = Duration::from_secs(1);
+        let started = Instant::now();
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            super::connect_to_mux(&sock_path, dir.path(), &bare_plan(window)),
+        )
+        .await
+        .expect("the window must end the connect by itself")
+        .err()
+        .expect("a socket that never sends its init message is not a mux");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= window && elapsed < window + Duration::from_secs(3),
+            "the connect must end with its {window:?} window, took {elapsed:?}"
+        );
+        assert_eq!(
+            accepted.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "one attempt must wait out the whole window"
+        );
+        assert!(
+            !failure.holder_gone,
+            "no lock was given, so the failure cannot say the holder is gone"
+        );
+        assert!(
+            failure.to_string().contains("no init message"),
+            "the error must say what happened, got: {failure}"
+        );
+    }
+
+    /// The bound is what is LEFT of the window when the attempt starts, not the whole window: the
+    /// socket here appears 1.5 s into a 3 s window, so the attempt that finds it has about 1.5 s
+    /// left and the connect ends with the window (about 3.0 s), where a bound of the whole window
+    /// would end it at about 4.5 s. Real clock; asserted between 3 s and 3.9 s (0.7 s of slack
+    /// either side).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_socket_that_appears_late_still_ends_the_connect_with_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let late = sock_path.clone();
+        let peer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let _mux = silent_mux(&late);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+
+        let window = Duration::from_secs(3);
+        let started = Instant::now();
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            super::connect_to_mux(&sock_path, dir.path(), &bare_plan(window)),
+        )
+        .await
+        .expect("the window must end the connect by itself");
+        let elapsed = started.elapsed();
+        peer.abort();
+
+        let failure = failure
+            .err()
+            .expect("a socket that never sends init is not a mux");
+        // The last attempt could not start before the socket appeared at 1.5 s, so what was left
+        // of the 3 s window was at most 1.5 s: its bound is at most that (the floor, 0.5 s, is
+        // lower). The whole window (3 s) or anything added to the bound would exceed 1.7 s. This
+        // holds however loaded the machine is, which a wall-clock bound does not.
+        let applied = failure
+            .source
+            .downcast_ref::<crate::lsp::client::MuxInitTimeout>()
+            .expect("the failure is the init timeout")
+            .after;
+        assert!(
+            applied <= Duration::from_millis(1700),
+            "the last attempt's bound is what is left of the window, got {applied:?}"
+        );
+        assert!(
+            elapsed >= window && elapsed < Duration::from_millis(3900),
+            "the connect must end with its {window:?} window, took {elapsed:?}"
+        );
+    }
+
+    /// A window of zero is a remembered wedge's one attempt: it still gives a mux that is up the
+    /// floor (`MUX_INIT_READ_MIN`) to send its init message, so a mux that answers 100 ms after
+    /// accepting is connected to, not written off with a 0 s bound. Real clock; 400 ms of slack
+    /// against the 500 ms floor.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_window_of_zero_still_lets_a_live_mux_send_its_init_message() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+            stream
+                .write_all(format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let connected =
+            super::connect_to_mux(&sock_path, dir.path(), &bare_plan(Duration::ZERO)).await;
+        peer.abort();
+        assert!(
+            connected.is_ok(),
+            "a mux that sends its init message 100 ms after accepting is alive: {:?}",
+            connected.err().map(|e| e.to_string())
+        );
+    }
+
+    /// F5 of the review of dd961fe5f. The bound given to an attempt is read from the failure
+    /// itself (`MuxInitTimeout::after`), so it is checked exactly and not through the wall clock
+    /// (a +400 ms mutant at the call site stayed inside every wall-clock slack on a machine at
+    /// load 13): with a 1 s window it never exceeds the window, and with a window of zero it is
+    /// exactly the floor.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_attempts_init_bound_is_what_is_left_of_the_window_and_never_below_the_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let (_accepted, _closed) = silent_mux(&sock_path);
+        let applied = |failure: MuxConnectFailure| {
+            failure
+                .source
+                .downcast_ref::<crate::lsp::client::MuxInitTimeout>()
+                .expect("the failure is the init timeout")
+                .after
+        };
+
+        let window = Duration::from_secs(1);
+        let failure = super::connect_to_mux(&sock_path, dir.path(), &bare_plan(window))
+            .await
+            .err()
+            .expect("silent");
+        let first = applied(failure);
+        assert!(
+            first <= window && first >= Duration::from_millis(500),
+            "one attempt waits what is left of a 1 s window: {first:?}"
+        );
+
+        let failure = super::connect_to_mux(&sock_path, dir.path(), &bare_plan(Duration::ZERO))
+            .await
+            .err()
+            .expect("silent");
+        assert_eq!(
+            applied(failure),
+            Duration::from_millis(500),
+            "a window of zero gives the floor and not a nanosecond more"
+        );
+    }
+
+    /// The constants the docs and the issue files quote, pinned by literals: the tests above
+    /// measure against the constants themselves, so changing one would otherwise move the
+    /// behaviour and the expectation together (review F4: 5 s to 2 s, 500 ms to 150 ms survived).
+    #[test]
+    fn the_mux_connect_constants_have_the_values_the_docs_quote() {
+        assert_eq!(
+            crate::lsp::client::MUX_INIT_READ_TIMEOUT,
+            Duration::from_secs(5)
+        );
+        assert_eq!(MUX_INIT_READ_MIN, Duration::from_millis(500));
+        assert_eq!(MUX_SPAWNED_CONNECT_WINDOW, Duration::from_millis(800));
+        assert_eq!(MUX_CONNECT_RETRY_INTERVAL, Duration::from_millis(200));
+        assert_eq!(MUX_CONNECT_ROUNDS, 3);
+    }
+
+    /// What each kind of round connects with, by literals. The spawned path (F3) is the one that
+    /// had no init bound before 2026-10-18: it gets the 5 s default and checks no lock.
+    #[cfg(unix)]
+    #[test]
+    fn each_kind_of_round_connects_with_the_documented_window_and_init_floor() {
+        let left = Duration::from_secs(7);
+        let lock = Path::new("/run/example.lock");
+        assert_eq!(
+            plan_mux_connect(true, false, left, lock),
+            MuxConnectPlan {
+                window: Duration::from_millis(800),
+                min_init_read: Duration::from_secs(5),
+                holder_lock: None,
+            }
+        );
+        assert_eq!(
+            plan_mux_connect(true, true, left, lock),
+            plan_mux_connect(true, false, left, lock),
+            "a spawned mux ignores the wedge memory"
+        );
+        assert_eq!(
+            plan_mux_connect(false, true, left, lock),
+            MuxConnectPlan {
+                window: Duration::ZERO,
+                min_init_read: Duration::from_millis(500),
+                holder_lock: Some(lock.to_path_buf()),
+            }
+        );
+        assert_eq!(
+            plan_mux_connect(false, false, left, lock),
+            MuxConnectPlan {
+                window: left,
+                min_init_read: Duration::from_millis(500),
+                holder_lock: Some(lock.to_path_buf()),
+            }
+        );
+        let half = Duration::from_millis(500);
+        assert_eq!(
+            mux_init_read_bound(Duration::from_secs(3), half),
+            Duration::from_secs(3)
+        );
+        assert_eq!(mux_init_read_bound(Duration::from_millis(200), half), half);
+        assert_eq!(mux_init_read_bound(Duration::ZERO, half), half);
+    }
+
+    /// F3 of the review of dd961fe5f. The path that SPAWNED the mux and saw its `ready` line
+    /// (`MUX_SPAWNED_CONNECT_WINDOW`, 800 ms, no lock to check) had NO bound on the init read
+    /// before the fix and got one of about 0.8 s from it, ending in a hard error. The mux is up
+    /// there, so the init read is given the full default bound (5 s): a mux that answers 2 s
+    /// after accepting (a busy machine) must be connected to.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_we_just_spawned_gets_the_full_init_bound_not_the_connect_window() {
+        use tokio::io::AsyncWriteExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        let peer = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+            stream
+                .write_all(format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        // The production plan for a mux this call just spawned.
+        let plan = plan_mux_connect(true, false, Duration::ZERO, Path::new("/unused.lock"));
+        let connected = tokio::time::timeout(
+            Duration::from_secs(30),
+            super::connect_to_mux(&sock_path, dir.path(), &plan),
+        )
+        .await
+        .expect("bounded");
+        peer.abort();
+        assert!(
+            connected.is_ok(),
+            "a mux that answers 2 s after accepting is alive: {:?}",
+            connected.err().map(|e| e.to_string())
+        );
+    }
+
+    /// F3 through the real spawn branch of `get_or_start_via_mux_waiting` (the test above runs the
+    /// plan against a socket; this runs the call site). A script stands in for the mux: it binds
+    /// the socket named in its arguments, prints `ready`, accepts, and sends its init message 2 s
+    /// after the client connected. The caller's peer wait is 500 ms, which would end a peer round
+    /// in 0.5 s: only the spawned-mux plan (800 ms window, 5 s init floor) connects to it.
+    /// The script is run as `python3 <script>` and is never exec'd: a file this process has just
+    /// written fails to exec with ETXTBSY while another test's fork holds a copy of the write
+    /// descriptor (measured 2026-10-19: 59 of 400 write+exec cycles against 6 forking threads;
+    /// 0 of 400 for `python3 <file>`).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&lock_path);
+        let fake_mux = dir.path().join("fake-mux.py");
+        std::fs::write(
+            &fake_mux,
+            r#"import json, socket, sys, time
+sock_path = sys.argv[sys.argv.index("--socket") + 1]
+s = socket.socket(socket.AF_UNIX)
+s.bind(sock_path)
+s.listen(8)
+s.settimeout(30)
+sys.stdout.write("ready\n")
+sys.stdout.flush()
+c, _ = s.accept()
+c.settimeout(20)
+time.sleep(2)
+body = json.dumps({"jsonrpc": "2.0", "id": 0, "result": {"capabilities": {}}}).encode()
+c.sendall(b"Content-Length: %d\r\n\r\n" % len(body) + body)
+try:
+    c.recv(1)
+except Exception:
+    pass
+"#,
+        )
+        .unwrap();
+
+        let mgr = LspManager::new();
+        *mgr.mux_binary_for_test.lock().unwrap() = Some((
+            PathBuf::from("python3"),
+            vec![fake_mux.to_string_lossy().into_owned()],
+        ));
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(60),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_millis(500)),
+        )
+        .await
+        .expect("bounded");
+        let _ = std::fs::remove_file(&sock_path);
+        assert!(
+            result.is_ok(),
+            "a mux this call spawned and saw ready is connected to even when it answers late: {:?}",
+            result.err().map(|e| format!("{e:#}"))
+        );
+    }
+
+    /// An attempt that timed out leaves nothing behind: its connection is closed (the peer sees
+    /// end of file) and no task outlives it. Before the bound the attempt never returned at all.
+    /// Real clock.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_attempt_that_gets_no_init_message_closes_its_connection_and_leaves_no_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("mux.sock");
+        let (accepted, mut closed) = silent_mux(&sock_path);
+        // Let the peer's accept loop start, then count the tasks alive with only it running.
+        tokio::task::yield_now().await;
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let before = metrics.num_alive_tasks();
+
+        let window = Duration::from_millis(600);
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            super::connect_to_mux(&sock_path, dir.path(), &bare_plan(window)),
+        )
+        .await
+        .expect("the window must end the connect by itself")
+        .err()
+        .expect("no init message, no client");
+        assert!(failure.to_string().contains("no init message"), "{failure}");
+        let attempts = accepted.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(attempts >= 1, "the peer must have been connected to");
+
+        // One end-of-file per connection the peer accepted.
+        for n in 0..attempts {
+            tokio::time::timeout(Duration::from_secs(5), closed.recv())
+                .await
+                .unwrap_or_else(|_| panic!("connection {n} of {attempts} was left open"))
+                .expect("peer alive");
+        }
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            metrics.num_alive_tasks(),
+            before,
+            "a failed attempt must not leave a task running"
+        );
+    }
+
+    /// The whole path: a peer mux that holds its lock, accepts and never sends its init message is
+    /// a wedged mux. The caller waits its window, gets the wedged-mux error (no respawn: the lock
+    /// is held), and the next call does not serve the wait again. Real clock (a paused clock jumps
+    /// over real socket I/O); the outer bound is only there so the pre-fix hang fails the test
+    /// instead of hanging it. Bounds: the first call takes at least the 2 s wait and under 5 s;
+    /// the second takes under the wait (it costs one attempt, the 0.5 s floor).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let _owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let (accepted, _closed) = silent_mux(&sock_path);
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        let wait = Duration::from_secs(2);
+        let started = Instant::now();
+        let first = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config(), wait),
+        )
+        .await
+        .expect("a socket that never sends its init message must end the wait by itself");
+        let first_took = started.elapsed();
+        let msg = match first {
+            Ok(_) => panic!("a silent socket must not connect or spawn"),
+            Err(e) => e.to_string(),
+        };
+        assert!(msg.contains("wedged or mid-restart"), "{msg}");
+        assert!(
+            first_took >= wait && first_took < wait + Duration::from_secs(3),
+            "the wait must be served, and no more than it, took {first_took:?}"
+        );
+        assert_eq!(
+            mgr.mux_wedged_at.lock().unwrap().len(),
+            1,
+            "a live holder that accepted and stayed silent for the whole wait is a wedged mux"
+        );
+        assert_eq!(
+            accepted.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "one attempt waits the whole window, and the wedged error needs no second round of waiting"
+        );
+
+        // Within the memory the next call makes one attempt: it costs the init floor, not the wait.
+        let started = Instant::now();
+        let second = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config(), wait),
+        )
+        .await
+        .expect("the remembered wedge's one attempt must end by itself");
+        let second_took = started.elapsed();
+        let _ = std::fs::remove_file(&lock_path);
+        assert!(second.is_err());
+        assert!(
+            second_took < wait,
+            "inside the memory the wait is not served again, took {second_took:?}"
+        );
+    }
+
+    /// The other side of the same rule: a silent socket whose lock holder died is not a wedged
+    /// mux. The init timeout ends the attempt, the lock check finds the holder gone, and nothing is
+    /// remembered. Real clock: the lock is released by closing a file descriptor.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let owner = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        let (_accepted, _closed) = silent_mux(&sock_path);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            drop(owner); // the holder died, the stand-in socket outlives it
+        });
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let mgr = LspManager::new();
+        // Round 1 finds the lock free and tries to spawn a mux, which fails in a test binary;
+        // what matters is what was recorded about the wait that ended.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(20),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(1)),
+        )
+        .await
+        .expect("a silent socket must end the wait by itself");
+        let _ = std::fs::remove_file(&lock_path);
+
+        assert!(
+            mgr.mux_wedged_at.lock().unwrap().is_empty(),
+            "a holder that died is not a wedged mux, whatever its socket did"
+        );
+    }
+
+    /// A waiting client probes the mux lock by TAKING it for an instant (`claim_mux_lock`, once
+    /// per 200 ms in `connect_to_mux`), and a mux's own attempt (step 1 of `mux::process::run`)
+    /// used to be a single try: landing inside a probe, it exited "another mux instance holds the
+    /// lock". This puts both on real threads: a thread probes in a loop (a compressed stand-in for
+    /// many waiting clients) while the mux's attempt is made at the same moment, over many trials,
+    /// each on a fresh lock file. The assertion is one-sided on purpose: with nothing holding the
+    /// lock but probes, no attempt may be refused, so a green run is exact and only a red run
+    /// depends on timing (it is red when any trial collides). The collision RATE here is
+    /// exaggerated by the loop and says nothing about how often it happens in production.
+    /// docs/issues/2026-10-17-mux-connect-path-lock-races.md
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_waiting_clients_lock_probe_never_makes_a_starting_mux_give_up() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        const TRIALS: usize = 300;
+        let dir = tempfile::tempdir().unwrap();
+        let mut refused = 0usize;
+        for trial in 0..TRIALS {
+            let lock = dir.path().join(format!("mux-{trial}.lock"));
+            let go = Arc::new(AtomicBool::new(false));
+            let probe = {
+                let (lock, go) = (lock.clone(), go.clone());
+                std::thread::spawn(move || {
+                    while !go.load(Ordering::SeqCst) {
+                        std::hint::spin_loop();
+                    }
+                    for _ in 0..50 {
+                        let _ = super::claim_mux_lock(&lock);
+                    }
+                })
+            };
+            go.store(true, Ordering::SeqCst);
+            if crate::lsp::mux::process::acquire_mux_lock(&lock)
+                .await
+                .is_err()
+            {
+                refused += 1;
+            }
+            probe.join().unwrap();
+        }
+        assert_eq!(
+            refused, 0,
+            "{refused} of {TRIALS} mux starts were refused while only a client's probe held the lock"
+        );
+    }
+
+    /// Race (1) of docs/issues/2026-10-17-mux-connect-path-lock-races.md, tried the natural way: two
+    /// clients (two managers, as two processes would be) wait on one lock holder in the same
+    /// workspace, the holder dies, and both go on to the next round at nearly the same moment, so
+    /// each one's lock claim can land inside the other's. No mux exists in this test and none is
+    /// started (a test binary cannot be one), so a client that reports "holds its lock ... wedged
+    /// or mid-restart" within 2 s was told something false: the only holder was the other client's
+    /// claim of an instant. Measured 2026-10-18, 300 trials of 2 clients each: with the fix's one
+    /// condition (`round > 0 && !last_holder_gone`) reverted to `round > 0`, 8 of 600 clients got
+    /// that error; with the fix, 0 of 600. The assertion is one-sided: green is "none were told
+    /// it", and a red run depends on timing.
+    /// `scripts/with-slot.sh cargo test --lib -- --ignored two_clients_waiting`
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "stress, about 150 s for 300 trials: the natural-interleaving attempt at race (1)"]
+    async fn two_clients_waiting_on_one_dead_holder_are_never_told_a_live_mux_wedged_it() {
+        const TRIALS: usize = 300;
+        let mut wrongly_told = 0usize;
+        for _ in 0..TRIALS {
+            let dir = tempfile::tempdir().unwrap();
+            let ws = dir.path().to_path_buf();
+            let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", &ws);
+            let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", &ws);
+            let _ = std::fs::remove_file(&sock_path);
+            let owner = super::claim_mux_lock(&lock_path).unwrap().unwrap();
+            let clients: Vec<_> = (0..2)
+                .map(|_| {
+                    let ws = ws.clone();
+                    tokio::spawn(async move {
+                        let config = LspServerConfig {
+                            command: "rust-analyzer".into(),
+                            args: vec![],
+                            workspace_root: ws.clone(),
+                            init_timeout: None,
+                            mux: true,
+                            env: vec![],
+                            idle_timeout_secs: None,
+                        };
+                        let started = Instant::now();
+                        let result = LspManager::new()
+                            .get_or_start_via_mux_waiting(
+                                "rust",
+                                &ws,
+                                config,
+                                Duration::from_secs(3),
+                            )
+                            .await;
+                        (started.elapsed(), result.err().map(|e| e.to_string()))
+                    })
+                })
+                .collect();
+            // Both clients are in their wait; the holder dies between two of their probes.
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            drop(owner);
+            for client in clients {
+                let (took, message) = client.await.unwrap();
+                if took < Duration::from_secs(2)
+                    && message.is_some_and(|m| m.contains("wedged or mid-restart"))
+                {
+                    wrongly_told += 1;
+                }
+            }
+            let _ = std::fs::remove_file(&lock_path);
+        }
+        assert_eq!(
+            wrongly_told,
+            0,
+            "{wrongly_told} of {} clients were told a live mux wedged the lock, with none running",
+            TRIALS * 2
+        );
+    }
+
+    /// What the process that takes the lock in the gap does next.
+    #[cfg(unix)]
+    enum ThirdHolder {
+        /// Its mux binds its socket and sends the init message this long after it took the lock.
+        BindsAfter(Duration),
+        /// Its mux never binds: a wedged holder.
+        NeverBinds,
+        /// It dies this long after taking the lock, binding nothing.
+        DiesAfter(Duration),
+    }
+
+    /// The manager under test, the lock currently held by a third process, and how many times the
+    /// gap opened (the `after_early_stop` seam ran).
+    #[cfg(unix)]
+    struct LockHandOffs {
+        mgr: LspManager,
+        held: Arc<StdMutex<Option<std::fs::File>>>,
+        gaps: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    /// Stand-in for the lock-holding side of race (1): the first holder dies while a client waits
+    /// on it, and in the instant after the client's wait ended on that (the `after_early_stop`
+    /// seam, which runs where the natural flow has no yield point) a THIRD process takes the lock
+    /// and behaves as `third` says. The gap is used for the first `max_hand_offs` times it opens.
+    #[cfg(unix)]
+    fn manager_whose_lock_changes_hands_after_the_first_holder_dies(
+        ws: &Path,
+        first_holder_dies_after: Duration,
+        third: ThirdHolder,
+        max_hand_offs: usize,
+    ) -> LockHandOffs {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::AsyncWriteExt;
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let sock_path = crate::lsp::mux::socket_path_for_workspace("rust", ws);
+        let _ = std::fs::remove_file(&sock_path);
+        let first = super::claim_mux_lock(&lock_path)
+            .unwrap()
+            .expect("a free lock is claimed");
+        tokio::spawn(async move {
+            tokio::time::sleep(first_holder_dies_after).await;
+            drop(first); // the first holder died
+        });
+
+        let held: Arc<StdMutex<Option<std::fs::File>>> = Arc::default();
+        let gaps = Arc::new(AtomicUsize::new(0));
+        let mgr = LspManager::new();
+        let (hook_held, hook_gaps) = (held.clone(), gaps.clone());
+        *mgr.after_early_stop.lock().unwrap() = Some(Arc::new(move || {
+            if hook_gaps.fetch_add(1, Ordering::SeqCst) >= max_hand_offs {
+                return;
+            }
+            // The lock was found free a moment ago, yet one run in 60 of this test group failed
+            // at the single claim that stood here (`expect`, the panic message was not kept).
+            // Candidate cause, not shown: a child forked by a concurrent test holds a copy of
+            // the probe's descriptor until it execs, which keeps the flock held for that long.
+            // Wait that out; it is not what the test is about.
+            let third_holder = (0..2000)
+                .find_map(|_| {
+                    super::claim_mux_lock(&lock_path).unwrap().or_else(|| {
+                        std::thread::sleep(Duration::from_millis(1));
+                        None
+                    })
+                })
+                .expect("the lock was found free and stayed claimable for 2 s");
+            *hook_held.lock().unwrap() = Some(third_holder);
+            match &third {
+                ThirdHolder::NeverBinds => {}
+                ThirdHolder::DiesAfter(after) => {
+                    let (after, held) = (*after, hook_held.clone());
+                    tokio::spawn(async move {
+                        tokio::time::sleep(after).await;
+                        drop(held.lock().unwrap().take()); // the third holder died
+                    });
+                }
+                ThirdHolder::BindsAfter(after) => {
+                    let (after, sock_path) = (*after, sock_path.clone());
+                    tokio::spawn(async move {
+                        tokio::time::sleep(after).await;
+                        let listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+                        let (mut stream, _) = listener.accept().await.unwrap();
+                        let init = r#"{"jsonrpc":"2.0","id":0,"result":{"capabilities":{}}}"#;
+                        stream
+                            .write_all(
+                                format!("Content-Length: {}\r\n\r\n{init}", init.len()).as_bytes(),
+                            )
+                            .await
+                            .unwrap();
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    });
+                }
+            }
+        }));
+        LockHandOffs { mgr, held, gaps }
+    }
+
+    /// Race (1) of docs/issues/2026-10-17-mux-connect-path-lock-races.md: a client waits on a
+    /// peer's mux, its holder dies, and before the client's next round a third process takes the
+    /// lock and starts a mux (two clients waiting on one dead holder do this to each other). The
+    /// lock is held again and no socket is bound yet: that is a mux that is STARTING, and the
+    /// client must wait for it, not report "wedged or mid-restart" at once. The third mux binds
+    /// 600 ms after taking the lock, inside a 5 s wait, so only a client that does not wait fails.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, .. } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(300),
+                ThirdHolder::BindsAfter(Duration::from_millis(600)),
+                1,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(5)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        drop(held);
+        assert!(
+            result.is_ok(),
+            "a mux that took the lock after the first holder died is starting, not wedged: {:?}",
+            result.err().map(|e| e.to_string())
+        );
+    }
+
+    /// The other half of race (1): a replacement holder that really never binds is still wedged,
+    /// and it is reported within the SAME wait, not after a second one. The first holder dies
+    /// about 1 s into a 2 s wait, so the replacement gets what is left (about 1 s) and the error
+    /// comes at about 2 s; a second full wait would make it about 3 s. Real clock; asserted
+    /// between 2 s and 2.6 s.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_replacement_holder_that_never_binds_is_wedged_within_the_same_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, .. } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(1000),
+                ThirdHolder::NeverBinds,
+                1,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let wait = Duration::from_secs(2);
+        let started = Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, wait),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        let took = started.elapsed();
+        drop(held);
+        let msg = match result {
+            Ok(_) => panic!("a holder that never binds must not connect"),
+            Err(e) => e.to_string(),
+        };
+        assert!(msg.contains("wedged or mid-restart"), "{msg}");
+        assert!(
+            took >= wait && took < Duration::from_millis(2600),
+            "the replacement is waited on for what is left of the {wait:?} wait, took {took:?}"
+        );
+    }
+
+    /// A replacement holder that dies too leaves a free lock, and that is a stale socket's cue to
+    /// respawn: the third round claims the lock and spawns a mux (which cannot work in a test
+    /// binary, so the call fails with the SPAWN's error), where a client without that round would
+    /// stop at the wedged-mux error for a lock nobody holds.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_replacement_holder_that_dies_too_hands_the_lock_to_a_respawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, gaps } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(300),
+                ThirdHolder::DiesAfter(Duration::from_millis(300)),
+                1,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(5)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        drop(held);
+        let msg = match result {
+            Ok(_) => panic!("a test binary cannot be the mux"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            !msg.contains("holds its lock"),
+            "nobody holds the lock any more, so the wedged-mux error is wrong: {msg}"
+        );
+        assert_eq!(
+            gaps.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "two holders died while the client waited"
+        );
+    }
+
+    /// F1 of the review of dd961fe5f. The wedge memory is for a mux that was waited on for a WHOLE
+    /// wait and stayed unreachable. A round that waited on a REPLACEMENT holder got only what was
+    /// left of the budget (here about nothing: the first holder dies at 950 ms of a 1 s wait), so
+    /// its failure says nothing about that mux, which here binds 1.5 s after taking the lock.
+    /// Recorded anyway, the next call, whose 5 s wait would have covered the bind, failed at once.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, .. } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(950),
+                ThirdHolder::BindsAfter(Duration::from_millis(1500)),
+                1,
+            );
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let first = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config(), Duration::from_secs(1)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        assert!(
+            first.is_err(),
+            "the replacement has not bound within the 1 s wait"
+        );
+        assert!(
+            mgr.mux_wedged_at.lock().unwrap().is_empty(),
+            "a replacement that got a short remainder of the wait is not a wedged mux"
+        );
+
+        let second = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config(), Duration::from_secs(5)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        drop(held);
+        assert!(
+            second.is_ok(),
+            "the next call's 5 s wait covers the bind: {:?}",
+            second.err().map(|e| e.to_string())
+        );
+    }
+
+    /// A lock that changes hands in every round ends the call: after the last round, with the last
+    /// holder dead, the client reports the changed-hands error instead of waiting on a lock that
+    /// never settles. Each
+    /// replacement dies 300 ms after taking the lock, so every round ends early; the gap opens
+    /// once per round and the call ends well inside its 10 s wait (under 5 s asserted).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_lock_that_changes_hands_in_every_round_ends_in_the_changed_hands_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, gaps } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(300),
+                ThirdHolder::DiesAfter(Duration::from_millis(300)),
+                usize::MAX,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let started = Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(10)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        let took = started.elapsed();
+        drop(held);
+        let msg = match result {
+            Ok(_) => panic!("no mux ever bound"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            msg.contains("changed hands")
+                && !msg.contains("holds its lock")
+                && !msg.contains("fuser"),
+            "no holder is wedged, so none may be named or `fuser`red: {msg}"
+        );
+        assert_eq!(
+            gaps.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "one gap per round, three rounds"
+        );
+        assert!(took < Duration::from_secs(5), "took {took:?}");
+    }
+
+    /// F2 of the review of dd961fe5f, the reviewer's scenario: two hand-offs and a third holder
+    /// that dies, so the rounds run out with the lock FREE. The error must not blame a holder
+    /// (no "holds its lock", no `fuser` hint): nobody holds anything.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rounds_that_run_out_with_the_lock_free_do_not_blame_a_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let LockHandOffs { mgr, held, gaps } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(300),
+                ThirdHolder::DiesAfter(Duration::from_millis(300)),
+                2,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_secs(10)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        let msg = match result {
+            Ok(_) => panic!("no mux ever bound"),
+            Err(e) => e.to_string(),
+        };
+        let lock_free_now = super::claim_mux_lock(&lock_path).unwrap().is_some();
+        drop(held);
+        assert_eq!(gaps.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert!(lock_free_now, "the last holder died, so the lock is free");
+        assert!(
+            !msg.contains("holds its lock") && !msg.contains("fuser"),
+            "nobody holds the lock, yet the error says someone does: {msg}"
+        );
+    }
+
+    /// The over-correction of F2 (review of 64df566e9): when the rounds run out with the LAST
+    /// replacement still alive and holding the lock, a holder IS known and the lock is held, so
+    /// the error is the holder one (`holds its lock`, with the `fuser` hint), not "changed hands
+    /// ... every holder waited on exited". Two hand-offs, a third holder alive past the 3.3 s
+    /// budget.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rounds_that_run_out_with_the_last_holder_alive_still_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let LockHandOffs { mgr, held, gaps } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(300),
+                ThirdHolder::DiesAfter(Duration::from_secs(2)),
+                2,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_millis(3300)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        let lock_held_now = super::claim_mux_lock(&lock_path).unwrap().is_none();
+        let msg = match result {
+            Ok(_) => panic!("no mux ever bound"),
+            Err(e) => format!("{e:#}"),
+        };
+        drop(held);
+        assert_eq!(gaps.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(lock_held_now, "the last holder is alive and holds the lock");
+        assert!(
+            msg.contains("holds its lock")
+                && msg.contains("fuser")
+                && !msg.contains("changed hands"),
+            "a live holder is known and must be named: {msg}"
+        );
+    }
+
+    /// F1 (review of 64df566e9), behaviour kept and pinned: a replacement that never binds is not
+    /// remembered as wedged (its round had only what was left of the budget), so the NEXT call
+    /// serves a full wait again, and only then is the wedge remembered. Two full waits in a row
+    /// (2 x 30 s in production) is the cost of that choice; the alternative, gating on how long the
+    /// replacement was waited on, needs a threshold nobody has measured. Bounds: each call takes
+    /// at least the 2 s wait and under 5 s.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_replacement_that_never_binds_costs_a_second_full_wait_on_the_next_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, .. } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(100),
+                ThirdHolder::NeverBinds,
+                1,
+            );
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let wait = Duration::from_secs(2);
+        let mut recorded_after = Vec::new();
+        for _ in 0..2 {
+            let started = Instant::now();
+            let result = tokio::time::timeout(
+                Duration::from_secs(30),
+                mgr.get_or_start_via_mux_waiting("rust", ws, config(), wait),
+            )
+            .await
+            .expect("bounded");
+            let took = started.elapsed();
+            assert!(result.is_err());
+            assert!(
+                took >= wait && took < wait + Duration::from_secs(3),
+                "each of the two calls serves the whole wait, took {took:?}"
+            );
+            recorded_after.push(mgr.mux_wedged_at.lock().unwrap().len());
+        }
+        drop(held);
+        assert_eq!(
+            recorded_after,
+            vec![0, 1],
+            "nothing is remembered after the replacement's short round, the wedge after the next full wait"
         );
     }
 
@@ -2791,8 +4126,7 @@ mod tests {
         let failure = super::connect_to_mux(
             &sock_path,
             dir.path(),
-            Duration::from_secs(1),
-            Some(&lock_path),
+            &peer_plan(Duration::from_secs(1), &lock_path),
         )
         .await
         .err()
@@ -2827,8 +4161,7 @@ mod tests {
         let connected = super::connect_to_mux(
             &sock_path,
             dir.path(),
-            Duration::from_secs(20),
-            Some(&lock_path),
+            &peer_plan(Duration::from_secs(20), &lock_path),
         )
         .await;
         assert!(connected.is_err(), "no socket ever appeared");

@@ -59,6 +59,39 @@ impl MuxState {
     }
 }
 
+/// How long a starting mux keeps trying for its ownership flock when it is held.
+///
+/// A client that finds a mux lock held by someone else probes it by taking it for an instant
+/// (`claim_mux_lock` in `lsp::manager`, once per 200 ms per waiting client, and once per round of
+/// `get_or_start_via_mux`); a mux whose single try landed inside that instant exited with
+/// "another mux instance holds the lock" although nothing owned the workspace. The hold is
+/// microseconds, so a short wait absorbs it; a lock that stays held for the whole grace belongs to
+/// another mux, which is still reported.
+// cap-class: NOT_A_CAP — bound on a wait for a lock; expiry surfaces as the "holds the lock" error, never as a shorter answer
+const MUX_LOCK_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Pause between two tries for the mux lock within [`MUX_LOCK_GRACE`].
+const MUX_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Step 1 of [`run`]: create the lock file and take its exclusive flock.
+///
+/// A flock that cannot be taken is retried for [`MUX_LOCK_GRACE`], then the attempt fails, which
+/// `run` reports as `another mux instance holds the lock`.
+pub(crate) async fn acquire_mux_lock(lock_path: &Path) -> Result<std::fs::File> {
+    let lock_file = std::fs::File::create(lock_path)
+        .with_context(|| format!("failed to create lock file: {}", lock_path.display()))?;
+    let deadline = tokio::time::Instant::now() + MUX_LOCK_GRACE;
+    loop {
+        match lock_file.try_lock_exclusive() {
+            Ok(()) => return Ok(lock_file),
+            Err(e) if tokio::time::Instant::now() >= deadline => {
+                return Err(e).context("another mux instance holds the lock");
+            }
+            Err(_) => tokio::time::sleep(MUX_LOCK_POLL).await,
+        }
+    }
+}
+
 /// Run the mux process. This is the entry point called by `codescout mux`.
 ///
 /// Blocks until idle timeout or server death. The caller should `std::process::exit`
@@ -73,11 +106,7 @@ pub async fn run(
     server_env: &[(String, String)],
 ) -> Result<()> {
     // 1. Acquire exclusive flock
-    let lock_file = std::fs::File::create(lock_path)
-        .with_context(|| format!("failed to create lock file: {}", lock_path.display()))?;
-    lock_file
-        .try_lock_exclusive()
-        .context("another mux instance holds the lock")?;
+    let lock_file = acquire_mux_lock(lock_path).await?;
     // Write PID for diagnostics
     use std::io::Write;
     writeln!(&lock_file, "{}", std::process::id())?;
@@ -1203,6 +1232,109 @@ mod tests {
             "identical re-registration must not grow the replay cache"
         );
     }
+
+    /// A flock held for a moment (a client's probe) is waited out: the lock is released 300 ms
+    /// after the attempt starts, and the attempt must get it, not fail on its first try. The
+    /// elapsed floor proves the first try was refused (the release comes after it by 300 ms);
+    /// the 20 s outer bound only keeps a regression from hanging the test.
+    #[tokio::test]
+    async fn a_mux_start_waits_out_a_lock_held_for_a_moment() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("mux.lock");
+        let holder = std::fs::File::create(&lock).unwrap();
+        holder.try_lock_exclusive().unwrap();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            drop(holder);
+        });
+
+        let started = Instant::now();
+        let got = tokio::time::timeout(std::time::Duration::from_secs(20), acquire_mux_lock(&lock))
+            .await
+            .expect("must not hang");
+        release.await.unwrap();
+        assert!(got.is_ok(), "a lock released within the grace is acquired");
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(300)
+                && started.elapsed() < std::time::Duration::from_secs(3),
+            "acquired after the release and without a long pause, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The lock constants by literals (review F4: `MUX_LOCK_GRACE` 1 s to 3 s survived, because
+    /// the tests above quote the constant).
+    #[test]
+    fn the_mux_lock_constants_have_the_values_the_docs_quote() {
+        assert_eq!(MUX_LOCK_GRACE, std::time::Duration::from_secs(1));
+        assert_eq!(MUX_LOCK_POLL, std::time::Duration::from_millis(10));
+    }
+
+    /// The wiring: `run` itself takes its lock through the grace, so a mux that starts while a
+    /// client's probe holds the lock gets as far as spawning its server (which does not exist
+    /// here, so that is the failure asserted) instead of exiting "another mux instance holds the
+    /// lock". The lock is released 300 ms after `run` starts, so the first try is refused.
+    #[tokio::test]
+    async fn run_takes_its_lock_through_the_grace() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("mux.lock");
+        let sock = dir.path().join("mux.sock");
+        let holder = std::fs::File::create(&lock).unwrap();
+        holder.try_lock_exclusive().unwrap();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            drop(holder);
+        });
+
+        let err = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            run(
+                &sock,
+                &lock,
+                dir.path(),
+                1,
+                "/nonexistent/codescout-test-lsp-server",
+                &[],
+                &[],
+            ),
+        )
+        .await
+        .expect("must not hang")
+        .expect_err("there is no server to spawn");
+        release.await.unwrap();
+        assert!(
+            format!("{err:#}").contains("failed to spawn LSP server"),
+            "the lock was taken and the next step failed, got: {err:#}"
+        );
+    }
+
+    /// A lock that stays held is another mux's: the attempt gives up after the grace (1 s) with
+    /// the error `run` reports, and does not give up before it. Bounds: at least the grace, under
+    /// 4 s.
+    #[tokio::test]
+    async fn a_mux_start_gives_up_on_a_lock_that_stays_held_after_the_grace() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("mux.lock");
+        let holder = std::fs::File::create(&lock).unwrap();
+        holder.try_lock_exclusive().unwrap();
+
+        let started = Instant::now();
+        let err = tokio::time::timeout(std::time::Duration::from_secs(20), acquire_mux_lock(&lock))
+            .await
+            .expect("must not hang")
+            .expect_err("a live holder keeps the lock");
+        let took = started.elapsed();
+        drop(holder);
+        assert!(
+            format!("{err:#}").contains("another mux instance holds the lock"),
+            "got: {err:#}"
+        );
+        assert!(
+            took >= MUX_LOCK_GRACE && took < MUX_LOCK_GRACE + std::time::Duration::from_secs(3),
+            "gave up after {took:?}, the grace is {MUX_LOCK_GRACE:?}"
+        );
+    }
+
     /// Two in-memory pipes standing in for the server's stdin and one connected client's socket,
     /// and a mux state holding that client as tag `a`.
     struct ClientHarness {
