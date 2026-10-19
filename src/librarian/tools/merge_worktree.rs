@@ -270,16 +270,14 @@ fn merge_one(
     };
     let shadow_aug = augmentation::get(cat, shadow_id)?;
     let main_aug = augmentation::get(cat, main_id)?;
-    // A main row the read door cleared (its file resolves outside the repository) was cleared of
-    // everything a pre-fix walk read through the link; a fork made before that clearing (in the
-    // window) recorded those values as its base. The base then counts as absent, so the merge
-    // never replays them into its conflicts or its `worktree_merge` event (review round 4, R4-3).
-    // The fork event itself is immutable and keeps them (a known limit, see the issue).
-    let base_frontmatter = if crate::librarian::read_door::cleared_by_the_read_door(&main_row) {
-        json!({})
-    } else {
-        base_frontmatter
-    };
+    // A MAIN row the read door cleared (its file resolves outside the repository) holds no file
+    // values, and none can be written through the door: its file is outside. So the frontmatter
+    // three-way below is skipped for it. Neither the fork's base (recorded before the clearing,
+    // in the window) nor the shadow's copy (never cleared when the worktree sits outside the main
+    // root, whose reindex alone clears) is printed in the conflicts, written into the
+    // `worktree_merge` event, or applied to the main row (review rounds 4 and 5, R4-3, R5-1,
+    // R5-7). The fork event itself is immutable and keeps the base (a known limit, see the issue).
+    let main_cleared = crate::librarian::read_door::cleared_by_the_read_door(&main_row);
     let shadow_params: Value = shadow_aug
         .as_ref()
         .and_then(|a| serde_json::from_str(&a.params).ok())
@@ -384,7 +382,13 @@ fn merge_one(
     let mut amended_main_row = main_row.clone();
     let shadow_fm = frontmatter_json(&shadow_row);
     let main_fm = frontmatter_json(&main_row);
-    for field in ["status", "title", "tags", "topic", "time_scope", "owners"] {
+    let fields: &[&str] = if main_cleared {
+        &[]
+    } else {
+        &["status", "title", "tags", "topic", "time_scope", "owners"]
+    };
+    for field in fields {
+        let field = *field;
         let base_v = base_frontmatter.get(field).cloned().unwrap_or(Value::Null);
         let shadow_v = shadow_fm.get(field).cloned().unwrap_or(Value::Null);
         if shadow_v == base_v {
