@@ -624,17 +624,17 @@ async fn a_pin_that_vanishes_before_the_write_lock_is_a_recoverable_refusal() {
     let host_root = std::fs::canonicalize(host.path()).unwrap();
     let gone = host_root.join("vanished");
 
-    let outcome = server
+    let refusal = match server
         .acquire_write_guard_if_writing(
             "memory",
             &serde_json::from_str(WRITE_TOPIC).unwrap(),
             Some(&gone),
         )
         .await
-        .unwrap_or_else(|e| panic!("must not be a protocol error: {e:?}"));
-    let refusal = match outcome {
-        Err(refusal) => refusal,
-        Ok(_) => panic!("a missing pin must not yield a write guard"),
+    {
+        Err(e) => panic!("must not be a protocol error: {e:?}"),
+        Ok(Err(refusal)) => refusal,
+        Ok(Ok(_)) => panic!("a missing pin must not yield a write guard"),
     };
     let body = recoverable_body("write gate", &refusal);
     assert!(
