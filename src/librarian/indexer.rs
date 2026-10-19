@@ -767,8 +767,9 @@ pub fn index_repo_sync(
         // path, augmentation and events and nothing read from the file behind the link.
         if escaping && has_history(cand_id) {
             in_savepoint(&cat.conn, || {
+                let plan = plan_risky_audit(cat, cand_id)?;
                 clear_escaping_row(cat, cand_id)?;
-                elide_escaping_audit(cat, cand_id)
+                elide_risky_audit(cat, &plan)
             })?;
             report.escaping_kept_ids.push(cand_id.clone());
             report.escaping_kept_paths.push(cand_abs_path.clone());
@@ -787,31 +788,20 @@ pub fn index_repo_sync(
             // rounds 2 and 3: R2-1a, R2-2, R3-1). One predicate, `stored_path_is_risky`, decides.
             let elide = escaping || door.stored_path_is_risky(std::path::Path::new(cand_abs_path));
             in_savepoint(&cat.conn, || {
-                // An error here is the database's, and is returned: swallowing it would skip the
-                // citation elision below silently (review round 3, R3-13).
-                let slug: Option<String> = cat
-                    .conn
-                    .query_row(
-                        "SELECT slug FROM artifact WHERE id = ?1",
-                        rusqlite::params![cand_id],
-                        |r| r.get(0),
-                    )
-                    .optional()?
-                    .flatten();
-                // Read BEFORE the elision below rewrites this row's own slug values.
-                let slug_since = match (&slug, elide) {
-                    (Some(s), true) => Some(slug_acquired_at(cat, cand_id, s)?),
-                    _ => None,
+                // Planned BEFORE the delete and the elision (which rewrites the slug mint rows
+                // the bound is read from); the lineage and the bound are review round 4 (R4-1,
+                // R4-2).
+                let plan = if elide {
+                    Some(plan_risky_audit(cat, cand_id)?)
+                } else {
+                    None
                 };
                 cat.conn.execute(
                     "DELETE FROM artifact WHERE id = ?1",
                     rusqlite::params![cand_id],
                 )?;
-                if elide {
-                    elide_escaping_audit(cat, cand_id)?;
-                    if let (Some(slug), Some(since)) = (slug, slug_since) {
-                        elide_cascaded_citations(cat, &slug, since)?;
-                    }
+                if let Some(plan) = &plan {
+                    elide_risky_audit(cat, plan)?;
                 }
                 Ok(())
             })?;
@@ -1035,18 +1025,126 @@ fn elide_cascaded_citations(cat: &Catalog, slug: &str, since: i64) -> Result<()>
     Ok(())
 }
 
-/// The audit `seq` from which row `id` held `slug`: the latest audit row of `id` that is its
-/// INSERT or an UPDATE whose new `slug` is `slug` (the mint). `0` when the trail holds neither (a
-/// catalog older than the trail), which bounds nothing: every row under the prefix is elided.
-fn slug_acquired_at(cat: &Catalog, id: &str, slug: &str) -> Result<i64> {
-    let seq: Option<i64> = cat.conn.query_row(
-        "SELECT MAX(seq) FROM catalog_audit WHERE tbl = 'artifact' AND row_id = ?1 \
-         AND (op = 'insert' OR (op = 'update' AND json_valid(payload) \
-              AND json_extract(payload, '$.slug[1]') = ?2))",
-        rusqlite::params![id, slug],
-        |r| r.get(0),
-    )?;
-    Ok(seq.unwrap_or(0))
+/// The audit `seq` from which the lineage `ids` held `slug`: for each id, its EARLIEST mint of the
+/// slug (an UPDATE whose new `slug` is `slug`, the graft handover included), or failing that its
+/// earliest INSERT (a kept row's own mint row is already elided); the earliest over the lineage.
+/// Earliest, not latest: a row that vanished and came back with the same id and slug (a branch
+/// switch) has an earlier incarnation whose citations are its own (review round 4, R4-1). `0`
+/// when the trail holds neither (a catalog older than the trail), which bounds nothing: every row
+/// under the prefix is elided.
+fn slug_acquired_at(cat: &Catalog, ids: &[String], slug: &str) -> Result<i64> {
+    let mut earliest: Option<i64> = None;
+    for id in ids {
+        let seq: Option<i64> = cat.conn.query_row(
+            "SELECT COALESCE( \
+               (SELECT MIN(seq) FROM catalog_audit WHERE tbl = 'artifact' AND row_id = ?1 \
+                AND op = 'update' AND json_valid(payload) \
+                AND json_extract(payload, '$.slug[1]') = ?2), \
+               (SELECT MIN(seq) FROM catalog_audit WHERE tbl = 'artifact' AND row_id = ?1 \
+                AND op = 'insert'))",
+            rusqlite::params![id, slug],
+            |r| r.get(0),
+        )?;
+        earliest = match (earliest, seq) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+    }
+    Ok(earliest.unwrap_or(0))
+}
+
+/// How many ids a lineage walk collects at most; a chain of pre-fix moves longer than this is cut
+/// there (each step is one `doc(move)` of one document).
+// cap-class: NOT_A_CAP — bounds an internal walk of the audit trail for the reindex's elision; no tool returns its result, so it shortens nothing a caller receives
+const LINEAGE_DEPTH_CAP: usize = 64;
+
+/// `id` and every row that handed `slug` over to a member, transitively: the earlier ids of a
+/// document moved by a pre-fix `doc(move)` (or reseated, or grafted). `graft_rows` records no
+/// lineage, so it is read from the trail (review round 4, R4-2): a handover is an UPDATE of the
+/// old row whose `slug` is `[slug, null]`, followed by the UPDATE of the new row to `[null, slug]`
+/// (one transaction, in that order). Nothing else sets a slug to null. A graft of a row with NO
+/// slug leaves no such pair and is not found. Walked from `id` backwards, one handover at a time,
+/// with a visited set (a chain can return to an earlier path, so an id) and at most
+/// `LINEAGE_DEPTH_CAP` ids.
+fn slug_lineage(cat: &Catalog, id: &str, slug: &str) -> Result<Vec<String>> {
+    // Every handover of `slug`: (from, into).
+    let handovers: Vec<(String, Option<String>)> = cat
+        .conn
+        .prepare(
+            "SELECT h.row_id, ( \
+               SELECT n.row_id FROM catalog_audit n WHERE n.tbl = 'artifact' \
+                 AND n.op = 'update' AND n.seq > h.seq AND json_valid(n.payload) \
+                 AND json_type(n.payload, '$.slug[0]') = 'null' \
+                 AND json_extract(n.payload, '$.slug[1]') = ?1 \
+               ORDER BY n.seq LIMIT 1) \
+             FROM catalog_audit h WHERE h.tbl = 'artifact' AND h.op = 'update' \
+               AND json_valid(h.payload) \
+               AND json_extract(h.payload, '$.slug[0]') = ?1 \
+               AND json_type(h.payload, '$.slug[1]') = 'null'",
+        )?
+        .query_map(rusqlite::params![slug], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut lineage = vec![id.to_string()];
+    let mut visited: std::collections::HashSet<String> = lineage.iter().cloned().collect();
+    let mut queue = vec![id.to_string()];
+    while let Some(member) = queue.pop() {
+        for (from, into) in &handovers {
+            if lineage.len() >= LINEAGE_DEPTH_CAP {
+                return Ok(lineage);
+            }
+            if into.as_deref() == Some(member.as_str()) && visited.insert(from.clone()) {
+                lineage.push(from.clone());
+                queue.push(from.clone());
+            }
+        }
+    }
+    Ok(lineage)
+}
+
+/// What the audit elision of a risky row needs, read BEFORE the row's own audit values are
+/// elided (the elision rewrites the slug mint rows the bound is read from).
+struct RiskyAudit {
+    lineage: Vec<String>,
+    citations: Option<(String, i64)>,
+}
+
+/// Plan the elision for risky row `id`: its slug, its lineage, and the citation bound.
+fn plan_risky_audit(cat: &Catalog, id: &str) -> Result<RiskyAudit> {
+    // An error here is the database's, and is returned: swallowing it would skip the citation
+    // elision silently (review round 3, R3-13).
+    let slug: Option<String> = cat
+        .conn
+        .query_row(
+            "SELECT slug FROM artifact WHERE id = ?1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(slug) = slug else {
+        return Ok(RiskyAudit {
+            lineage: vec![id.to_string()],
+            citations: None,
+        });
+    };
+    let lineage = slug_lineage(cat, id, &slug)?;
+    let since = slug_acquired_at(cat, &lineage, &slug)?;
+    Ok(RiskyAudit {
+        lineage,
+        citations: Some((slug, since)),
+    })
+}
+
+/// Elide, per `plan`: the file-derived audit values of every id in the lineage, and the cascaded
+/// citation payloads under the slug written since the lineage acquired it.
+fn elide_risky_audit(cat: &Catalog, plan: &RiskyAudit) -> Result<()> {
+    for id in &plan.lineage {
+        elide_escaping_audit(cat, id)?;
+    }
+    if let Some((slug, since)) = &plan.citations {
+        elide_cascaded_citations(cat, slug, *since)?;
+    }
+    Ok(())
 }
 
 /// Run `f` inside a SAVEPOINT on `conn`: released on `Ok`, rolled back on `Err`, so a removal and
