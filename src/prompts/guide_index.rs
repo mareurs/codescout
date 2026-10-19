@@ -279,6 +279,14 @@ pub const MAX_DECLARED_SECTION_BYTES: usize = 2500;
 /// `MAX_AUTO_INJECT_GUIDE_BYTES` (16,384 B, wrapper included), which the first cut of
 /// `append_entry` met with 40 B to spare (16,344 B) while a body-summing test read 13.5 KB.
 /// `append_entry`'s is also read by the end-to-end test, so there is one number.
+///
+/// RE-MEASURED 2026-10-18 (throwaway `eprintln!` in `tracker_write_shapes_ship_their_sections_and_only_theirs`
+/// and the end-to-end test): `append_entry` 12,936 B (end-to-end: 12,936 B), `update_entry`
+/// 9,083 B, `augment` 5,263 B, `link` 2,592 B on a tracker and on a bug file, so the margins
+/// left under the ceilings below are 120, 122, 126 and 127 B. The block-seam fix (every section
+/// block now opens with `\n`, `trailing_block`) adds 1 B per section block; how the drift above
+/// splits between that and earlier edits was not measured for these shapes. The constants below
+/// still read the 2026-10-17 figures on purpose: the ceilings were not raised.
 #[cfg(test)]
 pub(crate) const WRITE_CEILING_APPEND_ENTRY: usize = 12_928 + 128;
 #[cfg(test)]
@@ -288,7 +296,7 @@ pub(crate) const WRITE_CEILING_AUGMENT: usize = 5_261 + 128;
 #[cfg(test)]
 pub(crate) const WRITE_CEILING_LINK: usize = 2_591 + 128;
 /// A floor for `append_entry`, between its section BODIES (10,641 B) and what it delivers
-/// wrapped (12,928 B): it fails a delivered-bytes measure that forgot the wrappers.
+/// wrapped (12,928 B on 2026-10-17, 12,936 B on 2026-10-18): it fails a delivered-bytes measure that forgot the wrappers.
 #[cfg(test)]
 pub(crate) const WRITE_FLOOR_APPEND_ENTRY: usize = 12_000;
 

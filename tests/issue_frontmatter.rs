@@ -23,6 +23,9 @@
 //! 5. `kind` and `status` are present; `status: fixed` carries `closed: YYYY-MM-DD`;
 //! 6. `opened: YYYY-MM-DD` is present on a file named for a date on or after [`OPENED_REQUIRED_FROM`].
 //!
+//! Rules 1 to 4 and the presence half of 5 also run over `docs/issues/archive/` ([`Scope::Archive`]); the
+//! `closed` and `opened` policy (rest of 5, and 6) does not, because the archive predates it.
+//!
 //! Rules 5 and 6 are loosened from "kind, status, title and opened always": measured 2026-10-17 over the
 //! 79 tracked non-archive files (the template set aside), 11 have no `title` (one as recent as 2026-10-16,
 //! and the template carries none), and 10 have no `opened`, the newest named for 2026-09-23. So `title` is
@@ -38,6 +41,20 @@ use std::process::Command;
 /// First file-name date for which `opened` is mandatory. The last non-archive file lacking it is
 /// `2026-09-23-read-file-file-not-found-on-a-real-untr...`.
 const OPENED_REQUIRED_FROM: &str = "2026-09-24";
+
+/// Which population a file belongs to, and so which rules apply.
+///
+/// `Archive` files get the SYNTAX rules (1 to 4) and the `kind`/`status` presence rule, not the
+/// `opened`/`closed` policy rules (5's `closed`, 6). Measured 2026-10-18 over the 1083 tracked archive
+/// files: 0 syntax defects, but 191 `fixed` files with no `closed` and 20 with no `opened`, written
+/// before those fields were required. Applying the policy there would be 211 red lines about history.
+/// The syntax rules are the ones whose violation hides a file from a reader of `status`/`kind`, which
+/// is the harm the issue names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scope {
+    Live,
+    Archive,
+}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -133,7 +150,8 @@ fn value_problems(key: &str, value: &str) -> Vec<String> {
 }
 
 /// Every defect in one frontmatter block of the file named `file_name` (bare name, for the date).
-fn block_problems(file_name: &str, block: &str) -> Vec<String> {
+/// `scope` selects the rules: see [`Scope`].
+fn block_problems(scope: Scope, file_name: &str, block: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen: BTreeMap<String, String> = BTreeMap::new();
     for (i, line) in block.lines().enumerate() {
@@ -170,8 +188,9 @@ fn block_problems(file_name: &str, block: &str) -> Vec<String> {
             out.push(format!("missing `{required}`"));
         }
     }
+    let policy = scope == Scope::Live;
     let file_date = file_name.get(..10).filter(|d| is_date(d)).unwrap_or("");
-    if !file_date.is_empty() && file_date >= OPENED_REQUIRED_FROM {
+    if policy && !file_date.is_empty() && file_date >= OPENED_REQUIRED_FROM {
         match seen.get("opened") {
             None => out.push(format!(
                 "missing `opened` (required for files dated {OPENED_REQUIRED_FROM} or later)"
@@ -180,7 +199,7 @@ fn block_problems(file_name: &str, block: &str) -> Vec<String> {
             _ => {}
         }
     }
-    if seen.get("status").map(String::as_str) == Some("fixed") {
+    if policy && seen.get("status").map(String::as_str) == Some("fixed") {
         match seen.get("closed") {
             Some(v) if is_date(v) => {}
             other => out.push(format!(
@@ -191,18 +210,24 @@ fn block_problems(file_name: &str, block: &str) -> Vec<String> {
     out
 }
 
-/// Problems with a whole file: no block at all, or the block's problems.
+/// Problems with a whole file: no block at all, or the block's problems. `Scope::Live` rules.
 fn file_problems(file_name: &str, content: &str) -> Vec<String> {
+    file_problems_in(Scope::Live, file_name, content)
+}
+
+/// [`file_problems`] under the rules of `scope`.
+fn file_problems_in(scope: Scope, file_name: &str, content: &str) -> Vec<String> {
     match frontmatter_block(content) {
         None => vec!["no `---` frontmatter block at the top of the file".to_string()],
-        Some(block) => block_problems(file_name, block),
+        Some(block) => block_problems(scope, file_name, block),
     }
 }
 
-/// Tracked, non-archive `docs/issues/*.md`, except underscore-prefixed files (`_TEMPLATE.md` is a template
-/// with a placeholder date, not a record). Deduplicated: `git ls-files` lists an unmerged path once per
-/// stage, and this population is files.
-fn tracked_issue_files() -> Vec<String> {
+/// Tracked `docs/issues/*.md` of one population, except underscore-prefixed files (`_TEMPLATE.md` is a
+/// template with a placeholder date, not a record). `Live` is the directory itself, `Archive` is
+/// `docs/issues/archive/` (flat: measured 2026-10-18, 1083 files, none nested, none underscore-prefixed).
+/// Deduplicated: `git ls-files` lists an unmerged path once per stage, and this population is files.
+fn tracked_issue_files(scope: Scope) -> Vec<String> {
     let out = Command::new("git")
         .current_dir(repo_root())
         .args(["ls-files", "-z", "--", "docs/issues"])
@@ -217,11 +242,33 @@ fn tracked_issue_files() -> Vec<String> {
         .expect("tracked paths are UTF-8")
         .split('\0')
         .filter_map(|p| p.strip_prefix("docs/issues/"))
+        .filter_map(|rest| match scope {
+            Scope::Live => Some(rest),
+            Scope::Archive => rest.strip_prefix("archive/"),
+        })
         .filter(|rest| !rest.contains('/') && rest.ends_with(".md") && !rest.starts_with('_'))
-        .map(|rest| format!("docs/issues/{rest}"))
+        .map(|rest| match scope {
+            Scope::Live => format!("docs/issues/{rest}"),
+            Scope::Archive => format!("docs/issues/archive/{rest}"),
+        })
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+/// Every problem over `files` (repo-relative paths under `root`), each prefixed with its path. Its own
+/// function so that the walk itself, not only the rules it applies, can be tested on files it is handed.
+fn walk_problems(root: &std::path::Path, files: &[String], scope: Scope) -> Vec<String> {
+    let mut failures = Vec::new();
+    for file in files {
+        let content = std::fs::read_to_string(root.join(file))
+            .unwrap_or_else(|e| panic!("tracked file {file} is unreadable: {e}"));
+        let name = file.rsplit('/').next().unwrap();
+        for p in file_problems_in(scope, name, &content) {
+            failures.push(format!("{file}: {p}"));
+        }
+    }
+    failures
 }
 
 /// The frontmatter block of the p50 emission-budget issue as it stood at `31f0041c^`: a `fixed` record
@@ -257,7 +304,7 @@ fn repaired() -> String {
 
 #[test]
 fn every_tracked_issue_file_has_wellformed_frontmatter() {
-    let files = tracked_issue_files();
+    let files = tracked_issue_files(Scope::Live);
     // Floor, not a total: an empty or truncated walk must not pass by checking nothing. Measured
     // 2026-10-17: 80 tracked non-archive files, 79 once the template is set aside.
     assert!(
@@ -265,15 +312,7 @@ fn every_tracked_issue_file_has_wellformed_frontmatter() {
         "the walk found only {} tracked non-archive issue files; it is not reading the population",
         files.len()
     );
-    let mut failures = Vec::new();
-    for file in &files {
-        let content = std::fs::read_to_string(repo_root().join(file))
-            .unwrap_or_else(|e| panic!("tracked file {file} is unreadable: {e}"));
-        let name = file.rsplit('/').next().unwrap();
-        for p in file_problems(name, &content) {
-            failures.push(format!("{file}: {p}"));
-        }
-    }
+    let failures = walk_problems(&repo_root(), &files, Scope::Live);
     assert!(
         failures.is_empty(),
         "docs/issues frontmatter is malformed ({} problem(s) over {} files). Repair the YAML syntax in \
@@ -282,6 +321,89 @@ fn every_tracked_issue_file_has_wellformed_frontmatter() {
         files.len(),
         failures.join("\n")
     );
+}
+
+/// The issue's title names TWO broken archive files, found only by a hand-run PyYAML scan. A broken
+/// block moved into the archive later must not wait for another scan, so the archive is walked with the
+/// syntax rules ([`Scope::Archive`]).
+#[test]
+fn every_archived_issue_file_has_wellformed_syntax() {
+    let files = tracked_issue_files(Scope::Archive);
+    // Floor: measured 2026-10-18, 1083 tracked archive files. Archiving only adds to it.
+    assert!(
+        files.len() >= 1000,
+        "the walk found only {} tracked archive issue files; it is not reading the population",
+        files.len()
+    );
+    let failures = walk_problems(&repo_root(), &files, Scope::Archive);
+    assert!(
+        failures.is_empty(),
+        "docs/issues/archive frontmatter is malformed ({} problem(s) over {} files). Repair the YAML \
+         syntax in place (quote the value), as was done for the two files this test was added after; \
+         do not loosen the rule:\n{}",
+        failures.len(),
+        files.len(),
+        failures.join("\n")
+    );
+}
+
+/// The walk itself, on files it is handed: the per-rule tests below call the checker directly and the
+/// two tests above read the real tree, so a walk that stopped reading or reporting files would be
+/// invisible to every one of them while the real tree stayed clean.
+#[test]
+fn the_walk_names_each_broken_file_by_path_and_passes_a_clean_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("docs/issues/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    let clean = repaired();
+    let glued = PRE_FIX_GLUED_FILE;
+    std::fs::write(dir.join("2026-10-17-clean.md"), &clean).unwrap();
+    std::fs::write(dir.join("2026-10-17-glued.md"), glued).unwrap();
+    let files = vec![
+        "docs/issues/archive/2026-10-17-clean.md".to_string(),
+        "docs/issues/archive/2026-10-17-glued.md".to_string(),
+    ];
+
+    let failures = walk_problems(tmp.path(), &files, Scope::Archive);
+    assert!(
+        !failures.is_empty()
+            && failures
+                .iter()
+                .all(|f| f.starts_with("docs/issues/archive/2026-10-17-glued.md: ")),
+        "exactly the glued file must be named, with its path: {failures:#?}"
+    );
+    assert!(
+        failures.iter().any(|f| f.contains("glued")),
+        "and the defect must be the glued line: {failures:#?}"
+    );
+    assert!(
+        walk_problems(tmp.path(), &files[..1], Scope::Archive).is_empty(),
+        "the clean file alone must pass"
+    );
+}
+
+/// The archive is checked for syntax only. A `fixed` record with no `closed`, and a dated one with no
+/// `opened`, are history there (211 of them on 2026-10-18) and policy for the live directory.
+#[test]
+fn the_archive_scope_applies_the_syntax_rules_but_not_the_closed_and_opened_policy() {
+    let history = repaired()
+        .replace("closed: 2026-10-17\n", "")
+        .replace("opened: 2026-10-17\n", "");
+    assert!(
+        !file_problems_in(Scope::Live, P50_NAME, &history).is_empty(),
+        "control: the live rules refuse it"
+    );
+    assert!(
+        file_problems_in(Scope::Archive, P50_NAME, &history).is_empty(),
+        "{:#?}",
+        file_problems_in(Scope::Archive, P50_NAME, &history)
+    );
+    // Still a syntax check, and still `kind`/`status`.
+    assert!(!file_problems_in(Scope::Archive, P50_NAME, PRE_FIX_GLUED_FILE).is_empty());
+    let no_status = history.replace("status: fixed\n", "");
+    assert!(file_problems_in(Scope::Archive, P50_NAME, &no_status)
+        .iter()
+        .any(|p| p.contains("missing `status`")));
 }
 
 #[test]
@@ -350,6 +472,11 @@ fn kind_and_status_are_required() {
     assert!(file_problems(P50_NAME, &no_status)
         .iter()
         .any(|p| p.contains("missing `status`")));
+    // Present but empty is as good as absent: a reader of `status` gets nothing either way.
+    let empty_status = repaired().replace("status: fixed\n", "status:\n");
+    assert!(file_problems(P50_NAME, &empty_status)
+        .iter()
+        .any(|p| p.contains("missing `status`")));
 }
 
 #[test]
@@ -385,6 +512,21 @@ fn a_plain_value_that_yaml_cannot_read_is_refused_but_a_quoted_one_is_not() {
     assert!(file_problems(P50_NAME, &colon)
         .iter()
         .any(|p| p.contains("contains `: `")));
+    // Each reserved leading character and the trailing colon is its own branch.
+    for (value, what) in [
+        ("it ends with:", "ends with a colon"),
+        ("@someone said so", "starts with @"),
+        ("%d is a directive", "starts with %"),
+    ] {
+        let bad = repaired().replace(
+            "severity: low\n",
+            &format!("unverified: {value}\nseverity: low\n"),
+        );
+        assert!(
+            !file_problems(P50_NAME, &bad).is_empty(),
+            "a plain value that {what} must be refused: {value}"
+        );
+    }
     let quoted = repaired().replace(
         "severity: low\n",
         "unverified: \"`a` and `b` were dropped: both\"\nseverity: low\n",
@@ -406,6 +548,26 @@ fn a_quoted_value_that_does_not_close_or_has_a_lone_quote_is_refused() {
     assert!(file_problems(P50_NAME, &open)
         .iter()
         .any(|p| p.contains("does not close")));
+    // Double quotes: never closed, and closed only by an ESCAPED quote (an odd run of backslashes).
+    let open_double = repaired().replace(
+        "severity: low\n",
+        "unverified: \"never closed\nseverity: low\n",
+    );
+    assert!(file_problems(P50_NAME, &open_double)
+        .iter()
+        .any(|p| p.contains("double-quoted value does not close")));
+    let escaped = repaired().replace(
+        "severity: low\n",
+        "unverified: \"ends on an escaped quote\\\"\nseverity: low\n",
+    );
+    assert!(file_problems(P50_NAME, &escaped)
+        .iter()
+        .any(|p| p.contains("double-quoted value does not close")));
+    let backslash_then_close = repaired().replace(
+        "severity: low\n",
+        "unverified: \"ends in a backslash\\\\\"\nseverity: low\n",
+    );
+    assert!(file_problems(P50_NAME, &backslash_then_close).is_empty());
     let lone = repaired().replace(
         "severity: low\n",
         "unverified: 'it's broken'\nseverity: low\n",
@@ -423,15 +585,78 @@ fn a_date_glued_to_letters_is_refused_even_without_a_colon() {
         .any(|p| p.contains("glued")));
 }
 
+/// Comments, blank lines and indented lines are skipped by the grammar rather than judged. The
+/// block is VALID YAML (the earlier fixture here ended in a bare indented `continuation text`
+/// line, which PyYAML and the catalog reader both refuse: "could not find expected ':'"), and
+/// `src/librarian/frontmatter.rs` reads this same block whole
+/// (`the_catalog_reader_refuses_shapes_the_line_grammar_accepts`'s control row).
 #[test]
 fn indented_continuations_comments_and_blank_lines_are_allowed() {
     let ok = repaired().replace(
         "severity: low\n",
-        "severity: low\n# a comment\n\nrelated2:\n  - nested: item\n  continuation text\n",
+        "severity: low\n# a comment\n\nrelated2:\n  - nested: item\nsummary: first line\n  and a continuation\n",
     );
     assert!(
         file_problems(P50_NAME, &ok).is_empty(),
         "{:#?}",
         file_problems(P50_NAME, &ok)
     );
+}
+
+/// A file that is only a block, closed by the final fence with no trailing newline. Without the
+/// fallback in `frontmatter_block` it reads as "no frontmatter block" and is refused.
+#[test]
+fn a_block_closed_by_a_final_fence_with_no_trailing_newline_is_read() {
+    let only_a_block = "---\nkind: bug\nstatus: open\n---";
+    assert_eq!(
+        frontmatter_block(only_a_block),
+        Some("kind: bug\nstatus: open")
+    );
+    assert!(
+        file_problems("2026-09-01-only-a-block.md", only_a_block).is_empty(),
+        "{:#?}",
+        file_problems("2026-09-01-only-a-block.md", only_a_block)
+    );
+}
+
+/// `key:value` with no space is not a mapping entry in YAML (it is a plain scalar), so a line
+/// written that way is refused as not `key: value`, and a bare `key:` (nested block follows) is
+/// still a key.
+#[test]
+fn a_key_with_no_space_after_the_colon_is_refused() {
+    let glued = repaired().replace("severity: low\n", "title:value\nseverity: low\n");
+    assert!(file_problems(P50_NAME, &glued)
+        .iter()
+        .any(|p| p.contains("not `key: value`")));
+    let bare_key = repaired().replace("severity: low\n", "severity: low\nextra:\n  - a\n");
+    assert!(
+        file_problems(P50_NAME, &bare_key).is_empty(),
+        "{:#?}",
+        file_problems(P50_NAME, &bare_key)
+    );
+}
+
+/// `is_date` takes only `YYYY-MM-DD`. A slash date, and a ten-character run of digits, are not
+/// dates: the separator check is what refuses them. Before this test the check was killed only by
+/// three archived files whose hex `id:` looks like a date followed by letters.
+#[test]
+fn a_date_with_the_wrong_separator_is_not_a_date() {
+    assert!(is_date("2026-10-17"));
+    for bad in [
+        "2026/10/17",
+        "2026.10.17",
+        "2026-10/17",
+        "2026/10-17",
+        "2026101789",
+    ] {
+        assert!(!is_date(bad), "{bad:?} must not be a date");
+    }
+    let slash_closed = repaired().replace("closed: 2026-10-17\n", "closed: 2026/10/17\n");
+    assert!(file_problems(P50_NAME, &slash_closed)
+        .iter()
+        .any(|p| p.contains("needs `closed")));
+    let slash_opened = repaired().replace("opened: 2026-10-17\n", "opened: 2026/10/17\n");
+    assert!(file_problems(P50_NAME, &slash_opened)
+        .iter()
+        .any(|p| p.contains("`opened` is not")));
 }

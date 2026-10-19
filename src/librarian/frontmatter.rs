@@ -510,6 +510,187 @@ mod tests {
         assert!(parse(doc).is_err());
     }
 
+    /// docs/issues/2026-10-17-no-test-validates-the-frontmatter-of-docs-issues-files-a-glued-key-line-and-two-broken-archive-files-went-unnoticed.md
+    ///
+    /// The catalog does not read `docs/issues/*.md` with the line grammar of
+    /// `tests/issue_frontmatter.rs`: it reads them with [`parse`], which deserialises the block
+    /// into the typed [`Frontmatter`], and the indexer (`src/librarian/indexer.rs`) takes
+    /// `parse(..).unwrap_or((None, ""))`, so a block this rejects makes the file INVISIBLE to
+    /// `doc(find)`. The line grammar is a dependency-free subset check for the lean lane and
+    /// accepts shapes this refuses (see
+    /// `the_catalog_reader_refuses_shapes_the_line_grammar_accepts`), so the real reader runs
+    /// over the same tracked population here, archive included, and every file must parse with
+    /// both `kind` and `status` present.
+    #[test]
+    fn every_tracked_issue_file_parses_with_the_catalog_reader() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let out = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["ls-files", "-z", "--", "docs/issues"])
+            .output()
+            .expect("git ls-files must run");
+        assert!(
+            out.status.success(),
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let paths: std::collections::BTreeSet<String> = String::from_utf8(out.stdout)
+            .expect("tracked paths are UTF-8")
+            .split('\0')
+            .filter(|p| p.ends_with(".md"))
+            .map(str::to_string)
+            .collect();
+        // Floor, not a total: measured 2026-10-18, 1189 tracked files. An empty or truncated
+        // walk must not pass by checking nothing.
+        assert!(
+            paths.len() >= 1000,
+            "the walk found only {} tracked issue files; it is not reading the population",
+            paths.len()
+        );
+        let failures = catalog_reader_failures(root, &paths);
+        assert!(
+            failures.is_empty(),
+            "the catalog reader refuses or half-reads {} of {} tracked issue files, which then \
+             drop out of `doc(find)`. Repair the YAML in place; do not loosen the check:\n{}",
+            failures.len(),
+            paths.len(),
+            failures.join("\n")
+        );
+    }
+
+    /// Every file of `paths` (repo-relative, under `root`) the catalog reader refuses or half-reads,
+    /// each prefixed with its path. Its own function so the walk can be tested on files it is handed.
+    fn catalog_reader_failures(
+        root: &std::path::Path,
+        paths: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        for p in paths {
+            let content = std::fs::read_to_string(root.join(p))
+                .unwrap_or_else(|e| panic!("tracked file {p} is unreadable: {e}"));
+            match parse(&content) {
+                Ok((Some(fm), _)) if fm.kind.is_some() && fm.status.is_some() => {}
+                Ok((Some(fm), _)) => failures.push(format!(
+                    "{p}: parsed, but kind={:?} status={:?}",
+                    fm.kind, fm.status
+                )),
+                Ok((None, _)) => failures.push(format!("{p}: no frontmatter block")),
+                Err(e) => failures.push(format!("{p}: {e}")),
+            }
+        }
+        failures
+    }
+
+    /// The walk above, on files it is handed: the real tree is clean, so a walk that stopped
+    /// reporting (or stopped requiring `kind` and `status`) would stay green there.
+    #[test]
+    fn the_reader_walk_names_each_file_the_reader_refuses_or_half_reads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let write = |name: &str, doc: &str| {
+            std::fs::write(tmp.path().join(name), doc).unwrap();
+            name.to_string()
+        };
+        let good = write("good.md", "---\nkind: bug\nstatus: open\n---\n\nbody\n");
+        let refused = write(
+            "refused.md",
+            "---\nkind: bug\nstatus: open\ntags: cluster/x\n---\n\nb\n",
+        );
+        let no_status = write("no-status.md", "---\nkind: bug\nstatus: null\n---\n\nb\n");
+        let no_kind = write("no-kind.md", "---\nstatus: open\n---\n\nb\n");
+        let no_block = write("no-block.md", "# just a heading\n");
+
+        let only_good: std::collections::BTreeSet<String> = [good.clone()].into();
+        assert!(catalog_reader_failures(tmp.path(), &only_good).is_empty());
+
+        for (name, want) in [
+            (&refused, "invalid type"),
+            (&no_status, "status=None"),
+            (&no_kind, "kind=None"),
+            (&no_block, "no frontmatter block"),
+        ] {
+            let paths: std::collections::BTreeSet<String> = [good.clone(), name.clone()].into();
+            let failures = catalog_reader_failures(tmp.path(), &paths);
+            assert_eq!(failures.len(), 1, "{name}: {failures:#?}");
+            assert!(
+                failures[0].starts_with(&format!("{name}: ")) && failures[0].contains(want),
+                "{name} must be named with `{want}`: {failures:#?}"
+            );
+        }
+    }
+
+    /// What the line grammar in `tests/issue_frontmatter.rs` lets through and the real reader
+    /// does not, so the gap is recorded by a test and not only by prose. Measured 2026-10-18;
+    /// PyYAML agrees with the reader on every `Err` row except the first four (`tags: x`,
+    /// `owners: x`, `kind: [bug]` and a mapping as a `tags` item are valid YAML of the wrong
+    /// TYPE, which only the typed struct refuses). The two `Ok` rows are the quiet ones: `status: null` parses to
+    /// `status: None`, which the walk above catches through its `status.is_some()`, and a
+    /// `!tag` is dropped silently, which nothing catches.
+    #[test]
+    fn the_catalog_reader_refuses_shapes_the_line_grammar_accepts() {
+        let wrap = |block: &str| format!("---\n{block}---\n\nbody\n");
+        for (what, block) in [
+            (
+                "a scalar where `tags` is a list",
+                "kind: bug\nstatus: open\ntags: cluster/x\n",
+            ),
+            (
+                "a scalar where `owners` is a list",
+                "kind: bug\nstatus: open\nowners: marius\n",
+            ),
+            (
+                "a list where `kind` is a string",
+                "kind: [bug]\nstatus: open\n",
+            ),
+            (
+                "a mapping as a `tags` item",
+                "kind: bug\nstatus: open\ntags:\n- a: b\n",
+            ),
+            (
+                "a flow sequence as a title",
+                "kind: bug\nstatus: open\ntitle: [WIP] thing\n",
+            ),
+            (
+                "a tab-indented list item",
+                "kind: bug\nstatus: open\ntags:\n\t- x\n",
+            ),
+        ] {
+            assert!(
+                parse(&wrap(block)).is_err(),
+                "the reader must refuse {what}"
+            );
+        }
+        let (fm, _) = parse(&wrap("kind: bug\nstatus: null\n")).unwrap();
+        assert_eq!(
+            fm.unwrap().status,
+            None,
+            "`status: null` parses, to no status at all"
+        );
+        let (fm, _) = parse(&wrap("kind: bug\nstatus: open\ntitle: !important thing\n")).unwrap();
+        assert_eq!(
+            fm.unwrap().title.as_deref(),
+            Some("thing"),
+            "a `!tag` is read as its bare value, silently"
+        );
+        // Control: the same wrapper, a clean block, is read whole.
+        let (fm, _) = parse(&wrap(
+            "kind: bug\nstatus: open\ntitle: a fine title\ntags:\n- cluster/x\nowners:\n- marius\n",
+        ))
+        .unwrap();
+        let fm = fm.unwrap();
+        assert_eq!(fm.tags, vec!["cluster/x".to_string()]);
+        assert_eq!(fm.owners, vec!["marius".to_string()]);
+        // The block `tests/issue_frontmatter.rs` uses for "comments, blank lines and indented
+        // lines are skipped, not judged": valid YAML, and read whole by the real reader.
+        let (fm, _) = parse(&wrap(
+            "kind: bug\nstatus: open\n# a comment\n\nrelated2:\n  - nested: item\nsummary: first line\n  and a continuation\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            fm.unwrap().extra["summary"],
+            serde_json::json!("first line and a continuation")
+        );
+    }
+
     #[test]
     fn round_trip_preserves_body() {
         let fm = Frontmatter {

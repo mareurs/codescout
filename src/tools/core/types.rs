@@ -2048,7 +2048,9 @@ pub trait Tool: Send + Sync {
                     if let Some(s) = val.as_str() {
                         val = serde_json::json!({ "status": s, "_workspace_notice": n });
                     } else {
-                        notice_block = Some(Content::text(format!("\u{26a0} {n}")));
+                        notice_block = Some(crate::tools::core::guide_emit::trailing_block(
+                            format!("\u{26a0} {n}"),
+                        ));
                     }
                 }
                 notice_carried = true;

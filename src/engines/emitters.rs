@@ -39,7 +39,6 @@
 use super::coordinator::{Emission, Emitted, PostCtx};
 use crate::tools::guide_emit::{guide_block, guide_blocks_for, GuideDeliveryShape};
 use crate::tools::guide_ledger::GuideLedger;
-use rmcp::model::Content;
 
 /// Engine `session-opener`. Fires whenever the bootstrap topic specifically is
 /// absent from the ledger — not merely whenever the ledger is empty, which
@@ -130,7 +129,7 @@ pub(crate) fn emit_operator_rules(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -
             continue;
         }
         ledger.insert(key);
-        blocks.push(Content::text(format!(
+        blocks.push(crate::tools::guide_emit::trailing_block(format!(
             "<!-- operator-rule {} — delivered once this session for this call \
              shape; see docs/trackers/operator-rules.md -->\n{}",
             r.id, r.imperative
@@ -146,6 +145,7 @@ pub(crate) fn emit_operator_rules(ctx: &PostCtx<'_>, ledger: &mut GuideLedger) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::Content;
     use serde_json::json;
 
     fn ctx<'a>(value: &'a serde_json::Value, sel: Option<&'a str>) -> PostCtx<'a> {
@@ -286,6 +286,8 @@ mod tests {
         // The imperative is left free: it is OP-3's shipped text, and coupling an
         // engine test to a rule's wording would red on a legitimate rule edit.
         let (wrapper, imperative) = text
+            .strip_prefix('\n')
+            .expect("the block opens with the newline that puts it on a line of its own")
             .split_once('\n')
             .expect("the block is a wrapper comment, a newline, then the imperative");
         assert_eq!(
@@ -308,6 +310,27 @@ mod tests {
         assert!(
             second.is_empty(),
             "a delivered rule must not fire twice in a session"
+        );
+    }
+
+    /// An operator-rule block is appended behind the tool's own block, so a client that
+    /// lays the blocks end to end would put `<!-- operator-rule` on the tool's last line.
+    /// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+    #[test]
+    fn an_operator_rule_block_starts_on_its_own_line() {
+        let v = json!({"status": "ok"});
+        let Emitted::Claimed(e) =
+            emit_operator_rules(&ctx(&v, Some("memory.write")), &mut GuideLedger::default())
+        else {
+            panic!("a selector-bearing call must claim")
+        };
+        assert_eq!(e.blocks.len(), 1, "premise: OP-3 routes on memory.write");
+        let mut reply = vec![Content::text("{\n  \"status\": \"ok\"\n}")];
+        reply.extend(e.blocks);
+        assert!(
+            crate::tools::guide_emit::seam_defects(&reply).is_empty(),
+            "{:?}",
+            crate::tools::guide_emit::seam_defects(&reply)
         );
     }
 }

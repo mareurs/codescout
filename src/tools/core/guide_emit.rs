@@ -63,6 +63,32 @@ pub(crate) enum GuideDeliveryShape {
 // cap-class: RESULT_CAP guide_emit.auto_inject_bound — probed
 pub(crate) const MAX_AUTO_INJECT_GUIDE_BYTES: usize = 16 * 1024;
 
+/// A text block that FOLLOWS another in one reply, built so that it starts on a line of
+/// its own.
+///
+/// The MCP layer keeps a reply's content blocks apart, but a client that shows the reply
+/// as text lays them end to end (Claude Code and the `mcp` CLI both do), and the tool's
+/// own block ends on its last line with no newline. An appended block that opened with
+/// `<!--` then sat on that line (`      }<!-- auto-injected ...`), and a line-oriented
+/// reader that cut the guide at its marker (`sed '/auto-injected/,$d'`, `grep -v`, `head`)
+/// took the tool's last line with it: one body line, one overview row. That produced two
+/// false bug reports on 2026-10-17. A newline at the head of the appended block removes the
+/// hazard for every such reader whatever joins the blocks.
+/// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+///
+/// Every block this crate appends behind a tool's answer is built here: the guide blocks
+/// (whole, pointer, preamble, section), the operator rules, and the notices. Idempotent, so
+/// a block that already opens with a newline (the paths banner, the status block, the build
+/// notice) is not given a second one.
+pub(crate) fn trailing_block(text: impl AsRef<str>) -> Content {
+    let text = text.as_ref();
+    if text.starts_with('\n') {
+        Content::text(text)
+    } else {
+        Content::text(format!("\n{text}"))
+    }
+}
+
 pub(crate) fn inject_hint(val: &mut Value, topic: &str, shape: GuideDeliveryShape) {
     let text = match shape {
         GuideDeliveryShape::Whole => format!(
@@ -118,7 +144,7 @@ pub(crate) fn guide_block(topic: &str) -> Option<Content> {
          \n\
          <!-- end auto-injected get_guide('{topic}') -->"
     );
-    Some(Content::text(wrapped))
+    Some(trailing_block(wrapped))
 }
 
 /// The non-declaring (whole-topic) branch of [`guide_blocks_for`], with the
@@ -166,7 +192,7 @@ fn whole_topic_blocks(
     }
     emitted.insert(pointer_key);
     (
-        vec![Content::text(format!(
+        vec![trailing_block(format!(
             "<!-- get_guide('{topic}') NOT auto-injected: {size} bytes is over the \
              {max_bytes}-byte auto-inject bound. -->\n\
              Call `get_guide(\"{topic}\")` to read it."
@@ -245,7 +271,7 @@ pub(crate) fn guide_blocks_for(
                 // an argument, and the fail-safe direction is free.
                 emitted.insert(key);
                 (
-                    vec![Content::text(format!(
+                    vec![trailing_block(format!(
                         "<!-- auto-injected get_guide('{topic}') preamble — no section \
                      declares this call's shape. -->\n\
                      \n\
@@ -377,7 +403,7 @@ pub(crate) fn section_block(
     topic: &str,
     sec: &crate::prompts::guide_index::GuideSection,
 ) -> Content {
-    Content::text(format!(
+    trailing_block(format!(
         "<!-- auto-injected get_guide('{topic}') § {} — first call this \
              session that serves this section. Do NOT re-call get_guide for \
              it. -->\n\
@@ -387,6 +413,45 @@ pub(crate) fn section_block(
              <!-- end auto-injected get_guide('{topic}') § {} -->",
         sec.heading, sec.body, sec.heading
     ))
+}
+
+/// Test instrument: the blocks of one reply whose text would begin MID-LINE when a client
+/// lays the blocks end to end, one entry per block, naming it. Empty means every block
+/// after the first starts a line of its own: it begins with a newline, or the block before
+/// it ends with one. A non-text block is a break by itself; an empty text block is skipped.
+///
+/// `pub(crate)` because the seam is crossed from several modules (the engines, the notice
+/// carriers, the server's appended blocks) and one definition of "clean" is the point.
+#[cfg(test)]
+pub(crate) fn seam_defects(blocks: &[Content]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut prev: Option<&str> = None;
+    for (i, b) in blocks.iter().enumerate() {
+        let Some(t) = b.as_text() else {
+            prev = None;
+            continue;
+        };
+        let text = t.text.as_str();
+        // An empty block shows nothing: it neither has a seam of its own nor interrupts the
+        // one between the text before it and the text after it.
+        if text.is_empty() {
+            continue;
+        }
+        if let Some(p) = prev {
+            if !text.starts_with('\n') && !p.ends_with('\n') {
+                let head: String = text.chars().take(48).collect();
+                let tail: String = {
+                    let n = p.chars().count();
+                    p.chars().skip(n.saturating_sub(12)).collect()
+                };
+                out.push(format!(
+                    "block {i} starts mid-line: {head:?} follows {tail:?}"
+                ));
+            }
+        }
+        prev = Some(text);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -451,6 +516,136 @@ mod tests {
         assert!(blocks.is_empty());
         assert!(shape.is_none());
     }
+
+    /// The reply a caller reads is these blocks laid end to end, and the tool's own block
+    /// ends on its last line with no newline. Putting one in front of the block under test
+    /// is the whole fixture: whether the seam survives is decided by the block alone.
+    fn behind_a_primary(blocks: Vec<Content>) -> Vec<Content> {
+        let mut out = vec![Content::text("{\n  \"result\": 1\n}")];
+        out.extend(blocks);
+        out
+    }
+
+    /// The seam check is the instrument every test below reads through, so it is tested:
+    /// a glued block must be named, a separated one passed. Without this, a check that
+    /// returned nothing for every input would turn every test below into a pass.
+    #[test]
+    fn the_seam_check_names_a_glued_block_and_passes_a_separated_one() {
+        let glued = vec![Content::text("}"), Content::text("<!-- auto-injected")];
+        assert_eq!(seam_defects(&glued).len(), 1, "{:?}", seam_defects(&glued));
+        let led = vec![Content::text("}"), Content::text("\n<!-- auto-injected")];
+        assert!(seam_defects(&led).is_empty());
+        let trailing = vec![Content::text("}\n"), Content::text("<!-- auto-injected")];
+        assert!(seam_defects(&trailing).is_empty());
+        // The first block has nothing in front of it.
+        assert!(seam_defects(&[Content::text("<!-- first")]).is_empty());
+        // An empty block shows nothing, so the block after it still follows the last text
+        // on the line: `}` + `` + `<!-- auto-injected` reads `}<!-- auto-injected`.
+        let across_empty = vec![
+            Content::text("}"),
+            Content::text(""),
+            Content::text("<!-- auto-injected"),
+        ];
+        assert_eq!(
+            seam_defects(&across_empty).len(),
+            1,
+            "{:?}",
+            seam_defects(&across_empty)
+        );
+        let across_empty_led = vec![
+            Content::text("}"),
+            Content::text(""),
+            Content::text("\n<!-- auto-injected"),
+        ];
+        assert!(seam_defects(&across_empty_led).is_empty());
+        // A non-text block is a break by itself: what follows it is not glued to the text before.
+        let across_image = vec![
+            Content::text("}"),
+            Content::image("AA==", "image/png"),
+            Content::text("<!-- auto-injected"),
+        ];
+        assert!(
+            seam_defects(&across_image).is_empty(),
+            "{:?}",
+            seam_defects(&across_image)
+        );
+    }
+
+    /// The constructor itself: one newline added, never two, and the text otherwise
+    /// untouched. The idempotence is what lets a block that already opens with a newline
+    /// (the paths banner, the status block, the build notice) pass through unchanged.
+    #[test]
+    fn trailing_block_adds_exactly_one_leading_newline() {
+        assert_eq!(text(&trailing_block("<!-- x -->")), "\n<!-- x -->");
+        assert_eq!(text(&trailing_block("\n<!-- x -->")), "\n<!-- x -->");
+        assert_eq!(text(&trailing_block("\n\n<!-- x -->")), "\n\n<!-- x -->");
+        assert_eq!(text(&trailing_block("")), "\n");
+    }
+
+    /// docs/issues/2026-10-17-injected-guide-block-is-joined-to-the-tool-text-with-no-newline.md
+    ///
+    /// A client that lays the blocks end to end (Claude Code and the `mcp` CLI both do)
+    /// puts the marker on the tool's last line, and a line-oriented reader that cuts the
+    /// guide at the marker then loses that line with it. Whole-topic shape.
+    #[test]
+    fn a_whole_topic_guide_starts_on_its_own_line() {
+        let topic = a_non_declaring_topic();
+        let (blocks, shape) = guide_blocks_for(topic, None, &json!({}), &mut ledger());
+        assert!(matches!(shape, Some(GuideDeliveryShape::Whole)));
+        let reply = behind_a_primary(blocks);
+        assert!(
+            seam_defects(&reply).is_empty(),
+            "{:?}",
+            seam_defects(&reply)
+        );
+    }
+
+    /// The same seam, oversize-pointer shape (`whole_topic_blocks` builds it separately).
+    #[test]
+    fn an_oversize_pointer_starts_on_its_own_line() {
+        let (blocks, shape) = whole_topic_blocks(a_non_declaring_topic(), &mut ledger(), 100);
+        assert!(matches!(shape, Some(GuideDeliveryShape::Pointer)));
+        let reply = behind_a_primary(blocks);
+        assert!(
+            seam_defects(&reply).is_empty(),
+            "{:?}",
+            seam_defects(&reply)
+        );
+    }
+
+    /// The same seam, preamble-fallback shape (a third, separate `format!`).
+    #[test]
+    fn a_preamble_fallback_starts_on_its_own_line() {
+        let (blocks, shape) = guide_blocks_for(
+            DECLARING,
+            Some("no_such_tool.no_such_action"),
+            &json!({}),
+            &mut ledger(),
+        );
+        assert!(matches!(shape, Some(GuideDeliveryShape::Preamble)));
+        let reply = behind_a_primary(blocks);
+        assert!(
+            seam_defects(&reply).is_empty(),
+            "{:?}",
+            seam_defects(&reply)
+        );
+    }
+
+    /// The same seam, section shape (`section_block`, shared by the post-call delivery and
+    /// the pre-call gate).
+    #[test]
+    fn a_served_section_starts_on_its_own_line() {
+        let (blocks, shape) =
+            guide_blocks_for(DECLARING, Some(SERVED_SELECTOR), &json!({}), &mut ledger());
+        assert!(matches!(shape, Some(GuideDeliveryShape::Section)));
+        let reply = behind_a_primary(blocks);
+        assert!(
+            seam_defects(&reply).is_empty(),
+            "{:?}",
+            seam_defects(&reply)
+        );
+    }
+
     /// Byte length of a topic's whole-topic block — the quantity the bound reads.
     fn whole_block_len(topic: &str) -> usize {
         text(&guide_block(topic).expect("registered topic")).len()

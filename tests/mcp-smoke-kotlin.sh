@@ -64,10 +64,11 @@ call() {
     # See tests/mcp-smoke-rust.sh: the reply is plain text and carries the injected guide
     # body after an `<!-- auto-injected` marker, which would satisfy a string assertion on
     # its own. RESULT is the tool's reply only.
-    # The marker follows the tool's last line WITHOUT a newline, so this parameter expansion
-    # is the only safe way to cut it: a line-oriented strip (`sed '/auto-injected/,$d'`, `grep -v`)
-    # drops that last line along with it. Doing that is how a body, and an overview, once
-    # looked one line short.
+    # Since 2026-10-18 the marker opens on a line of its own (`trailing_block`), so a line-oriented
+    # strip no longer eats the tool's last line. Before that the marker followed the last line
+    # WITHOUT a newline, and doing it that way is how a body, and an overview, once looked one
+    # line short. This parameter expansion cuts at the marker whichever binary answered, so it
+    # stays: an older binary on PATH still glues.
     # docs/issues/2026-10-17-symbols-include-body-on-kotlin-lsp-results-is-shifted-up-one-line.md
     RESULT="${RESULT%%<!-- auto-injected*}"
 }
