@@ -145,32 +145,6 @@ fn filter_mentions_status(node: &FilterNode) -> bool {
     }
 }
 
-/// Ids of the rows matching `filter` whose file the read door refuses while they still hold file
-/// values (`read_door::listing_refusal`). `find` excludes them by id from the page AND from every
-/// count it derives (hints, the catalog summary), so neither a filter on a withheld field nor a
-/// count names what the row stores (review round 2, R2-3). Each row costs a door judgement.
-fn withheld_ids(
-    cat: &crate::librarian::catalog::Catalog,
-    door: &crate::librarian::read_door::ReadDoor,
-    filter: Option<&FilterNode>,
-    cutoff_ms: i64,
-) -> Result<Vec<String>> {
-    let rows = crate::librarian::catalog::find::find(
-        cat,
-        &crate::librarian::catalog::find::FindOpts {
-            filter: filter.cloned(),
-            limit: i64::MAX as usize,
-            offset: 0,
-        },
-        cutoff_ms,
-    )?;
-    Ok(rows
-        .into_iter()
-        .filter(|r| crate::librarian::read_door::listing_refusal(door, r).is_some())
-        .map(|r| r.id)
-        .collect())
-}
-
 /// The pre-filled claim call for unclaimed bugs on a bug-triage page.
 ///
 /// **Why this exists, and why it is the SECOND-best shape.**
@@ -870,8 +844,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .as_ref()
             .map(filter_mentions_status)
             .unwrap_or(false);
-    // The user's own filter (shortcuts and `augmented` folded in): the rows to scan for withheld ones.
-    let user_filter_for_scan: Option<FilterNode> = user_filter.clone();
     let base =
         combine_user_with_archived_hide(user_filter, a.include_archived, user_constrains_status);
 
@@ -904,63 +876,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         &exclude_worktrees,
     )?;
 
-    // Rows the read door refuses that still hold file values are excluded BY ID from the page and
-    // from every count derived from `base` (hints, the catalog summary): dropping them from the
-    // page alone left `title contains X` answering through `more_in_scope`, and a cold call's
-    // `by_kind` printing the stored kind (review round 2, R2-3). The rows scanned are those the
-    // user's filter matches (in any scope, archived or not: a superset of every count below), or on
-    // a cold call the rows of its scope. A semantic query with no filter is not scanned: its page
-    // drops such rows below, and its counts can still include one, which says at most whether the
-    // stored status is archived (the archived-hide). Each scanned row costs a door judgement, so a
-    // broad filter pays for every row it matches.
-    let scan_filter: Option<Option<FilterNode>> = if user_filter_for_scan.is_some() {
-        Some(user_filter_for_scan)
-    } else if is_cold_call {
-        Some(
-            apply_scope(
-                None,
-                effective_scope,
-                &ctx.workspace,
-                current,
-                &exclude_worktrees,
-            )?
-            .0,
-        )
-    } else {
-        None
-    };
-    let (base, scoped_filter) = match scan_filter {
-        Some(scan) => {
-            let door = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx));
-            let withheld = {
-                let cat = ctx.catalog.lock();
-                withheld_ids(&cat, &door, scan.as_ref(), cutoff_ms)?
-            };
-            if withheld.is_empty() {
-                (base, scoped_filter)
-            } else {
-                let nin = FilterNode::Leaf(
-                    [("id".to_string(), json!({ "nin": withheld }))]
-                        .into_iter()
-                        .collect(),
-                );
-                let base = Some(match base {
-                    Some(f) => FilterNode::And { and: vec![f, nin] },
-                    None => nin,
-                });
-                let scoped = apply_scope(
-                    base.clone(),
-                    effective_scope,
-                    &ctx.workspace,
-                    current,
-                    &exclude_worktrees,
-                )?
-                .0;
-                (base, scoped)
-            }
-        }
-        None => (base, scoped_filter),
-    };
+    // No scan of the catalog for refused rows (review round 3, R3-8): the reindex judges every
+    // stored row of its root (the walk through the read door, reclamation through the same door
+    // and `stored_path_is_risky`) and clears or removes, with the audit elision, every row whose
+    // text may have come from outside. Until a root's first post-fix reindex, a pre-fix row there
+    // still answers a filter and counts (the accepted window, stated in the issue); the page
+    // below drops such a row as before, which costs one judgement per row on the page.
 
     // Semantic path runs the async store-backed coordinator (it manages its own
     // catalog locking); the sync `find` below handles the non-semantic case.
