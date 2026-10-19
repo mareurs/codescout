@@ -2040,15 +2040,30 @@ async fn no_oracle_on_a_pre_fix_row_after_one_reindex() {
     }
 }
 
-/// R3-2: `librarian(context, topic=X)` selects candidates by stored title and topic. After ONE
-/// reindex it answers about the pre-fix row as about no row at all.
+/// R3-2 (reshaped in round 4, R4-5): `librarian(context, topic=X)` selects candidates by stored
+/// title and topic. The state is one where context DOES count the row before the reindex (no
+/// embedder, so no semantic ranking returns it for any topic), asserted first; after ONE reindex it
+/// answers about the pre-fix row as about no row at all.
 #[tokio::test]
 async fn context_counts_nothing_of_a_pre_fix_row_after_one_reindex() {
-    let (_tmp, ctx, _id, _p, _v) = kept_after_one_reindex().await;
-    let hit = context::call(&ctx, json!({"topic": MARK})).await.unwrap();
-    let miss = context::call(&ctx, json!({"topic": "no-row-has-this-zq"}))
+    let (_tmp, ctx, id, _fxv) = refused_row_with_stored_fields();
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id, json!({"note": "mine"}))).unwrap();
+    let ask = |topic: &'static str| context::call(&ctx, json!({"topic": topic}));
+    let (hit, miss) = (
+        ask(MARK).await.unwrap(),
+        ask("no-row-has-this-zq").await.unwrap(),
+    );
+    assert_ne!(
+        hit["overflow"], miss["overflow"],
+        "precondition: before the reindex context counts the pre-fix row"
+    );
+    super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
+    let (hit, miss) = (
+        ask(MARK).await.unwrap(),
+        ask("no-row-has-this-zq").await.unwrap(),
+    );
     assert_eq!(hit["overflow"], miss["overflow"], "{hit}");
     assert!(!has(&hit), "{hit}");
 }
@@ -2408,6 +2423,51 @@ async fn a_sibling_slugs_citation_history_is_left_alone() {
     );
 }
 
+/// R4-6 (ML): the citation prefix is matched at the START of the audit `row_id`. A slug that holds
+/// the removed row's slug in its middle (`pre-same-title` holds `same-title:` once it cites) has
+/// its own history, which the removal leaves alone.
+#[tokio::test]
+async fn a_slug_holding_the_removed_slug_in_its_middle_is_left_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("a.md"), "# Same Title\n\nfirst\n").unwrap();
+    std::fs::write(docs.join("c.md"), "# Pre Same Title\n\nother\n").unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let c = crate::librarian::ids::artifact_id_from_abs(&docs.join("c.md"));
+    let slug_c = artifact::ensure_slug(&ctx.catalog.lock().conn, &c).unwrap();
+    assert_eq!(slug_c, "pre-same-title", "precondition");
+    {
+        let cat = ctx.catalog.lock();
+        cat.conn
+            .execute(
+                "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+                 VALUES (?1, 'C-1', 'other:X-1', 'cites', 'write', 0)",
+                [&slug_c],
+            )
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM entry_cite WHERE src_slug = ?1", [&slug_c])
+            .unwrap();
+    }
+    std::fs::remove_file(docs.join("a.md")).unwrap();
+    std::os::unix::fs::symlink(docs.join("nowhere.md"), docs.join("a.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        audit_payloads_holding(&ctx, "\"src_slug\":\"pre-same-title\"").len(),
+        1,
+        "A's removal rewrote {slug_c}'s citation history"
+    );
+}
+
 /// Round 1's F1 invariant for a KEPT row: its clearing and its elision commit together. With the
 /// elision made to fail, the reindex errors and the row still holds what it held, so no audit row
 /// copied the clear's diff without its elision.
@@ -2431,4 +2491,567 @@ async fn a_kept_rows_clear_and_elision_commit_together() {
         row.title.as_deref().is_some_and(|t| t.contains(MARK)),
         "the clear committed without its elision: {row:?}"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review round 4.
+// ---------------------------------------------------------------------------------------------
+
+/// Count of audit payloads that hold `needle` (an exact substring of the JSON text).
+fn audit_payloads_holding(ctx: &ToolContext, needle: &str) -> Vec<String> {
+    ctx.catalog
+        .lock()
+        .conn
+        .prepare(
+            "SELECT tbl || ' ' || op || ' ' || row_id || ' ' || payload FROM catalog_audit \
+             WHERE instr(payload, ?1) > 0 ORDER BY seq",
+        )
+        .unwrap()
+        .query_map([needle], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+}
+
+/// A pre-fix `doc(move)`: rename the file (or link), seed the new id from the old row and fold
+/// the old row into it with `graft_rows`, as `tools/mv.rs` does. Returns the new id.
+fn pre_fix_move(ctx: &ToolContext, from: &Path, to: &Path) -> String {
+    std::fs::rename(from, to).unwrap();
+    let old_id = crate::librarian::ids::artifact_id_from_abs(from);
+    let new_id = crate::librarian::ids::artifact_id_from_abs(to);
+    let mut cat = ctx.catalog.lock();
+    let row = artifact::get(&cat, &old_id).unwrap().unwrap();
+    artifact::upsert(
+        &cat,
+        &artifact::ArtifactRow {
+            id: new_id.clone(),
+            abs_path: to.to_path_buf(),
+            ..row
+        },
+    )
+    .unwrap();
+    crate::librarian::catalog::graft::graft_rows(&mut cat, &old_id, &new_id).unwrap();
+    new_id
+}
+
+/// R4-1: a pre-fix row that vanished once and was catalogued again (a branch switch: delete, then
+/// re-insert) has the SAME id and slug. The citation bound is the EARLIEST acquisition of the slug
+/// by that id, so the first incarnation's cascaded citation is elided too.
+#[tokio::test]
+async fn an_earlier_incarnations_citation_history_is_elided() {
+    let (_tmp, ctx, _store, id, p, _link) = prefix_state(false, false).await;
+    cite_from(&ctx, &id);
+    {
+        let cat = ctx.catalog.lock();
+        let row = artifact::get(&cat, &id).unwrap().unwrap();
+        let s1: String = cat
+            .conn
+            .query_row("SELECT slug FROM artifact WHERE id = ?1", [&id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM artifact WHERE id = ?1", [&id])
+            .unwrap();
+        artifact::upsert(&cat, &row).unwrap();
+        let s2 = artifact::ensure_slug(&cat.conn, &id).unwrap();
+        assert_eq!(s1, s2, "precondition: the same slug is minted again");
+    }
+    cite_from(&ctx, &id);
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &id).unwrap().is_none(),
+        "{v}"
+    );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R4-2: a pre-fix move hands the slug from the old id to the new one and deletes the old id.
+/// Removing the risky new row also elides the old id's audit rows (the lineage read from the
+/// slug handover in the trail) and the citation history from before the move.
+#[tokio::test]
+async fn a_moved_rows_pre_move_history_is_elided() {
+    let (_tmp, ctx, _store, id, p, link) = prefix_state(false, false).await;
+    cite_from(&ctx, &id);
+    let new_id = pre_fix_move(&ctx, &link, &p.join("docs/y.md"));
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &new_id)
+            .unwrap()
+            .is_none(),
+        "{v}"
+    );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R4-2: a two-hop chain of pre-fix moves (A to B, B to C), C risky: A's and B's rows elided too,
+/// and a citation A dropped BEFORE the first move (its delete image lies between A's acquisition
+/// of the slug and B's, so the bound must be the lineage's earliest).
+#[tokio::test]
+async fn a_two_hop_move_chains_history_is_elided() {
+    let (_tmp, ctx, _store, id, p, link) = prefix_state(false, false).await;
+    cite_from(&ctx, &id);
+    ctx.catalog
+        .lock()
+        .conn
+        .execute("DELETE FROM entry_cite WHERE src_local = 'T-1'", [])
+        .unwrap();
+    cite_from(&ctx, &id);
+    pre_fix_move(&ctx, &link, &p.join("docs/y.md"));
+    let c = pre_fix_move(&ctx, &p.join("docs/y.md"), &p.join("docs/z.md"));
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &c).unwrap().is_none(),
+        "{v}"
+    );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R4-2: a chain that comes back to the same path (A to B, B back to A): the lineage walk ends
+/// and both ids' rows are elided.
+#[tokio::test]
+async fn a_move_chain_that_returns_to_its_path_is_elided_and_ends() {
+    let (_tmp, ctx, _store, id, p, link) = prefix_state(false, false).await;
+    cite_from(&ctx, &id);
+    pre_fix_move(&ctx, &link, &p.join("docs/y.md"));
+    let back = pre_fix_move(&ctx, &p.join("docs/y.md"), &link);
+    assert_eq!(back, id, "precondition: the same id again");
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R4-2: an ordinary move chain of a repository file keeps its whole history, also when its last
+/// row is later deleted as an ordinary vanished row: the lineage rule runs for risky rows only.
+#[tokio::test]
+async fn an_ordinary_move_chain_keeps_its_history() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("a.md"), "# Plain Title\n\nbody\n").unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let a = crate::librarian::ids::artifact_id_from_abs(&docs.join("a.md"));
+    pre_fix_move(&ctx, &docs.join("a.md"), &docs.join("b.md"));
+    pre_fix_move(&ctx, &docs.join("b.md"), &docs.join("c.md"));
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    std::fs::remove_file(docs.join("c.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        audit_payloads_holding(&ctx, "read-door").is_empty(),
+        "an ordinary chain was elided: {:#?}",
+        audit_payloads_holding(&ctx, "read-door")
+    );
+    let a_history = audit_payloads_holding(&ctx, "plain-title");
+    assert!(
+        a_history.iter().any(|r| r.contains(&a)),
+        "the first id's history is gone: {a_history:#?}"
+    );
+}
+
+/// R4-2: an unrelated earlier holder of the slug that was itself moved (handing the slug to a row
+/// that was then deleted ordinarily) is not in the lineage of a later risky holder.
+#[tokio::test]
+async fn an_unrelated_holders_move_is_not_in_a_later_holders_lineage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("h.md"), "# Same Title\n\nfirst\n").unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let h = crate::librarian::ids::artifact_id_from_abs(&docs.join("h.md"));
+    pre_fix_move(&ctx, &docs.join("h.md"), &docs.join("h2.md"));
+    std::fs::remove_file(docs.join("h2.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    // X takes the freed slug, then becomes a dangling link and is removed with elision.
+    std::fs::write(docs.join("x.md"), "# Same Title\n\nsecond\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    std::fs::remove_file(docs.join("x.md")).unwrap();
+    std::os::unix::fs::symlink(docs.join("nowhere.md"), docs.join("x.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let elided_h: Vec<String> = audit_payloads_holding(&ctx, "read-door")
+        .into_iter()
+        .filter(|r| r.contains(&h))
+        .collect();
+    assert!(
+        elided_h.is_empty(),
+        "an unrelated holder was elided: {elided_h:#?}"
+    );
+}
+
+/// R4-6 (MM): the removal and its elision commit together. With the elision made to fail, the
+/// reindex errors and the row is still there, so no unelided delete image was left behind.
+#[tokio::test]
+async fn a_removed_rows_delete_and_elision_commit_together() {
+    let (_tmp, ctx, _store, id, p, _link) = prefix_state(false, false).await;
+    std::fs::remove_file(p.parent().unwrap().join("out/x.md")).unwrap();
+    ctx.catalog
+        .lock()
+        .conn
+        .execute_batch(
+            "CREATE TEMP TRIGGER no_audit_rewrite BEFORE UPDATE OF payload ON catalog_audit \
+             BEGIN SELECT RAISE(ABORT, 'audit rewrite refused by the test'); END;",
+        )
+        .unwrap();
+    let r = super::reindex::call(&ctx, json!({"scope": "project"})).await;
+    assert!(r.is_err(), "precondition: the elision failed: {r:?}");
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &id).unwrap().is_some(),
+        "the row was removed without its elision"
+    );
+    let images: Vec<String> = audit_payloads_holding(&ctx, MARK)
+        .into_iter()
+        .filter(|r| r.starts_with("artifact delete"))
+        .collect();
+    assert!(images.is_empty(), "{images:#?}");
+}
+
+/// A dangling-link removal of `x.md` (title "Same Title") after an earlier, unrelated holder `a.md`
+/// of the same slug cited and was deleted ordinarily. `prep` runs between X's first index and its
+/// removal. Returns the earlier holder's citation delete images still holding its slug.
+async fn earlier_holder_after_removal(prep: impl Fn(&ToolContext, &str, &Path)) -> i64 {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    // X's path was once an unrelated document (a path reuse), indexed and deleted.
+    std::fs::write(docs.join("x.md"), "# Other\n\nunrelated\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    std::fs::remove_file(docs.join("x.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    // A holds the slug, cites, and is deleted ordinarily.
+    std::fs::write(docs.join("a.md"), "# Same Title\n\nfirst\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let a = crate::librarian::ids::artifact_id_from_abs(&docs.join("a.md"));
+    let slug = artifact::ensure_slug(&ctx.catalog.lock().conn, &a).unwrap();
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+             VALUES (?1, 'A-1', 'other:X-1', 'cites', 'write', 0)",
+            [&slug],
+        )
+        .unwrap();
+    std::fs::remove_file(docs.join("a.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    // X takes the slug at the reused path.
+    std::fs::write(docs.join("x.md"), "# Same Title\n\nsecond\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let x = crate::librarian::ids::artifact_id_from_abs(&docs.join("x.md"));
+    prep(&ctx, &x, &docs);
+    std::fs::remove_file(docs.join("x.md")).unwrap();
+    std::os::unix::fs::symlink(docs.join("nowhere.md"), docs.join("x.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(artifact::get(&ctx.catalog.lock(), &x).unwrap().is_none());
+    let needle = format!("\"src_slug\":\"{slug}\"");
+    let kept: i64 = ctx
+        .catalog
+        .lock()
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'entry_cite' AND op = 'delete' \
+             AND instr(payload, ?1) > 0",
+            [&needle],
+            |r| r.get(0),
+        )
+        .unwrap();
+    kept
+}
+
+/// R4-6 (MC, MN): X's path was reused, so its EARLIEST insert predates the earlier holder; the
+/// bound is X's earliest MINT of the slug, read before X's own rows are elided.
+#[tokio::test]
+async fn a_reused_path_bounds_by_the_slug_mint_not_the_first_insert() {
+    let kept = earlier_holder_after_removal(|_, _, _| {}).await;
+    assert_eq!(kept, 1, "the earlier holder's citation history was elided");
+}
+
+/// R4-6 (MB): X was KEPT and cleared once, which elides its own mint row, then removed. Its
+/// slug's acquisition can then only be read from X's INSERT, which still bounds the elision above
+/// the earlier holder's citation history.
+#[tokio::test]
+async fn a_kept_then_removed_row_bounds_by_its_insert() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    std::fs::write(docs.join("a.md"), "# Same Title\n\nfirst\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let a = crate::librarian::ids::artifact_id_from_abs(&docs.join("a.md"));
+    let slug = artifact::ensure_slug(&ctx.catalog.lock().conn, &a).unwrap();
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+             VALUES (?1, 'A-1', 'other:X-1', 'cites', 'write', 0)",
+            [&slug],
+        )
+        .unwrap();
+    std::fs::remove_file(docs.join("a.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    // X: indexed with the freed slug and history, swapped for a link out (kept and cleared),
+    // then its target removed (a dangling link: removed).
+    std::fs::write(docs.join("x.md"), "# Same Title\n\nsecond\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let x = crate::librarian::ids::artifact_id_from_abs(&docs.join("x.md"));
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&x, json!({"note": "mine"}))).unwrap();
+    target(&base.join("out"));
+    std::fs::remove_file(docs.join("x.md")).unwrap();
+    ln(base.join("out/x.md"), &docs.join("x.md"));
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        v["escaping_kept_ids"],
+        json!([x]),
+        "precondition: kept: {v}"
+    );
+    std::fs::remove_dir_all(base.join("out")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(artifact::get(&ctx.catalog.lock(), &x).unwrap().is_none());
+    let needle = format!("\"src_slug\":\"{slug}\"");
+    let kept: i64 = ctx
+        .catalog
+        .lock()
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'entry_cite' AND op = 'delete' \
+             AND instr(payload, ?1) > 0",
+            [&needle],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, 1, "the earlier holder's citation history was elided");
+}
+
+/// R4-6 (MD): a catalog older than the audit trail (no insert or mint of the row in the trail)
+/// bounds nothing: the removed row's cascaded citation is elided.
+#[tokio::test]
+async fn a_row_older_than_the_trail_elides_its_cascaded_citations() {
+    let (_tmp, ctx, _store, id, p, _link) = prefix_state(false, false).await;
+    cite_from(&ctx, &id);
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "DELETE FROM catalog_audit WHERE tbl = 'artifact' AND row_id = ?1",
+            [&id],
+        )
+        .unwrap();
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R4-3: a worktree fork made IN THE WINDOW, then the first reindex, then a merge. The merge does
+/// not replay the fork's base values (into its response or a new event) once the main row was
+/// cleared by the read door: the base counts as absent.
+#[tokio::test]
+async fn a_merge_after_the_reindex_does_not_replay_a_window_fork() {
+    let (_tmp, ctx, id, w, m) = window_fork().await;
+    let max_seq_before: i64 = ctx
+        .catalog
+        .lock()
+        .conn
+        .query_row("SELECT COALESCE(MAX(seq),0) FROM catalog_audit", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    crate::librarian::indexer::index_repo_sync(
+        &ctx.catalog.lock(),
+        &rules(),
+        &m,
+        &globset::GlobSet::empty(),
+        false,
+        false,
+        false,
+    )
+    .unwrap();
+    let merge = super::merge_worktree::call(&ctx, json!({"root": w.display().to_string()}))
+        .await
+        .unwrap()
+        .to_string();
+    assert!(!merge.contains(MARK), "{merge}");
+    let cat = ctx.catalog.lock();
+    let merge_events: Vec<String> = cat
+        .conn
+        .prepare("SELECT payload FROM events WHERE kind != 'worktree_fork'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(
+        merge_events.iter().all(|e| !e.contains(MARK)),
+        "{merge_events:#?}"
+    );
+    let new_audit: i64 = cat
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE seq > ?1 AND instr(payload, ?2) > 0",
+            rusqlite::params![max_seq_before, MARK],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(new_audit, 0);
+    let _ = id;
+}
+
+/// R4-3b, a KNOWN LIMIT kept as an expected failure: the window fork's own event is immutable
+/// (events are append-only by contract) and keeps the pre-fix values; deleting the row it hangs on
+/// cascades it, and the events delete trigger copies its payload into the audit trail. The
+/// operator remedy is in the issue (Review round 4).
+#[tokio::test]
+#[should_panic(expected = "the window fork's payload reached the trail")]
+async fn known_gap_deleting_a_window_forks_row_copies_its_payload_into_the_trail() {
+    let (_tmp, ctx, _id, _w, m) = window_fork().await;
+    crate::librarian::indexer::index_repo_sync(
+        &ctx.catalog.lock(),
+        &rules(),
+        &m,
+        &globset::GlobSet::empty(),
+        false,
+        false,
+        false,
+    )
+    .unwrap();
+    let cat = ctx.catalog.lock();
+    let shadow: String = cat
+        .conn
+        .query_row(
+            "SELECT artifact_id FROM events WHERE kind = 'worktree_fork'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    cat.conn
+        .execute("DELETE FROM artifact WHERE id = ?1", [&shadow])
+        .unwrap();
+    let copied: i64 = cat
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'events' AND op = 'delete' \
+             AND instr(payload, ?1) > 0",
+            [MARK],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(copied, 0, "the window fork's payload reached the trail");
+}
+
+/// The pre-fix main row (stored fields from the target, history so it is kept) and a worktree
+/// session's write to it IN THE WINDOW, which forks it. Returns the context, the main id, the
+/// worktree root and the main root.
+async fn window_fork() -> (tempfile::TempDir, ToolContext, String, PathBuf, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let m = project(&b);
+    target(&b.join("out"));
+    ln(b.join("out/x.md"), &m.join("docs/x.md"));
+    let w = m.join(".worktrees/feat");
+    std::fs::create_dir_all(w.join("docs")).unwrap();
+    std::fs::write(w.join(".git"), "gitdir: ../../.git/worktrees/feat\n").unwrap();
+    ln(b.join("out/x.md"), &w.join("docs/x.md"));
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_rules(rules())
+        .with_artifact_store(Arc::new(InMemoryArtifactStore::default()))
+        .with_current_project(Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: w.clone(),
+                git_root: w.clone(),
+                main_root: Some(m.clone()),
+                umbrella: None,
+            },
+        ))
+        .build();
+    let id = seed(&ctx, &m.join("docs/x.md"), Some(&format!("{MARK} title")));
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET topic = ?2 WHERE id = ?1",
+            rusqlite::params![id, format!("{MARK}topic")],
+        )
+        .unwrap();
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id, json!({"note": "mine"}))).unwrap();
+    super::event_create::call(
+        &ctx,
+        json!({"artifact_id": id, "kind": "note", "payload": {"text": "n"}}),
+    )
+    .await
+    .unwrap();
+    (tmp, ctx, id, w, m)
+}
+
+/// R4-2: a moved pre-fix row KEPT for its history: its clearing also elides the old id's rows.
+#[tokio::test]
+async fn a_kept_moved_rows_pre_move_history_is_elided() {
+    let (_tmp, ctx, _store, id, p, link) = prefix_state(false, true).await;
+    let new_id = pre_fix_move(&ctx, &link, &p.join("docs/y.md"));
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        v["escaping_kept_ids"],
+        json!([new_id]),
+        "precondition: kept: {v}"
+    );
+    let _ = id;
+    assert_nothing_of_the_target_remains(&ctx, &p, Some(&new_id), &v);
 }

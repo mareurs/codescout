@@ -1570,6 +1570,29 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             );
         }
     }
+    /// Review round 4, R4-3: only what `clear_escaping_row` leaves counts as cleared by the read
+    /// door; a row with no file values that a walk read (a hash, an mtime) does not.
+    #[test]
+    fn only_a_row_the_read_door_cleared_counts_as_cleared() {
+        use crate::librarian::catalog::artifact::TestArtifactRowBuilder;
+        let mut row = TestArtifactRowBuilder::new("r")
+            .with_kind("unknown")
+            .with_status("unknown")
+            .build();
+        row.file_sha256 = String::new();
+        row.file_mtime = 0;
+        assert!(super::cleared_by_the_read_door(&row));
+        let mut read = row.clone();
+        read.file_sha256 = "ab".into();
+        assert!(!super::cleared_by_the_read_door(&read));
+        let mut touched = row.clone();
+        touched.file_mtime = 1;
+        assert!(!super::cleared_by_the_read_door(&touched));
+        let mut titled = row.clone();
+        titled.title = Some("t".into());
+        assert!(!super::cleared_by_the_read_door(&titled));
+    }
+
     /// Review rounds 2 and 3 (R2-2, R3-6): a stored path holding U+FFFD that names no file is the
     /// lossy record of a non-UTF-8 name. The door does not refuse it at read time (that hid every
     /// ordinary file below such a name), but the reindex's removal predicate calls it risky. A real
