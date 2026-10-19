@@ -945,3 +945,87 @@ fn file_writes_do_not_read_the_global_indexing_key() {
         },
     );
 }
+
+/// R2-6. `onboarding` builds its own response blocks (it overrides `call_content`), so it never
+/// reached the dispatcher's notice injection.
+#[tokio::test]
+async fn the_failed_reload_notice_rides_an_onboarding_response() {
+    let (dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    save(&dir, &with_security(BAD_ENTRY));
+    // Onboarding loads the config itself and refuses an invalid one: a fatal (text) error.
+    let (_, text) = call(&server, "onboarding", json!({})).await;
+    assert!(
+        text.contains("invalid configuration") && text.contains("FAILED TO LOAD"),
+        "a fatal onboarding error carries the notice: {text}"
+    );
+}
+
+#[test]
+fn attach_workspace_notice_to_content_handles_object_and_text_blocks() {
+    use crate::tools::attach_workspace_notice_to_content;
+    use rmcp::model::Content;
+    let mut obj = vec![Content::text(r#"{"a":1}"#)];
+    attach_workspace_notice_to_content(&mut obj, "N");
+    let v: serde_json::Value =
+        serde_json::from_str(&obj[0].as_text().unwrap().text).expect("still an object");
+    assert_eq!(
+        (v["a"].clone(), v["_workspace_notice"].clone()),
+        (json!(1), json!("N"))
+    );
+    let mut text = vec![Content::text("plain answer")];
+    attach_workspace_notice_to_content(&mut text, "N");
+    assert_eq!(text[0].as_text().unwrap().text, "⚠ N\n\nplain answer");
+    let mut none: Vec<Content> = vec![];
+    attach_workspace_notice_to_content(&mut none, "N");
+    assert!(none.is_empty());
+}
+
+/// The destructive first-use hold is a response too (`executed: false`).
+#[cfg(feature = "librarian")]
+#[tokio::test]
+async fn the_failed_reload_notice_rides_a_held_destructive_response() {
+    // A keyed (conversation-bound) ledger, so the pre-call gate is live (as `gate_server`).
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    std::fs::write(project_toml(&dir), BASE_TOML).unwrap();
+    let env = ServerEnv {
+        session_id_explicit: Some("conv-R26".to_string()),
+        librarian: crate::librarian::LibrarianEnv {
+            db: Some(dir.path().join("librarian.db")),
+            ..Default::default()
+        },
+        ..super::test_support::test_env(dir.path())
+    };
+    let agent = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+        .await
+        .unwrap();
+    let server =
+        CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), false, env).await;
+    let (_, created) = call(
+        &server,
+        "doc",
+        json!({"action": "create", "kind": "note", "title": "t", "rel_path": "held.md", "body": "x"}),
+    )
+    .await;
+    let id = serde_json::from_str::<serde_json::Value>(
+        created.split("\n<!--").next().unwrap_or(&created),
+    )
+    .ok()
+    .and_then(|v| v["id"].as_str().map(str::to_string))
+    .unwrap_or_else(|| panic!("no id: {created}"));
+    save(&dir, &with_security(BAD_ENTRY));
+    let (_, text) = call(
+        &server,
+        "doc",
+        json!({"action": "move", "id": id, "new_rel_path": "held2.md"}),
+    )
+    .await;
+    assert!(
+        text.contains("\"executed\": false") || text.contains("\"executed\":false"),
+        "control: the first destructive call is held: {text}"
+    );
+    assert!(
+        text.contains("FAILED TO LOAD"),
+        "the held response carries the notice: {text}"
+    );
+}

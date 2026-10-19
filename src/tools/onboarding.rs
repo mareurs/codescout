@@ -93,14 +93,18 @@ pub(crate) fn system_prompt_stale(
     }
 }
 
-/// Change keys in the `[project]` table of an existing `project.toml` and leave every other
-/// table as the file has it.
+/// Change keys in the `[project]` table of an existing `project.toml` and write nothing from the
+/// merged config.
 ///
 /// The two stamping writers used to load the MERGED config (global config under the project's
 /// file), set a field and serialise the whole struct back. That wrote every merged value into
 /// the project's file: a stricter global `[security]` was copied there as the project's own, and
-/// from then on shadowed any later change to the global config. Patching the raw table keeps what
-/// the user wrote and writes nothing they did not.
+/// from then on shadowed any later change to the global config. This patches the project's RAW
+/// table instead, so a value the user did not write is not added.
+///
+/// **It does not preserve the file's formatting.** The file is parsed and re-serialised with the
+/// `toml` crate (not `toml_edit`, which is not a dependency): comments are dropped, tables are
+/// re-sorted and inline tables are rewritten. What survives is the data, not the layout.
 fn patch_project_table(
     config_path: &std::path::Path,
     set: impl FnOnce(&mut toml::Table),
@@ -477,35 +481,41 @@ impl Tool for Onboarding {
         Ok(result)
     }
 
+    /// `onboarding` builds its own response blocks, so it never reaches the dispatcher's
+    /// notice injection: the failed-reload notice is attached here, on the success blocks and
+    /// on an error, like on every other response.
     async fn call_content(
         &self,
         input: Value,
         ctx: &ToolContext,
     ) -> anyhow::Result<Vec<rmcp::model::Content>> {
-        let val = self.call(input, ctx).await?;
+        let notice = super::core::types::config_load_notice(ctx).await;
+        let result: anyhow::Result<Vec<rmcp::model::Content>> = async {
+            let val = self.call(input, ctx).await?;
 
-        // If there's a subagent prompt, write it to a temp markdown file and return
-        // compact instructions with heading navigation.
-        if let Some(prompt) = val["subagent_prompt"].as_str() {
-            let compact = format_onboarding(&val);
+            // If there's a subagent prompt, write it to a temp markdown file and return
+            // compact instructions with heading navigation.
+            if let Some(prompt) = val["subagent_prompt"].as_str() {
+                let compact = format_onboarding(&val);
 
-            let root = ctx
-                .agent
-                .require_project_root_for(ctx.workspace_override.as_deref())
-                .await?;
-            let tmp_dir = root.join(".codescout").join("tmp");
-            std::fs::create_dir_all(&tmp_dir)?;
-            let prompt_path = tmp_dir.join("onboarding-prompt.md");
-            std::fs::write(&prompt_path, prompt)?;
-            let rel_path = ".codescout/tmp/onboarding-prompt.md";
-            let sections = build_heading_map(prompt);
+                let root = ctx
+                    .agent
+                    .require_project_root_for(ctx.workspace_override.as_deref())
+                    .await?;
+                let tmp_dir = root.join(".codescout").join("tmp");
+                std::fs::create_dir_all(&tmp_dir)?;
+                let prompt_path = tmp_dir.join("onboarding-prompt.md");
+                std::fs::write(&prompt_path, prompt)?;
+                let rel_path = ".codescout/tmp/onboarding-prompt.md";
+                let sections = build_heading_map(prompt);
 
-            let subagent = ctx.client_can_spawn_subagents();
+                let subagent = ctx.client_can_spawn_subagents();
 
-            // Determine which instruction builder based on whether this is a
-            // version refresh (has stored_version) or full onboarding.
-            let instructions =
-                if val.get("version_stale").is_some() || val.get("explicit_refresh").is_some() {
+                // Determine which instruction builder based on whether this is a
+                // version refresh (has stored_version) or full onboarding.
+                let instructions = if val.get("version_stale").is_some()
+                    || val.get("explicit_refresh").is_some()
+                {
                     let stored = val["stored_version"].as_u64().map(|v| v as u32);
                     let current = val["current_version"].as_u64().unwrap_or(0) as u32;
                     build_buffered_refresh_instructions(rel_path, stored, current, subagent)
@@ -513,119 +523,132 @@ impl Tool for Onboarding {
                     build_buffered_onboarding_instructions(rel_path, subagent)
                 };
 
-            // For workspaces, also write per-project and synthesis prompt files.
-            let workspace_fields = if val["workspace_mode"].as_bool().unwrap_or(false) {
-                let projects_val = val["projects"].as_array();
-                if let Some(projects) = projects_val {
-                    let mut project_prompts = Vec::new();
-                    let all_projects: Vec<(String, Vec<String>)> = projects
-                        .iter()
-                        .filter_map(|p| {
-                            let id = p["id"].as_str()?.to_string();
-                            let langs: Vec<String> = p["languages"]
-                                .as_array()?
-                                .iter()
-                                .filter_map(|l| l.as_str().map(String::from))
-                                .collect();
-                            Some((id, langs))
-                        })
-                        .collect();
-
-                    for p in projects {
-                        let id = p["id"].as_str().unwrap_or("unknown");
-                        let project = crate::workspace::DiscoveredProject {
-                            id: id.to_string(),
-                            relative_root: std::path::PathBuf::from(
-                                p["root"].as_str().unwrap_or("."),
-                            ),
-                            languages: p["languages"]
-                                .as_array()
-                                .map(|a| {
-                                    a.iter()
-                                        .filter_map(|l| l.as_str().map(String::from))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            manifest: p["manifest"].as_str().map(String::from),
-                        };
-                        let siblings: Vec<(String, Vec<String>)> = all_projects
+                // For workspaces, also write per-project and synthesis prompt files.
+                let workspace_fields = if val["workspace_mode"].as_bool().unwrap_or(false) {
+                    let projects_val = val["projects"].as_array();
+                    if let Some(projects) = projects_val {
+                        let mut project_prompts = Vec::new();
+                        let all_projects: Vec<(String, Vec<String>)> = projects
                             .iter()
-                            .filter(|(sid, _)| sid != id)
-                            .cloned()
+                            .filter_map(|p| {
+                                let id = p["id"].as_str()?.to_string();
+                                let langs: Vec<String> = p["languages"]
+                                    .as_array()?
+                                    .iter()
+                                    .filter_map(|l| l.as_str().map(String::from))
+                                    .collect();
+                                Some((id, langs))
+                            })
                             .collect();
 
-                        let prompt_content = build_per_project_prompt(&project, &siblings);
-                        let file_name = format!("onboarding-project-{}.md", id);
-                        let file_path = tmp_dir.join(&file_name);
-                        std::fs::write(&file_path, &prompt_content)?;
+                        for p in projects {
+                            let id = p["id"].as_str().unwrap_or("unknown");
+                            let project = crate::workspace::DiscoveredProject {
+                                id: id.to_string(),
+                                relative_root: std::path::PathBuf::from(
+                                    p["root"].as_str().unwrap_or("."),
+                                ),
+                                languages: p["languages"]
+                                    .as_array()
+                                    .map(|a| {
+                                        a.iter()
+                                            .filter_map(|l| l.as_str().map(String::from))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                manifest: p["manifest"].as_str().map(String::from),
+                            };
+                            let siblings: Vec<(String, Vec<String>)> = all_projects
+                                .iter()
+                                .filter(|(sid, _)| sid != id)
+                                .cloned()
+                                .collect();
 
-                        let rel = format!(".codescout/tmp/{}", file_name);
-                        project_prompts.push((id.to_string(), rel));
+                            let prompt_content = build_per_project_prompt(&project, &siblings);
+                            let file_name = format!("onboarding-project-{}.md", id);
+                            let file_path = tmp_dir.join(&file_name);
+                            std::fs::write(&file_path, &prompt_content)?;
+
+                            let rel = format!(".codescout/tmp/{}", file_name);
+                            project_prompts.push((id.to_string(), rel));
+                        }
+
+                        // Write synthesis prompt
+                        let synthesis_content = build_synthesis_prompt(&all_projects);
+                        let synthesis_file = tmp_dir.join("onboarding-workspace-synthesis.md");
+                        std::fs::write(&synthesis_file, &synthesis_content)?;
+                        let synthesis_rel =
+                            ".codescout/tmp/onboarding-workspace-synthesis.md".to_string();
+
+                        // Build workspace-specific instructions (overrides the single-project ones)
+                        let ws_instructions = build_workspace_instructions(
+                            rel_path,
+                            &project_prompts,
+                            &synthesis_rel,
+                            subagent,
+                        );
+
+                        Some((project_prompts, synthesis_rel, ws_instructions))
+                    } else {
+                        None
                     }
-
-                    // Write synthesis prompt
-                    let synthesis_content = build_synthesis_prompt(&all_projects);
-                    let synthesis_file = tmp_dir.join("onboarding-workspace-synthesis.md");
-                    std::fs::write(&synthesis_file, &synthesis_content)?;
-                    let synthesis_rel =
-                        ".codescout/tmp/onboarding-workspace-synthesis.md".to_string();
-
-                    // Build workspace-specific instructions (overrides the single-project ones)
-                    let ws_instructions = build_workspace_instructions(
-                        rel_path,
-                        &project_prompts,
-                        &synthesis_rel,
-                        subagent,
-                    );
-
-                    Some((project_prompts, synthesis_rel, ws_instructions))
                 } else {
                     None
+                };
+
+                let response = if let Some((project_prompts, synthesis_path, ws_instructions)) =
+                    workspace_fields
+                {
+                    let pp_json: Vec<Value> = project_prompts
+                        .iter()
+                        .map(|(id, path)| serde_json::json!({ "id": id, "path": path }))
+                        .collect();
+
+                    serde_json::json!({
+                        "prompt_path": rel_path,
+                        "summary": compact,
+                        "sections": sections,
+                        "project_prompts": pp_json,
+                        "synthesis_prompt_path": synthesis_path,
+                        "instructions": ws_instructions,
+                    })
+                } else {
+                    serde_json::json!({
+                        "prompt_path": rel_path,
+                        "summary": compact,
+                        "sections": sections,
+                        "instructions": instructions,
+                    })
+                };
+
+                return Ok(vec![rmcp::model::Content::text(
+                    serde_json::to_string_pretty(&response)
+                        .unwrap_or_else(|_| format!("{{\"prompt_path\":\"{rel_path}\"}}")),
+                )]);
+            }
+
+            // Single-block fast path: already-onboarded status.
+            if val["onboarded"].as_bool().unwrap_or(false) {
+                let msg = val["message"].as_str().unwrap_or("Already onboarded.");
+                return Ok(vec![rmcp::model::Content::text(msg.to_string())]);
+            }
+
+            // Fallback
+            let compact = format_onboarding(&val);
+            Ok(vec![rmcp::model::Content::text(compact)])
+        }
+        .await;
+        match result {
+            Ok(mut out) => {
+                if let Some(n) = &notice {
+                    super::core::types::attach_workspace_notice_to_content(&mut out, n);
                 }
-            } else {
-                None
-            };
-
-            let response = if let Some((project_prompts, synthesis_path, ws_instructions)) =
-                workspace_fields
-            {
-                let pp_json: Vec<Value> = project_prompts
-                    .iter()
-                    .map(|(id, path)| serde_json::json!({ "id": id, "path": path }))
-                    .collect();
-
-                serde_json::json!({
-                    "prompt_path": rel_path,
-                    "summary": compact,
-                    "sections": sections,
-                    "project_prompts": pp_json,
-                    "synthesis_prompt_path": synthesis_path,
-                    "instructions": ws_instructions,
-                })
-            } else {
-                serde_json::json!({
-                    "prompt_path": rel_path,
-                    "summary": compact,
-                    "sections": sections,
-                    "instructions": instructions,
-                })
-            };
-
-            return Ok(vec![rmcp::model::Content::text(
-                serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|_| format!("{{\"prompt_path\":\"{rel_path}\"}}")),
-            )]);
+                Ok(out)
+            }
+            Err(e) => Err(super::core::types::attach_workspace_notice_to_error(
+                e, notice,
+            )),
         }
-
-        // Single-block fast path: already-onboarded status.
-        if val["onboarded"].as_bool().unwrap_or(false) {
-            let msg = val["message"].as_str().unwrap_or("Already onboarded.");
-            return Ok(vec![rmcp::model::Content::text(msg.to_string())]);
-        }
-
-        // Fallback
-        let compact = format_onboarding(&val);
-        Ok(vec![rmcp::model::Content::text(compact)])
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {

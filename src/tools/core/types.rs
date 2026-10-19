@@ -515,7 +515,7 @@ pub(super) async fn displaced_default_notice(
 /// succeeds because the stamp has already advanced past the broken file.
 ///
 /// docs/issues/2026-10-17-an-invalid-project-toml-reload-is-ignored-silently-so-a-tightening-saved-with-it-never-applies.md
-pub(super) async fn config_load_notice(ctx: &ToolContext) -> Option<String> {
+pub(crate) async fn config_load_notice(ctx: &ToolContext) -> Option<String> {
     ctx.agent
         .config_load_error_for(ctx.workspace_override.as_deref())
         .await
@@ -814,6 +814,28 @@ pub(crate) fn attach_param_corrections_to_error(
 /// The key a workspace notice is spliced under in an object-shaped response body, success or
 /// error: the same address `call_content`'s success path writes (`inject_notice`).
 pub(crate) const WORKSPACE_NOTICE_KEY: &str = "_workspace_notice";
+
+/// Put a workspace notice on a ready-made response (`Vec<Content>`) a tool built itself, for the
+/// tools that override `call_content` (`onboarding`) and so never reach `call_content`'s own
+/// `inject_notice`. An object-shaped first block gets the `_workspace_notice` field; a text one is
+/// prefixed with `⚠ {notice}` like `inject_notice` does to a `stdout`.
+pub(crate) fn attach_workspace_notice_to_content(out: &mut [Content], notice: &str) {
+    let Some(first) = out.first_mut() else { return };
+    let Some(text) = first.as_text().map(|t| t.text.clone()) else {
+        return;
+    };
+    let rendered = match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Object(mut obj)) => {
+            obj.insert(
+                WORKSPACE_NOTICE_KEY.to_string(),
+                Value::String(notice.to_string()),
+            );
+            serde_json::to_string_pretty(&Value::Object(obj)).unwrap_or(text)
+        }
+        _ => format!("⚠ {notice}\n\n{text}"),
+    };
+    *first = Content::text(rendered);
+}
 
 /// Attach the config-load notice to a tool's `Err`, the error-path twin of the success path's
 /// `inject_notice`. The notice is documented as riding every response, and the error path used
@@ -1798,18 +1820,20 @@ pub trait Tool: Send + Sync {
                 )
             };
             if !held.is_empty() {
-                let mut out = vec![Content::text(
-                    serde_json::json!({
-                        "executed": false,
-                        "tool": self.name(),
-                        "action": selector,
-                        "reason": "First call of this destructive shape this session. It was \
-                                   NOT run; the guide section that applies to it follows. Read \
-                                   it, then re-issue the identical call to proceed — it will \
-                                   run, and the section will not be served again.",
-                    })
-                    .to_string(),
-                )];
+                let mut held_body = serde_json::json!({
+                    "executed": false,
+                    "tool": self.name(),
+                    "action": selector,
+                    "reason": "First call of this destructive shape this session. It was \
+                               NOT run; the guide section that applies to it follows. Read \
+                               it, then re-issue the identical call to proceed — it will \
+                               run, and the section will not be served again.",
+                });
+                // A held call is a response like any other: the failed-reload notice rides it.
+                if let Some(notice) = config_load_notice(ctx).await {
+                    held_body[WORKSPACE_NOTICE_KEY] = Value::String(notice);
+                }
+                let mut out = vec![Content::text(held_body.to_string())];
                 out.extend(held);
                 return Ok(out);
             }
