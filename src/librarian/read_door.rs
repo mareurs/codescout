@@ -1076,7 +1076,19 @@ mod tests {
                         break;
                     }
                     ')' | ']' => paren = paren.saturating_sub(1),
-                    '<' if depth == 0 && paren == 0 => angle += 1,
+                    // `<` opens generics only where rustfmt'ed code writes them: right after
+                    // an identifier or `::`, with no space after (`Vec<u8>`, `f::<A, B>`).
+                    // A comparison or a shift is spaced (`x < 3`, `x <= 3`, `1 << 2`) and
+                    // must not keep the item open past its own comma (round 4, R4-4).
+                    '<' if depth == 0
+                        && paren == 0
+                        && (prev.is_alphanumeric() || prev == '_' || prev == ':')
+                        && out
+                            .get(j + 1)
+                            .is_some_and(|n| !n.is_whitespace() && *n != '=' && *n != '<') =>
+                    {
+                        angle += 1
+                    }
                     '>' if depth == 0 && paren == 0 && prev != '=' && prev != '-' => {
                         angle = angle.saturating_sub(1)
                     }
@@ -1431,6 +1443,14 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             "fn r4() -> S { S {\n #[cfg(test)]\n probe: 0,\n body: { std::fs::read_to_string(p).unwrap() },\n } }",
             "fn r5(k: u8) -> u8 { match k {\n _ => { let _ = std::fs::read(p); 2 }\n #[cfg(test)]\n 0 => 1\n } }",
             "fn r6(#[cfg(test)] a: u8) { let s = std::fs::read(p); }",
+            // Review round 4, R4-4: a comparison or a shift in the attributed item is not a
+            // generic, so it must not keep the item open past its own comma.
+            "fn g17(k: u8) -> u8 { match k {\n #[cfg(test)]\n x if x < 3 => 1,\n _ => { let _ = std::fs::read(p); 2 }\n } }",
+            "fn g18(k: u8) -> u8 { match k {\n #[cfg(test)]\n x if x <= 3 => 1,\n _ => { let _ = std::fs::read(p); 2 }\n } }",
+            "fn g19(k: u8) -> u8 { match k {\n #[cfg(test)]\n 0 => 1 << 2,\n _ => { let _ = std::fs::read(p); 2 }\n } }",
+            "fn g20() -> S { S {\n #[cfg(test)]\n probe: 1 < 2,\n body: std::fs::read_to_string(p).unwrap(),\n } }",
+            "fn g21() { f(\n #[cfg(test)] 1 < 2,\n std::fs::read(p),\n ); }",
+            "fn g22() { let v = [\n #[cfg(test)] a < b,\n std::fs::read(p).is_ok(),\n ]; }",
         ];
         for probe in probes {
             let (code, _) = production_code(probe);
@@ -1445,6 +1465,8 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             "fn z() -> S { S {\n #[cfg(test)]\n probe: std::fs::read(p),\n body: 1,\n } }",
             "#[cfg(test)]\nfn t<A, B>(a: A, b: B) -> Result<()> { std::fs::read(p); Ok(()) }",
             "#[cfg(test)]\nfn u<F: Fn() -> u8, B>(f: F, b: B) { std::fs::read(p); }",
+            // Generics still keep an attributed item open across their commas.
+            "fn w() -> S { S {\n #[cfg(test)]\n t: f::<A, B>(std::fs::read(p)),\n p: 1,\n } }",
         ] {
             let (code, _) = production_code(clean);
             let n: usize = read_counts(&code).iter().sum();
