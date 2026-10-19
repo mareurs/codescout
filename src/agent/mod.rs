@@ -628,6 +628,7 @@ fn load_project_config(root: &Path) -> Result<ProjectConfig> {
 }
 
 /// Longest piece of caller-supplied text echoed into a refusal, in bytes.
+// cap-class: NOT_A_CAP — bounds the echo of the caller's own input inside an error message, and the cut is marked in the text (`truncated, N bytes in all`); no result is shortened
 const ECHO_MAX_BYTES: usize = 512;
 
 /// `s` made safe to put in a message that is also stored in a usage row and written to a log:

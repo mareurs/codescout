@@ -2320,6 +2320,7 @@ fn select_error_render(e: &anyhow::Error) -> ErrorRender {
 
 /// How long a refused pin waits for its usage row to be written before answering anyway. The
 /// row is best-effort; the answer is not.
+// cap-class: NOT_A_CAP — a wait budget for a telemetry write, a timeout; the caller's answer is complete whether or not the row landed
 const REFUSAL_RECORD_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Route a tool `Err(e)` to the appropriate `CallToolResult`.
