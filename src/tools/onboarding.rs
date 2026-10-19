@@ -1330,6 +1330,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn patch_project_table_errors_never_quote_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        std::fs::write(&p, "db.internal:5432:app:alice:SECRETMARKER-31c9\n").unwrap();
+        let err = format!("{:#}", patch_project_table(&p, |_| {}).unwrap_err());
+        assert!(err.contains("parsing"), "control: {err}");
+        assert!(!err.contains("SECRETMARKER"), "{err}");
+    }
+
+    #[test]
     fn onboarding_version_stale_returns_true_for_none() {
         assert!(
             onboarding_version_stale(None),

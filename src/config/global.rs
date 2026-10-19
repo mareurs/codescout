@@ -418,6 +418,19 @@ mod tests {
     }
 
     #[test]
+    fn a_malformed_global_config_error_never_quotes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "db.internal:5432:app:alice:SECRETMARKER-31c9\n",
+        )
+        .unwrap();
+        let err = format!("{:#}", GlobalConfig::load_from_dir(dir.path()).unwrap_err());
+        assert!(err.contains("parsing global config"), "control: {err}");
+        assert!(!err.contains("SECRETMARKER"), "{err}");
+    }
+
+    #[test]
     fn load_errors_on_malformed_toml() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("config.toml"), "this is not = valid = toml").unwrap();
