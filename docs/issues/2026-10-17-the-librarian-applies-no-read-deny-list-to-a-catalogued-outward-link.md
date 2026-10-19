@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-pa
 tags:
 - cluster/unclassified
 kind: bug
-unverified: 'macOS not run (it takes the fallback path: F_GETPATH not wired) and Windows unverified: no inode check there, so the door judges then reads with a race window (D9). On the fallback path (no /proc, macOS, other Unix) a PARENT directory swapped inside for the judgement and back afterwards is still not refused (review round 1, F2). Not covered by design: a hard link or bind mount placed inside the repository. Kept rows keep their slug and citation edges, and a cascaded entry_cite delete keeps the slug in its row_id (Design deviation 8, operator decision open). A pre-fix row whose outward link was REMOVED before a post-fix reindex is deleted as an ordinary vanished row and its delete image (title, slug) reaches the audit trail and the shards (review round 2, R2-1b, known gap, expected-fail test, operator decision open). Removals outside the reindex (doc(delete), doctor prune_dead_root, delete_orphan_repos, merge_worktree, graft, the upsert pre-clean) do not elide; read, not run. Audit shard lines exported before a removal, text an embedder received, and freed SQLite pages are not recalled. Rows a pre-fix walk catalogued through an outward link still show a stored title in doc(list_stale), the worktree reports, tracker_design, merge_worktree, graft, constitution_check and worktree_fork events until the next reindex of their project clears or reclaims them (R2-13, not run). The doc(find) scan cost for withheld rows is estimated, not measured on the live catalog. Config-file TOML errors that quote a line were not exercised. The doctor cost on the live catalog is estimated, not measured on it. The external-store vector delete is tested with the in-memory store only.'
+unverified: 'macOS not run (it takes the fallback path: F_GETPATH not wired) and Windows unverified: no inode check there, so the door judges then reads with a race window (D9). On the fallback path (no /proc, macOS, other Unix) a PARENT directory swapped inside for the judgement and back afterwards is still not refused (review round 1, F2). Not covered by design: a hard link or bind mount placed inside the repository. Kept rows keep their slug and citation edges, and a cascaded entry_cite delete keeps the slug in its row_id (Design deviation 8, operator decision open). A pre-fix row whose outward link was REMOVED before a post-fix reindex is deleted as an ordinary vanished row and its delete image (title, slug) reaches the audit trail and the shards (review round 2, R2-1b, known gap, expected-fail test). Rows of a root never reindexed after the upgrade are never judged (round 3: the first post-fix reindex is the migration); until it runs, the find cold-call summary and counts, filters, context, graft preview, delete image, worktree fork and CLI backfill-chunks still print or answer about a pre-fix row (the window), and a worktree fork made in the window keeps those values in an event payload, which is never elided. Removals outside the reindex do not elide (doc(delete), doctor prune_dead_root, delete_orphan_repos, merge_worktree, graft, the upsert pre-clean); after the first reindex they find nothing of the target, before it they copy it. The round-3 R3-12 reading (the no-root rule refuses every no-root read on Windows and under macOS /tmp and /var, failing closed) was not run. The slug lookup error path (R3-13) is not exercised by a test. Audit shard lines exported before a removal, text an embedder received, and freed SQLite pages are not recalled. Rows a pre-fix walk catalogued through an outward link still show a stored title in doc(list_stale), the worktree reports, tracker_design, merge_worktree and constitution_check until the next reindex of their project clears or reclaims them (R2-13, not run). Config-file TOML errors that quote a line were not exercised. The doctor cost on the live catalog is estimated, not measured on it. The external-store vector delete is tested with the in-memory store only.'
 ---
 
 # BUG: the librarian applies NO read deny-list, so a repository can ship `notes.md -> ~/.ssh/id_rsa` and have the key catalogued, embedded and returned by `doc(get)`
@@ -679,6 +679,186 @@ Four survived their first run and were killed once a test was added:
 
 **Survived, equivalent:** M2 and M10, for the reasons above.
 
+## Review round 3 (Opus review of `ce02de8f8`): the reindex is the migration
+
+Rebase check: `experiments` is still `2f79ac712`, so no rebase was needed.
+
+**The premise (the controller's, after round 3).** Rounds 1, 2 and 3 found 6, 11 and 13 problems. Each round found
+sibling surfaces of the last, because withholding was added one surface at a time. Stored text is tainted by WHEN it
+was ingested, not by the state of the filesystem when it is read. A post-fix walk reads only through the door, which
+judges the opened file, so its text came from inside the root. Only a pre-fix walk can have stored text from outside.
+So stored rows are judged at the upgrade, and no more read-time checks are added.
+
+**The migration design, and why it is the reindex itself (option A, chosen by the controller).** The controller first
+asked for a separate one-time pass, gated by a per-root marker in `catalog_meta`. Reading `index_repo_sync` showed
+that this pass would reach no row that the reindex does not already reach, on every run:
+- A row the walk sees was opened through the door. Its stored fields are kept only when they equal what that file
+  just yielded; otherwise the walk rewrites them.
+- Every other row under the root is a reclamation candidate. Each one is judged again: by `exists()`, by the door's
+  `refusal` and by `stored_path_is_risky`.
+- Each risky candidate is either cleared and elided (an escaping row with history) or deleted and elided.
+- A row that is risky by the predicate is refused by the door (so it escapes), or it is gone (a dangling link at
+  some component, or a lossy path that names nothing).
+
+So the first post-fix reindex of a root IS the migration. No marker or extra pass was built. The marker mutants are
+moot, and D4 stays as the operator decided it: a row that escapes later is still cleared on every run. Option B (stop
+clearing post-migration rows) changes D4 and is the operator's call; it was not built.
+
+**The invariant, for every removal the reindex makes:** removing a row whose stored text may have come from outside
+never copies that text. One predicate decides: `ReadDoor::stored_path_is_risky`. It is true in three cases:
+1. the door refuses the path now;
+2. a link at ANY component below the door root dangles, the leaf or a parent directory (R3-1);
+3. the path is the lossy U+FFFD record of a non-UTF-8 name, and it names nothing.
+
+A path that crosses only links resolving inside the root and off the deny-list is not risky: such a link is a second
+name for a file in the repository. For a risky row, the clear or the delete and the elision of its
+`ARTIFACT_FILE_DERIVED` audit values run in one savepoint. The elision also covers its cascaded `entry_cite` payloads
+written since it acquired its slug.
+
+- **R3-1 (high), a row below a dangling DIRECTORY link.**
+  - Red at `ce02de8f8` (reviewer, `t3.log`): `get title="fakekeymarker title"`, `find_has_mark=true`. After the
+    reindex, `removed=1`, and the delete image holds the title, the slug-mint row and the embedded hash.
+  - Fix: the predicate checks every component, not only the leaf.
+  - Green: `a_row_below_a_dangling_directory_link_is_removed_without_copying_its_text` (one reindex from the pre-fix
+    state, with a cascaded citation), and the unit table `a_stored_path_is_risky_below_a_dangling_or_outward_link_at_any_component`.
+  - Mutation probes: the ancestor check off and leaf-only both KILLED.
+- **R3-6 (medium), an ordinary file below a non-UTF-8 name disappeared.**
+  - Red at `ce02de8f8` (reviewer): `find drops an ordinary non-UTF-8 file: {"count":0,...}`.
+  - Fix: `ReadDoor::refusal` no longer refuses a lossy stored path at read time. The case moved into the predicate,
+    where the reindex judges it. This replaces round 2's read-time rule (R2-2): the walk reads the real name
+    through the door, and a pre-fix lossy row is judged at the reindex.
+  - Green: `an_ordinary_file_below_a_non_utf8_name_is_found_and_kept` (found by a title filter, its title
+    returned, a second reindex removes nothing). The R2-2 reproduction is now a reindex test: one reindex from the
+    pre-fix state removes the row and leaves nothing, a cascaded citation included.
+  - The lossy-branch mutant was KILLED.
+- **R3-7 (low), the citation elision rewrote another artifact's history.**
+  - Red at `ce02de8f8` (reviewer): `B's removal rewrote A's citation history`.
+  - Fix: `elide_values_by_row_prefix_since`. Only audit rows written after the removed row acquired its slug
+    (`slug_acquired_at`: its latest INSERT, or its UPDATE that minted the slug) are elided. A catalog older than
+    the trail has no such row, and gets bound 0, the old behaviour.
+  - Also, a non-dangling link inside the root is no longer treated as tainted.
+  - Green: `a_reused_slug_leaves_the_earlier_holders_citation_history_alone`. A and B cite under the SAME key. A's
+    history is unchanged, and B's own cascaded delete IS elided, so the bound is not a no-op.
+  - The bound-dropped mutant was KILLED. The colon-dropped mutant (the reviewer's M1, a sibling slug `same-title-2`)
+    survived its first run and was killed by `a_sibling_slugs_citation_history_is_left_alone`.
+- **R3-13 (low), the slug lookup swallowed a database error.** It is now `.optional()?`. No test injects that error
+  (not probed).
+- **R3-8 (medium), cost.** The all-scope scan in `doc(find)` is removed. The page still drops a refused row that
+  holds file values, at one judgement per row on the page.
+  - Timing: `scratchpad/a8918-r2/timing3.sh`, the reviewer's `timing.sh` with the round-3 binary. Release builds,
+    three runs each, on the reviewer's copy of the live catalog (6,318 rows). Base is `experiments` `2f79ac712`.
+    Mean seconds:
+
+    | call | base | round-3 tip | ratio |
+    |---|---|---|---|
+    | cold, project scope | 0.277 (0.220 without the first warm-up run) | 0.229 | 1.04x on the warm runs |
+    | cold, `--scope all` | 0.175 | 0.202 | 1.15x |
+    | `--kind bug` | 0.165 | 0.163 | 0.99x |
+    | `--kind bug --scope all` | 0.113 | 0.126 | 1.11x |
+    | `--filter rel_path contains docs` | 0.183 | 0.195 | 1.06x |
+    | `--augmented false` | 0.192 | 0.203 | 1.05x |
+
+  - Every output of the six calls is byte-identical between base and tip.
+- **R3-2, R3-3, R3-4 and R3-5, sibling surfaces: no door checks added.** Each has one test. The test builds the real
+  pre-fix state (the walk read the target; the row has history, so it is kept), runs ONE reindex, then runs the
+  surface and asserts that the marker is absent:
+  - context's candidate counts equal those of a topic that matches nothing:
+    `context_counts_nothing_of_a_pre_fix_row_after_one_reindex`;
+  - the worktree fork event and the shadow row: `a_worktree_fork_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it`;
+  - graft's preview: `graft_preview_prints_nothing_of_a_pre_fix_row_after_one_reindex`;
+  - delete's image: `delete_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it`. The image's `slug` is set
+    aside: kept rows keep their slug, Deviation 8.
+
+  **These four tests also pass at `ce02de8f8`.** No code changed for those surfaces; the round-1 reindex already
+  cleared the kept row. They pin the promise. What makes them fail is the reindex not clearing or not eliding: the
+  mutants "kept row not cleared" and "kept row not elided" were run against them. Their RED is the reviewer's
+  window tests, which stay red by design.
+  - `worktree.rs` `resolve_write_target` reads the main row from the catalog (`artifact::get`), so after the
+    reindex it copies the cleared row. Verified by reading the code.
+  - `merge_worktree` replays the fork event's `base_frontmatter` (`merge_worktree.rs:258`) and reads both rows from
+    the catalog. A fork made AFTER the first reindex therefore replays cleared values (suspected R3-11, confirmed
+    by reading).
+  - A fork made IN THE WINDOW copies the pre-fix values into an event payload. The reindex does not elide events,
+    so that copy outlives the window (a known limit, below).
+- **R2-3/R2-4, the count-and-hints oracle.** The oracle is now closed by the first post-fix reindex, not at read
+  time. `no_oracle_on_a_pre_fix_row_after_one_reindex` checks a `contains` filter on each of title, topic,
+  status, kind, time scope, tags and owners. Each answers as a filter that matches nothing does, in count AND
+  hints, and get, find, context, state_at and workspace_state_at print nothing of the row. In the window, the
+  per-row withholding stays: get, the find page, gather, state_at, workspace_state_at and the semantic page. The
+  window test now also covers time scope, and gather judging `truncated` after the drop.
+- **R3-9 (medium), the gate.**
+  - Red at `ce02de8f8` (reviewer, `gate.log`): `std::fs::r#read(p)` counted 0, `std::fs::r#read_to_string(p)`
+    counted 0, and a `#[cfg(test)]` match arm or struct-literal field hid the production arm or field after it
+    (counted 0).
+  - Fix: the lexer reads a raw identifier as the identifier. A `#[cfg(test)]` item now ends at its own `,`, or just
+    before the `)`, `]` or `}` that closes its list or block. Commas inside `()`, `[]`, `{}` and generics `<>` do
+    not end it.
+  - Probes: raw identifiers; an attributed arm or field before and after a production one; an attributed function
+    parameter. Controls: the attributed arm and field are still blanked, and so is a generic `fn` with commas in
+    `<>`. The gate's real-tree count is unchanged.
+  - **What the gate still cannot see** (reviewer S5-S10): `fs::copy` followed by a door read of the copy, a
+    subprocess (`Command::new("cat")`), other crates (`fs_err`), a wrapper in another module, FFI (`libc::open`),
+    git object reads (`git2`). None of these exists in librarian production code today. It counts harmless
+    spellings too (H1-H7: `tokio::fs::write`, an append open, `io::read_to_string(stdin())`, `OpenOptions` in a
+    type, `use std::fs::File` for `create`, a custom `File::open`, `tokio::fs::metadata`), which fails closed.
+- **Suspected R3-12: the no-root rule on Windows and macOS (read, not run).**
+  - The no-root branch of `ReadDoor::verdict` compares `real` with the lexical spelling. On Windows `canonicalize`
+    returns a verbatim `\\?\C:\...` path, which never equals a plain spelling, so every no-root read is refused.
+  - On macOS a spelling under `/tmp` or `/var` resolves to `/private/...`, so it is refused too.
+  - Both fail CLOSED (a refusal, never a leak). The rooted branch compares two canonical paths and is unaffected.
+  - A no-root read is one of a row that no managed root contains and no repository is above.
+- **Suspected R3-11: confirmed by reading, see R3-3 above.** The suspected `id nin` variable limit no longer exists:
+  the scan that built that clause was removed.
+
+**The window.** Between the upgrade and the first reindex of a root, these surfaces still print the stored fields of a
+pre-fix row there:
+- the find cold-call `catalog.by_kind` and hints;
+- filters and counts (the count-and-hints oracle);
+- context;
+- graft's preview;
+- delete's image;
+- the worktree fork;
+- the CLI `backfill-chunks` run on stored chunks;
+- site-table layout R15's three stored-text sites.
+
+The remedy is to reindex first. The per-row withholding listed under R2-3/R2-4 above narrows that window but does not
+close it.
+
+**Known limits.**
+- Rows of a root that is never reindexed after the upgrade are never judged.
+- R2-1b: a link removed before the upgrade cannot be detected. The expected-fail test stays.
+- A worktree fork made in the window keeps the pre-fix values in its event payload. Events are not elided.
+- R2-11 (CLI `--params @file` and `--prompt-file`) is unchanged, recorded as a decision for the operator.
+- Deviation 8 is unchanged: kept rows keep their slug, and a cascaded citation's audit `row_id` keeps it.
+
+**Mutation probe, round 3.** Run in this worktree's own pool with `cargo test --lib -- read_door catalog::audit
+librarian::indexer` (209 tests). The reviewer's `mut3.py` was re-run in place, adapted to the new code, with its
+355-test filter set. Logs: `scratchpad/a8918-r2/mut3a.out`, `mut3b.out`, `mut3c.out` and `logs3/`.
+
+| mutant | verdict | killed by |
+|---|---|---|
+| predicate: ancestor dangling check off | KILLED | unit table; dangling-directory reindex test |
+| predicate: leaf only (`take(1)`) | KILLED | same |
+| predicate: lossy branch off | KILLED | `a_lossy_stored_path_is_risky_but_not_refused`; lossy reindex test |
+| predicate: door refusal off | KILLED | unit table |
+| removal elides escaping rows only | KILLED | dangling leaf, lossy and dangling-directory reindex tests |
+| citation seq bound dropped | KILLED | `a_reused_slug_leaves_the_earlier_holders_citation_history_alone` |
+| cascade elided for escaping rows only (reviewer's M8) | KILLED | dangling and lossy reindex tests |
+| citation prefix without its colon (reviewer's M1) | SURVIVED, then KILLED | `a_sibling_slugs_citation_history_is_left_alone` |
+| kept row: clear and elision in separate savepoints | SURVIVED, then KILLED | `a_kept_rows_clear_and_elision_commit_together` |
+| kept row not cleared | KILLED | the kept-row tests, the worktree fork test and the round-3 sibling-surface tests |
+| kept row not elided | KILLED | the kept-row tests, the delete-image test and the oracle test |
+| gate: raw identifier arm off | KILLED | `the_gate_counts_a_read_however_its_path_is_spelled` |
+| gate: `,` end, `)`/`]` end, `}` end, `<>` tracking off | KILLED | same (the `}` one by an overflow panic) |
+| gate: `->`/`=>` guard off | SURVIVED, then KILLED | a `#[cfg(test)] fn u<F: Fn() -> u8, B>` control |
+| get keeps `time_scope` (reviewer's M3) | KILLED | the window test, time scope now seeded |
+| no `withheld` reason (reviewer's M4) | SURVIVED, then KILLED | `no_oracle_on_a_pre_fix_row_after_one_reindex` (the kept row's reason) |
+| gather judges `truncated` before the drop (reviewer's M6) | SURVIVED, then KILLED | `gather_judges_truncated_after_dropping_a_refused_row` |
+| reviewer's M2, M5, M7 | not applicable | the scan they mutate is removed |
+| reviewer's controls C0 and C1 (adapted) | KILLED | |
+
+Not probed: the error propagation of the slug lookup (R3-13), because no test injects a database error there.
+
 ## Fix provenance
 
 Branch `worktree-agent-a8918c1498fdd30e8` (not yet on `experiments`). Rebased onto `experiments` `2f79ac712` on
@@ -715,6 +895,16 @@ when the three upstream tests got their `roots` argument.
 - **patch-id:** `cc0a0ff0a4e1c79750e3913e2bd025d60940de82`
 - **SHA:** `d146efba5` (review round 2: reproductions, the R2-1b expected failure)
 - **patch-id:** `f6b00b301b98dbfbd962e5d3261f3dc0d82bb614`
+- **SHA:** `16f481644` (review round 3, R3-1, R3-6, R3-7, R3-13: one removal predicate, the citation bound)
+- **patch-id:** `39bcf3009bcf39e771dc9a04679bb11c5f7609b1`
+- **SHA:** `40c30fa2b` (review round 3, R3-8: no catalog scan in doc(find))
+- **patch-id:** `b1ff0cc0008a0372f9ade8c2eb0e959b1569fab8`
+- **SHA:** `d736d89c3` (review round 3, R3-9: the gate)
+- **patch-id:** `4985b034eb0e575620f986ae9492f1a63eb6b4cd`
+- **SHA:** `de0091ffe` (review round 3: every surface after one reindex of the pre-fix state)
+- **patch-id:** `ee0c3221a2bcd0bf10dae1a27a592f8a7b6644e0`
+- **SHA:** `5e76c2ebd` (review round 3: tests for the surviving mutants)
+- **patch-id:** `6eb686a43df66a7487f343e3b898763c7de49dc8`
 
 ## Tests added
 
@@ -729,30 +919,55 @@ source gate and its lexer test), and the read column of the three write-door lay
 `get_still_returns_the_title_of_a_plain_row`, `a_refused_update_names_the_spelling_and_never_the_outside_target`, layout R15,
 and in `read_door.rs` `a_lossy_stored_path_cannot_be_judged`, `any_one_file_field_is_enough_to_hold_file_values`,
 `the_fallback_refuses_a_static_directory_link_out`, `one_door_judges_a_spelling_again_after_its_link_changes`,
-`the_gate_counts_a_read_however_its_path_is_spelled`.
+`the_gate_counts_a_read_however_its_path_is_spelled`. Review round 3 added, each from the real pre-fix state with ONE
+reindex where it applies:
+- `a_row_below_a_dangling_directory_link_is_removed_without_copying_its_text`
+- `no_oracle_on_a_pre_fix_row_after_one_reindex`
+- `context_counts_nothing_of_a_pre_fix_row_after_one_reindex`
+- `graft_preview_prints_nothing_of_a_pre_fix_row_after_one_reindex`
+- `delete_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it`
+- `a_worktree_fork_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it`
+- `an_ordinary_file_below_a_non_utf8_name_is_found_and_kept`
+- `a_reused_slug_leaves_the_earlier_holders_citation_history_alone`
+- `a_sibling_slugs_citation_history_is_left_alone`
+- `a_kept_rows_clear_and_elision_commit_together`
+- `gather_judges_truncated_after_dropping_a_refused_row`
+
+In `read_door.rs`: `a_lossy_stored_path_is_risky_but_not_refused` (it replaces `a_lossy_stored_path_cannot_be_judged`)
+and `a_stored_path_is_risky_below_a_dangling_or_outward_link_at_any_component`.
 
 ## Workarounds
 
-None needed after the fix, with one exception. **A catalogue built before the fix that holds a row reached through an
-outward link: reindex FIRST with the fixed binary, while the link is still in place, THEN remove the link.** The
-reindex then clears or reclaims the row and elides what the target supplied from the audit trail (Review round 2,
-cases 1 and 2). If the link is removed first, the next reindex deletes the row as an ordinary vanished row, and its
-delete image, which holds the target's title and slug, goes into the audit trail and the exported shards (R2-1b,
-known gap). If that has already happened, `librarian(audit_log, prune_before_ms)` is the only remedy, and it drops
-every audit row older than the cutoff. Before the fix: do not reindex a repository you do not trust with the librarian
-enabled; check `find <repo> -type l` first. Text a remote embedder received before the fix, and audit shard lines a
-pre-fix reindex exported, cannot be recalled.
+None needed after the fix, with two exceptions, both about a catalogue built before the fix.
+
+**After upgrading, reindex every root FIRST.** Until a root's first post-fix reindex, a row that a pre-fix walk read
+through an outward link still holds the target's title and fields. Several surfaces then print those fields or
+answer about them: the find cold-call summary and counts, filters, context, graft's preview, delete's image, the
+worktree fork, and the CLI `backfill-chunks` (Review round 3, the window). The first reindex clears or removes such
+rows and elides what the target supplied from the audit trail.
+
+**Reindex first, then remove the link.** If the link is removed before that reindex, the row is deleted as an ordinary
+vanished row. Its delete image, which holds the target's title and slug, goes into the audit trail and the exported
+shards (R2-1b, a known gap). If that has already happened, the only remedy is `librarian(audit_log, prune_before_ms)`,
+which drops every audit row older than the cutoff.
+
+Before the fix: do not reindex a repository you do not trust with the librarian enabled, and check `find <repo> -type
+l` first. These cannot be recalled: text a remote embedder received before the fix, audit shard lines a pre-fix
+reindex exported, and an event payload written in the window (a worktree fork).
 
 ## Resume
 
-Phase 2, review round 1 and review round 2 are done. Open for the operator:
+Phase 2 and review rounds 1, 2 and 3 are done. Round 3 settled R2-1b's direction: the reindex is the migration (option
+A), and the operator chose "one-time migration, then stop adding checks". Open for the operator:
 - Design deviation 8: kept rows keep their slug and citation edges, and a cascaded `entry_cite` delete keeps the slug
   in its `row_id`.
-- R2-1b: a removed outward link, options (a), (b) and (c), recommendation (c) plus (a).
+- Option B of round 3: stop clearing a row that escapes AFTER the first post-fix reindex. Its stored text was ingested
+  post-fix, but D4 clears it on every run.
 - R2-11: the CLI `--params @file` and `--prompt-file`.
 
 Follow-ups filed: `2026-10-18-librarian-reindex-drops-a-vanished-rows-catalog-entry-but-never-its-external-store-vectors.md`,
-`2026-10-18-the-audit-shard-readers-follow-a-link-a-repository-commits-under-codescout-audit.md`.
+`2026-10-18-the-audit-shard-readers-follow-a-link-a-repository-commits-under-codescout-audit.md`,
+`2026-10-18-run-command-heartbeat-test-fails-under-load.md`.
 
 ## References
 
