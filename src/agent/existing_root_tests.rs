@@ -259,53 +259,169 @@ fn a_path_behind_an_unreadable_parent_is_refused_as_unreachable_not_as_missing()
     );
 }
 
-/// F4: only a CONFIGURATION failure may point at project.toml. One case per way the classifier
-/// says yes, and the filesystem failure it must say no to.
+/// H1: the loader's TOML error quotes the offending source line (syntax) or value (type). Only
+/// the digits of the position survive; a type error, which has no position, keeps nothing.
 #[test]
-fn only_a_configuration_failure_is_classified_as_a_project_toml_problem() {
-    use anyhow::Context as _;
-    let toml_err = toml::from_str::<toml::Value>("= =").unwrap_err();
-    let wrapped_toml: anyhow::Error = Err::<(), _>(toml_err)
-        .context("parsing project.toml")
+fn a_toml_error_keeps_its_position_and_nothing_it_quotes() {
+    let syntax = toml::from_str::<toml::Value>("SECRET_MARKER_QX7 hunter2").unwrap_err();
+    let location =
+        toml_location(&anyhow::Error::new(syntax)).expect("a syntax error has a line and a column");
+    assert!(
+        location.starts_with(" (line 1, column ") && location.ends_with(')'),
+        "got: {location}"
+    );
+    assert!(!location.contains("SECRET"), "got: {location}");
+
+    let table = toml::from_str::<toml::Value>("project = \"SECRET_MARKER_QX7\"").unwrap();
+    let type_error = table
+        .try_into::<crate::config::project::ProjectConfig>()
         .unwrap_err();
     assert!(
-        is_project_config_error(&wrapped_toml),
-        "a TOML error under a context"
+        type_error.to_string().contains("SECRET_MARKER_QX7"),
+        "premise: the type error quotes the value"
     );
-    assert!(is_project_config_error(&anyhow::anyhow!(
-        "invalid configuration for /p/.codescout/project.toml (merged with the global config)"
-    )));
-    assert!(is_project_config_error(&anyhow::anyhow!(
-        "project.toml exceeds 1 MiB limit (2097152 bytes)"
-    )));
-    let denied: anyhow::Error = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
-    assert!(
-        !is_project_config_error(&denied),
-        "a permission error is not a config error"
-    );
-    assert!(!is_project_config_error(&anyhow::anyhow!("anything else")));
+    assert_eq!(toml_location(&anyhow::Error::new(type_error)), None);
+    assert_eq!(toml_location(&anyhow::anyhow!("not toml at all")), None);
 }
 
-/// `pin_resolution_refusal` keeps an existing refusal exactly as it is (its message already
-/// names the path and the remedy) and gives anything else the generic, project.toml-free hint.
+/// The refusal for a pin: a refusal that already exists passes through untouched, a config
+/// failure names the file that failed (the project's or the global one) with the matching
+/// hint, and anything else gets the generic hint. The pin is quoted in every case.
 #[test]
-fn a_pin_refusal_is_passed_through_and_other_failures_get_the_generic_hint() {
+fn a_pin_refusal_is_passed_through_names_the_failed_file_or_gets_the_generic_hint() {
     let root = Path::new("/p");
     let original = crate::tools::RecoverableError::with_hint("original message", "original hint");
     let passed = pin_resolution_refusal(root, original.into());
     assert_eq!(passed.message, "original message");
     assert_eq!(passed.hint(), Some("original hint"));
 
+    let project = pin_resolution_refusal(
+        root,
+        anyhow::Error::new(ConfigLoadFailed {
+            path: PathBuf::from("/p/.codescout/project.toml"),
+            global: false,
+            location: Some(" (line 1, column 2)".into()),
+        }),
+    );
+    assert_eq!(
+        project.message,
+        "workspace pin '/p' could not be resolved: project config \
+         '/p/.codescout/project.toml' could not be loaded (line 1, column 2)"
+    );
+    assert!(project
+        .hint()
+        .unwrap()
+        .contains("project's .codescout/project.toml"));
+
+    let global = pin_resolution_refusal(
+        root,
+        anyhow::Error::new(ConfigLoadFailed {
+            path: PathBuf::from("/home/u/.config/codescout/config.toml"),
+            global: true,
+            location: None,
+        }),
+    );
+    assert!(global
+        .message
+        .contains("global config '/home/u/.config/codescout/config.toml' could not be loaded"));
+    assert!(global.hint().unwrap().contains("global config"));
+    assert!(
+        !global.hint().unwrap().contains("project.toml"),
+        "a global failure must not send the caller to the project's file"
+    );
+
     let denied: anyhow::Error = std::io::Error::from(std::io::ErrorKind::PermissionDenied).into();
     let generic = pin_resolution_refusal(root, denied);
     assert!(generic
         .message
-        .starts_with("workspace pin /p could not be resolved"));
+        .starts_with("workspace pin '/p' could not be resolved"));
     assert!(!generic.hint().unwrap().contains("project.toml"));
+}
 
-    let config = pin_resolution_refusal(
-        root,
-        anyhow::anyhow!("invalid configuration for /p/.codescout/project.toml"),
+/// The loader is not asked to be the classifier: ANY error text, however it is worded, is
+/// reported as a config failure when and only when `ConfigLoadFailed` is in the chain.
+#[test]
+fn only_the_marker_makes_a_config_failure_whatever_the_loader_says() {
+    for wording in [
+        "invalid configuration for /p/.codescout/project.toml",
+        "project.toml exceeds 1 MiB limit (2097152 bytes)",
+        "parsing /p/.codescout/project.toml: unexpected token",
+    ] {
+        assert!(
+            config_load_failure(&anyhow::anyhow!(wording)).is_none(),
+            "text alone must not classify: {wording}"
+        );
+    }
+    let toml_error = toml::from_str::<toml::Value>("= =").unwrap_err();
+    assert!(config_load_failure(&anyhow::Error::new(toml_error)).is_none());
+    let marked = anyhow::Error::new(ConfigLoadFailed {
+        path: PathBuf::from("/p/.codescout/project.toml"),
+        global: false,
+        location: None,
+    })
+    .context("while resolving the pin");
+    assert!(
+        config_load_failure(&marked).is_some(),
+        "the marker is found under a context"
     );
-    assert!(config.hint().unwrap().contains("project.toml"));
+}
+
+/// L3: what is echoed is bounded and escaped. The boundary cases matter: exactly at the limit
+/// is untouched, one byte over is cut, and a multibyte character is never split.
+#[test]
+fn echoed_text_is_escaped_and_cut_at_the_bound() {
+    assert_eq!(bounded_for_message("/plain/path"), "/plain/path");
+    assert_eq!(bounded_for_message("a\nb\u{1b}c"), "a\\u{a}b\\u{1b}c");
+    assert_eq!(bounded_for_message("tab\there"), "tab\\u{9}here");
+
+    let exactly = "a".repeat(512);
+    assert_eq!(bounded_for_message(&exactly), exactly);
+    let over = "a".repeat(513);
+    let cut = bounded_for_message(&over);
+    assert!(cut.starts_with(&"a".repeat(512)), "got: {cut}");
+    assert!(cut.ends_with("(truncated, 513 bytes in all)"), "got: {cut}");
+
+    let wide = "é".repeat(1000);
+    let cut = bounded_for_message(&wide);
+    assert!(cut.contains("(truncated, 2000 bytes in all)"), "got: {cut}");
+    assert!(cut.len() < 512 + 40, "got {} bytes", cut.len());
+    assert!(cut.starts_with("éé") && !cut.contains('\u{fffd}'));
+}
+
+/// M1, through the REAL loader (no hand-built error): an unparseable file, a file over the
+/// 1 MiB limit and a list-limit breach each come back as `ConfigLoadFailed` for the project's
+/// own file, with nothing from inside the file in what is shown.
+#[test]
+fn the_real_loader_failures_become_the_marker_and_quote_nothing() {
+    let host = tempdir().unwrap();
+    let root = std::fs::canonicalize(host.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    let file = root.join(".codescout/project.toml");
+    let oversize = format!("# SECRET_MARKER_QX7\n{}", "#".repeat(1024 * 1024 + 1));
+    for (label, contents) in [
+        ("syntax", "SECRET_MARKER_QX7 hunter2".to_string()),
+        ("type", "project = \"SECRET_MARKER_QX7\"\n".to_string()),
+        ("oversize", oversize),
+        (
+            "list limit",
+            "[project]\nname = \"x\"\n[security]\nextra_write_roots = [\"SECRET_MARKER_QX7\"]\n"
+                .to_string(),
+        ),
+    ] {
+        std::fs::write(&file, contents).unwrap();
+        let err = load_project_config(&root).unwrap_err();
+        let failure =
+            config_load_failure(&err).unwrap_or_else(|| panic!("{label}: not the marker: {err:#}"));
+        assert!(!failure.global, "{label}: the project's file failed");
+        assert_eq!(failure.path, file, "{label}");
+        let shown = format!("{err:#} | {failure}");
+        assert!(
+            !shown.contains("SECRET_MARKER_QX7"),
+            "{label}: quoted: {shown}"
+        );
+        assert!(
+            shown.contains("could not be loaded"),
+            "{label}: got: {shown}"
+        );
+    }
 }

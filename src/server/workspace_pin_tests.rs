@@ -439,34 +439,6 @@ fn recoverable_body(label: &str, result: &CallToolResult) -> serde_json::Value {
     body
 }
 
-/// Makes a directory unreadable for the life of the guard, restoring the mode on drop (also on
-/// a panic, so the tempdir can be removed). `None` when the mode has no effect, which is the
-/// case for a process that may read anything (root): the caller then has no premise to test.
-#[cfg(unix)]
-struct Denied(std::path::PathBuf);
-
-#[cfg(unix)]
-impl Denied {
-    fn new(path: &std::path::Path) -> Option<Self> {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let guard = Self(path.to_path_buf());
-        if std::fs::read_dir(path).is_ok() {
-            eprintln!("mode 000 does not bind this process; skipping");
-            return None;
-        }
-        Some(guard)
-    }
-}
-
-#[cfg(unix)]
-impl Drop for Denied {
-    fn drop(&mut self) {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
-    }
-}
-
 const WRITE_TOPIC: &str = r#"{"action": "write", "topic": "t", "content": "c"}"#;
 
 /// F9: a `workspace` value that is not a string was silently "no pin", so `workspace: 5` was
@@ -589,6 +561,7 @@ async fn a_refused_pin_is_recorded_against_the_default_project_and_nowhere_else(
     .expect("a refused pin is an Ok result");
     assert_pin_refused("memory list", &result, &missing.to_string_lossy());
 
+    wait_for_usage_rows(&home_root, 1).await;
     let conn = crate::usage::db::open_db(&home_root).unwrap();
     let rows: Vec<(String, String, String)> = conn
         .prepare("SELECT tool_name, outcome, project_root FROM tool_calls")
@@ -644,49 +617,6 @@ async fn a_pin_that_vanishes_before_the_write_lock_is_a_recoverable_refusal() {
         "must name the pin; got: {body}"
     );
     assert_eq!(tree_listing(&host_root), Vec::<String>::new());
-}
-
-/// F2 (route 2) and F4: an existing directory this process may not enter is accepted at
-/// dispatch and fails in residency. The write must be a recoverable refusal (it was a protocol
-/// error, `write gate: Permission denied`), and neither it nor the read may blame project.toml.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_pin_to_an_unreadable_directory_is_recoverable_and_does_not_blame_project_toml() {
-    let (_home, server) = make_server().await;
-    let host = tempdir().unwrap();
-    let noperm = std::fs::canonicalize(host.path()).unwrap().join("noperm");
-    std::fs::create_dir(&noperm).unwrap();
-    let Some(_denied) = Denied::new(&noperm) else {
-        return;
-    };
-    let pin = noperm.to_string_lossy().to_string();
-
-    for (label, tool, args) in [
-        (
-            "memory list",
-            "memory",
-            serde_json::json!({"action": "list"}),
-        ),
-        (
-            "memory write",
-            "memory",
-            serde_json::from_str::<serde_json::Value>(WRITE_TOPIC).unwrap(),
-        ),
-    ] {
-        let result = dispatch_pinned(&server, tool, args, &pin)
-            .await
-            .unwrap_or_else(|e| panic!("{label}: must not be a protocol error: {e:?}"));
-        let body = recoverable_body(label, &result);
-        let error = body["error"].as_str().unwrap_or_default();
-        assert!(
-            error.contains(&pin) && error.to_lowercase().contains("permission denied"),
-            "{label}: must name the pin and the real cause; got: {body}"
-        );
-        assert!(
-            !body.to_string().contains("project.toml"),
-            "{label}: an unreadable directory is not a project.toml problem; got: {body}"
-        );
-    }
 }
 
 /// F2 (route 3), the case the existing project.toml hint is FOR: an unparseable config. The
@@ -761,6 +691,7 @@ async fn a_refused_pin_is_attributed_to_its_caller_like_an_ordinary_call() {
         .await
         .unwrap();
 
+    wait_for_usage_rows(&home_root, 4).await;
     let conn = crate::usage::db::open_db(&home_root).unwrap();
     let rows: Vec<(String, Option<String>, Option<String>)> = conn
         .prepare("SELECT outcome, cc_session_id, agent_id FROM tool_calls ORDER BY id")
@@ -807,4 +738,447 @@ async fn an_unpinned_write_with_no_project_keeps_its_protocol_error() {
         "got: {}",
         err.message
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Second review round (H1, M1, L1 to L3). Refusals must not leak, must name the pin, and must
+// cost the caller nothing.
+// ---------------------------------------------------------------------------------------------
+
+/// A server built with `debug = true`, which stores every call's input and output in the usage
+/// row, so a leak into the telemetry is visible to a test. Mirrors `make_server`.
+async fn make_debug_server() -> (tempfile::TempDir, CodeScoutServer) {
+    let dir = tempdir().unwrap();
+    let codescout_dir = dir.path().join(".codescout");
+    std::fs::create_dir_all(&codescout_dir).unwrap();
+    let ws_path = codescout_dir.join("librarian-workspace.toml");
+    std::fs::write(&ws_path, "").unwrap();
+    #[cfg(feature = "librarian")]
+    let env = ServerEnv {
+        librarian: crate::librarian::LibrarianEnv {
+            workspace: Some(ws_path),
+            db: Some(codescout_dir.join("librarian.db")),
+            ..Default::default()
+        },
+        ..test_support::test_env(dir.path())
+    };
+    #[cfg(not(feature = "librarian"))]
+    let env = test_support::test_env(dir.path());
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let server =
+        CodeScoutServer::from_parts_with_env(agent, LspManager::new_arc(), true, env).await;
+    (dir, server)
+}
+
+/// Every text block of a result, joined: a leak in ANY block counts.
+fn all_text(result: &CallToolResult) -> String {
+    result
+        .content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// H1: the refusal for a pin whose `project.toml` cannot be loaded used to print the whole
+/// error chain, and the TOML error QUOTES the offending source line. A project.toml that is a
+/// link to a secret file therefore returned that file's text. Neither a syntax error nor a type
+/// error (which quotes the VALUE) may reach any response or any stored usage row, on any tool.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_config_failure_never_quotes_the_file_in_a_response_or_a_usage_row() {
+    const MARKER: &str = "SECRET_MARKER_QX7";
+    for (label, contents) in [
+        ("syntax", format!("{MARKER}_parse hunter2")),
+        ("type", format!("project = \"{MARKER}_type\"\n")),
+    ] {
+        let (home, server) = make_debug_server().await;
+        let home_root = std::fs::canonicalize(home.path()).unwrap();
+        let host = tempdir().unwrap();
+        let host_root = std::fs::canonicalize(host.path()).unwrap();
+        let secret = host_root.join("secret.txt");
+        std::fs::write(&secret, contents).unwrap();
+        let proj = host_root.join("proj");
+        std::fs::create_dir_all(proj.join(".codescout")).unwrap();
+        std::os::unix::fs::symlink(&secret, proj.join(".codescout/project.toml")).unwrap();
+        let pin = proj.to_string_lossy().to_string();
+
+        for (tool, args) in [
+            ("memory", serde_json::json!({"action": "list"})),
+            ("memory", serde_json::from_str(WRITE_TOPIC).unwrap()),
+            (
+                "create_file",
+                serde_json::json!({"path": "n.txt", "content": "c"}),
+            ),
+            ("read_file", serde_json::json!({"path": "a.txt"})),
+            ("tree", serde_json::json!({})),
+        ] {
+            let result = dispatch_pinned(&server, tool, args, &pin)
+                .await
+                .unwrap_or_else(|e| panic!("{label} {tool}: protocol error {e:?}"));
+            let text = all_text(&result);
+            assert!(
+                !text.contains(MARKER),
+                "{label} {tool}: the file's text reached the response: {text}"
+            );
+            let body = recoverable_body(&format!("{label} {tool}"), &result);
+            assert!(
+                body["error"]
+                    .as_str()
+                    .is_some_and(|e| e.contains("project.toml")),
+                "{label} {tool}: must name the file that failed; got: {body}"
+            );
+        }
+
+        wait_for_usage_rows(&home_root, 5).await;
+        let conn = crate::usage::db::open_db(&home_root).unwrap();
+        let (rows, stored): (i64, String) = conn
+            .query_row(
+                "SELECT count(*), coalesce(group_concat(coalesce(error_msg,'') || '|' || \
+                 coalesce(input_json,'') || '|' || coalesce(output_json,'')), '') FROM tool_calls",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(rows > 0, "{label}: premise: the refusals were recorded");
+        assert!(
+            stored.contains(&pin),
+            "{label}: premise: debug storage holds the call, so a leak could land there"
+        );
+        assert!(
+            !stored.contains(MARKER),
+            "{label}: the file's text reached the usage rows"
+        );
+    }
+}
+
+/// L1: a pin that dispatch accepts but that cannot be made resident (here: `.codescout` is a
+/// regular file, which fails for root too) was refused only by the tools that happen to resolve
+/// it, and the others answered with a wrong cause ("requires an active project") or a bare
+/// error. It is now refused ONCE, at dispatch, before any tool body, for EVERY tool.
+#[tokio::test]
+async fn every_tool_refuses_an_unresidentable_pin_and_names_it() {
+    let (_home, server) = make_server().await;
+    let host = tempdir().unwrap();
+    let proj = std::fs::canonicalize(host.path()).unwrap().join("proj");
+    std::fs::create_dir(&proj).unwrap();
+    std::fs::write(proj.join(".codescout"), "not a directory").unwrap();
+    let pin = proj.to_string_lossy().to_string();
+
+    let names: Vec<String> = server.tools.iter().map(|t| t.name().to_string()).collect();
+    assert!(
+        names.len() >= 10,
+        "premise: the table covers the registry: {names:?}"
+    );
+    for name in names {
+        let result = dispatch_pinned(&server, &name, serde_json::json!({}), &pin)
+            .await
+            .unwrap_or_else(|e| panic!("{name}: protocol error {e:?}"));
+        let body = recoverable_body(&name, &result);
+        let error = body["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains(&pin) && !error.contains("active project"),
+            "{name}: must name the pin and the real cause; got: {body}"
+        );
+    }
+}
+
+/// L3: the pin is echoed into the response and into the stored usage row, so it is capped, and
+/// control characters (which would forge lines or colour in a log) are escaped.
+#[tokio::test]
+async fn a_refused_pin_is_echoed_capped_and_escaped() {
+    let (home, server) = make_server().await;
+    let home_root = std::fs::canonicalize(home.path()).unwrap();
+
+    let long = format!("/nonexistent/{}", "a".repeat(200_000));
+    let result = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        &long,
+    )
+    .await
+    .unwrap();
+    let body = recoverable_body("long pin", &result);
+    let error = body["error"].as_str().unwrap_or_default();
+    assert!(
+        error.len() < 2_000,
+        "the echo must be capped; got {} bytes",
+        error.len()
+    );
+    assert!(error.contains("truncated"), "and say so; got: {error}");
+
+    let rough = "/nonexistent/a\nb\u{1b}[31mc";
+    let result = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        rough,
+    )
+    .await
+    .unwrap();
+    let body = recoverable_body("control pin", &result);
+    let error = body["error"].as_str().unwrap_or_default();
+    assert!(
+        !error.contains('\n') && !error.contains('\u{1b}'),
+        "control characters must not reach the message raw; got: {error:?}"
+    );
+    assert!(
+        error.contains("\\u{a}") && error.contains("\\u{1b}"),
+        "got: {error:?}"
+    );
+
+    wait_for_usage_rows(&home_root, 2).await;
+    let conn = crate::usage::db::open_db(&home_root).unwrap();
+    let longest: i64 = conn
+        .query_row("SELECT max(length(error_msg)) FROM tool_calls", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(
+        longest < 2_000,
+        "the stored error is capped too; got {longest} chars"
+    );
+}
+
+/// L3: telemetry never re-creates a project that is gone. The session's default root was
+/// deleted; a refused pin must not bring `<root>/.codescout/usage.db` (and the root) back.
+#[tokio::test]
+async fn a_refused_pin_does_not_recreate_a_deleted_default_root() {
+    let (home, server) = make_server().await;
+    let root = std::fs::canonicalize(home.path()).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+
+    let result = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        "/nonexistent/pin",
+    )
+    .await
+    .unwrap();
+    recoverable_body("refused", &result);
+    assert!(
+        !root.exists(),
+        "recording must not re-create the deleted default root"
+    );
+}
+
+/// L3: recording the refusal is best-effort and bounded. With `usage.db` exclusively locked, the
+/// recorder waits out SQLite's 5 s busy timeout; the caller must not.
+#[tokio::test]
+async fn a_refused_pin_does_not_wait_for_a_locked_usage_db() {
+    let (home, server) = make_server().await;
+    let root = std::fs::canonicalize(home.path()).unwrap();
+    let first = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        "/nonexistent/pin",
+    )
+    .await
+    .unwrap();
+    recoverable_body("first", &first);
+
+    wait_for_usage_rows(&root, 1).await;
+    let conn = crate::usage::db::open_db(&root).unwrap();
+    conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let started = std::time::Instant::now();
+    let second = dispatch_pinned(
+        &server,
+        "memory",
+        serde_json::json!({"action": "list"}),
+        "/nonexistent/pin",
+    )
+    .await
+    .unwrap();
+    let waited = started.elapsed();
+    conn.execute_batch("ROLLBACK").unwrap();
+    recoverable_body("second", &second);
+    assert!(
+        waited < std::time::Duration::from_secs(3),
+        "the refusal waited {waited:?} on a locked usage.db"
+    );
+}
+
+/// F2 (route 2) and F4, root-proof: a project that cannot be opened for a reason that is NOT
+/// its configuration. `.codescout` is a regular file, so residency fails with `Not a
+/// directory` for every user, root included (the earlier fixture, a mode-000 directory, bound
+/// nobody who may read anything). Reads and writes alike must be recoverable and must not
+/// blame project.toml.
+#[tokio::test]
+async fn a_pin_whose_project_cannot_be_opened_is_recoverable_and_does_not_blame_project_toml() {
+    let (_home, server) = make_server().await;
+    let host = tempdir().unwrap();
+    let proj = std::fs::canonicalize(host.path()).unwrap().join("proj");
+    std::fs::create_dir(&proj).unwrap();
+    std::fs::write(proj.join(".codescout"), "not a directory").unwrap();
+    let pin = proj.to_string_lossy().to_string();
+
+    for (label, args) in [
+        ("memory list", serde_json::json!({"action": "list"})),
+        (
+            "memory write",
+            serde_json::from_str::<serde_json::Value>(WRITE_TOPIC).unwrap(),
+        ),
+    ] {
+        let result = dispatch_pinned(&server, "memory", args, &pin)
+            .await
+            .unwrap_or_else(|e| panic!("{label}: must not be a protocol error: {e:?}"));
+        let body = recoverable_body(label, &result);
+        let error = body["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains(&pin) && error.to_lowercase().contains("not a directory"),
+            "{label}: must name the pin and the real cause; got: {body}"
+        );
+        assert!(
+            !body.to_string().contains("project.toml"),
+            "{label}: an unopenable directory is not a project.toml problem; got: {body}"
+        );
+    }
+}
+
+/// M1 end to end, through the REAL loader and the real dispatch: each way a project.toml can
+/// fail to load comes back as one recoverable refusal naming that file, with the project.toml
+/// hint, and nothing from inside the file. The cases are the loader's four failure kinds.
+#[tokio::test]
+async fn each_way_a_project_toml_fails_to_load_is_refused_naming_the_file() {
+    let (_home, server) = make_server().await;
+    let host = tempdir().unwrap();
+    let host_root = std::fs::canonicalize(host.path()).unwrap();
+    let oversize = format!("# SECRET_MARKER_QX7\n{}", "#".repeat(1024 * 1024 + 1));
+    for (label, contents) in [
+        ("syntax", "SECRET_MARKER_QX7 hunter2".to_string()),
+        ("type", "project = \"SECRET_MARKER_QX7\"\n".to_string()),
+        ("oversize", oversize),
+        (
+            "list limit",
+            "[project]\nname = \"x\"\n[security]\nextra_write_roots = [\"SECRET_MARKER_QX7\"]\n"
+                .to_string(),
+        ),
+    ] {
+        let proj = host_root.join(label.replace(' ', "-"));
+        std::fs::create_dir_all(proj.join(".codescout")).unwrap();
+        let file = proj.join(".codescout/project.toml");
+        std::fs::write(&file, contents).unwrap();
+        let pin = proj.to_string_lossy().to_string();
+
+        let result = dispatch_pinned(
+            &server,
+            "memory",
+            serde_json::json!({"action": "list"}),
+            &pin,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !all_text(&result).contains("SECRET_MARKER_QX7"),
+            "{label}: quoted the file: {}",
+            all_text(&result)
+        );
+        let body = recoverable_body(label, &result);
+        let error = body["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains(&format!(
+                "project config '{}' could not be loaded",
+                file.display()
+            )),
+            "{label}: must name the file that failed; got: {body}"
+        );
+        assert!(
+            body["hint"]
+                .as_str()
+                .is_some_and(|h| h.contains("project's .codescout/project.toml")),
+            "{label}: must point at project.toml; got: {body}"
+        );
+    }
+}
+
+/// M1, the broken GLOBAL config: it fails every project, so it is named as the global file and
+/// the hint must not send the caller to the project's own project.toml. The global directory is
+/// reached through `XDG_CONFIG_HOME`, set for a CHILD process only (the shared suite never
+/// mutates its environment). The file is broken AFTER the server is built, since a broken
+/// global config stops the default project from loading at all.
+#[cfg(unix)]
+#[test]
+fn a_broken_global_config_is_named_as_the_global_file_not_the_projects() {
+    let xdg = tempdir().unwrap();
+    let xdg_root = std::fs::canonicalize(xdg.path()).unwrap();
+    crate::platform::test_child::run(
+        module_path!(),
+        "a_broken_global_config_is_named_as_the_global_file_not_the_projects",
+        &[("XDG_CONFIG_HOME", Some(xdg_root.to_str().unwrap()))],
+        || {
+            let xdg_root = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap());
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (_home, server) = make_server().await;
+                    let global = xdg_root.join("codescout");
+                    std::fs::create_dir_all(&global).unwrap();
+                    std::fs::write(global.join("config.toml"), "SECRET_MARKER_QX7 hunter2")
+                        .unwrap();
+                    let host = tempdir().unwrap();
+                    let proj = std::fs::canonicalize(host.path()).unwrap().join("proj");
+                    std::fs::create_dir_all(proj.join(".codescout")).unwrap();
+                    std::fs::write(
+                        proj.join(".codescout/project.toml"),
+                        "[project]\nname = \"fine\"\n",
+                    )
+                    .unwrap();
+
+                    let result = dispatch_pinned(
+                        &server,
+                        "memory",
+                        serde_json::json!({"action": "list"}),
+                        &proj.to_string_lossy(),
+                    )
+                    .await
+                    .unwrap();
+                    assert!(!all_text(&result).contains("SECRET_MARKER_QX7"));
+                    let body = recoverable_body("global", &result);
+                    let error = body["error"].as_str().unwrap_or_default();
+                    assert!(
+                        error.contains(&format!(
+                            "global config '{}' could not be loaded",
+                            global.join("config.toml").display()
+                        )),
+                        "must name the global file; got: {body}"
+                    );
+                    let hint = body["hint"].as_str().unwrap_or_default();
+                    assert!(
+                        hint.contains("global config") && !hint.contains("project.toml"),
+                        "must not send the caller to the project's file; got: {body}"
+                    );
+                });
+        },
+    );
+}
+
+/// Waits (up to 10 s) until the default project's usage database holds `at_least` rows. A
+/// refused pin's row is written under a short budget on the blocking pool, so on a loaded
+/// machine it may land just after the answer: the answer is what is bounded, not the row.
+async fn wait_for_usage_rows(root: &std::path::Path, at_least: i64) {
+    // Read-only and without `open_db`: that runs the schema migrations, and a migration racing
+    // the recorder's own open fails with `duplicate column name`.
+    let path = root.join(".codescout/usage.db");
+    for _ in 0..200 {
+        let count = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .and_then(|c| {
+            c.query_row("SELECT count(*) FROM tool_calls", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .unwrap_or(0);
+        if count >= at_least {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("the usage database never reached {at_least} rows");
 }

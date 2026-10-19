@@ -814,6 +814,70 @@ impl CodeScoutServer {
             .collect()
     }
 
+    /// Answer a call whose `workspace=` pin is unusable: the recoverable refusal, plus a usage
+    /// row for it.
+    ///
+    /// The row is written against the session's DEFAULT project, never the pinned one (nothing
+    /// may be created at the pinned path), and is best-effort in three ways:
+    /// - it is skipped when the default project's root is gone, because opening the usage
+    ///   database creates the directory, and telemetry must not bring a deleted project back;
+    /// - it runs on the blocking pool under a short budget, because the database waits out
+    ///   SQLite's 5 s busy timeout when another process holds it, and the caller must not;
+    /// - what it stores is the refusal's message, which is already capped and escaped.
+    ///
+    /// The caller is resolved as the access-gate refusal resolves it: the stamped principal,
+    /// else the `_meta` conversation, else the rendezvous poll (consumed once per call; this
+    /// early return is that call's only poll), else the server's own id.
+    #[allow(clippy::too_many_arguments)]
+    async fn refuse_pin(
+        &self,
+        tool: &str,
+        input: &Value,
+        refusal: crate::tools::RecoverableError,
+        principal: Option<&str>,
+        conversation: Option<&str>,
+        agent_id: Option<String>,
+        tool_use_id: Option<String>,
+    ) -> CallToolResult {
+        // A copy for the recorder: the response and the recorded row must say the same thing.
+        let recorded = crate::tools::RecoverableError::with_hint(
+            refusal.message.clone(),
+            refusal.hint().unwrap_or_default(),
+        );
+        let response = route_tool_error(refusal.into());
+        if !self
+            .agent
+            .project_root()
+            .await
+            .is_some_and(|root| root.is_dir())
+        {
+            return response;
+        }
+        let cc_session = principal
+            .map(str::to_owned)
+            .or_else(|| conversation.map(str::to_owned))
+            .or_else(|| self.poll_rendezvous())
+            .unwrap_or_else(|| self.cc_session_id.clone());
+        let recorder = UsageRecorder::new(
+            self.agent.clone(),
+            self.debug,
+            self.session_id.clone(),
+            cc_session,
+            agent_id,
+            tool_use_id,
+        );
+        let (name, input) = (tool.to_string(), input.clone());
+        let runtime = tokio::runtime::Handle::current();
+        let job = tokio::task::spawn_blocking(move || {
+            runtime.block_on(recorder.record_content(&name, &input, None, || async move {
+                Err::<Vec<Content>, anyhow::Error>(recorded.into())
+            }))
+        });
+        // The job keeps running past the budget; only the wait for it is bounded.
+        let _ = tokio::time::timeout(REFUSAL_RECORD_BUDGET, job).await;
+        response
+    }
+
     async fn acquire_write_guard_if_writing(
         &self,
         name: &str,
@@ -1452,44 +1516,48 @@ impl CodeScoutServer {
             .and_then(|p| p.split_once('/'))
             .map(|(_, agent)| agent.to_string());
 
-        // A `workspace=` pin that is not an existing directory is refused HERE, before anything
-        // resolves it: every later consumer (the access gate, the write lock, the tool body)
-        // would otherwise make that path resident and build a project there. Returned as the
-        // recoverable answer it is, so sibling calls in the turn survive.
+        // A `workspace=` pin that is not an existing directory, or whose project cannot be made
+        // resident (an unparseable project.toml, an unopenable directory), is refused HERE,
+        // once, before anything resolves it: every later consumer (the access gate, the write
+        // lock, the tool body) would otherwise make that path resident and build a project
+        // there, or answer with a wrong cause. Returned as the recoverable answer it is, so
+        // sibling calls in the turn survive.
         //
-        // The refusal is still RECORDED, against the session's DEFAULT project (`None` below,
-        // never the pin: nothing may be created at the pinned path). The incident that found
-        // this was diagnosed from a usage row, and a refused call that left none would have
-        // been invisible. The caller is resolved the way the gate refusal below resolves it,
-        // including the one rendezvous poll this early return makes in place of the later one.
+        // The refusal is still RECORDED, against the session's DEFAULT project, never the pin
+        // (see `refuse_pin`). The incident that found this was diagnosed from a usage row, and
+        // a refused call that left none would have been invisible.
         // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
         let workspace_override = match Self::extract_workspace_override(&input) {
             Ok(pin) => pin,
             Err(refusal) => {
-                let cc_session = asserted_principal
-                    .clone()
-                    .or_else(|| asserted_conversation.clone())
-                    .or_else(|| self.poll_rendezvous())
-                    .unwrap_or_else(|| self.cc_session_id.clone());
-                let recorder = UsageRecorder::new(
-                    self.agent.clone(),
-                    self.debug,
-                    self.session_id.clone(),
-                    cc_session,
-                    asserted_agent,
-                    asserted_tool_use_id,
-                );
-                let refused = recorder
-                    .record_content(&req.name, &input, None, || async move {
-                        Err::<Vec<Content>, anyhow::Error>(refusal.into())
-                    })
-                    .await;
-                return Ok(match refused {
-                    Ok(blocks) => CallToolResult::success(blocks),
-                    Err(e) => route_tool_error(e),
-                });
+                return Ok(self
+                    .refuse_pin(
+                        &req.name,
+                        &input,
+                        refusal,
+                        asserted_principal.as_deref(),
+                        asserted_conversation.as_deref(),
+                        asserted_agent,
+                        asserted_tool_use_id,
+                    )
+                    .await);
             }
         };
+        if let Some(root) = workspace_override.as_deref() {
+            if let Err(e) = self.agent.ensure_resident(root.to_path_buf()).await {
+                return Ok(self
+                    .refuse_pin(
+                        &req.name,
+                        &input,
+                        crate::agent::pin_resolution_refusal(root, e),
+                        asserted_principal.as_deref(),
+                        asserted_conversation.as_deref(),
+                        asserted_agent,
+                        asserted_tool_use_id,
+                    )
+                    .await);
+            }
+        }
 
         // Computed ONCE and threaded to its consumers — the write lock and the access gate
         // below. Deriving it twice is how the two halves of this decision drift apart, which
@@ -2249,6 +2317,10 @@ fn select_error_render(e: &anyhow::Error) -> ErrorRender {
         ErrorRender::Fatal(e.to_string())
     }
 }
+
+/// How long a refused pin waits for its usage row to be written before answering anyway. The
+/// row is best-effort; the answer is not.
+const REFUSAL_RECORD_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Route a tool `Err(e)` to the appropriate `CallToolResult`.
 ///

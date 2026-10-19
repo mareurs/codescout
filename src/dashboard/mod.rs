@@ -85,19 +85,52 @@ mod tests {
         );
     }
 
-    /// The other side: a root that exists is served (the call is still running when the
-    /// timeout fires), so the refusal above cannot be an unconditional one.
+    /// The other side, POSITIVELY: a root that exists is served, proved by connecting and being
+    /// answered (an earlier version only observed a timeout, which any hang also produces).
     #[tokio::test]
     async fn serve_still_serves_an_existing_project_root() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let host = tempfile::tempdir().unwrap();
-        let outcome = tokio::time::timeout(
-            Duration::from_millis(800),
-            serve(host.path().to_path_buf(), "127.0.0.1".into(), 0, false),
-        )
-        .await;
+        // A free port, found by binding and releasing it: `serve` binds its own listener.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let server = tokio::spawn(serve(
+            host.path().to_path_buf(),
+            "127.0.0.1".into(),
+            port,
+            false,
+        ));
+
+        let mut reply = None;
+        for _ in 0..60 {
+            if server.is_finished() {
+                break;
+            }
+            if let Ok(mut stream) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+                stream
+                    .write_all(
+                        b"GET /api/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                let mut body = String::new();
+                stream.read_to_string(&mut body).await.unwrap();
+                reply = Some(body);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let finished_early = server.is_finished();
+        server.abort();
         assert!(
-            outcome.is_err(),
-            "an existing root must be served, not refused: {outcome:?}"
+            !finished_early,
+            "serve returned instead of serving an existing root"
         );
+        let reply = reply.expect("the dashboard never accepted a connection");
+        assert!(reply.starts_with("HTTP/1.1 200"), "got: {reply}");
+        assert!(reply.contains("\"status\":\"ok\""), "got: {reply}");
     }
 }
