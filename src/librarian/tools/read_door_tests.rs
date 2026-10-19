@@ -3055,3 +3055,265 @@ async fn a_kept_moved_rows_pre_move_history_is_elided() {
     let _ = id;
     assert_nothing_of_the_target_remains(&ctx, &p, Some(&new_id), &v);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Review round 5.
+// ---------------------------------------------------------------------------------------------
+
+/// The window-fork layout with the worktree OUTSIDE the main root (`git worktree add ../wt`), or
+/// inside it; `reindex_first` forks after the main root's first post-fix reindex instead.
+async fn r5_fork(
+    external: bool,
+    reindex_first: bool,
+) -> (tempfile::TempDir, ToolContext, String, PathBuf, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let m = project(&b);
+    target(&b.join("out"));
+    ln(b.join("out/x.md"), &m.join("docs/x.md"));
+    let w = if external {
+        b.join("wt-feat")
+    } else {
+        m.join(".worktrees/feat")
+    };
+    std::fs::create_dir_all(w.join("docs")).unwrap();
+    std::fs::write(w.join(".git"), "gitdir: ../p/.git/worktrees/feat\n").unwrap();
+    ln(b.join("out/x.md"), &w.join("docs/x.md"));
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_rules(rules())
+        .with_artifact_store(Arc::new(InMemoryArtifactStore::default()))
+        .with_current_project(Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: w.clone(),
+                git_root: w.clone(),
+                main_root: Some(m.clone()),
+                umbrella: None,
+            },
+        ))
+        .build();
+    let id = seed(&ctx, &m.join("docs/x.md"), Some(&format!("{MARK} title")));
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET topic = ?2, tags = ?3 WHERE id = ?1",
+            rusqlite::params![id, format!("{MARK}topic"), format!("[\"{MARK}tag\"]")],
+        )
+        .unwrap();
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id, json!({"note": "mine"}))).unwrap();
+    let walk = |ctx: &ToolContext| {
+        crate::librarian::indexer::index_repo_sync(
+            &ctx.catalog.lock(),
+            &rules(),
+            &m,
+            &globset::GlobSet::empty(),
+            false,
+            false,
+            false,
+        )
+        .unwrap()
+    };
+    if reindex_first {
+        walk(&ctx);
+    }
+    super::event_create::call(
+        &ctx,
+        json!({"artifact_id": id, "kind": "note", "payload": {"text": "n"}}),
+    )
+    .await
+    .unwrap();
+    if !reindex_first {
+        walk(&ctx);
+    }
+    (tmp, ctx, id, w, m)
+}
+
+/// R5-1: a window fork in an EXTERNAL worktree. The main root's reindex clears only the MAIN
+/// row: it never walks the worktree, and the worktree session's own reindex skips a linked
+/// worktree, so the shadow keeps the pre-fix values. The merge must leave the cleared main row
+/// alone: no conflict, no value written back, nothing of the target in its `worktree_merge` event.
+#[tokio::test]
+async fn an_external_window_fork_merge_leaves_the_cleared_main_row_alone() {
+    let (_tmp, ctx, id, w, _m) = r5_fork(true, false).await;
+    // The worktree session's own reindex: skipped (a linked worktree), the shadow stays.
+    let _ = super::reindex::call(&ctx, json!({"scope": "project"})).await;
+    let shadow_marked: i64 = ctx
+        .catalog
+        .lock()
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM artifact WHERE id != ?1 AND instr(title, ?2) > 0",
+            rusqlite::params![id, MARK],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        shadow_marked, 1,
+        "precondition: only the MAIN row was cleared"
+    );
+    let merge = super::merge_worktree::call(&ctx, json!({"root": w.display().to_string()}))
+        .await
+        .unwrap();
+    assert_eq!(merge["conflicts"], json!([]), "{merge}");
+    assert!(!merge.to_string().contains(MARK), "{merge}");
+    let cat = ctx.catalog.lock();
+    let main = artifact::get(&cat, &id).unwrap().unwrap();
+    assert!(
+        crate::librarian::read_door::cleared_by_the_read_door(&main),
+        "the merge wrote onto the cleared main row: {main:?}"
+    );
+    let merge_events: Vec<String> = cat
+        .conn
+        .prepare("SELECT payload FROM events WHERE kind = 'worktree_merge'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(merge_events.len(), 1, "precondition: the merge ran");
+    assert!(!merge_events[0].contains(MARK), "{}", merge_events[0]);
+}
+
+/// R5-7: a fork made AFTER the clearing, nothing edited: the merge reports no conflict.
+#[tokio::test]
+async fn a_post_clearing_fork_merges_without_conflicts() {
+    let (_tmp, ctx, _id, w, _m) = r5_fork(false, true).await;
+    let merge = super::merge_worktree::call(&ctx, json!({"root": w.display().to_string()}))
+        .await
+        .unwrap();
+    assert_eq!(merge["conflicts"], json!([]), "{merge}");
+}
+
+/// A pre-fix chain of `n` moves of the outward link, then one reindex.
+async fn chain_of_moves(
+    n: usize,
+) -> (
+    tempfile::TempDir,
+    ToolContext,
+    Vec<String>,
+    PathBuf,
+    anyhow::Result<serde_json::Value>,
+) {
+    let (tmp, ctx, _store, id, p, link) = prefix_state(false, false).await;
+    let mut ids = vec![id];
+    let mut cur = link;
+    for i in 1..=n {
+        let next = p.join(format!("docs/m{i}.md"));
+        ids.push(pre_fix_move(&ctx, &cur, &next));
+        cur = next;
+    }
+    let v = super::reindex::call(&ctx, json!({"scope": "project"})).await;
+    (tmp, ctx, ids, p, v)
+}
+
+/// R5-6: a lineage within the cap is elided whole (ten moves).
+#[tokio::test]
+async fn a_lineage_within_the_cap_is_elided_whole() {
+    let (_tmp, ctx, ids, p, v) = chain_of_moves(10).await;
+    let v = v.unwrap();
+    assert!(artifact::get(&ctx.catalog.lock(), ids.last().unwrap())
+        .unwrap()
+        .is_none());
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+}
+
+/// R5-6: a lineage past the cap (70 moves) is not cut silently: the reindex fails naming the cap,
+/// and the row is left in place, its trail not half-elided.
+#[tokio::test]
+async fn a_lineage_past_the_cap_fails_the_reindex_and_leaves_the_row() {
+    let (_tmp, ctx, ids, _p, v) = chain_of_moves(70).await;
+    let err = format!("{:#}", v.unwrap_err());
+    assert!(err.contains("LINEAGE_DEPTH_CAP"), "{err}");
+    assert!(
+        artifact::get(&ctx.catalog.lock(), ids.last().unwrap())
+            .unwrap()
+            .is_some(),
+        "the row was removed although its lineage could not be elided"
+    );
+    assert!(
+        audit_payloads_holding(&ctx, "read-door").is_empty(),
+        "a lineage past the cap was half-elided"
+    );
+}
+
+/// R5-8: the operator remedy for an existing window-fork event, as the issue states it (run with
+/// the MCP server stopped). Deleting the event writes a delete image holding its payload; that
+/// image is then rewritten IN PLACE, as `elide_values` does, so the trail keeps every `seq`.
+#[tokio::test]
+async fn the_window_fork_remedy_rewrites_the_audit_payload_in_place() {
+    let (_tmp, ctx, _id, _w, _m) = window_fork().await;
+    let cat = ctx.catalog.lock();
+    let fork: String = cat
+        .conn
+        .query_row(
+            "SELECT id FROM events WHERE kind = 'worktree_fork'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let rows_before: i64 = cat
+        .conn
+        .query_row("SELECT COUNT(*) FROM catalog_audit", [], |r| r.get(0))
+        .unwrap();
+    // The issue's steps 2 and 3, verbatim but for the id.
+    cat.conn
+        .execute_batch(&format!(
+            "DELETE FROM events WHERE id = '{fork}';\n\
+             UPDATE catalog_audit SET payload = json_set(payload, '$.payload', \
+             json('{{\"elided\":\"read-door\"}}')) WHERE tbl = 'events' AND op = 'delete' \
+             AND row_id = '{fork}';"
+        ))
+        .unwrap();
+    let rows_after: i64 = cat
+        .conn
+        .query_row("SELECT COUNT(*) FROM catalog_audit", [], |r| r.get(0))
+        .unwrap();
+    let (max_seq, count): (i64, i64) = cat
+        .conn
+        .query_row("SELECT MAX(seq), COUNT(*) FROM catalog_audit", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(
+        rows_after,
+        rows_before + 1,
+        "the delete image is kept, not removed"
+    );
+    assert_eq!(max_seq, count, "no seq gap");
+    let leaking: i64 = cat
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'events' AND instr(payload, ?1) > 0",
+            [MARK],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(leaking, 0, "the fork payload is still in the trail");
+}
+
+/// R5-1: the same external window fork, but the worktree EDITED the shadow. The cleared main row
+/// still takes nothing (its file is outside, nothing can be written through it), and the fork's
+/// pre-fix base is not printed as a conflict. Tells the MAIN row's clearing from the shadow's: here
+/// only the main row is cleared.
+#[tokio::test]
+async fn an_edited_external_window_fork_merge_prints_no_base_and_leaves_main_alone() {
+    let (_tmp, ctx, id, w, _m) = r5_fork(true, false).await;
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET topic = 'worktree topic' WHERE id != ?1",
+            [&id],
+        )
+        .unwrap();
+    let merge = super::merge_worktree::call(&ctx, json!({"root": w.display().to_string()}))
+        .await
+        .unwrap();
+    assert!(!merge.to_string().contains(MARK), "{merge}");
+    assert_eq!(merge["conflicts"], json!([]), "{merge}");
+    let main = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+    assert!(
+        crate::librarian::read_door::cleared_by_the_read_door(&main),
+        "the merge wrote onto the cleared main row: {main:?}"
+    );
+}
