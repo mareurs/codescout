@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/2026-10-18-memory-read-follows-a-leaf-symlink-and-serves-the-target.md, docs/issues/2026-10-17-atomic-write-follows-a-planted-staging-symlink-and-overwrites-a-file-outside-the-root.md]
 tags:
 - cluster/unclassified
-unverified: 'The Windows behaviour (a .gitignore that is a reparse point) was not run. The check is symlink_metadata then read, so a link swapped in between the two calls is not closed (the writer is atomic_write, which replaces rather than follows). The tracing::warn notice was not asserted by a test (no observer in the suite reads it). The fix SHA is on the review branch and may not survive a rebase: use the patch-id.'
+unverified: 'The Windows behaviour (a .gitignore that is a reparse point) was not run. The check is symlink_metadata then read, so a link swapped in between the two calls is not closed (the writer is atomic_write, which replaces rather than follows). The warning log lines were not asserted by a test; the decision they report is a SelfIgnore value, which is. When the fallback is skipped (linked .codescout or private-memories, or an existing private-memories/.gitignore that is not exactly the one-line star file), nothing makes git ignore the private store. The fix SHAs are on the review branch and may not survive a rebase: use the patch-ids.'
 kind: bug
 ---
 
@@ -95,14 +95,27 @@ is never written through; an existing entry is left). A `tracing::warn!` names t
 change: for such a project `.gitignore` no longer gains the entry, and `private-memories/` gains a
 `.gitignore`.
 
+**What is guaranteed, stated exactly (corrected after review).** "The private store ignores itself" holds only when
+the fallback can establish it: every component of `.codescout/private-memories` must be a real directory (the
+first round joined the path without checking, and with `.codescout/private-memories` a link to a directory
+outside the project the fallback created `<outside>/.gitignore`), and an existing
+`private-memories/.gitignore` must be a regular file holding exactly `*\n`. Otherwise nothing is changed, a warning
+names the reason, and the store is NOT known to be ignored (the first round accepted ANY existing file there, so a
+shipped `# ignores nothing` file left the store committable). Second round: `aa934e25c`, patch-id
+`ba23f9d56125d799dd3b8a592d445a4af46c686b`; `a3b9eca5c`, patch-id `c4d0c21573de1bacfc806ebc876ef76e9c2cc460`.
+
 ## Tests added
 
 `src/memory/mod.rs`: `open_private_never_copies_a_gitignore_symlink_target_into_the_project`,
 `open_private_self_ignores_when_the_root_gitignore_is_a_link`,
 `open_private_leaves_a_dangling_gitignore_link_alone`,
 `open_private_survives_a_gitignore_that_is_a_directory`,
-`the_self_ignore_fallback_is_never_written_through_a_link`,
-`open_private_appends_after_a_gitignore_with_no_trailing_newline` (regression guard for the normal path);
+`the_self_ignore_fallback_is_never_written_through_a_link`, `open_private_appends_after_a_gitignore_with_no_trailing_newline`
+(regression guard for the normal path); second round: `the_self_ignore_fallback_never_writes_through_a_linked_private_dir`,
+`the_self_ignore_fallback_never_writes_through_a_linked_codescout_dir`,
+`the_self_ignore_fallback_accepts_only_an_existing_star_file`, `the_self_ignore_fallback_writes_star_when_the_file_is_absent`,
+`the_self_ignore_fallback_skips_a_linked_private_dir_with_a_reason`,
+`the_self_ignore_fallback_skips_a_link_or_directory_at_its_own_gitignore`;
 `src/agent/mod.rs`: `activation_never_copies_a_gitignore_symlink_target_into_the_project` (real entry point).
 Mutation: seven guarded sites mutated one at a time, all killed (table in the session report).
 

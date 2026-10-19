@@ -7,7 +7,7 @@ owner: marius
 related: [docs/issues/2026-10-18-opening-the-private-memory-store-copies-a-gitignore-symlink-targets-bytes-into-the-project.md, docs/issues/2026-10-14-pi-memory-write-guard-reencodes-invalid-utf8-before-backup.md]
 tags:
 - cluster/unclassified
-unverified: 'Windows behaviour was not run. The check is symlink_metadata per component then read_to_string, so a link swapped in between the two calls is not closed (the same window WriteTransaction has). anchors::hash_file still reads project paths named inside a sidecar (project_root joined with the anchor path) and was not changed: it reveals a SHA-256, not content. The SQLite semantic memory database file was not examined for a leaf link. The fix SHA is on the review branch and may not survive a rebase: use the patch-id.'
+unverified: 'Windows behaviour was not run. The walk is symlink_metadata per component; the final read now opens with O_NOFOLLOW and checks the descriptor (unix only), but a PARENT directory swapped for a link after the walk is not closed. OPEN DECISION, not changed: a store ROOT that is a link serves every *.md under its target (see Open decisions). anchors::hash_file still reads project paths named inside a sidecar and was not changed: it reveals a SHA-256, not content. The SQLite semantic memory database file was not examined for a leaf link. The onboarding protocol in src/prompts/source.md has no branch for the new unreadable state. The fix SHAs are on the review branch and may not survive a rebase: use the patch-ids.'
 kind: bug
 ---
 
@@ -64,16 +64,28 @@ sidecar path), and a link there is parsed as the topic's anchor set. Measured 20
 
 ## Evidence
 
-Which memory paths follow a leaf link (read from source at `0a8af94d7`, then run where marked):
+Who reads a memory-store path, and whether each follows a leaf link (read from source at `0a8af94d7`; "run" means a
+test drove it; the review of 2026-10-18 found rows 4, 5 and 11 missing from the first version of this table):
 
-- follows, fixed: `MemoryStore::read` (run), `read_anchor_file` (run), through `memory(action=read)` (run),
-  dashboard `get_memory`, onboarding `memory.read`, `migrate/memories.rs` re-embed (read from callers).
-- does not follow, unchanged: `MemoryStore::list` and `anchors::check_all_memories` (walkdir without
-  `follow_links`; pinned by `list_does_not_report_or_enter_symlinks`), `MemoryStore::write` and `delete`
-  (`WriteTransaction` refuses), `write_anchor_file` (`atomic_write` replaces the entry and never writes through).
-- documented design, unchanged: a symlinked store root (`docs/conventions/memory-write-history.md`).
-- 0 symlinks tracked under `.codescout/` (`git ls-files -s .codescout`, mode 120000, 2026-10-18) and no
-  production code creates one; no tracked doc or test describes a legitimate symlinked topic.
+| # | Reader | Followed a leaf link at `0a8af94d7` | Now |
+|---|---|---|---|
+| 1 | `MemoryStore::read` via `memory(action=read)`, shared and private (run) | yes | refused (`RecoverableError`) |
+| 2 | `MemoryStore::read` below a linked parent directory (run) | yes | refused |
+| 3 | `read_anchor_file` (run); a non-TOML target also leaked a line through the parse error | yes | refused |
+| 4 | MCP `memory://` resources, `src/mcp_resources/memory.rs`: `resources/list` listed link, dangling-link and directory entries, `resources/read` served the target (run through `ResourceRegistry`) | yes, and listed | not listed, read re-checks the type |
+| 5 | `.codescout/system-prompt.md` into the `initialize` instructions, `src/agent/mod.rs` `project_status` (run) | yes | skipped with a warning; see the sibling issue |
+| 6 | dashboard `get_memory`, onboarding `memory.read`, `migrate/memories.rs` re-embed (read from callers; all call `MemoryStore::read`) | yes | refused through row 1 |
+| 7 | onboarding `gather_protected_memory_state`: mapped a refusal to `exists:false`, which the protocol reads as "create fresh" (run) | n/a | `unreadable:true` plus `error`, no `exists` key |
+| 8 | `MemoryStore::list` (run, pinned by `list_does_not_report_or_enter_symlinks`) | no (walkdir without `follow_links`) | unchanged |
+| 9 | `anchors::check_all_memories`: the walk does not follow, but the sidecar read did, and one refused sidecar returned `Err`, which `workspace status` swallows, dropping the WHOLE `memory_staleness` section | sidecar read: yes; walk: no | a refused sidecar is listed under `unreadable` and the other topics are still checked (run) |
+| 10 | `MemoryStore::write`, `delete` (`WriteTransaction`, `write_transaction.rs:68`, `safe_topic_parent`) | no | unchanged; these use `bail!` (`isError: true`) where reads use `RecoverableError`, a documented difference |
+| 11 | A store ROOT that is a link (`.codescout/memories -> <elsewhere>`): every read and list resolves through it | yes, by design on the write side (`docs/conventions/memory-write-history.md`) | unchanged; see Open decisions |
+| 12 | `write_anchor_file` (`atomic_write`) | does not write through: the rename replaces the entry | unchanged |
+| 13 | `anchors::hash_file` on project paths named in a sidecar | yes, but it yields only a SHA-256 | unchanged |
+| 14 | the semantic memory SQLite database file | not examined | not examined |
+
+0 symlinks are tracked under `.codescout/` (`git ls-files -s .codescout`, mode 120000, 2026-10-18); the only tracked
+symlink in the repository is `.claude/skills/claude-traces`. No production code creates a memory symlink.
 
 ## Hypotheses tried
 
@@ -96,6 +108,24 @@ refuses a non-regular sidecar the same way ("anchor sidecar must be a regular fi
 leaf link is a refusal instead of "no such topic"; an unreadable component (EACCES) is now an error instead of
 `None`; a directory at the topic path is a `RecoverableError` instead of a raw io error.
 
+
+**Second round, after the review of `a0a41e431`** (`aa934e25c`, patch-id `ba23f9d56125d799dd3b8a592d445a4af46c686b`;
+`a3b9eca5c`, patch-id `c4d0c21573de1bacfc806ebc876ef76e9c2cc460`):
+
+- `src/mcp_resources/memory.rs`: `entries()` lists only entries whose `DirEntry::file_type()` (which does not follow
+  a link) is a regular file; `read_path_checked` re-checks with `symlink_metadata` at the read. It does not call
+  `MemoryStore::read`, because `a.b.md` has stem `a.b` and `topic_path` would map that to `a.md`.
+- `check_all_memories`: a refused sidecar goes to `unreadable` (`{topic, reason}`, key present only when
+  non-empty) and the walk continues; a dangling sidecar link is `unreadable`, not `untracked`.
+- `MemoryStore::read`: a component that cannot be inspected (EACCES, ENAMETOOLONG) is a `RecoverableError`
+  naming the path (the base answered "not found"); a plain file where a directory belongs says it is not a
+  directory instead of telling the user to replace a link; the final read opens with `O_NOFOLLOW | O_NONBLOCK` and
+  checks the descriptor (`read_regular_file`). A swapped-in PARENT link is still not closed.
+- onboarding: an unreadable protected topic is `{"unreadable": true, "error": ...}` with no `exists` key. The
+  onboarding protocol in `src/prompts/source.md` has no branch for it and was NOT edited (another session owns
+  `src/prompts`; `ONBOARDING_VERSION` is bumped only for the stored system-prompt surfaces, which are unchanged),
+  so a reader of that protocol sees neither the create-fresh nor the merge case. See Open decisions.
+
 ## Tests added
 
 `src/memory/mod.rs`: `read_refuses_a_leaf_symlink_to_a_file_outside_the_store`,
@@ -106,9 +136,36 @@ leaf link is a refusal instead of "no such topic"; an unreadable component (EACC
 `src/tools/memory/tests.rs`: `read_refuses_a_topic_that_is_a_symlink_to_a_secret` (shared and private store through
 the tool dispatch). Mutation: six guarded sites mutated one at a time, all killed (table in the session report).
 
+
+Second round: `mcp_resources::memory::tests::the_registry_neither_lists_nor_serves_a_linked_or_non_file_topic`,
+`read_refuses_an_entry_swapped_for_a_link_after_it_was_listed`;
+`memory::anchors::tests::a_linked_sidecar_is_reported_unreadable_and_the_other_topics_are_still_checked`,
+`a_dangling_sidecar_link_is_unreadable_not_untracked`;
+`tools::config::tests::project_status_keeps_memory_staleness_when_one_sidecar_is_a_link`;
+`memory::tests::read_below_a_plain_file_says_it_is_not_a_directory`,
+`read_of_an_over_long_name_is_a_recoverable_error_naming_the_component`,
+`read_below_an_unsearchable_directory_is_a_recoverable_error_naming_it`,
+`the_final_read_refuses_a_link_and_a_directory_even_without_the_walk`;
+`tools::onboarding::tests::a_protected_topic_that_cannot_be_read_is_unreadable_not_missing`. One mutant is
+behaviourally equivalent and survives: widening the walk's final-component arm to `!is_dir`, because
+`read_regular_file` refuses the same shapes with the same message (defence in depth).
+
 ## Workarounds
 
 Do not read memory from a repository you did not author until on the fix; inspect `.codescout/memories` for links.
+
+## Open decisions
+
+**A store root that is a link serves every `*.md` under its target.** `.codescout/memories -> /somewhere` is
+documented design for the WRITE side, but it is also a read exposure: a cloned repository can ship that link (git
+carries symlinks), and `memory(action=read)`, `memory(action=list)`, the `memory://` resources and onboarding then
+serve every `.md` file under the target directory. This is not changed here. Two options for the user:
+
+1. Refuse a project-local store root that resolves outside the project root (a configured store outside the
+   project, via `Workspace::memory_dir_for_project`, would be exempt).
+2. Require an explicit opt-in (a `project.toml` key) before a store root that is a link is used.
+
+The onboarding protocol has no branch for `unreadable`; wording one belongs to whoever owns `src/prompts/source.md`.
 
 ## Resume
 
