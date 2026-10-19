@@ -67,8 +67,9 @@ impl MemoryStore {
     /// `docs/issues/archive/2026-08-08-memory-dir-for-project-materializes-any-id.md`.
     ///
     /// Nothing is lost by not creating. [`Self::list`] walks with `walkdir` and
-    /// yields nothing for a missing root; [`Self::read`] gates on
-    /// `path.exists()`. Both already return the empty answer for an absent
+    /// yields nothing for a missing root; [`Self::read`] walks the topic path with
+    /// `symlink_metadata` and answers `None` for a missing component. Both already
+    /// return the empty answer for an absent
     /// directory — the only thing `create_dir_all` contributed was the directory.
     ///
     /// Infallible by construction, unlike `from_dir`: the creation this omits
@@ -99,14 +100,21 @@ impl MemoryStore {
     /// — a dangling link, a directory) is left exactly as found: not read through, and not
     /// replaced by a regular file carrying the target's bytes, which is what
     /// [`crate::util::fs::atomic_write`] over an existing link would do. Activation must
-    /// not fail on such a project, so instead the private store ignores itself with a
-    /// `.gitignore` of `*` inside its own directory, created exclusively so a link planted
-    /// at that name is never written through either. A notice is logged.
+    /// not fail on such a project, so [`Self::ignore_from_inside`] puts a `.gitignore` of
+    /// `*` inside the store's own directory instead.
+    ///
+    /// **What is guaranteed.** Either the root `.gitignore` carries `entry`, or the store
+    /// directory holds a regular `.gitignore` of exactly `*\n`. When the fallback cannot
+    /// establish that (a linked `.codescout` or store directory, an existing
+    /// `.gitignore` there with other content or of another type), nothing is changed, a
+    /// warning is logged, and the store is NOT known to be ignored.
     fn ensure_gitignored(project_root: &Path, entry: &str) -> Result<()> {
         let gitignore_path = project_root.join(".gitignore");
         let existing = match std::fs::symlink_metadata(&gitignore_path) {
             Ok(m) if m.file_type().is_file() => std::fs::read_to_string(&gitignore_path)?,
-            Ok(_) => return Self::ignore_from_inside(project_root, entry, &gitignore_path),
+            Ok(_) => {
+                return Self::ignore_from_inside(project_root, entry, &gitignore_path).map(|_| ())
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e.into()),
         };
@@ -125,27 +133,82 @@ impl MemoryStore {
 
     /// The fallback of [`Self::ensure_gitignored`] for a `.gitignore` that is not a regular
     /// file: ignore the store from inside it. `entry` is the project-relative directory
-    /// whose own `.gitignore` is written.
-    fn ignore_from_inside(project_root: &Path, entry: &str, skipped: &Path) -> Result<()> {
-        tracing::warn!(
-            "{} is not a regular file; left untouched. `{}` is ignored by a .gitignore inside it instead.",
-            skipped.display(),
-            entry
-        );
-        let own = project_root
-            .join(entry.trim_end_matches('/'))
-            .join(".gitignore");
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        match options.open(&own) {
-            Ok(mut file) => {
-                use std::io::Write;
-                file.write_all(b"*\n")?;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e.into()),
+    /// whose own `.gitignore` is written; every component of it must be a real directory
+    /// (a linked `.codescout` or store directory would send the write elsewhere), and an
+    /// existing `.gitignore` there is accepted only if it is a regular file holding exactly
+    /// `*\n` — the content `WriteTransaction` requires of its history directory. Anything
+    /// else is skipped with a reason, which is logged; nothing existing is overwritten.
+    fn ignore_from_inside(project_root: &Path, entry: &str, skipped: &Path) -> Result<SelfIgnore> {
+        let outcome = Self::try_ignore_from_inside(project_root, entry)?;
+        match &outcome {
+            SelfIgnore::Ignored => tracing::warn!(
+                "{} is not a regular file; left untouched. `{}` is ignored by a .gitignore inside it instead.",
+                skipped.display(),
+                entry
+            ),
+            SelfIgnore::Skipped(reason) => tracing::warn!(
+                "{} is not a regular file; left untouched, and `{}` is NOT known to be ignored by git: {}",
+                skipped.display(),
+                entry,
+                reason
+            ),
         }
-        Ok(())
+        Ok(outcome)
+    }
+
+    fn try_ignore_from_inside(project_root: &Path, entry: &str) -> Result<SelfIgnore> {
+        let mut dir = project_root.to_path_buf();
+        for component in Path::new(entry.trim_end_matches('/')).components() {
+            dir.push(component.as_os_str());
+            match std::fs::symlink_metadata(&dir) {
+                Ok(m) if m.file_type().is_dir() => {}
+                Ok(_) => {
+                    return Ok(SelfIgnore::Skipped(format!(
+                        "{} is not a real directory",
+                        dir.display()
+                    )))
+                }
+                Err(e) => {
+                    return Ok(SelfIgnore::Skipped(format!(
+                        "cannot inspect {}: {e}",
+                        dir.display()
+                    )))
+                }
+            }
+        }
+        let own = dir.join(".gitignore");
+        match std::fs::symlink_metadata(&own) {
+            Ok(m) if m.file_type().is_file() => {
+                if read_regular_file(&own).ok().as_deref() == Some("*\n") {
+                    Ok(SelfIgnore::Ignored)
+                } else {
+                    Ok(SelfIgnore::Skipped(format!(
+                        "{} exists and is not exactly `*`",
+                        own.display()
+                    )))
+                }
+            }
+            Ok(_) => Ok(SelfIgnore::Skipped(format!(
+                "{} exists and is not a regular file",
+                own.display()
+            ))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                match options.open(&own) {
+                    Ok(mut file) => {
+                        use std::io::Write;
+                        file.write_all(b"*\n")?;
+                        Ok(SelfIgnore::Ignored)
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(
+                        SelfIgnore::Skipped(format!("{} appeared concurrently", own.display())),
+                    ),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Replace a topic wholesale, preserving its predecessor in private history.
@@ -171,7 +234,17 @@ impl MemoryStore {
     /// `.codescout/memories/arch.md -> ~/.ssh/id_rsa`). The store ROOT may itself be a
     /// link — that is documented (`docs/conventions/memory-write-history.md`) and only
     /// components below it are inspected. A missing topic, or a missing parent, is still
-    /// `Ok(None)`.
+    /// `Ok(None)`. A component that cannot be inspected at all (EACCES, ENAMETOOLONG) is
+    /// a `RecoverableError` naming it; before the walk existed `exists()` hid those as
+    /// "not found".
+    ///
+    /// Reads refuse with [`RecoverableError`] where the write side uses `bail!`
+    /// (`isError: true`): a refused read is input the caller can correct, and the
+    /// difference is deliberate, not drift.
+    ///
+    /// The walk is check-then-read, so the final read opens the file with `O_NOFOLLOW`
+    /// and checks the descriptor ([`read_regular_file`]); a link swapped in after the
+    /// walk is still refused. A swapped-in PARENT directory link is not closed.
     pub fn read(&self, topic: &str) -> Result<Option<String>> {
         let path = self.topic_path(topic);
         let relative = path.strip_prefix(&self.memories_dir)?;
@@ -182,7 +255,7 @@ impl MemoryStore {
             let last = components.peek().is_none();
             match std::fs::symlink_metadata(&walked) {
                 Ok(m) if last && m.file_type().is_file() => {
-                    return Ok(Some(std::fs::read_to_string(&path)?));
+                    return read_regular_file(&path).map(Some);
                 }
                 Ok(m) if !last && m.file_type().is_dir() => {}
                 Ok(_) if last => {
@@ -193,19 +266,34 @@ impl MemoryStore {
                     )
                     .into());
                 }
-                Ok(_) => {
+                Ok(m) => {
+                    let hint = if m.file_type().is_symlink() {
+                        "A memory topic is read only through real directories; replace the \
+                         link with a directory, or remove it."
+                            .to_string()
+                    } else {
+                        format!(
+                            "{} is not a directory; remove or rename it.",
+                            walked.display()
+                        )
+                    };
                     return Err(RecoverableError::with_hint(
                         format!(
                             "memory parent must be a real directory: {}",
                             walked.display()
                         ),
-                        "A memory topic is read only through real directories; replace the \
-                         link with a directory, or remove it.",
+                        hint,
                     )
                     .into());
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    return Err(RecoverableError::with_hint(
+                        format!("cannot inspect memory path {}: {e}", walked.display()),
+                        "Check the name's length and the directory's permissions.",
+                    )
+                    .into());
+                }
             }
         }
         Ok(None)
@@ -242,6 +330,50 @@ impl MemoryStore {
         let safe = sanitize_topic(topic);
         self.memories_dir.join(safe).with_extension("md")
     }
+}
+
+/// What [`MemoryStore::ignore_from_inside`] did. `Skipped` carries the reason that is
+/// also logged, so the decision is a value a test can read.
+#[derive(Debug, PartialEq, Eq)]
+enum SelfIgnore {
+    Ignored,
+    Skipped(String),
+}
+
+/// Read a file's text only if the OPENED descriptor is a regular file.
+///
+/// On unix the open uses `O_NOFOLLOW` (a link at the final component fails `ELOOP`, which
+/// is reported as the same refusal) and `O_NONBLOCK` (so a FIFO swapped in after the walk
+/// cannot block the open). The type is then checked on the descriptor itself, not on the
+/// path, so nothing swapped in after the open can change what was read.
+fn read_regular_file(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let refuse = || {
+        RecoverableError::with_hint(
+            format!("memory target must be a regular file: {}", path.display()),
+            "A memory topic is read only when it is a regular file; replace the \
+             link or directory with a file, or remove it.",
+        )
+    };
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = match options.open(path) {
+        Ok(f) => f,
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => return Err(refuse().into()),
+        Err(e) => return Err(e.into()),
+    };
+    if !file.metadata()?.file_type().is_file() {
+        return Err(refuse().into());
+    }
+    let mut text = String::new();
+    (&file).read_to_string(&mut text)?;
+    Ok(text)
 }
 
 /// Sanitize a memory topic name to prevent directory traversal.
@@ -542,6 +674,117 @@ mod tests {
             .is_symlink());
     }
 
+    /// Review MEDIUM-2. The fallback joins `.codescout/private-memories` onto the project
+    /// root; if that directory is itself a link, `open_private` followed it and the
+    /// fallback created `<outside>/.gitignore`. Neither component may be a link.
+    #[cfg(unix)]
+    #[test]
+    fn the_self_ignore_fallback_never_writes_through_a_linked_private_dir() {
+        let sandbox = tempdir().unwrap();
+        let outside = sandbox.path().join("outside-dir");
+        std::fs::create_dir_all(&outside).unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::fs::create_dir(root.join(".gitignore")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".codescout/private-memories")).unwrap();
+
+        MemoryStore::open_private(&root).expect("activation must not fail");
+
+        assert!(
+            !outside.join(".gitignore").exists(),
+            "the fallback wrote through the linked private-memories directory"
+        );
+    }
+
+    /// The same, one level up: `.codescout` itself a link to a directory elsewhere.
+    #[cfg(unix)]
+    #[test]
+    fn the_self_ignore_fallback_never_writes_through_a_linked_codescout_dir() {
+        let sandbox = tempdir().unwrap();
+        let outside = sandbox.path().join("outside-codescout");
+        std::fs::create_dir_all(&outside).unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir(root.join(".gitignore")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".codescout")).unwrap();
+
+        MemoryStore::open_private(&root).expect("activation must not fail");
+
+        assert!(
+            !outside.join("private-memories/.gitignore").exists(),
+            "the fallback wrote through the linked .codescout directory"
+        );
+    }
+
+    /// Review LOW-1. The fallback used to accept ANY existing `private-memories/.gitignore`,
+    /// so a shipped `# ignores nothing` file left the private store committable while the
+    /// docs said it ignores itself. Only the exact `*\n` that `WriteTransaction` expects
+    /// counts; anything else is skipped with a reason (and logged), never overwritten.
+    #[test]
+    fn the_self_ignore_fallback_accepts_only_an_existing_star_file() {
+        let sandbox = tempdir().unwrap();
+        let root = sandbox.path();
+        let private = root.join(".codescout/private-memories");
+        std::fs::create_dir_all(&private).unwrap();
+        let skipped = root.join(".gitignore");
+        let entry = ".codescout/private-memories/";
+
+        std::fs::write(private.join(".gitignore"), "# ignores nothing\n").unwrap();
+        let outcome = MemoryStore::ignore_from_inside(root, entry, &skipped).unwrap();
+        assert!(matches!(outcome, SelfIgnore::Skipped(_)), "got {outcome:?}");
+        assert_eq!(
+            std::fs::read_to_string(private.join(".gitignore")).unwrap(),
+            "# ignores nothing\n",
+            "a user's file must not be overwritten"
+        );
+
+        std::fs::write(private.join(".gitignore"), "*\n").unwrap();
+        assert_eq!(
+            MemoryStore::ignore_from_inside(root, entry, &skipped).unwrap(),
+            SelfIgnore::Ignored
+        );
+    }
+
+    #[test]
+    fn the_self_ignore_fallback_writes_star_when_the_file_is_absent() {
+        let sandbox = tempdir().unwrap();
+        let root = sandbox.path();
+        std::fs::create_dir_all(root.join(".codescout/private-memories")).unwrap();
+
+        let outcome = MemoryStore::ignore_from_inside(
+            root,
+            ".codescout/private-memories/",
+            &root.join(".gitignore"),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, SelfIgnore::Ignored);
+        assert_eq!(
+            std::fs::read_to_string(root.join(".codescout/private-memories/.gitignore")).unwrap(),
+            "*\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_self_ignore_fallback_skips_a_linked_private_dir_with_a_reason() {
+        let sandbox = tempdir().unwrap();
+        let outside = sandbox.path().join("outside-dir");
+        std::fs::create_dir_all(&outside).unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".codescout/private-memories")).unwrap();
+
+        let outcome = MemoryStore::ignore_from_inside(
+            &root,
+            ".codescout/private-memories/",
+            &root.join(".gitignore"),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, SelfIgnore::Skipped(_)), "got {outcome:?}");
+    }
+
     #[test]
     fn write_and_read_roundtrip() {
         let (_dir, store) = make_store();
@@ -648,6 +891,97 @@ mod tests {
                 .contains("memory parent must be a real directory"),
             "got: {rec}"
         );
+    }
+
+    /// A plain file where a parent directory belongs is "not a directory", not a link to
+    /// replace: the hint must not tell the user to "replace the link".
+    #[test]
+    fn read_below_a_plain_file_says_it_is_not_a_directory() {
+        let (_dir, store) = make_store();
+        std::fs::write(store.dir().join("nested"), "i am a file").unwrap();
+
+        let err = store.read("nested/topic").expect_err("must be refused");
+
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
+        let text = rec.to_string();
+        assert!(
+            text.contains("memory parent must be a real directory"),
+            "got: {text}"
+        );
+        assert!(text.contains("is not a directory"), "got: {text}");
+        assert!(!text.contains("replace the link"), "got: {text}");
+    }
+
+    /// Review LOW-2. The base answered "topic not found" for a component it could not
+    /// stat (`exists()` is false on any error); the new walk returned the raw io error as
+    /// a fatal `isError: true`. It is a `RecoverableError` naming the component.
+    #[test]
+    fn read_of_an_over_long_name_is_a_recoverable_error_naming_the_component() {
+        let (_dir, store) = make_store();
+        let topic = "x".repeat(300);
+
+        let err = store
+            .read(&topic)
+            .expect_err("ENAMETOOLONG is not 'not found'");
+
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
+        assert!(
+            rec.to_string().contains(&"x".repeat(300)),
+            "the component must be named: {rec}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_below_an_unsearchable_directory_is_a_recoverable_error_naming_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, store) = make_store();
+        let nested = store.dir().join("locked");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("topic.md"), "x").unwrap();
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // root ignores mode bits, so the premise would not hold.
+        let probe = std::fs::symlink_metadata(nested.join("topic.md"));
+        let can_test = probe.is_err();
+
+        let result = store.read("locked/topic");
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !can_test {
+            return;
+        }
+
+        let err = result.expect_err("EACCES must surface");
+        let rec = err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .unwrap_or_else(|| panic!("must be a RecoverableError, got: {err:#}"));
+        assert!(rec.to_string().contains("topic.md"), "got: {rec}");
+    }
+
+    /// Review LOW-4. The path walk is check-then-read; the read itself must not follow a
+    /// final-component link either, and must check the DESCRIPTOR it opened.
+    #[cfg(unix)]
+    #[test]
+    fn the_final_read_refuses_a_link_and_a_directory_even_without_the_walk() {
+        let dir = tempdir().unwrap();
+        let secret = dir.path().join("secret");
+        std::fs::write(&secret, "SECRET-BYTES").unwrap();
+        let link = dir.path().join("link.md");
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+        let folder = dir.path().join("folder.md");
+        std::fs::create_dir(&folder).unwrap();
+        let file = dir.path().join("file.md");
+        std::fs::write(&file, "body").unwrap();
+
+        assert_eq!(read_regular_file(&file).unwrap(), "body");
+        for refused in [&link, &folder] {
+            let err = read_regular_file(refused).expect_err("must be refused");
+            assert_refused_as_non_regular(&err);
+            assert!(!format!("{err:#}").contains("SECRET-BYTES"));
+        }
     }
 
     /// The store root itself may be a link (documented in

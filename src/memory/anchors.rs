@@ -228,6 +228,10 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
     let mut stale = Vec::new();
     let mut fresh: Vec<Value> = Vec::new();
     let mut untracked: Vec<String> = Vec::new();
+    // Topics whose sidecar was REFUSED (a link, a directory). Named, not fatal: one bad
+    // sidecar must not hide the staleness of every other topic — the caller swallows an
+    // `Err` and drops the whole section.
+    let mut unreadable: Vec<Value> = Vec::new();
 
     if !memories_dir.exists() {
         return Ok(json!({ "stale": stale, "fresh": fresh, "untracked": untracked }));
@@ -248,12 +252,20 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
 
         let sidecar = anchor_path_for_topic(memories_dir, &topic);
 
-        if !sidecar.exists() {
+        // `symlink_metadata`, not `exists()`: a dangling link is a link, not an absent sidecar.
+        if std::fs::symlink_metadata(&sidecar).is_err() {
             untracked.push(topic);
             continue;
         }
 
-        let anchor_file = read_anchor_file(&sidecar)?;
+        let anchor_file = match read_anchor_file(&sidecar) {
+            Ok(af) => af,
+            Err(e) if e.downcast_ref::<crate::tools::RecoverableError>().is_some() => {
+                unreadable.push(json!({ "topic": topic, "reason": e.to_string() }));
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let report = check_path_staleness(project_root, &anchor_file)?;
 
         if report.is_fresh() {
@@ -306,11 +318,16 @@ pub fn check_all_memories(project_root: &Path, memories_dir: &Path) -> Result<Va
     fresh.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
     untracked.sort();
 
-    Ok(json!({
+    let mut report = json!({
         "stale": stale,
         "fresh": fresh,
         "untracked": untracked,
-    }))
+    });
+    // Present only when something was refused, so the usual shape is unchanged.
+    if !unreadable.is_empty() {
+        report["unreadable"] = json!(unreadable);
+    }
+    Ok(report)
 }
 
 /// Get the anchor sidecar path for a given memory topic within a memories directory.
@@ -447,6 +464,74 @@ mod tests {
             );
             assert!(!format!("{err:#}").contains("SECRET-BYTES"));
         }
+    }
+
+    /// One linked sidecar made `check_all_memories` return `Err`, and `workspace status`
+    /// swallows that `Err`, so the WHOLE `memory_staleness` section vanished — including
+    /// every healthy topic. A refused sidecar is named under `unreadable` and the walk goes on.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_sidecar_is_reported_unreadable_and_the_other_topics_are_still_checked() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let memories_dir = root.join(".codescout/memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/b.rs"), "v1").unwrap();
+        std::fs::write(memories_dir.join("a.md"), "# a").unwrap();
+        std::fs::write(memories_dir.join("b.md"), "# b").unwrap();
+        let secret = root.join("secret.toml");
+        std::fs::write(&secret, "SECRET-BYTES = not toml\n").unwrap();
+        std::os::unix::fs::symlink(&secret, anchor_path_for_topic(&memories_dir, "a")).unwrap();
+        let seeded = seed_anchors(root, "Uses `src/b.rs`.").unwrap();
+        write_anchor_file(&anchor_path_for_topic(&memories_dir, "b"), &seeded).unwrap();
+        std::fs::write(root.join("src/b.rs"), "v2").unwrap();
+
+        let report = check_all_memories(root, &memories_dir)
+            .expect("one refused sidecar must not fail the whole check");
+
+        let stale: Vec<&str> = report["stale"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["topic"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            stale,
+            vec!["b"],
+            "the healthy stale topic must still be reported"
+        );
+        let unreadable = report["unreadable"].as_array().expect("an unreadable list");
+        assert_eq!(unreadable.len(), 1);
+        assert_eq!(unreadable[0]["topic"], "a");
+        assert!(
+            unreadable[0]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("anchor sidecar must be a regular file"),
+            "got {unreadable:?}"
+        );
+        assert!(!report.to_string().contains("SECRET-BYTES"));
+    }
+
+    /// A dangling sidecar link is not "no sidecar": it is a link, and is named.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_sidecar_link_is_unreadable_not_untracked() {
+        let dir = tempdir().unwrap();
+        let memories_dir = dir.path().join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::write(memories_dir.join("a.md"), "# a").unwrap();
+        std::os::unix::fs::symlink(
+            dir.path().join("nowhere"),
+            anchor_path_for_topic(&memories_dir, "a"),
+        )
+        .unwrap();
+
+        let report = check_all_memories(dir.path(), &memories_dir).unwrap();
+
+        assert_eq!(report["unreadable"][0]["topic"], "a");
+        assert!(report["untracked"].as_array().unwrap().is_empty());
     }
 
     #[test]

@@ -325,9 +325,23 @@ fn gather_protected_memory_state(
 
         let content = match memory.read(topic) {
             Ok(Some(c)) => c,
-            _ => {
+            Ok(None) => {
                 // Topic doesn't exist — signal to create fresh
                 result.insert(topic.clone(), json!({ "exists": false }));
+                continue;
+            }
+            Err(e) => {
+                // A topic that is there but cannot be read (a link, a directory, no
+                // permission) is NOT the create-fresh case: the protocol would then
+                // write over what the user keeps there. No `exists` key, so neither
+                // `exists == false` nor `exists == true` matches; `error` says why.
+                result.insert(
+                    topic.clone(),
+                    json!({
+                        "unreadable": true,
+                        "error": e.to_string(),
+                    }),
+                );
                 continue;
             }
         };
@@ -1286,6 +1300,42 @@ mod tests {
             "downgrade (stored > current) should not be treated as stale"
         );
     }
+
+    /// Review LOW-3. A protected topic that cannot be read (a link, a directory) used to
+    /// become `{"exists": false}`, and the onboarding protocol says `exists == false`
+    /// means "create fresh" — which would then be refused by the write side, or, worse,
+    /// taken as licence to replace what the user keeps there. It carries `unreadable`
+    /// and the reason instead, and NO `exists` key, so neither protocol branch matches.
+    #[cfg(unix)]
+    #[test]
+    fn a_protected_topic_that_cannot_be_read_is_unreadable_not_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let memories_dir = dir.path().join(".codescout/memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::write(dir.path().join("secret"), "SECRET-BYTES").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret"), memories_dir.join("gotchas.md"))
+            .unwrap();
+        let store = crate::memory::MemoryStore::from_dir_readonly(memories_dir.clone());
+
+        let state = gather_protected_memory_state(
+            &store,
+            &memories_dir,
+            dir.path(),
+            &["gotchas".to_string(), "absent".to_string()],
+        );
+
+        let linked = &state["gotchas"];
+        assert_eq!(linked["unreadable"], true, "got {linked}");
+        assert!(
+            linked.get("exists").is_none(),
+            "no protocol branch may match: {linked}"
+        );
+        assert!(linked["error"].as_str().unwrap().contains("regular file"));
+        assert!(!state.to_string().contains("SECRET-BYTES"));
+        // A genuinely absent topic is still the create-fresh case.
+        assert_eq!(state["absent"], json!({ "exists": false }));
+    }
+
     #[test]
     fn system_prompt_stale_is_true_while_the_prompt_has_not_moved_since_the_request() {
         // Version behind, and the file is byte-identical to the baseline recorded
