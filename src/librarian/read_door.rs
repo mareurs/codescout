@@ -286,6 +286,14 @@ pub(crate) fn holds_file_values(row: &crate::librarian::catalog::artifact::Artif
         || row.kind != "unknown"
         || row.status != "unknown"
 }
+/// Is `row` exactly what `indexer::clear_escaping_row` leaves: no file values, no content hash, no
+/// mtime? A walk always records a hash and an mtime for a file it read, so an indexed row is never
+/// mistaken for a cleared one.
+pub(crate) fn cleared_by_the_read_door(
+    row: &crate::librarian::catalog::artifact::ArtifactRow,
+) -> bool {
+    !holds_file_values(row) && row.file_sha256.is_empty() && row.file_mtime == 0
+}
 
 /// Would a listing leak `row`'s stored fields? `Some(refusal)` when the door refuses its file AND
 /// it still holds file values: such a row is dropped from listings (`doc(find)`, `gather`'s

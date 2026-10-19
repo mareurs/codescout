@@ -270,6 +270,16 @@ fn merge_one(
     };
     let shadow_aug = augmentation::get(cat, shadow_id)?;
     let main_aug = augmentation::get(cat, main_id)?;
+    // A main row the read door cleared (its file resolves outside the repository) was cleared of
+    // everything a pre-fix walk read through the link; a fork made before that clearing (in the
+    // window) recorded those values as its base. The base then counts as absent, so the merge
+    // never replays them into its conflicts or its `worktree_merge` event (review round 4, R4-3).
+    // The fork event itself is immutable and keeps them (a known limit, see the issue).
+    let base_frontmatter = if crate::librarian::read_door::cleared_by_the_read_door(&main_row) {
+        json!({})
+    } else {
+        base_frontmatter
+    };
     let shadow_params: Value = shadow_aug
         .as_ref()
         .and_then(|a| serde_json::from_str(&a.params).ok())
