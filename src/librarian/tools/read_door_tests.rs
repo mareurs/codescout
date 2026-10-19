@@ -179,8 +179,24 @@ const NO_PROJECT: &[(&str, &str)] = &[
 ];
 
 /// Sites that build a relative spelling from the layout (`Fx::rel`), which is lossy for a
-/// non-UTF-8 name, so what they would read is not the layout's file.
+/// non-UTF-8 name, so what they would read is not the layout's file; and the three sites that
+/// return STORED text for a seeded row, which for a lossy stored path is judged by the reindex,
+/// not at read time (review round 3, R3-6: refusing it at read time hid every ordinary file below
+/// a non-UTF-8 name). Those three are the accepted window; the reindex cell is
+/// `a_non_utf8_path_row_is_withheld_and_removed_without_copying_its_text`.
 const LOSSY: &[(&str, &str)] = &[
+    (
+        "find_semantic",
+        "stored text of a lossy path: judged by the reindex (R3-6 window)",
+    ),
+    (
+        "find_title",
+        "stored text of a lossy path: judged by the reindex (R3-6 window)",
+    ),
+    (
+        "backfill_stored",
+        "stored text of a lossy path: judged by the reindex (R3-6 window)",
+    ),
     ("gather_file", "Fx::rel is lossy for a non-UTF-8 name"),
     ("gather_grep", "Fx::rel is lossy for a non-UTF-8 name"),
     ("config_value", "Fx::rel is lossy for a non-UTF-8 name"),
@@ -1260,8 +1276,10 @@ async fn prefix_state(
 }
 
 /// Every text value in every table of the catalog that carries `MARK`, as `table.column`, with
-/// one exception: the `slug` of `kept` (an escaping row kept for its history keeps its slug, open
-/// decision "Deviation 8" of the issue). The vec0 tables hold vectors, not text, and are skipped.
+/// two exceptions, both the open decision "Deviation 8" of the issue: the `slug` of `kept` (an
+/// escaping row kept for its history keeps its slug), and the audit `row_id` of a cascaded
+/// `entry_cite` delete (`slug:local→dst_ref`, the routing key). The vec0 tables hold vectors, not
+/// text, and are skipped.
 fn catalog_hits(ctx: &ToolContext, kept: Option<&str>) -> Vec<String> {
     let sha = crate::librarian::util::sha_of_bytes(doc_text().as_bytes());
     let cat = ctx.catalog.lock();
@@ -1286,6 +1304,10 @@ fn catalog_hits(ctx: &ToolContext, kept: Option<&str>) -> Vec<String> {
                 .iter()
                 .position(|c| c == "id")
                 .and_then(|i| r.get::<_, String>(i).ok());
+            let audited_tbl: Option<String> = cols
+                .iter()
+                .position(|c| c == "tbl")
+                .and_then(|i| r.get::<_, String>(i).ok());
             for (i, c) in cols.iter().enumerate() {
                 let v: rusqlite::types::Value = r.get(i).unwrap();
                 let text = match v {
@@ -1299,6 +1321,14 @@ fn catalog_hits(ctx: &ToolContext, kept: Option<&str>) -> Vec<String> {
                     continue;
                 }
                 if t == "artifact" && c == "slug" && row_id.as_deref() == kept && kept.is_some() {
+                    continue;
+                }
+                // A cascaded citation's audit `row_id` (`slug:local→dst_ref`) is the trail's
+                // routing key and keeps the slug: Deviation 8, open. Its PAYLOAD is checked.
+                if t == "catalog_audit"
+                    && c == "row_id"
+                    && audited_tbl.as_deref() == Some("entry_cite")
+                {
                     continue;
                 }
                 let head: String = text.chars().take(160).collect();
@@ -1520,6 +1550,7 @@ async fn a_row_below_a_directory_swapped_for_an_outward_link_is_kept_and_cleared
 async fn a_dangling_outward_link_row_is_removed_without_copying_its_text() {
     let (_tmp, ctx, _store, id, p, _link) = prefix_state(false, false).await;
     std::fs::remove_file(p.parent().unwrap().join("out/x.md")).unwrap();
+    cite_from(&ctx, &id);
     let v = super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
@@ -1549,8 +1580,9 @@ async fn known_gap_a_removed_outward_link_row_leaves_its_text_in_the_trail() {
 }
 
 /// R2-2: a non-UTF-8 directory name. The catalog stores a LOSSY path (U+FFFD), which names no
-/// file; the door cannot judge it, so its stored text is withheld before the reindex, and its
-/// removal (as a vanished row) elides like an escaping row's.
+/// file. From the pre-fix state, ONE post-fix reindex removes the row and elides like an escaping
+/// row's, its cascaded citation included (round 3, R3-10). Before that reindex the row is in the
+/// accepted window (round 3: a lossy path is not refused at read time, R3-6).
 #[tokio::test]
 async fn a_non_utf8_path_row_is_withheld_and_removed_without_copying_its_text() {
     use std::os::unix::ffi::OsStrExt;
@@ -1579,8 +1611,7 @@ async fn a_non_utf8_path_row_is_withheld_and_removed_without_copying_its_text() 
     target(&base.join("out"));
     std::fs::remove_file(docs.join("x.md")).unwrap();
     ln(base.join("out/x.md"), &docs.join("x.md"));
-    let f = find::call(&ctx, json!({"limit": 50})).await.unwrap();
-    assert!(!has(&f), "find before the reindex: {f}");
+    cite_from(&ctx, &id);
     let v = super::reindex::call(&ctx, json!({"scope": "project"}))
         .await
         .unwrap();
@@ -1589,6 +1620,7 @@ async fn a_non_utf8_path_row_is_withheld_and_removed_without_copying_its_text() 
         "{v}"
     );
     assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+    assert_no_surface_prints_the_mark(&ctx, &id).await;
 }
 
 /// R2-5: the reclaimed row's cascaded `entry_cite` delete. Its PAYLOAD must not carry the slug or
@@ -1659,24 +1691,26 @@ fn refused_row_with_stored_fields() -> (tempfile::TempDir, ToolContext, String, 
         .lock()
         .conn
         .execute(
-            "UPDATE artifact SET kind = ?2, status = ?3, topic = ?4, tags = ?5, owners = ?6 \
-             WHERE id = ?1",
+            "UPDATE artifact SET kind = ?2, status = ?3, topic = ?4, tags = ?5, owners = ?6, \
+             time_scope = ?7 WHERE id = ?1",
             rusqlite::params![
                 id,
                 format!("{MARK}kind"),
                 format!("{MARK}status"),
                 format!("{MARK}topic"),
                 format!("[\"{MARK}tag\"]"),
-                format!("[\"{MARK}owner\"]")
+                format!("[\"{MARK}owner\"]"),
+                format!("{MARK}timescope")
             ],
         )
         .unwrap();
     (tmp, ctx, id, fxv)
 }
 
-/// R2-3: every surface that prints a row's stored fields, for a refused row before the reindex.
-/// `doc(find)` and `gather` drop such a row (its presence under a filter is an oracle on the
-/// fields), `doc(get)` and `doc(state_at)` print it with the fields withheld.
+/// R2-3: every surface that prints a row's stored fields, for a refused row in the WINDOW before
+/// the first post-fix reindex. `doc(find)` drops such a row from its page and `gather` from its
+/// list, `doc(get)` and `doc(state_at)` print it with the fields withheld (time scope included,
+/// round 3, R3-10).
 #[tokio::test]
 async fn no_surface_prints_the_stored_fields_of_a_refused_row() {
     let (_tmp, ctx, id, fxv) = refused_row_with_stored_fields();
@@ -1691,23 +1725,20 @@ async fn no_surface_prints_the_stored_fields_of_a_refused_row() {
         "get",
         format!("{}", get::call(&ctx, json!({"id": id})).await.unwrap()),
     );
+    // The PAGE (the items). In the window a cold call's `catalog.by_kind` and its hints still
+    // count the row under its stored kind (round 3, R3-8: no catalog scan); the first post-fix
+    // reindex closes that, `no_oracle_on_a_pre_fix_row_after_one_reindex`.
     check(
         &mut leaks,
         "find",
-        format!("{}", find::call(&ctx, json!({"limit": 50})).await.unwrap()),
+        format!(
+            "{}",
+            find::call(&ctx, json!({"limit": 50})).await.unwrap()["items"]
+        ),
     );
-    // The filter on a withheld field must answer as a filter that matches nothing does: the same
-    // count AND the same hints (a `more_in_scope` of 1 answered it before the count did).
-    let by_title = |needle: &str| json!({"filter": {"title": {"contains": needle}}});
-    let filtered = find::call(&ctx, by_title(MARK)).await.unwrap();
-    let control = find::call(&ctx, by_title("no-row-has-this-title-zq"))
-        .await
-        .unwrap();
-    if filtered["count"] != control["count"] || filtered["hints"] != control["hints"] {
-        leaks.push(format!(
-            "find title-contains oracle: {filtered} (a filter matching nothing: {control})"
-        ));
-    }
+    // The count-and-hints oracle (a filter on a withheld field answering through `count` or
+    // `more_in_scope`) is NOT closed in this window since round 3 (R3-8): it is closed by the
+    // first post-fix reindex, `no_oracle_on_a_pre_fix_row_after_one_reindex`.
     check(
         &mut leaks,
         "state_at",
@@ -1838,5 +1869,453 @@ async fn a_refused_update_names_the_spelling_and_never_the_outside_target() {
     assert!(
         !msg.contains("out-secret-place"),
         "the outside target is named: {msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review round 3. The premise: a stored row's text is tainted by WHEN it was ingested. A post-fix
+// walk reads only through the door, so only a pre-fix row can hold text from outside, and the
+// reindex judges every stored row of its root on every run (the walk through the door, the
+// reclamation through the door and `stored_path_is_risky`). So the first post-fix reindex of a
+// root is the migration: each test below builds the REAL pre-fix state, runs ONE reindex, and
+// asserts the surface. Before that reindex is the accepted window (issue, Review round 3).
+// ---------------------------------------------------------------------------------------------
+
+/// A citation FROM row `id` (its slug, which a pre-fix walk minted from the target's title), so
+/// the removal's cascaded `entry_cite` delete has something to carry.
+fn cite_from(ctx: &ToolContext, id: &str) {
+    let cat = ctx.catalog.lock();
+    let slug: String = cat
+        .conn
+        .query_row("SELECT slug FROM artifact WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(
+        slug.contains(MARK),
+        "precondition: the slug derives from the target: {slug}"
+    );
+    cat.conn
+        .execute(
+            "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+             VALUES (?1, 'T-1', 'other:T-9', 'cites', 'write', 0)",
+            [&slug],
+        )
+        .unwrap();
+}
+
+/// `doc(get)` of `id`, a cold `doc(find)` and `librarian(context)` on the marker print nothing of
+/// it.
+async fn assert_no_surface_prints_the_mark(ctx: &ToolContext, id: &str) {
+    let g = match get::call(ctx, json!({"id": id})).await {
+        Ok(v) => v.to_string(),
+        Err(e) => format!("{e:#}"),
+    };
+    let f = find::call(ctx, json!({"limit": 50})).await.unwrap();
+    let c = context::call(ctx, json!({"topic": MARK})).await.unwrap();
+    for (name, out) in [
+        ("get", g),
+        ("find", f.to_string()),
+        ("context", c.to_string()),
+    ] {
+        assert!(
+            !out.contains(MARK),
+            "{name} prints the target's text: {out}"
+        );
+    }
+}
+
+/// The pre-fix state of a row KEPT for its history (an augmentation): the walk read the target, so
+/// its title, chunks and slug are the target's, and its frontmatter fields are set as a pre-fix
+/// walk would have stored them from the target. Then ONE post-fix reindex.
+async fn kept_after_one_reindex() -> (
+    tempfile::TempDir,
+    ToolContext,
+    String,
+    PathBuf,
+    serde_json::Value,
+) {
+    let (tmp, ctx, _store, id, p, _link) = prefix_state(false, true).await;
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET kind = ?2, status = ?3, topic = ?4, tags = ?5, owners = ?6, \
+             time_scope = ?7 WHERE id = ?1",
+            rusqlite::params![
+                id,
+                format!("{MARK}kind"),
+                format!("{MARK}status"),
+                format!("{MARK}topic"),
+                format!("[\"{MARK}tag\"]"),
+                format!("[\"{MARK}owner\"]"),
+                format!("{MARK}timescope")
+            ],
+        )
+        .unwrap();
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+    assert!(
+        row.title.is_none() && row.topic.is_none() && row.status == "unknown",
+        "precondition: the reindex kept and cleared the row: {row:?}"
+    );
+    (tmp, ctx, id, p, v)
+}
+
+/// R3-1: a pre-fix row below a DIRECTORY link out whose target directory was then removed (the
+/// directory link dangles). ONE reindex removes it and elides its trail.
+#[tokio::test]
+async fn a_row_below_a_dangling_directory_link_is_removed_without_copying_its_text() {
+    let (_tmp, ctx, _store, id, p, _leaf) = prefix_state(true, false).await;
+    std::fs::remove_dir_all(p.parent().unwrap().join("out")).unwrap();
+    cite_from(&ctx, &id);
+    let v = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert!(
+        artifact::get(&ctx.catalog.lock(), &id).unwrap().is_none(),
+        "{v}"
+    );
+    assert_nothing_of_the_target_remains(&ctx, &p, None, &v);
+    assert_no_surface_prints_the_mark(&ctx, &id).await;
+}
+
+/// R2-3/R2-4 after round 3: once the first post-fix reindex has run, a pre-fix row has null file
+/// fields, and a filter on any of them answers as a filter matching nothing does (count AND hints).
+#[tokio::test]
+async fn no_oracle_on_a_pre_fix_row_after_one_reindex() {
+    let (_tmp, ctx, id, p, v) = kept_after_one_reindex().await;
+    assert_nothing_of_the_target_remains(&ctx, &p, Some(&id), &v);
+    for field in [
+        "title",
+        "topic",
+        "status",
+        "kind",
+        "time_scope",
+        "tags",
+        "owners",
+    ] {
+        let by = |needle: &str| json!({"filter": {field: {"contains": needle}}});
+        let hit = find::call(&ctx, by(MARK)).await.unwrap();
+        let miss = find::call(&ctx, by("no-row-has-this-zq")).await.unwrap();
+        assert_eq!(
+            (&hit["count"], &hit["hints"]),
+            (&miss["count"], &miss["hints"]),
+            "a `{field} contains` filter answers about the pre-fix row: {hit}"
+        );
+    }
+    assert_no_surface_prints_the_mark(&ctx, &id).await;
+    for (name, out) in [
+        (
+            "state_at",
+            super::state_at::call(&ctx, json!({"id": id, "timestamp": 9_999_999_999_999i64}))
+                .await
+                .unwrap(),
+        ),
+        (
+            "workspace_state_at",
+            super::workspace_state_at::call(&ctx, json!({"timestamp": 9_999_999_999_999i64}))
+                .await
+                .unwrap(),
+        ),
+    ] {
+        assert!(!has(&out), "{name} prints the target's text: {out}");
+    }
+}
+
+/// R3-2: `librarian(context, topic=X)` selects candidates by stored title and topic. After ONE
+/// reindex it answers about the pre-fix row as about no row at all.
+#[tokio::test]
+async fn context_counts_nothing_of_a_pre_fix_row_after_one_reindex() {
+    let (_tmp, ctx, _id, _p, _v) = kept_after_one_reindex().await;
+    let hit = context::call(&ctx, json!({"topic": MARK})).await.unwrap();
+    let miss = context::call(&ctx, json!({"topic": "no-row-has-this-zq"}))
+        .await
+        .unwrap();
+    assert_eq!(hit["overflow"], miss["overflow"], "{hit}");
+    assert!(!has(&hit), "{hit}");
+}
+
+/// R3-4: `doc(graft)`'s dry run prints both rows' titles. After ONE reindex the pre-fix row's is
+/// null.
+#[tokio::test]
+async fn graft_preview_prints_nothing_of_a_pre_fix_row_after_one_reindex() {
+    let (_tmp, ctx, id, p, _v) = kept_after_one_reindex().await;
+    let c = p.join("docs/control.md");
+    std::fs::write(&c, "# control\n").unwrap();
+    let cid = seed(&ctx, &c, Some("control"));
+    let v = super::graft::call(&ctx, json!({"from_id": id, "into_id": cid}))
+        .await
+        .unwrap();
+    assert!(v["would_delete_row"]["title"].is_null(), "{v}");
+    assert!(!has(&v), "{v}");
+}
+
+/// R3-5: `doc(delete, force)` copies the whole row into the trail. After ONE reindex the row holds
+/// nothing of the target. The one value it keeps is the slug (Deviation 8, kept rows keep their
+/// slug, operator decision open), so the delete image's `slug` is set aside here.
+#[tokio::test]
+async fn delete_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it() {
+    let (_tmp, ctx, id, _p, _v) = kept_after_one_reindex().await;
+    super::delete::call(&ctx, json!({"id": id, "force": true}))
+        .await
+        .unwrap();
+    let cat = ctx.catalog.lock();
+    let rows: Vec<(String, String)> = cat
+        .conn
+        .prepare(
+            "SELECT op, payload FROM catalog_audit WHERE tbl = 'artifact' AND row_id = ?1 \
+             AND payload IS NOT NULL",
+        )
+        .unwrap()
+        .query_map([&id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(
+        rows.iter().any(|(op, _)| op == "delete"),
+        "precondition: the delete wrote its image: {rows:?}"
+    );
+    for (op, payload) in &rows {
+        let mut v: serde_json::Value = serde_json::from_str(payload).unwrap();
+        if op == "delete" {
+            v.as_object_mut().unwrap().remove("slug");
+        }
+        assert!(!has(&v), "{op} {v}");
+    }
+}
+
+/// R3-3: a worktree session's write to a MAIN row forks it: a shadow row seeded from the main
+/// row, and a `worktree_fork` event carrying its fields (events are never elided). After ONE
+/// reindex of the main checkout the main row is cleared, so the fork copies nothing of the target.
+#[tokio::test]
+async fn a_worktree_fork_of_a_pre_fix_row_after_one_reindex_copies_nothing_of_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = std::fs::canonicalize(tmp.path()).unwrap();
+    let m = project(&b);
+    target(&b.join("out"));
+    ln(b.join("out/x.md"), &m.join("docs/x.md"));
+    let w = m.join(".worktrees/feat");
+    std::fs::create_dir_all(w.join("docs")).unwrap();
+    std::fs::write(w.join(".git"), "gitdir: ../../.git/worktrees/feat\n").unwrap();
+    ln(b.join("out/x.md"), &w.join("docs/x.md"));
+    let md = m.join("docs/x.md");
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_rules(rules())
+        .with_artifact_store(Arc::new(InMemoryArtifactStore::default()))
+        .with_current_project(Arc::new(
+            crate::librarian::current_project::CurrentProject {
+                abs_path: w.clone(),
+                git_root: w.clone(),
+                main_root: Some(m.clone()),
+                umbrella: None,
+            },
+        ))
+        .build();
+    // The pre-fix row: what a pre-fix walk stored from the target, with history so it is kept.
+    let id = seed(&ctx, &md, Some(&format!("{MARK} title")));
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "UPDATE artifact SET topic = ?2, tags = ?3, owners = ?4, time_scope = ?5 WHERE id = ?1",
+            rusqlite::params![
+                id,
+                format!("{MARK}topic"),
+                format!("[\"{MARK}tag\"]"),
+                format!("[\"{MARK}owner\"]"),
+                format!("{MARK}timescope")
+            ],
+        )
+        .unwrap();
+    augmentation::upsert(&ctx.catalog.lock(), &aug_row(&id, json!({"note": "mine"}))).unwrap();
+    // ONE post-fix reindex of the main checkout (the worktree session's own reindex skips a
+    // linked worktree, so the main root is walked directly).
+    crate::librarian::indexer::index_repo_sync(
+        &ctx.catalog.lock(),
+        &rules(),
+        &m,
+        &globset::GlobSet::empty(),
+        false,
+        false,
+        false,
+    )
+    .unwrap();
+    super::event_create::call(
+        &ctx,
+        json!({"artifact_id": id, "kind": "note", "payload": {"text": "n"}}),
+    )
+    .await
+    .unwrap();
+    let cat = ctx.catalog.lock();
+    let forks: Vec<String> = cat
+        .conn
+        .prepare("SELECT payload FROM events WHERE kind = 'worktree_fork'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(
+        forks.len(),
+        1,
+        "precondition: the write forked the main row"
+    );
+    assert!(!forks[0].contains(MARK), "{}", forks[0]);
+    let shadow: Vec<String> = cat
+        .conn
+        .prepare("SELECT COALESCE(title,'') || COALESCE(topic,'') || tags || owners FROM artifact")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(shadow.iter().all(|s| !s.contains(MARK)), "{shadow:?}");
+}
+
+/// R3-6: an ORDINARY repository file whose directory name is not valid UTF-8 (no link anywhere)
+/// is found, and its title returned. Round 2 refused every such stored path at read time.
+#[tokio::test]
+async fn an_ordinary_file_below_a_non_utf8_name_is_found_and_kept() {
+    use std::os::unix::ffi::OsStrExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join(std::ffi::OsStr::from_bytes(b"d\xff"));
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("x.md"), "# plainnonutf title\n\nbody\n").unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let id = crate::librarian::ids::artifact_id_from_abs(&docs.join("x.md"));
+    let ff = find::call(
+        &ctx,
+        json!({"filter": {"title": {"contains": "plainnonutf"}}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ff["count"].as_u64(), Some(1), "{ff}");
+    let g = get::call(&ctx, json!({"id": id})).await.unwrap();
+    assert_eq!(g["title"].as_str(), Some("plainnonutf title"), "{g}");
+    let r2 = super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_eq!(r2["removed"].as_u64(), Some(0), "{r2}");
+}
+
+/// R3-7: a slug is unique among LIVE rows only, so a freed slug is minted again for another row.
+/// Removing that row with elision must leave the EARLIER holder's citation history alone.
+#[tokio::test]
+async fn a_reused_slug_leaves_the_earlier_holders_citation_history_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("a.md"), "# Same Title\n\nfirst document\n").unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let id_a = crate::librarian::ids::artifact_id_from_abs(&docs.join("a.md"));
+    let slug_a =
+        crate::librarian::catalog::artifact::ensure_slug(&ctx.catalog.lock().conn, &id_a).unwrap();
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+             VALUES (?1, 'A-1', 'other:X-1', 'cites', 'write', 0)",
+            [&slug_a],
+        )
+        .unwrap();
+    // A goes as an ordinary vanished row: no elision, its cascaded delete image is kept.
+    std::fs::remove_file(docs.join("a.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let needle = format!("\"src_slug\":\"{slug_a}\"");
+    let count = |ctx: &ToolContext| -> i64 {
+        ctx.catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'entry_cite' \
+                 AND instr(payload, ?1) > 0",
+                [&needle],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let before = count(&ctx);
+    // B: same title, so the freed slug is minted again, B cites under the SAME key as A did; then
+    // B's file becomes a dangling link inside the repository and B is removed with elision.
+    std::fs::write(docs.join("b.md"), "# Same Title\n\nsecond document\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let id_b = crate::librarian::ids::artifact_id_from_abs(&docs.join("b.md"));
+    let slug_b =
+        crate::librarian::catalog::artifact::ensure_slug(&ctx.catalog.lock().conn, &id_b).unwrap();
+    ctx.catalog
+        .lock()
+        .conn
+        .execute(
+            "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+             VALUES (?1, 'A-1', 'other:X-1', 'cites', 'write', 0)",
+            [&slug_b],
+        )
+        .unwrap();
+    std::fs::remove_file(docs.join("b.md")).unwrap();
+    std::os::unix::fs::symlink(docs.join("nowhere.md"), docs.join("b.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    assert_eq!(slug_a, slug_b, "precondition: the slug was reused");
+    assert!(
+        before >= 1,
+        "precondition: A's citation images hold the slug"
+    );
+    assert_eq!(
+        before,
+        count(&ctx),
+        "B's removal rewrote A's citation history"
+    );
+    // B's own cascaded citation WAS elided: the bound is not a no-op.
+    let b_elided: i64 = ctx
+        .catalog
+        .lock()
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'entry_cite' AND op = 'delete' \
+             AND instr(payload, '\"src_slug\":{\"elided\":\"read-door\"}') > 0",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(b_elided, 1, "B's own citation delete must be elided");
+}
+
+/// R3-10: `gather` judges `truncated` AFTER it drops a refused row, so the dropped row does not
+/// say "there is more" (window behaviour, before the first post-fix reindex).
+#[tokio::test]
+async fn gather_judges_truncated_after_dropping_a_refused_row() {
+    let (_tmp, ctx, _id, fxv) = refused_row_with_stored_fields();
+    let c = control_row(
+        &ctx,
+        &fxv,
+        json!({"gather_from": [{"source": "artifacts", "limit": 1}]}),
+    );
+    let out = refresh::call(&ctx, json!({"id": c})).await.unwrap();
+    let text = out.to_string();
+    assert!(!text.contains(MARK), "{text}");
+    assert!(
+        !text.contains("\"truncated\":true"),
+        "the dropped row was counted as more: {text}"
     );
 }
