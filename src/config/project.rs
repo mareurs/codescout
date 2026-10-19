@@ -511,6 +511,53 @@ impl ProjectConfig {
     }
 }
 
+/// A toml error as message, line and column, **never the source excerpt**.
+///
+/// `toml::de::Error`'s `Display` prints the offending source line. `project.toml` can be a link
+/// to any readable file, so that line can be a secret from a file the read deny-list protects
+/// (`~/.pgpass`), and the error reaches the caller (the failed-reload notice, the activation
+/// refusal, the log). `text` is the file's content, for the line number; pass `None` when the
+/// error comes from deserialising an already-parsed value (it has no span). Quoted values in the
+/// message (`invalid type: string "..."`, `unknown variant `...``) are redacted by
+/// [`redact_values`].
+pub(crate) fn describe_toml_error(text: Option<&str>, e: &toml::de::Error) -> String {
+    let message = redact_values(e.message());
+    match (text, e.span()) {
+        (Some(text), Some(span)) if span.start <= text.len() => {
+            let before = &text.as_bytes()[..span.start];
+            let line = before.iter().filter(|b| **b == b'\n').count() + 1;
+            let col = before.iter().rev().take_while(|b| **b != b'\n').count() + 1;
+            format!("{message} (line {line}, column {col})")
+        }
+        _ => message,
+    }
+}
+
+/// Replace what a serde/toml message quotes from the INPUT with `…`: every double-quoted
+/// segment, and the backticked name after `unknown variant` / `unknown field` (the other
+/// backticked names are our own field names and stay: `missing field `project``).
+fn redact_values(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut rest = message;
+    while let Some(i) = rest.find(['"', '`']) {
+        let quote = rest.as_bytes()[i] as char;
+        let (head, tail) = rest.split_at(i + 1);
+        out.push_str(head);
+        let Some(end) = tail.find(quote) else {
+            out.push_str(tail);
+            return out;
+        };
+        let redact = quote == '"'
+            || head.trim_end_matches('`').ends_with("unknown variant ")
+            || head.trim_end_matches('`').ends_with("unknown field ");
+        out.push_str(if redact { "…" } else { &tail[..end] });
+        out.push(quote);
+        rest = &tail[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// What every response says while `project.toml` fails to load. See
 /// `ActiveProject::config_load_error`; the error text is the loader's own, which names the
 /// entry.
@@ -830,7 +877,13 @@ impl ProjectConfig {
                 );
             }
             let text = std::fs::read_to_string(&config_path)?;
-            toml::from_str(&text).with_context(|| format!("parsing {}", config_path.display()))?
+            toml::from_str(&text).map_err(|e| {
+                anyhow::anyhow!(
+                    "parsing {}: {}",
+                    config_path.display(),
+                    describe_toml_error(Some(&text), &e)
+                )
+            })?
         } else {
             let name = root
                 .file_name()
@@ -845,7 +898,13 @@ impl ProjectConfig {
         };
 
         let merged = merge_toml(global_base, project_overlay);
-        let config: Self = toml::Value::try_into(merged)?;
+        let config: Self = toml::Value::try_into(merged).map_err(|e| {
+            anyhow::anyhow!(
+                "invalid configuration for {}: {}",
+                config_path.display(),
+                describe_toml_error(None, &e)
+            )
+        })?;
         // Name the file: the merged config may also carry the global config, and a reader with
         // several projects cannot tell which one stopped.
         config.validate_list_limits().with_context(|| {
@@ -1032,6 +1091,41 @@ mod tests {
         let cfg: ProjectConfig = toml::from_str(toml).unwrap();
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
+    }
+
+    /// `redact_values` removes what the message quotes from the input and keeps our own names.
+    #[test]
+    fn redact_values_keeps_our_field_names_and_drops_the_files_values() {
+        assert_eq!(
+            super::redact_values("missing field `project`"),
+            "missing field `project`"
+        );
+        assert_eq!(
+            super::redact_values("invalid type: string \"S3CRET\", expected a boolean"),
+            "invalid type: string \"…\", expected a boolean"
+        );
+        assert_eq!(
+            super::redact_values("unknown variant `S3CRET`, expected `default` or `root`"),
+            "unknown variant `…`, expected `default` or `root`"
+        );
+        assert_eq!(
+            super::redact_values("unknown field `S3CRET`"),
+            "unknown field `…`"
+        );
+        assert_eq!(
+            super::redact_values("unterminated \"quote"),
+            "unterminated \"quote"
+        );
+    }
+
+    /// A parse error is reported as message, line and column, and never the source line.
+    #[test]
+    fn describe_toml_error_gives_line_and_column_not_the_source_line() {
+        let text = "a = 1\nS3CRET line\n";
+        let e = toml::from_str::<toml::Table>(text).unwrap_err();
+        let d = super::describe_toml_error(Some(text), &e);
+        assert!(d.contains("line 2, column"), "{d}");
+        assert!(!d.contains("S3CRET"), "{d}");
     }
 
     /// `read_project_toml_table` is the salvage's only eye on the file, and each of its four

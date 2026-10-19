@@ -105,7 +105,14 @@ fn patch_project_table(
     config_path: &std::path::Path,
     set: impl FnOnce(&mut toml::Table),
 ) -> anyhow::Result<()> {
-    let mut doc: toml::Table = toml::from_str(&std::fs::read_to_string(config_path)?)?;
+    let text = std::fs::read_to_string(config_path)?;
+    let mut doc: toml::Table = toml::from_str(&text).map_err(|e| {
+        anyhow::anyhow!(
+            "parsing {}: {}",
+            config_path.display(),
+            crate::config::project::describe_toml_error(Some(&text), &e)
+        )
+    })?;
     let project = doc
         .entry("project")
         .or_insert_with(|| toml::Value::Table(toml::Table::new()))

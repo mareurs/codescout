@@ -255,8 +255,13 @@ impl GlobalConfig {
                 return Err(e).with_context(|| format!("reading global config {}", path.display()));
             }
         };
-        let config: GlobalConfig = toml::from_str(&text)
-            .with_context(|| format!("parsing global config {}", path.display()))?;
+        let config: GlobalConfig = toml::from_str(&text).map_err(|e| {
+            anyhow::anyhow!(
+                "parsing global config {}: {}",
+                path.display(),
+                crate::config::project::describe_toml_error(Some(&text), &e)
+            )
+        })?;
         Ok(Some(config))
     }
 

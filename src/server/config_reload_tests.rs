@@ -796,3 +796,116 @@ fn a_notice_alone_adds_no_empty_corrections_block_to_an_error_body() {
     assert_eq!(body["_workspace_notice"], "N", "{text}");
     assert!(body.get("corrections").is_none(), "{text}");
 }
+
+/// R2-2. The failed-reload notice (and every other rendering of a load error) must not quote
+/// the file it failed on. `project.toml` can be a link to ANY readable file, and the toml
+/// parser's `Display` prints the offending source line, so a link to a secret file returned
+/// that line in `_workspace_notice`, past the read deny-list. Only message, line and column.
+const SECRET: &str = "SECRETMARKER-7f3a91c2";
+
+#[cfg(unix)]
+fn secret_file(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
+    let outside = tempfile::tempdir().unwrap();
+    let path = outside.path().join("secret.txt");
+    std::fs::write(&path, content).unwrap();
+    // keep the directory alive for the test's duration
+    std::mem::forget(outside);
+    let _ = dir;
+    path
+}
+
+#[cfg(unix)]
+async fn responses_after_linking_project_toml_to(content: &str) -> Vec<(&'static str, String)> {
+    let (dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    let secret = secret_file(&dir, content);
+    std::fs::remove_file(project_toml(&dir)).unwrap();
+    std::os::unix::fs::symlink(&secret, project_toml(&dir)).unwrap();
+    vec![
+        (
+            "success",
+            call(&server, "tree", json!({"path": "."})).await.1,
+        ),
+        (
+            "recoverable error",
+            call(&server, "read_file", json!({"path": "no-such-file.txt"}))
+                .await
+                .1,
+        ),
+        (
+            "fatal error",
+            call(
+                &server,
+                "create_file",
+                json!({"path": "x.txt", "content": "x\n"}),
+            )
+            .await
+            .1,
+        ),
+    ]
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_parse_error_notice_never_quotes_the_file_it_failed_on() {
+    let secret_line = format!("db.internal:5432:app:alice:{SECRET}\n");
+    for (shape, text) in responses_after_linking_project_toml_to(&secret_line).await {
+        assert!(
+            text.contains("FAILED TO LOAD"),
+            "{shape}: control: the notice must be there: {text}"
+        );
+        assert!(
+            !text.contains(SECRET),
+            "{shape}: the notice quoted the linked file: {text}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_parse_error_notice_still_says_where_it_failed() {
+    let (_, text) = responses_after_linking_project_toml_to("a = 1\nbad line here\n")
+        .await
+        .remove(0);
+    assert!(
+        text.contains("line 2"),
+        "message + line + column must survive the redaction: {text}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_type_error_notice_never_quotes_a_value_of_the_linked_file() {
+    let content =
+        format!("[project]\nname = \"t\"\n\n[security]\nfile_write_enabled = \"{SECRET}\"\n");
+    for (shape, text) in responses_after_linking_project_toml_to(&content).await {
+        assert!(!text.contains(SECRET), "{shape}: {text}");
+    }
+    let variant = format!("[project]\nname = \"t\"\n\n[security]\nprofile = \"{SECRET}\"\n");
+    for (shape, text) in responses_after_linking_project_toml_to(&variant).await {
+        assert!(
+            !text.contains(SECRET),
+            "{shape}: an unknown enum variant is echoed by serde: {text}"
+        );
+    }
+}
+
+/// The activation path formats the same error (`Agent::new` refuses a project that does not
+/// load, and the message reaches the caller).
+#[cfg(unix)]
+#[tokio::test]
+async fn the_activation_refusal_never_quotes_the_file_either() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, format!("db.internal:5432:app:alice:{SECRET}\n")).unwrap();
+    std::os::unix::fs::symlink(&secret, dir.path().join(".codescout").join("project.toml"))
+        .unwrap();
+    let err = crate::agent::Agent::new(Some(dir.path().to_path_buf()))
+        .await
+        .err()
+        .expect("a project.toml that does not parse refuses activation");
+    let text = format!("{err:#}");
+    assert!(text.contains("project.toml"), "control: {text}");
+    assert!(!text.contains(SECRET), "{text}");
+}
