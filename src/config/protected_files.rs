@@ -176,6 +176,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 /// How many links `resolve` follows before it gives up (the kernel's own limit is 40).
+// cap-class: NOT_A_CAP — a loop guard on following links; hitting it returns the path as it stands, no result is truncated
 const MAX_LINK_HOPS: usize = 40;
 
 /// `path` with every link followed, the remainder appended as written, **including a link whose
@@ -495,7 +496,12 @@ mod tests {
         let eroot = std::fs::canonicalize(empty.path()).unwrap();
         std::fs::write(eroot.join("here.txt"), "x").unwrap();
         assert_eq!(
-            check_write_with(&eroot.join("here.txt"), change, None, &[eroot.clone()]),
+            check_write_with(
+                &eroot.join("here.txt"),
+                change,
+                None,
+                std::slice::from_ref(&eroot)
+            ),
             Ok(()),
             "config missing, target exists"
         );
@@ -504,7 +510,7 @@ mod tests {
             &eroot.join(".codescout").join("project.toml"),
             change,
             None,
-            &[eroot.clone()]
+            std::slice::from_ref(&eroot)
         )
         .is_err());
         // neither exists, a different path
@@ -528,7 +534,7 @@ mod tests {
             &root.join("cfgdir").join("project.toml"),
             change,
             None,
-            &[root.clone()]
+            std::slice::from_ref(&root)
         )
         .is_err());
         assert_eq!(
