@@ -425,3 +425,71 @@ fn the_real_loader_failures_become_the_marker_and_quote_nothing() {
         );
     }
 }
+
+/// L3 for the mapper: the pin, and the text of a non-config failure, are echoed bounded and
+/// escaped, like every other echo of caller-supplied text.
+#[test]
+fn a_pin_refusal_echoes_the_pin_and_the_error_bounded_and_escaped() {
+    let long_root = PathBuf::from(format!("/{}", "r".repeat(2000)));
+    let config = pin_resolution_refusal(
+        &long_root,
+        anyhow::Error::new(ConfigLoadFailed {
+            path: PathBuf::from("/p/.codescout/project.toml"),
+            global: false,
+            location: None,
+        }),
+    );
+    assert!(
+        config.message.len() < 700 && config.message.contains("(truncated, 2001 bytes in all)"),
+        "the pin in a config refusal is capped; got {} bytes",
+        config.message.len()
+    );
+
+    let rough_root = PathBuf::from("/a\nb");
+    let generic = pin_resolution_refusal(
+        &rough_root,
+        anyhow::anyhow!("{}\u{1b}[31m", "e".repeat(2000)),
+    );
+    assert!(
+        generic
+            .message
+            .starts_with("workspace pin '/a\\u{a}b' could not be resolved: "),
+        "the pin is escaped; got: {}",
+        generic.message
+    );
+    assert!(
+        generic.message.len() < 1200 && !generic.message.contains('\u{1b}'),
+        "the error text is capped and escaped; got {} bytes",
+        generic.message.len()
+    );
+    assert!(generic.message.contains("(truncated, "));
+}
+
+/// L3: the working directory named in the relative-path note is bounded too. Runs in a child
+/// process whose cwd is a deep directory, so the shared suite's cwd is never touched.
+#[cfg(unix)]
+#[test]
+fn a_long_cwd_is_bounded_in_the_relative_path_note() {
+    let base = tempdir().unwrap();
+    let base_root = std::fs::canonicalize(base.path()).unwrap();
+    crate::platform::test_child::run(
+        module_path!(),
+        "a_long_cwd_is_bounded_in_the_relative_path_note",
+        &[],
+        || {
+            let mut deep = base_root.clone();
+            for level in 0..4 {
+                deep.push(format!("{level}{}", "d".repeat(200)));
+            }
+            std::fs::create_dir_all(&deep).unwrap();
+            std::env::set_current_dir(&deep).unwrap();
+            let err = existing_project_dir(PathBuf::from("missing"), "workspace pin").unwrap_err();
+            assert!(
+                err.message.len() < 700 && err.message.contains("(truncated, "),
+                "the cwd in the note is capped; got {} bytes: {}",
+                err.message.len(),
+                err.message
+            );
+        },
+    );
+}
