@@ -794,6 +794,8 @@ async fn a_config_failure_never_quotes_the_file_in_a_response_or_a_usage_row() {
     ] {
         let (home, server) = make_debug_server().await;
         let home_root = std::fs::canonicalize(home.path()).unwrap();
+        // The database exists before any refusal's recorder can race to create it.
+        crate::usage::db::open_db(&home_root).unwrap();
         let host = tempdir().unwrap();
         let host_root = std::fs::canonicalize(host.path()).unwrap();
         let secret = host_root.join("secret.txt");
@@ -889,6 +891,9 @@ async fn every_tool_refuses_an_unresidentable_pin_and_names_it() {
 async fn a_refused_pin_is_echoed_capped_and_escaped() {
     let (home, server) = make_server().await;
     let home_root = std::fs::canonicalize(home.path()).unwrap();
+    // Create the usage database up front: several refusals' recorders can overlap, and
+    // two connections that both CREATE the schema race its migrations (`duplicate column name`).
+    crate::usage::db::open_db(&home_root).unwrap();
 
     let long = format!("/nonexistent/{}", "a".repeat(200_000));
     let result = dispatch_pinned(
