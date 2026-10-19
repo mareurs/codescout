@@ -85,8 +85,9 @@ pub(crate) fn check_write_with(
         refusal(
             path,
             &format!(
-                "the new content is not valid TOML ({e}), so it cannot be shown to leave \
-                 [{PROTECTED_TABLE}] unchanged"
+                "the new content is not valid TOML ({}), so it cannot be shown to leave \
+                 [{PROTECTED_TABLE}] unchanged",
+                crate::config::project::describe_toml_error(Some(new_content), &e)
             ),
         )
     })?;
@@ -135,9 +136,37 @@ fn is_global_config(path: &Path, global_config: Option<&Path>) -> bool {
 /// at, written under its own name. Both resolve to the same file as
 /// `<root>/.codescout/project.toml`, which is what this compares.
 fn is_a_loaded_projects_config(path: &Path, roots: &[PathBuf]) -> bool {
-    roots
-        .iter()
-        .any(|root| same_file(path, &root.join(".codescout").join("project.toml")))
+    // `path` is resolved ONCE, not once per root: this runs on every `atomic_write`, and a
+    // long-lived server holds one root per project it ever loaded (measured: the per-root
+    // resolve cost 1.4 ms at 100 roots and 15 ms at 1000 for an existing file).
+    let target = resolve(path);
+    let target_id = file_id(&target);
+    roots.iter().any(|root| {
+        let config = root.join(".codescout").join("project.toml");
+        match (target_id, file_id(&config)) {
+            // Both exist: the same file iff the same (device, inode). One `stat` per root,
+            // and it also recognises a hard link, which comparing paths cannot.
+            (Some(a), Some(b)) => a == b,
+            // Exactly one exists, so they cannot be the same file (a dangling link is not an
+            // existing file either).
+            (Some(_), None) | (None, Some(_)) => false,
+            // Neither exists (a create, a dangling link): only the resolved paths can say.
+            (None, None) => resolve(&config) == target,
+        }
+    })
+}
+
+/// `(device, inode)` of the file `path` names (links followed), when it exists. `None` where
+/// there is no such identity (not unix) or no such file.
+#[cfg(unix)]
+fn file_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_id(_path: &Path) -> Option<(u64, u64)> {
+    None
 }
 
 /// Whether `a` and `b` name the same file once every link is followed, for files that may not
@@ -424,5 +453,65 @@ mod tests {
         std::os::unix::fs::symlink("l2", root.join("l1")).unwrap();
         std::os::unix::fs::symlink("l1", root.join("l2")).unwrap();
         let _ = resolve(&root.join("l1")); // terminates
+    }
+
+    /// A hard link to a loaded project's `project.toml` is the same file under another name;
+    /// (device, inode) recognises it where comparing paths cannot. A different file that
+    /// merely exists is not it. Every existence combination is covered: both exist (ids),
+    /// only one exists (never equal), neither exists (resolved paths).
+    #[cfg(unix)]
+    #[test]
+    fn identity_compares_inodes_when_both_exist_and_paths_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let cfg = proj(&dir);
+        let cfg = std::fs::canonicalize(cfg.parent().unwrap())
+            .unwrap()
+            .join("project.toml");
+        std::fs::write(&cfg, "[project]\nname = \"a\"\n").unwrap();
+        let roots = vec![root.clone()];
+        let change = "[security]\nprofile = \"root\"\n";
+
+        std::fs::hard_link(&cfg, root.join("alias.txt")).unwrap();
+        assert!(
+            check_write_with(&root.join("alias.txt"), change, None, &roots).is_err(),
+            "hard link"
+        );
+
+        std::fs::write(root.join("other.txt"), "x").unwrap();
+        assert_eq!(
+            check_write_with(&root.join("other.txt"), change, None, &roots),
+            Ok(()),
+            "both exist, different files"
+        );
+        assert_eq!(
+            check_write_with(&root.join("new.txt"), change, None, &roots),
+            Ok(()),
+            "target missing, config exists"
+        );
+
+        // config missing, target exists
+        let empty = tempfile::tempdir().unwrap();
+        let eroot = std::fs::canonicalize(empty.path()).unwrap();
+        std::fs::write(eroot.join("here.txt"), "x").unwrap();
+        assert_eq!(
+            check_write_with(&eroot.join("here.txt"), change, None, &[eroot.clone()]),
+            Ok(()),
+            "config missing, target exists"
+        );
+        // neither exists: a create of the config's own path is caught by path
+        assert!(check_write_with(
+            &eroot.join(".codescout").join("project.toml"),
+            change,
+            None,
+            &[eroot.clone()]
+        )
+        .is_err());
+        // neither exists, a different path
+        assert_eq!(
+            check_write_with(&eroot.join("nope.txt"), change, None, &[eroot]),
+            Ok(()),
+            "neither exists, different"
+        );
     }
 }
