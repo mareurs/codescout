@@ -1436,6 +1436,7 @@ fn after() -> &'static str { std::fs::File::open(q); "" }
             "fn y(k: u8) -> u8 { match k {\n #[cfg(test)]\n 0 => { std::fs::read(p); 1 },\n _ => 2,\n } }",
             "fn z() -> S { S {\n #[cfg(test)]\n probe: std::fs::read(p),\n body: 1,\n } }",
             "#[cfg(test)]\nfn t<A, B>(a: A, b: B) -> Result<()> { std::fs::read(p); Ok(()) }",
+            "#[cfg(test)]\nfn u<F: Fn() -> u8, B>(f: F, b: B) { std::fs::read(p); }",
         ] {
             let (code, _) = production_code(clean);
             let n: usize = read_counts(&code).iter().sum();

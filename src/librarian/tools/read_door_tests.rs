@@ -2007,6 +2007,21 @@ async fn no_oracle_on_a_pre_fix_row_after_one_reindex() {
         );
     }
     assert_no_surface_prints_the_mark(&ctx, &id).await;
+    // The kept row is listed, cleared, and says why its fields are absent (reviewer's M4).
+    let f = find::call(&ctx, json!({"limit": 50})).await.unwrap();
+    let item = f["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("the kept row is listed: {f}"));
+    assert!(
+        item["withheld"]
+            .as_str()
+            .is_some_and(|w| w.contains("outside the repository root")),
+        "{item}"
+    );
     for (name, out) in [
         (
             "state_at",
@@ -2302,20 +2317,118 @@ async fn a_reused_slug_leaves_the_earlier_holders_citation_history_alone() {
 }
 
 /// R3-10: `gather` judges `truncated` AFTER it drops a refused row, so the dropped row does not
-/// say "there is more" (window behaviour, before the first post-fix reindex).
+/// say "there is more" (window behaviour, before the first post-fix reindex). Two rows match
+/// (the refused one and an ordinary one) and the limit is 1: the dropped row is not "more".
 #[tokio::test]
 async fn gather_judges_truncated_after_dropping_a_refused_row() {
     let (_tmp, ctx, _id, fxv) = refused_row_with_stored_fields();
-    let c = control_row(
-        &ctx,
-        &fxv,
-        json!({"gather_from": [{"source": "artifacts", "limit": 1}]}),
-    );
-    let out = refresh::call(&ctx, json!({"id": c})).await.unwrap();
-    let text = out.to_string();
-    assert!(!text.contains(MARK), "{text}");
+    let plain = fxv.base_dir().join("plain.md");
+    std::fs::write(&plain, "# plain\n").unwrap();
+    seed(&ctx, &plain, Some("plain"));
+    let sources: Vec<super::gather::GatherSource> =
+        vec![serde_json::from_value(json!({"source": "artifacts", "limit": 1})).unwrap()];
+    let (results, warnings) = super::gather::gather_all(&sources, &ctx, None)
+        .await
+        .unwrap();
+    let data = results[0].data.to_string();
+    assert!(!data.contains(MARK), "{data}");
     assert!(
-        !text.contains("\"truncated\":true"),
-        "the dropped row was counted as more: {text}"
+        data.contains("plain"),
+        "precondition: the ordinary row is listed: {data}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("truncated")),
+        "the dropped row was counted as more: {warnings:?}"
+    );
+}
+
+/// R3-10 (reviewer's M1): the citation prefix is `slug:` WITH its colon. A sibling slug minted by
+/// the dedup (`same-title-2`) starts with the removed row's slug, and its citation history is that
+/// row's own.
+#[tokio::test]
+async fn a_sibling_slugs_citation_history_is_left_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let p = project(&base);
+    let docs = p.join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("a.md"), "# Same Title\n\nfirst\n").unwrap();
+    let fxv = fx(&p, &docs, None);
+    let (ctx, _) = ctx_for(&fxv, None);
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    std::fs::write(docs.join("b.md"), "# Same Title\n\nsecond\n").unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let slug_of = |name: &str| -> String {
+        let id = crate::librarian::ids::artifact_id_from_abs(&docs.join(name));
+        crate::librarian::catalog::artifact::ensure_slug(&ctx.catalog.lock().conn, &id).unwrap()
+    };
+    let (slug_a, slug_b) = (slug_of("a.md"), slug_of("b.md"));
+    assert!(
+        slug_b.starts_with(&slug_a) && slug_b != slug_a,
+        "precondition: a sibling slug ({slug_a}, {slug_b})"
+    );
+    // B cites and drops the citation AFTER A acquired its slug: a delete image under `slug_b:`.
+    {
+        let cat = ctx.catalog.lock();
+        cat.conn
+            .execute(
+                "INSERT INTO entry_cite(src_slug, src_local, dst_ref, rel, origin, created_at) \
+                 VALUES (?1, 'B-1', 'other:X-1', 'cites', 'write', 0)",
+                [&slug_b],
+            )
+            .unwrap();
+        cat.conn
+            .execute("DELETE FROM entry_cite WHERE src_slug = ?1", [&slug_b])
+            .unwrap();
+    }
+    // A's file becomes a dangling link: A is removed with elision.
+    std::fs::remove_file(docs.join("a.md")).unwrap();
+    std::os::unix::fs::symlink(docs.join("nowhere.md"), docs.join("a.md")).unwrap();
+    super::reindex::call(&ctx, json!({"scope": "project"}))
+        .await
+        .unwrap();
+    let kept: i64 = ctx
+        .catalog
+        .lock()
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM catalog_audit WHERE tbl = 'entry_cite' AND op = 'delete' \
+             AND instr(payload, ?1) > 0",
+            [format!("\"src_slug\":\"{slug_b}\"")],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        kept, 1,
+        "A's removal rewrote its sibling {slug_b}'s citation history"
+    );
+}
+
+/// Round 1's F1 invariant for a KEPT row: its clearing and its elision commit together. With the
+/// elision made to fail, the reindex errors and the row still holds what it held, so no audit row
+/// copied the clear's diff without its elision.
+#[tokio::test]
+async fn a_kept_rows_clear_and_elision_commit_together() {
+    let (_tmp, ctx, _store, id, _p, _link) = prefix_state(false, true).await;
+    ctx.catalog
+        .lock()
+        .conn
+        .execute_batch(
+            // `OF payload`: the elision's rewrite, not the per-connection `audit_stamp` trigger
+            // (which sets `actor`/`verb` after every insert, and would fail the clear itself).
+            "CREATE TEMP TRIGGER no_audit_rewrite BEFORE UPDATE OF payload ON catalog_audit \
+             BEGIN SELECT RAISE(ABORT, 'audit rewrite refused by the test'); END;",
+        )
+        .unwrap();
+    let r = super::reindex::call(&ctx, json!({"scope": "project"})).await;
+    assert!(r.is_err(), "precondition: the elision failed: {r:?}");
+    let row = artifact::get(&ctx.catalog.lock(), &id).unwrap().unwrap();
+    assert!(
+        row.title.as_deref().is_some_and(|t| t.contains(MARK)),
+        "the clear committed without its elision: {row:?}"
     );
 }
