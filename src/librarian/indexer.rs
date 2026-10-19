@@ -1053,9 +1053,9 @@ fn slug_acquired_at(cat: &Catalog, ids: &[String], slug: &str) -> Result<i64> {
     Ok(earliest.unwrap_or(0))
 }
 
-/// How many ids a lineage walk collects at most; a chain of pre-fix moves longer than this is cut
-/// there (each step is one `doc(move)` of one document).
-// cap-class: NOT_A_CAP — bounds an internal walk of the audit trail for the reindex's elision; no tool returns its result, so it shortens nothing a caller receives
+/// How many ids a lineage walk collects at most (each step is one pre-fix `doc(move)` of one
+/// document). A longer lineage is not cut: `slug_lineage` returns an error naming this cap.
+// cap-class: NOT_A_CAP — past it the walk errors and the reindex fails, so no partial result is ever presented as complete
 const LINEAGE_DEPTH_CAP: usize = 64;
 
 /// `id` and every row that handed `slug` over to a member, transitively: the earlier ids of a
@@ -1064,8 +1064,8 @@ const LINEAGE_DEPTH_CAP: usize = 64;
 /// old row whose `slug` is `[slug, null]`, followed by the UPDATE of the new row to `[null, slug]`
 /// (one transaction, in that order). Nothing else sets a slug to null. A graft of a row with NO
 /// slug leaves no such pair and is not found. Walked from `id` backwards, one handover at a time,
-/// with a visited set (a chain can return to an earlier path, so an id) and at most
-/// `LINEAGE_DEPTH_CAP` ids.
+/// with a visited set (a chain can return to an earlier path, so an id). A lineage longer than
+/// `LINEAGE_DEPTH_CAP` ids is an error, never a cut (review round 5, R5-6).
 fn slug_lineage(cat: &Catalog, id: &str, slug: &str) -> Result<Vec<String>> {
     // Every handover of `slug`: (from, into).
     let handovers: Vec<(String, Option<String>)> = cat
@@ -1089,10 +1089,17 @@ fn slug_lineage(cat: &Catalog, id: &str, slug: &str) -> Result<Vec<String>> {
     let mut queue = vec![id.to_string()];
     while let Some(member) = queue.pop() {
         for (from, into) in &handovers {
-            if lineage.len() >= LINEAGE_DEPTH_CAP {
-                return Ok(lineage);
-            }
             if into.as_deref() == Some(member.as_str()) && visited.insert(from.clone()) {
+                // Fail closed (review round 5, R5-6): a lineage cut short would leave its oldest
+                // ids' outside values in the trail with no signal. The error rolls the row's
+                // savepoint back (the row stays, nothing half-elided) and stops the reindex, which
+                // then exports nothing.
+                anyhow::ensure!(
+                    lineage.len() < LINEAGE_DEPTH_CAP,
+                    "the slug lineage of artifact {id} (slug `{slug}`) is longer than \
+                     LINEAGE_DEPTH_CAP ({LINEAGE_DEPTH_CAP} ids): its audit elision cannot be \
+                     completed, so the row is left in place"
+                );
                 lineage.push(from.clone());
                 queue.push(from.clone());
             }
