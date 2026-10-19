@@ -514,4 +514,47 @@ mod tests {
             "neither exists, different"
         );
     }
+
+    /// `resolve` keeps what follows a link that is a DIRECTORY component: `.codescout` a dangling
+    /// link to a missing `cfgdir`, then `cfgdir/project.toml` is the config's own path.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_directory_link_keeps_the_rest_of_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::os::unix::fs::symlink("cfgdir", root.join(".codescout")).unwrap();
+        let change = "[security]\nprofile = \"root\"\n";
+        assert!(check_write_with(
+            &root.join("cfgdir").join("project.toml"),
+            change,
+            None,
+            &[root.clone()]
+        )
+        .is_err());
+        assert_eq!(
+            check_write_with(
+                &root.join("cfgdir").join("other.toml"),
+                change,
+                None,
+                &[root]
+            ),
+            Ok(()),
+            "control: another file in that directory is not the config"
+        );
+    }
+
+    /// When neither file exists the TARGET is resolved too: a second dangling link to the same
+    /// missing file names the config as surely as the file itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_second_dangling_link_to_the_same_missing_file_is_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        std::os::unix::fs::symlink("../x.toml", root.join(".codescout").join("project.toml"))
+            .unwrap();
+        std::os::unix::fs::symlink("x.toml", root.join("a.toml")).unwrap();
+        let change = "[security]\nprofile = \"root\"\n";
+        assert!(check_write_with(&root.join("a.toml"), change, None, &[root]).is_err());
+    }
 }

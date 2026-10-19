@@ -1029,3 +1029,23 @@ async fn the_failed_reload_notice_rides_a_held_destructive_response() {
         "the held response carries the notice: {text}"
     );
 }
+
+/// The success arm of `onboarding`'s notice: onboarding refuses to RUN on an invalid file, so the
+/// error is planted on the live project (the state a failed reload leaves) over a valid file.
+#[tokio::test]
+async fn the_failed_reload_notice_rides_a_successful_onboarding_response() {
+    let (_dir, server) = make_server_with_project_toml(Some(BASE_TOML)).await;
+    server
+        .agent
+        .with_project_at_mut(None, |p| {
+            p.config_load_error = Some("planted".to_string());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (err, text) = call(&server, "onboarding", json!({})).await;
+    assert!(
+        !err && text.contains("prompt_path") && text.contains("_workspace_notice"),
+        "a successful onboarding response is a JSON object and carries the notice: {text}"
+    );
+}
