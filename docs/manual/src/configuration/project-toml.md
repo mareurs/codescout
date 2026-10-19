@@ -148,8 +148,9 @@ refuse any write to that file, or to the global `config.toml`, that would change
 table (or whose new content is not valid TOML). The rest of the file stays editable through them;
 the onboarding embedding-model step edits `[embeddings]` that way. Change `[security]` in an editor;
 the server re-reads the file on the next call. The file is recognised by identity as well as by name,
-so a `.codescout` that is a link to a directory with another name, or the target of a `project.toml`
-link written under its own name, is guarded too.
+so a `.codescout` that is a link to a directory with another name, the target of a `project.toml`
+link written under its own name (including a link whose target does not exist yet, singly or in a
+chain), and a hard link to it are guarded too.
 
 **This is not a boundary against a session that can run shell commands.** Under the default
 `shell_command_mode = "warn"`, one `run_command` such as
@@ -177,7 +178,9 @@ In a **running** session an edit that fails to load is **not applied, and it is 
 last configuration that loaded stays in force, with two changes. First, every tool response, error
 responses included (the `_workspace_notice` field, or a `⚠` line ahead of a plain-text error), and
 every refused write carries the loader's error until a reload succeeds, so the failure cannot pass
-unseen. Second, from the file only a security *tightening* is
+unseen. That includes `onboarding` responses and the held first call of a destructive tool. The error
+never quotes the file: `project.toml` can be a link to any readable file, so the notice gives the
+parser's message, line and column and redacts quoted values. Second, from the file only a security *tightening* is
 applied: `file_write_enabled = false`, `indexing_enabled = false`, a stricter `shell_command_mode`,
 a `profile` other than `"root"`, and `extra_write_roots` entries removed. A key the edit deletes
 reads as what the file would mean without it: the global config's value if it sets one, else the

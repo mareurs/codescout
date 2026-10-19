@@ -137,6 +137,31 @@ the file would give with the invalid entry absent.
   (object body), a plain error on an `AdvisedError` wrapper rendered as a `⚠` prefix. One test per error
   shape. The other workspace notices (worktree, displaced default) are still success-path only; not changed.
 
+**Second review round (2026-10-19), each reproduced with a failing test first unless stated:**
+
+- **R2-2 (reproduced; fixed `00c9bc015`).** The notice quoted the toml parser's source excerpt of whatever
+  `project.toml` points at: with a link to a file holding `db.internal:5432:app:alice:SECRETMARKER-...`, the
+  success-path `_workspace_notice` returned that line, bypassing the read deny-list. Red:
+  `a_parse_error_notice_never_quotes_the_file_it_failed_on` (`the notice quoted the linked file:
+  ... 1 | db.internal:5432:app:alice:SECRETMARKER-7f3a91c2`), plus the type-error and activation tests. Load
+  errors now carry message, line and column only (`describe_toml_error`); quoted values and an
+  `unknown variant`/`unknown field` name are redacted (`redact_values`). Sites changed: the project loader
+  (parse and deserialise), the global loader, onboarding's `patch_project_table`; the notice, the F5 error
+  path, the activation refusal and the log all format the same, already-redacted, error. **Deliberately not
+  redacted:** the `extra_write_roots entry N ("...")` text, which names the entry the user must fix (an
+  existing test pins it); a linked file would have to be valid TOML with that exact key to reach it. A link
+  that resolves outside the root or onto a deny-listed path is NOT refused (not done: it would change the
+  symlinked-repository flow).
+- **R2-4 (surviving mutant, now killed).** `indexing_enabled` reading the global `file_write_enabled` key
+  survived. Added `indexing_does_not_read_the_global_file_write_key` and the converse.
+- **R2-5 (reproduced).** The reload tests read the developer's global config: 4 failed under a global
+  `shell_command_mode = "unrestricted"` and 9 under a strict one. The unit-test build of
+  `global_config_dir` now reads one shared empty directory, except inside a `test_child` re-exec, which pins
+  its own; verified green with `XDG_CONFIG_HOME` pointing at each hostile config.
+- **R2-6 (fixed `1c494a4aa`).** The notice was missing from `onboarding` responses (it overrides
+  `call_content`) and from the destructive first-use hold. Both carry it now. Evidence is mutants, not a
+  pre-fix red run: the fix was written before its tests.
+
 **Residual, by design.** Not salvaged from an invalid edit: `shell_dangerous_patterns` the file adds
 (an addition is a tightening, but it was left out to keep the rule small) and a lowered `max_index_bytes`.
 The `CONFIG_IS_CACHED_REMEDY` text was changed by commit `0d81e0138` (the Bug 2 fix: it no longer says

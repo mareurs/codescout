@@ -167,6 +167,23 @@ climbs out of `.codescout/memories` (returned ok, `project.toml` unchanged: the 
 Those are pinned only where a test could fail if the guard were removed; the memory test is a pin of
 measured behaviour, not a test of this guard.
 
+**Second review round (2026-10-19):**
+
+- **R2-1 (reproduced; fixed `b6beb9353`).** The identity match did not follow a link whose target does not
+  exist: `project.toml -> ../a.toml` with no `a.toml`, then `create_file(a.toml, <profile=root>)` landed
+  (`canonicalize` fails on the leaf as on a missing file, the walk-up kept the link's own name). Red:
+  `the_missing_target_of_a_dangling_project_toml_link_is_guarded`,
+  `the_missing_target_of_a_chain_of_links_is_guarded` and the unit test `resolve_follows_dangling_links_and_stops_at_a_loop`.
+  `resolve` now reads the link at the first unresolvable component and continues, with a 40-hop limit.
+- **R2-3 (measured; fixed `db2faf3ec`).** `check_write` resolved the target once per registered root, on
+  every `atomic_write`. Before: 1.4 ms at 100 roots and 15.0 ms at 1000 (existing target), 2.7 / 26.9 ms
+  (new file). It now resolves once and compares per root by (device, inode) with one stat each. After:
+  0.22 / 2.65 ms and 0.23 / 2.25 ms. A hard link to a project's `project.toml` is now recognised too
+  (behaviour widened, not narrowed).
+- **R2-2** (the load error no longer quotes the file) and **R2-6** are recorded in the other issue.
+- Pre-existing, filed separately and not fixed:
+  `docs/issues/2026-10-19-the-config-loaders-read-a-linked-special-file-without-a-bound.md`.
+
 **Related, pre-existing, fixed on the same branch (review F6):** onboarding wrote an explicit `[security]`
 table of DEFAULTS into the `project.toml` it creates, which overrides a STRICTER global config for that
 project (red: with a global `shell_command_mode = "disabled"`, `indexing_enabled = false`, the created
@@ -203,8 +220,8 @@ the project's file where they shadow any later change to the global config; they
 - A human editing the file, and `onboarding` itself (it writes `project.toml` with `std::fs::write`), are
   unaffected by design.
 - Under `profile = "root"` the classifier already allows every write; the guard does not change that.
-- A hard link to `project.toml` created by a shell is not detected (identity compares resolved paths, not
-  inodes).
+- A hard link is recognised only when both files exist and share a device and inode; a hard link made after
+  the check is a race the guard does not close.
 - A project root that was loaded keeps its `project.toml` guarded for the life of the process; a project
   whose root is only ever reached through a path no loaded root resolves to is guarded by the name rule alone.
 
