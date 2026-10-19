@@ -19,6 +19,13 @@ impl MemoryProvider {
             return out;
         };
         for e in rd.flatten() {
+            // `DirEntry::file_type` does not follow a link: a leaf link, a dangling
+            // link and a directory named `x.md` are not memory topics, and listing
+            // them would advertise a resource that `read` refuses (it once served the
+            // link's target).
+            if !e.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
             let p = e.path();
             if p.extension().and_then(|s| s.to_str()) == Some("md") {
                 if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
@@ -48,6 +55,33 @@ impl MemoryProvider {
             .find(|(s, _)| s == stem)
             .map(|(_, p)| p)
     }
+
+    /// Read an allowlisted entry.
+    ///
+    /// The allowlist was built without following links, but an entry can be swapped
+    /// between that walk and this read, so the file type is checked again, as
+    /// `MemoryStore::read` does. A stem is NOT handed to `MemoryStore::read`:
+    /// `a.b.md` has stem `a.b`, which `topic_path` would map to `a.md`.
+    async fn read_path_checked(
+        &self,
+        uri: &str,
+        path: PathBuf,
+    ) -> Result<ResourceBytes, ResourceError> {
+        match tokio::fs::symlink_metadata(&path).await {
+            Ok(m) if m.file_type().is_file() => {}
+            Ok(_) => {
+                return Err(ResourceError::SourceUnavailable(
+                    uri.into(),
+                    format!("memory target must be a regular file: {}", path.display()),
+                ))
+            }
+            Err(e) => return Err(ResourceError::SourceUnavailable(uri.into(), e.to_string())),
+        }
+        let body = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| ResourceError::SourceUnavailable(uri.into(), e.to_string()))?;
+        Ok(ResourceBytes::Text(body))
+    }
 }
 
 #[async_trait::async_trait]
@@ -68,10 +102,7 @@ impl ResourceProvider for MemoryProvider {
         let path = self
             .lookup(uri)
             .ok_or_else(|| ResourceError::NotFound(uri.into()))?;
-        let body = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|e| ResourceError::SourceUnavailable(uri.into(), e.to_string()))?;
-        Ok(ResourceBytes::Text(body))
+        self.read_path_checked(uri, path).await
     }
 }
 
@@ -100,5 +131,63 @@ mod tests {
             ResourceBytes::Text(s) => assert_eq!(s, "hello memory"),
             _ => panic!("expected text"),
         }
+    }
+
+    /// `resources/list` and `resources/read` through the registry, the layer the MCP
+    /// handler delegates to. A topic that is a link to a secret was both listed and
+    /// served (`resources/read memory://arch` returned the target); a dangling link and
+    /// a directory named `x.md` were listed as resources nothing could read.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_registry_neither_lists_nor_serves_a_linked_or_non_file_topic() {
+        use crate::mcp_resources::ResourceRegistry;
+        let sandbox = tempfile::tempdir().unwrap();
+        let secret = sandbox.path().join("home/.ssh/id_rsa");
+        std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+        std::fs::write(&secret, "SECRET-MARKER").unwrap();
+        let dir = sandbox.path().join("memories");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ok.md"), "fine").unwrap();
+        std::os::unix::fs::symlink(&secret, dir.join("arch.md")).unwrap();
+        std::os::unix::fs::symlink(sandbox.path().join("nowhere"), dir.join("ghost.md")).unwrap();
+        std::fs::create_dir(dir.join("folder.md")).unwrap();
+
+        let mut rr = ResourceRegistry::new();
+        rr.try_register(Box::new(MemoryProvider::new(dir))).unwrap();
+
+        let uris: Vec<String> = rr.list().into_iter().map(|d| d.uri).collect();
+        assert_eq!(uris, vec!["memory://ok".to_string()]);
+        for uri in ["memory://arch", "memory://ghost", "memory://folder"] {
+            match rr.read(uri).await {
+                Err(_) => {}
+                Ok(ResourceBytes::Text(t)) => panic!("{uri} was served: {t:?}"),
+                Ok(_) => panic!("{uri} was served"),
+            }
+        }
+    }
+
+    /// The allowlist is built without following links, so the read must re-check: an
+    /// entry swapped for a link between `descriptors` and `read` is refused, not served.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn read_refuses_an_entry_swapped_for_a_link_after_it_was_listed() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let secret = sandbox.path().join("secret");
+        std::fs::write(&secret, "SECRET-MARKER").unwrap();
+        let dir = sandbox.path().join("memories");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("arch.md"), "fine").unwrap();
+        let p = MemoryProvider::new(dir.clone());
+        assert!(p.lookup("memory://arch").is_some());
+        std::fs::remove_file(dir.join("arch.md")).unwrap();
+        std::os::unix::fs::symlink(&secret, dir.join("arch.md")).unwrap();
+        // `lookup` rebuilds the allowlist, so exercise the read-time check directly.
+        let err = p
+            .read_path_checked("memory://arch", dir.join("arch.md"))
+            .await;
+        assert!(
+            matches!(err, Err(ResourceError::SourceUnavailable(..))),
+            "got {err:?}"
+        );
     }
 }

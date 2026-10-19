@@ -1264,6 +1264,41 @@ async fn write_private_goes_to_private_store() {
     assert_eq!(private, Some("verbose".to_string()));
 }
 
+/// F13 through the real dispatch: a memory topic that is a link to a secret must not be
+/// readable through `memory(action="read")`, shared or private, and the refusal must be a
+/// `RecoverableError` (so sibling parallel tool calls survive).
+#[cfg(unix)]
+#[tokio::test]
+async fn read_refuses_a_topic_that_is_a_symlink_to_a_secret() {
+    let (dir, ctx) = test_ctx_with_project().await;
+    let secret = dir.path().join("home/.ssh/id_rsa");
+    std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+    std::fs::write(&secret, "PRIVATE").unwrap();
+    for (private, sub) in [(false, "memories"), (true, "private-memories")] {
+        let store_dir = dir.path().join(".codescout").join(sub);
+        std::fs::create_dir_all(&store_dir).unwrap();
+        std::os::unix::fs::symlink(&secret, store_dir.join("arch.md")).unwrap();
+
+        let err = Memory
+            .call(
+                json!({"action": "read", "topic": "arch", "private": private}),
+                &ctx,
+            )
+            .await
+            .expect_err("a linked topic must not be served");
+
+        let rec = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap_or_else(|| panic!("private={private}: must be recoverable, got {err:#}"));
+        assert!(
+            rec.to_string()
+                .contains("memory target must be a regular file"),
+            "private={private}: got {rec}"
+        );
+        assert!(!format!("{err:#}").contains("PRIVATE"));
+    }
+}
+
 // ── shrink guard (CM-6) ─────────────────────────────────────────────────
 //
 // `write` replaces a topic wholesale. Writing two new sections to a

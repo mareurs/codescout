@@ -848,6 +848,52 @@ async fn project_status_includes_memory_staleness() {
         .contains(&json!("src/server.rs")));
 }
 
+/// Regression for the review of the leaf-link read fix: a linked anchor sidecar made
+/// `check_all_memories` fail and the status tool dropped the whole `memory_staleness`
+/// section, hiding every healthy stale topic.
+#[cfg(unix)]
+#[tokio::test]
+async fn project_status_keeps_memory_staleness_when_one_sidecar_is_a_link() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+    let ctx = ToolContext {
+        agent,
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    };
+    let memories_dir = dir.path().join(".codescout/memories");
+    std::fs::create_dir_all(&memories_dir).unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/b.rs"), "v1").unwrap();
+    std::fs::write(memories_dir.join("a.md"), "# a").unwrap();
+    std::fs::write(memories_dir.join("b.md"), "# b").unwrap();
+    std::fs::write(dir.path().join("secret.toml"), "x = 1\n").unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("secret.toml"),
+        memories_dir.join("a.anchors.toml"),
+    )
+    .unwrap();
+    let anchors = crate::memory::anchors::seed_anchors(dir.path(), "Uses `src/b.rs`.").unwrap();
+    crate::memory::anchors::write_anchor_file(&memories_dir.join("b.anchors.toml"), &anchors)
+        .unwrap();
+    std::fs::write(dir.path().join("src/b.rs"), "v2").unwrap();
+
+    let result = ProjectStatus.call(json!({}), &ctx).await.unwrap();
+
+    let staleness = &result["memory_staleness"];
+    assert!(staleness.is_object(), "the section must survive: {result}");
+    assert_eq!(staleness["stale"][0]["topic"], "b");
+    assert_eq!(staleness["unreadable"][0]["topic"], "a");
+}
+
 #[tokio::test]
 async fn activate_includes_cwd_hint() {
     let dir = tempdir().unwrap();

@@ -1970,10 +1970,15 @@ impl Agent {
                     memories.dedup();
                 }
                 let has_index = db_path.exists();
-                let system_prompt = if prompt_file.exists() {
-                    std::fs::read_to_string(&prompt_file).ok()
-                } else {
-                    default_prompt
+                let system_prompt = match std::fs::symlink_metadata(&prompt_file) {
+                    Ok(m) if m.file_type().is_file() => std::fs::read_to_string(&prompt_file).ok(),
+                    // A link or directory is never served: its text goes into the
+                    // `initialize` instructions. Treated as absent.
+                    Ok(_) => {
+                        tracing::warn!("{} is not a regular file; ignored", prompt_file.display());
+                        default_prompt
+                    }
+                    Err(_) => default_prompt,
                 };
                 let worktree = crate::prompts::detect_worktree_info(&project_root);
                 (memories, has_index, system_prompt, worktree)
@@ -3945,6 +3950,45 @@ mod tests {
         assert_eq!(status.system_prompt.as_deref(), Some("From file\n"));
     }
 
+    /// A cloned repository can ship `.codescout/system-prompt.md` as a link to a secret;
+    /// the file's text goes into the `initialize` instructions, i.e. into the model's
+    /// context. A link is skipped, never served, and the TOML `system_prompt` (or nothing)
+    /// is used instead, exactly as for an absent file.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn project_status_never_serves_a_system_prompt_symlink_target() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let secret = sandbox.path().join("home/.ssh/id_rsa");
+        std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+        std::fs::write(&secret, "SECRET-PROMPT-BYTES\n").unwrap();
+        for (toml_prompt, expected) in [
+            ("", None),
+            ("system_prompt = \"From TOML\"\n", Some("From TOML")),
+        ] {
+            let root = sandbox
+                .path()
+                .join(format!("project-{}", expected.is_some()));
+            let config_dir = root.join(".codescout");
+            std::fs::create_dir_all(&config_dir).unwrap();
+            std::fs::write(
+                config_dir.join("project.toml"),
+                format!("[project]\nname = \"test\"\n{toml_prompt}"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(&secret, config_dir.join("system-prompt.md")).unwrap();
+
+            let agent = Agent::new(None).await.unwrap();
+            agent.activate(root.clone(), None).await.unwrap();
+            let status = agent.project_status().await.unwrap();
+
+            assert_eq!(
+                status.system_prompt.as_deref(),
+                expected,
+                "a linked system-prompt.md must be treated as absent"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn project_not_explicitly_activated_without_project() {
         let agent = Agent::new(None).await.unwrap();
@@ -4165,6 +4209,33 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    /// F12 through the real entry point. A cloned repository whose `.gitignore` is a link
+    /// to a secret must not get the secret's bytes copied into a regular project file by
+    /// merely being activated. `home/` is a fixture directory under the temp root, so
+    /// nothing outside the sandbox is read or written.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn activation_never_copies_a_gitignore_symlink_target_into_the_project() {
+        let sandbox = tempdir().unwrap();
+        let secret = sandbox.path().join("home/.ssh/id_rsa");
+        std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
+        std::fs::write(&secret, "PRIVATE\n").unwrap();
+        let root = sandbox.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&secret, root.join(".gitignore")).unwrap();
+
+        let agent = Agent::new(Some(root.clone())).await.unwrap();
+        drop(agent);
+
+        let meta = std::fs::symlink_metadata(root.join(".gitignore")).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            ".gitignore was replaced by a regular file: {:?}",
+            std::fs::read_to_string(root.join(".gitignore"))
+        );
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "PRIVATE\n");
     }
 
     /// Regression test: after switch_focus to a sub-project, project_root() must
