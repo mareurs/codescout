@@ -22,15 +22,17 @@ the file.
 - SHIPPED: reader-first tracker prompts (`tracker_design` Step 2, deployment_state
   template, `> Standing instruction:` label) — helps only trackers with no
   render_template table.
-- SHIPPED (re-verified 2026-09-08, was "green-lit, not yet built" in the original
+- SHIPPED (re-verified 2026-10-19, was "green-lit, not yet built" in the original
   finding): server-computed provenance envelope keys `refreshed_at_commit`,
   `commits_behind_head`, `head_commit`. Live in `doc(action="get")`'s `provenance`
-  object — `src/librarian/tools/get.rs:502-507` ("Finding 7: server-computed
+  object — `src/librarian/tools/get.rs:554-559` ("Finding 7: server-computed
   provenance keys (unforgeable staleness signal)"), with `refreshed_at_commit`
   falling back from the augmentation's own field to the tracker's latest `reviewed`
-  event's commit (`get.rs:390-406`), and `commits_behind_head` derived from a git
-  topo-distance walk between that commit and HEAD (`get.rs:407-421`). Covered by
-  `src/librarian/tools/get.rs:2003-2014` and `:2060-2063`. Ship rationale unchanged:
+  event's commit (`get.rs:442-458`), and `commits_behind_head` derived from a git
+  topo-distance walk (`commits::topo_distance`) between that commit and HEAD
+  (`get.rs:459-470`). Covered by the tests `artifact_get_includes_provenance_keys` and
+  `artifact_get_stale_when_commits_behind_horizon` (same file; cite by test name — the
+  old `:2003-2014`/`:2060-2063` refs had drifted). Ship rationale unchanged:
   KEY-PRIORITY 6/6 across 2 models; CALIBRATE 9-10/10 at n=10 pinned Sonnet.
 - DO NOT build: a persona preamble (A-4), or a delegation line/`<codescout-guide>`
   envelope (A-7 Test 1 — a plain footer suffices single-turn).

@@ -3,7 +3,7 @@
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "1a8a55ec5330f5e84e3d036ba8add34c275fcb9a34385eea0cc5b9577df3bd61"
+hash = "f3ed3d1b56f16e11720fbe0da4d3cbc7e4c44462ec93048dc910a8f548e37f21"
 
 [[anchors]]
 path = "src/tools/progress.rs"
@@ -11,7 +11,7 @@ hash = "d8430752d7a990667cfef66e6008f67af497d91db88805026046650ad858379b"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "3290e16a45f220e7796714f3aa8140d522b93aa94f79e495f0b9e081ccb1364b"
+hash = "a04f9e9f31705dffc1fbbd0cc3ad85c5678c993e5a83c5b8e62ce58e7e531784"
 
 [[anchors]]
 path = "docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md"
@@ -19,7 +19,7 @@ hash = "43b019d243b2e9730a4de1e4a7587096f72eefba31f034a7f07260b90e0ebf60"
 
 [[anchors]]
 path = "docs/superpowers/specs/2026-08-18-guide-ledger-session-identity-design.md"
-hash = "6571dbfe0af84be2a5e80d40ecab215128e7096c3c4191859475f863c3f3d197"
+hash = "dc41b02a635c708debf3ab307c5b8106c0a1b37c2b872ff196b9083acdcfcab2"
 
 [[anchors]]
 path = "docs/issues/archive/2026-08-18-clear-leaves-mcp-session-id-stale.md"
@@ -31,4 +31,4 @@ hash = "d54a729e4da84d441bbedb021acb1587e0c05a017910ea24c1d225d5a9a7a648"
 
 [[anchors]]
 path = "src/tools/onboarding.rs"
-hash = "00e3ff7d346458bf999381681752735a5450dcd86bf2a9728b88d2b1c91fdaab"
+hash = "be2750f558a0052c91e8a141ae60514d2d447395d487272eaa80b8fa25c23042"

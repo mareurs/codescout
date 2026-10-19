@@ -2,7 +2,8 @@
 
 ## Module Structure (src/)
 
-Verified against the tree 2026-09-08. **`src/tools/` is grouped into subdirectories by
+Verified against the tree 2026-09-08 (the `tools/` flat-file list, `tools/core/`, `librarian/`,
+`librarian/tools/` and the top-level `src/` list re-checked 2026-10-19). **`src/tools/` is grouped into subdirectories by
 concern, not flat** — the earlier version of this section listed a flat layout in which 12 of
 17 paths no longer resolved.
 
@@ -15,7 +16,8 @@ src/
     mod.rs           — the module list; read this first, it is the authoritative index
     core/            — Tool trait, ToolContext (types.rs), OutputGuard (guards.rs),
                        RecoverableError, params.rs, path_strip.rs (PATH_KEYS/ROOT_KEYS
-                       allowlist walker), write_ack.rs
+                       allowlist walker), write_ack.rs, param_alias.rs,
+                       response_fit.rs, guide_emit.rs, cap_probe.rs
     symbol/          — symbols.rs, references.rs, edit_code.rs, symbol_at.rs,
                        call_graph/, call_edges/, list_overview.rs, display.rs
     semantic/        — semantic_search.rs, index.rs
@@ -29,7 +31,8 @@ src/
     guide.rs, guide_ledger.rs, library.rs, onboarding.rs (+ ONBOARDING_VERSION),
     probe.rs, peer.rs, rendezvous.rs, approve_write.rs, progress.rs,
     section_coverage.rs, command_summary.rs, edit_repair.rs, file_group.rs,
-    format.rs, session_key.rs
+    format.rs, session_key.rs, guide_rearm.rs, hint_probe.rs, param_probe.rs,
+    invocation_context.rs, libtest_compact.rs
 ```
 
 **Two files were DELETED and must not be re-added to the flat-file list above** (a prior
@@ -59,10 +62,13 @@ separate modules declared in `src/lib.rs` (`src/usage/` is the MCP-call-only usa
                        audit_doc_refs/, legibility_scan/, merge_worktree.rs,
                        tracker_design.rs, state_at.rs, workspace_state_at.rs, timeline.rs,
                        schema_validate.rs, constitution_check.rs, goal_aggregation.rs,
-                       worktree.rs, scope.rs, render.rs, temp_write_guard.rs
+                       worktree.rs, scope.rs, render.rs, temp_write_guard.rs, rekey_prefix.rs,
+                       doctor/ (scope.rs)
                        (also present, not previously listed: audit_log.rs, librarian.rs, status.rs)
     augmentation_sidecar.rs, classify.rs, filter.rs, freshness.rs, frontmatter.rs,
-    ids.rs, indexer.rs, statements.rs, workspace.rs, preview/, prompts/
+    ids.rs, indexer.rs, statements.rs, workspace.rs, preview/, prompts/,
+    read_door.rs (the read door: judges every file the librarian reads against the deny-list
+    and the door root), reindex_progress.rs, util.rs
   lsp/               — LSP client, mux, per-language servers, circuit breaker
   retrieval/         — vector backends, embedding config, reranker, transport
   prompts/           — source.md (TWO slices), builders.rs, source.rs (slice extractor),
@@ -71,7 +77,7 @@ separate modules declared in `src/lib.rs` (`src/usage/` is the MCP-call-only usa
   operator_rules/    — operator profiles + compiled-in rule ledger
   usage/             — usage.db recorder (MCP calls only — Bash work is invisible to it)
   ast/ symbol/ git/ fs/ config/ memory/ library/ legibility/ peer/ platform/
-  migrate/ dashboard/ mcp_resources/ util/ cli/ bin/
+  migrate/ dashboard/ mcp_resources/ util/ cli/ bin/ engines/ server/ (test-only)
 ```
 
 **Do not navigate from this listing — navigate with `symbols`.** A directory tree in prose
@@ -82,7 +88,7 @@ a path source.
 
 ## Tool Registry / Count
 
-`CodeScoutServer::from_parts_with_env` (`src/server.rs:312`) builds the tool list. **19 tools
+`CodeScoutServer::from_parts_with_env` (`src/server.rs:379`) builds the tool list. **19 tools
 are always registered** (`ReadFile`, `Tree`, `Grep`, `CreateFile`, `EditFile`, `RunCommand`,
 `Onboarding`, `ApproveWrite`, `Symbols`, `References`, `SymbolAt`, `CallGraph`, `EditCode`,
 `Memory`, `SemanticSearch`, `Index`, `Workspace`, `Library`, `GetGuide`), plus **`doc` and
@@ -90,14 +96,14 @@ are always registered** (`ReadFile`, `Tree`, `Grep`, `CreateFile`, `EditFile`, `
 compiled in (default) and enabled at runtime — bringing the default advertised surface to
 **21 tools**. Two more are runtime-conditional and NOT part of the baseline count: `peer`
 (Unix-only, opt-in via `CODESCOUT_PEER_ENABLED`) and the debug-only `__probe_description_cap__`
-(`CODESCOUT_PROBE=1`). Verified 2026-09-08 against `src/server.rs:312-380`.
+(`CODESCOUT_PROBE=1`). Re-verified 2026-10-19 against `src/server.rs:379-597` (the 19-entry `vec!`, then the `peer`, probe and librarian additions).
 
 A 2026-09-02 "tool-surface collapse" retired several call forms that must never reappear in a
 prompt surface: `find_symbol`, `list_symbols`, `replace_symbol`, `insert_code`, `rename_symbol`,
 `search_pattern`, `read_markdown`, `edit_markdown`, `artifact_augment`, `artifact_event`,
 `artifact_refresh`, and the tool name `artifact` **when written as a call form with an opening
 paren** — the bare noun is still correct prose, which is why the canonical list carries that one
-entry with its paren attached. Canonical list: `DEPRECATED_TOOL_NAMES`, `src/prompts/mod.rs:1949`.
+entry with its paren attached. Canonical list: `DEPRECATED_TOOL_NAMES`, `src/prompts/mod.rs:2322`.
 
 Do not "improve" the sentence above by writing the paren form literally. `reader_docs_contain_no_retired_call_forms`
 scans `.codescout/` and cannot tell a mention from an invocation claim, so naming the retired
@@ -106,14 +112,14 @@ form exactly is what trips it — writing it without the paren is the documented
 ## Key Abstractions
 
 - **`CodeScoutServer`** (`server.rs`) — MCP `ServerHandler` impl; owns the tool registry;
-  all `CallToolRequest`s flow through `call_tool_inner()` (`src/server.rs:1055`)
-- **`Tool` trait** (`tools/core/types.rs:770`) **+ `ToolContext`** (`tools/core/types.rs:59`) —
+  all `CallToolRequest`s flow through `call_tool_inner()` (`src/server.rs:1349`)
+- **`Tool` trait** (`tools/core/types.rs:1368`) **+ `ToolContext`** (`tools/core/types.rs:293`) —
   every tool implements `call()`; `call_content()` is the MCP entry point (handles output
   buffer routing, and — since the 2026-08-09 field-aware-path-strip work — the
   `PATH_KEYS`/`ROOT_KEYS` allowlist walk over the typed `Value`, strictly before
   buffering/formatting)
 - **`Agent` / `ActiveProject`** (`agent/mod.rs`) — project state (config, memory, write lock);
-  tools access it via `with_project(|p| ...)` (`agent/mod.rs:1169`); `with_project_at` /
+  tools access it via `with_project(|p| ...)` (`agent/mod.rs:1541`); `with_project_at` /
   `with_project_at_mut` are the workspace-override variants
 - **`OutputGuard`** (`tools/output.rs`) — enforces two-mode progressive disclosure:
   Exploring (compact, capped at 200 items) / Focused (full detail, paginated)
@@ -125,7 +131,7 @@ form exactly is what trips it — writing it without the paren is the documented
 ## Data Flow: MCP Tool Call
 
 1. `ServerHandler::call_tool()` receives `CallToolRequest`
-2. `call_tool_inner()` (`src/server.rs:1055`) resolves tool by name, checks access, parses JSON
+2. `call_tool_inner()` (`src/server.rs:1349`) resolves tool by name, checks access, parses JSON
 3. Builds `ToolContext` (Agent, LspManager, output buffer, progress reporter)
 4. Acquires write guard if mutating
 5. Calls `tool.call_content()` → `tool.call()`, then the `PATH_KEYS`/`ROOT_KEYS` allowlist

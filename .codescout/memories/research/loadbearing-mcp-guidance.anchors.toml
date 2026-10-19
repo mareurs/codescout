@@ -7,12 +7,12 @@ hash = "8ba97c10171fae3ee7657cb9f025e68edc214025e6327a0558ef8f6440090e07"
 
 [[anchors]]
 path = "docs/trackers/prompt-hamsa-audit-log.md"
-hash = "e855b173de63358dbf1e81d88c0ed4e0415a5d9950f42e7b9e750c89cfd606e6"
+hash = "5e111ebcdbe0114a06d97fae03528da1d72e7dc502e5c7ef9b24d745bdb521de"
 
 [[anchors]]
 path = "src/librarian/tools/get.rs"
-hash = "1d6cc1188d10d859ed4728dba20b6c1b77fc402572dac0abb20c97195707e91b"
+hash = "90c7655d5b6389c883774a26c4802a5a92f1d64ca4e2e486abc929b0843b559e"
 
 [[anchors]]
 path = "src/tools/core/types.rs"
-hash = "ceca7ab9d4e487f31ea8f6a81cbe8c75504e662bde86915eff910a9d61979ad1"
+hash = "63144f589b38b4fa3e39be0a9a6cedeff0cfb3ae2417b2bd58f1a4b51b95dcaf"

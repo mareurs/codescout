@@ -1,3 +1,4 @@
+
 # Worktree merge → catalog reconciliation
 
 > **UPDATE 2026-07-17 — a first-class overlay flow is built on `experiments`
@@ -76,7 +77,7 @@ incompatibility is exactly the swapped field. `fable-tuning-findings`
 
 **The escape is one atomic call, and it is a designed affordance rather than a
 bypass.** `validate_merged_against_schema` (`src/librarian/tools/augment.rs:36-52`,
-called at `:370`, comment-tagged `F-5`) validates merged params against *the schema
+called at `:397`, comment-tagged `F-5`) validates merged params against *the schema
 this call supplies*. So a single `doc(action="augment", merge=true, …)` carrying params and
 `params_schema` together is fully validated against the target schema — not slipped
 past a guard. The three-call alternative (permissive schema → params → real schema)
@@ -103,23 +104,29 @@ comment-tagged `F-5` at its call site.
   allocation from a *worktree* (`src/librarian/tools/append_entry.rs`, `is_main_checkout_artifact`
   guard) on exactly these grounds, but that check alone cannot see a second clone. Measured:
   desktop `entry_high_water_R: 146`, laptop `147` unpushed, and both desktop allocator
-  inputs resolved to 147. **Mitigated 2026-09-02** (not fully fixed — status is
-  `mitigated`, tags `cluster/shared-resource-carries-no-owner`): `append_entry` now also
-  refuses when the target ledger has unpushed commits on its own branch
-  (`ledger_has_unpushed_commits`, guarded in `append_entry.rs`'s `call`), converting an
-  invisible cross-host divergence into a pushed one before allocating. **Three gaps remain,
-  named in the bug file's own `unverified` field, not closed by this mitigation:**
-  (1) it only catches the direction where *this* host is ahead — a peer who allocates and
-  pushes while this host hasn't fetched yet still collides undetected, since
-  `@{upstream}` is stale until fetched and an unpushed peer commit is unreachable by any
-  local check; (2) it covers prose ledgers only — a params ledger's committed index-table
+  inputs resolved to 147. **Status `mitigated`, not fixed** (tags
+  `cluster/shared-resource-carries-no-owner`). A 2026-09-02 mitigation made `append_entry`
+  refuse when the target ledger had unpushed commits on its own branch; **that refusal was
+  REMOVED 2026-09-11** (its only remedy, "push this ledger's commits", is an action no session
+  may perform unasked, and it never prevented the collision — it only converted an invisible
+  divergence into a pushed one). `append_entry` now ALLOCATES OPTIMISTICALLY — pinned by
+  `allocation_succeeds_while_the_ledger_has_unpushed_commits` (`append_entry.rs` tests). The
+  collision is now caught at `pre-push`, on the merge commit that resolves a rejected push (the
+  ENTRY-ID COLLISION SCAN in `scripts/pre-push-foreign-session-guard.sh`), not at allocate time.
+  Fix record: `docs/issues/archive/2026-09-10-append-entry-refuses-on-unpushed-commits-with-a-remedy-no-session-may-perform.md`.
+  **Gaps named in the original bug file's own `unverified` field** (written while the allocate-time
+  refusal still existed; only (1)'s wording changes now): (1) a peer who allocates and pushes
+  while this host has not fetched collides undetected until the push-time scan, since
+  `@{upstream}` is stale until fetched and an unpushed peer commit is unreachable by any local
+  check; (2) it covers prose ledgers only — a params ledger's committed index-table
   rows (`body_claimed_indices`, `catalog/augmentation.rs`) collide the same way with no
   guard in front of the params allocation path; (3) the sibling detector
-  (`entry_defined_twice`) has a 0-for-0 real-world track record — validated only against
-  fixtures, never yet caught a genuine collision. Bug file (archived, not deleted):
+  (`entry_defined_twice`, `scan_entry_defined_twice` in `tools/doctor.rs`) has a 0-for-0
+  real-world track record — validated only against fixtures, never yet caught a genuine
+  collision. Bug file (archived, not deleted):
   `docs/issues/archive/2026-08-31-append-entry-high-water-mark-collides-across-hosts.md`.
   It moved to `archive/` on `status: mitigated`, and `mitigated` is not `fixed` — treat the
-  three gaps above as still open work, not documentation debt.
+  gaps above as still open work, not documentation debt.
 
 **Establish sync direction empirically, never by heuristic.** "Longer field = newer"
 was wrong on 5 of 9 `render_template`s — the other host had *condensed* them. What
@@ -158,6 +165,17 @@ merge, run `librarian(action="doctor", fix="repair_frontmatter_id")` as a dry ru
 mismatch under the root, so check that the list holds only your files. Then apply with `confirm=true`
 and commit the one-line `id:` changes. A catalog row can also stay behind its file
 (`row_behind_file`): `librarian(action="reindex")` reconciles it.
+
+## `merge_worktree` and the read door
+
+The root-membership query that selects a worktree's rows is an EXACT comparison
+(`path_at_or_under_sql` / `root_and_prefix`, `src/librarian/util.rs`), not `LIKE`, so
+`.worktrees/feat_1` no longer selects the rows of `.worktrees/FEAT_1` (see `catalog-sql-hazards`).
+In `merge_one`, a MAIN row the read door cleared (`read_door::cleared_by_the_read_door`; its file
+resolves outside the repository) skips the frontmatter three-way (step 6): the field list is empty,
+so neither the fork's recorded `base_frontmatter` nor the shadow's copy is printed in `conflicts`,
+written into the `worktree_merge` event, or applied to the main row. The `worktree_fork` event itself
+is immutable and keeps the base.
 
 ## `git checkout <rev> -- <path>` is not a staging command to the stage recorder
 

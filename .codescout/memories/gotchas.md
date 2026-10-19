@@ -331,8 +331,9 @@ the real proof.
 
 **No longer true; verified 2026-09-03.** `doc(action="create", augment={...})` accepts the
 full augmentation shape, `entry_collection` included — `src/librarian/tools/create.rs:55`
-declares the field, `:440` propagates it into the written row, and `:790` pins it
-(`aug.entry_collection == Some("rows")`). The tool description now states the property
+declares the field, `:494` propagates it into the written row, and the test
+`create_augment_accepts_the_full_augmentation_shape` (`:1156`) pins it
+(`aug.entry_collection.as_deref() == Some("rows")`). The tool description now states the property
 directly: *"attach the augmentation atomically, so a tracker needs no follow-up call."*
 
 **What it was, recorded because the CLASS outlived the instance.** The `augment` shortcut on
@@ -396,8 +397,9 @@ and `force = false` is a fallback rather than a lock — an explicit
 fails. User-level config, outside every repo, so nothing ships to contributors.
 
 **It is deliberately NOT in the repo's `.cargo/config.toml`.** That file is
-tracked and carries the `cargo rb` alias CLAUDE.md names as the live-MCP build
-command, plus `sccache` and the mold linker, and is referenced by
+tracked and carries the `cargo rb` alias (the live-MCP build; CLAUDE.md now names
+`./scripts/rb.sh`, a wrapper that refuses a HEAD behind origin and then runs `cargo rb`),
+plus `sccache` and the mold linker, and is referenced by
 `.github/workflows/ci.yml` and `scripts/build-windows.sh`. Gitignoring it would
 require untracking it, which deletes all of that from every other checkout and
 from CI. Cargo's `include = [...]` is not an escape either — **a missing include
@@ -531,8 +533,9 @@ added to `permissions.deny` in `settings.json` for all three profiles (`~/.claud
 harness-level and unconditional: it sits upstream of, and independent from,
 codescout-companion's `pre-tool-guard.mjs`, whose advisory-then-stand-down
 behaviour no longer decides anything here. Verdict and its location:
-`docs/trackers/shell-gating-session-log.md` § *Promotion status*; `CLAUDE.md`
-§ *Companion Plugin* now states the same in place of its "in flight" paragraph.
+`docs/trackers/shell-gating-session-log.md` § *Promotion status*; the hook inventory in
+`docs/architecture/companion-plugin.md` states the same (CLAUDE.md § *Companion Plugin* now only
+points there).
 
 **One datum from the evaluation is kept, because without it the verdict invites
 re-litigation:** eval data had shown Opus performing *better* with native `Bash`
