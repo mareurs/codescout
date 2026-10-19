@@ -508,6 +508,20 @@ pub(super) async fn displaced_default_notice(
     ctx.agent.displaced_default_notice(caller.as_deref()).await
 }
 
+/// The notice that this call's project failed to load its last `project.toml` edit, riding
+/// the same `_workspace_notice` channel as the two above. Unlike them it is NOT one-shot and
+/// NOT suppressed by a pin: it describes the policy this very call ran under, which a
+/// pinned caller needs to know as much as an unpinned one, and it holds until a reload
+/// succeeds because the stamp has already advanced past the broken file.
+///
+/// docs/issues/2026-10-17-an-invalid-project-toml-reload-is-ignored-silently-so-a-tightening-saved-with-it-never-applies.md
+pub(crate) async fn config_load_notice(ctx: &ToolContext) -> Option<String> {
+    ctx.agent
+        .config_load_error_for(ctx.workspace_override.as_deref())
+        .await
+        .map(|e| crate::config::project::failed_reload_notice(&e))
+}
+
 /// Both notices ride the one `_workspace_notice` channel; a call that earns both
 /// carries both, in that order, rather than the second silently losing.
 fn join_notices(a: Option<String>, b: Option<String>) -> Option<String> {
@@ -791,8 +805,71 @@ pub(crate) fn attach_param_corrections_to_error(
         Err(e) => AdvisedError {
             inner: e,
             corrections: c.clone(),
+            notice: None,
         }
         .into(),
+    }
+}
+
+/// The key a workspace notice is spliced under in an object-shaped response body, success or
+/// error: the same address `call_content`'s success path writes (`inject_notice`).
+pub(crate) const WORKSPACE_NOTICE_KEY: &str = "_workspace_notice";
+
+/// Put a workspace notice on a ready-made response (`Vec<Content>`) a tool built itself, for the
+/// tools that override `call_content` (`onboarding`) and so never reach `call_content`'s own
+/// `inject_notice`. An object-shaped first block gets the `_workspace_notice` field; a text one is
+/// prefixed with `⚠ {notice}` like `inject_notice` does to a `stdout`.
+pub(crate) fn attach_workspace_notice_to_content(out: &mut [Content], notice: &str) {
+    let Some(first) = out.first_mut() else { return };
+    let Some(text) = first.as_text().map(|t| t.text.clone()) else {
+        return;
+    };
+    let rendered = match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Object(mut obj)) => {
+            obj.insert(
+                WORKSPACE_NOTICE_KEY.to_string(),
+                Value::String(notice.to_string()),
+            );
+            serde_json::to_string_pretty(&Value::Object(obj)).unwrap_or(text)
+        }
+        _ => format!("⚠ {notice}\n\n{text}"),
+    };
+    *first = Content::text(rendered);
+}
+
+/// Attach the config-load notice to a tool's `Err`, the error-path twin of the success path's
+/// `inject_notice`. The notice is documented as riding every response, and the error path used
+/// to return before it was built (a missing file, a refused write: all showed none).
+///
+/// Same two carriers as [`attach_param_corrections_to_error`], for the same reason: a
+/// [`RecoverableError`] has an `extra` map the router splices into the body, and a plain
+/// `anyhow` error has nowhere to put a field, so it is wrapped in an [`AdvisedError`] whose
+/// `Display`/`Debug`/`source()` still delegate to the inner error unchanged. An error that
+/// already is an `AdvisedError` (it carried a param-alias advisory) keeps that and gains the
+/// notice. `None` leaves the error untouched.
+pub(crate) fn attach_workspace_notice_to_error(
+    e: anyhow::Error,
+    notice: Option<String>,
+) -> anyhow::Error {
+    let Some(notice) = notice else { return e };
+    match e.downcast::<RecoverableError>() {
+        Ok(mut rec) => {
+            rec.extra
+                .insert(WORKSPACE_NOTICE_KEY.to_string(), Value::String(notice));
+            rec.into()
+        }
+        Err(e) => match e.downcast::<AdvisedError>() {
+            Ok(mut advised) => {
+                advised.notice = Some(notice);
+                advised.into()
+            }
+            Err(e) => AdvisedError {
+                inner: e,
+                corrections: Value::Null,
+                notice: Some(notice),
+            }
+            .into(),
+        },
     }
 }
 
@@ -1044,7 +1121,12 @@ impl std::error::Error for RecoverableError {}
 /// walks it).
 pub(crate) struct AdvisedError {
     pub(crate) inner: anyhow::Error,
+    /// The param-alias advisory, or `Value::Null` when this wrapper exists only to carry
+    /// `notice`.
     pub(crate) corrections: Value,
+    /// A workspace notice (the failed-reload one) for the response this error becomes. See
+    /// [`attach_workspace_notice_to_error`].
+    pub(crate) notice: Option<String>,
 }
 
 impl std::fmt::Display for AdvisedError {
@@ -1738,18 +1820,20 @@ pub trait Tool: Send + Sync {
                 )
             };
             if !held.is_empty() {
-                let mut out = vec![Content::text(
-                    serde_json::json!({
-                        "executed": false,
-                        "tool": self.name(),
-                        "action": selector,
-                        "reason": "First call of this destructive shape this session. It was \
-                                   NOT run; the guide section that applies to it follows. Read \
-                                   it, then re-issue the identical call to proceed — it will \
-                                   run, and the section will not be served again.",
-                    })
-                    .to_string(),
-                )];
+                let mut held_body = serde_json::json!({
+                    "executed": false,
+                    "tool": self.name(),
+                    "action": selector,
+                    "reason": "First call of this destructive shape this session. It was \
+                               NOT run; the guide section that applies to it follows. Read \
+                               it, then re-issue the identical call to proceed — it will \
+                               run, and the section will not be served again.",
+                });
+                // A held call is a response like any other: the failed-reload notice rides it.
+                if let Some(notice) = config_load_notice(ctx).await {
+                    held_body[WORKSPACE_NOTICE_KEY] = Value::String(notice);
+                }
+                let mut out = vec![Content::text(held_body.to_string())];
                 out.extend(held);
                 return Ok(out);
             }
@@ -1762,10 +1846,12 @@ pub trait Tool: Send + Sync {
         let mut val = match self.call(input, ctx).await {
             Ok(v) => v,
             Err(e) => {
-                return Err(attach_param_corrections_to_error(
+                let e = attach_param_corrections_to_error(e, param_corrections.as_ref());
+                // The config-load notice is owed to every response, this one included.
+                return Err(attach_workspace_notice_to_error(
                     e,
-                    param_corrections.as_ref(),
-                ))
+                    config_load_notice(ctx).await,
+                ));
             }
         };
 
@@ -1790,8 +1876,11 @@ pub trait Tool: Send + Sync {
         // a block has actually carried it.
         let displaced = displaced_default_notice(ctx).await;
         let workspace_notice = join_notices(
-            worktree_read_notice(ctx, project_root.as_deref()).await,
-            displaced.as_ref().map(|d| d.text.clone()),
+            config_load_notice(ctx).await,
+            join_notices(
+                worktree_read_notice(ctx, project_root.as_deref()).await,
+                displaced.as_ref().map(|d| d.text.clone()),
+            ),
         );
         // Whether the notice rode a block of this response. Every render path below sets
         // it, or fills `notice_block` (a result with no object to hold a field).

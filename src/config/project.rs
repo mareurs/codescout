@@ -4,22 +4,25 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// Owed by every refusal whose remedy is an edit to `.codescout/project.toml`.
+/// Owed by every refusal whose remedy is an edit to a `[security]` key of
+/// `.codescout/project.toml`.
 ///
-/// The config is loaded when a project becomes resident and cached for the life of the
-/// process; only codescout's own write tools re-read it, via
-/// `Agent::reload_config_if_project_toml_for`. So "edit the config and retry" is silently
-/// inert for an edit made in an editor, by `Bash`, or by any other process — the call
-/// re-runs and prints the byte-identical refusal, which reads as the remedy not having
-/// been performed. See
-/// `docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`.
+/// Two facts the remedy has to carry. The file is read again when it changes
+/// (`ActiveProject::config_is_stale`), so an edit made in an editor reaches the next tool
+/// call; this used to say the config was cached for the life of the process, which stopped
+/// being true on 2026-09-14
+/// (`docs/issues/archive/2026-09-14-an-out-of-band-project-toml-edit-never-invalidates-the-cached-config.md`).
+/// And codescout's own write tools REFUSE an edit to `[security]`
+/// (`config::protected_files`): the remedy this text used to prescribe, `edit_file`, is now a
+/// refused action for exactly the keys these refusals are about, so naming it would send the
+/// reader to a call that fails. The step that is theirs to take is an editor.
 ///
-/// **The `file_write_enabled` refusal must NOT use this** — it needs a stricter remedy,
-/// because the `edit_file` escape offered here is unreachable exactly when writes are the
-/// thing turned off. That message names the restart alone, in `util::path_security`.
-pub const CONFIG_IS_CACHED_REMEDY: &str = "That file is cached for the life of this process: \
-     make the edit with codescout's own edit_file, which reloads the config — or edit it any \
-     other way and restart the MCP server (`/mcp`).";
+/// **The `file_write_enabled` refusal does not use this** — it has its own text in
+/// `util::path_security`.
+pub const CONFIG_IS_CACHED_REMEDY: &str = "That file is read again when it changes, but \
+     codescout's own write tools cannot edit its [security] section (a session that could would \
+     be able to raise its own privileges): edit it yourself in an editor, or ask the user to. \
+     The next tool call picks the edit up; restarting the MCP server (`/mcp`) always does.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -336,6 +339,239 @@ impl SecuritySection {
     }
 }
 
+/// Strictness of the `shell_command_mode` values the dispatcher knows
+/// (`run_command_inner`): higher is stricter. `None` for any other string, which that
+/// dispatcher refuses outright.
+fn shell_mode_rank(mode: &str) -> Option<u8> {
+    match mode {
+        "unrestricted" => Some(0),
+        "warn" => Some(1),
+        "disabled" => Some(2),
+        _ => None,
+    }
+}
+
+/// What the GLOBAL config says about the three keys a project's absence inherits from it, as
+/// read for a failed project reload. `Unreadable` is its own state, not `Absent`: a global
+/// config that cannot be read cannot be shown to be permissive.
+pub(crate) enum GlobalSecurity {
+    Absent,
+    Set(crate::config::global::GlobalSecuritySection),
+    Unreadable,
+}
+
+impl GlobalSecurity {
+    /// Read the global config on its own, apart from the project file that failed.
+    pub(crate) fn load() -> Self {
+        match crate::config::global::GlobalConfig::load() {
+            Ok(Some(g)) => Self::Set(g.security),
+            Ok(None) => Self::Absent,
+            Err(_) => Self::Unreadable,
+        }
+    }
+}
+
+/// `*field` after a failed reload, for a boolean that is `true` when the gate is OPEN. The
+/// value the file means: its own when set (a non-boolean cannot be read as open, so counts as
+/// closed); else the global config's, else the built-in default (open); a global config that
+/// cannot be read counts as closed. The gate becomes the stricter of that and what it was.
+fn tighten_gate(
+    field: &mut bool,
+    raw: Option<&toml::Value>,
+    global: &GlobalSecurity,
+    from_global: fn(&crate::config::global::GlobalSecuritySection) -> Option<bool>,
+) {
+    let wanted = match raw {
+        Some(toml::Value::Boolean(open)) => *open,
+        Some(_) => false,
+        None => match global {
+            GlobalSecurity::Absent => true,
+            GlobalSecurity::Set(g) => from_global(g).unwrap_or(true),
+            GlobalSecurity::Unreadable => false,
+        },
+    };
+    *field = *field && wanted;
+}
+
+impl SecuritySection {
+    /// The security policy while `project.toml` FAILS TO LOAD: the stricter of the previous
+    /// policy and what the file says, never the previous policy alone.
+    ///
+    /// Keeping the last good config whole (the earlier behaviour) is looser than the file in
+    /// exactly the case that matters: a tightening saved in the same edit as an entry the
+    /// loader refuses never took effect, and nothing said so. A value is read from `file`
+    /// only to TIGHTEN, so a failed reload can never loosen anything:
+    ///
+    /// - `file_write_enabled`, `indexing_enabled`: `false` closes the gate; a value that is
+    ///   not a boolean closes it too. **Absent means what the file would mean without the
+    ///   invalid entry**: the global config's value if it sets one, else the built-in
+    ///   default, and a global config that cannot be read counts as the strictest value.
+    ///   The gate becomes the stricter of that and what it was (so deleting a looser key in
+    ///   the same save does not keep it).
+    /// - `shell_command_mode`: the same rule; a string that is not a known mode, or a
+    ///   non-string, counts as `disabled`.
+    /// - `profile` and `extra_write_roots` are confirmed or dropped: `Root` stays only if
+    ///   the file still says `profile = "root"`, and a write root stays only if the file
+    ///   still lists that exact entry. Absent or unreadable confirms nothing, because for
+    ///   these two keys absent means the default (sandboxed, no extra roots) and the global
+    ///   config cannot set either. A root the file ADDED is not adopted.
+    ///
+    /// `file` is `None` when the file could not be read as TOML at all (syntax error,
+    /// unreadable, over the size cap). Nothing in it can then be confirmed, so it is treated
+    /// as an empty file AND file writes are disabled: the one gate whose silent survival
+    /// the user cannot see.
+    ///
+    /// Not covered, by design: `shell_dangerous_patterns` added by the file and a lowered
+    /// `max_index_bytes`. (A tightening that only the global config carries is covered, via
+    /// `global`.)
+    pub(crate) fn tighten_for_unloadable_file(
+        &mut self,
+        file: Option<&toml::Table>,
+        global: &GlobalSecurity,
+    ) {
+        let empty = toml::Table::new();
+        if file.is_none() {
+            self.file_write_enabled = false;
+        }
+        let security = file
+            .and_then(|f| f.get("security"))
+            .and_then(toml::Value::as_table)
+            .unwrap_or(&empty);
+
+        tighten_gate(
+            &mut self.file_write_enabled,
+            security.get("file_write_enabled"),
+            global,
+            |g| g.file_write_enabled,
+        );
+        tighten_gate(
+            &mut self.indexing_enabled,
+            security.get("indexing_enabled"),
+            global,
+            |g| g.indexing_enabled,
+        );
+
+        // The mode the file means, as a rank: its own when set (anything unknown or not a
+        // string is the strictest), else the global config's, else the default `warn`; an
+        // unreadable global config is the strictest. A stricter rank replaces the current one.
+        let wanted_rank = match security.get("shell_command_mode") {
+            Some(toml::Value::String(wanted)) => shell_mode_rank(wanted).unwrap_or(2),
+            Some(_) => 2,
+            None => match global {
+                GlobalSecurity::Absent => 1,
+                GlobalSecurity::Set(g) => g
+                    .shell_command_mode
+                    .as_deref()
+                    .map_or(1, |m| shell_mode_rank(m).unwrap_or(2)),
+                GlobalSecurity::Unreadable => 2,
+            },
+        };
+        let current_rank = shell_mode_rank(&self.shell_command_mode).unwrap_or(2);
+        if wanted_rank > current_rank {
+            self.shell_command_mode = match wanted_rank {
+                1 => "warn",
+                _ => "disabled",
+            }
+            .into();
+        }
+
+        let still_root = matches!(
+            security.get("profile"),
+            Some(toml::Value::String(p)) if p == "root"
+        );
+        if !still_root {
+            self.profile = crate::util::path_security::SecurityProfile::Default;
+        }
+
+        match security.get("extra_write_roots") {
+            Some(toml::Value::Array(listed)) => self
+                .extra_write_roots
+                .retain(|root| listed.iter().any(|v| v.as_str() == Some(root.as_str()))),
+            _ => self.extra_write_roots.clear(),
+        }
+    }
+}
+
+impl ProjectConfig {
+    /// `project.toml` as a bare TOML table, for the failed-reload salvage in
+    /// [`SecuritySection::tighten_for_unloadable_file`]. A missing file is an empty table;
+    /// `None` is a file that exists but cannot be read, is over the same 1 MiB cap the
+    /// loader enforces, or is not TOML.
+    pub(crate) fn read_project_toml_table(root: &Path) -> Option<toml::Table> {
+        let path = root.join(".codescout").join("project.toml");
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(toml::Table::new()),
+            Err(_) => return None,
+        };
+        if metadata.len() > 1024 * 1024 {
+            return None;
+        }
+        toml::from_str(&std::fs::read_to_string(&path).ok()?).ok()
+    }
+}
+
+/// A toml error as message, line and column, **never the source excerpt**.
+///
+/// `toml::de::Error`'s `Display` prints the offending source line. `project.toml` can be a link
+/// to any readable file, so that line can be a secret from a file the read deny-list protects
+/// (`~/.pgpass`), and the error reaches the caller (the failed-reload notice, the activation
+/// refusal, the log). `text` is the file's content, for the line number; pass `None` when the
+/// error comes from deserialising an already-parsed value (it has no span). Quoted values in the
+/// message (`invalid type: string "..."`, `unknown variant `...``) are redacted by
+/// [`redact_values`].
+pub(crate) fn describe_toml_error(text: Option<&str>, e: &toml::de::Error) -> String {
+    let message = redact_values(e.message());
+    match (text, e.span()) {
+        (Some(text), Some(span)) if span.start <= text.len() => {
+            let before = &text.as_bytes()[..span.start];
+            let line = before.iter().filter(|b| **b == b'\n').count() + 1;
+            let col = before.iter().rev().take_while(|b| **b != b'\n').count() + 1;
+            format!("{message} (line {line}, column {col})")
+        }
+        _ => message,
+    }
+}
+
+/// Replace what a serde/toml message quotes from the INPUT with `…`: every double-quoted
+/// segment, and the backticked name after `unknown variant` / `unknown field` (the other
+/// backticked names are our own field names and stay: `missing field `project``).
+fn redact_values(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut rest = message;
+    while let Some(i) = rest.find(['"', '`']) {
+        let quote = rest.as_bytes()[i] as char;
+        let (head, tail) = rest.split_at(i + 1);
+        out.push_str(head);
+        let Some(end) = tail.find(quote) else {
+            out.push_str(tail);
+            return out;
+        };
+        let redact = quote == '"'
+            || head.trim_end_matches('`').ends_with("unknown variant ")
+            || head.trim_end_matches('`').ends_with("unknown field ");
+        out.push_str(if redact { "…" } else { &tail[..end] });
+        out.push(quote);
+        rest = &tail[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// What every response says while `project.toml` fails to load. See
+/// `ActiveProject::config_load_error`; the error text is the loader's own, which names the
+/// entry.
+pub fn failed_reload_notice(error: &str) -> String {
+    format!(
+        "`.codescout/project.toml` FAILED TO LOAD, so none of your last edit is applied: \
+         {error}. The previous settings stay in force; from the file only a security \
+         TIGHTENING is applied (file_write_enabled/indexing_enabled = false, a stricter \
+         shell_command_mode, profile other than \"root\", fewer extra_write_roots), and a \
+         file that is not valid TOML disables file writes. Fix the file in an editor; the \
+         next save is re-read."
+    )
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySection {
     /// Min drift score to trigger reverse-drift staleness flag (0.0-1.0)
@@ -626,6 +862,10 @@ impl ProjectConfig {
     /// Inner implementation — accepts an already-resolved global base so tests can
     /// inject it directly without touching environment variables.
     pub(crate) fn load_with_global_base(root: &Path, global_base: toml::Value) -> Result<Self> {
+        // Every project's config goes through here, so a project cannot become resident
+        // without its root reaching the write guard's identity check. Registering is
+        // widening-only: see `protected_files::PROJECT_ROOTS`.
+        crate::config::protected_files::register_project_root(root);
         let config_path = root.join(".codescout").join("project.toml");
 
         let project_overlay: toml::Value = if config_path.exists() {
@@ -637,7 +877,13 @@ impl ProjectConfig {
                 );
             }
             let text = std::fs::read_to_string(&config_path)?;
-            toml::from_str(&text).with_context(|| format!("parsing {}", config_path.display()))?
+            toml::from_str(&text).map_err(|e| {
+                anyhow::anyhow!(
+                    "parsing {}: {}",
+                    config_path.display(),
+                    describe_toml_error(Some(&text), &e)
+                )
+            })?
         } else {
             let name = root
                 .file_name()
@@ -652,7 +898,13 @@ impl ProjectConfig {
         };
 
         let merged = merge_toml(global_base, project_overlay);
-        let config: Self = toml::Value::try_into(merged)?;
+        let config: Self = toml::Value::try_into(merged).map_err(|e| {
+            anyhow::anyhow!(
+                "invalid configuration for {}: {}",
+                config_path.display(),
+                describe_toml_error(None, &e)
+            )
+        })?;
         // Name the file: the merged config may also carry the global config, and a reader with
         // several projects cannot tell which one stopped.
         config.validate_list_limits().with_context(|| {
@@ -839,6 +1091,151 @@ mod tests {
         let cfg: ProjectConfig = toml::from_str(toml).unwrap();
         assert!(cfg.security.file_write_enabled);
         assert!(cfg.security.indexing_enabled);
+    }
+
+    /// `redact_values` removes what the message quotes from the input and keeps our own names.
+    #[test]
+    fn redact_values_keeps_our_field_names_and_drops_the_files_values() {
+        assert_eq!(
+            super::redact_values("missing field `project`"),
+            "missing field `project`"
+        );
+        assert_eq!(
+            super::redact_values("invalid type: string \"S3CRET\", expected a boolean"),
+            "invalid type: string \"…\", expected a boolean"
+        );
+        assert_eq!(
+            super::redact_values("unknown variant `S3CRET`, expected `default` or `root`"),
+            "unknown variant `…`, expected `default` or `root`"
+        );
+        assert_eq!(
+            super::redact_values("unknown field `S3CRET`"),
+            "unknown field `…`"
+        );
+        assert_eq!(
+            super::redact_values("unterminated \"quote"),
+            "unterminated \"quote"
+        );
+    }
+
+    /// A parse error is reported as message, line and column, and never the source line.
+    #[test]
+    fn describe_toml_error_gives_line_and_column_not_the_source_line() {
+        let text = "a = 1\nS3CRET line\n";
+        let e = toml::from_str::<toml::Table>(text).unwrap_err();
+        let d = super::describe_toml_error(Some(text), &e);
+        assert!(d.contains("line 2, column"), "{d}");
+        assert!(!d.contains("S3CRET"), "{d}");
+    }
+
+    /// `read_project_toml_table` is the salvage's only eye on the file, and each of its four
+    /// outcomes decides a policy: missing is an empty file (confirms nothing, closes
+    /// nothing), anything unreadable is `None` (which also closes writes).
+    #[test]
+    fn read_project_toml_table_distinguishes_missing_valid_oversized_and_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(root),
+            Some(toml::Table::new()),
+            "a missing file is an empty table, not unreadable"
+        );
+
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let file = root.join(".codescout").join("project.toml");
+        std::fs::write(&file, "[security]\nfile_write_enabled = false\n").unwrap();
+        let table = ProjectConfig::read_project_toml_table(root).expect("valid TOML");
+        assert_eq!(
+            table["security"]["file_write_enabled"].as_bool(),
+            Some(false)
+        );
+
+        std::fs::write(&file, "[security\n").unwrap();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(root),
+            None,
+            "invalid TOML is unreadable"
+        );
+
+        std::fs::write(&file, format!("# {}\n", "x".repeat(1024 * 1024 + 16))).unwrap();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(root),
+            None,
+            "over the loader's 1 MiB cap is unreadable, though it is valid TOML"
+        );
+
+        // A path that cannot be stat'ed for a reason other than "not there" is not "missing".
+        let blocked = tempfile::tempdir().unwrap();
+        std::fs::write(blocked.path().join(".codescout"), "a file, not a directory").unwrap();
+        assert_eq!(
+            ProjectConfig::read_project_toml_table(blocked.path()),
+            None,
+            "an unreadable path is not an empty file"
+        );
+    }
+
+    /// `PathSecurityConfig::default()` is the STANDARD policy, whatever a repository says.
+    ///
+    /// **What this test is, honestly.** `default()` is a constant literal: no file is read to
+    /// build it, so no `project.toml` can change it, and nothing here observes such a change
+    /// happening. What the test protects is (a) the literal itself (a mutant that makes
+    /// `default()` carry `Root` is killed) and (b) that the repository's own `profile` is
+    /// carried into THAT PROJECT'S config by `SecuritySection::to_path_security_config`, so the
+    /// two values stay distinct, with the standard deny-list on the `default()` side: a refactor
+    /// that dropped the project's profile (so the control fails) or merged the two (so the last
+    /// assertions fail) is caught. A caller that builds a config from a repository file and one
+    /// from `default()` gets two different policies, and this pins which is which. It does not
+    /// pin what a future caller chooses to pass.
+    #[test]
+    fn a_repository_project_toml_cannot_change_what_path_security_config_default_means() {
+        use crate::util::path_security::{validate_read_path, PathSecurityConfig, SecurityProfile};
+
+        let home = crate::platform::resolved_home_dir()
+            .expect("a home directory, from $HOME or the account");
+        let protected = home.join(".ssh").join("id_rsa");
+        let protected = protected.to_str().unwrap();
+
+        assert_eq!(
+            PathSecurityConfig::default().profile,
+            SecurityProfile::Default
+        );
+        assert!(
+            validate_read_path(protected, None, &PathSecurityConfig::default()).is_err(),
+            "control: the standard deny-list refuses ~/.ssh"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout").join("project.toml"),
+            "[project]\nname = \"t\"\n\n[security]\nprofile = \"root\"\n",
+        )
+        .unwrap();
+        let loaded = ProjectConfig::load_with_global_base(
+            dir.path(),
+            toml::Value::Table(toml::map::Map::new()),
+        )
+        .unwrap();
+        assert_eq!(
+            loaded.security.profile,
+            SecurityProfile::Root,
+            "control: the repository's own project.toml is honoured for that project"
+        );
+        assert!(
+            validate_read_path(protected, None, &loaded.security.to_path_security_config()).is_ok(),
+            "control: the file's Root profile really does lift the deny-list for that config"
+        );
+
+        let standard = PathSecurityConfig::default();
+        assert_eq!(
+            standard.profile,
+            SecurityProfile::Default,
+            "loading a project.toml with profile = \"root\" changed default()"
+        );
+        assert!(
+            validate_read_path(protected, None, &standard).is_err(),
+            "default() no longer carries the standard deny-list after a root-profile project.toml"
+        );
     }
 
     #[test]

@@ -687,8 +687,21 @@ impl CodeScoutServer {
         } else {
             self.agent.security_config_for(workspace_override).await
         };
-        crate::util::path_security::check_tool_access(name, is_write, &security)
-            .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))
+        let refusal = match crate::util::path_security::check_tool_access(name, is_write, &security)
+        {
+            Ok(()) => return Ok(()),
+            Err(e) => e,
+        };
+        // Read AFTER the gate above: that call is what re-reads a stale file, so a load error
+        // from this very edit is already recorded. A refusal is the one response a writer
+        // cannot miss, and for an unparseable file it would otherwise blame a
+        // `file_write_enabled = false` the file does not contain.
+        let mut text = refusal.to_string();
+        if let Some(load_error) = self.agent.config_load_error_for(workspace_override).await {
+            text.push_str("\n\n");
+            text.push_str(&crate::config::project::failed_reload_notice(&load_error));
+        }
+        Err(CallToolResult::error(vec![Content::text(text)]))
     }
 
     /// `ledger` is the handle adoption resolved for this call. It is a parameter,
@@ -2356,9 +2369,10 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
     // `RecoverableError` arm and the advisory is already spliced into its body by the
     // time we get here. No double attach; `merge_param_corrections` would be
     // idempotent regardless (same key, same value).
-    let advisory = e
-        .downcast_ref::<crate::tools::AdvisedError>()
-        .map(|adv| &adv.corrections);
+    let advised = e.downcast_ref::<crate::tools::AdvisedError>();
+    // `Null` is "no alias advisory": the wrapper may exist only to carry a notice.
+    let advisory = advised.map(|adv| &adv.corrections).filter(|c| !c.is_null());
+    let notice = advised.and_then(|adv| adv.notice.as_deref());
     match select_error_render(&e) {
         ErrorRender::Body(mut body) => {
             if let (Some(c), Some(obj)) = (advisory, body.as_object_mut()) {
@@ -2370,6 +2384,12 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
                 // both facts must arrive together.
                 crate::tools::merge_param_corrections(obj, c);
             }
+            if let (Some(n), Some(obj)) = (notice, body.as_object_mut()) {
+                obj.insert(
+                    crate::tools::WORKSPACE_NOTICE_KEY.to_string(),
+                    serde_json::Value::String(n.to_string()),
+                );
+            }
             let text = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
             CallToolResult::success(vec![Content::text(text)])
         }
@@ -2378,14 +2398,18 @@ fn route_tool_error(e: anyhow::Error) -> CallToolResult {
             // spliced, matching `call_content`'s own compact-text success renderer's
             // choice for this same `hint` string: the notice changes how the message
             // below it should be read, so it has to arrive first. See
-            // `attach_param_corrections_to_error`.
-            let prefix = advisory
+            // `attach_param_corrections_to_error`. A workspace notice is prefixed the
+            // same way (it is what `inject_notice` does to a `stdout` string).
+            let alias_prefix = advisory
                 .and_then(|c| c.get("hint"))
                 .and_then(|v| v.as_str())
                 .filter(|h| !h.is_empty())
                 .map(|h| format!("⚠ {h}\n\n"))
                 .unwrap_or_default();
-            CallToolResult::error(vec![Content::text(format!("{prefix}{message}"))])
+            let notice_prefix = notice.map(|n| format!("⚠ {n}\n\n")).unwrap_or_default();
+            CallToolResult::error(vec![Content::text(format!(
+                "{notice_prefix}{alias_prefix}{message}"
+            ))])
         }
     }
 }
@@ -17944,6 +17968,14 @@ mod guide_hint_tests {
 /// warning that said so. Deliberately NOT `#[cfg(feature = "librarian")]` like
 /// `guide_hint_tests` above: `ResilientStdin` is not feature-gated, so this has
 /// to run in the lean lane too.
+#[cfg(test)]
+#[path = "server/config_reload_tests.rs"]
+mod config_reload_tests;
+
+#[cfg(test)]
+#[path = "server/protected_config_write_tests.rs"]
+mod protected_config_write_tests;
+
 #[cfg(test)]
 mod resilient_stdin_tests {
     use super::*;

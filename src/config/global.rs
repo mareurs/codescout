@@ -81,7 +81,21 @@ pub(crate) fn global_config_dir_from(
 
 /// `$XDG_CONFIG_HOME/codescout` or `$HOME/.config/codescout`. `None` when neither
 /// `XDG_CONFIG_HOME` nor `HOME` is set (e.g. some Windows/CI environments).
+///
+/// **In a unit-test build the environment is NOT read**, except in a `platform::test_child`
+/// re-exec (which sets `CODESCOUT_TEST_CHILD` and pins `XDG_CONFIG_HOME`/`HOME` for the one test
+/// that is about them). Every test that builds an `Agent` loads a project config merged over the
+/// global one, so a developer's own `~/.config/codescout/config.toml` (a `shell_command_mode`, a
+/// `file_write_enabled = false`) changed what dozens of tests assert. The test build reads one
+/// shared EMPTY directory instead: the global config is an injected input, as
+/// `docs/conventions/test-env-isolation.md` rule A asks, resolved once at this edge.
 fn global_config_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if std::env::var_os("CODESCOUT_TEST_CHILD").is_none() {
+        static EMPTY: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let dir = EMPTY.get_or_init(|| tempfile::tempdir().expect("an empty global config dir"));
+        return Some(dir.path().join("codescout"));
+    }
     global_config_dir_from(
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
         std::env::var_os("HOME").as_deref(),
@@ -255,8 +269,13 @@ impl GlobalConfig {
                 return Err(e).with_context(|| format!("reading global config {}", path.display()));
             }
         };
-        let config: GlobalConfig = toml::from_str(&text)
-            .with_context(|| format!("parsing global config {}", path.display()))?;
+        let config: GlobalConfig = toml::from_str(&text).map_err(|e| {
+            anyhow::anyhow!(
+                "parsing global config {}: {}",
+                path.display(),
+                crate::config::project::describe_toml_error(Some(&text), &e)
+            )
+        })?;
         Ok(Some(config))
     }
 
@@ -396,6 +415,19 @@ mod tests {
         .unwrap();
         let cfg = GlobalConfig::load_from_dir(dir.path()).unwrap().unwrap();
         assert_eq!(cfg.embeddings.model.as_deref(), Some("local:BGESmallENV15"));
+    }
+
+    #[test]
+    fn a_malformed_global_config_error_never_quotes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "db.internal:5432:app:alice:SECRETMARKER-31c9\n",
+        )
+        .unwrap();
+        let err = format!("{:#}", GlobalConfig::load_from_dir(dir.path()).unwrap_err());
+        assert!(err.contains("parsing global config"), "control: {err}");
+        assert!(!err.contains("SECRETMARKER"), "{err}");
     }
 
     #[test]

@@ -291,6 +291,7 @@ impl AgentInner {
             root: root.to_path_buf(),
             config,
             config_stamp,
+            config_load_error: None,
             memory,
             private_memory,
             library_registry,
@@ -412,6 +413,14 @@ pub struct ActiveProject {
     /// `ActiveProject::reload_config_from_disk`, and construction takes the pair out
     /// of `ProjectResources`, so neither can be set alone without adding a new site.
     pub(crate) config_stamp: Option<ConfigStamp>,
+    /// Why the LAST reload of `project.toml` failed, or `None` when it loaded.
+    ///
+    /// Set by `reload_config_from_disk` when the file on disk cannot be loaded, cleared by
+    /// the next reload that succeeds. It is what makes a failed reload loud: every tool
+    /// response and every refused write carries it (`config::project::failed_reload_notice`)
+    /// for as long as it is set. The stamp advances on a failure, so without this field a
+    /// broken file would be reported once, by the log, and then never again.
+    pub(crate) config_load_error: Option<String>,
     pub(crate) memory: MemoryStore,
     pub(crate) private_memory: MemoryStore,
     pub(crate) library_registry: LibraryRegistry,
@@ -465,17 +474,41 @@ impl ActiveProject {
 
     /// Re-read `project.toml` and re-stamp it, together.
     ///
-    /// **On a parse failure the stamp still advances while `config` does not**, and
-    /// both halves of that are deliberate. Keeping the last-good config means a
-    /// malformed file cannot relax a gate by falling back to permissive defaults.
-    /// Advancing the stamp anyway means a file that stays broken is parsed once
-    /// rather than on every gated call — without it the retry is unbounded and paid
-    /// by every tool invocation. Fixing the file changes its fingerprint, so the
-    /// reload happens then.
+    /// **On a load failure the stamp still advances, and the policy FAILS CLOSED.** Advancing
+    /// the stamp anyway means a file that stays broken is parsed once rather than on every
+    /// gated call — without it the retry is unbounded and paid by every tool invocation.
+    /// Fixing the file changes its fingerprint, so the reload happens then.
+    ///
+    /// What this used to do, keep the last good config whole and say nothing, is looser than
+    /// the file in the one case that matters: a tightening saved in the same edit as an
+    /// entry the loader refuses (`file_write_enabled = false` next to a bad
+    /// `extra_write_roots`) never applied, and no surface reported it. Now the failure is
+    /// recorded in `config_load_error` (every response and refusal carries it until a reload
+    /// succeeds) and the security section becomes the stricter of the previous policy and the
+    /// file's own — see [`crate::config::project::SecuritySection::tighten_for_unloadable_file`].
+    /// A malformed file still cannot relax a gate by falling back to permissive defaults.
+    /// docs/issues/2026-10-17-an-invalid-project-toml-reload-is-ignored-silently-so-a-tightening-saved-with-it-never-applies.md
     pub(crate) fn reload_config_from_disk(&mut self) {
         let stamp = ConfigStamp::of(&self.root);
-        if let Ok(fresh) = crate::config::project::ProjectConfig::load_or_default(&self.root) {
-            self.config = fresh;
+        match crate::config::project::ProjectConfig::load_or_default(&self.root) {
+            Ok(fresh) => {
+                self.config = fresh;
+                self.config_load_error = None;
+            }
+            Err(e) => {
+                let file =
+                    crate::config::project::ProjectConfig::read_project_toml_table(&self.root);
+                self.config.security.tighten_for_unloadable_file(
+                    file.as_ref(),
+                    &crate::config::project::GlobalSecurity::load(),
+                );
+                tracing::warn!(
+                    root = %self.root.display(),
+                    error = %format!("{e:#}"),
+                    "project.toml failed to load; keeping the previous settings, tightened"
+                );
+                self.config_load_error = Some(format!("{e:#}"));
+            }
         }
         self.config_stamp = stamp;
     }
@@ -856,6 +889,7 @@ impl Agent {
                 root: root.clone(),
                 config,
                 config_stamp,
+                config_load_error: None,
                 memory,
                 private_memory,
                 library_registry,
@@ -1147,6 +1181,20 @@ impl Agent {
     ) -> crate::util::path_security::PathSecurityConfig {
         self.security_config_for_call(workspace_override, workspace_override.is_some())
             .await
+    }
+
+    /// Why the project this call resolves to could not load its last `project.toml` edit, or
+    /// `None` when it loaded. Rendered by [`crate::config::project::failed_reload_notice`] on
+    /// the next response and on every refusal.
+    ///
+    /// Reads the field the gate just refreshed: both callers run it after
+    /// `security_config_for*`, which is where a stale file is re-read, so this never reports
+    /// the state from before the edit it should describe.
+    pub async fn config_load_error_for(&self, workspace_override: Option<&Path>) -> Option<String> {
+        self.with_project_at(workspace_override, |p| Ok(p.config_load_error.clone()))
+            .await
+            .ok()
+            .flatten()
     }
 
     async fn security_config_for_call(
@@ -1715,6 +1763,7 @@ impl Agent {
             // NEWER file than this stamp describes, which the next gated call sees as
             // a difference and reloads — the safe direction.
             config_stamp: ConfigStamp::of(&abs_root),
+            config_load_error: None,
             memory,
             private_memory,
             library_registry,
@@ -2744,6 +2793,7 @@ mod tests {
             // explicitly; tests that do not are unaffected, because nothing here calls
             // `config_is_stale`.
             config_stamp: None,
+            config_load_error: None,
             memory: MemoryStore::from_dir(root.join("mem")).unwrap(),
             private_memory: MemoryStore::from_dir(root.join("priv")).unwrap(),
             library_registry: LibraryRegistry::default(),

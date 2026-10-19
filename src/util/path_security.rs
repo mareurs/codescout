@@ -1135,11 +1135,13 @@ pub fn check_tool_access(
                     root,
                     cause: WriteBlockCause::ConfiguredOff,
                 }) => bail!(
-                    "File writes are disabled for {} by security.file_write_enabled = false in \
-                     its .codescout/project.toml. Re-activating with read_only=false will NOT \
-                     clear this — and neither will editing the file and retrying: the config is \
-                     cached for the life of this process. Edit it, then restart the MCP server \
-                     (`/mcp`) to pick the change up.",
+                    "File writes are disabled for {}: security.file_write_enabled is false in \
+                     its .codescout/project.toml or in the global config, or that project.toml \
+                     failed to load (writes stay off until it does; the response then says so). \
+                     Re-activating with read_only=false will NOT clear this. Fix the file in an \
+                     editor — the write tools are off, and cannot edit [security] in any case. \
+                     The next tool call picks the edit up; restarting the MCP server (`/mcp`) \
+                     always does.",
                     root.display()
                 ),
                 // No project root was available to the config builder, so say
@@ -3746,22 +3748,18 @@ mod tests {
             );
         }
     }
-    /// The two config-off refusals in this file prescribe DIFFERENT remedies, and the
-    /// difference is load-bearing rather than editorial.
+    /// Neither config-off refusal in this file may send its reader to `edit_file`.
     ///
-    /// Both are defeated by the same staleness — `project.toml` is read once when a project
-    /// becomes resident and cached for the life of the process — but the escapes available
-    /// differ. Indexing-off leaves writes ON, so editing the config through codescout's own
-    /// `edit_file` triggers `Agent::reload_config_if_project_toml_for` and genuinely works.
-    /// Writes-off does not: `edit_file` is unreachable precisely because writes are the thing
-    /// disabled, which leaves the restart as the only route.
+    /// Writes-off: `edit_file` is unreachable precisely because writes are the thing disabled.
+    /// Indexing-off: it used to be offered (writes stay on, and `edit_file` on `project.toml`
+    /// reloaded the config), but codescout's write tools now refuse an edit to `[security]`
+    /// (`config::protected_files`), so naming `edit_file` would prescribe a refused call.
+    /// Both must name a remedy that works: an editor, or the restart.
     ///
-    /// So the regression this guards is a TIDY-UP. Unifying the two onto the shared
-    /// `CONFIG_IS_CACHED_REMEDY` would hand the write refusal an escape its reader cannot
-    /// take — a message that is confidently wrong rather than merely unhelpful. Every other
-    /// test here reads one message alone, so nothing else can express the difference.
+    /// The regression this guards is a TIDY-UP in either direction: handing the write refusal
+    /// the shared `CONFIG_IS_CACHED_REMEDY`'s old `edit_file` escape, or restoring it there.
     #[test]
-    fn the_write_refusal_withholds_the_edit_file_escape_the_indexing_refusal_offers() {
+    fn neither_config_off_refusal_sends_its_reader_to_edit_file() {
         let indexing_off = PathSecurityConfig {
             indexing_enabled: false,
             ..PathSecurityConfig::default()
@@ -3783,9 +3781,13 @@ mod tests {
             .to_string();
 
         assert!(
-            indexing_err.contains("edit_file"),
-            "indexing-off CAN be cleared through codescout's own editor, and must say so: \
-             {indexing_err}"
+            !indexing_err.contains("edit_file"),
+            "indexing-off is set in [security], which codescout's own editor refuses to change; \
+             naming it prescribes a refused call: {indexing_err}"
+        );
+        assert!(
+            indexing_err.contains("editor"),
+            "indexing-off is cleared by the user's own edit, and must say so: {indexing_err}"
         );
         assert!(
             !write_err.contains("edit_file"),

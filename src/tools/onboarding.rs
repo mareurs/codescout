@@ -93,6 +93,40 @@ pub(crate) fn system_prompt_stale(
     }
 }
 
+/// Change keys in the `[project]` table of an existing `project.toml` and write nothing from the
+/// merged config.
+///
+/// The two stamping writers used to load the MERGED config (global config under the project's
+/// file), set a field and serialise the whole struct back. That wrote every merged value into
+/// the project's file: a stricter global `[security]` was copied there as the project's own, and
+/// from then on shadowed any later change to the global config. This patches the project's RAW
+/// table instead, so a value the user did not write is not added.
+///
+/// **It does not preserve the file's formatting.** The file is parsed and re-serialised with the
+/// `toml` crate (not `toml_edit`, which is not a dependency): comments are dropped, tables are
+/// re-sorted and inline tables are rewritten. What survives is the data, not the layout.
+fn patch_project_table(
+    config_path: &std::path::Path,
+    set: impl FnOnce(&mut toml::Table),
+) -> anyhow::Result<()> {
+    let text = std::fs::read_to_string(config_path)?;
+    let mut doc: toml::Table = toml::from_str(&text).map_err(|e| {
+        anyhow::anyhow!(
+            "parsing {}: {}",
+            config_path.display(),
+            crate::config::project::describe_toml_error(Some(&text), &e)
+        )
+    })?;
+    let project = doc
+        .entry("project")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("[project] in project.toml is not a table"))?;
+    set(project);
+    std::fs::write(config_path, toml::to_string_pretty(&doc)?)?;
+    Ok(())
+}
+
 /// Record the prompt's current content as the baseline a requested refresh must
 /// supersede, **without** stamping the version.
 ///
@@ -107,10 +141,12 @@ async fn record_refresh_request(ctx: &ToolContext) -> anyhow::Result<()> {
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
             let config_path = p.root.join(".codescout").join("project.toml");
             if config_path.exists() {
-                let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
-                config.project.system_prompt_sha256 = Some(hash_system_prompt(&p.root));
-                let toml_str = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, &toml_str)?;
+                // Still loaded, so a file that does not load is refused here as before.
+                crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+                let baseline = hash_system_prompt(&p.root);
+                patch_project_table(&config_path, |project| {
+                    project.insert("system_prompt_sha256".into(), toml::Value::String(baseline));
+                })?;
             }
             Ok(config_path)
         })
@@ -142,7 +178,7 @@ pub(crate) async fn stamp_witnessed_refresh(ctx: &ToolContext) -> anyhow::Result
             if !config_path.exists() {
                 return Ok((config_path, false));
             }
-            let mut config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
+            let config = crate::config::project::ProjectConfig::load_or_default(&p.root)?;
             let current = hash_system_prompt(&p.root);
             let stored = config.project.onboarding_version;
             let witnessed = onboarding_version_stale(stored)
@@ -152,10 +188,13 @@ pub(crate) async fn stamp_witnessed_refresh(ctx: &ToolContext) -> anyhow::Result
                     &current,
                 );
             if witnessed {
-                config.project.onboarding_version = Some(ONBOARDING_VERSION);
-                config.project.system_prompt_sha256 = Some(current);
-                let toml_str = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, &toml_str)?;
+                patch_project_table(&config_path, |project| {
+                    project.insert(
+                        "onboarding_version".into(),
+                        toml::Value::Integer(i64::from(ONBOARDING_VERSION)),
+                    );
+                    project.insert("system_prompt_sha256".into(), toml::Value::String(current));
+                })?;
             }
             Ok((config_path, witnessed))
         })
@@ -442,35 +481,41 @@ impl Tool for Onboarding {
         Ok(result)
     }
 
+    /// `onboarding` builds its own response blocks, so it never reaches the dispatcher's
+    /// notice injection: the failed-reload notice is attached here, on the success blocks and
+    /// on an error, like on every other response.
     async fn call_content(
         &self,
         input: Value,
         ctx: &ToolContext,
     ) -> anyhow::Result<Vec<rmcp::model::Content>> {
-        let val = self.call(input, ctx).await?;
+        let notice = super::core::types::config_load_notice(ctx).await;
+        let result: anyhow::Result<Vec<rmcp::model::Content>> = async {
+            let val = self.call(input, ctx).await?;
 
-        // If there's a subagent prompt, write it to a temp markdown file and return
-        // compact instructions with heading navigation.
-        if let Some(prompt) = val["subagent_prompt"].as_str() {
-            let compact = format_onboarding(&val);
+            // If there's a subagent prompt, write it to a temp markdown file and return
+            // compact instructions with heading navigation.
+            if let Some(prompt) = val["subagent_prompt"].as_str() {
+                let compact = format_onboarding(&val);
 
-            let root = ctx
-                .agent
-                .require_project_root_for(ctx.workspace_override.as_deref())
-                .await?;
-            let tmp_dir = root.join(".codescout").join("tmp");
-            std::fs::create_dir_all(&tmp_dir)?;
-            let prompt_path = tmp_dir.join("onboarding-prompt.md");
-            std::fs::write(&prompt_path, prompt)?;
-            let rel_path = ".codescout/tmp/onboarding-prompt.md";
-            let sections = build_heading_map(prompt);
+                let root = ctx
+                    .agent
+                    .require_project_root_for(ctx.workspace_override.as_deref())
+                    .await?;
+                let tmp_dir = root.join(".codescout").join("tmp");
+                std::fs::create_dir_all(&tmp_dir)?;
+                let prompt_path = tmp_dir.join("onboarding-prompt.md");
+                std::fs::write(&prompt_path, prompt)?;
+                let rel_path = ".codescout/tmp/onboarding-prompt.md";
+                let sections = build_heading_map(prompt);
 
-            let subagent = ctx.client_can_spawn_subagents();
+                let subagent = ctx.client_can_spawn_subagents();
 
-            // Determine which instruction builder based on whether this is a
-            // version refresh (has stored_version) or full onboarding.
-            let instructions =
-                if val.get("version_stale").is_some() || val.get("explicit_refresh").is_some() {
+                // Determine which instruction builder based on whether this is a
+                // version refresh (has stored_version) or full onboarding.
+                let instructions = if val.get("version_stale").is_some()
+                    || val.get("explicit_refresh").is_some()
+                {
                     let stored = val["stored_version"].as_u64().map(|v| v as u32);
                     let current = val["current_version"].as_u64().unwrap_or(0) as u32;
                     build_buffered_refresh_instructions(rel_path, stored, current, subagent)
@@ -478,119 +523,132 @@ impl Tool for Onboarding {
                     build_buffered_onboarding_instructions(rel_path, subagent)
                 };
 
-            // For workspaces, also write per-project and synthesis prompt files.
-            let workspace_fields = if val["workspace_mode"].as_bool().unwrap_or(false) {
-                let projects_val = val["projects"].as_array();
-                if let Some(projects) = projects_val {
-                    let mut project_prompts = Vec::new();
-                    let all_projects: Vec<(String, Vec<String>)> = projects
-                        .iter()
-                        .filter_map(|p| {
-                            let id = p["id"].as_str()?.to_string();
-                            let langs: Vec<String> = p["languages"]
-                                .as_array()?
-                                .iter()
-                                .filter_map(|l| l.as_str().map(String::from))
-                                .collect();
-                            Some((id, langs))
-                        })
-                        .collect();
-
-                    for p in projects {
-                        let id = p["id"].as_str().unwrap_or("unknown");
-                        let project = crate::workspace::DiscoveredProject {
-                            id: id.to_string(),
-                            relative_root: std::path::PathBuf::from(
-                                p["root"].as_str().unwrap_or("."),
-                            ),
-                            languages: p["languages"]
-                                .as_array()
-                                .map(|a| {
-                                    a.iter()
-                                        .filter_map(|l| l.as_str().map(String::from))
-                                        .collect()
-                                })
-                                .unwrap_or_default(),
-                            manifest: p["manifest"].as_str().map(String::from),
-                        };
-                        let siblings: Vec<(String, Vec<String>)> = all_projects
+                // For workspaces, also write per-project and synthesis prompt files.
+                let workspace_fields = if val["workspace_mode"].as_bool().unwrap_or(false) {
+                    let projects_val = val["projects"].as_array();
+                    if let Some(projects) = projects_val {
+                        let mut project_prompts = Vec::new();
+                        let all_projects: Vec<(String, Vec<String>)> = projects
                             .iter()
-                            .filter(|(sid, _)| sid != id)
-                            .cloned()
+                            .filter_map(|p| {
+                                let id = p["id"].as_str()?.to_string();
+                                let langs: Vec<String> = p["languages"]
+                                    .as_array()?
+                                    .iter()
+                                    .filter_map(|l| l.as_str().map(String::from))
+                                    .collect();
+                                Some((id, langs))
+                            })
                             .collect();
 
-                        let prompt_content = build_per_project_prompt(&project, &siblings);
-                        let file_name = format!("onboarding-project-{}.md", id);
-                        let file_path = tmp_dir.join(&file_name);
-                        std::fs::write(&file_path, &prompt_content)?;
+                        for p in projects {
+                            let id = p["id"].as_str().unwrap_or("unknown");
+                            let project = crate::workspace::DiscoveredProject {
+                                id: id.to_string(),
+                                relative_root: std::path::PathBuf::from(
+                                    p["root"].as_str().unwrap_or("."),
+                                ),
+                                languages: p["languages"]
+                                    .as_array()
+                                    .map(|a| {
+                                        a.iter()
+                                            .filter_map(|l| l.as_str().map(String::from))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                                manifest: p["manifest"].as_str().map(String::from),
+                            };
+                            let siblings: Vec<(String, Vec<String>)> = all_projects
+                                .iter()
+                                .filter(|(sid, _)| sid != id)
+                                .cloned()
+                                .collect();
 
-                        let rel = format!(".codescout/tmp/{}", file_name);
-                        project_prompts.push((id.to_string(), rel));
+                            let prompt_content = build_per_project_prompt(&project, &siblings);
+                            let file_name = format!("onboarding-project-{}.md", id);
+                            let file_path = tmp_dir.join(&file_name);
+                            std::fs::write(&file_path, &prompt_content)?;
+
+                            let rel = format!(".codescout/tmp/{}", file_name);
+                            project_prompts.push((id.to_string(), rel));
+                        }
+
+                        // Write synthesis prompt
+                        let synthesis_content = build_synthesis_prompt(&all_projects);
+                        let synthesis_file = tmp_dir.join("onboarding-workspace-synthesis.md");
+                        std::fs::write(&synthesis_file, &synthesis_content)?;
+                        let synthesis_rel =
+                            ".codescout/tmp/onboarding-workspace-synthesis.md".to_string();
+
+                        // Build workspace-specific instructions (overrides the single-project ones)
+                        let ws_instructions = build_workspace_instructions(
+                            rel_path,
+                            &project_prompts,
+                            &synthesis_rel,
+                            subagent,
+                        );
+
+                        Some((project_prompts, synthesis_rel, ws_instructions))
+                    } else {
+                        None
                     }
-
-                    // Write synthesis prompt
-                    let synthesis_content = build_synthesis_prompt(&all_projects);
-                    let synthesis_file = tmp_dir.join("onboarding-workspace-synthesis.md");
-                    std::fs::write(&synthesis_file, &synthesis_content)?;
-                    let synthesis_rel =
-                        ".codescout/tmp/onboarding-workspace-synthesis.md".to_string();
-
-                    // Build workspace-specific instructions (overrides the single-project ones)
-                    let ws_instructions = build_workspace_instructions(
-                        rel_path,
-                        &project_prompts,
-                        &synthesis_rel,
-                        subagent,
-                    );
-
-                    Some((project_prompts, synthesis_rel, ws_instructions))
                 } else {
                     None
+                };
+
+                let response = if let Some((project_prompts, synthesis_path, ws_instructions)) =
+                    workspace_fields
+                {
+                    let pp_json: Vec<Value> = project_prompts
+                        .iter()
+                        .map(|(id, path)| serde_json::json!({ "id": id, "path": path }))
+                        .collect();
+
+                    serde_json::json!({
+                        "prompt_path": rel_path,
+                        "summary": compact,
+                        "sections": sections,
+                        "project_prompts": pp_json,
+                        "synthesis_prompt_path": synthesis_path,
+                        "instructions": ws_instructions,
+                    })
+                } else {
+                    serde_json::json!({
+                        "prompt_path": rel_path,
+                        "summary": compact,
+                        "sections": sections,
+                        "instructions": instructions,
+                    })
+                };
+
+                return Ok(vec![rmcp::model::Content::text(
+                    serde_json::to_string_pretty(&response)
+                        .unwrap_or_else(|_| format!("{{\"prompt_path\":\"{rel_path}\"}}")),
+                )]);
+            }
+
+            // Single-block fast path: already-onboarded status.
+            if val["onboarded"].as_bool().unwrap_or(false) {
+                let msg = val["message"].as_str().unwrap_or("Already onboarded.");
+                return Ok(vec![rmcp::model::Content::text(msg.to_string())]);
+            }
+
+            // Fallback
+            let compact = format_onboarding(&val);
+            Ok(vec![rmcp::model::Content::text(compact)])
+        }
+        .await;
+        match result {
+            Ok(mut out) => {
+                if let Some(n) = &notice {
+                    super::core::types::attach_workspace_notice_to_content(&mut out, n);
                 }
-            } else {
-                None
-            };
-
-            let response = if let Some((project_prompts, synthesis_path, ws_instructions)) =
-                workspace_fields
-            {
-                let pp_json: Vec<Value> = project_prompts
-                    .iter()
-                    .map(|(id, path)| serde_json::json!({ "id": id, "path": path }))
-                    .collect();
-
-                serde_json::json!({
-                    "prompt_path": rel_path,
-                    "summary": compact,
-                    "sections": sections,
-                    "project_prompts": pp_json,
-                    "synthesis_prompt_path": synthesis_path,
-                    "instructions": ws_instructions,
-                })
-            } else {
-                serde_json::json!({
-                    "prompt_path": rel_path,
-                    "summary": compact,
-                    "sections": sections,
-                    "instructions": instructions,
-                })
-            };
-
-            return Ok(vec![rmcp::model::Content::text(
-                serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|_| format!("{{\"prompt_path\":\"{rel_path}\"}}")),
-            )]);
+                Ok(out)
+            }
+            Err(e) => Err(super::core::types::attach_workspace_notice_to_error(
+                e, notice,
+            )),
         }
-
-        // Single-block fast path: already-onboarded status.
-        if val["onboarded"].as_bool().unwrap_or(false) {
-            let msg = val["message"].as_str().unwrap_or("Already onboarded.");
-            return Ok(vec![rmcp::model::Content::text(msg.to_string())]);
-        }
-
-        // Fallback
-        let compact = format_onboarding(&val);
-        Ok(vec![rmcp::model::Content::text(compact)])
     }
 
     fn format_compact(&self, result: &Value) -> Option<String> {
@@ -1064,7 +1122,15 @@ async fn perform_full_onboarding(
             libraries: Default::default(),
             lsp: Default::default(),
         };
-        let toml_str = toml::to_string_pretty(&config)?;
+        // `[security]` is left OUT of the file: the file is merged over the global config, so an
+        // explicit table of defaults here would override a stricter global `shell_command_mode`
+        // or `indexing_enabled` for this project. Absent, the project inherits the global
+        // value or the same defaults it was just given.
+        let mut doc = toml::Value::try_from(&config)?;
+        if let Some(table) = doc.as_table_mut() {
+            table.remove("security");
+        }
+        let toml_str = toml::to_string_pretty(&doc)?;
         std::fs::write(&config_path, &toml_str)?;
         // Reload in-memory config so the version is visible within this session
         ctx.agent
@@ -1264,6 +1330,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn patch_project_table_errors_never_quote_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        std::fs::write(&p, "db.internal:5432:app:alice:SECRETMARKER-31c9\n").unwrap();
+        let err = format!("{:#}", patch_project_table(&p, |_| {}).unwrap_err());
+        assert!(err.contains("parsing"), "control: {err}");
+        assert!(!err.contains("SECRETMARKER"), "{err}");
+    }
+
+    #[test]
     fn onboarding_version_stale_returns_true_for_none() {
         assert!(
             onboarding_version_stale(None),
@@ -1370,6 +1446,212 @@ mod tests {
             absent,
             hash_system_prompt(dir.path()),
             "writing content must move the hash, or no regeneration is ever witnessed"
+        );
+    }
+}
+
+/// What onboarding writes into `project.toml` must not override a STRICTER global config.
+///
+/// The file is merged over `~/.config/codescout/config.toml`, so every key written into it
+/// wins. Onboarding serialised a whole `ProjectConfig`, so it wrote an explicit `[security]`
+/// table of DEFAULTS (`shell_command_mode = "warn"`, `indexing_enabled = true`, ...) and
+/// silently relaxed a global `shell_command_mode = "disabled"` / `indexing_enabled = false`
+/// for that project. Each test runs the real onboarding code path in a child process whose
+/// `XDG_CONFIG_HOME` holds the stricter global config.
+#[cfg(all(test, unix))]
+mod global_strictness_tests {
+    use super::*;
+    use crate::agent::Agent;
+
+    const STRICT_GLOBAL: &str =
+        "[security]\nshell_command_mode = \"disabled\"\nindexing_enabled = false\n";
+
+    fn ctx(agent: Agent) -> ToolContext {
+        ToolContext {
+            agent,
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        }
+    }
+
+    /// Run `body(root, ctx)` in a child whose global config is `STRICT_GLOBAL`, over a project
+    /// holding `project_toml` (or none). Bodies assert their own controls: the project's own
+    /// `[security]`, where it has one, legitimately overrides the global config.
+    fn in_strict_global(
+        name: &'static str,
+        project_toml: Option<&'static str>,
+        body: impl for<'a> FnOnce(
+                &'a std::path::Path,
+                &'a ToolContext,
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>
+            + 'static,
+    ) {
+        let fixture = tempfile::tempdir().unwrap();
+        let xdg = fixture.path().canonicalize().unwrap().join("xdg");
+        crate::platform::test_child::run(
+            module_path!(),
+            name,
+            &[("XDG_CONFIG_HOME", Some(xdg.to_str().unwrap()))],
+            move || {
+                let xdg = std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap());
+                std::fs::create_dir_all(xdg.join("codescout")).unwrap();
+                std::fs::write(xdg.join("codescout").join("config.toml"), STRICT_GLOBAL).unwrap();
+                let root = xdg.parent().unwrap().join("proj");
+                std::fs::create_dir_all(root.join(".codescout")).unwrap();
+                std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+                if let Some(t) = project_toml {
+                    std::fs::write(root.join(".codescout").join("project.toml"), t).unwrap();
+                }
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        let agent = Agent::new(Some(root.clone())).await.unwrap();
+                        let ctx = ctx(agent);
+                        body(&root, &ctx).await;
+                    });
+            },
+        );
+    }
+
+    async fn effective(root: &std::path::Path) -> (String, bool) {
+        let c = crate::config::project::ProjectConfig::load_or_default(root).unwrap();
+        (c.security.shell_command_mode, c.security.indexing_enabled)
+    }
+
+    fn file(root: &std::path::Path) -> String {
+        std::fs::read_to_string(root.join(".codescout").join("project.toml")).unwrap()
+    }
+
+    #[test]
+    fn a_created_project_toml_does_not_relax_a_stricter_global_config() {
+        in_strict_global(
+            "a_created_project_toml_does_not_relax_a_stricter_global_config",
+            None,
+            |root, ctx| {
+                Box::pin(async move {
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "control: the stricter global config is in force before onboarding"
+                    );
+                    let result = Onboarding.call(json!({}), ctx).await.unwrap();
+                    assert_eq!(
+                        result["config_created"], true,
+                        "control: onboarding wrote it"
+                    );
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "onboarding's project.toml relaxed the stricter global config; file:\n{}",
+                        file(root)
+                    );
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn recording_a_refresh_request_does_not_freeze_the_global_values_into_project_toml() {
+        in_strict_global(
+            "recording_a_refresh_request_does_not_freeze_the_global_values_into_project_toml",
+            Some("[project]\nname = \"t\"\n"),
+            |root, ctx| {
+                Box::pin(async move {
+                    record_refresh_request(ctx).await.unwrap();
+                    assert!(
+                        file(root).contains(&hash_system_prompt(root)),
+                        "control: the baseline was recorded: {}",
+                        file(root)
+                    );
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "file:\n{}",
+                        file(root)
+                    );
+                    // Measured: writing the MERGED config back copies the global values into
+                    // the project's file (it does not relax them at that moment), where they
+                    // then shadow any later change to the global config.
+                    assert!(
+                        !file(root).contains("[security]"),
+                        "the global values were frozen into project.toml:\n{}",
+                        file(root)
+                    );
+                })
+            },
+        );
+    }
+
+    #[test]
+    fn stamping_a_witnessed_refresh_does_not_freeze_the_global_values_into_project_toml() {
+        in_strict_global(
+            "stamping_a_witnessed_refresh_does_not_freeze_the_global_values_into_project_toml",
+            Some(
+                "[project]\nname = \"t\"\nonboarding_version = 1\nsystem_prompt_sha256 = \"abc\"\n",
+            ),
+            |root, ctx| {
+                Box::pin(async move {
+                    assert!(
+                        stamp_witnessed_refresh(ctx).await.unwrap(),
+                        "control: the stamp was written"
+                    );
+                    assert!(
+                        file(root).contains(&format!("onboarding_version = {ONBOARDING_VERSION}")),
+                        "control: the version was stamped:\n{}",
+                        file(root)
+                    );
+                    assert!(
+                        file(root).contains(&hash_system_prompt(root)),
+                        "control: the baseline was stamped:\n{}",
+                        file(root)
+                    );
+                    assert_eq!(
+                        effective(root).await,
+                        ("disabled".to_string(), false),
+                        "file:\n{}",
+                        file(root)
+                    );
+                    assert!(
+                        !file(root).contains("[security]"),
+                        "the global values were frozen into project.toml:\n{}",
+                        file(root)
+                    );
+                })
+            },
+        );
+    }
+
+    /// The control that keeps the fix honest: a project's OWN explicit `[security]` is the
+    /// user's, and a stamp must leave it exactly as written.
+    #[test]
+    fn a_stamp_keeps_the_projects_own_security_table_as_written() {
+        in_strict_global(
+            "a_stamp_keeps_the_projects_own_security_table_as_written",
+            Some("[project]\nname = \"t\"\n\n[security]\nshell_command_mode = \"warn\"\n"),
+            |root, ctx| {
+                Box::pin(async move {
+                    record_refresh_request(ctx).await.unwrap();
+                    let text = file(root);
+                    assert!(
+                        text.contains("shell_command_mode = \"warn\""),
+                        "the project's own key was lost: {text}"
+                    );
+                    assert!(
+                        !text.contains("indexing_enabled"),
+                        "a key the project never wrote was materialised: {text}"
+                    );
+                })
+            },
         );
     }
 }
