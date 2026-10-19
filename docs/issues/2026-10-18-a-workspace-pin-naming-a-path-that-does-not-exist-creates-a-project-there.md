@@ -142,14 +142,33 @@ $ ls -A <empty dir> | wc -l      # after that call and after the edit_file shape
 0
 ```
 
+### Review follow-up (opened 2026-10-18, finished 2026-10-19)
+
+An independent review of `bdf34bdb4` returned MERGE AFTER FIXES. Commits (branch `fix/workspace-pin-2026-10-18`, not pushed): `fc392ac10` (patch-id `cd1a9e054a812ba4da6a60ed3a1f1c3253c95505`), `1efb9bfe9` (`fd2d2aa0235aceba81023e32421b9d1649905129`), `f7ad47795` (`ae57f0a9d6c02dd07f99ba37e65c202b029dec55`). Each finding was reproduced before it was fixed:
+
+- F1: with `existing_project_dir` not canonicalizing, all 21 `_pin_` tests passed. `a_relative_pin_naming_an_existing_directory_still_resolves_against_the_cwd` and the blank-pin test now assert the success body (`0 topics`), and a write through the relative pin is read back from `proj/.codescout/memories/t.md`.
+- F2: three routes ended in a PROTOCOL error at the write gate (vanished directory, mode-000 directory `Permission denied`, unparseable `project.toml`). They are now recoverable through `agent::pin_resolution_refusal`; the unpinned branch keeps its protocol error.
+- F3: new tests for a resident-then-deleted workspace (`ensure_resident_refuses_a_resident_workspace_whose_directory_was_deleted`) and for a bad pinned write under a read-only default (`a_bad_pin_is_refused_before_the_write_gate_speaks`).
+- F4: `project.toml` is named only for configuration errors (`is_project_config_error`: a TOML error in the chain, `invalid configuration for`, `project.toml exceeds`). A mode-000 pin no longer blames it.
+- F5: a refused pin is recorded against the DEFAULT project (`recoverable_error`, same attribution as an ordinary call, nothing created at the pin).
+- F6: `dashboard::serve` refuses a root that is not an existing directory (`--features dashboard`). Done in `serve`, not in the CLI arm, so every caller is covered.
+- F7: a path behind an unreadable parent is refused as "cannot be reached: permission denied", not as missing.
+- F8: the refusal's argument label is asserted per caller (`workspace pin`, `project root`, `sub-project root`).
+- F9: a `workspace` value that is neither string nor null is refused; absent, null and blank stay "no pin".
+
+Red lines before the fixes (these tests, then unfixed): `a_pin_that_vanishes_before_the_write_lock...`, `a_pin_to_an_unparseable_project_toml...`, `a_pin_to_an_unreadable_directory...` panicked with `must not be a protocol error: ErrorData { code: ErrorCode(-32603), message: "write gate: ...` (`Permission denied (os error 13)`, `parsing .../project.toml`); `a_refused_pin_is_recorded...` got `left: []`; `a_workspace_value_that_is_not_a_string_is_refused` got `number: must be a JSON refusal body; got: 0 topics`; `a_path_behind_an_unreadable_parent...` got `... is not an existing directory`; `dashboard::tests::serve_refuses...` got `serve must refuse a missing root, not start serving it: Elapsed(())`.
+
+Mutation matrix after the follow-up, each applied alone and restored with `git checkout`: every mutant below was killed by at least one test, none survived. Sites: `is_dir`->`exists`; no canonicalize; `create_dir_all` on refusal; each of the five `existing_project_dir` call sites reverted and each label swapped; directory check after `open_lock_file`; residency checked before the directory; permission arm disabled; relative-cwd branch and cwd-unreadable arm; each of the three `is_project_config_error` clauses; `pin_resolution_refusal` passthrough, always-config hint, never-config hint; the memory call site back to its old wrapper; dispatch guard reverted to the old fallback, replaced by "no pin", or deferred past `check_tool_access`; `trim()` removed; non-string accepted, `null` refused, each of the four kind labels; refusal not recorded, principal dropped, agent id dropped, session fallback emptied; pinned write gate as protocol error, unpinned write gate made recoverable, write-lock pin threaded as `None`; dashboard check removed or mislabelled.
+
 ## Residuals
 
 - The stray `x/` in the main checkout is still there, and nobody has told the owner of the call (see `## Resume`).
-- `tools::memory::resolve_memory_dirs` wraps an `ensure_resident` failure in its own refusal whose hint reads "Fix that project's .codescout/project.toml". With the dispatch guard in place a missing-directory pin never reaches it from `call_tool_inner` (measured: with the dispatch guard mutated away, the memory read path returned `workspace pin <p> could not be resolved: workspace pin '<p>' is not an existing directory ... hint: Pass the absolute path` under a project.toml hint). It would mislabel the cause only if the directory vanished between the dispatch check and that call, or for an in-process caller that sets `ToolContext::workspace_override` itself. Not changed, to keep the diff local.
-- `Agent::security_config_for_call` still turns a `with_project_at` error into `PathSecurityConfig::default()`. Unchanged by design (that default's meaning must not move); a pin that becomes unusable after the dispatch check reaches the tool body, whose own `with_project_at` then refuses.
-- Behaviour change, deliberate: a workspace that is already resident but whose directory has since been deleted is now refused on the next pinned call (it used to be served from the cached entry). Not measured by a test.
-- Not examined and not changed: the `dashboard` command (`dashboard::serve(root, ..)` takes `--project` unvalidated; its handlers call `MemoryStore::open(&state.project_root)` per request, read from `src/dashboard/api/memories.rs`, not run). It is a typed CLI flag, not a pin.
-- Not verified here: any platform other than this Linux machine (the four child-process tests are `cfg(unix)`).
+- A pin that dispatch accepts but that then cannot be made resident (a directory this process may not enter, an unparseable `project.toml`) is now a recoverable refusal on both the read path (`memory`) and the write gate, but it is NOT recorded in any usage.db: the recorder resolves the PINNED project to find its `usage.db`, fails, and its write is best-effort. Measured live 2026-10-19: of four refused calls against one default project, only the two refused at dispatch (`workspace="x"`, `workspace: 5`) left a row; the two mode-000 pins left none. Not changed: recording these against the default project would need the recorder to fall back when the pin cannot be resolved, a larger change than this fix.
+- Other tools' bodies (not `memory`, not the write gate) still return a plain `anyhow` error (`isError: true`) when a dispatch-accepted pin fails residency (for example `read_file` on a mode-000 directory). Not measured beyond reading `with_project_at`'s callers; not changed.
+- `Agent::security_config_for_call` still turns a `with_project_at` error into `PathSecurityConfig::default()`. Unchanged by design (that default's meaning must not move).
+- The `workspace(activate)` and `--project` paths treat a relative path as relative to the SERVER's cwd, as the per-call pin now does. That is the documented behaviour, not a decision to refuse relative pins.
+- `acquire_write_guard_if_writing` keeps the protocol error for an unpinned write whose default project cannot be resolved (pinned by `an_unpinned_write_with_no_project_keeps_its_protocol_error`).
+- Not verified: any platform other than this Linux machine (the child-process and mode-000 tests are `cfg(unix)`; the mode-000 tests return early when the process may read a mode-000 directory, as root does, so they prove nothing there).
 
 ## Workarounds
 
