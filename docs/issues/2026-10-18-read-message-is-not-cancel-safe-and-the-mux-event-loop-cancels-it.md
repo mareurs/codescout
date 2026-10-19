@@ -78,7 +78,7 @@ Unknown, not implemented in this branch (on purpose). Shape: make the server rea
 
 ## Tests added
 
-`a_read_dropped_mid_body_does_not_lose_the_bytes_it_had_consumed` (ignored, `src/lsp/transport.rs`); in `tests/mux_event_loop_cancel_repro.rs`: `a_split_frame_alone_does_not_kill_the_mux` (control, runs by default, about 7 s), and the ignored `a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux` (about 5 s) and `the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux` (about 13 s). The ignored ones are red now.
+`a_read_dropped_mid_body_does_not_lose_the_bytes_it_had_consumed` (ignored, `src/lsp/transport.rs`); in `tests/mux_event_loop_cancel_repro.rs`: `a_split_frame_alone_does_not_kill_the_mux` (control, runs by default, about 3.5 s of watching after the second review cut it from 7 s: the frame is split 1 s after `ready` and finished 1 s later), `a_child_that_never_prints_ready_fails_the_wait_and_is_stopped` (default; the `ready` wait has a 30 s deadline and a `ChildGuard` stops the mux on every exit path, panics included; the first version used a bare `read_line` and left the child running on a panic), and the ignored `a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux` (about 5 s) and `the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux` (about 13 s). The ignored ones are red now. Nothing under `scripts/` or `.github/` passes `--ignored` or `--include-ignored` (grep, 2026-10-19). Mutants of the test helpers: the guard's Drop made a no-op and the `ready` wait without its deadline were both killed by `a_child_that_never_prints_ready_fails_the_wait_and_is_stopped`.
 
 ## Workarounds
 
