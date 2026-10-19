@@ -91,9 +91,19 @@ boundary**. The check happens before any I/O:
    list. Even `extra_write_roots` cannot bypass this.
 2. **Boundary check** — the canonicalized path must fall under the project root
    or an explicitly configured `extra_write_roots` entry.
-3. **Symlink escape prevention** — the parent directory is canonicalized (not
-   the target file, which may not exist yet), so symlinks pointing outside the
-   root are caught.
+3. **Symlink escape prevention** — the parent directory is canonicalized (the target
+   file itself may not exist yet), so a symlinked directory pointing outside the
+   root is caught, including below a directory that does not exist yet. If the
+   target file is itself a symlink it is followed (chains, relative links and
+   dangling links included, up to 40 links): a link whose end is in the deny list,
+   a loop, a chain longer than 40 links, a link that cannot be read and a link
+   whose end holds an unresolvable `..` are refused.
+   A link inside a write root (the project root, an `extra_write_roots` entry, an
+   approved directory, the temp dir) whose end is elsewhere (and not deny-listed)
+   is allowed: `create_file`, `edit_file`, `edit_markdown` and `edit_code`
+   `replace`/`insert`/`remove` replace the link with a regular file and never write
+   to the end. `edit_code` `rename` does write through the link, so it additionally
+   requires the end to be inside a write root.
 
 ### Allowing Writes Outside the Project Root
 

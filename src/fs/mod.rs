@@ -89,17 +89,36 @@ pub(crate) enum LinkTarget {
 
 /// Validate what a write target's LEAF symlink resolves to, when it is one.
 ///
-/// `validate_write_path` resolves the PARENT and keeps the leaf as written (a file that may not
-/// exist yet), so `<root>/leaf -> ~/.ssh/id_rsa` classifies as an ordinary in-root file and the
-/// deny-list is applied to the spelling, not to what the OS opens. This closes that for the
-/// callers, without touching the classifier: the resolved target is run through the existing
-/// public validators ([`validate_read_path`](crate::util::path_security::validate_read_path),
+/// `validate_write_path` judges a leaf link by the deny list (of the link's own location AND of
+/// where the chain ends) and by the roots of the link's OWN location only: every writer but one
+/// replaces the link and never touches its end, so the roots have nothing to say about the end.
+/// It hands back the link's own spelling, `<root>/leaf -> /elsewhere/file` included when allowed.
+/// This look is therefore two different things, by policy:
+///
+/// - [`LinkTarget::Writable`], used by `edit_code` rename, which writes THROUGH the link
+///   (`std::fs::write`): the ONLY check that the end is inside a write root. Delete it and a rename
+///   writes anywhere a link points that the deny list does not name.
+/// - [`LinkTarget::ReadableByTools`], used by `write_ack::resolve_write_or_capture` and
+///   `resolve_write_path_for`: defence in depth, UNTESTED. The classifier already refuses a deny-listed
+///   end, no input is known that it allows and this refuses, and mutants that discard the result at
+///   either call site survive the whole lib suite. It stays for the window in which a link is
+///   re-pointed between the classifier and the read, a window that is real (the review's racing
+///   thread flipped a link 142628 times in 8 s and 3922 refusals came from this look alone) and that no
+///   deterministic test reaches without a seam between the two looks.
+///
+/// Both run the resolved target through the existing public validators
+/// ([`validate_read_path`](crate::util::path_security::validate_read_path),
 /// [`validate_write_path`](crate::util::path_security::validate_write_path)).
+///
+/// Not shown redundant, so not removed: nothing proves the `ReadableByTools` read deny-list is a
+/// subset of what the classifier's two-form deny list covers on every filesystem shape.
 ///
 /// A target that is not a link, or a path that does not exist, is `Ok`. A dangling link is `Ok`
 /// under [`LinkTarget::ReadableByTools`] (nothing can be read through it and `atomic_write`
-/// replaces it) and refused under [`LinkTarget::Writable`] (a write would CREATE its target
-/// wherever it points, and where that is cannot be established).
+/// replaces it) and refused under [`LinkTarget::Writable`] with a clearer message than the one the
+/// caller would give (a write would CREATE its target wherever it points). At its only caller,
+/// rename, that arm decides nothing: the pre-image read that follows fails on a dangling link
+/// first. It is not a reason the look matters.
 ///
 /// docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
 pub(crate) fn validate_leaf_link_target(
@@ -167,8 +186,10 @@ pub(crate) async fn resolve_write_path_for(
         &security,
         &session_roots,
     )?;
-    // The classifier resolved the parent and kept the leaf as written; a leaf link to a
-    // deny-listed file is read by the edit tools through the link. See `validate_leaf_link_target`.
+    // The classifier refuses a link into the deny list but hands back the link's own spelling, and
+    // the edit tools read the target through it, so look again at the point of use. UNTESTED defence
+    // in depth (a mutant that discards the result survives the lib suite). See
+    // `validate_leaf_link_target`.
     validate_leaf_link_target(
         &resolved,
         &root,
@@ -693,6 +714,40 @@ mod tests {
         assert!(ok(&inside, LinkTarget::Writable).is_ok());
         assert!(ok(&outward, LinkTarget::ReadableByTools).is_ok());
         assert!(ok(&dangling, LinkTarget::ReadableByTools).is_ok());
+    }
+
+    /// `resolve_write_path_for` is the resolver `create_file`, `edit_file` and `edit_code` share.
+    /// A dangling leaf link to a place outside every write root resolves, as the link: the writers
+    /// replace a link and never write to its end, so there is nothing to approve. (This branch had
+    /// refused it with an approval for the end's directory; see the policy note in the issue.)
+    /// The target does not exist and is never created.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resolve_write_path_for_hands_back_a_leaf_link_out_of_the_write_roots_as_the_link() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".codescout")).unwrap();
+        std::os::unix::fs::symlink("/var/ce_fs_leaf_probe/new.txt", root.path().join("leaf"))
+            .unwrap();
+        let agent = Agent::new(Some(root.path().to_path_buf())).await.unwrap();
+        // The precondition that makes this a test of the POLICY: the end really is outside every
+        // write root, so a classifier that asked the roots about it would refuse.
+        let security = agent.security_config_for(None).await;
+        assert!(
+            matches!(
+                crate::util::path_security::classify_write_path(
+                    "/var/ce_fs_leaf_probe/new.txt",
+                    root.path(),
+                    &security,
+                    &[]
+                ),
+                crate::util::path_security::WritePathDecision::OutsideRoot { .. }
+            ),
+            "precondition: /var/ce_fs_leaf_probe/new.txt must be outside the write roots here"
+        );
+        let resolved = resolve_write_path_for(&agent, None, "leaf")
+            .await
+            .expect("a link out of the write roots is judged by its own location");
+        assert!(resolved.ends_with("leaf"), "got: {resolved:?}");
     }
 
     /// Deny-listed targets, hermetically. The deny list is built from `$HOME`, which a test must

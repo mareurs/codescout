@@ -98,11 +98,15 @@ pub async fn resolve_write_or_capture(
 
     match classify_write_path(raw_path, &root, &security, &session_roots) {
         WritePathDecision::Allowed(p) => {
-            // The classifier resolves the parent and keeps the leaf as written, so an in-root
-            // leaf link to a deny-listed file is "allowed" here while `read_file` refuses the
-            // same link. The edit tools read the target through it (error hints echo it, a
-            // unique match copies it into the project), so apply the read deny-list to what
-            // the link resolves to. docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
+            // The classifier judges where a write through a leaf link lands (a link to a
+            // deny-listed file is `Denied` there), but it returns the link's own spelling and the
+            // edit tools read the target through it (error hints echo it, a unique match copies it
+            // into the project). Look again at the point of use: apply the read deny-list to what
+            // the link resolves to now. UNTESTED defence in depth at THIS call site: no input is
+            // known that the classifier lets through and this refuses (a mutant that discards its
+            // result survives the suite), so it is kept for the window in which a link is
+            // re-pointed between the two looks, not because a test needs it.
+            // docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
             crate::fs::validate_leaf_link_target(
                 &p,
                 &root,
@@ -274,5 +278,81 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out, input);
+    }
+
+    // ---- a LEAF that is itself a symlink: the ack flow follows the classifier -------------------
+    //
+    // `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+    //
+    // The outside targets below do not exist and are never created: a DANGLING link names them, and
+    // the classifier judges the path a write through it would create. They sit under `/var`, which
+    // the ambient environment these tests run in (`resolve_write_or_capture` reads it) does not
+    // cover; the system temp dir does, so a tempdir could not stand in for "outside".
+
+    #[cfg(unix)]
+    fn plant_leaf_link(project: &std::path::Path, target: &str) -> String {
+        let link = project.join("leaf");
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        link.to_str().unwrap().to_string()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_leaf_link_to_an_outside_path_is_written_as_the_link_and_mints_no_ack() {
+        // POLICY (pending the user's confirmation, see the issue): the writers behind
+        // `resolve_write_or_capture` replace a link and never write to its end, so a link out of
+        // the roots needs no approval, and an `@ack_*` for the END's directory would grant a
+        // session root for a write that never happens there. Before this was a pending ack for
+        // `/var/ce_ack_leaf_capture`, and replaying it left that directory approved.
+        let (dir, ctx) = ctx_with_project().await;
+        let link = plant_leaf_link(dir.path(), "/var/ce_ack_leaf_capture/victim.txt");
+        // The precondition that makes this a test of the POLICY: the end is outside every root.
+        assert!(
+            matches!(
+                classify_write_path(
+                    "/var/ce_ack_leaf_capture/victim.txt",
+                    dir.path(),
+                    &ctx.agent.security_config_for(None).await,
+                    &[]
+                ),
+                WritePathDecision::OutsideRoot { .. }
+            ),
+            "precondition: the end must be outside the write roots here"
+        );
+        let input = json!({ "path": link, "content": "x" });
+        match resolve_write_or_capture(&ctx, "create_file", &input, &link)
+            .await
+            .unwrap()
+        {
+            WriteOutcome::Write(p) => assert!(
+                p.ends_with("leaf"),
+                "the write is handed the link itself, got: {p:?}"
+            ),
+            other => panic!("a link out of the roots must be written as the link, got: {other:?}"),
+        }
+        assert!(
+            ctx.agent.session_write_roots_snapshot().await.is_empty(),
+            "nothing may have been approved"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_leaf_link_to_a_deny_listed_path_is_refused_and_offers_no_ack() {
+        // `/etc/gshadow` is on the default deny list. Whether or not it exists on this host the
+        // link is refused, and a hard denial must never mint an `@ack_*` handle: the error is
+        // the whole answer.
+        let (dir, ctx) = ctx_with_project().await;
+        let link = plant_leaf_link(dir.path(), "/etc/gshadow");
+        let input = json!({ "path": link, "content": "x" });
+        let err = resolve_write_or_capture(&ctx, "create_file", &input, &link)
+            .await
+            .expect_err("a link to a deny-listed path must be refused");
+        let msg = err.to_string();
+        assert!(msg.contains("protected location"), "got: {msg}");
+        assert!(
+            !msg.contains("@ack_") && !msg.contains("approve_write(path="),
+            "a hard denial must not point at an approval, got: {msg}"
+        );
     }
 }

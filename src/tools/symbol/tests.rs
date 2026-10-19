@@ -11102,6 +11102,142 @@ async fn edit_code_replace_on_a_leaf_symlink_replaces_the_link_and_spares_the_vi
     assert!(std::fs::read_to_string(&leaf).unwrap().contains("42.0"));
 }
 
+/// A context whose language server knows `Point/a` in `leaf` and answers a `rename` with one edit
+/// to `leaf` (`a` -> `b`), the path spelled as the tool passed it.
+#[cfg(unix)]
+async fn rename_over_leaf_ctx(dir: &tempfile::TempDir, leaf: &std::path::Path) -> ToolContext {
+    use crate::lsp::{mock::MockLspClient, mock::MockLspProvider, SymbolInfo, SymbolKind};
+
+    let method = SymbolInfo {
+        name: "a".to_string(),
+        name_path: "Point/a".to_string(),
+        kind: SymbolKind::Method,
+        file: leaf.to_path_buf(),
+        start_line: 2,
+        end_line: 4,
+        start_col: 7,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let uri: lsp_types::Uri = url::Url::from_file_path(leaf)
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let edit = lsp_types::WorkspaceEdit {
+        changes: Some(std::collections::HashMap::from([(
+            uri,
+            vec![lsp_types::TextEdit {
+                range: lsp_types::Range {
+                    start: lsp_types::Position {
+                        line: 2,
+                        character: 7,
+                    },
+                    end: lsp_types::Position {
+                        line: 2,
+                        character: 8,
+                    },
+                },
+                new_text: "b".to_string(),
+            }],
+        )])),
+        ..Default::default()
+    };
+    let lsp = MockLspProvider::with_client(
+        MockLspClient::new()
+            .with_symbols(leaf, vec![method])
+            .with_rename_edit(edit),
+    );
+    ToolContext {
+        agent: Agent::new(Some(dir.path().to_path_buf())).await.unwrap(),
+        lsp,
+        output_buffer: buf(),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    }
+}
+
+/// `edit_code` rename is the one writer that writes THROUGH a leaf link (`std::fs::write` over the
+/// plan), so the classifier answering "allowed" for an in-root link is not enough for it: the
+/// second look (`validate_leaf_link_target`, `Writable`) must refuse a link whose end is outside
+/// every write root. The victim is `/dev/null`: it exists, is outside the roots and is not
+/// deny-listed, and a write to it destroys nothing if this ever regresses.
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_the_second_look() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let leaf = root.join("src").join("leaf.rs");
+    std::os::unix::fs::symlink("/dev/null", &leaf).unwrap();
+    let ctx = rename_over_leaf_ctx(&dir, &leaf).await;
+
+    let err = EditCode
+        .call(
+            json!({
+                "action": "rename", "symbol": "Point/a", "path": "src/leaf.rs", "new_name": "b",
+            }),
+            &ctx,
+        )
+        .await
+        .expect_err("a rename that would write through a link to an outside file must be refused");
+    let msg = format!("{err:#}");
+    // The second look's own wording: the classifier never says "reached through".
+    assert!(
+        msg.contains("outside the project root")
+            && msg.contains("reached through the symbolic link"),
+        "got: {msg}"
+    );
+}
+
+/// The control: a link whose end is inside the root is a legal rename target, and the rename writes
+/// through it (the link survives, its target changes).
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_code_rename_through_a_leaf_link_to_an_in_root_file_writes_the_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let real = root.join("src").join("real.rs");
+    std::fs::write(
+        &real,
+        "struct Point { x: f64, y: f64 }\nimpl Point {\n    fn a(&self) -> f64 {\n        1.0\n    }\n}\n",
+    )
+    .unwrap();
+    let leaf = root.join("src").join("leaf.rs");
+    std::os::unix::fs::symlink("real.rs", &leaf).unwrap();
+    let ctx = rename_over_leaf_ctx(&dir, &leaf).await;
+
+    EditCode
+        .call(
+            json!({
+                "action": "rename", "symbol": "Point/a", "path": "src/leaf.rs", "new_name": "b",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a link to a file inside the root is a legal rename target");
+    assert!(
+        std::fs::read_to_string(&real).unwrap().contains("fn b("),
+        "the rename must have rewritten the link's target"
+    );
+    assert!(
+        std::fs::symlink_metadata(&leaf)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "a rename writes through the link, it does not replace it"
+    );
+}
+
 #[tokio::test]
 async fn edit_code_refuses_a_reindent_value_it_cannot_read_instead_of_ignoring_it() {
     // `optional_bool_param` reads an unreadable value as ABSENT. For a switch whose whole

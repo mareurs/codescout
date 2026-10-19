@@ -1849,6 +1849,51 @@ async fn create_file_overwrite_on_a_leaf_symlink_replaces_the_link_and_spares_th
     assert_eq!(std::fs::read_to_string(&dangling).unwrap(), "x");
 }
 
+/// A leaf link to an outside file that is in NO write root and is not deny-listed, as a
+/// `create_file` target. The write replaces the link, so nothing is written at the end and no
+/// approval is offered or granted: on the branch before this policy, the same call returned a
+/// `pending_ack` whose replay approved the END's directory (`pw -> /etc/passwd` ended with `/etc`
+/// a session write root). The end is `/dev/null`: outside every root (the temp dir is one), not
+/// deny-listed. The assertions that discriminate a write-through are the file type of the link (a
+/// write-through would leave a link) and the absence of an ack; the end is a device, so its own
+/// content could not show one.
+#[cfg(unix)]
+#[tokio::test]
+async fn create_file_on_a_leaf_link_to_an_outside_file_replaces_the_link_and_grants_nothing() {
+    let (dir, ctx) = project_ctx().await;
+    let leaf = dir.path().join("pw");
+    std::os::unix::fs::symlink("/dev/null", &leaf).unwrap();
+
+    let result = CreateFile
+        .call(
+            json!({
+                "path": leaf.to_str().unwrap(),
+                "content": "replaced",
+                "overwrite": true
+            }),
+            &ctx,
+        )
+        .await
+        .expect("a link in the project is a legal target for a writer that replaces it");
+
+    assert!(
+        result.get("pending_ack").is_none(),
+        "no approval may be offered for the end of a link that is replaced: {result}"
+    );
+    assert!(
+        ctx.agent.session_write_roots_snapshot().await.is_empty(),
+        "nothing may have been approved"
+    );
+    assert!(
+        std::fs::symlink_metadata(&leaf)
+            .unwrap()
+            .file_type()
+            .is_file(),
+        "the link must have been replaced by a regular file"
+    );
+    assert_eq!(std::fs::read_to_string(&leaf).unwrap(), "replaced");
+}
+
 #[tokio::test]
 async fn create_file_refuses_overwrite_shrink_without_force() {
     let (dir, ctx) = project_ctx().await;

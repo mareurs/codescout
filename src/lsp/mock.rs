@@ -53,6 +53,8 @@ pub struct MockLspClient {
     /// Canned responses for `references`, keyed by file path.
     pub references_results:
         std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Vec<lsp_types::Location>>>,
+    /// The edit `rename` answers with. `None` answers an empty edit.
+    rename_edit: Option<lsp_types::WorkspaceEdit>,
 }
 
 impl MockLspClient {
@@ -70,6 +72,7 @@ impl MockLspClient {
             incoming_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             outgoing_calls_results: std::sync::Mutex::new(std::collections::HashMap::new()),
             references_results: std::sync::Mutex::new(std::collections::HashMap::new()),
+            rename_edit: None,
         }
     }
 
@@ -77,6 +80,12 @@ impl MockLspClient {
     /// when it never answers. The path must match exactly what the tool passes.
     pub fn with_symbols_error(mut self, path: impl Into<PathBuf>, message: &str) -> Self {
         self.symbols_errors.insert(path.into(), message.to_string());
+        self
+    }
+
+    /// Make `rename` answer with `edit`, as a language server does with the sites it would change.
+    pub fn with_rename_edit(mut self, edit: lsp_types::WorkspaceEdit) -> Self {
+        self.rename_edit = Some(edit);
         self
     }
 
@@ -245,7 +254,7 @@ impl LspClientOps for MockLspClient {
         _new_name: &str,
         _language_id: &str,
     ) -> anyhow::Result<lsp_types::WorkspaceEdit> {
-        Ok(lsp_types::WorkspaceEdit::default())
+        Ok(self.rename_edit.clone().unwrap_or_default())
     }
 
     async fn did_change(&self, path: &Path) -> anyhow::Result<()> {

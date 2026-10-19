@@ -644,9 +644,12 @@ impl EditCode {
                 &security,
                 &session_roots,
             )?;
-            // This loop's `fs::write` FOLLOWS a leaf link, and the classifier above resolves only
-            // the parent, so a source file that is an in-root link to a file outside the write
-            // roots passes it. The resolved target must itself be writable.
+            // This loop's `fs::write` FOLLOWS a leaf link, which no other `edit_code` action does. The
+            // classifier above asks the deny list of the link's end but the ROOTS only of the link's
+            // own location, so THIS look is the only check that the end is inside a write root: the
+            // resolved target must itself be writable. Delete it and a rename writes through an
+            // in-root link to anywhere the deny list does not name. (A dangling link is refused here
+            // too, but the pre-image read below would fail on it anyway.)
             crate::fs::validate_leaf_link_target(
                 &path,
                 &root,

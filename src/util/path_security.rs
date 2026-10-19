@@ -363,6 +363,62 @@ fn canonicalize_through_existing_ancestor(path: &Path) -> PathBuf {
     }
 }
 
+/// The most symbolic links one write target may chain through before the classifier gives up on
+/// it. It mirrors the kernel's own limit (`MAXSYMLINKS`, 40 on Linux), so a chain the OS would
+/// follow is a chain this follows, and a loop ends in a refusal instead of a hang.
+// cap-class: NOT_A_CAP — bounds how many symbolic links the classifier follows before refusing a chain; it limits a walk over the filesystem, never how much of any result is returned
+const MAX_LEAF_LINK_HOPS: usize = 40;
+
+/// Where a write to `target` lands when its LEAF may itself be a symlink: `target` itself when it
+/// is not one, otherwise the end of the chain, followed for up to [`MAX_LEAF_LINK_HOPS`] links.
+///
+/// `canonicalize_write_target` resolves only the target's directory, so `<root>/leaf ->
+/// ~/.ssh/id_rsa` kept the in-root spelling `<root>/leaf` and the allowlist and the deny list judged
+/// the link's name, never what the OS would open. Every hop is a `symlink_metadata`/`read_link`,
+/// never `metadata`, which would follow the link and hide that there was one. A relative hop is
+/// resolved against the directory of the link that names it, and every hop goes through
+/// `canonicalize_write_target` again, so a hop that crosses a symlinked directory, or names a file
+/// below a directory that does not exist yet (a dangling link), is resolved the way a first-hand
+/// target is. The landing is held the way `canonicalize_write_target` holds a write target: its
+/// directory resolved through the deepest existing ancestor, the file name as the last link
+/// spelled it.
+///
+/// Only the END of the chain is returned: a write replaces the first link (`atomic_write`) or
+/// lands on the last file (`fs::write`), and an intermediate hop is neither.
+///
+/// An `lstat` that fails (missing file, `ENOTDIR`, `EACCES`) ends the chain: it is not a link
+/// that can be read, and the write that follows fails by itself and says why. A link that was
+/// seen but cannot be read, and a chain longer than the limit (a loop included), have no landing:
+/// `Err` carries the reason, for the refusal.
+///
+/// Limit, stated so it is not read as a guarantee: the check and the write are separate
+/// syscalls, so a link planted between them still wins.
+fn resolve_leaf_link(target: &Path) -> Result<PathBuf, String> {
+    let mut cur = target.to_path_buf();
+    let mut hops = 0usize;
+    loop {
+        let is_link = std::fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link {
+            return Ok(cur);
+        }
+        if hops == MAX_LEAF_LINK_HOPS {
+            return Err(format!(
+                "that chains through more than {MAX_LEAF_LINK_HOPS} symbolic links (a loop, or too deep to follow)"
+            ));
+        }
+        hops += 1;
+        let Ok(link) = std::fs::read_link(&cur) else {
+            return Err("whose target could not be read".to_string());
+        };
+        // `with_file_name` replaces the link's own name with its target, so a relative target is
+        // read from the directory that holds the link and an absolute one replaces the whole
+        // path (`PathBuf::push` semantics). A link always has a file name, so unlike
+        // `parent().join()` there is no parentless case to invent an answer for.
+        let next = cur.with_file_name(link);
+        cur = canonicalize_write_target(&next);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -554,6 +610,15 @@ impl WriteEnv {
 }
 
 /// `classify_write_path` over an explicit environment.
+///
+/// When the target's LEAF is a symlink, the answer is also the answer for where a write through
+/// it lands (`resolve_leaf_link`). The deny list is asked of the link's own location AND of its
+/// resolved end, and a chain that cannot be followed to an end (a loop, more than
+/// `MAX_LEAF_LINK_HOPS` links, a link that cannot be read) or whose end holds an unresolvable `..`
+/// is a hard denial. The ROOTS are asked of the link's own location only, and `Allowed` carries
+/// the link's own spelling: every writer but `edit_code` rename replaces a link and never touches
+/// its end, and rename, which writes through, is gated by `fs::validate_leaf_link_target` (the
+/// policy and its alternative are in the issue file; it is pending the user's confirmation).
 fn classify_write_path_in(
     raw: &str,
     project_root: &Path,
@@ -609,6 +674,32 @@ fn classify_write_path_in(
 
     let project_root = canonicalize_through_existing_ancestor(project_root);
 
+    // The target's LEAF may itself be a symlink, which `canonicalize_write_target` does not
+    // resolve. Where a write through it LANDS is asked of the deny list below, in addition to the
+    // link's own location: a link into the deny list is refused whichever writer follows it. For a
+    // target that is not a link the landing IS `resolved`, and the second look repeats the first.
+    let landing = match resolve_leaf_link(&resolved) {
+        Ok(landing) => landing,
+        Err(why) => {
+            return WritePathDecision::Denied(format!(
+                "write denied: '{}' is a symbolic link {}. approve_write cannot grant this — \
+                 where a write would land cannot be established; point the link at a regular \
+                 file or write to a path that is not a link.",
+                raw, why
+            ));
+        }
+    };
+    // Same reason, same wording family, as the check on `resolved` above: `starts_with` would match
+    // a root that an unresolved `..` in the link's target escapes.
+    if has_parent_dir(&landing) {
+        return WritePathDecision::Denied(format!(
+            "write denied: '{}' is a symbolic link whose target contains '..' that could not be \
+             resolved. approve_write cannot grant this — the link's target is rejected, not its \
+             location; point the link at a path with no unresolved '..' segments.",
+            raw
+        ));
+    }
+
     // Check deny-list first (blocks writes to ~/.ssh even if somehow under
     // an extra_write_root). Each entry is held in TWO forms, because the target is resolved by
     // `canonicalize_write_target` (parent resolved, leaf as written) and an entry can be a symlink
@@ -627,6 +718,15 @@ fn classify_write_path_in(
              this — the deny-list is checked first and holds even inside an approved \
              directory.",
             raw
+        ));
+    }
+    if is_denied(&landing, &denied) {
+        return WritePathDecision::Denied(format!(
+            "write denied: '{}' is a symbolic link to '{}', which is in a protected location. \
+             approve_write cannot grant this — the deny-list is checked first and holds even \
+             inside an approved directory.",
+            raw,
+            landing.display()
         ));
     }
 
@@ -691,6 +791,15 @@ fn classify_write_path_in(
         || temp_root
             .as_deref()
             .is_some_and(|t| temp_root_admits(t, &homes, &resolved));
+    // The roots are asked of the LINK's own location only, never of where it lands. A writer that
+    // replaces a link (`create_file`, `edit_file`, `edit_markdown`, `edit_code` replace, insert and
+    // remove: `util::fs::atomic_write`) never touches the landing, so an `OutsideRoot` for the
+    // landing would mint an `@ack_*` whose replay approves the LANDING'S directory (`pw ->
+    // /etc/passwd` ended with `/etc` a session root) for a write that does not happen there. The one
+    // writer that writes THROUGH a link, `edit_code` rename (`std::fs::write`), is gated by
+    // `fs::validate_leaf_link_target` (`LinkTarget::Writable`), which asks `validate_write_path` of
+    // the landing as a regular file. The deny list, which does cover the landing, was asked above.
+    // The path handed back stays the link's own spelling.
     if !under_allowed_root {
         return WritePathDecision::OutsideRoot { resolved };
     }
@@ -8768,5 +8877,660 @@ EOF"#;
             detect_terminal_filter(&mask_heredoc_bodies(cmd)).is_none(),
             "masking must hide the body pipe from the detector"
         );
+    }
+    // ── a LEAF that is itself a symlink: the classifier judges where the write lands ────────────
+    //
+    // `docs/issues/2026-10-17-write-allowlist-canonicalizes-only-the-parent-so-a-leaf-symlink-or-a-missing-subdir-escapes.md`
+    //
+    // Every case builds its own canonical tree with the temp dir, home and cwd INJECTED
+    // (`LeafTree::env`), so only the roots a case names can admit a write and nothing is read from
+    // the process (`docs/conventions/test-env-isolation.md`).
+
+    /// `<base>/project` (the project root), `<base>/outside` (a directory no root covers) and
+    /// `<base>/home` (the protected home, holding `.ssh/id_rsa`). `base` is canonical.
+    #[cfg(unix)]
+    struct LeafTree {
+        _scratch: tempfile::TempDir,
+        base: PathBuf,
+        project: PathBuf,
+        outside: PathBuf,
+        home: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl LeafTree {
+        fn new() -> Self {
+            let scratch = tempdir().unwrap();
+            let base = std::fs::canonicalize(scratch.path()).unwrap();
+            let project = base.join("project");
+            let outside = base.join("outside");
+            let home = base.join("home");
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            std::fs::create_dir_all(home.join(".ssh")).unwrap();
+            std::fs::write(home.join(".ssh/id_rsa"), "PRIVATE").unwrap();
+            std::fs::write(outside.join("victim.txt"), "victim").unwrap();
+            std::fs::write(project.join("real.txt"), "real").unwrap();
+            Self {
+                _scratch: scratch,
+                base,
+                project,
+                outside,
+                home,
+            }
+        }
+
+        fn env(&self) -> WriteEnv {
+            env_of(&self.base.join("no-temp"), Some(&self.home), None)
+        }
+
+        fn classify(&self, target: &Path, session_roots: &[PathBuf]) -> WritePathDecision {
+            classify_write_path_in(
+                target.to_str().unwrap(),
+                &self.project,
+                &default_config(),
+                session_roots,
+                &self.env(),
+            )
+        }
+    }
+
+    #[cfg(unix)]
+    fn symlink(to: impl AsRef<Path>, at: &Path) {
+        std::os::unix::fs::symlink(to.as_ref(), at).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn assert_denied_as_protected(decision: &WritePathDecision, what: &str) {
+        assert!(
+            matches!(decision, WritePathDecision::Denied(m) if m.contains("protected location")),
+            "{what} must be a deny-list refusal, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_deny_listed_file_is_refused_whatever_roots_are_approved() {
+        // `<root>/leaf -> ~/.ssh/id_rsa`: the leaf kept its in-root spelling, so the deny list never
+        // saw `~/.ssh`. The deny list wins over every root, so approving the project, the key's own
+        // directory or an unrelated directory changes nothing. The second victim does not exist: the
+        // link dangles into the deny-listed directory.
+        let t = LeafTree::new();
+        let existing = t.home.join(".ssh/id_rsa");
+        let missing = t.home.join(".ssh/new_key");
+        for (name, victim) in [("to-existing", &existing), ("to-missing", &missing)] {
+            let leaf = t.project.join(name);
+            symlink(victim, &leaf);
+            for roots in [
+                vec![],
+                vec![t.project.clone()],
+                vec![t.home.join(".ssh")],
+                vec![t.outside.clone()],
+            ] {
+                let decision = t.classify(&leaf, &roots);
+                assert_denied_as_protected(&decision, &format!("{name} with roots {roots:?}"));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_into_the_deny_list_through_a_symlinked_directory_is_refused() {
+        // The link names `<project>/ssh/id_rsa`, and `<project>/ssh` is itself a link to `~/.ssh`:
+        // the landing has to be resolved through the link's own parent too.
+        let t = LeafTree::new();
+        symlink(t.home.join(".ssh"), &t.project.join("ssh"));
+        let leaf = t.project.join("leaf");
+        symlink(t.project.join("ssh/id_rsa"), &leaf);
+        assert_denied_as_protected(&t.classify(&leaf, &[]), "a link through a linked directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_file_inside_the_root_is_allowed_under_the_link_spelling() {
+        // Allowed, and the path carried is the LINK, not its target: the writers replace a link with
+        // a regular file (`a_target_that_is_a_symlink_is_replaced_not_written_through`), so
+        // handing them the target would turn "replace the link" into "rewrite the target".
+        let t = LeafTree::new();
+        let absolute = t.project.join("abs-link");
+        symlink(t.project.join("real.txt"), &absolute);
+        let relative = t.project.join("rel-link");
+        symlink("real.txt", &relative);
+        for leaf in [&absolute, &relative] {
+            let decision = t.classify(leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if p == leaf),
+                "{leaf:?} must be allowed as itself, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_to_a_file_outside_every_root_is_allowed_as_the_link_and_asks_for_no_approval() {
+        // POLICY (pending the user's confirmation, see the issue): a link whose end is outside
+        // every root and not deny-listed is judged by the link's own location. Every writer but
+        // one REPLACES the link and never touches the landing, so an `@ack_*` that approved the
+        // landing's directory would grant a session root for a write that does not happen there
+        // (`create_file` on `pw -> /etc/passwd` once ended with `["/etc"]` approved). `edit_code`
+        // rename writes THROUGH the link and is gated by the second look in `fs`, not here.
+        // The ends cover a file in the home directory (once reported as "directly in the home
+        // directory") and a missing file below a missing directory.
+        let t = LeafTree::new();
+        let victim = t.outside.join("victim.txt");
+        let absolute = t.project.join("abs-link");
+        symlink(&victim, &absolute);
+        let relative = t.project.join("rel-link");
+        symlink("../outside/victim.txt", &relative);
+        let in_home = t.project.join("home-link");
+        symlink(t.home.join(".rc"), &in_home);
+        let missing = t.project.join("missing-link");
+        symlink(t.outside.join("nodir/deep/x.txt"), &missing);
+        for leaf in [&absolute, &relative, &in_home, &missing] {
+            let decision = t.classify(leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if p == leaf),
+                "{leaf:?} must be allowed as the link, with no approval to offer, got: {decision:?}"
+            );
+        }
+        // The project-relative RAW path (the form the tools receive) is the same question.
+        let decision = t.classify(Path::new("abs-link"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == absolute),
+            "a project-relative raw path must be judged the same way, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_leaf_link_is_denied_only_when_the_path_it_names_is_deny_listed() {
+        // A write through a dangling link would CREATE its target, so the path it names is
+        // resolved through its deepest existing ancestor and the deny list is asked of that.
+        // Anywhere else it is the link that gets replaced (see the policy test above).
+        let t = LeafTree::new();
+        let allowed: [(&str, PathBuf); 3] = [
+            ("missing-file", t.outside.join("missing.txt")),
+            ("missing-dirs", t.outside.join("nodir/deep/x.txt")),
+            ("missing-inside", t.project.join("nodir/new.txt")),
+        ];
+        for (name, target) in allowed {
+            let leaf = t.project.join(name);
+            symlink(&target, &leaf);
+            let decision = t.classify(&leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if *p == leaf),
+                "{name}: must be allowed as the link, got: {decision:?}"
+            );
+        }
+        let denied: [(&str, PathBuf); 3] = [
+            ("deny-missing-file", t.home.join(".ssh/new_key")),
+            ("deny-missing-dirs", t.home.join(".ssh/nodir/deep/k")),
+            ("deny-relative", PathBuf::from("../home/.ssh/new_key")),
+        ];
+        for (name, target) in denied {
+            let leaf = t.project.join(name);
+            symlink(&target, &leaf);
+            assert_denied_as_protected(&t.classify(&leaf, &[]), name);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_chain_is_followed_to_its_end() {
+        let t = LeafTree::new();
+        let victim = t.outside.join("victim.txt");
+
+        // a -> b -> outside/victim.txt: out of the roots, not deny-listed, so the link itself
+        // is what is judged (policy test above)
+        symlink(&victim, &t.project.join("b1"));
+        symlink("b1", &t.project.join("a1"));
+        let decision = t.classify(&t.project.join("a1"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("a1")),
+            "a chain out of the roots is allowed as its first link, got: {decision:?}"
+        );
+
+        // a -> b -> project/real.txt stays in the root
+        symlink(t.project.join("real.txt"), &t.project.join("b2"));
+        symlink("b2", &t.project.join("a2"));
+        let decision = t.classify(&t.project.join("a2"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("a2")),
+            "an in-root chain must be allowed as its first link, got: {decision:?}"
+        );
+
+        // a -> b -> ~/.ssh/id_rsa: only the LAST hop is deny-listed, and only following the chain
+        // past its first hop finds it
+        symlink(t.home.join(".ssh/id_rsa"), &t.project.join("b3"));
+        symlink("b3", &t.project.join("a3"));
+        assert_denied_as_protected(
+            &t.classify(&t.project.join("a3"), &[]),
+            "a chain's last hop",
+        );
+
+        // The decision is about where the write LANDS: an intermediate hop outside the roots is
+        // not written (a replace touches only the first link, a write-through only the end).
+        symlink(t.project.join("real.txt"), &t.outside.join("mid"));
+        symlink(t.outside.join("mid"), &t.project.join("a4"));
+        let decision = t.classify(&t.project.join("a4"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("a4")),
+            "an intermediate hop outside the roots is not the landing, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_hop_resolves_against_the_directory_of_the_link_that_names_it() {
+        // `project/sub/hop -> ../real.txt` is `project/real.txt`; `project/sub/far ->
+        // ../../home/.ssh/id_rsa` is `<base>/home/.ssh/id_rsa`, which is deny-listed. Resolving
+        // either against the project root, or against the link the chain started from, lands
+        // somewhere else (`<base>/../home/...` is not in the deny list).
+        let t = LeafTree::new();
+        std::fs::create_dir(t.project.join("sub")).unwrap();
+        symlink("../real.txt", &t.project.join("sub/hop"));
+        symlink("sub/hop", &t.project.join("near"));
+        let decision = t.classify(&t.project.join("near"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == t.project.join("near")),
+            "a relative hop inside a subdirectory must land on real.txt, got: {decision:?}"
+        );
+
+        symlink("../../home/.ssh/id_rsa", &t.project.join("sub/far"));
+        symlink("sub/far", &t.project.join("distant"));
+        assert_denied_as_protected(
+            &t.classify(&t.project.join("distant"), &[]),
+            "a relative hop out of a subdirectory",
+        );
+    }
+
+    /// Run `classify` on its own thread so a loop that is not bounded fails the test instead of
+    /// hanging the suite.
+    #[cfg(unix)]
+    fn classify_with_deadline(t: &LeafTree, target: &Path) -> WritePathDecision {
+        classify_with_deadline_in(t, target, &t.base.join("no-temp"), None)
+    }
+
+    /// `classify_with_deadline` with the temp dir and the cwd root injected.
+    #[cfg(unix)]
+    fn classify_with_deadline_in(
+        t: &LeafTree,
+        target: &Path,
+        temp: &Path,
+        cwd: Option<&Path>,
+    ) -> WritePathDecision {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (target, project, home, temp, cwd) = (
+            target.to_path_buf(),
+            t.project.clone(),
+            t.home.clone(),
+            temp.to_path_buf(),
+            cwd.map(Path::to_path_buf),
+        );
+        std::thread::spawn(move || {
+            let env = env_of(&temp, Some(&home), cwd.as_deref());
+            let decision = classify_write_path_in(
+                target.to_str().unwrap(),
+                &project,
+                &default_config(),
+                &[],
+                &env,
+            );
+            let _ = tx.send(decision);
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the classifier must terminate on a symlink loop")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_loop_is_refused_and_does_not_hang() {
+        let t = LeafTree::new();
+        symlink("self", &t.project.join("self"));
+        symlink("two-b", &t.project.join("two-a"));
+        symlink("two-a", &t.project.join("two-b"));
+        for name in ["self", "two-a"] {
+            let decision = classify_with_deadline(&t, &t.project.join(name));
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
+                "{name}: a loop has no landing and must be a hard denial, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_chain_is_followed_for_exactly_the_hop_limit() {
+        // `k` links in a row, the last one naming `real.txt`. The limit is a count of links
+        // followed: `MAX_LEAF_LINK_HOPS` resolve, one more does not.
+        let t = LeafTree::new();
+        let chain = |name: &str, k: usize| {
+            let first = format!("{name}0");
+            for i in 0..k {
+                let at = t.project.join(format!("{name}{i}"));
+                if i + 1 == k {
+                    symlink("real.txt", &at);
+                } else {
+                    symlink(format!("{name}{}", i + 1), &at);
+                }
+            }
+            t.project.join(first)
+        };
+        let at_limit = chain("fits", MAX_LEAF_LINK_HOPS);
+        let decision = t.classify(&at_limit, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == at_limit),
+            "a chain of {MAX_LEAF_LINK_HOPS} links must resolve, got: {decision:?}"
+        );
+        // The limit is not free to shrink: 40 is what the kernel itself follows (`MAXSYMLINKS`), so
+        // a chain of that depth that works everywhere else must not be refused here. A literal, on
+        // purpose: the assertions around it move with the constant, this one does not.
+        let kernel_depth = chain("kernel", 40);
+        let decision = t.classify(&kernel_depth, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == kernel_depth),
+            "a chain of 40 links must resolve, got: {decision:?}"
+        );
+        let over = chain("over", MAX_LEAF_LINK_HOPS + 1);
+        let decision = t.classify(&over, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
+            "a chain of {} links must be refused, got: {decision:?}",
+            MAX_LEAF_LINK_HOPS + 1
+        );
+        // And not free to GROW past the kernel's depth either, by one: a literal again.
+        let past_kernel_depth = chain("past", 41);
+        let decision = t.classify(&past_kernel_depth, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
+            "a chain of 41 links must be refused, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_whose_target_sits_under_a_symlinked_directory_resolves_through_it() {
+        // `project/dirlink -> home/.ssh` (a directory), then leaves naming `project/dirlink/...`:
+        // the spelling is in-root, the landing is in the deny list. The third leaf also dangles
+        // below the linked directory.
+        let t = LeafTree::new();
+        symlink(t.home.join(".ssh"), &t.project.join("dirlink"));
+        symlink(t.project.join("dirlink/id_rsa"), &t.project.join("abs"));
+        symlink("dirlink/id_rsa", &t.project.join("rel"));
+        symlink(
+            t.project.join("dirlink/nodir/x.txt"),
+            &t.project.join("below"),
+        );
+        for name in ["abs", "rel", "below"] {
+            assert_denied_as_protected(&t.classify(&t.project.join(name), &[]), name);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_is_allowed_with_or_without_an_approval_of_its_end_and_never_past_the_deny_list()
+    {
+        // The link is what is judged (policy test above), so approving its end's directory
+        // neither changes the answer nor is ever asked for. The deny list still wins over a
+        // session root and over `extra_write_roots` that cover the end.
+        let t = LeafTree::new();
+        let to_victim = t.project.join("to-victim");
+        symlink(t.outside.join("victim.txt"), &to_victim);
+        let to_key = t.project.join("to-key");
+        symlink(t.home.join(".ssh/id_rsa"), &to_key);
+
+        for roots in [vec![], vec![t.outside.clone()]] {
+            let decision = t.classify(&to_victim, &roots);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if *p == to_victim),
+                "roots {roots:?}: must be allowed as the link, got: {decision:?}"
+            );
+        }
+        let config = PathSecurityConfig {
+            extra_write_roots: vec![t.outside.clone(), t.home.join(".ssh")],
+            ..Default::default()
+        };
+        for (leaf, ok) in [(&to_victim, true), (&to_key, false)] {
+            let decision =
+                classify_write_path_in(leaf.to_str().unwrap(), &t.project, &config, &[], &t.env());
+            if ok {
+                assert!(
+                    matches!(&decision, WritePathDecision::Allowed(p) if p == leaf),
+                    "{leaf:?} with extra roots, got: {decision:?}"
+                );
+            } else {
+                assert_denied_as_protected(&decision, "a link to the deny list under extra roots");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_spelled_outside_the_roots_stays_refused_when_it_points_inside() {
+        // The link ITSELF is what a replacing writer overwrites, so a link outside the roots (or in
+        // the deny list) is refused for where it lives, whatever it points at.
+        let t = LeafTree::new();
+        let outside_link = t.outside.join("ln");
+        symlink(t.project.join("real.txt"), &outside_link);
+        let decision = t.classify(&outside_link, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == outside_link),
+            "a link outside the roots must be refused at its own location, got: {decision:?}"
+        );
+
+        let ssh_link = t.home.join(".ssh/ln");
+        symlink(t.project.join("real.txt"), &ssh_link);
+        assert_denied_as_protected(
+            &t.classify(&ssh_link, &[t.home.join(".ssh")]),
+            "a link inside the deny list",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_whose_target_has_an_unresolvable_dotdot_is_refused() {
+        // `nodir` does not exist, so `nodir/../../x` cannot be collapsed; `starts_with` would
+        // match a root that the `..` escapes.
+        let t = LeafTree::new();
+        let leaf = t.project.join("leaf");
+        symlink(t.project.join("nodir/../../x"), &leaf);
+        let decision = t.classify(&leaf, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("'..'")),
+            "an unresolved '..' in the landing must be a hard denial, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_that_is_not_a_link_is_classified_as_before() {
+        let t = LeafTree::new();
+        let inside_file = t.project.join("real.txt");
+        let inside_missing = t.project.join("new.txt");
+        let inside_dir = t.project.join("a-dir");
+        std::fs::create_dir(&inside_dir).unwrap();
+        for leaf in [&inside_file, &inside_missing, &inside_dir] {
+            let decision = t.classify(leaf, &[]);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if p == leaf),
+                "{leaf:?} must be allowed as itself, got: {decision:?}"
+            );
+        }
+        let outside_file = t.outside.join("victim.txt");
+        let decision = t.classify(&outside_file, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::OutsideRoot { resolved } if *resolved == outside_file),
+            "a regular file outside the roots must be refused, got: {decision:?}"
+        );
+        assert_denied_as_protected(
+            &t.classify(&t.home.join(".ssh/id_rsa"), &[]),
+            "a regular deny-listed file",
+        );
+        // A leaf below a regular file (ENOTDIR on the lstat) is not a link either.
+        let decision = t.classify(&inside_file.join("below"), &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == inside_file.join("below")),
+            "a path below a regular file keeps its old answer, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_root_profile_still_classifies_a_leaf_link_as_itself() {
+        // `SecurityProfile::Root` is the "no restrictions" profile and returns before the
+        // allowlist; it is not given a deny list by this change.
+        let t = LeafTree::new();
+        let leaf = t.project.join("leaf");
+        symlink(t.home.join(".ssh/id_rsa"), &leaf);
+        let config = PathSecurityConfig {
+            profile: SecurityProfile::Root,
+            ..Default::default()
+        };
+        let decision =
+            classify_write_path_in(leaf.to_str().unwrap(), &t.project, &config, &[], &t.env());
+        assert!(
+            matches!(&decision, WritePathDecision::Allowed(p) if *p == leaf),
+            "the Root profile must be unchanged, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_outside_the_roots_to_the_deny_list_is_denied_not_offered_an_approval() {
+        // `outside/ln -> ~/.ssh/id_rsa`, the link spelled outside every root. Two checks refuse it
+        // and they must be asked in this order: if the roots were asked first the answer would be
+        // `OutsideRoot`, which the ack layer turns into an `@ack_*` handle for a key file.
+        let t = LeafTree::new();
+        let ln = t.outside.join("ln");
+        symlink(t.home.join(".ssh/id_rsa"), &ln);
+        for roots in [vec![], vec![t.outside.clone()]] {
+            let decision = t.classify(&ln, &roots);
+            assert_denied_as_protected(
+                &decision,
+                &format!("a link to the deny list, roots {roots:?}"),
+            );
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if !m.contains("approve_write(path=")),
+                "a hard denial must not name an approval: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_leaf_link_in_the_temp_root_or_the_cwd_root_is_judged_like_one_in_the_project() {
+        // The temp dir and the server's cwd are write roots too. In each: a link out of every root
+        // is allowed as the link (policy test above), a link into the deny list is denied, and a
+        // loop is denied.
+        let t = LeafTree::new();
+        let temp = t.base.join("temp");
+        let cwd = t.base.join("cwd");
+        std::fs::create_dir(&temp).unwrap();
+        std::fs::create_dir(&cwd).unwrap();
+        let env = env_of(&temp, Some(&t.home), Some(&cwd));
+        for (kind, dir) in [("temp", &temp), ("cwd", &cwd)] {
+            let out = dir.join("out");
+            symlink(t.outside.join("victim.txt"), &out);
+            let key = dir.join("key");
+            symlink(t.home.join(".ssh/id_rsa"), &key);
+            let looped = dir.join("loop");
+            symlink("loop", &looped);
+            let classify = |target: &Path| {
+                classify_write_path_in(
+                    target.to_str().unwrap(),
+                    &t.project,
+                    &default_config(),
+                    &[],
+                    &env,
+                )
+            };
+            let decision = classify(&out);
+            assert!(
+                matches!(&decision, WritePathDecision::Allowed(p) if *p == out),
+                "{kind}: a link out of the roots must be allowed as the link, got: {decision:?}"
+            );
+            assert_denied_as_protected(
+                &classify(&key),
+                &format!("{kind}: a link to the deny list"),
+            );
+            let decision = classify_with_deadline_in(&t, &looped, &temp, Some(&cwd));
+            assert!(
+                matches!(&decision, WritePathDecision::Denied(m) if m.contains("symbolic link")),
+                "{kind}: a loop must be denied, got: {decision:?}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_leaf_link_that_cannot_be_read_is_refused() {
+        // `/proc/1/cwd` is a symlink an unprivileged process can `lstat` but not `readlink`
+        // (EACCES), so a link the classifier SEES but cannot follow, without any race. It is
+        // refused rather than judged by its own name. The premise does not hold as root, or on a
+        // procfs that lets this process read it, and then there is nothing to classify: the test
+        // returns, SILENTLY (the harness hides the output of a passing test, so the line below is
+        // only seen with `--nocapture`), and the `read_link` failure arm goes untested. Setting
+        // `CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST` makes that case a failure instead, for a lane
+        // that must not run as root.
+        let p = Path::new("/proc/1/cwd");
+        let is_link = std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+        if !is_link || std::fs::read_link(p).is_ok() {
+            let why = format!(
+                "a_leaf_link_that_cannot_be_read_is_refused: /proc/1/cwd is {} for this process \
+                 (root, or a procfs that allows it), so there is no unreadable link to classify",
+                if is_link { "readable" } else { "not a symlink" }
+            );
+            assert!(
+                std::env::var_os("CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST").is_none(),
+                "{why}, and CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST forbids skipping"
+            );
+            eprintln!("SKIPPED {why}");
+            return;
+        }
+        let t = LeafTree::new();
+        let decision = t.classify(p, &[]);
+        assert!(
+            matches!(&decision, WritePathDecision::Denied(m) if m.contains("could not be read")),
+            "a link that cannot be read must be a hard denial, got: {decision:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refusal_through_a_link_names_the_link_and_where_it_lands() {
+        // The text of each refusal for a link says it is a link; the deny-list one also names the
+        // end. Without that a reader is told that the path they typed is protected, or outside the
+        // project, when it is an in-project name.
+        let t = LeafTree::new();
+        let key = t.project.join("key");
+        symlink(t.home.join(".ssh/id_rsa"), &key);
+        let looped = t.project.join("loop");
+        symlink("loop", &looped);
+        let dotdot = t.project.join("dotdot");
+        symlink(t.project.join("nodir/../../x"), &dotdot);
+
+        let message = |leaf: &Path| match t.classify(leaf, &[]) {
+            WritePathDecision::Denied(m) => m,
+            other => panic!("{leaf:?} must be denied, got: {other:?}"),
+        };
+        let m = message(&key);
+        let expected = format!(
+            "'{}' is a symbolic link to '{}'",
+            key.display(),
+            t.home.join(".ssh/id_rsa").display()
+        );
+        assert!(m.contains(&expected), "expected {expected:?} in: {m}");
+        let m = match classify_with_deadline(&t, &looped) {
+            WritePathDecision::Denied(m) => m,
+            other => panic!("{looped:?} must be denied, got: {other:?}"),
+        };
+        let expected = format!("'{}' is a symbolic link", looped.display());
+        assert!(m.contains(&expected), "expected {expected:?} in: {m}");
+        let m = message(&dotdot);
+        let expected = format!(
+            "'{}' is a symbolic link whose target contains '..'",
+            dotdot.display()
+        );
+        assert!(m.contains(&expected), "expected {expected:?} in: {m}");
     }
 }
