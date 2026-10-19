@@ -883,6 +883,8 @@ The plan (slug, lineage, bound) is read before the delete and before any elision
   - Fix: the bound is the EARLIEST acquisition of the slug by the row, not the latest. That is its earliest mint of
     the slug or, when that row is already elided (a kept row), its earliest INSERT. A row that vanished and came
     back with the same id and slug (a branch switch) owns its first incarnation's citations.
+    **Corrected in round 5 (R5-4):** the bound also covers another holder's citations written between two
+    incarnations, which are then elided as well.
   - Green.
 - **R4-2 (medium): a pre-fix move's old id kept the outside title, slug and hash.**
   - **The premise was checked first: `graft_rows` records NO lineage.** It writes no event or link, and neither do
@@ -892,7 +894,9 @@ The plan (slug, lineage, bound) is read before the delete and before any elision
     slug to null.
   - The walk goes backwards from the removed row, one handover at a time. It keeps a visited set (a chain can
     return to its own path, and so to its own id) and stops at 64 ids. It runs only for a risky row. It uses exact
-    JSON value comparison, never `LIKE`.
+    JSON value comparison, never `LIKE`. **Corrected in round 5 (R5-6):** the stop was silent and the oldest ids
+    kept their values; past the cap the walk now fails the reindex instead.
+
   - Red: `a_moved_rows_pre_move_history_is_elided` (the reviewer's) failed with `{"slug":[null,"fakekeymarker-title"]}`
     and `{"embedded_sha256":[null,"49dfbc09…"]}` of the old id. `a_two_hop_move_chains_history_is_elided` and
     `a_move_chain_that_returns_to_its_path_is_elided_and_ends` failed the same way.
@@ -903,7 +907,8 @@ The plan (slug, lineage, bound) is read before the delete and before any elision
       moved is not in the lineage).
   - **Limits:**
     - The rule is an inference from audit semantics, not a recorded lineage.
-    - A graft of a row that had NO slug leaves no handover and is missed.
+    - A graft of a row that had NO slug leaves no handover and is missed. **Corrected in round 5:** so are a graft
+      made by the graft code before `0370c1ab0` (R5-2) and a graft into a row that already held a slug (R5-3).
     - Shard lines exported before the removal cannot be recalled.
     - `graft_rows` and the graft contract are unchanged.
 - **R4-3 (medium): after the first reindex, `merge_worktree` replayed a window fork's base.**
@@ -911,7 +916,10 @@ The plan (slug, lineage, bound) is read before the delete and before any elision
     the fork event is not rewritten (candidate (a) was rejected), and option (b) was taken.
   - Option (b): when the main row is exactly what `clear_escaping_row` leaves (`read_door::cleared_by_the_read_door`:
     no file values, no hash, no mtime), the merge treats the fork's base as absent. It never prints the base in its
-    conflicts or copies it into its `worktree_merge` event.
+    conflicts or copies it into its `worktree_merge` event. **Corrected in round 5 (R5-1, R5-7):** it then printed and
+    APPLIED the worktree's copy of the same values when the worktree sat outside the main root, and gave a
+    post-clearing fork spurious conflicts. Round 5 replaces option (b): the merge skips the frontmatter three-way for a
+    cleared main row.
   - Red: `a_merge_after_the_reindex_does_not_replay_a_window_fork` failed with `{"conflicts":[...{"key":"title",...`
     holding the marker.
   - Green. Pin: `only_a_row_the_read_door_cleared_counts_as_cleared`.
@@ -924,9 +932,13 @@ The plan (slug, lineage, bound) is read before the delete and before any elision
     1. Find the event: `SELECT id FROM events WHERE kind = 'worktree_fork' AND payload LIKE '%<a word of the
        pre-fix title>%';`.
     2. Delete it: `DELETE FROM events WHERE id = '<id>';`.
-    3. In the same session, before the next reindex exports the trail, delete the audit row that delete wrote:
-       `DELETE FROM catalog_audit WHERE tbl = 'events' AND op = 'delete' AND row_id = '<id>';`.
-    4. Do the same for a `worktree_merge` event written by a merge in the window.
+    3. In the same session, before the next reindex exports the trail, rewrite the payload of the audit row that
+       delete wrote, IN PLACE, as `elide_values` does. Do not delete the audit row: a `seq` gap is the trail's
+       tamper signal (corrected in round 5, R5-8). The statement is: `UPDATE catalog_audit SET payload =
+       json_set(payload, '$.payload', json('{"elided":"read-door"}')) WHERE tbl = 'events' AND op = 'delete'
+       AND row_id = '<id>';`.
+    4. Do the same for a `worktree_merge` event written by a merge in the window, or by a merge made with round-4
+       code after it (R5-1).
 - **R4-4 (medium, latent): `<` in an attributed arm, field, argument or element kept the item open.**
   - Red: `the_gate_counts_a_read_however_its_path_is_spelled` failed on the reviewer's probe G17
     (``the gate does not count `fn g17(k: u8) -> u8 { match k {\n #[cfg(test)]\n x if x < 3 => 1,` ...``).
@@ -960,7 +972,9 @@ The plan (slug, lineage, bound) is read before the delete and before any elision
 **The window, updated.** Between the upgrade and a root's first post-fix reindex, these still print or answer about
 a pre-fix row:
 - every surface listed in round 3;
-- `merge_worktree`'s conflicts and its `worktree_merge` event, for a merge made in the window;
+- `merge_worktree`'s conflicts and its `worktree_merge` event, for a merge made in the window. **Corrected in
+  round 5 (R5-1):** with round-4 code, a merge made AFTER the window also wrote the values for an external worktree;
+  that is fixed in round 5;
 - `doc(event_list)` of a window fork;
 - `audit_log` payloads.
 
@@ -1002,60 +1016,148 @@ Why the four survivors are equivalent:
   duplicates.
 - **The two `<` tests.** Each is enough on its own for spaced code: a comparison or shift has a space on both sides.
 
+## Review round 5 (Opus review of `49715c515`): the merge regression, the lineage cap, the remedy
+
+Rebased onto `experiments` `ab64e3cab` (one memory-file commit past `9f0d4c681`, no conflict).
+Scope, as the operator chose: fix the regression and the record, and list the rest as limits.
+
+- **R5-1 (medium, a regression introduced by round 4).** After R4-3, `merge_worktree` wrote the outside file's title
+  and topic back onto a cleared MAIN row. This happened when the worktree sat outside the main root and was forked
+  before the first reindex.
+  - Why: the main reindex never walks an external worktree. **The worktree session's own reindex skips a linked
+    worktree** (`index_repo_sync`'s first check, `is_linked_worktree(abs_root)`, returns a skip report). So an
+    external worktree's shadow is never cleared, and R5-1 is the normal case for external worktrees, not a corner.
+  - Round 4 also reset the base to empty, so every value the shadow still held looked like a worktree edit.
+  - The cleared check already looked at the MAIN row, but the round-4 test cleared both rows, so it could not tell
+    them apart. The reviewer's mutant R5 (check the shadow) survived.
+  - **Fix:** for a main row the read door cleared, the merge skips the frontmatter three-way entirely. Nothing can be
+    written through that row's file, and no value is printed in the conflicts or the `worktree_merge` event. The
+    round-4 base reset is removed.
+  - **The check is exact.** `cleared_by_the_read_door` needs an empty `file_sha256`, `file_mtime` 0 and no file
+    values. I checked this by grepping every production writer of `file_sha256`:
+    - `artifact::upsert` callers in `indexer.rs:655`, `create.rs`, `update.rs` and `adapter.rs` write the SHA-256 of
+      the content (an empty file still gets the SHA-256 of zero bytes);
+    - `mv` and the worktree fork copy the source row's hash;
+    - `augmentation::record_written_file` writes the written file's hash;
+    - the only writer of an empty hash is `clear_escaping_row`. Every other hit is in a test module.
+  - **Red**, with the round-4 merge code: `an_external_window_fork_merge_leaves_the_cleared_main_row_alone` got
+    `"conflicts":[{"key":"status","base":null,"main":"unknown","worktree":"draft"},{"key":"tags",...,"worktree":["fakekeymarkertag"]...`.
+  - **Green.** The test asserts four things:
+    - a precondition: only the main row was cleared, and the shadow still holds the marker after the worktree
+      session's own reindex;
+    - the merge reports no conflict;
+    - the main row is still cleared;
+    - the `worktree_merge` event holds nothing of the target.
+  - `an_edited_external_window_fork_merge_prints_no_base_and_leaves_main_alone` (the worktree edited the shadow)
+    kills mutant R5.
+- **R5-7 (low): a fork made after the clearing merged with three spurious conflicts.**
+  - Red: `a_post_clearing_fork_merges_without_conflicts` got `"conflicts":[{"key":"status","base":null,"main":"unknown","worktree":"unknown"},{"key":"tags",...`.
+  - Green: the same skip, so there are no conflicts, as in round 3.
+- **R5-6 (low): the lineage cap stopped silently.** It now fails closed. Past `LINEAGE_DEPTH_CAP` (64 ids) the walk
+  returns an error that names the cap and the row. The row's savepoint rolls back, so the row stays and nothing is
+  half-elided. The reindex then fails, so nothing is exported.
+  - Red: `a_lineage_past_the_cap_fails_the_reindex_and_leaves_the_row` (70 moves) got `called Result::unwrap_err() on
+    an Ok value: {... "removed":1, "reclaimed_escaping":1 ...}`.
+  - Green. The cap is pinned by `a_lineage_within_the_cap_is_elided_whole` (10 moves): the reviewer's mutant R1
+    (cap 3) is killed.
+  - Cost of failing closed: until the lineage is shortened (or the cap raised), every reindex of that root stops at
+    that row.
+- **R5-8 (low): the remedy left a `seq` gap.** Step 3 now rewrites the audit payload in place (see the corrected
+  remedy in round 4), with the server stopped. Checked by running the exact statements on a scratch catalog:
+  `the_window_fork_remedy_rewrites_the_audit_payload_in_place`. The delete image is kept (one more audit row),
+  `MAX(seq) = COUNT(*)` (no gap), and no `events` audit payload holds the marker.
+- **R5-9 (low): five round-4 statements the code contradicted** are corrected in place in the round-4 section, each
+  marked "Corrected in round 5".
+
+**Known limits recorded in round 5 (no code change, the reviewer's evidence):**
+- **R5-2: an old-format move is not in the lineage. LEAKS.** Before `0370c1ab0` (2026-09-17), `graft_rows` deleted
+  the source row first. So the trail holds a DELETE image with `S` and then `[null, S]` or `[T, S]`, and never
+  `[S, null]`. The old id keeps the outside title, slug and SHA-256, and the reindex exports its delete image. On the
+  6,318-row catalog copy there are 363 candidate pairs.
+- **R5-3: a graft into a row that already held a slug is not in the lineage. LEAKS.** The destination's audit row is
+  `[T, S]`, not `[null, S]`. Every walked row has a slug, so `doc(graft)` into an indexed row (the documented remedy
+  for a reseat collision) takes this path.
+- **R5-4: the earliest-acquisition bound reaches past an intervening holder. Loses history, does not leak.** The
+  case: X held `S`, then A held `S` and cited, then X came back with `S`. A's citation delete images are elided when
+  X is removed.
+- **R5-5: an unpaired handover is paired with a later, unrelated holder. Loses history, does not leak.** The case: Y
+  handed `S` to Z as `[zed, S]`, which is not `[null, S]`. The walk then pairs Y's `[S, null]` with a later holder
+  X's mint, and Y's rows are elided when X is removed.
+- **The shadow's delete image at a merge** (`merge_worktree` deletes the shadow row) holds the shadow's values. For
+  an external worktree, which no reindex clears, those are the pre-fix values, also after the window. **LEAKS** into
+  the trail and the shards. This is the same class as R4-3b. The in-place remedy (step 3 above) applies to that
+  audit row with `tbl = 'artifact'`, the shadow's id, and `json_set` over `$.title`, `$.topic`, `$.tags`,
+  `$.owners`, `$.status` and `$.slug`.
+
+**Mutation probe, round 5** (own pool, 236 tests):
+
+| mutant | verdict |
+|---|---|
+| R5: the merge checks the shadow, not the main row | SURVIVED once, then KILLED by `an_edited_external_window_fork_merge_prints_no_base_and_leaves_main_alone` |
+| the frontmatter skip off | KILLED (`a_merge_after_the_reindex_does_not_replay_a_window_fork`) |
+| R1: cap 3 | KILLED (`a_lineage_within_the_cap_is_elided_whole`) |
+| the cap check never fails | KILLED (`a_lineage_past_the_cap_fails_the_reindex_and_leaves_the_row`) |
+
 ## Fix provenance
 
-Branch `worktree-agent-a8918c1498fdd30e8` (not yet on `experiments`). Rebased onto `experiments` `723816e00` on
+Branch `worktree-agent-a8918c1498fdd30e8` (not yet on `experiments`). Rebased onto `experiments` `ab64e3cab` on
 2026-10-19; the SHAs below are the rebased ones. Every patch-id is unchanged since the round-2 rebase, except the walk
 commit's: it changed then, when three upstream tests got their `roots` argument.
 
-- **SHA:** `eceef77e5` (the read door)
+- **SHA:** `d2a123c73` (the read door)
 - **patch-id:** `7bfbbd10c5a0a4be4d7dfeb2edb1eaa31f8ae125`
-- **SHA:** `10269a5ed` (walk, reclamation, backfill)
+- **SHA:** `5806c431e` (walk, reclamation, backfill)
 - **patch-id:** `df343a58a90900f3f578eef4ee43f894a24c21bb`
-- **SHA:** `c78a3564d` (every other read site)
+- **SHA:** `67d2aaef2` (every other read site)
 - **patch-id:** `23d2abc7aef8f0dcb9c72f8ec90ab24b94b0c961`
-- **SHA:** `47f9acde8` (source gate)
+- **SHA:** `dc521e269` (source gate)
 - **patch-id:** `394c11fb30be5535bed536a111fb811c7a46729e`
-- **SHA:** `ab0210c05` (tests strengthened after two surviving mutants)
+- **SHA:** `8e82e7890` (tests strengthened after two surviving mutants)
 - **patch-id:** `fea062f37642cd1fed4661de84e9c2b5966d10ca`
-- **SHA:** `71e465f6a` (clippy fix to the test hook)
+- **SHA:** `903216dd6` (clippy fix to the test hook)
 - **patch-id:** `b24957d48be5ee8443eb1fc14136095779b4f44f`
-- **SHA:** `4c7fec557` (a Unix-only test helper)
+- **SHA:** `91928f0ca` (a Unix-only test helper)
 - **patch-id:** `80ef542f1f8aaef45a7656a447702174eb2c4941`
-- **SHA:** `2f370eec1` (review round 1, F1 and F6: the audit trail)
+- **SHA:** `2bc827e44` (review round 1, F1 and F6: the audit trail)
 - **patch-id:** `b5d252c89da38ed0a0748c27e79e9f169aa7bd0d`
-- **SHA:** `cfd52dd08` (review round 1, F2-F4: descriptor path, fallible read, refusal wording)
+- **SHA:** `b927507aa` (review round 1, F2-F4: descriptor path, fallible read, refusal wording)
 - **patch-id:** `62059f8abf07ac3131048e1442a6e533ac9a2aec`
-- **SHA:** `50d33a7f5` (review round 1, F5: the gate counts every spelling of a read)
+- **SHA:** `76bc1fd84` (review round 1, F5: the gate counts every spelling of a read)
 - **patch-id:** `f7d47519e2b07950845bd6a421cbb803ec1b7b2e`
-- **SHA:** `fca21dc74` (review round 1: tests for the two surviving mutants)
+- **SHA:** `5bc2daa0e` (review round 1: tests for the two surviving mutants)
 - **patch-id:** `8796cd0f5bea62b2e9a6fcd09f459225bb4c7245`
-- **SHA:** `3ab2da8af` (review round 2, R2-1a, R2-2, R2-5: removal elision for dangling-link and lossy-path rows, cascaded citations)
+- **SHA:** `1a4083e54` (review round 2, R2-1a, R2-2, R2-5: removal elision for dangling-link and lossy-path rows, cascaded citations)
 - **patch-id:** `62ec8daeab7f2e5d23a68895aeb827dfc46a8ec9`
-- **SHA:** `33ca86fbb` (review round 2, R2-2 to R2-4, R2-9: no surface prints a refused row's stored fields)
+- **SHA:** `b14259638` (review round 2, R2-2 to R2-4, R2-9: no surface prints a refused row's stored fields)
 - **patch-id:** `ce4791b7e7c460e71def9e4af32b1238efdff7e0`
-- **SHA:** `c877435f3` (review round 2, R2-6 to R2-8: the gate tokenises, door pins)
+- **SHA:** `b8d6d1f6c` (review round 2, R2-6 to R2-8: the gate tokenises, door pins)
 - **patch-id:** `cc0a0ff0a4e1c79750e3913e2bd025d60940de82`
-- **SHA:** `7964cd27d` (review round 2: reproductions, the R2-1b expected failure)
+- **SHA:** `af26ba928` (review round 2: reproductions, the R2-1b expected failure)
 - **patch-id:** `f6b00b301b98dbfbd962e5d3261f3dc0d82bb614`
-- **SHA:** `23e5e4251` (review round 3, R3-1, R3-6, R3-7, R3-13: one removal predicate, the citation bound)
+- **SHA:** `07bff17a3` (review round 3, R3-1, R3-6, R3-7, R3-13: one removal predicate, the citation bound)
 - **patch-id:** `39bcf3009bcf39e771dc9a04679bb11c5f7609b1`
-- **SHA:** `348492ad1` (review round 3, R3-8: no catalog scan in doc(find))
+- **SHA:** `be9c7b410` (review round 3, R3-8: no catalog scan in doc(find))
 - **patch-id:** `b1ff0cc0008a0372f9ade8c2eb0e959b1569fab8`
-- **SHA:** `7c0f9553f` (review round 3, R3-9: the gate)
+- **SHA:** `429a6babe` (review round 3, R3-9: the gate)
 - **patch-id:** `4985b034eb0e575620f986ae9492f1a63eb6b4cd`
-- **SHA:** `9a97d5c39` (review round 3: every surface after one reindex of the pre-fix state)
+- **SHA:** `ef793f2b0` (review round 3: every surface after one reindex of the pre-fix state)
 - **patch-id:** `ee0c3221a2bcd0bf10dae1a27a592f8a7b6644e0`
-- **SHA:** `bac6cc93e` (review round 3: tests for the surviving mutants)
+- **SHA:** `ff2deb0ef` (review round 3: tests for the surviving mutants)
 - **patch-id:** `6eb686a43df66a7487f343e3b898763c7de49dc8`
-- **SHA:** `ccdad3f2b` (review round 4, R4-1, R4-2: earliest acquisition, slug lineage)
+- **SHA:** `6c6ad4b7e` (review round 4, R4-1, R4-2: earliest acquisition, slug lineage)
 - **patch-id:** `a61383b7c462aa5bfa8c7bc7f304af490e32fae3`
-- **SHA:** `3844cc7d4` (review round 4, R4-3: merge_worktree ignores a cleared row's window base)
+- **SHA:** `bc49d88d1` (review round 4, R4-3: merge_worktree ignores a cleared row's window base)
 - **patch-id:** `dc4c75eef731905d4253b5bb97d2a6b99ec31c28`
-- **SHA:** `f092a9ef8` (review round 4, R4-4: the gate's `<`)
+- **SHA:** `81177d697` (review round 4, R4-4: the gate's `<`)
 - **patch-id:** `40241398aa49df8e9747e8ee46d52ffa62b38dc9`
-- **SHA:** `5cdf0205f` (review round 4: reproductions, bound and savepoint pins, the R4-3b expected failure)
+- **SHA:** `b49a61cc4` (review round 4: reproductions, bound and savepoint pins, the R4-3b expected failure)
 - **patch-id:** `e08a711c023fd307d4598fc64f6e7fc3c4efe0cc`
+- **SHA:** `07b1c9f92` (review round 5, R5-1, R5-7: the merge leaves a cleared main row alone)
+- **patch-id:** `d702bda47cbe298696234fd0f55f5a42ed51577b`
+- **SHA:** `5ec11d6f1` (review round 5, R5-6: the lineage cap fails closed)
+- **patch-id:** `dfb4e0ab1d38e82e93bb13b699e6aea5865dd9d9`
+- **SHA:** `6240de45c` (review round 5: tests for both fixes and the remedy)
+- **patch-id:** `86122d9a3f32cbb619ec109c2735b972efe16eb1`
 
 ## Tests added
 
@@ -1102,7 +1204,13 @@ and `a_stored_path_is_risky_below_a_dangling_or_outward_link_at_any_component`. 
 - `known_gap_deleting_a_window_forks_row_copies_its_payload_into_the_trail` (expected fail)
 - `only_a_row_the_read_door_cleared_counts_as_cleared`
 
-The context test was reshaped, and the gate probes G17-G22 were added.
+The context test was reshaped, and the gate probes G17-G22 were added. Review round 5 added:
+- `an_external_window_fork_merge_leaves_the_cleared_main_row_alone`
+- `an_edited_external_window_fork_merge_prints_no_base_and_leaves_main_alone`
+- `a_post_clearing_fork_merges_without_conflicts`
+- `a_lineage_within_the_cap_is_elided_whole`
+- `a_lineage_past_the_cap_fails_the_reindex_and_leaves_the_row`
+- `the_window_fork_remedy_rewrites_the_audit_payload_in_place`
 
 ## Workarounds
 
