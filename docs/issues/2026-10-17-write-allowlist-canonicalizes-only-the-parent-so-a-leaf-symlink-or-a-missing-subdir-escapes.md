@@ -164,7 +164,9 @@ after `MAX_LEAF_LINK_HOPS` (40, the kernel's `MAXSYMLINKS`) links. Only the END 
   `/etc/passwd` probe itself.
 - `edit_code` `rename` is the one writer that writes THROUGH a link (`std::fs::write`, `edit_code.rs` `do_rename`). It is
   gated by the kept second look, `fs::validate_leaf_link_target` with `LinkTarget::Writable`, which asks
-  `validate_write_path` of the end as a regular file and refuses a dangling link outright. Proved through the REAL rename path
+  `validate_write_path` of the end as a regular file. Since `520f95fce` it is the ONLY check that the end is inside a write root,
+  because the classifier asks the roots of the link alone (its dangling-link arm decides nothing at rename: the pre-image read
+  fails on a dangling link first). Proved through the REAL rename path
   with a mock LSP edit (`MockLspClient::with_rename_edit`): a link to `/dev/null` is refused with the second look's own text
   ("reached through the symbolic link"); a link to an in-root file is renamed through and stays a link
   (`edit_code_rename_through_a_leaf_link_to_...`). Mutants that delete the second look or switch its policy were killed (table).
@@ -175,12 +177,20 @@ link into a place the project does not own be replaced silently, but it refuses 
 rename (the link is replaced, nothing outside is touched) and it changes the behaviour of every project that keeps a link to a
 shared file inside it. The coordinator chose the policy above; the user has not yet confirmed it.
 
-`fs::validate_leaf_link_target` (the resolver look added by `38a492b4`) is KEPT, unchanged apart from its comments. It is not
-shown exactly redundant: its `Writable` policy is what gates rename (above) and refuses a dangling link outright, where the
-classifier answers by the path the link names. Its `ReadableByTools` call in `write_ack::resolve_write_or_capture` is
-UNTESTED defence in depth: no input is known that the classifier lets through and the read deny list refuses, a mutant that
-discards its result survives the suite (see the table), and it is kept for the window in which a link is re-pointed between the
-two looks. Nothing in this paragraph is shown by a test except the `Writable` half.
+`fs::validate_leaf_link_target` (the resolver look added by `38a492b4`) is KEPT, and it is two different things by policy:
+
+- `LinkTarget::Writable`, at `edit_code` rename: the ONLY check on the end's roots (the second review's M14, policy switched, and M8a, the
+  `Writable` arm discarded, prove it; this session's equivalents are the two rename rows of the table). Tested through the real rename path.
+- `LinkTarget::ReadableByTools`, at `write_ack::resolve_write_or_capture` (edit_file, create_file, edit_markdown) and at
+  `fs::resolve_write_path_for` (edit_code replace/insert/remove, and the first look of rename): UNTESTED defence in depth. No input
+  is known that the classifier lets through and the read deny list refuses, and a mutant that discards the result survives at
+  EACH call site (the second review's M9 and M10; table). It is kept for the window in which a link is re-pointed between the
+  classifier and the read. That window is real: the review's racing thread re-pointed an in-root link between a harmless file and
+  `/etc/gshadow` for 8 s, 142628 flips, 4701 writes, 6768 refusals by the classifier and 3922 refusals by this second
+  look ALONE; no non-racing input was found. A deterministic test needs a seam between the two looks, in production code, which
+  this change does not add; so the two call sites stay unpinned and are listed as such, not as covered.
+- Not shown redundant either way: nothing proves the read deny list is a subset of the classifier's two-form deny list on every
+  filesystem shape.
 
 ## Tests added
 
@@ -206,7 +216,8 @@ linked directory, all into the deny list), `a_dangling_leaf_link_is_denied_only_
 `a_leaf_link_chain_is_followed_for_exactly_the_hop_limit` (the constant, a literal 40 that must resolve and a literal 41 that
 must be refused), `a_leaf_link_whose_target_has_an_unresolvable_dotdot_is_refused`,
 `a_leaf_link_that_cannot_be_read_is_refused` (`/proc/1/cwd`: `lstat` works, `readlink` is EACCES for an unprivileged user; skips
-with a printed reason as root or where readable), `a_leaf_link_is_allowed_with_or_without_an_approval_of_its_end_and_never_past_the_deny_list`,
+SILENTLY as root or where readable, because the harness hides a passing test's output; `CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST`
+turns that skip into a failure, for a lane that must not run as root, and that guard itself was not exercised as root), `a_leaf_link_is_allowed_with_or_without_an_approval_of_its_end_and_never_past_the_deny_list`,
 `a_leaf_link_to_a_file_outside_every_root_is_allowed_as_the_link_and_asks_for_no_approval` (the policy: a file, a file in the
 home directory, a missing file below a missing directory), `a_link_outside_the_roots_to_the_deny_list_is_denied_not_offered_an_approval`,
 `a_leaf_link_in_the_temp_root_or_the_cwd_root_is_judged_like_one_in_the_project`, `a_refusal_through_a_link_names_the_link_and_where_it_lands`
@@ -252,7 +263,8 @@ Mutation record, `scripts/mutation-probe.sh`, isolated worktree, one mutant per 
 | `if !under_allowed_root` -> `false`; `is_denied(&resolved)` -> `false` | KILLED (many existing cases; and `a_link_spelled_outside_the_roots_stays_refused_when_it_points_inside` for the second) |
 | session-root `resolved != *root` dropped; temp-root branch -> `false` | KILLED, existing `a_session_root_never_admits_...`; 7 temp-root cases |
 | `edit_code` rename second look: `Writable` -> `ReadableByTools`; result discarded (`.ok()`) (`tools::symbol::tests::edit_code_rename`) | KILLED, `edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_the_second_look` (each) |
-| `write_ack::resolve_write_or_capture` second look (`ReadableByTools`): result discarded (`.ok()`), `cargo test --lib tools::` (4301 tests) | **SURVIVED**, as documented under Fix: untested defence in depth |
+| `write_ack::resolve_write_or_capture` second look (`ReadableByTools`): result discarded (`.ok()`), `cargo test --lib tools::` (4301 tests) | **SURVIVED**, untested defence in depth (second review: M9, and also across the whole lib) |
+| `fs::resolve_write_path_for` second look (`ReadableByTools`): result discarded | **SURVIVED** the whole lib (second review's M10), untested defence in depth |
 
 The roots closure of round 1 is gone, so the review's "temp-root branch judged on `resolved`" mutant has no site left; the
 temp/cwd-root case instead pins what a link in those roots gets.
@@ -281,7 +293,8 @@ over-granted; the review's findings and what became of each:
 - F5 (low): confirmed reachable (`/proc/1/cwd`); test added, mutant killed, the two issue lines that called it unreachable corrected
   (Fix and Tests added no longer say so). The dead `None => link` arm is gone (`with_file_name`); the earlier run's survivor of that
   mutant (round 1) is the evidence that nothing relied on it.
-- F7 (low): kept and documented as UNTESTED defence in depth (a code comment in `write_ack.rs` and Fix); the discard mutant survives
+- F7 (low): kept and documented as UNTESTED defence in depth (a code comment in `write_ack.rs` and Fix), at both call sites (`write_ack` and
+  `resolve_write_path_for`; the second review's M10 is the second); the discard mutant survives
   4301 `tools::` tests.
 - F8 (nit): comments and `docs/manual/src/concepts/security.md` reworded (rename writes through; the manual had said only the parent is
   canonicalized).
@@ -295,18 +308,34 @@ over-granted; the review's findings and what became of each:
 - F11 (documented): a hard link to a protected file stays `Allowed` (the classifier compares paths, not inodes); git cannot ship one.
 - Not verified at all: macOS (`/var` -> `/private/var`), case-insensitive filesystems, Windows (`read_link`/junction semantics; the
   tests are `cfg(unix)`).
-- `edit_markdown` DOES consult the classifier (`resolve_write_or_capture`, `edit_markdown.rs` line 1550; read from the code, not run
-  against a leaf link). `MemoryStore::write` is reported by the reviewer's probe to refuse a leaf link but NOT a symlinked
+- `edit_markdown` DOES consult the classifier (`resolve_write_or_capture`, `edit_markdown.rs` line 1550; read from the code). The second
+  review ran it, through `edit_file`'s heading and frontmatter path, against a leaf link: nothing was written through. This session
+  did not run it. `MemoryStore::write` is reported by the reviewer's probe to refuse a leaf link but NOT a symlinked
   `.codescout/memories` directory (documented design, `docs/conventions/memory-write-history.md`); this session did not run it. The
   memory store's READ of a leaf link with no deny list (reviewer findings F12 and F13) is out of scope here and goes to another session.
+
+- Correction to the brief of this work: `~/.config/codescout` and `.codescout/project.toml` are NOT in the deny list
+  (`platform/unix.rs`, `denied_read_prefixes`). Probed 2026-10-19 with a throwaway test (not committed) over a temp home and project:
+  a link to `<home>/.config/codescout/config.toml` classifies `Allowed(<link>)` (the target itself is `OutsideRoot`, not `Denied`), and a
+  link to `<project>/.codescout/project.toml` classifies `Allowed(<link>)` (the target itself is `Allowed`); `atomic_write` on either
+  link replaced it with a regular file and left the target's bytes (`ORIG`) untouched. So they are replaced, not written through,
+  and not protected from a plain write either. Whether they belong on the deny list is a separate question, not decided here.
+
+**Open decisions for the user (not changed by this work; tool output deliberately untouched).** With the policy, `create_file`,
+`edit_file` and `edit_code` on an in-root link to a shared outside file return a bare "ok" while the LINK was destroyed (the second
+review's probe: 12 of 12 cases ended with the path a regular file and the outside file unmodified). The librarian rejects exactly
+this (`src/librarian/util.rs`, `refuse_write_through_symlink`), so the two subsystems disagree about whether replacing a link is a
+legitimate write. Options: (1) keep the policy and make the tools say "replaced symlink X (-> Y); Y not modified"; (2) a hard denial
+for any in-root link whose end is outside the roots ("'<link>' is a symbolic link to '<end>'; the write would replace the link"),
+which also removes the disagreement. Both need the user's decision; the policy is also still pending the user's confirmation (Fix).
 
 Verified by running it on this branch (`scripts/with-slot.sh`): whole `cargo test --lib` exit 0, `7423 passed; 0 failed; 12 ignored`;
 `--test result_caps` 71 passed; `--test issue_frontmatter` 12 passed; `--test safety_comments` 3 passed; `--test
 env_mutation_isolation` 5 passed; `cargo fmt --all -- --check` exit 0; `cargo clippy --workspace --all-targets --features local-embed
 -- -D warnings` exit 0. The issue stays OPEN, at medium, for what that run did not cover:
 
-- The memory writers (`MemoryStore`, `tempfile::NamedTempFile::persist`, no write classifier) and `edit_markdown` were NOT run against a
-  leaf link by this session.
+- The memory writers (`MemoryStore`, `tempfile::NamedTempFile::persist`, no write classifier) were NOT run against a leaf link by this
+  session, and neither was `edit_markdown` (the reviewer did).
 - The classifier follows a dangling or unreadable (EACCES) DIRECTORY link only as far as `fs::canonicalize` does
   (`canonicalize_through_existing_ancestor`), so a leaf link whose target sits below a dangling directory link is judged at
   the spelling `canonicalize` leaves it. Measured for a dangling directory link with `create_dir_all` on 2026-10-17: no
@@ -320,8 +349,8 @@ env_mutation_isolation` 5 passed; `cargo fmt --all -- --check` exit 0; `cargo cl
   through the read and write validators at the shared write resolvers (record:
   `docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md`,
   status fixed; the in-root twin of that record is closed too). The fixing tests ran green on this tree.
-  The classifier question stays open: `classify_write_path_in` still answers allowed for
-  `<root>/leaf -> ~/.ssh/id_rsa`, and the refusal comes from the resolvers, not from the classifier.
+  (OUTDATED since `0b0ab92f4`: `classify_write_path_in` used to answer allowed for `<root>/leaf -> ~/.ssh/id_rsa`, with the
+  refusal coming from the resolvers; it now refuses it itself.)
 - The first follow-up bullet below (`validate_approve_path` accepts a directory above the home, such as
   `/home`) is closed by `abbd3ec8` and `0d205e1f`: `approve_write` now refuses a filesystem root, a
   home and any ancestor of one, and a path with an unresolved `..`
