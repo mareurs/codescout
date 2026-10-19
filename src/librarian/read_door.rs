@@ -144,20 +144,16 @@ impl ReadDoor {
     /// Would the door read `path` now? `None` when it would. For a site that returns bytes the
     /// catalog already holds (stored chunk text, a stored title) without opening the file. A
     /// missing plain path is judged where it would be; a dangling leaf link is refused.
+    ///
+    /// A stored path that is the lossy (U+FFFD) record of a name that is not valid UTF-8 is judged
+    /// like any missing path, not refused: refusing it hid every ordinary file below a non-UTF-8
+    /// name (review round 3, R3-6). Its text is judged where it was ingested: the walk read the
+    /// real name through this door, and a pre-fix row is judged by the reindex's removal predicate
+    /// ([`Self::stored_path_is_risky`]).
     pub(crate) fn refusal(&self, path: &Path) -> Option<anyhow::Error> {
         let real = match std::fs::canonicalize(path) {
             Ok(r) => r,
             Err(_) => {
-                // A stored path holding U+FFFD that names no file is the lossy record of a name
-                // that is not valid UTF-8 (the catalog stores paths as text): what it names
-                // cannot be judged (review round 2, R2-2).
-                if path.to_string_lossy().contains('\u{FFFD}') {
-                    return Some(refused(
-                        path,
-                        "its stored path is a lossy record of a name that is not valid UTF-8, so \
-                         the file it names cannot be judged",
-                    ));
-                }
                 let is_link = std::fs::symlink_metadata(path)
                     .map(|m| m.file_type().is_symlink())
                     .unwrap_or(false);
@@ -172,6 +168,39 @@ impl ReadDoor {
             }
         };
         self.judge(path, &real).err()
+    }
+
+    /// May a STORED row at `path` hold text from outside its repository? The reindex asks this of
+    /// every row it removes or keeps, and elides the audit values of a risky one (the invariant in
+    /// `indexer::index_repo_sync`). True when any of these holds:
+    ///
+    /// * the door refuses the path now ([`Self::refusal`]);
+    /// * a component of the path below its door root is a symbolic link that DANGLES, the leaf or
+    ///   any parent directory: where it pointed when the row was read cannot be judged (review
+    ///   round 3, R3-1: a pre-fix row below a directory link whose target was removed);
+    /// * the path is the lossy (U+FFFD) record of a name that is not valid UTF-8 and names nothing
+    ///   (round 2, R2-2): the file it was read from cannot be found to be judged.
+    ///
+    /// Not risky: a path that crosses only links that resolve inside the root and off the
+    /// deny-list. Such a link is a second name for a repository file (round 3, R3-7).
+    pub(crate) fn stored_path_is_risky(&self, path: &Path) -> bool {
+        if self.refusal(path).is_some() {
+            return true;
+        }
+        let names_nothing = std::fs::symlink_metadata(path).is_err();
+        if names_nothing && path.to_string_lossy().contains('\u{FFFD}') {
+            return true;
+        }
+        let root = crate::librarian::util::door_root(&self.roots, path);
+        path.ancestors()
+            .take_while(|a| match &root {
+                Some(r) => a.starts_with(r) && a != r,
+                None => a.parent().is_some(),
+            })
+            .any(|a| {
+                std::fs::symlink_metadata(a).is_ok_and(|m| m.file_type().is_symlink())
+                    && std::fs::canonicalize(a).is_err()
+            })
     }
 
     /// The judgement, on the path the OS resolved (`real`), against the root the SPELLING names.

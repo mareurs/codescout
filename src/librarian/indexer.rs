@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
+use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::SystemTime;
@@ -780,11 +781,14 @@ pub fn index_repo_sync(
         if gone || skipped_duplicate_ids.contains(cand_id) || escaping {
             // The delete trigger copies the whole old row into the trail. For a row whose file the
             // door refuses that is the outside file's text, and the door's refusal is not the only
-            // way to know it: a row whose path is still a LINK (dangling: its target removed) or
-            // whose stored path is a lossy record of a non-UTF-8 name was catalogued from a file
-            // nobody can judge now, and is elided the same way (review round 2, R2-1a, R2-2).
-            let elide = escaping || removal_needs_elision(cand_abs_path);
+            // way to know it: a row below a link that now DANGLES (the leaf or a parent directory)
+            // or whose stored path is a lossy record of a non-UTF-8 name that names nothing was
+            // catalogued from a file nobody can judge now, and is elided the same way (review
+            // rounds 2 and 3: R2-1a, R2-2, R3-1). One predicate, `stored_path_is_risky`, decides.
+            let elide = escaping || door.stored_path_is_risky(std::path::Path::new(cand_abs_path));
             in_savepoint(&cat.conn, || {
+                // An error here is the database's, and is returned: swallowing it would skip the
+                // citation elision below silently (review round 3, R3-13).
                 let slug: Option<String> = cat
                     .conn
                     .query_row(
@@ -792,16 +796,21 @@ pub fn index_repo_sync(
                         rusqlite::params![cand_id],
                         |r| r.get(0),
                     )
-                    .ok()
+                    .optional()?
                     .flatten();
+                // Read BEFORE the elision below rewrites this row's own slug values.
+                let slug_since = match (&slug, elide) {
+                    (Some(s), true) => Some(slug_acquired_at(cat, cand_id, s)?),
+                    _ => None,
+                };
                 cat.conn.execute(
                     "DELETE FROM artifact WHERE id = ?1",
                     rusqlite::params![cand_id],
                 )?;
                 if elide {
                     elide_escaping_audit(cat, cand_id)?;
-                    if let Some(slug) = slug {
-                        elide_cascaded_citations(cat, &slug)?;
+                    if let (Some(slug), Some(since)) = (slug, slug_since) {
+                        elide_cascaded_citations(cat, &slug, since)?;
                     }
                 }
                 Ok(())
@@ -1007,28 +1016,37 @@ fn elide_escaping_audit(cat: &Catalog, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Does removing the row at `abs_path` (a stored path) need the audit elision although the read
-/// door did not call it escaping? Yes when the path is itself a symbolic link (a dangling one is
-/// `gone` to `exists()`), and when it is the lossy record (U+FFFD) of a name that is not valid
-/// UTF-8 and names no file. Both rows hold values taken from a file the door cannot judge.
-fn removal_needs_elision(abs_path: &str) -> bool {
-    let p = std::path::Path::new(abs_path);
-    let is_link = std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
-    is_link || (abs_path.contains('\u{FFFD}') && !p.exists())
-}
-
 /// The `entry_cite` rows of a removed row cascade away with it, and their delete images carry the
 /// row's slug (minted from the file's title) and the cited tokens (from its text). The PAYLOAD
 /// copies are elided; the `row_id` (`slug:local→dst_ref`) is the trail's routing key and stays,
 /// which is recorded as the open part of the issue's Deviation 8.
-fn elide_cascaded_citations(cat: &Catalog, slug: &str) -> Result<()> {
-    crate::librarian::catalog::audit::elide_values_by_row_prefix(
+///
+/// Only rows written AFTER `since` (`slug_acquired_at`): a slug is unique among live rows only, so
+/// a freed slug is minted again for another artifact, and the earlier holder's citation history
+/// under the same prefix is that artifact's, not this one's (review round 3, R3-7).
+fn elide_cascaded_citations(cat: &Catalog, slug: &str, since: i64) -> Result<()> {
+    crate::librarian::catalog::audit::elide_values_by_row_prefix_since(
         &cat.conn,
         "entry_cite",
         &format!("{slug}:"),
+        since,
         &["src_slug", "src_local", "dst_ref"],
     )?;
     Ok(())
+}
+
+/// The audit `seq` from which row `id` held `slug`: the latest audit row of `id` that is its
+/// INSERT or an UPDATE whose new `slug` is `slug` (the mint). `0` when the trail holds neither (a
+/// catalog older than the trail), which bounds nothing: every row under the prefix is elided.
+fn slug_acquired_at(cat: &Catalog, id: &str, slug: &str) -> Result<i64> {
+    let seq: Option<i64> = cat.conn.query_row(
+        "SELECT MAX(seq) FROM catalog_audit WHERE tbl = 'artifact' AND row_id = ?1 \
+         AND (op = 'insert' OR (op = 'update' AND json_valid(payload) \
+              AND json_extract(payload, '$.slug[1]') = ?2))",
+        rusqlite::params![id, slug],
+        |r| r.get(0),
+    )?;
+    Ok(seq.unwrap_or(0))
 }
 
 /// Run `f` inside a SAVEPOINT on `conn`: released on `Ok`, rolled back on `Err`, so a removal and
