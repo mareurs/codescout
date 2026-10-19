@@ -263,8 +263,12 @@ Mutation record, `scripts/mutation-probe.sh`, isolated worktree, one mutant per 
 | `if !under_allowed_root` -> `false`; `is_denied(&resolved)` -> `false` | KILLED (many existing cases; and `a_link_spelled_outside_the_roots_stays_refused_when_it_points_inside` for the second) |
 | session-root `resolved != *root` dropped; temp-root branch -> `false` | KILLED, existing `a_session_root_never_admits_...`; 7 temp-root cases |
 | `edit_code` rename second look: `Writable` -> `ReadableByTools`; result discarded (`.ok()`) (`tools::symbol::tests::edit_code_rename`) | KILLED, `edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_the_second_look` (each) |
-| `write_ack::resolve_write_or_capture` second look (`ReadableByTools`): result discarded (`.ok()`), `cargo test --lib tools::` (4301 tests) | **SURVIVED**, untested defence in depth (second review: M9, and also across the whole lib) |
-| `fs::resolve_write_path_for` second look (`ReadableByTools`): result discarded | **SURVIVED** the whole lib (second review's M10), untested defence in depth |
+| `write_ack::resolve_write_or_capture` second look (`ReadableByTools`): result discarded (`.ok()`), `cargo test --lib tools::` (4301 tests) | **SURVIVED** `tools::` (4301 tests) and the whole lib (7435 tests, re-run on `b58e7f4c5`); untested defence in depth (the second review's M9) |
+| `fs::resolve_write_path_for` second look (`ReadableByTools`): result discarded | **SURVIVED** the whole lib (7435 tests, run on `b58e7f4c5`; the second review's M10), untested defence in depth |
+
+Re-run on `b58e7f4c5` after the third review's test edits (the `/dev/null` assertions removed, the unreadable-link guard): the `read_link`
+arm mutant and both rename-look mutants are still KILLED by the same single tests (`a_leaf_link_that_cannot_be_read_is_refused`;
+`edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_the_second_look`). No production byte changed in that round (comments only).
 
 The roots closure of round 1 is gone, so the review's "temp-root branch judged on `resolved`" mutant has no site left; the
 temp/cwd-root case instead pins what a link in those roots gets.
