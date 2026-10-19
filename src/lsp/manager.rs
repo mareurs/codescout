@@ -112,10 +112,13 @@ pub struct LspManager {
     /// lock) has no yield point in the natural flow, so a test cannot land in it otherwise.
     #[cfg(test)]
     after_early_stop: StdMutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    /// Test seam: the program the mux spawn runs instead of `resolve_mux_binary()`, so a test can
-    /// stand a script in for the mux (the test binary cannot be one).
+    /// Test seam: the program (and leading arguments) the mux spawn runs instead of
+    /// `resolve_mux_binary()`, so a test can stand a script in for the mux (the test binary cannot
+    /// be one). A test runs `python3 <script>` and never execs a file it has just written: that
+    /// fails with ETXTBSY ("Text file busy") while another thread's fork holds a copy of the
+    /// write descriptor.
     #[cfg(test)]
-    mux_binary_for_test: StdMutex<Option<PathBuf>>,
+    mux_binary_for_test: StdMutex<Option<(PathBuf, Vec<String>)>>,
     /// Project root for test-only DB writes. Set by new_for_test_with_root.
     #[cfg(test)]
     project_root_for_test: Option<std::path::PathBuf>,
@@ -509,10 +512,10 @@ fn claim_mux_lock(lock_path: &std::path::Path) -> std::io::Result<Option<std::fs
     }
 }
 
-/// The rounds of one call ran out because the mux lock changed hands in every one of them: each
-/// holder that was waited on exited, and the next process took the lock. Nothing is known to be
-/// wedged and the lock may be free by now, so unlike [`mux_socket_unreachable_error`] this names
-/// no holder and gives no `fuser` hint.
+/// The rounds of one call ran out because the mux lock changed hands in every one of them and the
+/// LAST holder that was waited on exited too. Nothing is known to be wedged and the lock may be
+/// free by now, so unlike [`mux_socket_unreachable_error`] this names no holder and gives no
+/// `fuser` hint. (A last holder that is still alive gets the holder error instead.)
 #[cfg(unix)]
 fn mux_lock_changed_hands_error(language: &str, socket_path: &std::path::Path) -> anyhow::Error {
     crate::tools::RecoverableError::with_hint(
@@ -1198,17 +1201,17 @@ impl LspManager {
 
             if need_spawn {
                 #[cfg(test)]
-                let exe = match self
+                let (exe, lead_args): (PathBuf, Vec<String>) = match self
                     .mux_binary_for_test
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .clone()
                 {
                     Some(fake) => fake,
-                    None => resolve_mux_binary()?,
+                    None => (resolve_mux_binary()?, Vec::new()),
                 };
                 #[cfg(not(test))]
-                let exe = resolve_mux_binary()?;
+                let (exe, lead_args): (PathBuf, Vec<String>) = (resolve_mux_binary()?, Vec::new());
 
                 // We observed the ownership flock was free (no live mux). The
                 // analyzer home is codescout-private, so any process still holding
@@ -1230,6 +1233,7 @@ impl LspManager {
                 // index lock) is written there, not to stdout. Without this the caller
                 // only saw a blank "mux process failed to start:".
                 let mut child = tokio::process::Command::new(&exe)
+                    .args(&lead_args)
                     .args(&mux_args)
                     .stdout(std::process::Stdio::piped())
                     .stdin(std::process::Stdio::null())
@@ -1355,9 +1359,13 @@ impl LspManager {
                         // The WHOLE wait was served on the holder the call started with and it is
                         // still alive: the next callers need not serve it again. A wait that
                         // stopped early because the lock turned free found nothing wedged (its
-                        // holder died), so nothing is recorded and the next round takes over; a
-                        // round on a replacement holder had only what was left of the budget, so
-                        // it records nothing either.
+                        // holder died), so nothing is recorded and the next round takes over.
+                        // A round on a REPLACEMENT holder records nothing either, whatever its
+                        // length: it got the remainder of the budget, which can be about
+                        // nothing, and no threshold for "long enough" has been measured. The
+                        // cost is that when a replacement never binds the next call serves a
+                        // full wait again before the wedge is remembered (pinned by
+                        // `a_replacement_that_never_binds_costs_a_second_full_wait_on_the_next_call`).
                         self.mux_wedged_at
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
@@ -1375,15 +1383,25 @@ impl LspManager {
             }
         }
 
-        // Reached only when the lock changed hands in every round (each holder died in turn):
-        // there is no wedged holder to name, and the lock may be free now, so the error says
-        // what happened and does not point at a holder.
+        // Reached when no round returned: the lock changed hands (a holder died, another
+        // process took it) in every round. If the LAST holder died too, nothing is known to be
+        // wedged and the lock may be free now, so the error names no holder; if the last
+        // replacement is still ALIVE and holding the lock but never answered, it is the wedged
+        // or still-starting holder of `mux_socket_unreachable_error`, as in a plain round 1.
         if let Some(e) = &last_err {
             tracing::warn!(
                 "mux connect for {language} gave up after {MUX_CONNECT_ROUNDS} rounds: {e:#}"
             );
         }
-        Err(mux_lock_changed_hands_error(language, &socket_path))
+        if last_holder_gone {
+            Err(mux_lock_changed_hands_error(language, &socket_path))
+        } else {
+            Err(mux_socket_unreachable_error(
+                language,
+                &socket_path,
+                &lock_path,
+            ))
+        }
     }
 
     /// Record a successful LSP start to `lsp_events` — best-effort, never fails
@@ -3248,10 +3266,13 @@ mod tests {
     /// the socket named in its arguments, prints `ready`, accepts, and sends its init message 2 s
     /// after the client connected. The caller's peer wait is 500 ms, which would end a peer round
     /// in 0.5 s: only the spawned-mux plan (800 ms window, 5 s init floor) connects to it.
+    /// The script is run as `python3 <script>` and is never exec'd: a file this process has just
+    /// written fails to exec with ETXTBSY while another test's fork holds a copy of the write
+    /// descriptor (measured 2026-10-19: 59 of 400 write+exec cycles against 6 forking threads;
+    /// 0 of 400 for `python3 <file>`).
     #[cfg(unix)]
     #[tokio::test]
     async fn a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let ws = dir.path();
         let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
@@ -3261,12 +3282,12 @@ mod tests {
         let fake_mux = dir.path().join("fake-mux.py");
         std::fs::write(
             &fake_mux,
-            r#"#!/usr/bin/env python3
-import json, socket, sys, time
+            r#"import json, socket, sys, time
 sock_path = sys.argv[sys.argv.index("--socket") + 1]
 s = socket.socket(socket.AF_UNIX)
 s.bind(sock_path)
 s.listen(8)
+s.settimeout(30)
 sys.stdout.write("ready\n")
 sys.stdout.flush()
 c, _ = s.accept()
@@ -3281,10 +3302,12 @@ except Exception:
 "#,
         )
         .unwrap();
-        std::fs::set_permissions(&fake_mux, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let mgr = LspManager::new();
-        *mgr.mux_binary_for_test.lock().unwrap() = Some(fake_mux);
+        *mgr.mux_binary_for_test.lock().unwrap() = Some((
+            PathBuf::from("python3"),
+            vec![fake_mux.to_string_lossy().into_owned()],
+        ));
         let config = LspServerConfig {
             command: "rust-analyzer".into(),
             args: vec![],
@@ -3304,7 +3327,7 @@ except Exception:
         assert!(
             result.is_ok(),
             "a mux this call spawned and saw ready is connected to even when it answers late: {:?}",
-            result.err().map(|e| e.to_string())
+            result.err().map(|e| format!("{e:#}"))
         );
     }
 
@@ -3880,8 +3903,9 @@ except Exception:
         );
     }
 
-    /// A lock that changes hands in every round ends the call: after the last round the client
-    /// reports the unreachable-mux error instead of waiting on a lock that never settles. Each
+    /// A lock that changes hands in every round ends the call: after the last round, with the last
+    /// holder dead, the client reports the changed-hands error instead of waiting on a lock that
+    /// never settles. Each
     /// replacement dies 300 ms after taking the lock, so every round ends early; the gap opens
     /// once per round and the call ends well inside its 10 s wait (under 5 s asserted).
     #[cfg(unix)]
@@ -3976,6 +4000,109 @@ except Exception:
         assert!(
             !msg.contains("holds its lock") && !msg.contains("fuser"),
             "nobody holds the lock, yet the error says someone does: {msg}"
+        );
+    }
+
+    /// The over-correction of F2 (review of 64df566e9): when the rounds run out with the LAST
+    /// replacement still alive and holding the lock, a holder IS known and the lock is held, so
+    /// the error is the holder one (`holds its lock`, with the `fuser` hint), not "changed hands
+    /// ... every holder waited on exited". Two hand-offs, a third holder alive past the 3.3 s
+    /// budget.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rounds_that_run_out_with_the_last_holder_alive_still_name_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let lock_path = crate::lsp::mux::lock_path_for_workspace("rust", ws);
+        let LockHandOffs { mgr, held, gaps } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(300),
+                ThirdHolder::DiesAfter(Duration::from_secs(2)),
+                2,
+            );
+        let config = LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            mgr.get_or_start_via_mux_waiting("rust", ws, config, Duration::from_millis(3300)),
+        )
+        .await
+        .expect("the wait is bounded by its window");
+        let lock_held_now = super::claim_mux_lock(&lock_path).unwrap().is_none();
+        let msg = match result {
+            Ok(_) => panic!("no mux ever bound"),
+            Err(e) => format!("{e:#}"),
+        };
+        drop(held);
+        assert_eq!(gaps.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(lock_held_now, "the last holder is alive and holds the lock");
+        assert!(
+            msg.contains("holds its lock")
+                && msg.contains("fuser")
+                && !msg.contains("changed hands"),
+            "a live holder is known and must be named: {msg}"
+        );
+    }
+
+    /// F1 (review of 64df566e9), behaviour kept and pinned: a replacement that never binds is not
+    /// remembered as wedged (its round had only what was left of the budget), so the NEXT call
+    /// serves a full wait again, and only then is the wedge remembered. Two full waits in a row
+    /// (2 x 30 s in production) is the cost of that choice; the alternative, gating on how long the
+    /// replacement was waited on, needs a threshold nobody has measured. Bounds: each call takes
+    /// at least the 2 s wait and under 5 s.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_replacement_that_never_binds_costs_a_second_full_wait_on_the_next_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        let LockHandOffs { mgr, held, .. } =
+            manager_whose_lock_changes_hands_after_the_first_holder_dies(
+                ws,
+                Duration::from_millis(100),
+                ThirdHolder::NeverBinds,
+                1,
+            );
+        let config = || LspServerConfig {
+            command: "rust-analyzer".into(),
+            args: vec![],
+            workspace_root: ws.to_path_buf(),
+            init_timeout: None,
+            mux: true,
+            env: vec![],
+            idle_timeout_secs: None,
+        };
+        let wait = Duration::from_secs(2);
+        let mut recorded_after = Vec::new();
+        for _ in 0..2 {
+            let started = Instant::now();
+            let result = tokio::time::timeout(
+                Duration::from_secs(30),
+                mgr.get_or_start_via_mux_waiting("rust", ws, config(), wait),
+            )
+            .await
+            .expect("bounded");
+            let took = started.elapsed();
+            assert!(result.is_err());
+            assert!(
+                took >= wait && took < wait + Duration::from_secs(3),
+                "each of the two calls serves the whole wait, took {took:?}"
+            );
+            recorded_after.push(mgr.mux_wedged_at.lock().unwrap().len());
+        }
+        drop(held);
+        assert_eq!(
+            recorded_after,
+            vec![0, 1],
+            "nothing is remembered after the replacement's short round, the wedge after the next full wait"
         );
     }
 

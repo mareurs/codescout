@@ -3697,7 +3697,16 @@ struct Point {
         .await
         .expect("a silent socket must not hold connect forever");
         let elapsed = started.elapsed();
-        assert!(result.is_err());
+        let applied = result
+            .err()
+            .expect("a silent socket is not a mux")
+            .downcast_ref::<MuxInitTimeout>()
+            .expect("the failure is the init timeout")
+            .after;
+        assert_eq!(
+            applied, bound,
+            "the error must report the bound that was applied"
+        );
         assert!(
             elapsed >= bound && elapsed < std::time::Duration::from_secs(3),
             "the caller's {bound:?} bound must apply, took {elapsed:?}"
