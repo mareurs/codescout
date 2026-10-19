@@ -725,15 +725,42 @@ impl CodeScoutServer {
 
     /// Phase 2: extract an optional `workspace` pin from tool input. The value
     /// is a path string, canonicalized to match the registry's canonical-root
-    /// keys. No tool consumes this yet — Phase 3 wires `with_project_at`.
-    /// See docs/plans/2026-05-30-per-request-workspace-pinning.md.
-    fn extract_workspace_override(input: &Value) -> Option<std::path::PathBuf> {
-        let raw = input.get("workspace")?.as_str()?;
+    /// keys. See docs/plans/2026-05-30-per-request-workspace-pinning.md.
+    ///
+    /// A pin that does not name an existing directory is REFUSED here, at the dispatch
+    /// boundary, with a `RecoverableError`. It used to be kept as a raw (possibly
+    /// relative) root, and the first touch built a project there, so a placeholder pin
+    /// such as `workspace="x"` left `x/.codescout/` in the server's cwd. An absent or
+    /// `null` value, and an empty or blank string, are "no pin". Any OTHER JSON type is
+    /// refused too: it used to be read as "no pin", so `workspace: 5` was answered by the
+    /// session's default project, a different project from the one the caller meant. A
+    /// relative pin that exists still resolves against the server's cwd. See
+    /// [`crate::agent::existing_project_dir`].
+    /// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+    fn extract_workspace_override(
+        input: &Value,
+    ) -> std::result::Result<Option<std::path::PathBuf>, crate::tools::RecoverableError> {
+        let raw = match input.get("workspace") {
+            None | Some(Value::Null) => return Ok(None),
+            Some(Value::String(raw)) => raw,
+            Some(other) => {
+                let kind = match other {
+                    Value::Bool(_) => "a boolean",
+                    Value::Number(_) => "a number",
+                    Value::Array(_) => "an array",
+                    _ => "an object",
+                };
+                return Err(crate::tools::RecoverableError::with_hint(
+                    format!("`workspace` must be a string path, got {kind}"),
+                    "Pass the absolute path of an existing project root as a string, or omit \
+                     `workspace` to use the active project.",
+                ));
+            }
+        };
         if raw.trim().is_empty() {
-            return None;
+            return Ok(None);
         }
-        let p = std::path::PathBuf::from(raw);
-        Some(std::fs::canonicalize(&p).unwrap_or(p))
+        crate::agent::existing_project_dir(std::path::PathBuf::from(raw), "workspace pin").map(Some)
     }
 
     /// Inject the optional `workspace` pin into a pinnable tool's advertised
@@ -787,10 +814,75 @@ impl CodeScoutServer {
             .collect()
     }
 
+    /// Answer a call whose `workspace=` pin is unusable: the recoverable refusal, plus a usage
+    /// row for it.
+    ///
+    /// The row is written against the session's DEFAULT project, never the pinned one (nothing
+    /// may be created at the pinned path), and is best-effort in three ways:
+    /// - it is skipped when the default project's root is gone, because opening the usage
+    ///   database creates the directory, and telemetry must not bring a deleted project back;
+    /// - it runs on the blocking pool under a short budget, because the database waits out
+    ///   SQLite's 5 s busy timeout when another process holds it, and the caller must not;
+    /// - what it stores is the refusal's message, which is already capped and escaped.
+    ///
+    /// The caller is resolved as the access-gate refusal resolves it: the stamped principal,
+    /// else the `_meta` conversation, else the rendezvous poll (consumed once per call; this
+    /// early return is that call's only poll), else the server's own id.
+    #[allow(clippy::too_many_arguments)]
+    async fn refuse_pin(
+        &self,
+        tool: &str,
+        input: &Value,
+        refusal: crate::tools::RecoverableError,
+        principal: Option<&str>,
+        conversation: Option<&str>,
+        agent_id: Option<String>,
+        tool_use_id: Option<String>,
+    ) -> CallToolResult {
+        // A copy for the recorder: the response and the recorded row must say the same thing.
+        let recorded = crate::tools::RecoverableError::with_hint(
+            refusal.message.clone(),
+            refusal.hint().unwrap_or_default(),
+        );
+        let response = route_tool_error(refusal.into());
+        if !self
+            .agent
+            .project_root()
+            .await
+            .is_some_and(|root| root.is_dir())
+        {
+            return response;
+        }
+        let cc_session = principal
+            .map(str::to_owned)
+            .or_else(|| conversation.map(str::to_owned))
+            .or_else(|| self.poll_rendezvous())
+            .unwrap_or_else(|| self.cc_session_id.clone());
+        let recorder = UsageRecorder::new(
+            self.agent.clone(),
+            self.debug,
+            self.session_id.clone(),
+            cc_session,
+            agent_id,
+            tool_use_id,
+        );
+        let (name, input) = (tool.to_string(), input.clone());
+        let runtime = tokio::runtime::Handle::current();
+        let job = tokio::task::spawn_blocking(move || {
+            runtime.block_on(recorder.record_content(&name, &input, None, || async move {
+                Err::<Vec<Content>, anyhow::Error>(recorded.into())
+            }))
+        });
+        // The job keeps running past the budget; only the wait for it is bounded.
+        let _ = tokio::time::timeout(REFUSAL_RECORD_BUDGET, job).await;
+        response
+    }
+
     async fn acquire_write_guard_if_writing(
         &self,
         name: &str,
         input: &Value,
+        override_root: Option<&std::path::Path>,
     ) -> std::result::Result<
         std::result::Result<Option<crate::agent::WriteGuard>, CallToolResult>,
         McpError,
@@ -802,10 +894,19 @@ impl CodeScoutServer {
         // resolve. A write pinned via `workspace` must acquire that project's
         // write_lock/file_lock, not the session default's — otherwise a
         // concurrent subagent's activate() steals the lock target.
-        let override_root = Self::extract_workspace_override(input);
-        let (mutex, fd_lock, holder_path, timeout_secs) = self
+        //
+        // `override_root` is the pin `call_tool_inner` already resolved (and validated as an
+        // existing directory) for this call. It is taken as a parameter rather than re-derived
+        // from `input`, so the lock and the tool body cannot disagree about the target.
+        //
+        // A pin accepted there can still fail HERE: the directory vanished since, it cannot be
+        // entered, or its project.toml does not parse. For a pinned call that is the caller's
+        // input, so it is the same recoverable refusal the tool bodies give
+        // (`agent::pin_resolution_refusal`), never a protocol error. Only the session's own
+        // default project, which no caller chose, keeps the protocol error.
+        let (mutex, fd_lock, holder_path, timeout_secs) = match self
             .agent
-            .with_project_at(override_root.as_deref(), |p| {
+            .with_project_at(override_root, |p| {
                 Ok((
                     p.write_lock.clone(),
                     p.file_lock.clone(),
@@ -814,7 +915,17 @@ impl CodeScoutServer {
                 ))
             })
             .await
-            .map_err(|e| McpError::internal_error(format!("write gate: {}", e), None))?;
+        {
+            Ok(parts) => parts,
+            Err(e) => match override_root {
+                Some(root) => {
+                    return Ok(Err(route_tool_error(
+                        crate::agent::pin_resolution_refusal(root, e).into(),
+                    )))
+                }
+                None => return Err(McpError::internal_error(format!("write gate: {}", e), None)),
+            },
+        };
         let session = crate::tools::session_key::resolve(
             std::env::var("CODESCOUT_SESSION_ID").ok(),
             crate::tools::session_key::HARNESS_SESSION_VARS
@@ -1405,7 +1516,48 @@ impl CodeScoutServer {
             .and_then(|p| p.split_once('/'))
             .map(|(_, agent)| agent.to_string());
 
-        let workspace_override = Self::extract_workspace_override(&input);
+        // A `workspace=` pin that is not an existing directory, or whose project cannot be made
+        // resident (an unparseable project.toml, an unopenable directory), is refused HERE,
+        // once, before anything resolves it: every later consumer (the access gate, the write
+        // lock, the tool body) would otherwise make that path resident and build a project
+        // there, or answer with a wrong cause. Returned as the recoverable answer it is, so
+        // sibling calls in the turn survive.
+        //
+        // The refusal is still RECORDED, against the session's DEFAULT project, never the pin
+        // (see `refuse_pin`). The incident that found this was diagnosed from a usage row, and
+        // a refused call that left none would have been invisible.
+        // docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+        let workspace_override = match Self::extract_workspace_override(&input) {
+            Ok(pin) => pin,
+            Err(refusal) => {
+                return Ok(self
+                    .refuse_pin(
+                        &req.name,
+                        &input,
+                        refusal,
+                        asserted_principal.as_deref(),
+                        asserted_conversation.as_deref(),
+                        asserted_agent,
+                        asserted_tool_use_id,
+                    )
+                    .await);
+            }
+        };
+        if let Some(root) = workspace_override.as_deref() {
+            if let Err(e) = self.agent.ensure_resident(root.to_path_buf()).await {
+                return Ok(self
+                    .refuse_pin(
+                        &req.name,
+                        &input,
+                        crate::agent::pin_resolution_refusal(root, e),
+                        asserted_principal.as_deref(),
+                        asserted_conversation.as_deref(),
+                        asserted_agent,
+                        asserted_tool_use_id,
+                    )
+                    .await);
+            }
+        }
 
         // Computed ONCE and threaded to its consumers — the write lock and the access gate
         // below. Deriving it twice is how the two halves of this decision drift apart, which
@@ -1547,7 +1699,11 @@ impl CodeScoutServer {
         // the cross-process write lock is released even when the task is parked
         // waiting for rmcp to drop it on connection close.
         let write_guard = match self
-            .acquire_write_guard_if_writing(&req.name, &input_for_record)
+            .acquire_write_guard_if_writing(
+                &req.name,
+                &input_for_record,
+                ctx.workspace_override.as_deref(),
+            )
             .await?
         {
             Ok(g) => g,
@@ -2161,6 +2317,11 @@ fn select_error_render(e: &anyhow::Error) -> ErrorRender {
         ErrorRender::Fatal(e.to_string())
     }
 }
+
+/// How long a refused pin waits for its usage row to be written before answering anyway. The
+/// row is best-effort; the answer is not.
+// cap-class: NOT_A_CAP — a wait budget for a telemetry write, a timeout; the caller's answer is complete whether or not the row landed
+const REFUSAL_RECORD_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Route a tool `Err(e)` to the appropriate `CallToolResult`.
 ///
@@ -10255,6 +10416,8 @@ mod tests {
             .find_map(|c| c.as_text().map(|t| t.text.clone()))
             .unwrap_or_default()
     }
+
+    include!("server/workspace_pin_tests.rs");
 
     /// docs/issues/archive/2026-09-28-a-pinned-write-lifts-a-read-only-activation-for-every-caller.md
     /// (mechanism B, probe rows 5, 7 and 8).

@@ -1,6 +1,8 @@
 //! Central orchestrator: manages projects, tool registry, and shared state.
 
 pub(crate) mod build_check;
+#[cfg(test)]
+mod existing_root_tests;
 mod write_guard;
 #[allow(unused_imports)]
 pub(crate) use write_guard::{
@@ -484,6 +486,217 @@ impl ActiveProject {
     }
 }
 
+/// Resolve `raw` to the canonical directory a project would live in, or REFUSE it.
+///
+/// Every path that makes a project resident (`Agent::new`, `Agent::activate`,
+/// `Agent::ensure_resident`, the server's per-call `workspace=` pin) resolves its root
+/// through here. They each used to do `canonicalize(..).unwrap_or(raw)`, which turns "that
+/// path does not exist" into "that path is the root": a relative or missing pin was kept
+/// as-is and the first touch BUILT a project there (`.gitignore` and
+/// `.codescout/{memories, private-memories, usage.db, write.lock}`), so a placeholder such as
+/// `workspace="x"` left a stray `x/.codescout/` in the server's cwd.
+///
+/// A root must be an existing DIRECTORY (`is_dir`, not `exists`: a file is no project root
+/// either). Nothing is created on the refusal path. A path that exists resolves exactly as it
+/// did, so an existing relative path still resolves against the server's cwd, as
+/// `workspace(activate)` and `--project` do. `what` names the argument in the refusal.
+///
+/// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+pub(crate) fn existing_project_dir(
+    raw: PathBuf,
+    what: &str,
+) -> std::result::Result<PathBuf, crate::tools::RecoverableError> {
+    // The io error kind is the only cheap way to tell "does not exist" from "cannot be
+    // reached": a mode-000 parent makes `canonicalize` fail with a permission error, and
+    // calling that "not an existing directory" sends the caller looking for a typo.
+    let (root, denied) = match std::fs::canonicalize(&raw) {
+        Ok(canonical) => (canonical, false),
+        Err(e) => (raw, e.kind() == std::io::ErrorKind::PermissionDenied),
+    };
+    if root.is_dir() {
+        return Ok(root);
+    }
+    // The path is the caller's text and lands in a response, a usage row and a log: capped
+    // and escaped (`bounded_for_message`).
+    let shown = bounded_for_message(&root.display().to_string());
+    if denied {
+        return Err(crate::tools::RecoverableError::with_hint(
+            format!(
+                "{what} '{shown}' cannot be reached: permission denied on the path or one of its parents"
+            ),
+            "Pass the absolute path of a project root this process may read, or fix the \
+             permissions on it. Nothing was created at that path.",
+        ));
+    }
+    // A relative path is resolved against the process's cwd, which the caller does not
+    // control, so say where that is: it is the most likely reason a relative path is wrong.
+    let cwd_note = if root.is_relative() {
+        match std::env::current_dir() {
+            Ok(cwd) => format!(
+                " (a relative path resolves against the working directory, {})",
+                bounded_for_message(&cwd.display().to_string())
+            ),
+            Err(_) => " (a relative path resolves against the working directory)".into(),
+        }
+    } else {
+        String::new()
+    };
+    Err(crate::tools::RecoverableError::with_hint(
+        format!("{what} '{shown}' is not an existing directory{cwd_note}"),
+        "Pass the absolute path of an existing project root. Nothing was created at that path.",
+    ))
+}
+
+/// A configuration file (the project's `project.toml` or the global `config.toml`) that the
+/// loader could not turn into a configuration.
+///
+/// It is the TYPE that says "this is a configuration failure", set by this module at the one
+/// place it calls the loader ([`load_project_config`]). Classifying by the loader's error type
+/// or message text would couple the hint to wording another module owns, and the loader's own
+/// error QUOTES the offending source line (a syntax error) or value (a type error), so a
+/// project.toml that is a link to a secret file would be echoed to whoever pinned it. This
+/// type therefore carries only what is safe to show: which file, and the line and column of a
+/// syntax error. The original error is deliberately not kept.
+#[derive(Debug)]
+pub(crate) struct ConfigLoadFailed {
+    /// The file that failed.
+    pub(crate) path: PathBuf,
+    /// The machine-wide config, not the project's own.
+    pub(crate) global: bool,
+    /// ` (line L, column C)` for a syntax error, digits only.
+    pub(crate) location: Option<String>,
+}
+
+impl std::fmt::Display for ConfigLoadFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} '{}' could not be loaded{}",
+            if self.global {
+                "global config"
+            } else {
+                "project config"
+            },
+            bounded_for_message(&self.path.display().to_string()),
+            self.location.as_deref().unwrap_or("")
+        )
+    }
+}
+
+impl std::error::Error for ConfigLoadFailed {}
+
+/// The `ConfigLoadFailed` in `e`, if that is what it is.
+fn config_load_failure(e: &anyhow::Error) -> Option<&ConfigLoadFailed> {
+    e.chain()
+        .find_map(|cause| cause.downcast_ref::<ConfigLoadFailed>())
+}
+
+/// ` (line L, column C)` from a TOML syntax error, or `None`. Only the digits of the first
+/// line are read: the rest of that error is the quoted source, which must not be shown.
+fn toml_location(e: &anyhow::Error) -> Option<String> {
+    let shown = e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<toml::de::Error>())?
+        .to_string();
+    let rest = shown
+        .lines()
+        .next()?
+        .strip_prefix("TOML parse error at line ")?;
+    let (line, column) = rest.split_once(", column ")?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    (digits(line) && digits(column)).then(|| format!(" (line {line}, column {column})"))
+}
+
+/// `ProjectConfig::load_or_default(root)`, with a failure replaced by [`ConfigLoadFailed`].
+///
+/// Which file failed is found by asking the global loader: if it fails on its own, the global
+/// config is the culprit; otherwise the project's `project.toml` is. Only on the error path.
+fn load_project_config(root: &Path) -> Result<ProjectConfig> {
+    ProjectConfig::load_or_default(root).map_err(|e| {
+        let global = crate::config::global::GlobalConfig::load().is_err();
+        let path = if global {
+            crate::config::global::global_config_path().unwrap_or_default()
+        } else {
+            root.join(".codescout").join("project.toml")
+        };
+        anyhow::Error::new(ConfigLoadFailed {
+            path,
+            global,
+            location: toml_location(&e),
+        })
+    })
+}
+
+/// Longest piece of caller-supplied text echoed into a refusal, in bytes.
+// cap-class: NOT_A_CAP — bounds the echo of the caller's own input inside an error message, and the cut is marked in the text (`truncated, N bytes in all`); no result is shortened
+const ECHO_MAX_BYTES: usize = 512;
+
+/// `s` made safe to put in a message that is also stored in a usage row and written to a log:
+/// control characters are escaped (`\u{a}`), so they cannot forge a line or colour, and the
+/// text is cut to [`ECHO_MAX_BYTES`] at a character boundary, saying how long it was.
+pub(crate) fn bounded_for_message(s: &str) -> String {
+    let mut out = String::with_capacity(s.len().min(ECHO_MAX_BYTES) + 32);
+    for c in s.chars() {
+        let piece = if c.is_control() {
+            format!("\\u{{{:x}}}", c as u32)
+        } else {
+            c.to_string()
+        };
+        if out.len() + piece.len() > ECHO_MAX_BYTES {
+            out.push_str(&format!("… (truncated, {} bytes in all)", s.len()));
+            return out;
+        }
+        out.push_str(&piece);
+    }
+    out
+}
+
+/// The recoverable refusal for a pin whose project could not be made resident, whatever the
+/// route: the dispatch check, `ensure_resident` inside a tool body and the write gate all use
+/// it, so the same failure reads the same on every path.
+///
+/// An error that is already a `RecoverableError` (the directory is not there) passes through
+/// untouched. A [`ConfigLoadFailed`] points at the file that failed (the project's or the
+/// global one) and shows nothing from inside it. Anything else gets the generic hint: a
+/// directory this process may not enter used to be blamed on a project.toml never read.
+/// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
+pub(crate) fn pin_resolution_refusal(
+    root: &Path,
+    e: anyhow::Error,
+) -> crate::tools::RecoverableError {
+    let e = match e.downcast::<crate::tools::RecoverableError>() {
+        Ok(refusal) => return refusal,
+        Err(e) => e,
+    };
+    let pin = bounded_for_message(&root.display().to_string());
+    if let Some(config) = config_load_failure(&e) {
+        let message = format!("workspace pin '{pin}' could not be resolved: {config}");
+        if config.global {
+            crate::tools::RecoverableError::with_hint(
+                message,
+                "Fix the global config named above (it applies to every project), or drop the \
+                 workspace= argument to use the active project instead.",
+            )
+        } else {
+            crate::tools::RecoverableError::with_hint(
+                message,
+                "Fix that project's .codescout/project.toml -- a [project] table with a `name` \
+                 is required, and it must be valid and within its size and list limits -- or \
+                 drop the workspace= argument to use the active project instead.",
+            )
+        }
+    } else {
+        crate::tools::RecoverableError::with_hint(
+            format!(
+                "workspace pin '{pin}' could not be resolved: {}",
+                bounded_for_message(&format!("{e:#}"))
+            ),
+            "Check that the directory is readable and usable as a project root, or drop the \
+             workspace= argument to use the active project instead.",
+        )
+    }
+}
+
 /// Read `workspace.toml` and return the discovery depth and exclude list.
 ///
 /// From a linked worktree, reads through to the MAIN checkout when the worktree has
@@ -629,7 +842,7 @@ impl Agent {
             // Canonicalize so home_root is always an absolute path.  This prevents
             // path-form drift when activate_project(".") later canonicalizes its
             // argument and compares against home_root.
-            let root = std::fs::canonicalize(&raw).unwrap_or(raw);
+            let root = existing_project_dir(raw, "project root")?;
             // Stamped before the read it describes — see `ConfigStamp::of`.
             let config_stamp = ConfigStamp::of(&root);
             let config = ProjectConfig::load_or_default(&root)?;
@@ -759,7 +972,7 @@ impl Agent {
         // key) sees the same absolute path. Without this, activate(".") would
         // compare unequal to Agent::new's canonicalized home_root, making
         // is_home false on the first re-activation and flipping to read-only.
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root = existing_project_dir(root, "project root")?;
         let res = Self::load_project_resources(&root).await?;
         {
             let mut inner = self.inner.write().await;
@@ -789,7 +1002,7 @@ impl Agent {
         // leaves a stamp describing the OLDER file, so the next gated call reloads.
         // The reverse order swallows that write permanently. See `ConfigStamp::of`.
         let config_stamp = ConfigStamp::of(root);
-        let config = ProjectConfig::load_or_default(root)?;
+        let config = load_project_config(root)?;
         let memory = MemoryStore::open(root)?;
         let private_memory = MemoryStore::open_private(root)?;
         let registry_path = root.join(".codescout").join("libraries.json");
@@ -833,8 +1046,13 @@ impl Agent {
     ///
     /// Still does not require a full `activate`, which would clear every other resident
     /// workspace — see `Agent::activate`.
+    ///
+    /// `root` must be an existing directory, or this refuses with a `RecoverableError` before
+    /// anything is created ([`existing_project_dir`]). It used to keep a missing path as the
+    /// root and build a project there on first touch.
+    /// docs/issues/2026-10-18-a-workspace-pin-naming-a-path-that-does-not-exist-creates-a-project-there.md
     pub async fn ensure_resident(&self, root: PathBuf) -> Result<()> {
-        let root = std::fs::canonicalize(&root).unwrap_or(root);
+        let root = existing_project_dir(root, "workspace pin")?;
         if self.inner.read().await.workspaces.contains_key(&root) {
             return Ok(());
         }
@@ -1409,6 +1627,11 @@ impl Agent {
         let effective_read_only_snapshot =
             AgentInner::resolve_read_only(read_only, is_home_snapshot);
         let _ = effective_read_only_snapshot; // recomputed under write lock below
+
+        // A sub-project is discovered from a manifest, so its directory existed at discovery;
+        // it may be gone since. `open_lock_file` below `create_dir_all`s, so without this a
+        // deleted sub-project would be silently re-created as an empty project.
+        existing_project_dir(abs_root.clone(), "sub-project root")?;
 
         // Open the lock file before acquiring the write lock — involves blocking
         // fs I/O (create_dir_all + OpenOptions::open) that must not run on the
