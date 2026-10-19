@@ -96,9 +96,11 @@ boundary**. The check happens before any I/O:
    root is caught, including below a directory that does not exist yet. If the
    target file is itself a symlink it is followed (chains, relative links and
    dangling links included, up to 40 links): a link whose end is in the deny list,
-   a loop, a chain longer than 40 links and a link that cannot be read are refused.
-   A link inside the project root whose end is elsewhere (and not deny-listed) is
-   allowed: `create_file`, `edit_file`, `edit_markdown` and `edit_code`
+   a loop, a chain longer than 40 links, a link that cannot be read and a link
+   whose end holds an unresolvable `..` are refused.
+   A link inside a write root (the project root, an `extra_write_roots` entry, an
+   approved directory, the temp dir) whose end is elsewhere (and not deny-listed)
+   is allowed: `create_file`, `edit_file`, `edit_markdown` and `edit_code`
    `replace`/`insert`/`remove` replace the link with a regular file and never write
    to the end. `edit_code` `rename` does write through the link, so it additionally
    requires the end to be inside a write root.

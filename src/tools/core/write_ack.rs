@@ -306,6 +306,19 @@ mod tests {
         // `/var/ce_ack_leaf_capture`, and replaying it left that directory approved.
         let (dir, ctx) = ctx_with_project().await;
         let link = plant_leaf_link(dir.path(), "/var/ce_ack_leaf_capture/victim.txt");
+        // The precondition that makes this a test of the POLICY: the end is outside every root.
+        assert!(
+            matches!(
+                classify_write_path(
+                    "/var/ce_ack_leaf_capture/victim.txt",
+                    dir.path(),
+                    &ctx.agent.security_config_for(None).await,
+                    &[]
+                ),
+                WritePathDecision::OutsideRoot { .. }
+            ),
+            "precondition: the end must be outside the write roots here"
+        );
         let input = json!({ "path": link, "content": "x" });
         match resolve_write_or_capture(&ctx, "create_file", &input, &link)
             .await

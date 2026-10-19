@@ -11171,8 +11171,6 @@ async fn rename_over_leaf_ctx(dir: &tempfile::TempDir, leaf: &std::path::Path) -
 #[cfg(unix)]
 #[tokio::test]
 async fn edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_the_second_look() {
-    use std::os::unix::fs::FileTypeExt;
-
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -11196,13 +11194,6 @@ async fn edit_code_rename_through_a_leaf_link_to_an_outside_file_is_refused_by_t
         msg.contains("outside the project root")
             && msg.contains("reached through the symbolic link"),
         "got: {msg}"
-    );
-    assert!(
-        std::fs::metadata("/dev/null")
-            .unwrap()
-            .file_type()
-            .is_char_device(),
-        "/dev/null must still be the device"
     );
 }
 

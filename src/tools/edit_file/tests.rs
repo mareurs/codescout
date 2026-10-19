@@ -1854,12 +1854,12 @@ async fn create_file_overwrite_on_a_leaf_symlink_replaces_the_link_and_spares_th
 /// approval is offered or granted: on the branch before this policy, the same call returned a
 /// `pending_ack` whose replay approved the END's directory (`pw -> /etc/passwd` ended with `/etc`
 /// a session write root). The end is `/dev/null`: outside every root (the temp dir is one), not
-/// deny-listed, and harmless if the write ever did go through it.
+/// deny-listed. The assertions that discriminate a write-through are the file type of the link (a
+/// write-through would leave a link) and the absence of an ack; the end is a device, so its own
+/// content could not show one.
 #[cfg(unix)]
 #[tokio::test]
 async fn create_file_on_a_leaf_link_to_an_outside_file_replaces_the_link_and_grants_nothing() {
-    use std::os::unix::fs::FileTypeExt;
-
     let (dir, ctx) = project_ctx().await;
     let leaf = dir.path().join("pw");
     std::os::unix::fs::symlink("/dev/null", &leaf).unwrap();
@@ -1892,13 +1892,6 @@ async fn create_file_on_a_leaf_link_to_an_outside_file_replaces_the_link_and_gra
         "the link must have been replaced by a regular file"
     );
     assert_eq!(std::fs::read_to_string(&leaf).unwrap(), "replaced");
-    assert!(
-        std::fs::metadata("/dev/null")
-            .unwrap()
-            .file_type()
-            .is_char_device(),
-        "/dev/null must still be the device"
-    );
 }
 
 #[tokio::test]

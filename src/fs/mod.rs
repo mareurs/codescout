@@ -89,24 +89,36 @@ pub(crate) enum LinkTarget {
 
 /// Validate what a write target's LEAF symlink resolves to, when it is one.
 ///
-/// `validate_write_path` judges where a write through a leaf link lands (it follows the chain and
-/// asks the deny list and the roots of the link AND of its end), so this is a SECOND look, kept as
-/// defence in depth rather than as the only guard: it asks again at the point of use (the link may
-/// have been re-pointed since the classifier looked), and its policies add what the classifier
-/// does not say. The classifier hands back the link's own spelling, `<root>/leaf ->
-/// ~/.ssh/id_rsa` included when it is allowed, and this runs the resolved target through the
-/// existing public validators ([`validate_read_path`](crate::util::path_security::validate_read_path),
+/// `validate_write_path` judges a leaf link by the deny list (of the link's own location AND of
+/// where the chain ends) and by the roots of the link's OWN location only: every writer but one
+/// replaces the link and never touches its end, so the roots have nothing to say about the end.
+/// It hands back the link's own spelling, `<root>/leaf -> /elsewhere/file` included when allowed.
+/// This look is therefore two different things, by policy:
+///
+/// - [`LinkTarget::Writable`], used by `edit_code` rename, which writes THROUGH the link
+///   (`std::fs::write`): the ONLY check that the end is inside a write root. Delete it and a rename
+///   writes anywhere a link points that the deny list does not name.
+/// - [`LinkTarget::ReadableByTools`], used by `write_ack::resolve_write_or_capture` and
+///   `resolve_write_path_for`: defence in depth, UNTESTED. The classifier already refuses a deny-listed
+///   end, no input is known that it allows and this refuses, and mutants that discard the result at
+///   either call site survive the whole lib suite. It stays for the window in which a link is
+///   re-pointed between the classifier and the read, a window that is real (the review's racing
+///   thread flipped a link 142628 times in 8 s and 3922 refusals came from this look alone) and that no
+///   deterministic test reaches without a seam between the two looks.
+///
+/// Both run the resolved target through the existing public validators
+/// ([`validate_read_path`](crate::util::path_security::validate_read_path),
 /// [`validate_write_path`](crate::util::path_security::validate_write_path)).
 ///
-/// Not shown redundant, so not removed: the `Writable` policy refuses a dangling link outright, which
-/// the classifier answers by the path the link names, and nothing proves the `ReadableByTools`
-/// read deny-list is a subset of what the classifier's two-form deny list covers on every
-/// filesystem shape.
+/// Not shown redundant, so not removed: nothing proves the `ReadableByTools` read deny-list is a
+/// subset of what the classifier's two-form deny list covers on every filesystem shape.
 ///
 /// A target that is not a link, or a path that does not exist, is `Ok`. A dangling link is `Ok`
 /// under [`LinkTarget::ReadableByTools`] (nothing can be read through it and `atomic_write`
-/// replaces it) and refused under [`LinkTarget::Writable`] (a write would CREATE its target
-/// wherever it points, and where that is cannot be established).
+/// replaces it) and refused under [`LinkTarget::Writable`] with a clearer message than the one the
+/// caller would give (a write would CREATE its target wherever it points). At its only caller,
+/// rename, that arm decides nothing: the pre-image read that follows fails on a dangling link
+/// first. It is not a reason the look matters.
 ///
 /// docs/issues/2026-10-17-edit-file-on-a-leaf-symlink-to-a-deny-listed-path-reads-and-copies-the-file.md
 pub(crate) fn validate_leaf_link_target(
@@ -174,9 +186,10 @@ pub(crate) async fn resolve_write_path_for(
         &security,
         &session_roots,
     )?;
-    // The classifier judges where a write through a leaf link lands, but hands back the link's own
-    // spelling and the edit tools read the target through it, so look again at the point of use
-    // (defence in depth). See `validate_leaf_link_target`.
+    // The classifier refuses a link into the deny list but hands back the link's own spelling, and
+    // the edit tools read the target through it, so look again at the point of use. UNTESTED defence
+    // in depth (a mutant that discards the result survives the lib suite). See
+    // `validate_leaf_link_target`.
     validate_leaf_link_target(
         &resolved,
         &root,
@@ -716,6 +729,21 @@ mod tests {
         std::os::unix::fs::symlink("/var/ce_fs_leaf_probe/new.txt", root.path().join("leaf"))
             .unwrap();
         let agent = Agent::new(Some(root.path().to_path_buf())).await.unwrap();
+        // The precondition that makes this a test of the POLICY: the end really is outside every
+        // write root, so a classifier that asked the roots about it would refuse.
+        let security = agent.security_config_for(None).await;
+        assert!(
+            matches!(
+                crate::util::path_security::classify_write_path(
+                    "/var/ce_fs_leaf_probe/new.txt",
+                    root.path(),
+                    &security,
+                    &[]
+                ),
+                crate::util::path_security::WritePathDecision::OutsideRoot { .. }
+            ),
+            "precondition: /var/ce_fs_leaf_probe/new.txt must be outside the write roots here"
+        );
         let resolved = resolve_write_path_for(&agent, None, "leaf")
             .await
             .expect("a link out of the write roots is judged by its own location");

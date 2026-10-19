@@ -9464,16 +9464,25 @@ EOF"#;
     fn a_leaf_link_that_cannot_be_read_is_refused() {
         // `/proc/1/cwd` is a symlink an unprivileged process can `lstat` but not `readlink`
         // (EACCES), so a link the classifier SEES but cannot follow, without any race. It is
-        // refused rather than judged by its own name. Skips, loudly, where the premise does not
-        // hold: running as root, or a procfs that lets this process read it.
+        // refused rather than judged by its own name. The premise does not hold as root, or on a
+        // procfs that lets this process read it, and then there is nothing to classify: the test
+        // returns, SILENTLY (the harness hides the output of a passing test, so the line below is
+        // only seen with `--nocapture`), and the `read_link` failure arm goes untested. Setting
+        // `CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST` makes that case a failure instead, for a lane
+        // that must not run as root.
         let p = Path::new("/proc/1/cwd");
         let is_link = std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
         if !is_link || std::fs::read_link(p).is_ok() {
-            eprintln!(
-                "SKIPPED a_leaf_link_that_cannot_be_read_is_refused: /proc/1/cwd is {} for this process \
+            let why = format!(
+                "a_leaf_link_that_cannot_be_read_is_refused: /proc/1/cwd is {} for this process \
                  (root, or a procfs that allows it), so there is no unreadable link to classify",
                 if is_link { "readable" } else { "not a symlink" }
             );
+            assert!(
+                std::env::var_os("CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST").is_none(),
+                "{why}, and CODESCOUT_REQUIRE_UNREADABLE_LINK_TEST forbids skipping"
+            );
+            eprintln!("SKIPPED {why}");
             return;
         }
         let t = LeafTree::new();

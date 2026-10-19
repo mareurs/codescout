@@ -644,10 +644,12 @@ impl EditCode {
                 &security,
                 &session_roots,
             )?;
-            // This loop's `fs::write` FOLLOWS a leaf link. The classifier above judges where such a
-            // link lands, but it returns the link's own spelling, and a DANGLING link is allowed
-            // by the path it names, so look again at the point of use: the resolved target must
-            // itself be writable, and a dangling link is refused.
+            // This loop's `fs::write` FOLLOWS a leaf link, which no other `edit_code` action does. The
+            // classifier above asks the deny list of the link's end but the ROOTS only of the link's
+            // own location, so THIS look is the only check that the end is inside a write root: the
+            // resolved target must itself be writable. Delete it and a rename writes through an
+            // in-root link to anywhere the deny list does not name. (A dangling link is refused here
+            // too, but the pre-image read below would fail on it anyway.)
             crate::fs::validate_leaf_link_target(
                 &path,
                 &root,
