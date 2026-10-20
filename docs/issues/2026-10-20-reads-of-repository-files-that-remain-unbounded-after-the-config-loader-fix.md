@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-19-the-config-loaders-read-a-linked-special-file-w
 tags:
 - cluster/unclassified
 kind: bug
-unverified: Rows 3 (src/workspace.rs deps_from_*), 7 (src/server.rs *_enabled_at_runtime) and 10 (src/agent/write_guard.rs read_holder_record) were NOT touched in branch fix/bounded-repo-reads-2026-10-20 (they belong to other work) and are still plain reads; the new row 11 (src/memory/anchors.rs read_anchor_file, regular-file check but no size cap) is unfixed. The hard-link .md -> project.toml question is untested. For the fixed rows, reachability by a FIFO is proven by tests run red against the plain read (see Re-verification); reachability of a link to /dev/zero is reasoned from std path semantics and the type check, never driven (not run on this machine). Fixes are on the branch only; not yet merged to experiments.
+unverified: "Fixes are on branch fix/bounded-repo-reads-2026-10-20 only; not merged to experiments. A link to /dev/zero was never driven (it fills memory): reachability by a link to a device is reasoned from std path semantics and the type check on the opened descriptor, FIFO reachability is proven by red tests. /dev/null stands for a device in controls. The hard-link .md -> project.toml question is untested. The stream_regular length bound for a file that lies about its length has no test of its own. Several commits group more than one concern per file (util/fs.rs, server.rs, doctor.rs)."
 ---
 
 # BUG: reads of repository files that the config-loader fix did not touch still use a plain read, so a linked FIFO or device can hold them or an oversized file can fill memory
@@ -175,20 +175,32 @@ refusal and are not red tests.
 | 8 | `.git` pointer and `<gitdir>/HEAD`: `prompts/mod.rs` `detect_worktree_info`, `librarian/tools/worktree.rs` `read_branch`, `util/path_security.rs` `is_linked_worktree`, `worktree_main_root`, `list_git_worktrees` | Yes. `worktree_main_root` has no type check and runs from `usage/mod.rs:167`, `agent/mod.rs` `load_discover_settings` and the activation response, so a `.git` FIFO held them (red); a `HEAD` FIFO under a pointer-named gitdir held `detect_worktree_info` / `read_branch` (red); a `gitdir` FIFO under `.git/worktrees/` held `list_git_worktrees` (red); an oversized `.git` was read whole (red) | `d535f9a5d` (`198f6fec9d0846d2254c7d0ede01d5a273d93893`) | new `util::fs::read_git_pointer` with `MAX_GIT_POINTER_BYTES` = 64 KiB; `None` for absent, refused, oversized or non-UTF-8, as the `.ok()` sites already treated a failed read |
 | 9, 8 (doctor) | `librarian/tools/doctor.rs` `worktree_residue_sessions` (`cc_session_id`) and the `gitdir` scan (now `registered_worktree_roots`) | Yes: both run over `.worktrees/` entries git does not vouch for (FIFO, red) | `6297c6718` (`ba540aeae0b3d940754113edc8a00dda9a44cd6f`); the read-door allow-list entries for these and the `tools/worktree.rs` reads were removed in `217ed7b8f` (a first gate run failed `no_librarian_production_read_bypasses_the_read_door` on their liveness floor, and on the new test modules being `#[cfg(all(test, unix))]`, which that scan does not recognise as test code: `#[cfg(test)] #[cfg(unix)]` in the two librarian files) | `MAX_SESSION_ID_FILE_BYTES` = 4096 (as `server.rs`), `read_git_pointer` for the gitdir files |
 
+**Second pass (after the Opus review of `fbcff95af`)** added the rows the first pass left and one it missed:
+
+| Row | Site | Reachable | Fixed in | Cap (all `cap-class: NOT_A_CAP`) |
+|---|---|---|---|---|
+| 12 (new) | `library/registry.rs` `LibraryRegistry::load` (`.codescout/libraries.json`, every activation: `agent/mod.rs` x3, dashboard) | Yes: `exists()` then a plain read, so a committed link to a FIFO held every activation (red); a link to `/dev/zero` was not driven | `08685b2ed` (`6f5e5ccecbcf506a59fd5b24ae1c9e7ea6d2123d`) | `MAX_CONFIG_FILE_BYTES`. A refused or over-cap file is an EMPTY registry, as an absent one is (all callers used `unwrap_or_default`; a directory used to be `Err`, now empty, same result at the callers). Invalid JSON, empty and invalid UTF-8 are still errors; the error quotes nothing |
+| 3 | `workspace.rs` `deps_from_cargo/npm/pyproject/requirements/gradle` (onboarding) | Yes: sibling manifests of a discovered project are whatever the repository holds; FIFO held them (red). `read_file_capped` was not used (`File::open` blocks on a FIFO) | `14864cbbc` (`f0669b33e40b6683ac452451e97f63e8d48e2f85`) | `MAX_CONFIG_FILE_BYTES`; refused = skip the manifest; the `settings.gradle.kts` -> `settings.gradle` fall-through is kept and tested |
+| 11 (new) | `memory/anchors.rs` `read_anchor_file` | Reachable only as a size problem: the path check already refuses a FIFO or link (that test is a control); a FIFO swapped after the check is the race | `852fce089` (`9d327d8de91512d8d6b6e2ac940f1dc29e4805b1`) | `MAX_CONFIG_FILE_BYTES`; over-cap or swapped-in special file is the same `RecoverableError` as a link, so `check_all_memories` lists the topic under `unreadable` and checks the rest |
+| 10 | `agent/write_guard.rs` `read_holder_record` | Only by a planted link or a very large record (the file is written by this process) | `b5a3d7b68` (`ffecdd9dfdbaaacd8dbd70af4b2db2c1fdc27515`) | new `MAX_HOLDER_RECORD_BYTES` = 64 KiB. Every refusal is `None`, which the doc on that function already defines as "no usable owner information", never "the lock is free"; no design decision was needed. `why_no_holder_record` reads only metadata and is unchanged |
+| 7 | `server.rs` `librarian_enabled_at_runtime`, `peer_enabled_at_runtime` | Only through a `project.toml` swapped after the bounded loader read it; defence in depth (FIFO, red) | `8dee39068` (`2ff4285bf4845ebe97d84967a68731614b6b6597`) | `MAX_CONFIG_FILE_BYTES`, one shared seam `project_toml_enabled`; a refusal leaves the caller's default, as a failed read did |
+
+Follow-ups in the same pass: `hash_file` now streams through the new `util::fs::stream_regular` (same open, bounds and refusals as `read_regular_bytes`, no 64 MiB buffer; digests unchanged for ordinary files) and `read_git_pointer` is silent for a directory (the `.git` of every ordinary checkout, read per usage row), both in `96306d8ec` (`d304884be81a658cb735d8ac608df07a2ce1df7e`); the duplicated 4096-byte session-id cap is one `util::fs::MAX_SESSION_ID_FILE_BYTES` (`96306d8ec`, `8dee39068`, `b50a0e4d3` (`5c82158935d58a075ab79a69fa173320906a5c1c`)); new teeth for `patch_project_table` over-cap and oversized `HEAD` in `8db52293b` (`9904ef770f0029454055e5cf81f4ba1127dd8db5`).
+
+Known, intended behaviour: an anchored file over 64 MiB makes `check_path_staleness` report it permanently `Changed`, while `merge_anchors` / `refresh_hashes` drop its anchor silently.
+
 **Not fixed in this branch, and why**
 
-- **Row 3** `src/workspace.rs` `deps_from_*`, **row 7** `src/server.rs` `librarian_enabled_at_runtime` / `peer_enabled_at_runtime`, **row 10** `src/agent/write_guard.rs` `read_holder_record`: outside the site list this branch was given; untouched and still plain reads. Row 7 is reachable only through a path swapped after the bounded loader read; row 10 only by a planted link.
-- **Row 11 (new), `src/memory/anchors.rs` `read_anchor_file`**: type-checked with `symlink_metadata` (a link or FIFO is refused) and then `std::fs::read_to_string` with no size cap, the same shape as row 5a. Found while reading `check_all_memories`; not fixed here and not tested.
 - The system-prompt and `.git` pointer reads still check the type on the path and open afterwards: a link swapped in between the two is followed. The bounded read narrows what that can do (type and size are checked on the opened descriptor) but does not remove the swap.
 - The hard-link `.md` -> `project.toml` question: untouched; nothing new learned.
 
 ## Fix
 
-Applied for rows 1, 2, 4, 5, 6, 8 and 9 as described in the table above, with the shared
+Applied for rows 1 to 12 as described in the tables above, with the shared
 `util::fs::read_regular_text` / `read_regular_bytes` helper (plus `read_git_pointer`), a cap named
 and annotated per site, and a refused, oversized or non-UTF-8 file treated as the absent file where
 the caller already skipped on absence. Error and debug messages carry the reason and the path,
-never the file's content. Rows 3, 7 and 10 and the new row 11 are not fixed (see above).
+never the file's content. Rows 3, 7, 10, 11 and 12 were added in the second pass (see above).
 
 ## Tests added
 
@@ -207,10 +219,28 @@ are valid so only the length check can refuse it):
   `librarian::tools::worktree::read_branch_bounded_tests` (3), `util::fs` `read_git_pointer` test (1)
 - `librarian::tools::doctor::worktree_residue_bounded_tests` (4)
 
+Second-pass modules: `library::registry::bounded_load_tests` (4), `workspace::bounded_manifest_tests`
+(5), `memory::anchors::bounded_anchor_tests` (+2: sidecar over-cap, FIFO sidecar control),
+`agent::write_guard::holder_record_bounded_tests` (2), `server::project_toml_enabled_tests` (2), plus
+`util::fs` (`stream_regular`, directory-silent log capture), `memory::hash` (multi-chunk digest),
+`tools::onboarding` (`patch_project_table` over-cap), `prompts` (oversized `HEAD`) and
+`util::path_security` (directory `.git`).
+
 Red evidence: each module's production read was reverted to the plain read, the module run, and the
 revert undone with `git checkout --` (`git diff HEAD` empty afterwards). FIFO tests failed with the
-deadline panic; over-cap tests failed on the assertion. Tests that stay green on the plain read are
-the controls and the `/dev/null` device checks.
+deadline panic; over-cap tests failed on the assertion. For the second pass all mutants were applied
+at once (one line each: the read in `registry.rs`, `workspace.rs`, `anchors.rs`, `write_guard.rs`,
+`server.rs`, `doctor.rs`; `read_regular_text(.., u64::MAX)` in `patch_project_table` and in
+`read_git_pointer`; the directory test of `read_git_pointer` reverted; the `sink(..)` call of
+`stream_regular` removed) and the failing test names read per module: 24 failures, covering the FIFO
+and over-cap tests of rows 3, 7, 10, 11, 12, the doctor over-cap test, the `patch_project_table`
+over-cap test, both oversized-pointer tests, the directory-log test and the multi-chunk digests.
+Correction to the first pass: the doctor "oversized" case wrote a valid id followed by a NUL tail,
+which `is_session_id` rejects on its own, so a plain read kept it green and it had no teeth; it is
+now the id padded with spaces (trimmed away) plus an at-the-limit case, and fails on the plain read.
+Tests that stay green on the plain read are the controls and the `/dev/null` device checks; the
+length bound inside `stream_regular` (never more than `max + 1` bytes pulled from a file that
+lies about its length) has no test of its own, the shared `read_bounded` has.
 
 ## Workarounds
 
@@ -219,12 +249,11 @@ untrusted project before activating it.
 
 ## Resume
 
-Rows 3 (`workspace.rs`), 7 (`server.rs`), 10 (`write_guard.rs`) and the new row 11
-(`memory/anchors.rs` `read_anchor_file`) remain. Use the same shape: a seam that takes the path,
-`read_regular_text` with a named `cap-class: NOT_A_CAP` constant, a FIFO test under
-`util::fs::special_file_fixtures::within_deadline` proved red, then the writers that skip
-`check_write` question. Merge the branch before archiving this file (record patch-ids of the SHAs
-above, which are positional).
+Every read named in this file's list is now bounded on the branch (rows 1 to 12). What remains is
+the writers that skip `check_write` question (including the hard-link `.md` -> `project.toml`
+case, untested) and the swap between a path-type check and the open at the system-prompt and
+`.git` pointer sites. Merge the branch before archiving this file (patch-ids are above; the SHAs
+are positional).
 
 ## References
 
