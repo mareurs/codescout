@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -187,6 +187,23 @@ fn record_dotenv_injected(keys: std::collections::BTreeSet<String>) {
     let _ = DOTENV_INJECTED.set(keys);
 }
 
+/// The `KEY=value` pairs of the startup dotenv at `path`, or `None` (with a warning) when it
+/// cannot be read. Split out of [`load_startup_env`] so the read can be tested without
+/// touching the process environment.
+fn read_dotenv_pairs(path: &std::path::Path) -> Option<Vec<(String, String)>> {
+    match crate::util::fs::read_regular_config_bytes(path) {
+        Ok(bytes) => Some(
+            dotenvy::from_read_iter(bytes.as_slice())
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>(),
+        ),
+        Err(e) => {
+            tracing::warn!("failed to load startup env from {}: {e}", path.display());
+            None
+        }
+    }
+}
+
 /// Load a startup dotenv into the process environment before config resolution.
 ///
 /// Path: `$CODESCOUT_ENV_FILE` if set, else [`global_env_path`]. An explicit process
@@ -217,14 +234,8 @@ pub fn load_startup_env() {
         StartupEnvPlan::Nothing => return,
     };
 
-    let pairs = match crate::util::fs::read_regular_config_bytes(&path) {
-        Ok(bytes) => dotenvy::from_read_iter(bytes.as_slice())
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>(),
-        Err(e) => {
-            tracing::warn!("failed to load startup env from {}: {e}", path.display());
-            return;
-        }
+    let Some(pairs) = read_dotenv_pairs(&path) else {
+        return;
     };
     // Compute the assignments once, then record WHICH keys they were before applying
     // them. The list is exactly what distinguishes a dotenv-injected value from an
@@ -257,8 +268,10 @@ impl GlobalConfig {
             Ok(t) => t,
             Err(e) if e.is_not_found() => return Ok(None),
             Err(e) => {
-                return Err(anyhow::Error::new(e))
-                    .with_context(|| format!("reading global config {}", path.display()));
+                return Err(anyhow::anyhow!(
+                    "reading global config {}: {e}",
+                    path.display()
+                ));
             }
         };
         let config: GlobalConfig = toml::from_str(&text).map_err(|e| {
@@ -493,6 +506,68 @@ mod tests {
         std::os::unix::fs::symlink(&real, dir.path().join("config.toml")).unwrap();
         let cfg = GlobalConfig::load_from_dir(dir.path()).unwrap().unwrap();
         assert_eq!(cfg.embeddings.model.as_deref(), Some("local:BGESmallENV15"));
+    }
+
+    /// The text a caller gets from `{e}` (not `{e:#}`) says WHY, not only which file: callers
+    /// such as the embedding-config loader print `{e}`. Never any content of the file.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_global_config_says_why_in_the_top_level_message_and_quotes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&path, format!("# SECRET_MARKER_QX7\n{}", "#".repeat(cap))).unwrap();
+        let shown = GlobalConfig::load_from_dir(dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("config.toml"), "{shown}");
+        assert!(shown.contains("exceeds the 1048576 byte limit"), "{shown}");
+        assert!(!shown.contains("SECRET_MARKER_QX7"), "{shown}");
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let shown = GlobalConfig::load_from_dir(dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("not a regular file"), "{shown}");
+    }
+
+    /// The startup dotenv is read like a config file: bounded, regular files only. A FIFO used
+    /// to hold startup before any config was resolved.
+    #[cfg(unix)]
+    #[test]
+    fn the_startup_dotenv_read_refuses_a_special_file_and_reads_a_regular_one() {
+        use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+        let dir = tempfile::tempdir().unwrap();
+
+        let fifo = dir.path().join("pipe.env");
+        make_fifo(&fifo);
+        let got = within_deadline("read_dotenv_pairs on a FIFO", move || {
+            read_dotenv_pairs(&fifo)
+        });
+        assert_eq!(got, None);
+
+        let real = dir.path().join("real.env");
+        std::fs::write(&real, "ALPHA=1\nBETA=two\n").unwrap();
+        let linked = dir.path().join("linked.env");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        for p in [&real, &linked] {
+            assert_eq!(
+                read_dotenv_pairs(p),
+                Some(vec![
+                    ("ALPHA".to_string(), "1".to_string()),
+                    ("BETA".to_string(), "two".to_string())
+                ]),
+                "{}",
+                p.display()
+            );
+        }
+
+        let big = dir.path().join("big.env");
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&big, format!("A=1\n#{}\n", "x".repeat(cap))).unwrap();
+        assert_eq!(read_dotenv_pairs(&big), None);
+        assert_eq!(read_dotenv_pairs(dir.path()), None, "a directory");
     }
 
     #[test]

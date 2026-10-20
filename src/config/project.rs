@@ -869,10 +869,11 @@ impl ProjectConfig {
 
         let project_overlay: toml::Value = if config_path.exists() {
             // Regular files only, bounded by the bytes read: `project.toml` is repository
-            // content, so it can be a link to a FIFO or to `/dev/zero`. The message names the
-            // file and the reason, never what is in it.
+            // content, so it can be a link to a FIFO or to `/dev/zero`. The reason is IN the
+            // message, not behind a context layer that `{e}` does not print: callers format
+            // it that way. It names the file and the reason, never what is in it.
             let text = crate::util::fs::read_regular_config_text(&config_path)
-                .with_context(|| format!("reading {}", config_path.display()))?;
+                .map_err(|e| anyhow::anyhow!("reading {}: {e}", config_path.display()))?;
             toml::from_str(&text).map_err(|e| {
                 anyhow::anyhow!(
                     "parsing {}: {}",
@@ -1267,6 +1268,29 @@ mod tests {
         assert_eq!(cfg.project.name, "linked");
         let table = ProjectConfig::read_project_toml_table(dir.path()).expect("readable");
         assert_eq!(table["project"]["name"].as_str(), Some("linked"));
+    }
+
+    /// What a caller prints with `{e}` (the embedding-config loader does) says why the file was
+    /// refused and names it, and never quotes it.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_project_toml_says_why_in_the_top_level_message_and_quotes_nothing() {
+        let (dir, file) = project_with_codescout_dir();
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&file, format!("# SECRET_MARKER_QX7\n{}", "#".repeat(cap))).unwrap();
+        let shown = ProjectConfig::load_with_global_base(dir.path(), empty_global())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("project.toml"), "{shown}");
+        assert!(shown.contains("exceeds the 1048576 byte limit"), "{shown}");
+        assert!(!shown.contains("SECRET_MARKER_QX7"), "{shown}");
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let shown = ProjectConfig::load_with_global_base(dir.path(), empty_global())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("not a regular file"), "{shown}");
     }
 
     /// `PathSecurityConfig::default()` is the STANDARD policy, whatever a repository says.
