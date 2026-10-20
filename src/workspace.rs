@@ -596,9 +596,28 @@ fn normalize_path(base: &Path, relative: &str) -> PathBuf {
     result
 }
 
+/// Read one of a discovered sub-project's manifests as text, or `None` when it cannot be used.
+/// A project directory holds one manifest that made it a project; the others (a `requirements.txt`
+/// beside a `Cargo.toml`, a `settings.gradle`) are whatever the repository put there, so a name can
+/// be a link to a FIFO or a device and a plain read would hold the onboarding. The read is a
+/// bounded regular-file read ([`crate::util::fs::read_regular_config_text`]); absent, refused,
+/// oversized and non-UTF-8 are all "skip this manifest", as a failed read always was. The reason
+/// (never the content) goes to the debug log.
+fn read_manifest(path: &Path) -> Option<String> {
+    match crate::util::fs::read_regular_config_text(path) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            if !e.is_not_found() {
+                tracing::debug!("manifest {} skipped: {e}", path.display());
+            }
+            None
+        }
+    }
+}
+
 /// Parse Cargo.toml `[dependencies]` / `[dev-dependencies]` for `path = "..."` entries.
 fn deps_from_cargo(project_root: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(project_root.join("Cargo.toml")) else {
+    let Some(content) = read_manifest(&project_root.join("Cargo.toml")) else {
         return vec![];
     };
     let Ok(table) = toml::from_str::<toml::Value>(&content) else {
@@ -619,7 +638,7 @@ fn deps_from_cargo(project_root: &Path) -> Vec<String> {
 
 /// Parse package.json for `"file:../..."` or `"workspace:../..."` dependency values.
 fn deps_from_npm(project_root: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(project_root.join("package.json")) else {
+    let Some(content) = read_manifest(&project_root.join("package.json")) else {
         return vec![];
     };
     let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) else {
@@ -647,7 +666,7 @@ fn deps_from_npm(project_root: &Path) -> Vec<String> {
 
 /// Parse pyproject.toml for `{path = "..."}` dependency entries.
 fn deps_from_pyproject(project_root: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(project_root.join("pyproject.toml")) else {
+    let Some(content) = read_manifest(&project_root.join("pyproject.toml")) else {
         return vec![];
     };
     let Ok(table) = toml::from_str::<toml::Value>(&content) else {
@@ -689,7 +708,7 @@ fn deps_from_pyproject(project_root: &Path) -> Vec<String> {
 
 /// Parse requirements.txt for `-e ../sibling` editable installs.
 fn deps_from_requirements(project_root: &Path) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(project_root.join("requirements.txt")) else {
+    let Some(content) = read_manifest(&project_root.join("requirements.txt")) else {
         return vec![];
     };
     content
@@ -710,7 +729,7 @@ fn deps_from_requirements(project_root: &Path) -> Vec<String> {
 fn deps_from_gradle(project_root: &Path) -> Vec<String> {
     let content = ["settings.gradle.kts", "settings.gradle"]
         .iter()
-        .find_map(|f| std::fs::read_to_string(project_root.join(f)).ok())
+        .find_map(|f| read_manifest(&project_root.join(f)))
         .unwrap_or_default();
 
     let mut paths = vec![];
@@ -1216,5 +1235,141 @@ mod tests {
             langs
         );
         assert_eq!(dominant_language(dir.path()).as_deref(), Some("python"));
+    }
+}
+/// A discovered sub-project's sibling manifests are repository content: any of them can be a link
+/// to a FIFO or a device. Each `deps_from_*` reader is driven with one in place of its file.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod bounded_manifest_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    type Reader = fn(&Path) -> Vec<String>;
+
+    /// (file name, reader, a body that names `../foo`).
+    const READERS: &[(&str, Reader, &str)] = &[
+        (
+            "Cargo.toml",
+            deps_from_cargo,
+            "[dependencies]\nfoo = { path = \"../foo\" }\n",
+        ),
+        (
+            "package.json",
+            deps_from_npm,
+            "{\"dependencies\":{\"foo\":\"file:../foo\"}}",
+        ),
+        (
+            "pyproject.toml",
+            deps_from_pyproject,
+            "[tool.poetry.dependencies]\nfoo = { path = \"../foo\" }\n",
+        ),
+        ("requirements.txt", deps_from_requirements, "-e ../foo\n"),
+        (
+            "settings.gradle.kts",
+            deps_from_gradle,
+            "includeBuild(\"../foo\")\n",
+        ),
+        (
+            "settings.gradle",
+            deps_from_gradle,
+            "includeBuild('../foo')\n",
+        ),
+    ];
+
+    fn foo() -> Vec<String> {
+        vec!["../foo".to_string()]
+    }
+
+    fn read_in_time(what: &str, reader: Reader, root: &Path) -> Vec<String> {
+        let root = root.to_path_buf();
+        within_deadline(what, move || reader(&root))
+    }
+
+    /// A FIFO, and a link to one, in place of the manifest held the onboarding. It is skipped.
+    #[test]
+    fn a_fifo_or_a_link_to_one_in_place_of_a_manifest_is_skipped_and_never_a_hang() {
+        for (name, reader, _) in READERS {
+            for linked in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join(name);
+                if linked {
+                    let fifo = dir.path().join("elsewhere-pipe");
+                    make_fifo(&fifo);
+                    std::os::unix::fs::symlink(&fifo, &file).unwrap();
+                } else {
+                    make_fifo(&file);
+                }
+                let got = read_in_time(&format!("{name} a FIFO"), *reader, dir.path());
+                assert!(got.is_empty(), "{name} linked={linked}: {got:?}");
+            }
+        }
+    }
+
+    /// Control: regular files, and links to them, are read as before.
+    #[test]
+    fn a_regular_manifest_and_a_link_to_one_are_still_read() {
+        for (name, reader, body) in READERS {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(name), body).unwrap();
+            assert_eq!(reader(dir.path()), foo(), "{name}");
+
+            let linked = tempfile::tempdir().unwrap();
+            let real = linked.path().join("real-manifest");
+            std::fs::write(&real, body).unwrap();
+            std::os::unix::fs::symlink(&real, linked.path().join(name)).unwrap();
+            assert_eq!(reader(linked.path()), foo(), "{name} linked");
+        }
+    }
+
+    /// Exactly at the limit is read; one byte over is skipped. The padding is whitespace, so the
+    /// plain read would parse the over-limit file and find `../foo`.
+    #[test]
+    fn a_manifest_at_the_limit_is_read_and_one_byte_over_is_skipped() {
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        for (name, reader, body) in READERS {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join(name);
+            let mut padded = (*body).to_string();
+            padded.push_str(&" ".repeat(limit - padded.len()));
+            std::fs::write(&file, &padded).unwrap();
+            assert_eq!(reader(dir.path()), foo(), "{name} at the limit");
+            padded.push(' ');
+            std::fs::write(&file, &padded).unwrap();
+            assert!(reader(dir.path()).is_empty(), "{name} over the limit");
+        }
+    }
+
+    /// Missing and invalid UTF-8 give nothing, as a failed read always did.
+    #[test]
+    fn missing_and_invalid_manifests_give_nothing() {
+        for (name, reader, _) in READERS {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(reader(dir.path()).is_empty(), "{name} missing");
+            std::fs::write(dir.path().join(name), [0xff, 0xfe]).unwrap();
+            assert!(reader(dir.path()).is_empty(), "{name} invalid");
+        }
+    }
+
+    /// The Gradle fall-through is unchanged: an unusable `settings.gradle.kts` still leaves
+    /// `settings.gradle` to be tried, and two unusable ones leave nothing.
+    #[test]
+    fn an_unusable_kts_settings_file_still_falls_through_to_settings_gradle() {
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("settings.gradle.kts"));
+        std::fs::write(
+            dir.path().join("settings.gradle"),
+            "includeBuild('../foo')\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_in_time("kts FIFO, groovy regular", deps_from_gradle, dir.path()),
+            foo()
+        );
+
+        let both = tempfile::tempdir().unwrap();
+        make_fifo(&both.path().join("settings.gradle.kts"));
+        make_fifo(&both.path().join("settings.gradle"));
+        assert!(read_in_time("both FIFOs", deps_from_gradle, both.path()).is_empty());
     }
 }
