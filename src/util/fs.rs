@@ -630,15 +630,25 @@ pub(crate) mod special_file_fixtures {
         what: &str,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> T {
+        within_deadline_of(what, HANG_DEADLINE, f)
+    }
+
+    /// [`within_deadline`] with the caller's own deadline, for a call that is slow on its own.
+    #[track_caller]
+    pub(crate) fn within_deadline_of<T: Send + 'static>(
+        what: &str,
+        deadline: Duration,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
         use std::sync::mpsc::RecvTimeoutError;
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || {
             let _ = tx.send(f());
         });
-        match rx.recv_timeout(HANG_DEADLINE) {
+        match rx.recv_timeout(deadline) {
             Ok(value) => value,
             Err(RecvTimeoutError::Timeout) => panic!(
-                "{what} did not return within {HANG_DEADLINE:?}: it is blocked reading a special file"
+                "{what} did not return within {deadline:?}: it is blocked reading a special file"
             ),
             // The sender is gone without a value: the closure panicked. Its own panic is the
             // failure, not a hang; re-raise it with its message.
