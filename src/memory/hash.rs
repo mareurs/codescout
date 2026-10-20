@@ -24,8 +24,14 @@ pub const MAX_HASHED_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// path comes from a memory anchor, i.e. from the repository, and a plain read of a FIFO held the
 /// caller for good.
 pub fn hash_file(path: &Path) -> Result<String> {
+    hash_file_capped(path, MAX_HASHED_FILE_BYTES)
+}
+
+/// [`hash_file`] at a caller-chosen limit, so a test can put the limit under the size of a file
+/// that exists (`/proc` files report length 0 but return bytes).
+fn hash_file_capped(path: &Path, max_bytes: u64) -> Result<String> {
     let mut hasher = Sha256::new();
-    crate::util::fs::stream_regular(path, MAX_HASHED_FILE_BYTES, |chunk| hasher.update(chunk))?;
+    crate::util::fs::stream_regular(path, max_bytes, |chunk| hasher.update(chunk))?;
     Ok(hex::encode(hasher.finalize()))
 }
 
@@ -160,16 +166,29 @@ mod bounded_hash_tests {
         assert_eq!(hash_file_or_empty(&missing), sha_hex(b""));
     }
 
-    /// The streamed digest of a file larger than one read chunk equals the digest of its bytes,
-    /// for the fallible and the total form alike.
+    /// The streamed digest equals the digest of the raw bytes at every size around the 64 KiB
+    /// read chunk (one byte, one under, exact, one over, two chunks, two chunks and a byte), for
+    /// the fallible and the total form alike.
     #[test]
     fn a_multi_chunk_file_hashes_to_the_digest_of_its_bytes() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("big.rs");
-        let body: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
-        std::fs::write(&file, &body).unwrap();
-        assert_eq!(hash_file(&file).unwrap(), sha_hex(&body));
-        assert_eq!(hash_file_or_empty(&file), sha_hex(&body));
+        let file = dir.path().join("sized.rs");
+        for size in [1usize, 65_535, 65_536, 65_537, 131_072, 131_073, 300_000] {
+            let body: Vec<u8> = (0..size).map(|i| (i % 253) as u8).collect();
+            std::fs::write(&file, &body).unwrap();
+            assert_eq!(hash_file(&file).unwrap(), sha_hex(&body), "size {size}");
+            assert_eq!(hash_file_or_empty(&file), sha_hex(&body), "size {size}");
+        }
+    }
+
+    /// A `/proc` file reports length 0 but returns bytes: under a limit smaller than what it
+    /// returns it is a refusal, never `Ok` with the digest of a prefix. (The limit is lowered
+    /// through the private seam; at 64 MiB this small file would simply be hashed.)
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_file_that_lies_about_its_length_is_refused_not_hashed_from_a_prefix() {
+        let err = hash_file_capped(Path::new("/proc/self/status"), 16).unwrap_err();
+        assert!(is_refusal(&err), "{err:#}");
     }
 
     /// Over the limit is refused. The file starts with real content and is then extended

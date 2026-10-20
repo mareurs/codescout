@@ -1913,7 +1913,9 @@ mod bounded_read_tests {
 
     /// `.git` is a directory in every ordinary checkout and is read on every usage row, so a
     /// directory is `None` WITHOUT a log line; a FIFO still logs. The log is captured with a
-    /// scoped subscriber, so this holds for this thread's calls only.
+    /// scoped dispatcher, set explicitly on each thread that reads (the FIFO read runs under
+    /// `within_deadline`, i.e. on another thread, so a plain read there fails the test with the
+    /// deadline panic instead of hanging it).
     #[test]
     fn read_git_pointer_is_silent_for_a_directory_and_logs_a_fifo() {
         use std::sync::{Arc, Mutex};
@@ -1930,11 +1932,13 @@ mod bounded_read_tests {
         }
         let capture = Capture::default();
         let sink = capture.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_ansi(false)
-            .with_writer(move || sink.clone())
-            .finish();
+        let dispatch = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::DEBUG)
+                .with_ansi(false)
+                .with_writer(move || sink.clone())
+                .finish(),
+        );
 
         let dir = tempdir().unwrap();
         let dot_git = dir.path().join(".git");
@@ -1942,16 +1946,19 @@ mod bounded_read_tests {
         let fifo = dir.path().join("pipe");
         make_fifo(&fifo);
 
-        let (dir_got, fifo_got) = tracing::subscriber::with_default(subscriber, || {
-            let d = read_git_pointer(&dot_git);
-            let logged_after_dir = capture.0.lock().unwrap().len();
-            assert_eq!(logged_after_dir, 0, "a directory logs nothing");
-            // Not through `within_deadline`: that runs on another thread, which this scoped
-            // subscriber does not see. The hang-safety of a FIFO is the previous test's.
-            let f = read_git_pointer(&fifo);
-            (d, f)
+        let dir_got = tracing::dispatcher::with_default(&dispatch, || read_git_pointer(&dot_git));
+        assert_eq!(dir_got, None);
+        assert_eq!(
+            capture.0.lock().unwrap().len(),
+            0,
+            "a directory logs nothing"
+        );
+
+        let d = dispatch.clone();
+        let fifo_got = within_deadline("read_git_pointer on a FIFO", move || {
+            tracing::dispatcher::with_default(&d, || read_git_pointer(&fifo))
         });
-        assert_eq!((dir_got, fifo_got), (None, None));
+        assert_eq!(fifo_got, None);
         let log = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
         assert!(
             log.contains("not a regular file"),
@@ -1988,6 +1995,28 @@ mod bounded_read_tests {
         assert!(matches!(err, BoundedReadError::NotRegular), "{err}");
         let err = stream_regular(&dir.path().join("absent"), 1024, |_| {}).unwrap_err();
         assert!(err.is_not_found());
+    }
+
+    /// A file that reports length 0 but returns bytes (`/proc`): the up-front length check cannot
+    /// refuse it, so the bound on the bytes actually read must. Without the bound the sink would
+    /// see the whole file; without the final count check an `Ok` would carry a TRUNCATED prefix
+    /// (and a hash of it). No seam: the real procfs file is the liar.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stream_regular_cuts_a_file_that_lies_about_its_length() {
+        let status = Path::new("/proc/self/status");
+        assert_eq!(
+            std::fs::metadata(status).unwrap().len(),
+            0,
+            "premise: procfs reports no length"
+        );
+        let mut seen = 0usize;
+        let r = stream_regular(status, 16, |c| seen += c.len());
+        assert!(
+            matches!(r, Err(BoundedReadError::TooLarge { max: 16 })),
+            "{r:?}"
+        );
+        assert!(seen <= 17, "seen={seen}");
     }
 
     /// `/dev/zero` never ends. It is refused on its type, and even if it were not, the read is
