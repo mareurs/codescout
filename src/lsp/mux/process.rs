@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use crate::lsp::mux::protocol::{self, ClientTag, DocumentState};
-use crate::lsp::transport::{read_message, write_message};
+use crate::lsp::transport::{read_message, read_message_returning_reader, write_message};
 
 /// Writer handle shared between tasks. Both server stdin and client streams use this type.
 type SharedWriter = Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>;
@@ -366,6 +366,14 @@ async fn event_loop(
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
         .context("install SIGINT handler")?;
 
+    // `read_message` is not cancel-safe: it keeps the Content-Length it parsed and the body it
+    // has read in locals, so a `read_message(server_reader)` written inside the `select!` below
+    // is dropped, with those bytes, whenever another arm wins mid-frame (a client connecting, a
+    // watchdog tick), and the next read starts inside the frame. Pin ONE read outside the loop
+    // instead and poll it by `&mut`; it is replaced only after it completes.
+    // docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md
+    let mut server_read = std::pin::pin!(read_message_returning_reader(&mut *server_reader));
+
     loop {
         tokio::select! {
             // Accept new client connections
@@ -413,8 +421,13 @@ async fn event_loop(
                 }
             }
 
-            // Read messages from the LSP server
-            server_msg = read_message(server_reader) => {
+            // Read messages from the LSP server. `server_read` is polled by `&mut`, so when
+            // another arm wins it stays pending with its half-read frame intact (see the
+            // comment where it is created).
+            (reader, server_msg) = &mut server_read => {
+                // Start the next read right away, before anything below can `break` or
+                // `continue`: a completed future must not be polled again.
+                server_read.set(read_message_returning_reader(reader));
                 match server_msg {
                     Ok(msg) => {
                         handle_server_message(msg, state, server_writer).await;

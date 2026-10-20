@@ -1,18 +1,17 @@
-//! OPEN BUG repro, ignored on purpose: the mux event loop drops a half-read server frame.
+//! Regression tests: the mux event loop must not drop a half-read server frame.
 //!
-//! `lsp/mux/process.rs` races `read_message(server_reader)` against accepting a client, the 10 s
-//! watchdog tick and signals in one `select!`. `read_message` (`lsp/transport.rs`) keeps the header
-//! and the body it has read in locals, so when another arm wins while a frame is half read, the
-//! bytes consumed so far are dropped with the future and the next read starts mid-frame. The mux
-//! then reads garbage, reports "LSP server disconnected" and shuts down, taking the server with it.
+//! `lsp/mux/process.rs` races the server read against accepting a client, the 10 s watchdog tick
+//! and signals in one `select!`. `read_message` (`lsp/transport.rs`) keeps the header and the body
+//! it has read in locals, so a read dropped by that `select!` while a frame is half read loses the
+//! bytes consumed so far and the next read starts mid-frame; the mux then reports "LSP server
+//! disconnected" and shuts down, taking the server with it. The event loop now pins one read
+//! future outside the loop and polls it by `&mut`, so no arm can drop it.
 //!
 //! These tests run the real `codescout mux` against a fake LSP server that answers `initialize`,
 //! waits `pre` seconds, writes a header and part of a frame, pauses `gap` seconds, finishes the
-//! frame and sends a second whole message. The control (nothing races the read) must stay up; a
-//! client connecting during the pause (the accept arm), or the watchdog tick landing in it, must
-//! not be able to kill the mux either. Run the ignored ones with `--ignored`:
-//! `scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro -- --ignored`
-//! (nothing under `scripts/` or `.github/` passes `--ignored` or `--include-ignored`.)
+//! frame and sends a second whole message. The control (nothing races the read) and the two
+//! racing cases (a client connecting during the pause, the watchdog tick landing in it) must all
+//! leave the mux running. The racing cases take about 5 s and 13 s.
 //! docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md
 #![cfg(unix)]
 
@@ -199,7 +198,6 @@ fn a_split_frame_alone_does_not_kill_the_mux() {
 
 /// A client connects 2 s in, while the server is 1 s into a 3 s pause inside a frame.
 #[test]
-#[ignore = "open bug: docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md"]
 fn a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux() {
     let exited =
         run_mux_against_a_split_frame(1, 3, Some(Duration::from_secs(2)), Duration::from_secs(7));
@@ -211,7 +209,6 @@ fn a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux() {
 
 /// No client at all: the frame straddles the watchdog's 10 s tick (split at 9 s, finished at 12 s).
 #[test]
-#[ignore = "open bug: docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md"]
 fn the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux() {
     let exited = run_mux_against_a_split_frame(9, 3, None, Duration::from_secs(15));
     assert!(
