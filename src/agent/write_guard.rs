@@ -66,13 +66,19 @@ fn write_holder_record(path: &Path, holder: &str) -> std::io::Result<()> {
     std::fs::write(path, format!("{}\t{}", now_ms(), holder))
 }
 
+/// The most bytes the holder record (`<epoch_ms>\t<holder>`) may hold. The holder is a short label
+/// for the process that took the lock; a record past this is not one, and reads as "no usable
+/// owner information" like any other unparseable record, never as a free lock.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as unparseable, no result is shortened and nothing is presented as complete
+const MAX_HOLDER_RECORD_BYTES: u64 = 64 * 1024;
+
 /// Read the holder record, or `None` when it is absent, empty or unparseable.
 ///
 /// Every `None` branch means "no usable owner information" and NEVER "no
 /// holder" — the flock already established that someone holds it. The caller
 /// must not turn a `None` into a claim that the lock is free.
 fn read_holder_record(path: &Path) -> Option<(u128, String)> {
-    let buf = std::fs::read_to_string(path).ok()?;
+    let buf = crate::util::fs::read_regular_text(path, MAX_HOLDER_RECORD_BYTES).ok()?;
     let (ts, holder) = buf.trim_end().split_once('\t')?;
     let holder = holder.trim();
     if holder.is_empty() {
@@ -600,5 +606,67 @@ mod tests {
             "must not report a lost race when no record was ever written — that is \
              the fix applied in the wrong direction: {rendered}"
         );
+    }
+}
+/// `.codescout/write.lock.holder` is written by this process, but the path is inside the repository
+/// and can be a planted link to a FIFO or a device.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod holder_record_bounded_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    /// A FIFO, or a link to one, is "no usable owner information" (`None`), never a hang and
+    /// never a claim that the lock is free (that is the caller's `Err`, untouched).
+    #[test]
+    fn a_fifo_or_a_link_to_one_is_no_usable_record_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("write.lock.holder");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &path).unwrap();
+            } else {
+                make_fifo(&path);
+            }
+            let got = within_deadline("read_holder_record on a FIFO", move || {
+                let _keep = dir;
+                read_holder_record(&path)
+            });
+            assert_eq!(got, None, "linked={linked}");
+        }
+    }
+
+    /// Control: a regular record parses as before; absent, empty, unparseable and invalid UTF-8
+    /// are `None`. Exactly at the limit is read; one byte over is `None` (the padding is
+    /// trailing whitespace the parse trims, so a read without the limit would parse it).
+    #[test]
+    fn a_regular_record_parses_and_an_oversized_one_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("write.lock.holder");
+        assert_eq!(read_holder_record(&path), None, "absent");
+        std::fs::write(&path, "1700000000000\treindex pid 42").unwrap();
+        assert_eq!(
+            read_holder_record(&path),
+            Some((1700000000000, "reindex pid 42".to_string()))
+        );
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(read_holder_record(&path), None, "empty");
+        std::fs::write(&path, "no tab here").unwrap();
+        assert_eq!(read_holder_record(&path), None, "unparseable");
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert_eq!(read_holder_record(&path), None, "invalid UTF-8");
+
+        let limit = MAX_HOLDER_RECORD_BYTES as usize;
+        let rec = "1700000000000\treindex";
+        std::fs::write(&path, format!("{rec}{}", " ".repeat(limit - rec.len()))).unwrap();
+        assert_eq!(
+            read_holder_record(&path),
+            Some((1700000000000, "reindex".to_string())),
+            "at the limit"
+        );
+        std::fs::write(&path, format!("{rec}{}", " ".repeat(limit + 1 - rec.len()))).unwrap();
+        assert_eq!(read_holder_record(&path), None, "over the limit");
     }
 }
