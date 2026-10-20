@@ -3299,6 +3299,39 @@ fn is_session_id(s: &str) -> bool {
         })
 }
 
+/// The most bytes a `.codescout/cc_session_id` may hold: a session id is a UUID (36 bytes).
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+const MAX_SESSION_ID_FILE_BYTES: u64 = 4096;
+
+/// A worktree directory's `.codescout/cc_session_id`, or `None`. The doctor reads it from every
+/// entry under `.worktrees/` that git does not know, i.e. from trees nobody vouches for, so it is
+/// a bounded regular-file read: a FIFO or a link to a device is "no id", not a held doctor run.
+/// (The server's own start-up read of the file is bounded the same way.)
+fn read_session_id_file(path: &Path) -> Option<String> {
+    crate::util::fs::read_regular_text(path, MAX_SESSION_ID_FILE_BYTES).ok()
+}
+
+/// The roots of the worktrees git has registered, from `<main>/.git/worktrees/*/gitdir` (each
+/// holds `<worktree root>/.git`), each passed through `canon`. An entry whose `gitdir` cannot be
+/// read as a bounded regular file registers nothing.
+fn registered_worktree_roots(
+    worktrees_dir: &Path,
+    canon: impl Fn(&Path) -> PathBuf,
+) -> std::collections::BTreeSet<PathBuf> {
+    let mut registered = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir(worktrees_dir) {
+        for e in entries.flatten() {
+            let Some(text) = crate::util::fs::read_git_pointer(&e.path().join("gitdir")) else {
+                continue;
+            };
+            if let Some(root) = Path::new(text.trim()).parent() {
+                registered.insert(canon(root));
+            }
+        }
+    }
+    registered
+}
+
 /// Session ids a directory's own residue names: `.buddy/<id>/` entries and the contents of
 /// `.codescout/cc_session_id`. Sorted and de-duplicated. These are gitignored per-session
 /// files that a session writes into whatever directory it was running in, so the author of an
@@ -3314,7 +3347,7 @@ fn worktree_residue_sessions(dir: &Path) -> Vec<String> {
             }
         }
     }
-    if let Ok(text) = std::fs::read_to_string(dir.join(".codescout").join("cc_session_id")) {
+    if let Some(text) = read_session_id_file(&dir.join(".codescout").join("cc_session_id")) {
         let id = text.trim();
         if is_session_id(id) {
             ids.insert(id.to_string());
@@ -3391,18 +3424,7 @@ fn scan_unregistered_worktree_dirs(ctx: &ToolContext) -> (Vec<Violation>, Value)
     }
 
     let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    let mut registered = std::collections::BTreeSet::new();
-    if let Ok(entries) = std::fs::read_dir(git_dir.join("worktrees")) {
-        for e in entries.flatten() {
-            let Ok(text) = std::fs::read_to_string(e.path().join("gitdir")) else {
-                continue;
-            };
-            // `gitdir` holds `<worktree root>/.git`.
-            if let Some(root) = Path::new(text.trim()).parent() {
-                registered.insert(canon(root));
-            }
-        }
-    }
+    let registered = registered_worktree_roots(&git_dir.join("worktrees"), canon);
 
     let Ok(entries) = std::fs::read_dir(&wt_dir) else {
         return (
@@ -24451,5 +24473,114 @@ body
             json!(1),
             "call() must reach scan_claim_liveness; an unregistered check is silent: {out:#?}"
         );
+    }
+}
+/// The doctor reads `.codescout/cc_session_id` out of every unregistered `.worktrees/` entry, and
+/// the `gitdir` files of the registered ones: trees and files nobody vouches for.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod worktree_residue_bounded_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    const ID: &str = "0123abcd-4567-89ab-cdef-0123456789ab";
+
+    fn dir_with_codescout() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        dir
+    }
+
+    /// A FIFO, or a link to one, as the session-id file held the doctor run.
+    #[test]
+    fn a_fifo_session_id_file_names_nobody_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = dir_with_codescout();
+            let file = dir.path().join(".codescout").join("cc_session_id");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &file).unwrap();
+            } else {
+                make_fifo(&file);
+            }
+            let got = within_deadline("worktree_residue_sessions on a FIFO", move || {
+                let ids = worktree_residue_sessions(dir.path());
+                drop(dir);
+                ids
+            });
+            assert!(got.is_empty(), "linked={linked}: {got:?}");
+        }
+    }
+
+    /// Control: a regular id file (and a link to one) is read and trimmed as before; a
+    /// device link, an empty file, one that is not an id, and one over the limit name nobody.
+    #[test]
+    fn a_regular_session_id_file_is_read_and_the_others_name_nobody() {
+        let dir = dir_with_codescout();
+        let file = dir.path().join(".codescout").join("cc_session_id");
+        std::fs::write(&file, format!("{ID}\n")).unwrap();
+        assert_eq!(worktree_residue_sessions(dir.path()), vec![ID.to_string()]);
+
+        std::fs::remove_file(&file).unwrap();
+        let real = dir.path().join("real-id");
+        std::fs::write(&real, format!(" {ID} ")).unwrap();
+        std::os::unix::fs::symlink(&real, &file).unwrap();
+        assert_eq!(worktree_residue_sessions(dir.path()), vec![ID.to_string()]);
+
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &file).unwrap();
+        assert!(worktree_residue_sessions(dir.path()).is_empty(), "device");
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(&file, "").unwrap();
+        assert!(worktree_residue_sessions(dir.path()).is_empty(), "empty");
+        std::fs::write(&file, "not-a-session-id").unwrap();
+        assert!(
+            worktree_residue_sessions(dir.path()).is_empty(),
+            "not an id"
+        );
+
+        // A valid id followed by a sparse tail past the limit: only the length check refuses it.
+        std::fs::write(&file, format!("{ID}\n")).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+        f.set_len(MAX_SESSION_ID_FILE_BYTES + 1).unwrap();
+        drop(f);
+        assert!(
+            worktree_residue_sessions(dir.path()).is_empty(),
+            "oversized"
+        );
+    }
+
+    /// An entry whose `gitdir` is a FIFO registers nothing and does not hold the scan; the
+    /// regular entry beside it registers its worktree root.
+    #[test]
+    fn a_fifo_gitdir_entry_registers_nothing_and_the_scan_goes_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let worktrees = dir.path().join("worktrees");
+        std::fs::create_dir_all(worktrees.join("bad")).unwrap();
+        std::fs::create_dir_all(worktrees.join("good")).unwrap();
+        make_fifo(&worktrees.join("bad").join("gitdir"));
+        std::fs::write(
+            worktrees.join("good").join("gitdir"),
+            "/work/trees/feat/.git\n",
+        )
+        .unwrap();
+        let got = within_deadline("registered_worktree_roots, a gitdir FIFO", move || {
+            let roots = registered_worktree_roots(&worktrees, |p| p.to_path_buf());
+            drop(dir);
+            roots
+        });
+        let want: std::collections::BTreeSet<PathBuf> =
+            [PathBuf::from("/work/trees/feat")].into_iter().collect();
+        assert_eq!(got, want);
+    }
+
+    /// Control: no `worktrees` directory registers nothing.
+    #[test]
+    fn a_missing_worktrees_directory_registers_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = registered_worktree_roots(&dir.path().join("worktrees"), |p| p.to_path_buf());
+        assert!(got.is_empty());
     }
 }
