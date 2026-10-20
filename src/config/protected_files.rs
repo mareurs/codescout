@@ -12,9 +12,23 @@
 //! covered on the day it is added. It is **content-aware**, not a blanket path deny, because
 //! the rest of the file is legitimately edited through those tools: the onboarding prompt's
 //! embedding-model step tells the model to `edit_file` `.codescout/project.toml` and change
-//! `[embeddings].model`. A write is refused only when the `[security]` table it produces
-//! differs from the one on disk, or when the new content is not TOML and so cannot be shown
-//! to leave it alone.
+//! `[embeddings].model`. A write is refused for exactly four causes:
+//!
+//! 1. the `[security]` table it produces differs from the one on disk;
+//! 2. the new content is not TOML, so it cannot be shown to leave that table alone;
+//! 3. the new content is longer than [`crate::util::fs::MAX_CONFIG_FILE_BYTES`]: the loader
+//!    reads at most that, so the tools must not create a protected file the server then cannot
+//!    load and no later tool write could repair;
+//! 4. a file is already there and cannot be read as it is (not a regular file once links are
+//!    followed, over that cap, or one the OS will not open), so its `[security]` is unknown.
+//!
+//! Cause 4 is new as of the bounded config reads, and it is broader than the old guard:
+//! permission-denied, a link loop, a link to `/dev/null`, a socket, a FIFO and a directory at a
+//! protected path now refuse every write through the tools, where the old guard read them as an
+//! empty "before". That is accepted on purpose: the loader already could not read any of them, so
+//! the file was unusable before the write was attempted, and the repair is made outside these
+//! tools. Absent, dangling-link, non-TOML and non-UTF-8 files are still an empty "before" (see
+//! `security_on_disk`).
 //!
 //! **Scope, stated so it is not read as wider.** This is a property of the file-writing
 //! tools. It does not stop `run_command` (a shell can write any file the user can, and is
@@ -81,6 +95,24 @@ pub(crate) fn check_write_with(
     {
         return Ok(());
     }
+    // Before anything is parsed: a protected file the loader would refuse for its size must not be
+    // created by a tool. Allowed once, it locks the file against every later write (the "before"
+    // cannot be read, see below) and against the loader, so only a shell or the user could mend it.
+    let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES;
+    if new_content.len() as u64 > cap {
+        return Err(unloadable_refusal(
+            path,
+            &format!(
+                "the new content is {} bytes, over the {cap} byte limit the loader reads, so the \
+                 server could no longer load the file and no write tool could repair it",
+                new_content.len()
+            ),
+            &format!(
+                "Write at most {cap} bytes; edits to the rest of the file within that size are \
+                 allowed."
+            ),
+        ));
+    }
     let new: toml::Table = toml::from_str(new_content).map_err(|e| {
         refusal(
             path,
@@ -92,11 +124,17 @@ pub(crate) fn check_write_with(
         )
     })?;
     let before = security_on_disk(path).map_err(|why| {
-        refusal(
+        unloadable_refusal(
             path,
             &format!(
                 "the file on disk cannot be read as it is ({why}), so it cannot be shown to \
                  leave [{PROTECTED_TABLE}] unchanged"
+            ),
+            &format!(
+                "No write tool can change it now: the file has to be brought back to a regular \
+                 file of at most {cap} bytes outside these tools (shrink it, or replace the link, \
+                 directory, FIFO, socket or device with a regular file, in an editor or a shell). \
+                 The server re-reads it on its next call."
             ),
         )
     })?;
@@ -111,14 +149,18 @@ pub(crate) fn check_write_with(
 
 /// The `[security]` table of the file as it is now.
 ///
-/// `Ok(None)` when the file is absent (also a dangling link), is not TOML or not UTF-8, or has
-/// no such table: an absent or broken "before" is the same as an empty one, so a write cannot
-/// use a broken file to smuggle a table in. `Err(reason)` when a file IS there and cannot be
-/// read as it is: not a regular file, over [`crate::util::fs::MAX_CONFIG_FILE_BYTES`], or one
-/// the OS will not open. That is NOT an empty "before". The loader refuses such a file too, so
-/// its `[security]` is unknown to this process, and treating it as empty let a write that
-/// drops the table pass: pad the file past the cap (allowed, the table is unchanged), then
-/// write a small one without the table (allowed, `None == None`).
+/// `Ok(None)` when the file is absent (also a dangling link), is not UTF-8, is not TOML, or has
+/// no such table. `Err(reason)` when a file IS there and cannot be read as it is: not a regular
+/// file, over [`crate::util::fs::MAX_CONFIG_FILE_BYTES`], or one the OS will not open. That is
+/// NOT an empty "before": pad the file past the cap with the table unchanged, then write a small
+/// one without the table, and `None == None` would have let the table be dropped.
+///
+/// **A non-TOML or non-UTF-8 file is deliberately still `Ok(None)`, and that has a cost.** If it
+/// held a `[security]` table, a write that drops the table is allowed, although the loader
+/// refuses such a file too. The alternative (refusing) would leave a broken file unrepairable
+/// through the tools, and the write tools cannot produce either state: new content that is not
+/// TOML is refused (cause 2 in the module doc) and the text arrives as UTF-8. So a legitimate
+/// repair write, rewriting a hand-broken file as valid TOML, is allowed on purpose.
 fn security_on_disk(path: &Path) -> Result<Option<toml::Value>, String> {
     use crate::util::fs::BoundedReadError;
     let text = match crate::util::fs::read_regular_config_text(path) {
@@ -261,6 +303,17 @@ fn refusal(path: &Path, why: &str) -> String {
          write tools cannot change it: a session that could would be able to raise its own \
          privileges. Ask the user to make that edit in an editor; the server re-reads the file \
          on its next call. Edits to the rest of the file are allowed.",
+        path.display()
+    )
+}
+
+/// A refusal that is about the FILE being unloadable (too big to write, or not readable as it
+/// is), not about `[security]`. It cannot end with the other refusal's sentence "Edits to the
+/// rest of the file are allowed.": for the unreadable-before case that is false (every write is
+/// refused), so each caller states its own action.
+fn unloadable_refusal(path: &Path, why: &str, action: &str) -> String {
+    format!(
+        "write denied: '{}' is a codescout configuration file and {why}. {action}",
         path.display()
     )
 }
@@ -412,7 +465,9 @@ mod tests {
     /// A file that is THERE but cannot be read as it is (over the cap, not a regular file) is
     /// not an empty "before". Two steps used to drop `[security]` from a protected file: pad it
     /// past the cap with the table unchanged (allowed), then write a small file with no table
-    /// (allowed too, because the unreadable "before" compared equal to "no table").
+    /// (allowed too, because the unreadable "before" compared equal to "no table"). Step 1 is now
+    /// refused too (the new content is over the cap), so the tools cannot reach step 2; the
+    /// oversized file is made here by hand, as a shell or an editor could, to pin step 2 alone.
     #[test]
     fn a_file_over_the_cap_refuses_every_write_to_a_protected_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -422,11 +477,8 @@ mod tests {
         let padded = format!("{secure}#{}\n", "x".repeat(cap));
 
         std::fs::write(&p, secure).unwrap();
-        assert_eq!(
-            check_write_with(&p, &padded, None, &[]),
-            Ok(()),
-            "step 1: the table is unchanged, so padding is allowed while the file is small"
-        );
+        let step1 = check_write_with(&p, &padded, None, &[]).unwrap_err();
+        assert!(step1.contains("over the 1048576 byte limit"), "{step1}");
         std::fs::write(&p, &padded).unwrap();
 
         let small_without_table = "[project]\nname = \"t\"\n";
@@ -460,6 +512,97 @@ mod tests {
         std::fs::create_dir(&real).unwrap();
         std::os::unix::fs::symlink(&real, &p).unwrap();
         assert!(check_write_with(&p, small, None, &[]).is_err());
+    }
+
+    /// The tools must not be able to create a file the loader cannot read. New content over the
+    /// cap is refused for each way a path becomes protected (by name, as the global config, by
+    /// identity as a loaded project's config), with a message that says why and what to do; the
+    /// size is counted in bytes and exactly the cap is still allowed.
+    #[cfg(unix)]
+    #[test]
+    fn new_content_over_the_cap_is_refused_for_each_protected_path_kind() {
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let head = "[security]\nshell_command_mode = \"warn\"\n#";
+        let at_cap = format!("{head}{}", "x".repeat(cap - head.len()));
+        let over = format!("{at_cap}x");
+        assert_eq!((at_cap.len(), over.len()), (cap, cap + 1));
+        let secure = "[security]\nshell_command_mode = \"warn\"\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let by_name = proj(&dir);
+        let by_name = std::fs::canonicalize(by_name.parent().unwrap())
+            .unwrap()
+            .join("project.toml");
+        let global = root.join("global").join("config.toml");
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(&by_name, secure).unwrap();
+        std::fs::write(&global, secure).unwrap();
+        let alias = root.join("alias.txt");
+        std::fs::hard_link(&by_name, &alias).unwrap();
+        let roots = vec![root.clone()];
+
+        let cases: [(&str, &Path, Option<&Path>, &[PathBuf]); 3] = [
+            ("by name", &by_name, None, &[]),
+            ("global config", &global, Some(global.as_path()), &[]),
+            ("loaded project's config, by identity", &alias, None, &roots),
+        ];
+        for (kind, path, global_config, project_roots) in cases {
+            let err = check_write_with(path, &over, global_config, project_roots).expect_err(kind);
+            assert!(
+                err.contains(&format!("{} bytes", cap + 1)) && err.contains("1048576 byte limit"),
+                "{kind}: names the size and the limit: {err}"
+            );
+            assert!(
+                err.contains("at most 1048576 bytes"),
+                "{kind}: says what to do: {err}"
+            );
+            assert_eq!(
+                check_write_with(path, &at_cap, global_config, project_roots),
+                Ok(()),
+                "{kind}: exactly the cap, with [security] unchanged, is allowed"
+            );
+        }
+        // Over the cap is refused first, whatever else is wrong with the content.
+        let junk = "x".repeat(cap + 1);
+        let err = check_write_with(&by_name, &junk, None, &[]).unwrap_err();
+        assert!(err.contains("1048576 byte limit"), "{err}");
+    }
+
+    /// The refusal for a file that is there but cannot be read as it is says what is wrong and
+    /// what to do, and does not claim that edits to the rest of the file are allowed.
+    #[test]
+    fn the_unreadable_before_refusal_says_the_reason_and_the_action_and_no_false_promise() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = proj(&dir);
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(
+            &p,
+            format!("[security]\nprofile = \"default\"\n#{}\n", "x".repeat(cap)),
+        )
+        .unwrap();
+        let err = check_write_with(&p, "[project]\nname = \"t\"\n", None, &[]).unwrap_err();
+        assert!(
+            err.contains("exceeds the 1048576 byte limit"),
+            "reason: {err}"
+        );
+        assert!(
+            err.contains("outside these tools") && err.contains("at most 1048576 bytes"),
+            "action: {err}"
+        );
+        assert!(
+            !err.contains("Edits to the rest of the file are allowed"),
+            "that sentence is false here: {err}"
+        );
+        // The refusals about [security] itself keep their sentence: it is true for them.
+        let small = tempfile::tempdir().unwrap();
+        let q = proj(&small);
+        std::fs::write(&q, "[security]\nprofile = \"default\"\n").unwrap();
+        let err = check_write_with(&q, "[security]\nprofile = \"root\"\n", None, &[]).unwrap_err();
+        assert!(
+            err.contains("Edits to the rest of the file are allowed"),
+            "{err}"
+        );
     }
 
     /// The write guard reads the file as it is now. A FIFO there used to hang the write; a file
