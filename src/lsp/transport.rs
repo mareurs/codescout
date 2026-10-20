@@ -17,8 +17,11 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 /// locals across `.await` points, so a future dropped part-way (a losing `select!` arm, a
 /// `timeout`) loses what it had consumed from the reader and the next read starts in the middle
 /// of a frame. Await it to completion, or after a drop stop using the reader. To race it against
-/// other work, use [`read_message_returning_reader`] on a pinned future that outlives the
-/// `select!`. The mux event loop (`lsp/mux/process.rs`) is the one caller that races it.
+/// other work and keep reading, use [`read_message_returning_reader`] on a pinned future that
+/// outlives the `select!`. The mux event loop (`lsp/mux/process.rs`) is the one caller that races
+/// it and keeps using the reader. The callers that wrap it in a `timeout` (the mux-init read in
+/// `lsp/client.rs`) are safe because a timeout abandons the reader: the connect fails and the
+/// half-read reader is dropped with it.
 pub async fn read_message<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<Value> {
     let mut content_length: Option<usize> = None;
     let mut header = String::new();
@@ -66,13 +69,15 @@ pub async fn read_message<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Result<
 
     serde_json::from_slice(&body).context("invalid JSON in message body")
 }
+
 /// [`read_message`] for a caller that must race the read against other work in a `select!`.
 ///
 /// `read_message` is NOT cancel-safe (see its doc), so a `select!` must never drop it half done.
 /// The way to keep it alive is to pin ONE read future outside the loop, poll it by `&mut` in the
 /// `select!`, and when it completes start the next read from the reader this function hands back.
-/// A plain `read_message(reader)` written inside the `select!` arm is rebuilt, and the half-read
-/// frame dropped, on every pass of the loop. Returning the reader is what lets the next future
+/// A plain `read_message(reader)` written inside the `select!` arm is rebuilt on every pass of
+/// the loop, and the half-read frame is dropped on each pass where another arm wins mid-frame.
+/// Returning the reader is what lets the next future
 /// reborrow it: the previous future's borrow is still alive in the pinned slot until it is
 /// overwritten by `Pin::set`, and a second `&mut *reader` taken from the outer reference at that
 /// point would be rejected by the borrow checker.
@@ -135,7 +140,7 @@ mod tests {
     /// watchdog tick and signals. The read future is pinned outside the loop, so a `select!` that
     /// another arm wins leaves it, and the half-read frame inside it, alive.
     #[tokio::test]
-    async fn a_read_dropped_mid_body_does_not_lose_the_bytes_it_had_consumed() {
+    async fn a_pinned_read_that_loses_a_select_keeps_the_bytes_it_had_consumed() {
         let (mut writer, reader) = tokio::io::duplex(4096);
         let mut reader = BufReader::new(reader);
         let first = r#"{"jsonrpc":"2.0","method":"a","params":{"k":"0123456789"}}"#;
@@ -176,9 +181,13 @@ mod tests {
             "the stream must still be framed after the first message, got: {next:?}"
         );
     }
-    /// The hazard the pinned future exists to avoid, pinned down so that nobody "simplifies" the
-    /// event loop back to `read_message(reader)` inside the `select!`: a read future DROPPED
-    /// part-way loses the bytes it had consumed and the next read starts mid-frame.
+
+    /// Guards that `read_message` is still NOT cancel-safe: a read future DROPPED part-way loses
+    /// the bytes it had consumed and the next read starts mid-frame. While that holds, the
+    /// `read_message` doc and the pinned read in the mux event loop stay necessary. (This test
+    /// does not stop anyone moving the read back into the `select!` arm; the end-to-end tests in
+    /// `tests/mux_event_loop_cancel_repro.rs` do that.) If it fails because the read now yields
+    /// the first message, `read_message` became cancel-safe and that doc and pin can go.
     #[tokio::test]
     async fn a_read_dropped_mid_body_desynchronises_the_stream() {
         let (mut writer, reader) = tokio::io::duplex(4096);

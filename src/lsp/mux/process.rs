@@ -425,8 +425,10 @@ async fn event_loop(
             // another arm wins it stays pending with its half-read frame intact (see the
             // comment where it is created).
             (reader, server_msg) = &mut server_read => {
-                // Start the next read right away, before anything below can `break` or
-                // `continue`: a completed future must not be polled again.
+                // Replace the completed future right away. A completed future must not be
+                // polled again, so it has to be replaced before the loop can reach the `select!`
+                // again; doing it first means a `continue` added to this arm later cannot skip it.
+                // (A `break` below exits the loop and never polls it.)
                 server_read.set(read_message_returning_reader(reader));
                 match server_msg {
                     Ok(msg) => {
