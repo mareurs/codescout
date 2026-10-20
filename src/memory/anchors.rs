@@ -39,13 +39,25 @@ pub fn read_anchor_file(path: &Path) -> Result<AnchorFile> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(AnchorFile::default()),
         Err(e) => return Err(e.into()),
     }
-    match std::fs::read_to_string(path) {
+    // The type was checked on the path above; the open checks it again on the descriptor (a FIFO
+    // swapped in since cannot hold the read) and the length is bounded, so a huge sidecar cannot
+    // fill memory. Both refusals are the same `RecoverableError` as a link: named per topic by
+    // `check_all_memories`, never fatal to the other topics.
+    match crate::util::fs::read_regular_config_text(path) {
         Ok(contents) => {
             let anchor_file: AnchorFile = toml::from_str(&contents)?;
             Ok(anchor_file)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AnchorFile::default()),
-        Err(e) => Err(e.into()),
+        Err(e) if e.is_not_found() => Ok(AnchorFile::default()),
+        Err(
+            e @ (crate::util::fs::BoundedReadError::NotRegular
+            | crate::util::fs::BoundedReadError::TooLarge { .. }),
+        ) => Err(crate::tools::RecoverableError::with_hint(
+            format!("anchor sidecar cannot be read: {} ({e})", path.display()),
+            "Replace it with a regular file within the size limit, or remove it.",
+        )
+        .into()),
+        Err(crate::util::fs::BoundedReadError::Io(e)) => Err(e.into()),
     }
 }
 
@@ -1351,5 +1363,63 @@ mod bounded_anchor_tests {
         let af = seed_anchors(root, "`src/small.rs` and `src/big.bin`").unwrap();
         let paths: Vec<_> = af.anchors.iter().map(|a| a.path.as_str()).collect();
         assert_eq!(paths, ["src/small.rs"]);
+    }
+
+    /// The sidecar itself is repository content: it is checked as a regular file first and then
+    /// read, and the read had no size bound. At the limit it still reads; one byte over is a
+    /// `RecoverableError` (named per topic by `check_all_memories`, not fatal to the others).
+    /// The padding is TOML whitespace, so the plain read would parse the over-limit file.
+    #[test]
+    fn a_sidecar_over_the_size_limit_is_refused_per_topic_and_one_at_the_limit_reads() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/ok.rs"), "stable").unwrap();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        for topic in ["big", "fine"] {
+            std::fs::write(memories_dir.join(format!("{topic}.md")), "`src/ok.rs`").unwrap();
+            let af = seed_anchors(root, "`src/ok.rs`").unwrap();
+            write_anchor_file(&anchor_path_for_topic(&memories_dir, topic), &af).unwrap();
+        }
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let big = anchor_path_for_topic(&memories_dir, "big");
+        let mut body = std::fs::read_to_string(&big).unwrap();
+        body.push_str(&" ".repeat(limit - body.len()));
+        std::fs::write(&big, &body).unwrap();
+        assert_eq!(body.len(), limit);
+        assert_eq!(
+            read_anchor_file(&big).unwrap().anchors.len(),
+            1,
+            "at the limit"
+        );
+
+        body.push(' ');
+        std::fs::write(&big, &body).unwrap();
+        let err = read_anchor_file(&big).unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "{err:#}"
+        );
+        let report = check_all_memories(root, &memories_dir).unwrap();
+        assert_eq!(report["unreadable"][0]["topic"], "big", "{report}");
+        assert_eq!(report["fresh"], serde_json::json!(["fine"]), "{report}");
+    }
+
+    /// Control: a FIFO at the sidecar path is still refused by the path check, without a hang.
+    #[test]
+    fn a_fifo_sidecar_is_refused_without_a_hang() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.anchors.toml");
+        make_fifo(&path);
+        let err = within_deadline("read_anchor_file on a FIFO", move || {
+            let _keep = dir;
+            read_anchor_file(&path)
+        })
+        .unwrap_err();
+        assert!(err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .is_some());
     }
 }
