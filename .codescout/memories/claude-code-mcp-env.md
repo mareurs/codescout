@@ -4,7 +4,7 @@
 
 - **Elicitation** (server→user structured prompt): supported since **v2.1.76**
   — confirmed by two independent sources; rmcp `elicitation` feature already
-  enabled in `Cargo.toml` (`:53` as of 2026-08-31 — the `:50` ref had drifted). Tension with codescout's progressive-disclosure
+  enabled in `Cargo.toml` (`:54` as of 2026-10-19 — the `:53` ref had drifted, and the `:50` ref before it). Tension with codescout's progressive-disclosure
   design; adopt only as a CC-gated layer over the existing compact disambiguation
   list, never the primary path.
 - **Progress notifications**: ~v2.1.172. **Resources + `list_changed`**,
@@ -38,8 +38,8 @@ not.
 **Claude Code already speaks MCP v2** — inferred from a bug fix that presupposes
 it: 2.1.233 "Fixed MCP v2 connections endlessly reopening the subscriptions/listen
 stream". codescout does not: `ServerCapabilities::builder().enable_tools()
-.enable_tool_list_changed().enable_resources()` (`src/server.rs:1385-1389`, re-located
-2026-09-08 — the `:1335-1338` ref had drifted, and before that the `:867-873` ref
+.enable_tool_list_changed().enable_resources()` (`src/server.rs:1804-1808`, in `get_info`, re-located
+2026-10-19 — the `:1385-1389` ref had drifted, and the `:1335-1338` ref before it, and before that the `:867-873` ref
 had already drifted onto unrelated `has_git_remote` code) declares no `extensions`
 block. rmcp is declared `version = "1.3"`, which is a **caret**
 requirement (`>=1.3.0, <2.0.0`), **not a pin** — so "pinned at 1.3.0", as this entry used to
@@ -72,8 +72,8 @@ todo tracking — they vanish on 2.1.233. Whether the background-task controls
 backgrounding message still names `TaskStop`. Do not assume either way.
 
 **Still unknown: does CC actually SEND `_meta.progressToken`?** codescout builds a
-`ProgressReporter` only when it receives one (`src/server.rs:1481-1484`, re-located
-2026-09-08 — the `:977-979` ref had drifted) and logs
+`ProgressReporter` only when it receives one (`src/server.rs:1900-1903`, in `call_tool`, re-located
+2026-10-19 — the `:1481-1484` ref had drifted, and the `:977-979` ref before it) and logs
 nothing either way. The live `.codescout/diagnostic-*.log` files are tracing
 output, not raw JSON-RPC — their zero hits for `progressToken` are a property of
 the view, not evidence about the client (the only `_meta` matches there are
@@ -139,7 +139,8 @@ Fixed on `experiments` (server-side commits `5bdb7f45`..`feb845aa`; companion ho
 - **Companion rendezvous closes the `/clear` gap specifically.** MCP `initialize` runs
   *before* Claude Code's `SessionStart` hook, so the server can't get the new id at startup
   — it publishes first, the hook writes second. At construction the server writes
-  `$XDG_STATE_HOME/codescout/servers/<pid>.json` = `{pid, ppid, start_time, cwd, session}`;
+  `$XDG_STATE_HOME/codescout/servers/<pid>.json` = `{pid, ppid, started_at, cwd, session, hook_at, hook_source}`
+  (`Entry` in `src/tools/rendezvous.rs`; `hook_at`/`hook_source` are written only by the hook);
   `session-start.mjs` fires on every `source` (including `"clear"`), finds the slot whose
   `ppid` is on its own process ancestry, and stamps the current session id into it. The
   server re-reads its own entry when the file's mtime changes. **Keyed by server pid**,
@@ -150,6 +151,13 @@ Fixed on `experiments` (server-side commits `5bdb7f45`..`feb845aa`; companion ho
   `session_change_rearms_everything` (`src/server.rs`). The poll runs **before** the ledger
   is consulted on each tool call, so the re-arm takes effect on the *same* response, not one
   call late — pinned by `a_tool_call_polls_the_rendezvous_and_re_arms` (`src/server.rs`).
+- **A dispatched subagent shares its parent's session id**, so the ledger cannot tell it from
+  the parent. A second, per-agent companion signal covers that: the `SubagentStart` hook drops
+  `$XDG_STATE_HOME/codescout/guide_rearm/<server_pid>-<hash(agent_id)>.json`, and
+  `GuideRearmInbox` (`src/tools/guide_rearm.rs`, `poll_guide_rearm` in `src/server.rs`) consumes
+  a request only on a call stamped with that same `agent_id` (the spec's § 9 says any call
+  polls first; the code is stricter) and then `re_arm()`s the named topics on that principal's
+  ledger (a `fork` request instead seeds them as already delivered).
 - **The server is fully correct without the hook.** No companion installed → the key never
   refreshes → the anonymous-tier idle TTL is what eventually catches a `/clear`, one interval
   late instead of immediately. This is the Agent-Agnostic Design contract in practice:

@@ -281,7 +281,7 @@ Found twice independently on 2026-08-30, by two sessions, each by running the mu
 than reasoning about coverage:
 
 - A hook chain with four links — `edit_markdown` calls the hook, the slot holds it, the syncer
-  updates the row, `install_catalog_frontmatter_sync` (`src/server.rs`, ~`:379`) installs the syncer. Three were mutation-checked. Deleting the
+  updates the row, `install_catalog_frontmatter_sync` (defined in `src/librarian/adapter.rs`, called from `CodeScoutServer::from_parts_with_env` in `src/server.rs`) installs the syncer. Three were mutation-checked. Deleting the
   install line left **all 8 tests green**. Predicted, then run, then recorded as a measured
   residual rather than claimed as coverage.
 - A peer's policy resolver: a pure unit test for `resolve()` plus four wire tests. Mutating

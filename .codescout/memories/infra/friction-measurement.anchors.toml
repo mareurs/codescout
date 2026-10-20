@@ -3,16 +3,16 @@
 
 [[anchors]]
 path = "docs/issues/archive/2026-08-20-telemetry-session-id-frozen-while-the-ledger-re-keys-per-call.md"
-hash = "8c6a504a8f2e79aa2e6af359112a5a0d95549fc540681f346458e0f3788a2b40"
+hash = "00c7e6c6cc45e4a4a8a7e9112ce22f22a3a59fb639e9da5310ceac3363d2b029"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "3290e16a45f220e7796714f3aa8140d522b93aa94f79e495f0b9e081ccb1364b"
+hash = "a04f9e9f31705dffc1fbbd0cc3ad85c5678c993e5a83c5b8e62ce58e7e531784"
 
 [[anchors]]
 path = "src/usage/mod.rs"
-hash = "418d6a5195c6dc86261a1d4c7e0b84f8a1f3c47637b052918aa51e05461bc4ab"
+hash = "ca6a174b90694a1c9594a97f76fb7d6343a5b361c4a63a3160ec976e134aee5b"
 
 [[anchors]]
 path = "src/usage/db.rs"
-hash = "50483fdcd47bf33729d7c124a9d81f2136887cfe33477a116ea124c3ad09faf6"
+hash = "b1137502fe511d1718611c72f97e2c9a127887d01c74fc9be77abcdca44d6af0"

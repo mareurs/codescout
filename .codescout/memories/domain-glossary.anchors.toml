@@ -7,19 +7,19 @@ hash = "580156d6e5fd836bc495a9b01d60ee51ad02381cbe28bd298650d520f9ebfed3"
 
 [[anchors]]
 path = "docs/PROGRESSIVE_DISCOVERABILITY.md"
-hash = "f42a0d273160300fb6d6d285199aafb44d6222f57abddf55d2cedf202533b89c"
+hash = "f805007a3751c890a57d3dbe62b59a106de3c4ebe32c77fb306eb9ce4b9921e5"
 
 [[anchors]]
 path = "src/tools/mod.rs"
-hash = "a5dbfabb0c2cd7941d92444ef8c15462f94f654b3ee2c843a39af38e94cf8791"
+hash = "c30132f0465373c0ec0cf59baf17ba6ea56400ac641641d1a2a0d9032e6cafdd"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "7c7bd2385ebbe25023e35670d4434c3515fabff9bed7886da9fe365d1003753d"
+hash = "6103081bb9b97576c19aad1a48028f124c03f33eafd8acc9a4cea65cfbec8cbd"
 
 [[anchors]]
 path = "src/tools/output_buffer.rs"
-hash = "adfec6638b64940c1725abbf3bb5f8c00d58933dc22e683fd6de0d09a51e10bc"
+hash = "db08c444e1047e6d9a23074d9c2bf923813c2edbecab6fe7e3c325d8dd804f75"
 
 [[anchors]]
 path = "src/lsp/ops.rs"
@@ -35,7 +35,7 @@ hash = "6a2781daed325953afabc327add312c6827df3e12bf96287198a64831c54f522"
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "1a8a55ec5330f5e84e3d036ba8add34c275fcb9a34385eea0cc5b9577df3bd61"
+hash = "f3ed3d1b56f16e11720fbe0da4d3cbc7e4c44462ec93048dc910a8f548e37f21"
 
 [[anchors]]
 path = "src/memory/classify.rs"
@@ -43,16 +43,16 @@ hash = "30ff0aa1b4aa14154992e63220a0a03ad18894c3c6931324377def53676877bf"
 
 [[anchors]]
 path = "src/workspace.rs"
-hash = "d544c747d25cd5712686fd407c8f5ba5e5252a7851b2e453595c81238929d17f"
+hash = "09de7bd92af24dead2f4db5dcd75491a994111c299b8dd3bef1b349c619f670e"
 
 [[anchors]]
 path = "src/library/scope.rs"
-hash = "1dfa2682cc0a01a5830e2f986e37ad2ac4f333c7f10e5abf71824e2ecbdad19e"
+hash = "88ec0120ab09eb33be3a87174b0c488df1cee007462e51d6678cf611717d41c5"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "3290e16a45f220e7796714f3aa8140d522b93aa94f79e495f0b9e081ccb1364b"
+hash = "a04f9e9f31705dffc1fbbd0cc3ad85c5678c993e5a83c5b8e62ce58e7e531784"
 
 [[anchors]]
 path = "src/memory/anchors.rs"
-hash = "56e9a3811ef3ddfe7f5a26121e928908484934d3cd1ad58b5702cbbfbfd5cd1b"
+hash = "4d13bff40f90993b2e450331f59579ad491ee3f4255a9cd06cb6be9f7d47667c"

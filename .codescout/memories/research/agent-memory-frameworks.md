@@ -22,7 +22,7 @@ Mechanism families: context-compression · retrieval-augmented · reflective/sel
 codescout already spans ALL 3 substrate types:
 - atoms ≈ `ObservationRow` (src/librarian/catalog/observations.rs:8)
 - working tier ≈ `OutputBuffer`/`@ref` (src/tools/output_buffer.rs)
-- vector semantic store: Qdrant with buckets (code/system/preferences/unstructured) + `create_semantic_anchors` (src/tools/memory/mod.rs); `QdrantWrap` in src/retrieval/memory.rs
+- vector semantic store: Qdrant with buckets (code/system/preferences/unstructured) + `create_semantic_anchors` (src/tools/memory/mod.rs); `QdrantWrap` (struct in src/retrieval/qdrant.rs; its semantic-memory operations are `impl QdrantWrap` in src/retrieval/memory.rs)
 - structured graph: librarian `Catalog` (ArtifactRow/EdgeRow/EventRow/LinkRow)
 - white-box markdown everywhere
 
@@ -35,12 +35,12 @@ The ONLY real gap is **Axis 3 — control policy**: every write is hand-authored
 - **B — build TencentDB-style native distillation pipeline**: elegant substrate fit (L0→L3 maps ~1:1 onto librarian rows) BUT requires adding a generative LLM in-server = identity break; whose model/tokens?; silent-fact-loss + non-determinism vs strict test culture.
 - **C — host-driven scaffolding (RECOMMENDED, ethos-preserving)**: keep codescout passive; the HOST LLM does generation via new tools. Three additive, deterministic, independently-shippable pieces:
   1. `memory consolidate` action — host proposes atomic facts, codescout dedups (existing embedding path) + stores as `ObservationRow` (no new fact schema).
-  2. Persist `@ref` buffers across sessions — spill `BufferEntry` to `.codescout/buffers/<output_id>.md`, rehydrate on startup; `node_id` recovery = existing `grep @ref` made durable. Precedent: `BufferEntry.source_path` already round-trips `@file_*`.
+  2. Persist `@ref` buffers across sessions — spill `BufferEntry` to `.codescout/buffers/<output_id>.md`, rehydrate on startup; `node_id` recovery = existing `grep @ref` made durable. Precedent: `BufferEntry.source_path` already ties a `@file_*` entry to its file on disk (mtime-based auto-refresh in `get()`), but buffers are in-memory only today; nothing is spilled to disk.
   3. Add `valid_until`/`superseded_by` to `ArtifactRow` → Zep-style temporal + Supermemory-style forgetting, reusing `HIDDEN_STATUSES` filter.
   Conclusion: this isn't "add a memory system" — it's adding the missing connective tissue between surfaces codescout already has, leaving the generative trigger in the host's hands.
 
 ## Side effect
-Surfaced the `HIDDEN_STATUSES` split-brain bug → docs/issues/archive/2026-05-25-hidden-statuses-context-missing-retired.md (find.rs has "retired", context.rs doesn't).
+Surfaced the `HIDDEN_STATUSES` split-brain bug (find.rs had "retired", context.rs didn't) → docs/issues/archive/2026-05-25-hidden-statuses-context-missing-retired.md. Since fixed: `HIDDEN_STATUSES` is one shared const (`["archived", "superseded", "retired"]`, src/librarian/tools/mod.rs). Verified 2026-10-19: Approach C's three pieces are still unbuilt (no `memory consolidate` action, no buffer spill, `ArtifactRow` has no `valid_until`/`superseded_by`), and there is still no generative client in `src/` or `Cargo.toml`.
 
 ## Sources
 - github.com/Tencent/TencentDB-Agent-Memory

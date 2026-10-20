@@ -18,14 +18,13 @@ open, so a twice-opening idempotency test does NOT catch it.
 **Rule:** a table-copy migration must carry EVERY column the live schema declares and
 recreate EVERY index. When you add a column, grep the migrations dir for table rebuilds of
 that table before treating the add as isolated. **Mechanical guard:** the schema-invariant
-test that loops `SCHEMA_SQL`'s declared columns against every legacy-seed path
-(`src/librarian/catalog/mod.rs`); regression precedent
+test `every_schema_sql_artifact_column_survives_every_migration_path`
+(`src/librarian/catalog/migrate_v6.rs`), which loops the columns `parse_create_table_columns`
+(`src/librarian/catalog/mod.rs`, unit-tested by
+`parse_create_table_columns_extracts_artifact_columns`) parses out of `SCHEMA_SQL` against
+every legacy-seed path; regression precedent
 `migration_v6_single_open_preserves_v9_entry_graph_shape` (`migrate_v6.rs`). Still current —
-`catalog/mod.rs` still auto-checks every `SCHEMA_SQL` column against every legacy-seed path
-(`parse_create_table_columns_extracts_artifact_columns`,
-`every_schema_sql_artifact_column_survives_every_migration_path`), and
-`migrate_v6.rs`'s regression test set (`migration_v6_single_open_preserves_v9_entry_graph_shape`
-et al.) is intact.
+both test files and `drop_legacy_and_stamp` exist as named.
 
 ## User Strings in LIKE Patterns Must Be Wildcard-Escaped
 
@@ -37,14 +36,13 @@ escape char, with an explicit `ESCAPE` clause — else `%`/`_` in the input act 
 and pair it with an `ESCAPE` clause; never re-inline the triple-replace. The helper carries
 5 unit tests plus a DRY gate, `like_escape_idiom_is_not_inlined_outside_helper`, that fails
 if the Rust idiom appears anywhere but the helper itself. Live callers:
-`src/librarian/filter.rs` (`compile_leaf`), `src/librarian/catalog/augmentation.rs`
-(`resolve_cite_ref`), and `src/librarian/catalog/gc.rs` (`detect_move_candidates`,
-`plan_rehome`, `rehome_commits`). The extraction and its gate **shipped**, and the bug file
-that asked for them is closed —
+`src/librarian/filter.rs` (`compile_leaf`, 4 call sites), `src/librarian/catalog/augmentation.rs`
+(`resolve_cite_ref`), `src/librarian/catalog/gc.rs` (`detect_move_candidates`,
+`plan_rehome`, `rehome_commits`) and `src/librarian/reindex_progress.rs` (`read_all`). The
+extraction and its gate **shipped**, and the bug file that asked for them is closed —
 `docs/issues/archive/2026-07-17-like-escape-idiom-duplicated-no-shared-helper.md`. Earlier
 point fixes: `4b922ac4` (worktree `covering()`), and the Stage-2 `resolve_cite_ref` bug that
-motivated the extraction. Still current — verified against `filter.rs` (`compile_leaf`, 4
-call sites), `catalog/augmentation.rs` (`resolve_cite_ref`), `catalog/gc.rs` (3 call sites).
+motivated the extraction.
 
 **SQL side — FIXED, no longer a second unguarded implementation.** Where the *haystack*
 column is escaped rather than the needle (`src/librarian/catalog/worktree.rs`
@@ -55,19 +53,30 @@ triple-`REPLACE` inlined verbatim at four sites — `src/librarian/tools/merge_w
 only by "mirrors" comments and unreachable by the Rust-idiom gate (SQL string literals don't
 match what it greps for). **Extracted as `descendant_path_like(root_expr)`**
 (`src/librarian/util.rs`, beside `escape_like_pattern`) — closed as SD-2 in
-`docs/trackers/structural-debt-refactor.md` at `experiments:31609aa5`. All four sites now
-call the helper (verified: `catalog/worktree.rs:80`, `tools/merge_worktree.rs:68`,
-`tools/worktree.rs:173`); the duplicated unit turned out larger than first described — the
-`|| '%' ESCAPE` tail is shared too, so the whole strict-descendant predicate moved, not just
-the triple-replace. Guarded by its own DRY gate, `sql_descendant_like_is_not_inlined_outside_helper`
-(sibling of the Rust-side gate — one law, two spellings, needed two greps), plus a
-characterization test, `descendant_path_like_reproduces_the_pre_extraction_sql_exactly`,
-pinning the exact pre-extraction SQL byte-for-byte so the refactor is provably
-behaviour-preserving. Nested-`REPLACE` occurrences in `src` went 5 → 1 (the helper itself).
-This memory previously described this exact section as fixed-Rust/pending-SQL and cited
-`filter.rs:230-236` as the "canonical inline idiom" — that line is now a call to the helper
-and contains no inline `.replace`/`REPLACE` at all (tracked as SD-5, also now fixed). Full
-record: `structural-debt-refactor.md` SD-2 and SD-5.
+`docs/trackers/structural-debt-refactor.md` at `experiments:31609aa5`. The duplicated unit
+turned out larger than first described — the `|| '%' ESCAPE` tail is shared too, so the whole
+strict-descendant predicate moved, not just the triple-replace. Guarded by its own DRY gate,
+`sql_descendant_like_is_not_inlined_outside_helper` (sibling of the Rust-side gate — one law,
+two spellings, needed two greps), plus a characterization test,
+`descendant_path_like_reproduces_the_pre_extraction_sql_exactly`, pinning the exact
+pre-extraction SQL byte-for-byte so the refactor is provably behaviour-preserving.
+Nested-`REPLACE` occurrences in `src` went 5 → 1 (the helper itself; the test that pins its
+SQL spells it a second time). Full record: `structural-debt-refactor.md` SD-2 and SD-5.
+
+**Current call sites of `descendant_path_like` are TWO**, not four: `catalog/worktree.rs`
+(`covering_conn`) and `tools/worktree.rs` (`shadow_main_pairs`). The "is this row at or under
+this root" queries in `tools/merge_worktree.rs` (`call`), `tools/doctor.rs` (`prune_dead_root`,
+`count_dead_root`) and `indexer.rs` (`index_repo_sync`) no longer use `LIKE` at all: they use
+`crate::librarian::util::path_at_or_under_sql(col, root_param, prefix_param)` — byte-exact
+`col = ?root OR substr(col, 1, length(?prefix)) = ?prefix` — with the two bound values from
+`root_and_prefix(root)` (root without trailing `/`, and root plus one `/`). The reason is a
+hazard escaping does not cure: SQLite `LIKE` is ASCII-case-insensitive, so `.worktrees/feat_1`
+also matched the rows of `.worktrees/FEAT_1` (and `abandon` deleted them with their cascade).
+For a new "under this root" query on paths, prefer `path_at_or_under_sql`; `LIKE` plus the escape
+helpers is only right when case-insensitivity is genuinely wanted. Pinned by
+`path_at_or_under_sql_is_exact_for_windows_shaped_paths`,
+`path_at_or_under_sql_counts_characters_for_a_non_ascii_root` and
+`root_and_prefix_normalizes_one_trailing_separator` (all in `util.rs`).
 
 ## `length()` on TEXT counts CHARACTERS, not bytes
 

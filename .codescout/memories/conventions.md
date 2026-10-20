@@ -2,7 +2,13 @@
 
 ## Pre-Commit Requirements
 
-Four commands, and **the order is load-bearing** — not a checklist you may reorder:
+Four commands, and **the order is load-bearing** — not a checklist you may reorder. The executable
+form is `./scripts/gate.sh`: it runs the light Python lane (`scripts/python-tests.py --lane light`),
+then these four, in a `target/` slot **leased for that run** from a pool (`scripts/slot-pool.sh`),
+so a peer session's build cannot replace `target/debug/codescout` mid-run. It is not mandatory — a
+session typing the four commands itself still shares `target/` — and a targeted run leases its own
+slot with `scripts/with-slot.sh cargo test …`
+(`docs/issues/2026-09-14-the-gate-ordering-guarantee-is-false-under-concurrency.md`):
 
 1. `./scripts/fmt-mine.sh` — NOT bare `cargo fmt`, which rewrites every peer's
    uncommitted Rust on a shared checkout. Formats only what this session wrote and
@@ -16,8 +22,8 @@ All four must pass. No exceptions.
 
 **The bare `cargo clippy -- -D warnings` is not a gate step.** It lints only the root
 package's non-test targets with default features, so it passes trees CI fails. CI runs both
-forms (`ci.yml:94` narrow, `:105` wide — reverified 2026-09-08, line numbers moved from the
-`:50`/`:61` this memory previously cited); only the wide one reaches `#[test]` code and
+forms (`ci.yml:369` narrow, `:380` wide — reverified 2026-10-19; the line numbers have moved twice,
+from `:50`/`:61` to `:94`/`:105` to these); only the wide one reaches `#[test]` code and
 `codescout-embed`'s feature-gated `local` module. Running the narrow one locally buys
 nothing the wide one does not already cover.
 
@@ -31,8 +37,9 @@ feature-gating regression in whatever you just committed. Ending on the default 
 rebuilds it correctly, so following the gate cannot leave the trap armed for the next
 session. Do not restate a fresh red/pass count here — CLAUDE.md deliberately declines to
 re-derive one (re-deriving it means overwriting the shared `target/debug/codescout` binary
-and arming the trap for other sessions); its own verified figure is `cli_doc` holding
-**15** tests, all passing against a librarian-bearing binary (verified 2026-09-05).
+and arming the trap for other sessions). `tests/cli_doc.rs` carries **16** `#[test]` functions
+(counted 2026-10-19); CLAUDE.md no longer states a figure, and the last verified all-passing run
+was 15 tests (2026-09-05).
 
 **Both test lanes carry `--workspace`, and the lean one is `test` not `check`.** Bare
 `cargo test` builds only the root package's targets, so every workspace-member test is
@@ -90,7 +97,7 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
 - **Ship the calibration probe, not the calibration.** Give users the four-tier measurement (directly-answers / same-domain / tangential / unrelated, the middle tier adversarial), state what our model measured *labelled with the model name*, and let them derive their own value. See F-13 in `docs/trackers/release-promotion-session-log.md` for why a two-point probe is not enough to characterise a scale.
 
 - **Classify before flagging — one of these three classes is in scope, not all `unwrap_or`s.**
-  1. *Compatibility constants* — a wrong value means **broken**, not degraded, and there is nothing to calibrate. `model_dim` `unwrap_or(768)` (`src/retrieval/config.rs`) must match the embedding model or nothing works. **Out of scope.**
+  1. *Compatibility constants* — a wrong value means **broken**, not degraded, and there is nothing to calibrate. `model_dim` has no baked-in default any more: `RetrievalConfig::model_dim` is an `Option<usize>` (absent or unparsable `CODESCOUT_MODEL_DIM` is `None`, "the model is the authority"), and the few call sites that still need a concrete `usize` fall back to `DEFAULT_MODEL_DIM = 768` (`src/retrieval/config.rs`), which must match the embedding model or nothing works. **Out of scope.**
   2. *Degradation deadlines* — a wrong value costs one slower or coarser call and self-heals on the next. `LSP_FIRST_CALL_BUDGET` (2 s, `src/lsp/mod.rs`): over budget, callers fall back to tree-sitter marked `"lsp": "warming"` while the start continues detached. **Out of scope**, provided the fallback is documented at the constant.
   3. *Tuning constants* — a wrong value silently returns **worse results**, with no error and no self-healing, and the value was calibrated against a specific model / corpus / hardware. **The only class the rule targets.**
   Discriminating question: *would a wrong value raise an error, or quietly degrade output?* Quietly degrade ⇒ in scope. Swept 2026-08-07: exactly one in codescout (`bm25_boost`), four in researcher (all `researcher:src/config.rs` — a sibling repo, so the path does not
@@ -99,16 +106,16 @@ Sibling of Agent-Agnostic Design, and the same question one layer down: users ru
 
 ## Testing Patterns
 
-- Cache-invalidation tests use a **three-query sandwich** (baseline → assert-stale → invalidate → assert-fresh), not two. The step-3 stale assertion is what makes it a *regression* test — it fails if the system ever changes to eager-reread. Canonical example: `did_change_refreshes_stale_symbol_positions` in `src/lsp/client.rs`.
+- Cache-invalidation tests use a **three-query sandwich** (baseline → assert-stale → invalidate → assert-fresh), not two. The step-3 stale assertion is what makes it a *regression* test — it fails if the system ever changes to eager-reread. The former canonical example in `src/lsp/client.rs`, `did_change_refreshes_stale_symbol_positions`, no longer exists: it was replaced by `document_symbols_reflects_a_write_made_outside_codescout`, because its stale-assertion step pinned a defect (`symbols()` serving pre-checkout content after an external write) as if it were the contract. The replacement asserts the drift is repaired with no explicit flush, then that an explicit `did_change` is a no-op. Use the sandwich only when the stale reading is the intended behaviour.
 - **Never write env-mutating tests.** `EnvGuard` + `#[serial_test::serial]` is option B in `docs/conventions/test-env-isolation.md` and is marked **NOT VIABLE** there: `#[serial]` locks only among *annotated* tests, so any untagged test elsewhere reading the same var still races, and `std::env::set_var` is process-global with no way to scope it. The guard restores faithfully and the race happens anyway. The class was removed project-wide (default-build UB warnings 119 → 0), which also deleted the two exemplars this memory used to point at; the ruling itself lives in `docs/conventions/test-env-isolation.md`. Only `src/agent/mod.rs` still uses one — server-stack gated, explicitly exempt. Do option A instead: resolve env once at the edge into a struct and pass it inward (`LibrarianEnv::from_env`, `ServerEnv::from_env`, and `EmbedEnv::from_real_env` in `src/retrieval/config.rs` are the shape), then unit-test the decision as a pure function taking its inputs as arguments — no guard, no `#[serial]`, no cleanup, and they run in parallel. *Corrected 2026-08-11: this entry previously mandated the banned pattern, and a plan written from it propagated the instruction into three task briefs before an implementer read the convention doc and refused. See `docs/trackers/local-onnx-embedding-session-log.md` F-3.*
 - Fallback-path tests gated on an exact-match miss must avoid substring overlap in fixtures (else the exact path fires first → false green). Assert on a path-specific marker so a mis-route fails loudly. See `docs/trackers/reconnaissance-patterns.md` R-16.
 
 ## Prompt Surface Consistency
 
-Any tool rename, addition, or behavior change requires updating all three prompt surfaces.
+Any tool rename, addition, or behavior change requires updating all the prompt surfaces: the `server_instructions` and `onboarding_prompt` slices of `src/prompts/source.md`, `build_system_prompt_draft()`, and `.codescout/system-prompt.md` (`src/prompts/README.md` § Surfaces).
 The build-time test `prompt_surfaces_reference_only_real_tools` catches stale tool names; `claude_md_contains_no_deprecated_tool_names` guards `CLAUDE.md`.
 Bump `ONBOARDING_VERSION` only for `onboarding_prompt` surface changes — never for `server_instructions`.
-The static slice cap is **1900 characters** (`STATIC_SLICE_CHAR_BUDGET`), below the measured 2048-**char** client cliff (`CLIENT_INSTRUCTIONS_CHAR_LIMIT`, `src/prompts/mod.rs:29`). Count characters, not bytes — the old rule said "2200 bytes", which was both the wrong unit and above the cliff it existed to protect, and stayed green for months. Never raise it; move content to a `get_guide(topic)` **and wire the topic's trigger**. Full operational detail (bump matrix, verify-slice hazard) + the writing style guide live in `src/prompts/README.md`.
+The static slice cap is **1900 characters** (`STATIC_SLICE_CHAR_BUDGET`), below the measured 2048-**char** client cliff (`CLIENT_INSTRUCTIONS_CHAR_LIMIT`, `src/prompts/mod.rs:30`). Count characters, not bytes — the old rule said "2200 bytes", which was both the wrong unit and above the cliff it existed to protect, and stayed green for months. Never raise it; move content to a `get_guide(topic)` **and wire the topic's trigger**. Full operational detail (bump matrix, verify-slice hazard) + the writing style guide live in `src/prompts/README.md`.
 
 
 ## Bug Tracking
