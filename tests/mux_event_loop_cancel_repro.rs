@@ -1,22 +1,24 @@
-//! OPEN BUG repro, ignored on purpose: the mux event loop drops a half-read server frame.
+//! Regression tests: the mux event loop must not drop a half-read server frame.
 //!
-//! `lsp/mux/process.rs` races `read_message(server_reader)` against accepting a client, the 10 s
-//! watchdog tick and signals in one `select!`. `read_message` (`lsp/transport.rs`) keeps the header
-//! and the body it has read in locals, so when another arm wins while a frame is half read, the
-//! bytes consumed so far are dropped with the future and the next read starts mid-frame. The mux
-//! then reads garbage, reports "LSP server disconnected" and shuts down, taking the server with it.
+//! `lsp/mux/process.rs` races the server read against accepting a client, the 10 s watchdog tick
+//! and signals in one `select!`. `read_message` (`lsp/transport.rs`) keeps the header and the body
+//! it has read in locals, so a read dropped by that `select!` while a frame is half read loses the
+//! bytes consumed so far and the next read starts mid-frame; the mux then reports "LSP server
+//! disconnected" and shuts down, taking the server with it. The event loop now pins one read
+//! future outside the loop and polls it by `&mut`, so no arm can drop it.
 //!
 //! These tests run the real `codescout mux` against a fake LSP server that answers `initialize`,
 //! waits `pre` seconds, writes a header and part of a frame, pauses `gap` seconds, finishes the
-//! frame and sends a second whole message. The control (nothing races the read) must stay up; a
-//! client connecting during the pause (the accept arm), or the watchdog tick landing in it, must
-//! not be able to kill the mux either. Run the ignored ones with `--ignored`:
-//! `scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro -- --ignored`
-//! (nothing under `scripts/` or `.github/` passes `--ignored` or `--include-ignored`.)
+//! frame and sends a second whole message. The control (nothing races the read) and the two
+//! racing cases (a client connecting during the pause, the watchdog tick landing in it) must all
+//! leave the mux running AND a connected client must still be served the whole conversation
+//! (`init` and both notifications), so a mux that is up but deaf to its server fails too. When
+//! they fail the racing cases end at about 4.6 s and 12.5 s; a green run of the whole file takes
+//! about 16 s.
 //! docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md
 #![cfg(unix)]
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -103,13 +105,13 @@ fn first_stdout_line(child: &mut Child, deadline: Duration) -> Result<String, St
 }
 
 /// Runs the real mux against the fake server. A client connects `client_at` after `ready`, if
-/// given. Returns when and how the mux exited within `watch` of `ready`, if it did.
+/// given, and keeps reading until the mux exits or `watch` has passed since `ready`.
 fn run_mux_against_a_split_frame(
     pre: u32,
     gap: u32,
     client_at: Option<Duration>,
     watch: Duration,
-) -> Option<(Duration, std::process::ExitStatus)> {
+) -> Run {
     let dir = tempfile::tempdir().unwrap();
     let server = dir.path().join("fake_lsp.py");
     std::fs::write(&server, FAKE_LSP).unwrap();
@@ -142,11 +144,25 @@ fn run_mux_against_a_split_frame(
     );
 
     let started = Instant::now();
-    let mut client = None;
+    let mut client: Option<UnixStream> = None;
+    let mut received = Vec::new();
     let mut exited = None;
     while started.elapsed() < watch {
         if client.is_none() && client_at.is_some_and(|at| started.elapsed() >= at) {
-            client = Some(UnixStream::connect(&sock).expect("connect a client"));
+            let stream = UnixStream::connect(&sock).expect("connect a client");
+            stream.set_nonblocking(true).expect("non-blocking client");
+            client = Some(stream);
+        }
+        if let Some(stream) = client.as_mut() {
+            let mut chunk = [0u8; 4096];
+            loop {
+                match stream.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => received.extend_from_slice(&chunk[..n]),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(e) => panic!("read from the mux: {e}"),
+                }
+            }
         }
         if let Some(status) = mux.0.try_wait().unwrap() {
             exited = Some((started.elapsed(), status));
@@ -154,7 +170,82 @@ fn run_mux_against_a_split_frame(
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    exited
+    Run { exited, received }
+}
+
+/// What a run of [`run_mux_against_a_split_frame`] observed.
+struct Run {
+    /// When and how the mux exited within the watch, if it did.
+    exited: Option<(Duration, std::process::ExitStatus)>,
+    /// Every byte the connected client read from the mux (empty when none connected).
+    received: Vec<u8>,
+}
+
+impl Run {
+    /// The mux stayed up AND the connected client was served the whole conversation: the cached
+    /// `init`, then both notifications the fake server sends, the first being the one whose frame
+    /// was split mid-way (a 200-`x` body). A mux that is alive but no longer reads its server
+    /// (for example a server-read arm that never fires) passes the first half and fails the rest.
+    fn assert_alive_and_client_served(&self, what: &str) {
+        assert!(
+            self.exited.is_none(),
+            "the mux exited {:?} {what}, although its server was alive",
+            self.exited
+        );
+        let frames = parse_frames(&self.received);
+        let kinds: Vec<String> = frames
+            .iter()
+            .map(|f| {
+                f["type"]
+                    .as_str()
+                    .or_else(|| f["method"].as_str())
+                    .unwrap_or("?")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["init", "window/logMessage", "window/logMessage"],
+            "the client must be served init and both notifications {what}; got {kinds:?} from {} bytes",
+            self.received.len()
+        );
+        assert_eq!(
+            frames[1]["params"]["message"].as_str(),
+            Some("x".repeat(200).as_str()),
+            "the split frame must reach the client whole {what}"
+        );
+        assert_eq!(
+            frames[2]["params"]["message"].as_str(),
+            Some("second"),
+            "the frame after the split one must reach the client {what}"
+        );
+    }
+}
+
+/// Splits `bytes` into the `Content-Length` framed JSON messages they hold. Panics on a stream
+/// that is not whole frames, which is what a desynchronised mux would send.
+fn parse_frames(bytes: &[u8]) -> Vec<serde_json::Value> {
+    let mut frames = Vec::new();
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        let head_end = rest
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .unwrap_or_else(|| panic!("a frame header never ends in {} bytes", rest.len()));
+        let head = std::str::from_utf8(&rest[..head_end]).expect("header is utf-8");
+        let len: usize = head
+            .lines()
+            .find_map(|l| l.strip_prefix("Content-Length:"))
+            .unwrap_or_else(|| panic!("no Content-Length in header {head:?}"))
+            .trim()
+            .parse()
+            .expect("numeric Content-Length");
+        let body = &rest[head_end + 4..];
+        assert!(body.len() >= len, "a frame body is cut short");
+        frames.push(serde_json::from_slice(&body[..len]).expect("frame body is JSON"));
+        rest = &body[len..];
+    }
+    frames
 }
 
 /// The deadline works: a program that prints nothing and does not exit fails the wait instead of
@@ -190,32 +281,26 @@ fn a_child_that_never_prints_ready_fails_the_wait_and_is_stopped() {
 /// (it was 7 s; the frame is finished at about 2 s).
 #[test]
 fn a_split_frame_alone_does_not_kill_the_mux() {
-    let exited = run_mux_against_a_split_frame(1, 1, None, Duration::from_millis(3500));
-    assert!(
-        exited.is_none(),
-        "the mux exited with nothing racing the read: {exited:?}"
-    );
+    // The client connects at once, a second before the frame is split, so its accept does not
+    // race the read either.
+    let run =
+        run_mux_against_a_split_frame(1, 1, Some(Duration::ZERO), Duration::from_millis(3500));
+    run.assert_alive_and_client_served("with nothing racing the read");
 }
 
 /// A client connects 2 s in, while the server is 1 s into a 3 s pause inside a frame.
 #[test]
-#[ignore = "open bug: docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md"]
 fn a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux() {
-    let exited =
+    let run =
         run_mux_against_a_split_frame(1, 3, Some(Duration::from_secs(2)), Duration::from_secs(7));
-    assert!(
-        exited.is_none(),
-        "the mux exited {exited:?} after a client connected mid-frame, although its server was alive",
-    );
+    run.assert_alive_and_client_served("after a client connected mid-frame");
 }
 
 /// No client at all: the frame straddles the watchdog's 10 s tick (split at 9 s, finished at 12 s).
 #[test]
-#[ignore = "open bug: docs/issues/2026-10-18-read-message-is-not-cancel-safe-and-the-mux-event-loop-cancels-it.md"]
 fn the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux() {
-    let exited = run_mux_against_a_split_frame(9, 3, None, Duration::from_secs(15));
-    assert!(
-        exited.is_none(),
-        "the mux exited {exited:?} after the watchdog tick fell inside a frame, although its server was alive",
-    );
+    // The client connects at once, about 9 s before the frame is split, so the tick is the only
+    // thing that can race the read.
+    let run = run_mux_against_a_split_frame(9, 3, Some(Duration::ZERO), Duration::from_secs(15));
+    run.assert_alive_and_client_served("after the watchdog tick fell inside a frame");
 }
