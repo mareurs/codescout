@@ -1861,12 +1861,16 @@ mod bounded_read_tests {
         ));
     }
 
-    /// The bound is on the bytes READ. A `/proc` file is a regular file that reports length 0
-    /// and returns kilobytes: the reported-length check passes it, only the `take` catches it.
-    /// This is the shape of the defect (a limit checked on a number the file reports).
+    /// A `/proc` file is a regular file that reports length 0 and returns kilobytes. This proves
+    /// the check AFTER the read: a file whose reported length passes the pre-check but whose
+    /// bytes exceed the cap is still `TooLarge`. It does NOT prove the bound on the read itself
+    /// (`take(max + 1)`): with `take(u64::MAX)` this file is small enough to be read whole and the
+    /// post-read check still refuses it. That bound is proved by
+    /// `the_read_itself_stops_one_byte_past_the_cap_and_never_pulls_more`, which uses a source
+    /// that fails if more than `max + 1` bytes are pulled.
     #[cfg(target_os = "linux")]
     #[test]
-    fn the_bound_is_on_the_bytes_read_not_on_the_length_the_file_reports() {
+    fn a_file_reporting_length_zero_is_refused_when_its_bytes_exceed_the_cap() {
         let path = Path::new("/proc/self/status");
         let meta = std::fs::metadata(path).unwrap();
         assert!(meta.file_type().is_file());

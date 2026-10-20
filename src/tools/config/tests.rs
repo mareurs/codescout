@@ -314,10 +314,12 @@ async fn project_status_returns_all_sections() {
 #[cfg(unix)]
 #[test]
 fn status_answers_when_workspace_toml_is_a_fifo_or_a_link_to_one() {
-    /// `status` is slow on its own: the index probe took ~19 s of the existing
-    /// `project_status_returns_all_sections` (measured 2026-10-20, no workspace.toml at all), so
-    /// the deadline is far above that. A read that blocks never returns, so it stays a failure.
-    const STATUS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
+    /// `status` is slow on its own: ~19 s idle (measured here 2026-10-20 on the existing
+    /// `project_status_returns_all_sections`, which has no workspace.toml at all) and ~60 s at 2x
+    /// CPU oversubscription (the round-2 reviewer's figure). 120 s had about 2x headroom over the
+    /// loaded figure, so a loaded gate could report a false "blocked reading a special file";
+    /// 300 s is 5x. A blocked read never returns, so the deadline costs time only when red.
+    const STATUS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
 
     /// One whole `Agent::new` + `status` on its own thread and runtime. `Agent::new` also reads
     /// `workspace.toml`, on the thread that polls it, so a blocked read there would stop any

@@ -459,17 +459,8 @@ impl CodeScoutServer {
         // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md and
         // memory `claude-code-mcp-env`.
         let guide_project_root = agent.project_root().await;
-        let cc_session_id = env
-            .cc_session_id
-            .clone()
-            .or_else(|| {
-                guide_project_root
-                    .as_ref()
-                    .and_then(|r| read_cc_session_id(r))
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-            })
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let cc_session_id =
+            resolve_cc_session_id(env.cc_session_id.clone(), guide_project_root.as_deref());
         // The ledger's key is resolved separately from the usage-correlation id
         // above: usage tolerates a collision between two windows on one repo,
         // the ledger does not. See the plan's Ruling 3 and spec §1.
@@ -1901,6 +1892,21 @@ fn read_cc_session_id(root: &std::path::Path) -> Option<String> {
     .ok()
 }
 
+/// The Claude Code session id the server uses as its guide-ledger key, in the order the
+/// constructor documents: the one from the environment, else the companion's
+/// `<root>/.codescout/cc_session_id` (trimmed, non-empty, read as a bounded regular file), else
+/// a random uuid. Split out of the constructor so the file leg is tested through the real
+/// resolution and not only through [`read_cc_session_id`].
+fn resolve_cc_session_id(from_env: Option<String>, root: Option<&std::path::Path>) -> String {
+    from_env
+        .or_else(|| {
+            root.and_then(read_cc_session_id)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
 #[cfg(all(test, unix))]
 mod cc_session_id_tests {
     use super::*;
@@ -1965,6 +1971,41 @@ mod cc_session_id_tests {
         std::fs::remove_file(&file).unwrap();
         std::fs::write(&file, "x".repeat(MAX_SESSION_ID_FILE_BYTES as usize + 1)).unwrap();
         assert_eq!(read_cc_session_id(dir.path()), None);
+    }
+
+    /// The resolution the constructor runs: a FIFO or a `/dev/null` link at the file leaves a
+    /// fresh uuid (no hang, and not the empty string); a regular file is trimmed and used; the
+    /// environment value wins over the file.
+    #[test]
+    fn the_resolution_never_hangs_on_a_special_file_and_still_uses_a_regular_one() {
+        let dir = with_codescout_dir();
+        let file = dir.path().join(".codescout").join("cc_session_id");
+        let root = dir.path().to_path_buf();
+        make_fifo(&file);
+        let r = root.clone();
+        let id = within_deadline("resolve_cc_session_id on a FIFO", move || {
+            resolve_cc_session_id(None, Some(&r))
+        });
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "a fresh uuid, got {id:?}"
+        );
+
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &file).unwrap();
+        let id = resolve_cc_session_id(None, Some(&root));
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "a fresh uuid, got {id:?}"
+        );
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(&file, "  abc-123 \n").unwrap();
+        assert_eq!(resolve_cc_session_id(None, Some(&root)), "abc-123");
+        assert_eq!(
+            resolve_cc_session_id(Some("from-env".into()), Some(&root)),
+            "from-env"
+        );
     }
 }
 

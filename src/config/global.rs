@@ -204,6 +204,30 @@ fn read_dotenv_pairs(path: &std::path::Path) -> Option<Vec<(String, String)>> {
     }
 }
 
+/// Everything [`load_startup_env`] does before it touches the environment: decide which dotenv
+/// to load ([`plan_startup_env`]), warn about a missing explicit one, and read the one chosen
+/// as a bounded regular file ([`read_dotenv_pairs`]). `None` when there is nothing to apply.
+/// The path and the pairs come back; the process environment is not read or written, which is
+/// what lets a test drive the real decision and the real read with a FIFO in place.
+fn read_startup_env(
+    explicit: Option<PathBuf>,
+    default: Option<PathBuf>,
+) -> Option<(PathBuf, Vec<(String, String)>)> {
+    let path = match plan_startup_env(explicit, default, |p| p.exists()) {
+        StartupEnvPlan::Load(p) => p,
+        StartupEnvPlan::WarnMissingExplicit(p) => {
+            tracing::warn!(
+                "CODESCOUT_ENV_FILE set to {} but the file was not found",
+                p.display()
+            );
+            return None;
+        }
+        StartupEnvPlan::Nothing => return None,
+    };
+    let pairs = read_dotenv_pairs(&path)?;
+    Some((path, pairs))
+}
+
 /// Load a startup dotenv into the process environment before config resolution.
 ///
 /// Path: `$CODESCOUT_ENV_FILE` if set, else [`global_env_path`]. An explicit process
@@ -217,24 +241,10 @@ fn read_dotenv_pairs(path: &std::path::Path) -> Option<Vec<(String, String)>> {
 /// logic lives in [`plan_startup_env`] / [`startup_env_assignments`] so it can be
 /// tested without a `set_var` anywhere near a parallel test runner.
 pub fn load_startup_env() {
-    let plan = plan_startup_env(
+    let Some((path, pairs)) = read_startup_env(
         std::env::var_os("CODESCOUT_ENV_FILE").map(PathBuf::from),
         global_env_path(),
-        |p| p.exists(),
-    );
-    let path = match plan {
-        StartupEnvPlan::Load(p) => p,
-        StartupEnvPlan::WarnMissingExplicit(p) => {
-            tracing::warn!(
-                "CODESCOUT_ENV_FILE set to {} but the file was not found",
-                p.display()
-            );
-            return;
-        }
-        StartupEnvPlan::Nothing => return,
-    };
-
-    let Some(pairs) = read_dotenv_pairs(&path) else {
+    ) else {
         return;
     };
     // Compute the assignments once, then record WHICH keys they were before applying
@@ -568,6 +578,47 @@ mod tests {
         std::fs::write(&big, format!("A=1\n#{}\n", "x".repeat(cap))).unwrap();
         assert_eq!(read_dotenv_pairs(&big), None);
         assert_eq!(read_dotenv_pairs(dir.path()), None, "a directory");
+    }
+
+    /// The decision and the read that `load_startup_env` runs, through the real seam: an explicit
+    /// `$CODESCOUT_ENV_FILE` that is a FIFO (or a link to one) held startup before any config was
+    /// resolved; a regular file, explicit or the default, is still loaded.
+    #[cfg(unix)]
+    #[test]
+    fn the_startup_env_decision_reads_the_chosen_file_bounded() {
+        use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+        let dir = tempfile::tempdir().unwrap();
+
+        let fifo = dir.path().join("pipe.env");
+        make_fifo(&fifo);
+        let linked = dir.path().join("linked-pipe.env");
+        std::os::unix::fs::symlink(&fifo, &linked).unwrap();
+        for explicit in [fifo, linked] {
+            let shown = explicit.display().to_string();
+            let got = within_deadline("read_startup_env on a FIFO", move || {
+                read_startup_env(Some(explicit), None)
+            });
+            assert_eq!(got, None, "explicit {shown}");
+        }
+
+        let real = dir.path().join("real.env");
+        std::fs::write(&real, "ALPHA=1\n").unwrap();
+        let pairs = vec![("ALPHA".to_string(), "1".to_string())];
+        assert_eq!(
+            read_startup_env(Some(real.clone()), None),
+            Some((real.clone(), pairs.clone())),
+            "explicit regular file"
+        );
+        assert_eq!(
+            read_startup_env(None, Some(real.clone())),
+            Some((real.clone(), pairs)),
+            "default regular file"
+        );
+        assert_eq!(
+            read_startup_env(Some(dir.path().join("absent.env")), None),
+            None
+        );
+        assert_eq!(read_startup_env(None, None), None);
     }
 
     #[test]
