@@ -38,7 +38,10 @@ impl Drop for WriteGuard {
         // Clear the record BEFORE unlocking. The reverse order leaves a window in which
         // the next holder has already taken the flock and written its record,
         // and this clear erases it — reporting a live holder as anonymous.
-        let _ = std::fs::write(&self.holder_path, "");
+        // Through `open_holder_record`, like the write: a plain `fs::write("")` follows a
+        // planted link (empties a file outside the root) and blocks on a FIFO. A refusal is
+        // ignored, and the unlock below runs either way.
+        let _ = open_holder_record(&self.holder_path);
         let _ = FileExt::unlock(&*self.file);
     }
 }
@@ -63,7 +66,47 @@ fn now_ms() -> u128 {
 /// the lock. That is what makes it trustworthy without a second lock protecting
 /// it, and moving the bytes out of the lock file does not weaken it.
 fn write_holder_record(path: &Path, holder: &str) -> std::io::Result<()> {
-    std::fs::write(path, format!("{}\t{}", now_ms(), holder))
+    use std::io::Write;
+    let mut file = open_holder_record(path)?;
+    file.write_all(format!("{}\t{}", now_ms(), holder).as_bytes())
+}
+
+/// Open the holder record for writing, emptied: created if absent, never through a link, never
+/// blocking, and only if it is a regular file.
+///
+/// The record sits at `.codescout/write.lock.holder` inside the repository, so the path can be a
+/// planted link. `std::fs::write` follows it: to a FIFO it blocks in `open` (on the acquire path,
+/// with the in-process mutex held), and to a regular file outside the root it overwrites that file
+/// while the lock is held and empties it on release. On unix the open is `O_NOFOLLOW |
+/// O_NONBLOCK` (a link at the leaf is `ELOOP`, a FIFO nobody reads is `ENXIO`), the opened
+/// descriptor is `fstat`ed and anything but a regular file is refused, and truncation happens
+/// only after that check: `O_TRUNC` on open would empty a hard-linked or otherwise regular
+/// target before the check could look at it. A hard link to a file elsewhere is still followed
+/// (it is the same inode); that is not detectable here. Other platforms keep the plain open.
+/// Callers treat a refusal as best effort, as they treat any failed write of the record.
+/// docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md
+fn open_holder_record(path: &Path) -> std::io::Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    options.truncate(true);
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        if !file.metadata()?.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "holder record is not a regular file",
+            ));
+        }
+        file.set_len(0)?;
+    }
+    Ok(file)
 }
 
 /// The most bytes the holder record (`<epoch_ms>\t<holder>`) may hold. The holder is a short label
@@ -668,5 +711,123 @@ mod holder_record_bounded_tests {
         );
         std::fs::write(&path, format!("{rec}{}", " ".repeat(limit + 1 - rec.len()))).unwrap();
         assert_eq!(read_holder_record(&path), None, "over the limit");
+    }
+
+    /// Run `acquire` and the guard's drop to completion on a private runtime, on this thread (the
+    /// caller wraps it in `within_deadline`). Returns whether the acquire succeeded and, while the
+    /// guard is held, `during()`'s answer.
+    fn acquire_hold_release<T>(
+        root: &Path,
+        during: impl FnOnce() -> T,
+    ) -> (Result<(), RecoverableError>, Option<T>) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let file = open_lock_file(root).unwrap();
+            let guard = acquire(
+                Arc::new(AsyncMutex::new(())),
+                file,
+                holder_record_path(root),
+                Duration::from_secs(5),
+                "holder-x",
+            )
+            .await;
+            match guard {
+                Ok(guard) => {
+                    let seen = during();
+                    drop(guard);
+                    (Ok(()), Some(seen))
+                }
+                Err(e) => (Err(e), None),
+            }
+        })
+    }
+
+    /// A record path that is a link to a FIFO (or a FIFO itself) made an uncontended acquire block
+    /// in `write_holder_record` with the in-process mutex held; the release then blocked the same
+    /// way in the clear. Both are now refused, best effort, and the acquire is granted.
+    #[test]
+    fn a_holder_record_that_is_a_fifo_or_a_link_to_one_does_not_hang_acquire_or_release() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            let record = holder_record_path(dir.path());
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &record).unwrap();
+            } else {
+                make_fifo(&record);
+            }
+            let root = dir.path().to_path_buf();
+            let (granted, _) = within_deadline("acquire with a FIFO holder record", move || {
+                let _keep = dir;
+                acquire_hold_release(&root, || ())
+            });
+            assert!(
+                granted.is_ok(),
+                "linked={linked}: the lock is still granted"
+            );
+        }
+    }
+
+    /// A record path that is a link to a regular file outside the root: the outside file is not
+    /// written while the lock is held and not emptied on release. A link to a path that does not
+    /// exist does not create it.
+    #[test]
+    fn a_holder_record_that_is_a_link_to_an_outside_file_leaves_it_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let target = outside.path().join("precious.txt");
+        std::fs::write(&target, "OUTSIDE-BYTES").unwrap();
+        std::os::unix::fs::symlink(&target, holder_record_path(dir.path())).unwrap();
+
+        let t = target.clone();
+        let (granted, during) =
+            acquire_hold_release(dir.path(), move || std::fs::read_to_string(&t).unwrap());
+        assert!(granted.is_ok());
+        assert_eq!(during.as_deref(), Some("OUTSIDE-BYTES"), "during the hold");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "OUTSIDE-BYTES");
+
+        let dangling = outside.path().join("never-created.txt");
+        std::fs::remove_file(holder_record_path(dir.path())).unwrap();
+        std::os::unix::fs::symlink(&dangling, holder_record_path(dir.path())).unwrap();
+        let (granted, _) = acquire_hold_release(dir.path(), || ());
+        assert!(granted.is_ok());
+        assert!(!dangling.exists(), "a dangling link target is not created");
+    }
+
+    /// Control: an ordinary record is written during the hold, byte for byte as before
+    /// (`<epoch_ms>\t<holder>`), and emptied (not removed) on release.
+    #[test]
+    fn an_ordinary_holder_record_is_written_during_the_hold_and_cleared_on_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = holder_record_path(dir.path());
+        let r = record.clone();
+        let (granted, during) = acquire_hold_release(dir.path(), move || read_holder_record(&r));
+        assert!(granted.is_ok());
+        let (ts, holder) = during.unwrap().expect("a parseable record during the hold");
+        assert_eq!(holder, "holder-x");
+        assert!(ts > 0);
+        let meta = std::fs::metadata(&record).expect("emptied, not removed");
+        assert!(meta.is_file());
+        assert_eq!(meta.len(), 0);
+        // A stale, longer record from a previous holder is fully replaced, not overlaid.
+        std::fs::write(
+            &record,
+            "1\tan-old-holder-with-a-long-label-xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        )
+        .unwrap();
+        let r = record.clone();
+        let (_, during) =
+            acquire_hold_release(dir.path(), move || std::fs::read_to_string(&r).unwrap());
+        let text = during.unwrap();
+        assert!(
+            text.ends_with("\tholder-x") && !text.contains("old-holder"),
+            "{text:?}"
+        );
     }
 }
