@@ -125,6 +125,15 @@ impl std::error::Error for BoundedReadError {
 /// Links are followed on purpose: a `project.toml` that is a link to a real file is an accepted
 /// layout. Pattern: `MemoryStore`'s `read_regular_file`, which refuses links instead.
 pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, BoundedReadError> {
+    let file = open_regular(path, max_bytes)?;
+    read_bounded(file, max_bytes)
+}
+
+/// The open and the two up-front checks of [`read_regular_bytes`] (see there for the contract:
+/// `O_NONBLOCK | O_NOCTTY` on unix, the type taken from the opened descriptor, a socket as
+/// `NotRegular`, the reported length against `max_bytes`), without the read. The one place that
+/// opens a file for a bounded read, shared with [`stream_regular`].
+fn open_regular(path: &Path, max_bytes: u64) -> Result<std::fs::File, BoundedReadError> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -147,7 +156,40 @@ pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, Bounde
     if metadata.len() > max_bytes {
         return Err(BoundedReadError::TooLarge { max: max_bytes });
     }
-    read_bounded(file, max_bytes)
+    Ok(file)
+}
+
+/// [`read_regular_bytes`] without the buffer: the bytes of `path` are handed to `sink` in chunks as
+/// they are read, for a caller that only digests them (a hash). Same open, same refusals, same
+/// bound: at most `max_bytes + 1` bytes are ever pulled from the file, and a file that turns out to
+/// hold more than `max_bytes` is [`BoundedReadError::TooLarge`]. **On an `Err` the sink may already
+/// have seen up to `max_bytes + 1` bytes**, so a caller must discard what it built from them.
+/// Returns the number of bytes streamed.
+pub fn stream_regular(
+    path: &Path,
+    max_bytes: u64,
+    mut sink: impl FnMut(&[u8]),
+) -> Result<u64, BoundedReadError> {
+    use std::io::Read;
+    let file = open_regular(path, max_bytes)?;
+    let mut reader = file.take(max_bytes.saturating_add(1));
+    let mut chunk = [0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                total += n as u64;
+                sink(&chunk[..n]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(BoundedReadError::Io(e)),
+        }
+    }
+    if total > max_bytes {
+        return Err(BoundedReadError::TooLarge { max: max_bytes });
+    }
+    Ok(total)
 }
 
 /// Read `reader` to its end, but never more than `max_bytes + 1` bytes from it: more than
@@ -193,6 +235,12 @@ pub fn read_regular_config_text(path: &Path) -> Result<String, BoundedReadError>
 // cap-class: NOT_A_CAP — bounds how many bytes of an INPUT git pointer file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
 pub const MAX_GIT_POINTER_BYTES: u64 = 64 * 1024;
 
+/// The most bytes a `.codescout/cc_session_id` may hold. A session id is a UUID (36 bytes); a file
+/// longer than a few KiB is not one, and is refused rather than read. One number for the server's
+/// start-up read and the doctor's read of other worktrees.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+pub const MAX_SESSION_ID_FILE_BYTES: u64 = 4096;
+
 /// Read a git pointer file (see [`MAX_GIT_POINTER_BYTES`]) as text, or `None` when it cannot be
 /// used: absent, unreadable, not UTF-8, not a regular file, or over the limit. The path is a
 /// `.git` file in a directory the server was pointed at, or a path that file names (so anyone who
@@ -202,7 +250,12 @@ pub fn read_git_pointer(path: &Path) -> Option<String> {
     match read_regular_text(path, MAX_GIT_POINTER_BYTES) {
         Ok(text) => Some(text),
         Err(e) => {
-            if !e.is_not_found() {
+            // A directory is the ordinary `.git` of a normal checkout, read on every usage row:
+            // it is expected, not worth a line, as EISDIR never was. A FIFO, a device or an
+            // oversized file is.
+            let ordinary =
+                e.is_not_found() || (matches!(e, BoundedReadError::NotRegular) && path.is_dir());
+            if !ordinary {
                 tracing::debug!("git pointer {} skipped: {e}", path.display());
             }
             None
@@ -1856,6 +1909,85 @@ mod bounded_read_tests {
         big.set_len(MAX_GIT_POINTER_BYTES + 1).unwrap();
         drop(big);
         assert_eq!(read_git_pointer(&file), None, "over the limit");
+    }
+
+    /// `.git` is a directory in every ordinary checkout and is read on every usage row, so a
+    /// directory is `None` WITHOUT a log line; a FIFO still logs. The log is captured with a
+    /// scoped subscriber, so this holds for this thread's calls only.
+    #[test]
+    fn read_git_pointer_is_silent_for_a_directory_and_logs_a_fifo() {
+        use std::sync::{Arc, Mutex};
+        #[derive(Clone, Default)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let capture = Capture::default();
+        let sink = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish();
+
+        let dir = tempdir().unwrap();
+        let dot_git = dir.path().join(".git");
+        std::fs::create_dir(&dot_git).unwrap();
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+
+        let (dir_got, fifo_got) = tracing::subscriber::with_default(subscriber, || {
+            let d = read_git_pointer(&dot_git);
+            let logged_after_dir = capture.0.lock().unwrap().len();
+            assert_eq!(logged_after_dir, 0, "a directory logs nothing");
+            // Not through `within_deadline`: that runs on another thread, which this scoped
+            // subscriber does not see. The hang-safety of a FIFO is the previous test's.
+            let f = read_git_pointer(&fifo);
+            (d, f)
+        });
+        assert_eq!((dir_got, fifo_got), (None, None));
+        let log = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            log.contains("not a regular file"),
+            "a FIFO is logged: {log:?}"
+        );
+    }
+
+    /// `stream_regular` hands over exactly the bytes `read_regular_bytes` returns, across several
+    /// chunks, and refuses what it refuses: a FIFO (without a hang), a directory, a file one byte
+    /// over the cap; a file exactly at the cap streams whole.
+    #[test]
+    fn stream_regular_streams_the_same_bytes_and_refuses_the_same_files() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("multi.bin");
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &body).unwrap();
+        let mut got = Vec::new();
+        let n = stream_regular(&file, body.len() as u64, |c| got.extend_from_slice(c)).unwrap();
+        assert_eq!(n, body.len() as u64, "at the cap");
+        assert_eq!(got, body);
+        assert_eq!(got, read_regular_bytes(&file, body.len() as u64).unwrap());
+
+        let over = stream_regular(&file, body.len() as u64 - 1, |_| {}).unwrap_err();
+        assert!(matches!(over, BoundedReadError::TooLarge { .. }), "{over}");
+
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        let err = within_deadline("stream_regular on a FIFO", move || {
+            stream_regular(&fifo, 1024, |_| {})
+        })
+        .unwrap_err();
+        assert!(matches!(err, BoundedReadError::NotRegular), "{err}");
+        let err = stream_regular(dir.path(), 1024, |_| {}).unwrap_err();
+        assert!(matches!(err, BoundedReadError::NotRegular), "{err}");
+        let err = stream_regular(&dir.path().join("absent"), 1024, |_| {}).unwrap_err();
+        assert!(err.is_not_found());
     }
 
     /// `/dev/zero` never ends. It is refused on its type, and even if it were not, the read is

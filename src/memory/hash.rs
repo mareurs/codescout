@@ -24,9 +24,9 @@ pub const MAX_HASHED_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// path comes from a memory anchor, i.e. from the repository, and a plain read of a FIFO held the
 /// caller for good.
 pub fn hash_file(path: &Path) -> Result<String> {
-    let bytes = crate::util::fs::read_regular_bytes(path, MAX_HASHED_FILE_BYTES)?;
-    let digest = Sha256::digest(&bytes);
-    Ok(hex::encode(digest))
+    let mut hasher = Sha256::new();
+    crate::util::fs::stream_regular(path, MAX_HASHED_FILE_BYTES, |chunk| hasher.update(chunk))?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// True when `err` (from [`hash_file`]) says the path is not a regular file or is over
@@ -55,9 +55,7 @@ pub fn is_refusal(err: &anyhow::Error) -> bool {
 /// fails to move and therefore reports "not yet regenerated" — the conservative
 /// direction. Do not use it where the distinction carries meaning.
 pub fn hash_file_or_empty(path: &Path) -> String {
-    let bytes =
-        crate::util::fs::read_regular_bytes(path, MAX_HASHED_FILE_BYTES).unwrap_or_default();
-    hex::encode(Sha256::digest(&bytes))
+    hash_file(path).unwrap_or_else(|_| hex::encode(Sha256::digest(b"")))
 }
 
 #[cfg(test)]
@@ -160,6 +158,18 @@ mod bounded_hash_tests {
         let err = hash_file(&missing).unwrap_err();
         assert!(!is_refusal(&err), "{err:#}");
         assert_eq!(hash_file_or_empty(&missing), sha_hex(b""));
+    }
+
+    /// The streamed digest of a file larger than one read chunk equals the digest of its bytes,
+    /// for the fallible and the total form alike.
+    #[test]
+    fn a_multi_chunk_file_hashes_to_the_digest_of_its_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("big.rs");
+        let body: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+        std::fs::write(&file, &body).unwrap();
+        assert_eq!(hash_file(&file).unwrap(), sha_hex(&body));
+        assert_eq!(hash_file_or_empty(&file), sha_hex(&body));
     }
 
     /// Over the limit is refused. The file starts with real content and is then extended

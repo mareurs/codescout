@@ -9602,6 +9602,16 @@ mod git_pointer_read_tests {
         assert!(!is_linked_worktree(empty.path()));
     }
 
+    /// A normal checkout: `.git` is a directory. No main root, not a linked worktree, and no
+    /// hang or error. (The silence of the log is asserted in `util::fs`.)
+    #[test]
+    fn a_directory_dot_git_has_no_main_root_and_is_not_a_linked_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        assert_eq!(worktree_main_root(dir.path()), None);
+        assert!(!is_linked_worktree(dir.path()));
+    }
+
     /// A pointer over the limit is no pointer. It starts with a valid one and is then extended
     /// sparse, so only the length check refuses it.
     #[test]
