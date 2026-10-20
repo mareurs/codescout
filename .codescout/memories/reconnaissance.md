@@ -25,7 +25,7 @@ entry holds the full narrative; this file carries only the rule.
   not exist under cmd.exe, so it short-circuited and never exercised the kill
   path — hiding a total absence of Windows process-tree kill), and a 134-test
   suite that structurally could not reach `inject_tee`'s path validator.
-  (claude-plugins `windows-shell-env-session-log.md` W-2)
+  (cited source: claude-plugins `windows-shell-env-session-log.md` W-2. That file was not found under the claude-plugins or codescout docs on 2026-10-20, so these three instances are unverified)
 
 - A red gate is not a finding until HEAD has been measured: `git stash`, re-run,
   compare. Attribute by measurement, never by reading the diff and reasoning
@@ -34,13 +34,16 @@ entry holds the full narrative; this file carries only the rule.
   following statement is `cfg(unix)`) and refuted a plausible self-blame for
   three EDR-quarantined test binaries. Corollary for flaky-vs-real: re-run the
   single test in isolation — deterministic 5/5 failure is real, passes-alone /
-  fails-under-load is a timing flake. (same log, W-3)
+  fails-under-load is a timing flake. (cited source: the same log, W-3, with the same caveat)
 
 - Shell-pipeline scouts must read exit status AND bytes, not output emptiness.
   A non-zero exit with non-empty output is common (jq with several inputs,
-  compilers with `-k`) and defeats `${x:-default}` guards — codescout's own
-  `_merge_cache` consumed a partial-success jq document and silently swapped the
-  session JSON for a cache file. (claude-plugins reconnaissance-patterns R-4)
+  compilers with `-k`) and defeats `${x:-default}` guards — the `_merge_cache`
+  function in claude-plugins (`buddy/scripts/statusline-composed.sh`) is cited as
+  having consumed a partial-success jq document and silently swapped the session
+  JSON for a cache file. (cited source: claude-plugins reconnaissance-patterns
+  R-4. That R-4 is the positive-control entry and does not record this incident,
+  so the incident is unverified as of 2026-10-20)
 
 - **A companion-plugin fix is inert until the version bumps.** All three
   profiles install codescout-companion from a *version-keyed cache*
@@ -54,9 +57,9 @@ entry holds the full narrative; this file carries only the rule.
   the retired "do NOT run index in worktrees" claim still present in all three
   caches after the fix merged to `main`, and the IL3 quoted-pipe false positive
   still firing from the hook while the rebuilt server correctly allowed the same
-  command — that disagreement is the tell. (bug-fix work stream; the
-  version-bump-checklist tracker calls a missing cache dir the #1 cause of
-  "plugin appears installed but hook never fires")
+  command — that disagreement is the tell. (bug-fix work stream. The version-keyed
+  cache layout was confirmed on 2026-10-20. The quoted "#1 cause" wording was not
+  found in the version-bump-checklist tracker, so treat it as unverified)
 
 - **Before attaching a conclusion to a measurement, state in one sentence what
   that measurement cannot see.** A real probe answering exactly what it was
