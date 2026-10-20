@@ -459,6 +459,38 @@ fn a_special_file_as_project_toml_becomes_the_marker_not_a_hang_or_a_default() {
     }
 }
 
+/// `workspace.toml` is repository content: a FIFO there (or a link to one) must not hold
+/// activation, and a link to a regular file must still be read.
+#[cfg(unix)]
+#[test]
+fn read_discover_settings_refuses_a_special_file_and_reads_a_linked_regular_one() {
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+    let host = tempdir().unwrap();
+    let root = std::fs::canonicalize(host.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    let ws = crate::config::workspace::workspace_config_path(&root);
+
+    make_fifo(&ws);
+    let r = root.clone();
+    let got = within_deadline("read_discover_settings on a FIFO", move || {
+        read_discover_settings(&r)
+    });
+    assert_eq!(got, None);
+    std::fs::remove_file(&ws).unwrap();
+
+    let real = root.join("shared-workspace.toml");
+    std::fs::write(
+        &real,
+        "exclude_projects = [\"node_modules\"]\n[workspace]\nname = \"w\"\ndiscovery_max_depth = 5\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&real, &ws).unwrap();
+    assert_eq!(
+        read_discover_settings(&root),
+        Some((5, vec!["node_modules".to_string()]))
+    );
+}
+
 /// L3 for the mapper: the pin, and the text of a non-config failure, are echoed bounded and
 /// escaped, like every other echo of caller-supplied text.
 #[test]

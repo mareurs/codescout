@@ -307,6 +307,79 @@ async fn project_status_returns_all_sections() {
     );
 }
 
+/// `workspace(action="status")` reads `.codescout/workspace.toml`, which is repository content
+/// and can be a link to a FIFO. It used to `exists()` and then `read_to_string` it: no answer.
+/// Runs the real call as a task on a multi-thread runtime and waits on it under a deadline, so
+/// a regression is a failure and not a hung suite.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_answers_when_workspace_toml_is_a_fifo_or_a_link_to_one() {
+    /// `status` is slow on its own: the index probe took ~19 s of the existing
+    /// `project_status_returns_all_sections` (measured 2026-10-20, no workspace.toml at all), so
+    /// the deadline is far above that. A read that blocks never returns, so it stays a failure.
+    const STATUS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
+
+    async fn status_with(mode: &'static str) -> Value {
+        use crate::util::fs::special_file_fixtures::make_fifo;
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let target = dir.path().join(".codescout").join("workspace.toml");
+        match mode {
+            "regular (control)" => {
+                std::fs::write(&target, "[workspace]\nname = \"ctl\"\n").unwrap();
+            }
+            "fifo" => make_fifo(&target),
+            _ => {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &target).unwrap();
+            }
+        }
+        let agent = Agent::new(Some(dir.path().to_path_buf())).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: lsp(),
+            output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        };
+        // The call runs as its own task on another worker, and the test waits on its handle: a
+        // read that blocks parks that worker, and the timeout, on this task, still fires.
+        let call = tokio::spawn(async move { ProjectStatus.call(json!({}), &ctx).await });
+        let result = tokio::time::timeout(STATUS_DEADLINE, call)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "workspace(action=status) with workspace.toml = {mode} did not return within \
+                     {STATUS_DEADLINE:?}: it is blocked reading a special file"
+                )
+            })
+            .unwrap()
+            .unwrap();
+        drop(dir);
+        result
+    }
+
+    let (control, fifo, linked) = tokio::join!(
+        status_with("regular (control)"),
+        status_with("fifo"),
+        status_with("link to a fifo"),
+    );
+    assert_eq!(control["workspace"]["name"], "ctl", "{control:#}");
+    for (mode, result) in [("fifo", fifo), ("link to a fifo", linked)] {
+        assert!(result["project_root"].is_string(), "{mode}");
+        assert!(
+            result["workspace"].is_null(),
+            "{mode}: an unreadable workspace.toml is no workspace section: {result:#}"
+        );
+    }
+}
+
 /// `status` must declare the binary that answered, through the real call.
 ///
 /// The comparison this exists for is `status.server.git_sha` against the

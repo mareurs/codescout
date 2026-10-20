@@ -712,32 +712,30 @@ impl Tool for ProjectStatus {
         // config by id, same as `Agent::workspace_summary`.
         // docs/issues/archive/2026-08-26-list-projects-reports-declared-projects-not-workspace-members.md
         let live_projects = ctx.agent.discovered_projects().await;
-        let workspace_toml_path = crate::config::workspace::workspace_config_path(&root);
-        let workspace_info = if workspace_toml_path.exists() {
-            std::fs::read_to_string(&workspace_toml_path)
-                .ok()
-                .and_then(|s| toml::from_str::<crate::config::workspace::WorkspaceConfig>(&s).ok())
-                .map(|ws| {
-                    json!({
-                        "name": ws.workspace.name,
-                        "projects": live_projects.iter().map(|p| {
-                            let depends_on = ws.projects.iter()
-                                .find(|e| e.id == p.id)
-                                .map(|e| e.depends_on.clone())
-                                .unwrap_or_default();
-                            json!({
-                                "id": p.id,
-                                "root": to_forward_slash(&p.relative_root),
-                                "languages": p.languages,
-                                "depends_on": depends_on,
-                            })
-                        }).collect::<Vec<_>>(),
-                        "resources": {
-                            "max_lsp_clients": ws.resources.max_lsp_clients,
-                            "idle_timeout_secs": ws.resources.idle_timeout_secs,
-                        },
-                    })
+        // `workspace.toml` is repository content: bounded regular-file read, never a plain
+        // `read_to_string` (a link to a FIFO held this call for ever).
+        let workspace_info = if crate::config::workspace::workspace_config_path(&root).exists() {
+            crate::config::workspace::load_workspace_config(&root).map(|ws| {
+                json!({
+                    "name": ws.workspace.name,
+                    "projects": live_projects.iter().map(|p| {
+                        let depends_on = ws.projects.iter()
+                            .find(|e| e.id == p.id)
+                            .map(|e| e.depends_on.clone())
+                            .unwrap_or_default();
+                        json!({
+                            "id": p.id,
+                            "root": to_forward_slash(&p.relative_root),
+                            "languages": p.languages,
+                            "depends_on": depends_on,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "resources": {
+                        "max_lsp_clients": ws.resources.max_lsp_clients,
+                        "idle_timeout_secs": ws.resources.idle_timeout_secs,
+                    },
                 })
+            })
         } else {
             None
         };
