@@ -53,8 +53,11 @@ pub fn read_utf8(path: &Path) -> Result<String> {
 }
 
 /// The most bytes a configuration file (`project.toml`, the global `config.toml`, `workspace.toml`,
-/// the startup dotenv) may hold before it is refused. Every config loader reads through
-/// [`read_regular_config_bytes`] / [`read_regular_config_text`], so there is one number.
+/// the startup dotenv) may hold before it is refused. The config loaders named in
+/// `docs/issues/2026-10-19-the-config-loaders-read-a-linked-special-file-without-a-bound.md` read
+/// through [`read_regular_config_bytes`] / [`read_regular_config_text`], so there is one number;
+/// the reads that remain outside it are listed in
+/// `docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md`.
 // cap-class: NOT_A_CAP — bounds how many bytes of an INPUT configuration file are read; a file over it is refused whole with an error, no result is shortened and nothing is presented as complete
 pub const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 
@@ -109,23 +112,34 @@ impl std::error::Error for BoundedReadError {
 /// followed. For input that is repository or user content and must not be trusted to be a file.
 ///
 /// The type is checked on the OPENED descriptor (`fstat`), not on the path, so nothing swapped in
-/// after the open changes what is read; a directory, FIFO, socket or device is refused without a
-/// read. The open is non-blocking on unix, so a FIFO nobody writes to cannot hold it. The length
-/// is then bounded twice: the reported length first (refuse without reading), and the read itself
-/// through `take(max + 1)`, because a length is something the file reports about itself.
+/// after the open changes what is read; a directory, FIFO or character/block device is refused
+/// without a read. A FIFO nobody writes to cannot hold the open: on unix it is
+/// `O_NONBLOCK | O_NOCTTY` (the second so that opening a terminal device cannot make it this
+/// process's controlling terminal). **The open itself still happens before the refusal**, so a
+/// device is opened (never read) before `fstat` turns it away; its driver's open side effects,
+/// if any, are not prevented here. A socket cannot be opened at all: `open(2)` fails `ENXIO`, which
+/// is reported as the same [`BoundedReadError::NotRegular`]. The length is then bounded twice: the
+/// reported length first (refuse without reading), and the read itself ([`read_bounded`]),
+/// because a length is something the file reports about itself.
 ///
 /// Links are followed on purpose: a `project.toml` that is a link to a real file is an accepted
 /// layout. Pattern: `MemoryStore`'s `read_regular_file`, which refuses links instead.
 pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, BoundedReadError> {
-    use std::io::Read;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK);
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY);
     }
-    let file = options.open(path).map_err(BoundedReadError::Io)?;
+    let file = match options.open(path) {
+        Ok(file) => file,
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ENXIO) => {
+            return Err(BoundedReadError::NotRegular);
+        }
+        Err(e) => return Err(BoundedReadError::Io(e)),
+    };
     let metadata = file.metadata().map_err(BoundedReadError::Io)?;
     if !metadata.file_type().is_file() {
         return Err(BoundedReadError::NotRegular);
@@ -133,8 +147,17 @@ pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, Bounde
     if metadata.len() > max_bytes {
         return Err(BoundedReadError::TooLarge { max: max_bytes });
     }
+    read_bounded(file, max_bytes)
+}
+
+/// Read `reader` to its end, but never more than `max_bytes + 1` bytes from it: more than
+/// `max_bytes` is [`BoundedReadError::TooLarge`]. The bound is on the bytes pulled from the
+/// reader, so an endless or lying source cannot grow the buffer past `max_bytes + 1`.
+fn read_bounded(reader: impl std::io::Read, max_bytes: u64) -> Result<Vec<u8>, BoundedReadError> {
+    use std::io::Read;
     let mut bytes = Vec::new();
-    file.take(max_bytes.saturating_add(1))
+    reader
+        .take(max_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(BoundedReadError::Io)?;
     if bytes.len() as u64 > max_bytes {
@@ -607,15 +630,23 @@ pub(crate) mod special_file_fixtures {
         what: &str,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> T {
+        use std::sync::mpsc::RecvTimeoutError;
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let _ = tx.send(f());
         });
-        rx.recv_timeout(HANG_DEADLINE).unwrap_or_else(|_| {
-            panic!(
+        match rx.recv_timeout(HANG_DEADLINE) {
+            Ok(value) => value,
+            Err(RecvTimeoutError::Timeout) => panic!(
                 "{what} did not return within {HANG_DEADLINE:?}: it is blocked reading a special file"
-            )
-        })
+            ),
+            // The sender is gone without a value: the closure panicked. Its own panic is the
+            // failure, not a hang; re-raise it with its message.
+            Err(RecvTimeoutError::Disconnected) => match handle.join() {
+                Err(payload) => std::panic::resume_unwind(payload),
+                Ok(()) => panic!("{what}: the worker ended without a result"),
+            },
+        }
     }
 }
 
@@ -1872,5 +1903,73 @@ mod bounded_read_tests {
         std::fs::create_dir(&secret).unwrap();
         let shown = read_regular_text(&secret, 64).unwrap_err().to_string();
         assert!(!shown.contains("SECRET_PATH_QX7"), "got: {shown}");
+    }
+
+    /// A source that supplies bytes without end and fails the moment more than `fail_after`
+    /// have been pulled from it. A bound that is really on the READER ends the read first with
+    /// `TooLarge`; one that is only checked afterwards (`take(u64::MAX)`) reaches the failure.
+    struct EndlessThenFails {
+        pulled: u64,
+        fail_after: u64,
+    }
+
+    impl std::io::Read for EndlessThenFails {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pulled >= self.fail_after {
+                return Err(std::io::Error::other("read past the bound"));
+            }
+            let n = (self.fail_after - self.pulled).min(buf.len() as u64) as usize;
+            buf[..n].fill(b'a');
+            self.pulled += n as u64;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn the_read_itself_stops_one_byte_past_the_cap_and_never_pulls_more() {
+        let max = 100;
+        let r = read_bounded(
+            EndlessThenFails {
+                pulled: 0,
+                fail_after: max + 1,
+            },
+            max,
+        );
+        assert!(
+            matches!(r, Err(BoundedReadError::TooLarge { max: 100 })),
+            "the source fails after max+1 bytes, so a read that stopped at max+1 never sees it; got {r:?}"
+        );
+        let exact = read_bounded(
+            EndlessThenFails {
+                pulled: 0,
+                fail_after: max,
+            },
+            max,
+        );
+        assert!(
+            matches!(exact, Err(BoundedReadError::Io(_))),
+            "control: a source that fails inside the allowance surfaces its error; got {exact:?}"
+        );
+    }
+
+    /// `open(2)` of a socket fails `ENXIO`; it is the same refusal as any other non-file.
+    #[test]
+    fn a_socket_is_refused_as_not_a_regular_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let r = within_deadline("reading a socket", move || {
+            read_regular_text(&path, MAX_CONFIG_FILE_BYTES)
+        });
+        assert!(refused_as_not_regular(r));
+    }
+
+    /// A panic inside the closure is reported as that panic, not as a hang.
+    #[test]
+    #[should_panic(expected = "the closure's own failure")]
+    fn within_deadline_reraises_a_panic_from_the_closure() {
+        within_deadline("a closure that panics", || -> () {
+            panic!("the closure's own failure")
+        });
     }
 }
