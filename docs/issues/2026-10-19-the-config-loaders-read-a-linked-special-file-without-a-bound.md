@@ -131,6 +131,30 @@ Review round 1 (an Opus review of `a3bdc48fb` found the helper correct and these
   and a 120 s deadline (`status` takes ~19 s on this machine even with no `workspace.toml`), and
   `within_deadline_of` is added.
 
+Review round 2:
+
+- `d1e062c90` (patch-id `ef23ef0505f47b5a742d5b925786b90f2cb2fe73`): padding a protected file past the
+  cap with `[security]` unchanged was still allowed, after which every write (even the identical
+  small content) was refused, the loader refused the file, and only a shell or the user could
+  repair it; the refusal also ended with a sentence ("Edits to the rest of the file are
+  allowed.") that was false for that case. `check_write_with` now refuses new content longer
+  than `MAX_CONFIG_FILE_BYTES` for a path protected by name, as the global config, or by identity,
+  and the "before cannot be read" refusal names the reason and the action (shrink the file or
+  replace the special file, outside these tools) without the false sentence. The module doc lists
+  the four refusal causes and records that the new refusals (permission-denied, link loop, a link
+  to `/dev/null`, a socket, a FIFO, a directory at a protected path) are accepted because the
+  loader already could not read any of them. A non-TOML or non-UTF-8 "before" that held a
+  `[security]` table still lets a table-dropping repair write through, on purpose and now said
+  so in the `security_on_disk` docstring.
+- `44338ba87` (patch-id `58b0dd6ffa771d2ae198e2de5d3e7f938a0e4a37`): `read_startup_env` is split out
+  of `load_startup_env` and `resolve_cc_session_id` out of the server constructor, so a FIFO test
+  goes through the code the two call sites run (the mutants that read without the helper in those
+  two functions are killed). The status test's deadline is 300 s (status is ~19 s idle and ~60 s
+  at 2x CPU oversubscription). The `/proc` test is renamed
+  `a_file_reporting_length_zero_is_refused_when_its_bytes_exceed_the_cap` and its doc says it does
+  not kill `take(u64::MAX)`; `the_read_itself_stops_one_byte_past_the_cap_and_never_pulls_more`
+  does.
+
 Correction to the first pass: this file said `src/workspace.rs` `read_file_capped` was unbounded on
 a linked FIFO. It is not: it caps with `take(max_bytes)` (`:24`) and is reached only for entries the
 `ignore` walker reports as regular files by their own type (`entry.file_type().is_file()`, `:61`;
@@ -168,6 +192,15 @@ as the one-line equivalent for the guard, the message and the two mutants; green
 `the_read_itself_stops_one_byte_past_the_cap_and_never_pulls_more`,
 `a_socket_is_refused_as_not_a_regular_file`, `within_deadline_reraises_a_panic_from_the_closure`.
 No test covers `O_NOCTTY` (it needs a terminal device).
+
+Added in review round 2: `new_content_over_the_cap_is_refused_for_each_protected_path_kind` (three
+path kinds, and exactly the cap still allowed),
+`the_unreadable_before_refusal_says_the_reason_and_the_action_and_no_false_promise`
+(red on the unmodified guard, `red6.log`: both failed there), `the_startup_env_decision_reads_the_chosen_file_bounded`,
+`cc_session_id_tests::the_resolution_never_hangs_on_a_special_file_and_still_uses_a_regular_one`
+(each fails with a `did not return within 15s` when the helper call in its function is replaced by
+a plain read). `a_file_over_the_cap_refuses_every_write_to_a_protected_path` now asserts that the
+padding step is itself refused and builds the oversized file by hand for the second step.
 
 Helper tests in `util::fs::bounded_read_tests` (they test the new function, so they have no
 "before"): FIFO, link to a FIFO, link to `/dev/zero`, directory and link to one, link to a regular
