@@ -1088,7 +1088,7 @@ pub fn list_git_worktrees(project_root: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for entry in entries.flatten() {
         let gitdir_file = entry.path().join("gitdir");
-        if let Ok(content) = std::fs::read_to_string(&gitdir_file) {
+        if let Some(content) = crate::util::fs::read_git_pointer(&gitdir_file) {
             let raw = content.trim();
             // Reject null bytes
             if raw.contains('\0') {
@@ -1134,7 +1134,7 @@ pub fn is_linked_worktree(root: &Path) -> bool {
     if !meta.file_type().is_file() {
         return false;
     }
-    let Ok(pointer) = std::fs::read_to_string(&dot_git) else {
+    let Some(pointer) = crate::util::fs::read_git_pointer(&dot_git) else {
         return false;
     };
     pointer
@@ -1156,7 +1156,7 @@ pub fn is_linked_worktree(root: &Path) -> bool {
 /// `gitdir:` path has no `.git` path component to split the main root on
 /// (i.e. `root` is not actually a linked worktree).
 pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
-    let pointer = std::fs::read_to_string(root.join(".git")).ok()?;
+    let pointer = crate::util::fs::read_git_pointer(&root.join(".git"))?;
     let gitdir = pointer
         .lines()
         .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))?;
@@ -9532,5 +9532,109 @@ EOF"#;
             dotdot.display()
         );
         assert!(m.contains(&expected), "expected {expected:?} in: {m}");
+    }
+}
+/// The `.git` pointer file and the `gitdir` files under `.git/worktrees/` are read by the
+/// worktree guards on tool calls; none of them is guaranteed to be a regular file.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod git_pointer_read_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    const POINTER: &str = "gitdir: /somewhere/main/.git/worktrees/feat\n";
+
+    fn extend_sparse(path: &Path) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_len(crate::util::fs::MAX_GIT_POINTER_BYTES + 1)
+            .unwrap();
+    }
+
+    /// `worktree_main_root` has no type check of its own and runs on every usage row and every
+    /// activation: a `.git` FIFO, or a link to one, held all of them.
+    #[test]
+    fn a_fifo_dot_git_has_no_main_root_and_is_not_a_linked_worktree() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let dot_git = dir.path().join(".git");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &dot_git).unwrap();
+            } else {
+                make_fifo(&dot_git);
+            }
+            let root = dir.path().to_path_buf();
+            let (main, is_wt) = within_deadline("worktree_main_root, .git a FIFO", move || {
+                let _keep = dir;
+                (worktree_main_root(&root), is_linked_worktree(&root))
+            });
+            assert_eq!(main, None, "linked={linked}");
+            assert!(!is_wt, "linked={linked}");
+        }
+    }
+
+    /// Control: a regular pointer gives the main root and a linked worktree; a pointer that is a
+    /// link to a regular file is followed, as before; missing and invalid UTF-8 give nothing.
+    #[test]
+    fn a_regular_dot_git_pointer_is_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".git"), POINTER).unwrap();
+        assert_eq!(
+            worktree_main_root(dir.path()),
+            Some(PathBuf::from("/somewhere/main"))
+        );
+        assert!(is_linked_worktree(dir.path()));
+
+        let linked = tempfile::tempdir().unwrap();
+        let real = linked.path().join("real-pointer");
+        std::fs::write(&real, POINTER).unwrap();
+        std::os::unix::fs::symlink(&real, linked.path().join(".git")).unwrap();
+        assert_eq!(
+            worktree_main_root(linked.path()),
+            Some(PathBuf::from("/somewhere/main"))
+        );
+
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(worktree_main_root(empty.path()), None, "missing");
+        std::fs::write(empty.path().join(".git"), [0xff, 0xfe]).unwrap();
+        assert_eq!(worktree_main_root(empty.path()), None, "invalid UTF-8");
+        assert!(!is_linked_worktree(empty.path()));
+    }
+
+    /// A pointer over the limit is no pointer. It starts with a valid one and is then extended
+    /// sparse, so only the length check refuses it.
+    #[test]
+    fn an_oversized_dot_git_pointer_is_no_pointer() {
+        let dir = tempfile::tempdir().unwrap();
+        let dot_git = dir.path().join(".git");
+        std::fs::write(&dot_git, POINTER).unwrap();
+        assert!(is_linked_worktree(dir.path()), "control");
+        extend_sparse(&dot_git);
+        assert!(!is_linked_worktree(dir.path()));
+        assert_eq!(worktree_main_root(dir.path()), None);
+    }
+
+    /// An entry whose `gitdir` is a FIFO registers nothing and does not hold the listing; the
+    /// regular entry beside it is still listed.
+    #[test]
+    fn a_fifo_gitdir_entry_is_skipped_and_the_listing_goes_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let wt_root = tempfile::tempdir().unwrap();
+        let admin = dir.path().join(".git").join("worktrees");
+        std::fs::create_dir_all(admin.join("bad")).unwrap();
+        std::fs::create_dir_all(admin.join("good")).unwrap();
+        make_fifo(&admin.join("bad").join("gitdir"));
+        std::fs::write(
+            admin.join("good").join("gitdir"),
+            format!("{}/.git\n", wt_root.path().display()),
+        )
+        .unwrap();
+        let root = dir.path().to_path_buf();
+        let got = within_deadline("list_git_worktrees, a gitdir FIFO", move || {
+            let _keep = dir;
+            list_git_worktrees(&root)
+        });
+        assert_eq!(got, vec![wt_root.path().to_path_buf()]);
     }
 }

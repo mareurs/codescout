@@ -186,6 +186,29 @@ pub fn read_regular_config_bytes(path: &Path) -> Result<Vec<u8>, BoundedReadErro
 pub fn read_regular_config_text(path: &Path) -> Result<String, BoundedReadError> {
     read_regular_text(path, MAX_CONFIG_FILE_BYTES)
 }
+/// The most bytes a git pointer file may hold: a worktree's `.git` file (`gitdir: <path>`), the
+/// `gitdir` file under `.git/worktrees/<name>/`, or a `HEAD` (a SHA or `ref: refs/heads/<name>`).
+/// Each is a line or two; the limit is far above any path or ref name and far below anything that
+/// matters to memory.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT git pointer file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+pub const MAX_GIT_POINTER_BYTES: u64 = 64 * 1024;
+
+/// Read a git pointer file (see [`MAX_GIT_POINTER_BYTES`]) as text, or `None` when it cannot be
+/// used: absent, unreadable, not UTF-8, not a regular file, or over the limit. The path is a
+/// `.git` file in a directory the server was pointed at, or a path that file names (so anyone who
+/// wrote the pointer chose it), and a plain read of a FIFO there holds the caller for good. The
+/// reason, never the content, is logged at debug.
+pub fn read_git_pointer(path: &Path) -> Option<String> {
+    match read_regular_text(path, MAX_GIT_POINTER_BYTES) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            if !e.is_not_found() {
+                tracing::debug!("git pointer {} skipped: {e}", path.display());
+            }
+            None
+        }
+    }
+}
 
 /// How many staging names `atomic_write` tries before it gives up. A collision needs an
 /// existing entry at a 128-bit random name, so reaching even the second attempt means
@@ -1806,6 +1829,33 @@ mod bounded_read_tests {
             read_regular_text(&link, MAX_CONFIG_FILE_BYTES)
         });
         assert!(refused_as_not_regular(r));
+    }
+    /// The git pointer reader answers `None` for everything but a regular file of at most
+    /// `MAX_GIT_POINTER_BYTES`, and never holds on a FIFO.
+    #[test]
+    fn read_git_pointer_reads_a_regular_file_and_refuses_the_rest() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("HEAD");
+        std::fs::write(&file, "ref: refs/heads/main\n").unwrap();
+        assert_eq!(
+            read_git_pointer(&file).as_deref(),
+            Some("ref: refs/heads/main\n")
+        );
+        assert_eq!(read_git_pointer(&dir.path().join("absent")), None);
+
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        assert_eq!(
+            within_deadline("read_git_pointer on a FIFO", move || read_git_pointer(
+                &fifo
+            )),
+            None
+        );
+
+        let big = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+        big.set_len(MAX_GIT_POINTER_BYTES + 1).unwrap();
+        drop(big);
+        assert_eq!(read_git_pointer(&file), None, "over the limit");
     }
 
     /// `/dev/zero` never ends. It is refused on its type, and even if it were not, the read is

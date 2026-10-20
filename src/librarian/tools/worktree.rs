@@ -41,9 +41,9 @@ pub(crate) fn is_main_checkout_artifact(
 /// Best-effort branch name: worktree `.git` file → gitdir → `<gitdir>/HEAD`
 /// → `ref: refs/heads/<branch>`. Filesystem-only, like current_project.rs.
 fn read_branch(worktree_root: &std::path::Path) -> Option<String> {
-    let gitfile = std::fs::read_to_string(worktree_root.join(".git")).ok()?;
+    let gitfile = crate::util::fs::read_git_pointer(&worktree_root.join(".git"))?;
     let gitdir = gitfile.strip_prefix("gitdir:")?.trim();
-    let head = std::fs::read_to_string(std::path::Path::new(gitdir).join("HEAD")).ok()?;
+    let head = crate::util::fs::read_git_pointer(&std::path::Path::new(gitdir).join("HEAD"))?;
     head.trim()
         .strip_prefix("ref: refs/heads/")
         .map(String::from)
@@ -655,5 +655,88 @@ mod tests {
             "the lineage edge must follow the main twin's new id, or merge_worktree \
              silently stops seeing the shadow it is supposed to fold"
         );
+    }
+}
+/// `read_branch` follows the worktree's `.git` file (no type check) to the `HEAD` it names; both
+/// can be a FIFO, or a link to one.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod read_branch_bounded_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    /// `<tmp>/wt/.git` -> `gitdir: <tmp>/admin`; returns (tmp, wt, admin).
+    fn worktree() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let wt = tmp.path().join("wt");
+        let admin = tmp.path().join("admin");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+        (tmp, wt, admin)
+    }
+
+    #[test]
+    fn a_fifo_dot_git_or_a_link_to_one_is_no_branch_and_never_a_hang() {
+        for linked in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let wt = tmp.path().join("wt");
+            std::fs::create_dir_all(&wt).unwrap();
+            if linked {
+                let fifo = tmp.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, wt.join(".git")).unwrap();
+            } else {
+                make_fifo(&wt.join(".git"));
+            }
+            let got = within_deadline("read_branch, .git a FIFO", move || {
+                let _keep = tmp;
+                read_branch(&wt)
+            });
+            assert_eq!(got, None, "linked={linked}");
+        }
+    }
+
+    #[test]
+    fn a_fifo_head_or_a_link_to_one_is_no_branch_and_never_a_hang() {
+        for linked in [false, true] {
+            let (tmp, wt, admin) = worktree();
+            if linked {
+                let fifo = tmp.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, admin.join("HEAD")).unwrap();
+            } else {
+                make_fifo(&admin.join("HEAD"));
+            }
+            let got = within_deadline("read_branch, HEAD a FIFO", move || {
+                let _keep = tmp;
+                read_branch(&wt)
+            });
+            assert_eq!(got, None, "linked={linked}");
+        }
+    }
+
+    /// Control: a regular pointer and `HEAD` name the branch; a detached `HEAD`, a missing
+    /// `HEAD` and an oversized `HEAD` give none. (The oversized one starts with a valid
+    /// `ref:` line and is then extended sparse, so only the length check refuses it.)
+    #[test]
+    fn a_regular_head_names_the_branch_and_an_oversized_one_does_not() {
+        let (_tmp, wt, admin) = worktree();
+        std::fs::write(admin.join("HEAD"), "ref: refs/heads/feat/x\n").unwrap();
+        assert_eq!(read_branch(&wt).as_deref(), Some("feat/x"));
+
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(admin.join("HEAD"))
+            .unwrap();
+        file.set_len(crate::util::fs::MAX_GIT_POINTER_BYTES + 1)
+            .unwrap();
+        drop(file);
+        assert_eq!(read_branch(&wt), None, "oversized HEAD");
+
+        std::fs::write(admin.join("HEAD"), "0123456789abcdef\n").unwrap();
+        assert_eq!(read_branch(&wt), None, "detached");
+        std::fs::remove_file(admin.join("HEAD")).unwrap();
+        assert_eq!(read_branch(&wt), None, "missing");
     }
 }
