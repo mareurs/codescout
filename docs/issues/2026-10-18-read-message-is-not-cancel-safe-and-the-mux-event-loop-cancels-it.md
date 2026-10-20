@@ -29,17 +29,23 @@ A mux that exits (status 0) while its language server is alive, after a client c
 
 ## Reproduction
 
-Transport level (ignored, `src/lsp/transport.rs`):
+The reproductions are regular tests since the fix (no `#[ignore]`, nothing needs `--ignored` or `--include-ignored`). Both commands below were run 2026-10-20 and run tests (9 and 4).
+
+Transport level (`src/lsp/transport.rs`):
 
 ```
-scripts/with-slot.sh cargo test --lib -- --ignored a_read_dropped_mid_body
+scripts/with-slot.sh cargo test --lib lsp::transport
 ```
 
-End to end against the real binary (`tests/mux_event_loop_cancel_repro.rs`): a fake LSP server answers `initialize`, then writes 60 bytes of a frame, pauses, finishes the frame and sends a second message. The control passes, the two ignored tests fail:
+It runs 9 tests, including `a_pinned_read_that_loses_a_select_keeps_the_bytes_it_had_consumed` (the pinned-read pattern the event loop uses) and `a_read_dropped_mid_body_desynchronises_the_stream` (a plain dropped `read_message` still loses the bytes it had consumed, which is the hazard).
+
+End to end against the real binary (`tests/mux_event_loop_cancel_repro.rs`): a fake LSP server answers `initialize`, then writes 60 bytes of a frame, pauses, finishes the frame and sends a second message. A connected client must be served `init` and both notifications:
 
 ```
-scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro -- --include-ignored
+scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro
 ```
+
+It runs 4 tests (about 16 s). To see the bug itself, restore the old event loop and run the same command: `git checkout 79dcf2c58 -- src/lsp/mux/process.rs` (the `experiments` commit this fix is based on), then `git checkout HEAD -- src/lsp/mux/process.rs` to put the fix back. With the old loop `a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux` fails (mux exited at 4.56 s) and `the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux` fails (12.53 s).
 
 ## Environment
 
@@ -89,21 +95,23 @@ Cost of the choice: the safety is a discipline of the one `select!` that races a
 
 ## Tests added
 
-All three end-to-end tests in `tests/mux_event_loop_cancel_repro.rs` are now un-ignored and run in the default suite. Red before, green after, measured 2026-10-20 with `scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro`:
+Two end-to-end tests in `tests/mux_event_loop_cancel_repro.rs` were ignored (`a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux`, `the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux`); they are now un-ignored and run in the default suite, with the two that already ran (`a_split_frame_alone_does_not_kill_the_mux`, `a_child_that_never_prints_ready_fails_the_wait_and_is_stopped`). Review follow-up 2026-10-20: the three mux tests also require that the connected client is served `init` and both `window/logMessage` notifications (the first with its 200-`x` body), because asserting only that the mux stayed up let a server-read arm that never fires survive. Measured mutant: `, if false` added to the server-read arm of the `select!` in `event_loop` was NOT killed before that assertion (4 passed) and is killed after (3 failed, each `got ["init"] from 95 bytes`); the file was restored byte for byte (`git diff HEAD` empty).
+
+Red before, green after, measured 2026-10-20 with `scripts/with-slot.sh cargo test --test mux_event_loop_cancel_repro`:
 
 ```
 before (src/lsp/mux/process.rs restored to 79dcf2c58, tests as committed):
 test a_client_connecting_while_the_server_is_mid_frame_does_not_kill_the_mux ... FAILED
 test the_watchdog_tick_during_a_split_frame_does_not_kill_the_mux ... FAILED
-  the mux exited Some((4.555909002s, ExitStatus(unix_wait_status(0)))) after a client connected mid-frame, although its server was alive
-  the mux exited Some((12.516331391s, ExitStatus(unix_wait_status(0)))) after the watchdog tick fell inside a frame, although its server was alive
+  the mux exited Some((4.560070607s, ExitStatus(unix_wait_status(0)))) after a client connected mid-frame, although its server was alive
+  the mux exited Some((12.530297987s, ExitStatus(unix_wait_status(0)))) after the watchdog tick fell inside a frame, although its server was alive
 test result: FAILED. 2 passed; 2 failed
 
-after:
-test result: ok. 4 passed; 0 failed; 0 ignored; finished in 15.70s
+after (three runs):
+test result: ok. 4 passed; 0 failed; 0 ignored; finished in 15.80s / 15.75s / 15.75s
 ```
 
-Transport level (`src/lsp/transport.rs`, `tests` module): `a_read_dropped_mid_body_does_not_lose_the_bytes_it_had_consumed` (un-ignored; now drives the pinned-read pattern with `read_message_returning_reader` through a `select!` that another arm wins, then checks the first message arrives whole and the second frame is still framed) and `a_read_dropped_mid_body_desynchronises_the_stream` (documents that a DROPPED `read_message` still desynchronises the stream, so nobody moves the read back into the `select!` arm; it fails if `read_message` ever becomes cancel-safe, which is the cue to simplify). The transport test cannot be red against the old code (it names the new function); the end-to-end tests are the red-before evidence.
+Transport level (`src/lsp/transport.rs`, `tests` module): `a_pinned_read_that_loses_a_select_keeps_the_bytes_it_had_consumed` (was the ignored `a_read_dropped_mid_body_does_not_lose_the_bytes_it_had_consumed`; now drives the pinned-read pattern with `read_message_returning_reader` through a `select!` that another arm wins, then checks the first message arrives whole and the second frame is still framed) and `a_read_dropped_mid_body_desynchronises_the_stream` (guards that `read_message` is still NOT cancel-safe, so its doc and the pinned read stay needed; it does not stop anyone moving the read back into the `select!` arm, only the end-to-end tests do that). The transport test cannot be red against the old code (it names the new function); the end-to-end tests are the red-before evidence.
 
 ## Workarounds
 
