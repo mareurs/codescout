@@ -91,7 +91,16 @@ pub(crate) fn check_write_with(
             ),
         )
     })?;
-    if security_on_disk(path).as_ref() == new.get(PROTECTED_TABLE) {
+    let before = security_on_disk(path).map_err(|why| {
+        refusal(
+            path,
+            &format!(
+                "the file on disk cannot be read as it is ({why}), so it cannot be shown to \
+                 leave [{PROTECTED_TABLE}] unchanged"
+            ),
+        )
+    })?;
+    if before.as_ref() == new.get(PROTECTED_TABLE) {
         return Ok(());
     }
     Err(refusal(
@@ -100,13 +109,30 @@ pub(crate) fn check_write_with(
     ))
 }
 
-/// The `[security]` table of the file as it is now: `None` when the file is absent, is not
-/// TOML, or has no such table. An unreadable "before" is the same as an empty one, so a
-/// write cannot use a broken file to smuggle a table in.
-fn security_on_disk(path: &Path) -> Option<toml::Value> {
-    let text = crate::util::fs::read_regular_config_text(path).ok()?;
-    let table: toml::Table = toml::from_str(&text).ok()?;
-    table.get(PROTECTED_TABLE).cloned()
+/// The `[security]` table of the file as it is now.
+///
+/// `Ok(None)` when the file is absent (also a dangling link), is not TOML or not UTF-8, or has
+/// no such table: an absent or broken "before" is the same as an empty one, so a write cannot
+/// use a broken file to smuggle a table in. `Err(reason)` when a file IS there and cannot be
+/// read as it is: not a regular file, over [`crate::util::fs::MAX_CONFIG_FILE_BYTES`], or one
+/// the OS will not open. That is NOT an empty "before". The loader refuses such a file too, so
+/// its `[security]` is unknown to this process, and treating it as empty let a write that
+/// drops the table pass: pad the file past the cap (allowed, the table is unchanged), then
+/// write a small one without the table (allowed, `None == None`).
+fn security_on_disk(path: &Path) -> Result<Option<toml::Value>, String> {
+    use crate::util::fs::BoundedReadError;
+    let text = match crate::util::fs::read_regular_config_text(path) {
+        Ok(text) => text,
+        Err(e) if e.is_not_found() => return Ok(None),
+        Err(BoundedReadError::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData => {
+            return Ok(None);
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let Ok(table) = toml::from_str::<toml::Table>(&text) else {
+        return Ok(None);
+    };
+    Ok(table.get(PROTECTED_TABLE).cloned())
 }
 
 /// A file named `project.toml` directly inside a directory named `.codescout`, matched
@@ -383,8 +409,63 @@ mod tests {
         );
     }
 
-    /// The write guard reads the file as it is now. A FIFO there used to hang the write; it is
-    /// an unreadable "before", the same as a broken file, so it confirms nothing.
+    /// A file that is THERE but cannot be read as it is (over the cap, not a regular file) is
+    /// not an empty "before". Two steps used to drop `[security]` from a protected file: pad it
+    /// past the cap with the table unchanged (allowed), then write a small file with no table
+    /// (allowed too, because the unreadable "before" compared equal to "no table").
+    #[test]
+    fn a_file_over_the_cap_refuses_every_write_to_a_protected_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = proj(&dir);
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let secure = "[security]\nshell_command_mode = \"warn\"\n";
+        let padded = format!("{secure}#{}\n", "x".repeat(cap));
+
+        std::fs::write(&p, secure).unwrap();
+        assert_eq!(
+            check_write_with(&p, &padded, None, &[]),
+            Ok(()),
+            "step 1: the table is unchanged, so padding is allowed while the file is small"
+        );
+        std::fs::write(&p, &padded).unwrap();
+
+        let small_without_table = "[project]\nname = \"t\"\n";
+        let err = check_write_with(&p, small_without_table, None, &[]).unwrap_err();
+        assert!(err.contains("cannot be read as it is"), "{err}");
+        assert!(err.contains("byte limit"), "names the reason: {err}");
+        assert!(
+            check_write_with(&p, secure, None, &[]).is_err(),
+            "even the same table cannot be shown unchanged against a file that cannot be read"
+        );
+    }
+
+    /// The same for a file that is not a regular file once links are followed.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_regular_file_at_a_protected_path_refuses_every_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = proj(&dir);
+        crate::util::fs::special_file_fixtures::make_fifo(&fifo);
+        let small = "[project]\nname = \"t\"\n";
+        let err = crate::util::fs::special_file_fixtures::within_deadline(
+            "check_write_with on a FIFO",
+            move || check_write_with(&fifo, small, None, &[]),
+        )
+        .unwrap_err();
+        assert!(err.contains("not a regular file"), "{err}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let p = proj(&dir);
+        let real = dir.path().join("a-dir");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &p).unwrap();
+        assert!(check_write_with(&p, small, None, &[]).is_err());
+    }
+
+    /// The write guard reads the file as it is now. A FIFO there used to hang the write; a file
+    /// that is there but cannot be read as it is, is an `Err` (the write is refused), not an
+    /// empty "before"; absent, dangling and non-UTF-8 stay empty; a link to a regular file is
+    /// still read.
     #[cfg(unix)]
     #[test]
     fn a_fifo_or_a_directory_on_disk_is_an_unreadable_before_and_never_a_hang() {
@@ -395,22 +476,34 @@ mod tests {
         let got = within_deadline("security_on_disk on a FIFO", move || {
             security_on_disk(&fifo)
         });
-        assert_eq!(got, None);
+        assert!(got.unwrap_err().contains("not a regular file"));
 
         let real = dir.path().join("a-dir");
         std::fs::create_dir(&real).unwrap();
         let link = dir.path().join("dir-link.toml");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert_eq!(security_on_disk(&link), None);
+        assert!(security_on_disk(&link).is_err());
 
         let file = dir.path().join("ok.toml");
         std::fs::write(&file, "[security]\nshell_command_mode = \"warn\"\n").unwrap();
         let linked = dir.path().join("ok-link.toml");
         std::os::unix::fs::symlink(&file, &linked).unwrap();
         assert!(
-            security_on_disk(&linked).is_some(),
+            matches!(security_on_disk(&linked), Ok(Some(_))),
             "a link to a regular file is still read"
         );
+
+        assert_eq!(security_on_disk(&dir.path().join("absent.toml")), Ok(None));
+        let dangling = dir.path().join("dangling.toml");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &dangling).unwrap();
+        assert_eq!(
+            security_on_disk(&dangling),
+            Ok(None),
+            "a dangling link is absent"
+        );
+        let binary = dir.path().join("binary.toml");
+        std::fs::write(&binary, [0xffu8, 0xfe]).unwrap();
+        assert_eq!(security_on_disk(&binary), Ok(None), "not UTF-8 is not TOML");
     }
 
     /// The global config is guarded wherever the caller says it lives, including through a
