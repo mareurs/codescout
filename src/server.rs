@@ -431,7 +431,10 @@ impl CodeScoutServer {
             );
         }
         #[cfg(feature = "librarian")]
-        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
+        if librarian_enabled_at_runtime(
+            std::env::var("LIBRARIAN_ENABLED").ok().as_deref(),
+            status.as_ref().map(|s| s.path.as_str()),
+        ) {
             if let Some(lib_ctx) =
                 crate::librarian::try_build_runtime_with(lsp.clone(), &env.librarian).await
             {
@@ -2095,6 +2098,65 @@ mod project_toml_enabled_tests {
         );
         assert!(!peer_enabled_at_runtime(None, Some(&root(&dir))));
     }
+
+    /// `librarian_enabled_at_runtime` itself, through all of its layers: a FIFO or a link to one at
+    /// `project.toml` leaves the default (enabled) and does not hang; an ordinary file sets it;
+    /// the env override wins over the file; one byte over the limit is ignored (the padding is
+    /// whitespace, so a plain read would honour `enabled = false`).
+    #[cfg(feature = "librarian")]
+    #[test]
+    fn librarian_enabled_at_runtime_reads_project_toml_bounded_and_keeps_its_layers() {
+        for linked in [false, true] {
+            let dir = project_with(None);
+            let file = dir.path().join(".codescout/project.toml");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &file).unwrap();
+            } else {
+                make_fifo(&file);
+            }
+            let r = root(&dir);
+            let got = within_deadline("librarian_enabled_at_runtime on a FIFO", move || {
+                let _keep = dir;
+                librarian_enabled_at_runtime(None, Some(&r))
+            });
+            assert!(got, "the default is enabled, linked={linked}");
+        }
+
+        let off = "[librarian]\nenabled = false\n";
+        let dir = project_with(Some(off));
+        let r = root(&dir);
+        assert!(
+            !librarian_enabled_at_runtime(None, Some(&r)),
+            "file sets it"
+        );
+        assert!(
+            librarian_enabled_at_runtime(Some("on"), Some(&r)),
+            "env on wins"
+        );
+        assert!(
+            !librarian_enabled_at_runtime(Some("0"), None),
+            "env off wins"
+        );
+        assert!(
+            !librarian_enabled_at_runtime(Some("banana"), Some(&r)),
+            "junk env falls to file"
+        );
+        assert!(librarian_enabled_at_runtime(None, None), "default");
+
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let dir = project_with(Some(&format!("{off}{}", " ".repeat(limit - off.len()))));
+        assert!(
+            !librarian_enabled_at_runtime(None, Some(&root(&dir))),
+            "at the limit"
+        );
+        let dir = project_with(Some(&format!("{off}{}", " ".repeat(limit + 1 - off.len()))));
+        assert!(
+            librarian_enabled_at_runtime(None, Some(&root(&dir))),
+            "over the limit"
+        );
+    }
 }
 
 /// `[<section>] enabled = true|false` from `<root>/.codescout/project.toml`, or `None` when the
@@ -2122,9 +2184,13 @@ fn project_toml_enabled(root: &str, section: &str) -> Option<bool> {
 /// 2. `LIBRARIAN_ENABLED=1|true|on` env var enables (overrides config).
 /// 3. `[librarian] enabled = true|false` in `<project>/.codescout/project.toml`.
 /// 4. Default: enabled (set `LIBRARIAN_ENABLED=0` or `[librarian] enabled = false` to opt out).
+///
+/// `env_override` is the value of `LIBRARIAN_ENABLED`; the one production caller reads the
+/// variable and passes it, so the layers behave as before and a test can supply the value
+/// without touching the process environment (as for [`peer_enabled_at_runtime`]).
 #[cfg(feature = "librarian")]
-fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
-    if let Ok(v) = std::env::var("LIBRARIAN_ENABLED") {
+fn librarian_enabled_at_runtime(env_override: Option<&str>, project_path: Option<&str>) -> bool {
+    if let Some(v) = env_override {
         let v = v.trim().to_ascii_lowercase();
         if matches!(v.as_str(), "0" | "false" | "off" | "no") {
             return false;
