@@ -758,9 +758,7 @@ fn load_discover_settings(root: &std::path::Path) -> (usize, Vec<String>) {
 /// `None` collapses "missing" and "unparseable" into one case, as the caller's
 /// fallback always has.
 fn read_discover_settings(root: &std::path::Path) -> Option<(usize, Vec<String>)> {
-    let ws_path = crate::config::workspace::workspace_config_path(root);
-    let content = std::fs::read_to_string(&ws_path).ok()?;
-    let ws = toml::from_str::<crate::config::workspace::WorkspaceConfig>(&content).ok()?;
+    let ws = crate::config::workspace::load_workspace_config(root)?;
     Some((ws.workspace.discovery_max_depth, ws.exclude_projects))
 }
 
@@ -2021,9 +2019,7 @@ impl Agent {
             return None;
         }
         let ws_cfg: Option<crate::config::workspace::WorkspaceConfig> =
-            std::fs::read_to_string(crate::config::workspace::workspace_config_path(&ws.root))
-                .ok()
-                .and_then(|s| toml::from_str(&s).ok());
+            crate::config::workspace::load_workspace_config(&ws.root);
 
         let summaries = ws
             .projects

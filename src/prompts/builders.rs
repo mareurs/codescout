@@ -360,27 +360,22 @@ pub(crate) fn build_system_prompt_draft(
 
         // Load depends_on from workspace.toml if available
         if let Some(root) = project_root {
-            let ws_path = crate::config::workspace::workspace_config_path(root);
-            if let Ok(content) = std::fs::read_to_string(&ws_path) {
-                if let Ok(ws) =
-                    toml::from_str::<crate::config::workspace::WorkspaceConfig>(&content)
-                {
-                    let deps: Vec<_> = ws
-                        .projects
-                        .iter()
-                        .filter(|p| !p.depends_on.is_empty())
-                        .collect();
-                    if !deps.is_empty() {
-                        draft.push_str("**Cross-project dependencies:**\n");
-                        for p in deps {
-                            draft.push_str(&format!(
-                                "- {} depends on {}\n",
-                                p.id,
-                                p.depends_on.join(", "),
-                            ));
-                        }
-                        draft.push('\n');
+            if let Some(ws) = crate::config::workspace::load_workspace_config(root) {
+                let deps: Vec<_> = ws
+                    .projects
+                    .iter()
+                    .filter(|p| !p.depends_on.is_empty())
+                    .collect();
+                if !deps.is_empty() {
+                    draft.push_str("**Cross-project dependencies:**\n");
+                    for p in deps {
+                        draft.push_str(&format!(
+                            "- {} depends on {}\n",
+                            p.id,
+                            p.depends_on.join(", "),
+                        ));
                     }
+                    draft.push('\n');
                 }
             }
         }
@@ -1099,5 +1094,57 @@ mod route_path_tests {
                 "{root:?}: {rest:.80}"
             );
         }
+    }
+}
+
+/// `build_system_prompt_draft` reads `workspace.toml` for the dependency table; the file is
+/// repository content, so a FIFO there must not hold the onboarding call.
+#[cfg(all(test, unix))]
+mod workspace_toml_read_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    fn two_projects() -> Vec<crate::workspace::DiscoveredProject> {
+        ["api", "web"]
+            .iter()
+            .map(|id| crate::workspace::DiscoveredProject {
+                id: (*id).to_string(),
+                relative_root: std::path::PathBuf::from(id),
+                languages: vec!["rust".to_string()],
+                manifest: None,
+            })
+            .collect()
+    }
+
+    fn draft(root: std::path::PathBuf) -> String {
+        build_system_prompt_draft(&[], &[], Some(&root), Some(&two_projects()), &[])
+    }
+
+    #[test]
+    fn a_fifo_workspace_toml_does_not_hold_the_draft_and_a_regular_one_still_adds_dependencies() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let ws = crate::config::workspace::workspace_config_path(dir.path());
+
+        std::fs::write(
+            &ws,
+            "[workspace]\nname = \"w\"\n[[project]]\nid = \"web\"\nroot = \"web\"\ndepends_on = [\"api\"]\n",
+        )
+        .unwrap();
+        let with_deps = draft(dir.path().to_path_buf());
+        assert!(
+            with_deps.contains("web depends on api"),
+            "control: a readable workspace.toml adds the table"
+        );
+        std::fs::remove_file(&ws).unwrap();
+
+        make_fifo(&ws);
+        let root = dir.path().to_path_buf();
+        let got = within_deadline(
+            "build_system_prompt_draft on a FIFO workspace.toml",
+            move || draft(root),
+        );
+        assert!(got.contains("## Workspace Projects"), "{got}");
+        assert!(!got.contains("Cross-project dependencies"), "{got}");
     }
 }

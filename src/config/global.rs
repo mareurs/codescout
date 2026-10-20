@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -187,6 +187,47 @@ fn record_dotenv_injected(keys: std::collections::BTreeSet<String>) {
     let _ = DOTENV_INJECTED.set(keys);
 }
 
+/// The `KEY=value` pairs of the startup dotenv at `path`, or `None` (with a warning) when it
+/// cannot be read. Split out of [`load_startup_env`] so the read can be tested without
+/// touching the process environment.
+fn read_dotenv_pairs(path: &std::path::Path) -> Option<Vec<(String, String)>> {
+    match crate::util::fs::read_regular_config_bytes(path) {
+        Ok(bytes) => Some(
+            dotenvy::from_read_iter(bytes.as_slice())
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>(),
+        ),
+        Err(e) => {
+            tracing::warn!("failed to load startup env from {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// Everything [`load_startup_env`] does before it touches the environment: decide which dotenv
+/// to load ([`plan_startup_env`]), warn about a missing explicit one, and read the one chosen
+/// as a bounded regular file ([`read_dotenv_pairs`]). `None` when there is nothing to apply.
+/// The path and the pairs come back; the process environment is not read or written, which is
+/// what lets a test drive the real decision and the real read with a FIFO in place.
+fn read_startup_env(
+    explicit: Option<PathBuf>,
+    default: Option<PathBuf>,
+) -> Option<(PathBuf, Vec<(String, String)>)> {
+    let path = match plan_startup_env(explicit, default, |p| p.exists()) {
+        StartupEnvPlan::Load(p) => p,
+        StartupEnvPlan::WarnMissingExplicit(p) => {
+            tracing::warn!(
+                "CODESCOUT_ENV_FILE set to {} but the file was not found",
+                p.display()
+            );
+            return None;
+        }
+        StartupEnvPlan::Nothing => return None,
+    };
+    let pairs = read_dotenv_pairs(&path)?;
+    Some((path, pairs))
+}
+
 /// Load a startup dotenv into the process environment before config resolution.
 ///
 /// Path: `$CODESCOUT_ENV_FILE` if set, else [`global_env_path`]. An explicit process
@@ -200,29 +241,11 @@ fn record_dotenv_injected(keys: std::collections::BTreeSet<String>) {
 /// logic lives in [`plan_startup_env`] / [`startup_env_assignments`] so it can be
 /// tested without a `set_var` anywhere near a parallel test runner.
 pub fn load_startup_env() {
-    let plan = plan_startup_env(
+    let Some((path, pairs)) = read_startup_env(
         std::env::var_os("CODESCOUT_ENV_FILE").map(PathBuf::from),
         global_env_path(),
-        |p| p.exists(),
-    );
-    let path = match plan {
-        StartupEnvPlan::Load(p) => p,
-        StartupEnvPlan::WarnMissingExplicit(p) => {
-            tracing::warn!(
-                "CODESCOUT_ENV_FILE set to {} but the file was not found",
-                p.display()
-            );
-            return;
-        }
-        StartupEnvPlan::Nothing => return,
-    };
-
-    let pairs = match dotenvy::from_path_iter(&path) {
-        Ok(iter) => iter.filter_map(|r| r.ok()).collect::<Vec<_>>(),
-        Err(e) => {
-            tracing::warn!("failed to load startup env from {}: {e}", path.display());
-            return;
-        }
+    ) else {
+        return;
     };
     // Compute the assignments once, then record WHICH keys they were before applying
     // them. The list is exactly what distinguishes a dotenv-injected value from an
@@ -247,26 +270,18 @@ impl GlobalConfig {
         let path = config_dir.join("config.toml");
         // Race-tolerant: under parallel test runs another tempdir may delete
         // the path between an exists()-check and a subsequent read. Always
-        // attempt the I/O and treat ENOENT as Ok(None) at each step.
-        let metadata = match std::fs::metadata(&path) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => {
-                return Err(e).with_context(|| format!("reading global config {}", path.display()));
-            }
-        };
-        if metadata.len() > 1024 * 1024 {
-            anyhow::bail!(
-                "global config {} exceeds 1 MiB limit ({} bytes)",
-                path.display(),
-                metadata.len()
-            );
-        }
-        let text = match std::fs::read_to_string(&path) {
+        // attempt the I/O and treat ENOENT as Ok(None).
+        //
+        // One bounded read of a regular file (following links): the global config can be a
+        // link, and a link to a FIFO or `/dev/zero` must be refused, not read.
+        let text = match crate::util::fs::read_regular_config_text(&path) {
             Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.is_not_found() => return Ok(None),
             Err(e) => {
-                return Err(e).with_context(|| format!("reading global config {}", path.display()));
+                return Err(anyhow::anyhow!(
+                    "reading global config {}: {e}",
+                    path.display()
+                ));
             }
         };
         let config: GlobalConfig = toml::from_str(&text).map_err(|e| {
@@ -440,6 +455,170 @@ mod tests {
             msg.contains("config.toml"),
             "error should mention file path: {msg}"
         );
+    }
+
+    // --- the global config may be a link, and a link can point at anything ---
+
+    /// A `config.toml` that is a FIFO: the old loader's length check read 0 and the read then
+    /// blocked for ever. Now it is an error naming the file, with nothing from inside it.
+    #[cfg(unix)]
+    #[test]
+    fn a_global_config_that_is_a_fifo_is_refused_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        crate::util::fs::special_file_fixtures::make_fifo(&path);
+        let root = dir.path().to_path_buf();
+        let err = crate::util::fs::special_file_fixtures::within_deadline(
+            "GlobalConfig::load_from_dir on a FIFO",
+            move || GlobalConfig::load_from_dir(&root),
+        )
+        .unwrap_err();
+        let shown = format!("{err:#}");
+        assert!(shown.contains("config.toml"), "names the file: {shown}");
+        assert!(shown.contains("not a regular file"), "says why: {shown}");
+    }
+
+    /// A link to a directory and a directory in place of the file are both refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_global_config_that_is_a_link_to_a_directory_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("elsewhere");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("config.toml")).unwrap();
+        let err = GlobalConfig::load_from_dir(dir.path()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not a regular file"),
+            "got: {err:#}"
+        );
+    }
+
+    /// Over 1 MiB is refused whole, by length and (see `util::fs`) by bytes read.
+    #[test]
+    fn a_global_config_over_the_cap_is_refused_and_one_at_the_cap_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&path, format!("{}\n", "#".repeat(cap))).unwrap();
+        let err = GlobalConfig::load_from_dir(dir.path()).unwrap_err();
+        assert!(format!("{err:#}").contains("exceeds"), "got: {err:#}");
+        std::fs::write(&path, "#".repeat(cap)).unwrap();
+        assert!(GlobalConfig::load_from_dir(dir.path()).unwrap().is_some());
+    }
+
+    /// An allowed layout: the config kept elsewhere and linked in.
+    #[cfg(unix)]
+    #[test]
+    fn a_global_config_that_is_a_link_to_a_regular_file_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles-config.toml");
+        std::fs::write(&real, "[embeddings]\nmodel = \"local:BGESmallENV15\"\n").unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("config.toml")).unwrap();
+        let cfg = GlobalConfig::load_from_dir(dir.path()).unwrap().unwrap();
+        assert_eq!(cfg.embeddings.model.as_deref(), Some("local:BGESmallENV15"));
+    }
+
+    /// The text a caller gets from `{e}` (not `{e:#}`) says WHY, not only which file: callers
+    /// such as the embedding-config loader print `{e}`. Never any content of the file.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_global_config_says_why_in_the_top_level_message_and_quotes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&path, format!("# SECRET_MARKER_QX7\n{}", "#".repeat(cap))).unwrap();
+        let shown = GlobalConfig::load_from_dir(dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("config.toml"), "{shown}");
+        assert!(shown.contains("exceeds the 1048576 byte limit"), "{shown}");
+        assert!(!shown.contains("SECRET_MARKER_QX7"), "{shown}");
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let shown = GlobalConfig::load_from_dir(dir.path())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("not a regular file"), "{shown}");
+    }
+
+    /// The startup dotenv is read like a config file: bounded, regular files only. A FIFO used
+    /// to hold startup before any config was resolved.
+    #[cfg(unix)]
+    #[test]
+    fn the_startup_dotenv_read_refuses_a_special_file_and_reads_a_regular_one() {
+        use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+        let dir = tempfile::tempdir().unwrap();
+
+        let fifo = dir.path().join("pipe.env");
+        make_fifo(&fifo);
+        let got = within_deadline("read_dotenv_pairs on a FIFO", move || {
+            read_dotenv_pairs(&fifo)
+        });
+        assert_eq!(got, None);
+
+        let real = dir.path().join("real.env");
+        std::fs::write(&real, "ALPHA=1\nBETA=two\n").unwrap();
+        let linked = dir.path().join("linked.env");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        for p in [&real, &linked] {
+            assert_eq!(
+                read_dotenv_pairs(p),
+                Some(vec![
+                    ("ALPHA".to_string(), "1".to_string()),
+                    ("BETA".to_string(), "two".to_string())
+                ]),
+                "{}",
+                p.display()
+            );
+        }
+
+        let big = dir.path().join("big.env");
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&big, format!("A=1\n#{}\n", "x".repeat(cap))).unwrap();
+        assert_eq!(read_dotenv_pairs(&big), None);
+        assert_eq!(read_dotenv_pairs(dir.path()), None, "a directory");
+    }
+
+    /// The decision and the read that `load_startup_env` runs, through the real seam: an explicit
+    /// `$CODESCOUT_ENV_FILE` that is a FIFO (or a link to one) held startup before any config was
+    /// resolved; a regular file, explicit or the default, is still loaded.
+    #[cfg(unix)]
+    #[test]
+    fn the_startup_env_decision_reads_the_chosen_file_bounded() {
+        use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+        let dir = tempfile::tempdir().unwrap();
+
+        let fifo = dir.path().join("pipe.env");
+        make_fifo(&fifo);
+        let linked = dir.path().join("linked-pipe.env");
+        std::os::unix::fs::symlink(&fifo, &linked).unwrap();
+        for explicit in [fifo, linked] {
+            let shown = explicit.display().to_string();
+            let got = within_deadline("read_startup_env on a FIFO", move || {
+                read_startup_env(Some(explicit), None)
+            });
+            assert_eq!(got, None, "explicit {shown}");
+        }
+
+        let real = dir.path().join("real.env");
+        std::fs::write(&real, "ALPHA=1\n").unwrap();
+        let pairs = vec![("ALPHA".to_string(), "1".to_string())];
+        assert_eq!(
+            read_startup_env(Some(real.clone()), None),
+            Some((real.clone(), pairs.clone())),
+            "explicit regular file"
+        );
+        assert_eq!(
+            read_startup_env(None, Some(real.clone())),
+            Some((real.clone(), pairs)),
+            "default regular file"
+        );
+        assert_eq!(
+            read_startup_env(Some(dir.path().join("absent.env")), None),
+            None
+        );
+        assert_eq!(read_startup_env(None, None), None);
     }
 
     #[test]

@@ -426,6 +426,71 @@ fn the_real_loader_failures_become_the_marker_and_quote_nothing() {
     }
 }
 
+/// A `project.toml` that is a FIFO or a link to a directory is not silently defaulted: the real
+/// loader refuses it and `load_project_config` marks it `ConfigLoadFailed` for the project's own
+/// file, which is what the pin refusal and the failed-reload notice are built from. On the old
+/// loader the FIFO case never returned at all.
+#[cfg(unix)]
+#[test]
+fn a_special_file_as_project_toml_becomes_the_marker_not_a_hang_or_a_default() {
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+    for label in ["fifo", "link to a directory"] {
+        let host = tempdir().unwrap();
+        let root = std::fs::canonicalize(host.path()).unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let file = root.join(".codescout/project.toml");
+        if label == "fifo" {
+            make_fifo(&file);
+        } else {
+            let real = root.join("a-directory");
+            std::fs::create_dir(&real).unwrap();
+            std::os::unix::fs::symlink(&real, &file).unwrap();
+        }
+        let r = root.clone();
+        let err = within_deadline(label, move || load_project_config(&r)).unwrap_err();
+        let failure =
+            config_load_failure(&err).unwrap_or_else(|| panic!("{label}: not the marker: {err:#}"));
+        assert!(!failure.global, "{label}: the project's file failed");
+        assert_eq!(failure.path, file, "{label}");
+        assert!(
+            format!("{failure}").contains("could not be loaded"),
+            "{label}: got: {failure}"
+        );
+    }
+}
+
+/// `workspace.toml` is repository content: a FIFO there (or a link to one) must not hold
+/// activation, and a link to a regular file must still be read.
+#[cfg(unix)]
+#[test]
+fn read_discover_settings_refuses_a_special_file_and_reads_a_linked_regular_one() {
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+    let host = tempdir().unwrap();
+    let root = std::fs::canonicalize(host.path()).unwrap();
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    let ws = crate::config::workspace::workspace_config_path(&root);
+
+    make_fifo(&ws);
+    let r = root.clone();
+    let got = within_deadline("read_discover_settings on a FIFO", move || {
+        read_discover_settings(&r)
+    });
+    assert_eq!(got, None);
+    std::fs::remove_file(&ws).unwrap();
+
+    let real = root.join("shared-workspace.toml");
+    std::fs::write(
+        &real,
+        "exclude_projects = [\"node_modules\"]\n[workspace]\nname = \"w\"\ndiscovery_max_depth = 5\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&real, &ws).unwrap();
+    assert_eq!(
+        read_discover_settings(&root),
+        Some((5, vec!["node_modules".to_string()]))
+    );
+}
+
 /// L3 for the mapper: the pin, and the text of a non-config failure, are echoed bounded and
 /// escaped, like every other echo of caller-supplied text.
 #[test]

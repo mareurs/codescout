@@ -495,19 +495,18 @@ impl SecuritySection {
 impl ProjectConfig {
     /// `project.toml` as a bare TOML table, for the failed-reload salvage in
     /// [`SecuritySection::tighten_for_unloadable_file`]. A missing file is an empty table;
-    /// `None` is a file that exists but cannot be read, is over the same 1 MiB cap the
-    /// loader enforces, or is not TOML.
+    /// `None` is a file that exists but cannot be read, is not a regular file (a FIFO, a device,
+    /// a directory, once links are followed), is over the same 1 MiB cap the loader enforces,
+    /// or is not TOML.
     pub(crate) fn read_project_toml_table(root: &Path) -> Option<toml::Table> {
         let path = root.join(".codescout").join("project.toml");
-        let metadata = match std::fs::metadata(&path) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(toml::Table::new()),
-            Err(_) => return None,
-        };
-        if metadata.len() > 1024 * 1024 {
-            return None;
+        match crate::util::fs::read_regular_config_text(&path) {
+            Ok(text) => toml::from_str(&text).ok(),
+            Err(e) if e.is_not_found() => Some(toml::Table::new()),
+            // A non-regular file (FIFO, device, directory), one over the cap, an unreadable
+            // one: all "exists but cannot be read", the same as the loader refusing it.
+            Err(_) => None,
         }
-        toml::from_str(&std::fs::read_to_string(&path).ok()?).ok()
     }
 }
 
@@ -869,14 +868,12 @@ impl ProjectConfig {
         let config_path = root.join(".codescout").join("project.toml");
 
         let project_overlay: toml::Value = if config_path.exists() {
-            let metadata = std::fs::metadata(&config_path)?;
-            if metadata.len() > 1024 * 1024 {
-                anyhow::bail!(
-                    "project.toml exceeds 1 MiB limit ({} bytes)",
-                    metadata.len()
-                );
-            }
-            let text = std::fs::read_to_string(&config_path)?;
+            // Regular files only, bounded by the bytes read: `project.toml` is repository
+            // content, so it can be a link to a FIFO or to `/dev/zero`. The reason is IN the
+            // message, not behind a context layer that `{e}` does not print: callers format
+            // it that way. It names the file and the reason, never what is in it.
+            let text = crate::util::fs::read_regular_config_text(&config_path)
+                .map_err(|e| anyhow::anyhow!("reading {}: {e}", config_path.display()))?;
             toml::from_str(&text).map_err(|e| {
                 anyhow::anyhow!(
                     "parsing {}: {}",
@@ -1172,6 +1169,128 @@ mod tests {
             None,
             "an unreadable path is not an empty file"
         );
+    }
+
+    // --- project.toml is repository content: it can be a link to anything readable ---
+
+    /// A tempdir holding `.codescout/`, and the path `project.toml` would have in it.
+    fn project_with_codescout_dir() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let file = dir.path().join(".codescout").join("project.toml");
+        (dir, file)
+    }
+
+    fn empty_global() -> toml::Value {
+        toml::Value::Table(toml::map::Map::new())
+    }
+
+    /// `project.toml` as a FIFO nobody writes to. The old loader read length 0, passed the
+    /// size check and blocked in `read_to_string` for ever; both entry points now refuse it:
+    /// the loader with an error that names the file and the reason, the salvage with `None`.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_toml_that_is_a_fifo_is_refused_by_the_loader_and_the_salvage() {
+        use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+        let (dir, file) = project_with_codescout_dir();
+        make_fifo(&file);
+        let root = dir.path().to_path_buf();
+
+        let r = root.clone();
+        let err = within_deadline(
+            "ProjectConfig::load_with_global_base on a FIFO",
+            move || ProjectConfig::load_with_global_base(&r, empty_global()),
+        )
+        .unwrap_err();
+        let shown = format!("{err:#}");
+        assert!(shown.contains("project.toml"), "names the file: {shown}");
+        assert!(shown.contains("not a regular file"), "says why: {shown}");
+
+        let table = within_deadline("read_project_toml_table on a FIFO", move || {
+            ProjectConfig::read_project_toml_table(&root)
+        });
+        assert_eq!(table, None, "a FIFO is unreadable, not an empty file");
+    }
+
+    /// A link to a directory (and a link to a character device) is followed and then refused.
+    /// `/dev/null` stands in for the endless `/dev/zero`: the type check refuses both before any
+    /// read, and the shipped code is never pointed at an endless source here.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_toml_that_links_to_a_directory_or_a_device_is_refused() {
+        let elsewhere = tempfile::tempdir().unwrap();
+        for target in [elsewhere.path(), std::path::Path::new("/dev/null")] {
+            let (dir, file) = project_with_codescout_dir();
+            std::os::unix::fs::symlink(target, &file).unwrap();
+            let err = ProjectConfig::load_with_global_base(dir.path(), empty_global()).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("not a regular file"),
+                "{}: {err:#}",
+                target.display()
+            );
+            assert_eq!(
+                ProjectConfig::read_project_toml_table(dir.path()),
+                None,
+                "{}",
+                target.display()
+            );
+        }
+    }
+
+    /// Over the cap is refused by the loader whatever the file claims; exactly at the cap loads.
+    #[test]
+    fn a_project_toml_over_the_cap_is_refused_and_one_at_the_cap_loads() {
+        let (dir, file) = project_with_codescout_dir();
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(
+            &file,
+            format!("[project]\nname = \"p\"\n#{}\n", "x".repeat(cap)),
+        )
+        .unwrap();
+        let err = ProjectConfig::load_with_global_base(dir.path(), empty_global()).unwrap_err();
+        assert!(format!("{err:#}").contains("exceeds"), "got: {err:#}");
+
+        let head = "[project]\nname = \"p\"\n#";
+        std::fs::write(&file, format!("{head}{}", "x".repeat(cap - head.len()))).unwrap();
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty_global()).unwrap();
+        assert_eq!(cfg.project.name, "p");
+    }
+
+    /// An allowed layout, unchanged: `project.toml` kept elsewhere and linked in.
+    #[cfg(unix)]
+    #[test]
+    fn a_project_toml_that_links_to_a_regular_file_still_loads() {
+        let (dir, file) = project_with_codescout_dir();
+        let real = dir.path().join("shared-project.toml");
+        std::fs::write(&real, "[project]\nname = \"linked\"\n").unwrap();
+        std::os::unix::fs::symlink(&real, &file).unwrap();
+        let cfg = ProjectConfig::load_with_global_base(dir.path(), empty_global()).unwrap();
+        assert_eq!(cfg.project.name, "linked");
+        let table = ProjectConfig::read_project_toml_table(dir.path()).expect("readable");
+        assert_eq!(table["project"]["name"].as_str(), Some("linked"));
+    }
+
+    /// What a caller prints with `{e}` (the embedding-config loader does) says why the file was
+    /// refused and names it, and never quotes it.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_project_toml_says_why_in_the_top_level_message_and_quotes_nothing() {
+        let (dir, file) = project_with_codescout_dir();
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&file, format!("# SECRET_MARKER_QX7\n{}", "#".repeat(cap))).unwrap();
+        let shown = ProjectConfig::load_with_global_base(dir.path(), empty_global())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("project.toml"), "{shown}");
+        assert!(shown.contains("exceeds the 1048576 byte limit"), "{shown}");
+        assert!(!shown.contains("SECRET_MARKER_QX7"), "{shown}");
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        let shown = ProjectConfig::load_with_global_base(dir.path(), empty_global())
+            .unwrap_err()
+            .to_string();
+        assert!(shown.contains("not a regular file"), "{shown}");
     }
 
     /// `PathSecurityConfig::default()` is the STANDARD policy, whatever a repository says.

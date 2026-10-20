@@ -60,6 +60,17 @@ pub fn workspace_config_path(root: &std::path::Path) -> std::path::PathBuf {
     root.join(".codescout").join("workspace.toml")
 }
 
+/// The project's `.codescout/workspace.toml`, or `None` when it is absent, cannot be read, or
+/// is not a valid workspace config (every caller treats those alike and falls back).
+///
+/// The file is repository content and can be a link to anything, so it is read as a bounded
+/// regular file ([`crate::util::fs::read_regular_config_text`]): a FIFO or a device is `None`
+/// and cannot hold the caller.
+pub fn load_workspace_config(root: &std::path::Path) -> Option<WorkspaceConfig> {
+    let text = crate::util::fs::read_regular_config_text(&workspace_config_path(root)).ok()?;
+    toml::from_str(&text).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

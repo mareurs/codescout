@@ -459,19 +459,8 @@ impl CodeScoutServer {
         // docs/issues/archive/2026-06-14-get-guide-reinjects-on-mcp-restart.md and
         // memory `claude-code-mcp-env`.
         let guide_project_root = agent.project_root().await;
-        let cc_session_id = env
-            .cc_session_id
-            .clone()
-            .or_else(|| {
-                guide_project_root
-                    .as_ref()
-                    .and_then(|r| {
-                        std::fs::read_to_string(r.join(".codescout").join("cc_session_id")).ok()
-                    })
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-            })
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let cc_session_id =
+            resolve_cc_session_id(env.cc_session_id.clone(), guide_project_root.as_deref());
         // The ledger's key is resolved separately from the usage-correlation id
         // above: usage tolerates a collision between two windows on one repo,
         // the ledger does not. See the plan's Ruling 3 and spec §1.
@@ -1882,6 +1871,142 @@ pub(crate) fn server_output_buffer() -> crate::tools::output_buffer::OutputBuffe
         50,
         crate::tools::output_buffer::MAX_POOL_BYTES,
     )
+}
+
+/// The most bytes `.codescout/cc_session_id` may hold. A session id is a UUID (36 bytes); a file
+/// longer than a few KiB is not one, and is refused rather than read.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+const MAX_SESSION_ID_FILE_BYTES: u64 = 4096;
+
+/// The Claude Code session id the companion plugin left in `<root>/.codescout/cc_session_id`, or
+/// `None`. Used only when no session id is in the environment.
+///
+/// The file is inside the repository, so it can be a link to anything readable: a FIFO held
+/// startup, and a link to `/dev/stdin` made the server take the client's `initialize` request
+/// for a session id. It is read like a config file, as a bounded regular file.
+fn read_cc_session_id(root: &std::path::Path) -> Option<String> {
+    crate::util::fs::read_regular_text(
+        &root.join(".codescout").join("cc_session_id"),
+        MAX_SESSION_ID_FILE_BYTES,
+    )
+    .ok()
+}
+
+/// The Claude Code session id the server uses as its guide-ledger key, in the order the
+/// constructor documents: the one from the environment, else the companion's
+/// `<root>/.codescout/cc_session_id` (trimmed, non-empty, read as a bounded regular file), else
+/// a random uuid. Split out of the constructor so the file leg is tested through the real
+/// resolution and not only through [`read_cc_session_id`].
+fn resolve_cc_session_id(from_env: Option<String>, root: Option<&std::path::Path>) -> String {
+    from_env
+        .or_else(|| {
+            root.and_then(read_cc_session_id)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
+#[cfg(all(test, unix))]
+mod cc_session_id_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    fn with_codescout_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        dir
+    }
+
+    /// A FIFO held startup for 20 s; a link to a FIFO the same.
+    #[test]
+    fn a_fifo_or_a_link_to_one_is_no_session_id_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = with_codescout_dir();
+            let file = dir.path().join(".codescout").join("cc_session_id");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &file).unwrap();
+            } else {
+                make_fifo(&file);
+            }
+            let root = dir.path().to_path_buf();
+            let got = within_deadline("read_cc_session_id on a FIFO", move || {
+                read_cc_session_id(&root)
+            });
+            assert_eq!(got, None, "linked={linked}");
+        }
+    }
+
+    /// `/dev/stdin` was read as the session id: the server took the client's first request for
+    /// it. A character device is not a regular file, so it is no session id.
+    #[test]
+    fn a_link_to_a_device_is_no_session_id() {
+        let dir = with_codescout_dir();
+        std::os::unix::fs::symlink(
+            "/dev/null",
+            dir.path().join(".codescout").join("cc_session_id"),
+        )
+        .unwrap();
+        assert_eq!(read_cc_session_id(dir.path()), None);
+    }
+
+    #[test]
+    fn a_regular_file_and_a_link_to_one_are_read_and_an_oversized_one_is_not() {
+        let dir = with_codescout_dir();
+        let file = dir.path().join(".codescout").join("cc_session_id");
+        std::fs::write(&file, "abc-123\n").unwrap();
+        assert_eq!(read_cc_session_id(dir.path()).as_deref(), Some("abc-123\n"));
+
+        std::fs::remove_file(&file).unwrap();
+        let real = dir.path().join("elsewhere");
+        std::fs::write(&real, "linked-id\n").unwrap();
+        std::os::unix::fs::symlink(&real, &file).unwrap();
+        assert_eq!(
+            read_cc_session_id(dir.path()).as_deref(),
+            Some("linked-id\n")
+        );
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(&file, "x".repeat(MAX_SESSION_ID_FILE_BYTES as usize + 1)).unwrap();
+        assert_eq!(read_cc_session_id(dir.path()), None);
+    }
+
+    /// The resolution the constructor runs: a FIFO or a `/dev/null` link at the file leaves a
+    /// fresh uuid (no hang, and not the empty string); a regular file is trimmed and used; the
+    /// environment value wins over the file.
+    #[test]
+    fn the_resolution_never_hangs_on_a_special_file_and_still_uses_a_regular_one() {
+        let dir = with_codescout_dir();
+        let file = dir.path().join(".codescout").join("cc_session_id");
+        let root = dir.path().to_path_buf();
+        make_fifo(&file);
+        let r = root.clone();
+        let id = within_deadline("resolve_cc_session_id on a FIFO", move || {
+            resolve_cc_session_id(None, Some(&r))
+        });
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "a fresh uuid, got {id:?}"
+        );
+
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &file).unwrap();
+        let id = resolve_cc_session_id(None, Some(&root));
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "a fresh uuid, got {id:?}"
+        );
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(&file, "  abc-123 \n").unwrap();
+        assert_eq!(resolve_cc_session_id(None, Some(&root)), "abc-123");
+        assert_eq!(
+            resolve_cc_session_id(Some("from-env".into()), Some(&root)),
+            "from-env"
+        );
+    }
 }
 
 /// Whether to register the embedded librarian tool surface for this session.
