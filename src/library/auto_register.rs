@@ -72,14 +72,30 @@ pub async fn auto_register_deps(project_root: &Path, ctx: &ToolContext) -> Vec<R
 
 // ── Rust (Cargo) ────────────────────────────────────────────────────────────
 
+/// Read one of the project root's manifests as text, or `None` when it cannot be used. The
+/// manifests are repository content, so a name can be a committed link to a FIFO or a device (or
+/// a directory) and a plain read would hold the activation or fill memory: the read is a bounded
+/// regular-file read ([`crate::util::fs::read_regular_config_text`]). Absent, not UTF-8, not a
+/// regular file and over the byte limit are all the same answer, "skip this manifest", as an
+/// absent manifest always was; the reason (never the content) is logged at debug.
+fn read_manifest(path: &Path) -> Option<String> {
+    match crate::util::fs::read_regular_config_text(path) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            if !e.is_not_found() {
+                tracing::debug!("manifest {} skipped: {e}", path.display());
+            }
+            None
+        }
+    }
+}
+
 fn collect_cargo_deps(
     project_root: &Path,
     out: &mut Vec<(DiscoveredDep, String, Option<PathBuf>)>,
 ) {
-    let cargo_toml = project_root.join("Cargo.toml");
-    let content = match std::fs::read_to_string(&cargo_toml) {
-        Ok(s) => s,
-        Err(_) => return,
+    let Some(content) = read_manifest(&project_root.join("Cargo.toml")) else {
+        return;
     };
     let deps = parse_cargo_deps(&content);
     if deps.is_empty() {
@@ -238,10 +254,8 @@ fn detect_node_language(pkg_dir: &Path) -> &'static str {
 }
 
 fn collect_node_deps(project_root: &Path, out: &mut Vec<(DiscoveredDep, String, Option<PathBuf>)>) {
-    let pkg_json = project_root.join("package.json");
-    let content = match std::fs::read_to_string(&pkg_json) {
-        Ok(s) => s,
-        Err(_) => return,
+    let Some(content) = read_manifest(&project_root.join("package.json")) else {
+        return;
     };
     let deps = parse_node_deps(&content);
     for dep in deps {
@@ -404,14 +418,14 @@ fn collect_python_deps(
     let requirements = project_root.join("requirements.txt");
 
     let deps = if pyproject.exists() {
-        match std::fs::read_to_string(&pyproject) {
-            Ok(s) => parse_python_deps_pyproject(&s),
-            Err(_) => vec![],
+        match read_manifest(&pyproject) {
+            Some(s) => parse_python_deps_pyproject(&s),
+            None => vec![],
         }
     } else if requirements.exists() {
-        match std::fs::read_to_string(&requirements) {
-            Ok(s) => parse_python_deps_requirements(&s),
-            Err(_) => vec![],
+        match read_manifest(&requirements) {
+            Some(s) => parse_python_deps_requirements(&s),
+            None => vec![],
         }
     } else {
         return;
@@ -530,10 +544,8 @@ fn go_mod_cache_from(
 }
 
 fn collect_go_deps(project_root: &Path, out: &mut Vec<(DiscoveredDep, String, Option<PathBuf>)>) {
-    let go_mod = project_root.join("go.mod");
-    let content = match std::fs::read_to_string(&go_mod) {
-        Ok(s) => s,
-        Err(_) => return,
+    let Some(content) = read_manifest(&project_root.join("go.mod")) else {
+        return;
     };
     let deps = parse_go_deps(&content);
     if deps.is_empty() {
@@ -637,11 +649,11 @@ fn collect_jvm_deps(project_root: &Path, out: &mut Vec<(DiscoveredDep, String, O
     let language = detect_jvm_language(project_root);
 
     // Try Gradle first, then Maven
-    let deps = if let Ok(content) = std::fs::read_to_string(project_root.join("build.gradle.kts"))
-        .or_else(|_| std::fs::read_to_string(project_root.join("build.gradle")))
+    let deps = if let Some(content) = read_manifest(&project_root.join("build.gradle.kts"))
+        .or_else(|| read_manifest(&project_root.join("build.gradle")))
     {
         parse_gradle_deps(&content)
-    } else if let Ok(content) = std::fs::read_to_string(project_root.join("pom.xml")) {
+    } else if let Some(content) = read_manifest(&project_root.join("pom.xml")) {
         parse_maven_deps(&content)
     } else {
         return;
@@ -1109,5 +1121,207 @@ dependencies {
             !registry_b.exists(),
             "libraries.json must NOT be written to the session-default workspace B"
         );
+    }
+}
+/// The project root's manifests are repository content: a committed link can name a FIFO or a
+/// device, and the activation reads every one of them. These drive the real `collect_*` call
+/// sites with a special file where a manifest belongs.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod bounded_manifest_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    /// Every manifest name the activation reads, with a body that yields one dependency and the
+    /// dependency's name.
+    const MANIFESTS: &[(&str, &str, &str)] = &[
+        (
+            "Cargo.toml",
+            "[package]\nname=\"t\"\n\n[dependencies]\nserde = \"1\"\n",
+            "serde",
+        ),
+        (
+            "package.json",
+            r#"{"dependencies":{"express":"^4.0"}}"#,
+            "express",
+        ),
+        (
+            "pyproject.toml",
+            "[project]\ndependencies = [\n    \"requests>=2.28\",\n]\n",
+            "requests",
+        ),
+        ("requirements.txt", "flask==2.0\n", "flask"),
+        (
+            "go.mod",
+            "module example.com/m\n\ngo 1.21\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.9.1\n)\n",
+            "github.com/gin-gonic/gin",
+        ),
+        (
+            "build.gradle.kts",
+            "dependencies {\n    implementation(\"com.google:guava:32.0\")\n}\n",
+            "guava",
+        ),
+        (
+            "build.gradle",
+            "dependencies {\n    implementation 'com.google:guava:32.0'\n}\n",
+            "guava",
+        ),
+        (
+            "pom.xml",
+            "<dependencies>\n<dependency>\n<groupId>g</groupId>\n<artifactId>jackson-databind</artifactId>\n<version>2.15.0</version>\n</dependency>\n</dependencies>\n",
+            "jackson-databind",
+        ),
+    ];
+
+    /// The Cargo and Go collectors give up before listing anything when no home directory can
+    /// be found; a control for them only means something when there is one.
+    fn collectable(name: &str) -> bool {
+        !matches!(name, "Cargo.toml" | "go.mod") || crate::platform::home_dir().is_some()
+    }
+
+    /// Every dependency name the five collectors find in `root`.
+    fn collected(root: &Path) -> Vec<String> {
+        let mut out = vec![];
+        collect_cargo_deps(root, &mut out);
+        collect_node_deps(root, &mut out);
+        collect_python_deps(root, &mut out);
+        collect_go_deps(root, &mut out);
+        collect_jvm_deps(root, &mut out);
+        out.into_iter().map(|(d, _, _)| d.name).collect()
+    }
+
+    fn collected_in_time(what: &str, root: &Path) -> Vec<String> {
+        let root = root.to_path_buf();
+        within_deadline(what, move || collected(&root))
+    }
+
+    /// A FIFO held the activation; a link to one the same. Both are skipped like an absent
+    /// manifest.
+    #[test]
+    fn a_fifo_or_a_link_to_one_in_place_of_a_manifest_is_skipped_and_never_a_hang() {
+        for (name, _, _) in MANIFESTS {
+            for linked in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join(name);
+                if linked {
+                    let fifo = dir.path().join("elsewhere-pipe");
+                    make_fifo(&fifo);
+                    std::os::unix::fs::symlink(&fifo, &file).unwrap();
+                } else {
+                    make_fifo(&file);
+                }
+                let got = collected_in_time(&format!("collecting with {name} a FIFO"), dir.path());
+                assert!(got.is_empty(), "{name} linked={linked}: {got:?}");
+            }
+        }
+    }
+
+    /// A device is opened (never read) and refused as not a regular file. `/dev/null` and not
+    /// `/dev/zero`: on the unfixed code this reads empty and passes, so it documents the
+    /// refusal and is not a red test; the FIFO test above is.
+    #[test]
+    fn a_link_to_a_device_in_place_of_a_manifest_is_skipped() {
+        for (name, _, _) in MANIFESTS {
+            let dir = tempfile::tempdir().unwrap();
+            std::os::unix::fs::symlink("/dev/null", dir.path().join(name)).unwrap();
+            let got = collected_in_time(&format!("collecting with {name} a device"), dir.path());
+            assert!(got.is_empty(), "{name}: {got:?}");
+        }
+    }
+
+    /// Control: the same manifests as regular files, and as links to regular files, still
+    /// register their dependency.
+    #[test]
+    fn a_regular_manifest_and_a_link_to_one_are_still_read() {
+        for (name, body, dep) in MANIFESTS {
+            if !collectable(name) {
+                continue;
+            }
+            for linked in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join(name);
+                if linked {
+                    let real = dir.path().join("real-manifest");
+                    std::fs::write(&real, body).unwrap();
+                    std::os::unix::fs::symlink(&real, &file).unwrap();
+                } else {
+                    std::fs::write(&file, body).unwrap();
+                }
+                let got = collected_in_time(&format!("collecting {name}"), dir.path());
+                assert!(
+                    got.iter().any(|n| n == dep),
+                    "{name} linked={linked}: expected {dep} in {got:?}"
+                );
+            }
+        }
+    }
+
+    /// The Gradle and Maven fall-through is unchanged: an unusable `build.gradle.kts` still
+    /// leaves `build.gradle`, and two unusable Gradle files still leave `pom.xml`.
+    #[test]
+    fn an_unusable_gradle_file_still_falls_through_to_the_next_manifest() {
+        let gradle = MANIFESTS.iter().find(|m| m.0 == "build.gradle").unwrap();
+        let pom = MANIFESTS.iter().find(|m| m.0 == "pom.xml").unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("build.gradle.kts"));
+        std::fs::write(dir.path().join("build.gradle"), gradle.1).unwrap();
+        let got = collected_in_time("kts FIFO, gradle regular", dir.path());
+        assert!(got.iter().any(|n| n == "guava"), "{got:?}");
+
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("build.gradle.kts"));
+        make_fifo(&dir.path().join("build.gradle"));
+        std::fs::write(dir.path().join("pom.xml"), pom.1).unwrap();
+        let got = collected_in_time("both gradle FIFOs, pom regular", dir.path());
+        assert!(got.iter().any(|n| n == "jackson-databind"), "{got:?}");
+    }
+
+    /// A `pyproject.toml` that is present but unusable still shadows `requirements.txt`, as it
+    /// did when the read failed.
+    #[test]
+    fn an_unusable_pyproject_still_shadows_requirements() {
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("pyproject.toml"));
+        std::fs::write(dir.path().join("requirements.txt"), "flask==2.0\n").unwrap();
+        let got = collected_in_time("pyproject FIFO", dir.path());
+        assert!(got.is_empty(), "{got:?}");
+    }
+
+    /// Missing, empty, invalid UTF-8, a directory and an oversized file are all "no manifest";
+    /// the same file just under the limit is read.
+    #[test]
+    fn missing_empty_invalid_directory_and_oversized_manifests_register_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(collected_in_time("no manifests", dir.path()).is_empty());
+
+        let pad = |n: usize| "x".repeat(n);
+        let json_of_size = |total: usize| {
+            let head = r#"{"dependencies":{"express":"^4.0"},"pad":""#;
+            let tail = r#""}"#;
+            format!("{head}{}{tail}", pad(total - head.len() - tail.len()))
+        };
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), json_of_size(limit)).unwrap();
+        let got = collected_in_time("package.json at the limit", dir.path());
+        assert!(got.iter().any(|n| n == "express"), "control: {got:?}");
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), json_of_size(limit + 1)).unwrap();
+        assert!(collected_in_time("package.json over the limit", dir.path()).is_empty());
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), "").unwrap();
+        assert!(collected_in_time("empty package.json", dir.path()).is_empty());
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), [0xff, 0xfe, 0xfd]).unwrap();
+        assert!(collected_in_time("invalid package.json", dir.path()).is_empty());
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("package.json")).unwrap();
+        assert!(collected_in_time("package.json a directory", dir.path()).is_empty());
     }
 }
