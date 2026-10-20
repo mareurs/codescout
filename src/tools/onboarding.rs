@@ -1785,6 +1785,35 @@ mod bounded_read_tests {
         );
     }
 
+    /// Exactly at the limit is patched; one byte over is refused with the limit named and the file
+    /// left byte for byte as it was. The padding is TOML whitespace, so a read without the limit
+    /// would parse the over-limit file and rewrite it.
+    #[test]
+    fn patch_project_table_refuses_a_file_over_the_limit_and_leaves_it_unwritten() {
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        let mut body = "[project]\nname = \"keep\"\n".to_string();
+        body.push_str(&" ".repeat(limit - body.len()));
+        std::fs::write(&p, &body).unwrap();
+        patch_project_table(&p, |t| {
+            t.insert("added".into(), toml::Value::Integer(1));
+        })
+        .unwrap();
+        assert!(std::fs::read_to_string(&p).unwrap().contains("added"));
+
+        std::fs::write(&p, format!("{body} ")).unwrap();
+        let before = std::fs::read(&p).unwrap();
+        let err = patch_project_table(&p, |t| {
+            t.insert("added".into(), toml::Value::Integer(2));
+        })
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("byte limit"), "{msg}");
+        assert!(!msg.contains("keep"), "no content in the error: {msg}");
+        assert_eq!(std::fs::read(&p).unwrap(), before, "left unwritten");
+    }
+
     /// A FIFO or a link to a device at `system-prompt.md` hashes as an absent prompt (empty
     /// content), without a hang; a regular prompt hashes its bytes.
     #[test]

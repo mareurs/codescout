@@ -3352,6 +3352,30 @@ mod git_pointer_read_tests {
         assert_eq!(detect_worktree_info(&wt).unwrap().branch, None, "no HEAD");
     }
 
+    /// An oversized `HEAD` under a pointer-named gitdir gives no branch (the worktree is still
+    /// recognised). It starts with a valid `ref:` line and is then extended sparse, so only the
+    /// length check can refuse it: a plain read finds the branch.
+    #[test]
+    fn an_oversized_head_is_no_branch() {
+        let (_tmp, wt, admin) = linked_worktree();
+        std::fs::write(admin.join("HEAD"), "ref: refs/heads/feat/x\n").unwrap();
+        assert_eq!(
+            detect_worktree_info(&wt).unwrap().branch.as_deref(),
+            Some("feat/x"),
+            "control"
+        );
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(admin.join("HEAD"))
+            .unwrap();
+        file.set_len(crate::util::fs::MAX_GIT_POINTER_BYTES + 1)
+            .unwrap();
+        drop(file);
+        let info = detect_worktree_info(&wt).unwrap();
+        assert_eq!(info.branch, None);
+        assert_eq!(info.name.as_deref(), Some("wt"));
+    }
+
     /// The pointer is a regular file (that is checked first), but it had no size bound. Here it
     /// starts with a valid pointer and is then extended sparse: only the length check refuses it.
     #[test]
