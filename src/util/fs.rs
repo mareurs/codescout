@@ -52,6 +52,118 @@ pub fn read_utf8(path: &Path) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", path.display(), e))
 }
 
+/// The most bytes a configuration file (`project.toml`, the global `config.toml`, `workspace.toml`,
+/// the startup dotenv) may hold before it is refused. Every config loader reads through
+/// [`read_regular_config_bytes`] / [`read_regular_config_text`], so there is one number.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT configuration file are read; a file over it is refused whole with an error, no result is shortened and nothing is presented as complete
+pub const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
+
+/// Why [`read_regular_bytes`] refused. `Display` names the reason only, never the file's content
+/// or its path: the file can be a link to anything readable, and the message reaches the
+/// caller, the log and the usage row. The caller adds the path.
+#[derive(Debug)]
+pub enum BoundedReadError {
+    /// The opened descriptor is not a regular file: a directory, FIFO, socket or device. It is
+    /// never read, so a link to `/dev/zero` or to a FIFO nobody writes to cannot hang the caller.
+    NotRegular,
+    /// More than `max` bytes. The bound is on the bytes actually read, not on the length the file
+    /// reports, so a file that lies about its size (`/proc`, a file growing while read) is still cut.
+    TooLarge { max: u64 },
+    /// The open or the read failed, or the bytes were not UTF-8 (text reads only).
+    Io(std::io::Error),
+}
+
+impl BoundedReadError {
+    /// The path does not exist (also: a dangling link). The one `Io` case callers treat as
+    /// "absent" rather than "broken".
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
+    }
+}
+
+impl std::fmt::Display for BoundedReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotRegular => {
+                write!(
+                    f,
+                    "not a regular file (a directory, FIFO, socket or device)"
+                )
+            }
+            Self::TooLarge { max } => write!(f, "exceeds the {max} byte limit"),
+            Self::Io(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for BoundedReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+/// Read at most `max_bytes` from `path`, which must be a regular file once any link on the way is
+/// followed. For input that is repository or user content and must not be trusted to be a file.
+///
+/// The type is checked on the OPENED descriptor (`fstat`), not on the path, so nothing swapped in
+/// after the open changes what is read; a directory, FIFO, socket or device is refused without a
+/// read. The open is non-blocking on unix, so a FIFO nobody writes to cannot hold it. The length
+/// is then bounded twice: the reported length first (refuse without reading), and the read itself
+/// through `take(max + 1)`, because a length is something the file reports about itself.
+///
+/// Links are followed on purpose: a `project.toml` that is a link to a real file is an accepted
+/// layout. Pattern: `MemoryStore`'s `read_regular_file`, which refuses links instead.
+pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, BoundedReadError> {
+    use std::io::Read;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(BoundedReadError::Io)?;
+    let metadata = file.metadata().map_err(BoundedReadError::Io)?;
+    if !metadata.file_type().is_file() {
+        return Err(BoundedReadError::NotRegular);
+    }
+    if metadata.len() > max_bytes {
+        return Err(BoundedReadError::TooLarge { max: max_bytes });
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(BoundedReadError::Io)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(BoundedReadError::TooLarge { max: max_bytes });
+    }
+    Ok(bytes)
+}
+
+/// [`read_regular_bytes`] as UTF-8 text; bytes that are not UTF-8 are an `Io` error of kind
+/// `InvalidData`, as `std::fs::read_to_string` gives.
+pub fn read_regular_text(path: &Path, max_bytes: u64) -> Result<String, BoundedReadError> {
+    String::from_utf8(read_regular_bytes(path, max_bytes)?).map_err(|_| {
+        BoundedReadError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        ))
+    })
+}
+
+/// [`read_regular_bytes`] at [`MAX_CONFIG_FILE_BYTES`].
+pub fn read_regular_config_bytes(path: &Path) -> Result<Vec<u8>, BoundedReadError> {
+    read_regular_bytes(path, MAX_CONFIG_FILE_BYTES)
+}
+
+/// [`read_regular_text`] at [`MAX_CONFIG_FILE_BYTES`]: the one way a config loader reads a file.
+pub fn read_regular_config_text(path: &Path) -> Result<String, BoundedReadError> {
+    read_regular_text(path, MAX_CONFIG_FILE_BYTES)
+}
+
 /// How many staging names `atomic_write` tries before it gives up. A collision needs an
 /// existing entry at a 128-bit random name, so reaching even the second attempt means
 /// something is planting names; sixteen is generous for a benign cause and still bounded.
@@ -463,6 +575,47 @@ impl From<&std::path::Path> for RepoPath {
 impl From<&std::path::PathBuf> for RepoPath {
     fn from(p: &std::path::PathBuf) -> Self {
         Self::from_path(p.as_path())
+    }
+}
+
+/// Fixtures for tests that put a special file where a config file belongs. Unix only: a FIFO and
+/// a link need it. A read of a FIFO nobody writes to never returns, so a test that calls a loader
+/// on one goes through [`within_deadline`], which turns the hang into a failing assertion.
+#[cfg(all(test, unix))]
+pub(crate) mod special_file_fixtures {
+    use std::path::Path;
+    use std::time::Duration;
+
+    /// How long a loader may take on a special file before the test calls it hung. A refusal is
+    /// one `open` and one `fstat`; the slack is for a loaded machine.
+    pub(crate) const HANG_DEADLINE: Duration = Duration::from_secs(15);
+
+    /// `mkfifo(path)`: a named pipe with no writer.
+    pub(crate) fn make_fifo(path: &Path) {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `c` is a valid NUL-terminated path for the duration of the call.
+        let rc = unsafe { libc::mkfifo(c.as_ptr(), 0o600) };
+        assert_eq!(rc, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+    }
+
+    /// Run `f` on a thread and return its result, or panic if it has not finished within
+    /// [`HANG_DEADLINE`]. A thread stuck in a blocking `open` is left behind (it cannot be
+    /// cancelled); the test binary exits when the suite is done.
+    #[track_caller]
+    pub(crate) fn within_deadline<T: Send + 'static>(
+        what: &str,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(HANG_DEADLINE).unwrap_or_else(|_| {
+            panic!(
+                "{what} did not return within {HANG_DEADLINE:?}: it is blocked reading a special file"
+            )
+        })
     }
 }
 
@@ -1572,5 +1725,152 @@ mod tests {
     fn state_dir_is_none_when_xdg_relative_and_home_absent() {
         let got = state_dir_from(Some(std::ffi::OsString::from("relative/state")), None);
         assert_eq!(got, None);
+    }
+}
+
+/// `read_regular_bytes` / `read_regular_text`: a link is followed, a file that is not a regular
+/// file is refused without a read, and the bound is on the bytes read.
+#[cfg(all(test, unix))]
+mod bounded_read_tests {
+    use super::special_file_fixtures::{make_fifo, within_deadline};
+    use super::*;
+    use tempfile::tempdir;
+
+    fn refused_as_not_regular(r: Result<String, BoundedReadError>) -> bool {
+        matches!(r, Err(BoundedReadError::NotRegular))
+    }
+
+    /// A FIFO with no writer: a blocking open or read never returns, so a regression is a hang,
+    /// which `within_deadline` reports as a failure.
+    #[test]
+    fn a_fifo_is_refused_not_read() {
+        let dir = tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        let r = within_deadline("reading a FIFO", move || {
+            read_regular_text(&fifo, MAX_CONFIG_FILE_BYTES)
+        });
+        assert!(refused_as_not_regular(r));
+    }
+
+    /// A link to a FIFO is followed to the FIFO, then refused.
+    #[test]
+    fn a_link_to_a_fifo_is_refused_not_read() {
+        let dir = tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        let link = dir.path().join("link.toml");
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+        let r = within_deadline("reading a link to a FIFO", move || {
+            read_regular_text(&link, MAX_CONFIG_FILE_BYTES)
+        });
+        assert!(refused_as_not_regular(r));
+    }
+
+    /// `/dev/zero` never ends. It is refused on its type, and even if it were not, the read is
+    /// `take`n at the cap, so this cannot allocate more than the cap plus one byte.
+    #[test]
+    fn a_link_to_dev_zero_is_refused_and_never_read_unbounded() {
+        let dir = tempdir().unwrap();
+        let link = dir.path().join("zero.toml");
+        std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+        let r = within_deadline("reading a link to /dev/zero", move || {
+            read_regular_text(&link, MAX_CONFIG_FILE_BYTES)
+        });
+        assert!(refused_as_not_regular(r));
+    }
+
+    #[test]
+    fn a_directory_and_a_link_to_one_are_refused() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real-dir");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("dir-link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        for p in [&real, &link] {
+            let r = read_regular_text(p, MAX_CONFIG_FILE_BYTES);
+            assert!(refused_as_not_regular(r), "{}", p.display());
+        }
+    }
+
+    #[test]
+    fn a_link_to_a_regular_file_is_read() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        std::fs::write(&real, "name = \"x\"\n").unwrap();
+        let link = dir.path().join("link.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(
+            read_regular_text(&link, MAX_CONFIG_FILE_BYTES).unwrap(),
+            "name = \"x\"\n"
+        );
+    }
+
+    #[test]
+    fn the_cap_is_exact_at_the_limit_and_one_byte_over() {
+        let dir = tempdir().unwrap();
+        let at = dir.path().join("at");
+        let over = dir.path().join("over");
+        std::fs::write(&at, "a".repeat(64)).unwrap();
+        std::fs::write(&over, "a".repeat(65)).unwrap();
+        assert_eq!(read_regular_text(&at, 64).unwrap().len(), 64);
+        assert!(matches!(
+            read_regular_text(&over, 64),
+            Err(BoundedReadError::TooLarge { max: 64 })
+        ));
+    }
+
+    /// The bound is on the bytes READ. A `/proc` file is a regular file that reports length 0
+    /// and returns kilobytes: the reported-length check passes it, only the `take` catches it.
+    /// This is the shape of the defect (a limit checked on a number the file reports).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_bound_is_on_the_bytes_read_not_on_the_length_the_file_reports() {
+        let path = Path::new("/proc/self/status");
+        let meta = std::fs::metadata(path).unwrap();
+        assert!(meta.file_type().is_file());
+        assert_eq!(meta.len(), 0, "premise: /proc reports length 0");
+        assert!(
+            std::fs::read(path).unwrap().len() > 16,
+            "premise: it returns more than the cap used below"
+        );
+        assert!(matches!(
+            read_regular_bytes(path, 16),
+            Err(BoundedReadError::TooLarge { max: 16 })
+        ));
+    }
+
+    #[test]
+    fn a_missing_path_and_a_dangling_link_are_not_found_and_other_failures_are_not() {
+        let dir = tempdir().unwrap();
+        let gone = dir.path().join("gone.toml");
+        assert!(read_regular_text(&gone, 64).unwrap_err().is_not_found());
+        let dangling = dir.path().join("dangling.toml");
+        std::os::unix::fs::symlink(&gone, &dangling).unwrap();
+        assert!(read_regular_text(&dangling, 64).unwrap_err().is_not_found());
+        assert!(!BoundedReadError::NotRegular.is_not_found());
+        assert!(!BoundedReadError::TooLarge { max: 1 }.is_not_found());
+    }
+
+    #[test]
+    fn invalid_utf8_is_an_error_for_text_and_bytes_for_bytes() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("bin");
+        std::fs::write(&p, [0xff, 0xfe, 0x41]).unwrap();
+        assert!(matches!(
+            read_regular_text(&p, 64),
+            Err(BoundedReadError::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData
+        ));
+        assert_eq!(read_regular_bytes(&p, 64).unwrap(), vec![0xff, 0xfe, 0x41]);
+    }
+
+    /// The message names the reason and nothing from inside the file or its path.
+    #[test]
+    fn the_refusal_text_carries_no_path_and_no_content() {
+        let dir = tempdir().unwrap();
+        let secret = dir.path().join("SECRET_PATH_QX7");
+        std::fs::create_dir(&secret).unwrap();
+        let shown = read_regular_text(&secret, 64).unwrap_err().to_string();
+        assert!(!shown.contains("SECRET_PATH_QX7"), "got: {shown}");
     }
 }
