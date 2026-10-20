@@ -762,6 +762,50 @@ fn read_discover_settings(root: &std::path::Path) -> Option<(usize, Vec<String>)
     Some((ws.workspace.discovery_max_depth, ws.exclude_projects))
 }
 
+/// The most bytes `.codescout/system-prompt.md` may hold before it is not served. The file goes
+/// into the `initialize` instructions, i.e. into the model's context; generated prompts are a few
+/// KiB (the largest on this machine is under 8 KiB), so a file past this is not a prompt.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+const MAX_SYSTEM_PROMPT_FILE_BYTES: u64 = 256 * 1024;
+
+/// The project's system prompt as the `initialize` instructions serve it: the text of
+/// `.codescout/system-prompt.md` when that is a regular file (a link is never served, as its
+/// target can be any readable file), else `default_prompt` (the `system_prompt` of
+/// `project.toml`, if any).
+///
+/// The type check on the path is not enough on its own: the file is then opened, and between the
+/// two a FIFO can take its place, and the text had no size bound. The read is
+/// `read_regular_text` at [`MAX_SYSTEM_PROMPT_FILE_BYTES`]; a FIFO, device or oversized file is
+/// treated as an absent one (the default), logged, its content never echoed. A regular file that
+/// fails to read (permissions, not UTF-8) is `None`, as it always was.
+fn read_system_prompt_file(
+    prompt_file: &std::path::Path,
+    default_prompt: Option<String>,
+) -> Option<String> {
+    match std::fs::symlink_metadata(prompt_file) {
+        Ok(m) if m.file_type().is_file() => {
+            match crate::util::fs::read_regular_text(prompt_file, MAX_SYSTEM_PROMPT_FILE_BYTES) {
+                Ok(text) => Some(text),
+                Err(
+                    e @ (crate::util::fs::BoundedReadError::NotRegular
+                    | crate::util::fs::BoundedReadError::TooLarge { .. }),
+                ) => {
+                    tracing::warn!("{} ignored: {e}", prompt_file.display());
+                    default_prompt
+                }
+                Err(_) => None,
+            }
+        }
+        // A link or directory is never served: its text goes into the `initialize`
+        // instructions. Treated as absent.
+        Ok(_) => {
+            tracing::warn!("{} is not a regular file; ignored", prompt_file.display());
+            default_prompt
+        }
+        Err(_) => default_prompt,
+    }
+}
+
 /// Resolve the short git HEAD SHA for a directory. Returns None if not a git
 /// repo or if HEAD is unborn (no commits yet).
 ///
@@ -1968,16 +2012,7 @@ impl Agent {
                     memories.dedup();
                 }
                 let has_index = db_path.exists();
-                let system_prompt = match std::fs::symlink_metadata(&prompt_file) {
-                    Ok(m) if m.file_type().is_file() => std::fs::read_to_string(&prompt_file).ok(),
-                    // A link or directory is never served: its text goes into the
-                    // `initialize` instructions. Treated as absent.
-                    Ok(_) => {
-                        tracing::warn!("{} is not a regular file; ignored", prompt_file.display());
-                        default_prompt
-                    }
-                    Err(_) => default_prompt,
-                };
+                let system_prompt = read_system_prompt_file(&prompt_file, default_prompt);
                 let worktree = crate::prompts::detect_worktree_info(&project_root);
                 (memories, has_index, system_prompt, worktree)
             })
@@ -4917,5 +4952,125 @@ mod tests {
 
         assert_eq!(depth, 3);
         assert!(exclude.is_empty());
+    }
+}
+/// `.codescout/system-prompt.md` is served into the `initialize` instructions. The path is
+/// checked first (a link or FIFO is never served), but the text had no size bound.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod system_prompt_read_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    fn default() -> Option<String> {
+        Some("From TOML".to_string())
+    }
+
+    /// Past the limit is "not a prompt": the project.toml default is used, as for an absent
+    /// file. The file starts with real text and is then extended sparse, so only the length
+    /// check can refuse it (a read would serve the text and the zeros).
+    #[test]
+    fn an_oversized_prompt_file_is_ignored_for_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("system-prompt.md");
+        std::fs::write(&path, "Always use pytest.\n").unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(MAX_SYSTEM_PROMPT_FILE_BYTES + 1).unwrap();
+        drop(file);
+        assert_eq!(read_system_prompt_file(&path, default()), default());
+        assert_eq!(read_system_prompt_file(&path, None), None);
+    }
+
+    /// The same, through the real call site that builds the instructions.
+    #[tokio::test]
+    async fn project_status_ignores_an_oversized_system_prompt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".codescout");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("project.toml"),
+            "[project]\nname = \"test\"\nsystem_prompt = \"From TOML\"\n",
+        )
+        .unwrap();
+        let path = config_dir.join("system-prompt.md");
+        std::fs::write(&path, "Always use pytest.\n").unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(MAX_SYSTEM_PROMPT_FILE_BYTES + 1).unwrap();
+        drop(file);
+
+        let agent = Agent::new(None).await.unwrap();
+        agent
+            .activate(dir.path().to_path_buf(), None)
+            .await
+            .unwrap();
+        let status = agent.project_status().await.unwrap();
+        assert_eq!(status.system_prompt.as_deref(), Some("From TOML"));
+    }
+
+    /// A FIFO, and a link to one, are not served and do not hold the call.
+    #[test]
+    fn a_fifo_or_a_link_to_one_is_ignored_for_the_default_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("system-prompt.md");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &path).unwrap();
+            } else {
+                make_fifo(&path);
+            }
+            let got = within_deadline("read_system_prompt_file on a FIFO", move || {
+                read_system_prompt_file(&path, default())
+            });
+            assert_eq!(got, default(), "linked={linked}");
+        }
+    }
+
+    /// Control: the other cases give what they always gave.
+    #[test]
+    fn regular_missing_empty_and_invalid_prompt_files_read_as_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("system-prompt.md");
+
+        assert_eq!(
+            read_system_prompt_file(&path, default()),
+            default(),
+            "missing"
+        );
+
+        std::fs::write(&path, "Always use pytest.\n").unwrap();
+        assert_eq!(
+            read_system_prompt_file(&path, default()).as_deref(),
+            Some("Always use pytest.\n")
+        );
+
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(
+            read_system_prompt_file(&path, default()).as_deref(),
+            Some("")
+        );
+
+        // An unreadable regular file is `None` (not the default), as `.ok()` made it.
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert_eq!(
+            read_system_prompt_file(&path, default()),
+            None,
+            "invalid UTF-8"
+        );
+
+        // A file of exactly the limit is still served.
+        std::fs::write(&path, "x".repeat(MAX_SYSTEM_PROMPT_FILE_BYTES as usize)).unwrap();
+        assert_eq!(
+            read_system_prompt_file(&path, default()).map(|s| s.len()),
+            Some(MAX_SYSTEM_PROMPT_FILE_BYTES as usize)
+        );
+
+        // A link to a regular file is never served.
+        std::fs::remove_file(&path).unwrap();
+        let real = dir.path().join("real.md");
+        std::fs::write(&real, "SECRET").unwrap();
+        std::os::unix::fs::symlink(&real, &path).unwrap();
+        assert_eq!(read_system_prompt_file(&path, default()), default(), "link");
     }
 }
