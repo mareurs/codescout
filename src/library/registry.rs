@@ -49,12 +49,25 @@ impl LibraryRegistry {
         }
     }
 
-    /// Load from a JSON file. Returns an empty registry if the file does not exist.
+    /// Load from a JSON file. Returns an empty registry if the file does not exist, and also when
+    /// it is not a usable file: `.codescout/libraries.json` is repository content, so it can be a
+    /// committed link to a FIFO or a device, which a plain read would hold or exhaust memory on.
+    /// It is read as a bounded regular file ([`crate::util::fs::read_regular_config_text`]); a
+    /// refused or oversized file is the same answer as an absent one (logged at debug, reason
+    /// only). A file that is readable but not valid JSON is still an error.
     pub fn load(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-        let data = std::fs::read_to_string(path)?;
+        let data = match crate::util::fs::read_regular_config_text(path) {
+            Ok(data) => data,
+            Err(e) if e.is_not_found() => return Ok(Self::new()),
+            Err(
+                e @ (crate::util::fs::BoundedReadError::NotRegular
+                | crate::util::fs::BoundedReadError::TooLarge { .. }),
+            ) => {
+                tracing::debug!("library registry {} ignored: {e}", path.display());
+                return Ok(Self::new());
+            }
+            Err(crate::util::fs::BoundedReadError::Io(e)) => return Err(e.into()),
+        };
         let registry: LibraryRegistry = serde_json::from_str(&data)?;
         Ok(registry)
     }
@@ -542,5 +555,100 @@ mod tests {
     fn discovery_method_manifest_scan_serializes() {
         let json = serde_json::to_string(&DiscoveryMethod::ManifestScan).unwrap();
         assert_eq!(json, "\"manifest_scan\"");
+    }
+}
+/// `.codescout/libraries.json` is read on every activation and a repository can commit that path as
+/// a link to a FIFO or a device.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod bounded_load_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    fn one_entry_json() -> String {
+        let mut reg = LibraryRegistry::new();
+        reg.register(
+            "tokio".into(),
+            PathBuf::from("/libs/tokio"),
+            "rust".into(),
+            DiscoveryMethod::Manual,
+            true,
+        );
+        serde_json::to_string_pretty(&reg).unwrap()
+    }
+
+    /// A FIFO, and a link to one, as the registry file held every activation. It is an empty
+    /// registry, as an absent file is.
+    #[test]
+    fn a_fifo_or_a_link_to_one_is_an_empty_registry_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("libraries.json");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &path).unwrap();
+            } else {
+                make_fifo(&path);
+            }
+            let reg = within_deadline("LibraryRegistry::load on a FIFO", move || {
+                let _keep = dir;
+                LibraryRegistry::load(&path)
+            })
+            .unwrap_or_else(|e| panic!("linked={linked}: {e:#}"));
+            assert!(reg.all().is_empty(), "linked={linked}");
+        }
+    }
+
+    /// A device and a directory are refused the same way (`/dev/null`, not `/dev/zero`).
+    #[test]
+    fn a_device_link_and_a_directory_are_an_empty_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let dev = dir.path().join("dev.json");
+        std::os::unix::fs::symlink("/dev/null", &dev).unwrap();
+        assert!(LibraryRegistry::load(&dev).unwrap().all().is_empty());
+        let sub = dir.path().join("dir.json");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(LibraryRegistry::load(&sub).unwrap().all().is_empty());
+    }
+
+    /// Exactly at the limit still loads; one byte over is refused as an absent file. The padding
+    /// is JSON whitespace, so the plain read would parse the over-limit file and find the entry.
+    #[test]
+    fn a_registry_at_the_limit_loads_and_one_byte_over_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("libraries.json");
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let mut body = one_entry_json();
+        body.push_str(&" ".repeat(limit - body.len()));
+        std::fs::write(&path, &body).unwrap();
+        assert_eq!(body.len(), limit);
+        assert_eq!(LibraryRegistry::load(&path).unwrap().all().len(), 1);
+
+        body.push(' ');
+        std::fs::write(&path, &body).unwrap();
+        assert!(LibraryRegistry::load(&path).unwrap().all().is_empty());
+    }
+
+    /// Control: a regular file, and a link to one, load as before; invalid JSON, an empty file
+    /// and invalid UTF-8 are still errors, and the error quotes none of the content.
+    #[test]
+    fn a_regular_registry_still_loads_and_a_broken_one_is_still_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("libraries.json");
+        std::fs::write(&path, one_entry_json()).unwrap();
+        assert_eq!(LibraryRegistry::load(&path).unwrap().all().len(), 1);
+
+        let link = dir.path().join("link.json");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert_eq!(LibraryRegistry::load(&link).unwrap().all().len(), 1);
+
+        std::fs::write(&path, "SECRETMARKER-77 not json").unwrap();
+        let err = format!("{:#}", LibraryRegistry::load(&path).unwrap_err());
+        assert!(!err.contains("SECRETMARKER"), "{err}");
+        std::fs::write(&path, "").unwrap();
+        assert!(LibraryRegistry::load(&path).is_err());
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert!(LibraryRegistry::load(&path).is_err());
     }
 }
