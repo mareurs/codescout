@@ -3299,16 +3299,12 @@ fn is_session_id(s: &str) -> bool {
         })
 }
 
-/// The most bytes a `.codescout/cc_session_id` may hold: a session id is a UUID (36 bytes).
-// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
-const MAX_SESSION_ID_FILE_BYTES: u64 = 4096;
-
 /// A worktree directory's `.codescout/cc_session_id`, or `None`. The doctor reads it from every
 /// entry under `.worktrees/` that git does not know, i.e. from trees nobody vouches for, so it is
 /// a bounded regular-file read: a FIFO or a link to a device is "no id", not a held doctor run.
 /// (The server's own start-up read of the file is bounded the same way.)
 fn read_session_id_file(path: &Path) -> Option<String> {
-    crate::util::fs::read_regular_text(path, MAX_SESSION_ID_FILE_BYTES).ok()
+    crate::util::fs::read_regular_text(path, crate::util::fs::MAX_SESSION_ID_FILE_BYTES).ok()
 }
 
 /// The roots of the worktrees git has registered, from `<main>/.git/worktrees/*/gitdir` (each
@@ -24542,11 +24538,18 @@ mod worktree_residue_bounded_tests {
             "not an id"
         );
 
-        // A valid id followed by a sparse tail past the limit: only the length check refuses it.
-        std::fs::write(&file, format!("{ID}\n")).unwrap();
-        let f = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
-        f.set_len(MAX_SESSION_ID_FILE_BYTES + 1).unwrap();
-        drop(f);
+        // Exactly at the limit still names the id; one byte over names nobody. The id is padded
+        // with spaces, which `trim()` drops, so a read without the length check would accept the
+        // over-limit file and only that check can refuse it.
+        let limit = crate::util::fs::MAX_SESSION_ID_FILE_BYTES as usize;
+        let padded = |total: usize| format!("{ID}{}", " ".repeat(total - ID.len()));
+        std::fs::write(&file, padded(limit)).unwrap();
+        assert_eq!(
+            worktree_residue_sessions(dir.path()),
+            vec![ID.to_string()],
+            "at the limit"
+        );
+        std::fs::write(&file, padded(limit + 1)).unwrap();
         assert!(
             worktree_residue_sessions(dir.path()).is_empty(),
             "oversized"
