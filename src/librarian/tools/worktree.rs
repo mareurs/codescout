@@ -660,7 +660,8 @@ mod tests {
 /// `read_branch` follows the worktree's `.git` file (no type check) to the `HEAD` it names; both
 /// can be a FIFO, or a link to one.
 /// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod read_branch_bounded_tests {
     use super::*;
     use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};

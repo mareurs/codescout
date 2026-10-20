@@ -24478,7 +24478,8 @@ body
 /// The doctor reads `.codescout/cc_session_id` out of every unregistered `.worktrees/` entry, and
 /// the `gitdir` files of the registered ones: trees and files nobody vouches for.
 /// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod worktree_residue_bounded_tests {
     use super::*;
     use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
