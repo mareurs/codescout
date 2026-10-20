@@ -35,6 +35,13 @@ pub enum DiscoveryMethod {
     ManifestScan,
 }
 
+/// The most bytes `.codescout/libraries.json` may hold. It is rewritten on every activation, so a
+/// file refused here is replaced by an empty registry on the next save; the limit is therefore far
+/// above anything real (one entry is ~250 bytes: 16 MiB is tens of thousands of libraries) rather
+/// than the 1 MiB used for configuration files.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT registry file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+pub(crate) const MAX_LIBRARY_REGISTRY_BYTES: u64 = 16 * 1024 * 1024;
+
 /// Persistent registry of known external libraries.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LibraryRegistry {
@@ -52,11 +59,19 @@ impl LibraryRegistry {
     /// Load from a JSON file. Returns an empty registry if the file does not exist, and also when
     /// it is not a usable file: `.codescout/libraries.json` is repository content, so it can be a
     /// committed link to a FIFO or a device, which a plain read would hold or exhaust memory on.
-    /// It is read as a bounded regular file ([`crate::util::fs::read_regular_config_text`]); a
-    /// refused or oversized file is the same answer as an absent one (logged at debug, reason
-    /// only). A file that is readable but not valid JSON is still an error.
+    /// It is read as a bounded regular file ([`crate::util::fs::read_regular_text`] at
+    /// [`MAX_LIBRARY_REGISTRY_BYTES`]); a refused or oversized file is the same answer as an absent
+    /// one (logged at debug, reason only). A file that is readable but not valid JSON is still an
+    /// error.
+    ///
+    /// **A registry that loads empty because it was refused is indistinguishable from a new one,
+    /// and the next `save` (activation's `auto_register_deps`) replaces the file.** That was
+    /// already so for invalid JSON (the callers `unwrap_or_default`); it is now so for a refused
+    /// file too, the reason this limit is generous rather than the 1 MiB config one. Whether a
+    /// refused load should instead block the save is an open decision, recorded in
+    /// `docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md`.
     pub fn load(path: &Path) -> Result<Self> {
-        let data = match crate::util::fs::read_regular_config_text(path) {
+        let data = match crate::util::fs::read_regular_text(path, MAX_LIBRARY_REGISTRY_BYTES) {
             Ok(data) => data,
             Err(e) if e.is_not_found() => return Ok(Self::new()),
             Err(
@@ -614,11 +629,13 @@ mod bounded_load_tests {
 
     /// Exactly at the limit still loads; one byte over is refused as an absent file. The padding
     /// is JSON whitespace, so the plain read would parse the over-limit file and find the entry.
+    /// The limit is the registry's own 16 MiB, not the 1 MiB config limit: a file between the two
+    /// still loads.
     #[test]
     fn a_registry_at_the_limit_loads_and_one_byte_over_is_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("libraries.json");
-        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let limit = MAX_LIBRARY_REGISTRY_BYTES as usize;
         let mut body = one_entry_json();
         body.push_str(&" ".repeat(limit - body.len()));
         std::fs::write(&path, &body).unwrap();
@@ -628,6 +645,17 @@ mod bounded_load_tests {
         body.push(' ');
         std::fs::write(&path, &body).unwrap();
         assert!(LibraryRegistry::load(&path).unwrap().all().is_empty());
+
+        let between = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize + 1;
+        assert!(between < limit);
+        let mut body = one_entry_json();
+        body.push_str(&" ".repeat(between - body.len()));
+        std::fs::write(&path, &body).unwrap();
+        assert_eq!(
+            LibraryRegistry::load(&path).unwrap().all().len(),
+            1,
+            "a registry over the config limit and under its own still loads"
+        );
     }
 
     /// Control: a regular file, and a link to one, load as before; invalid JSON, an empty file
