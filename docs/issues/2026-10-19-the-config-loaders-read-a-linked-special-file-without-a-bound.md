@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-17-project-toml-under-the-writable-project-root-ca
 tags:
 - cluster/unclassified
 kind: bug
-unverified: "No test drives the startup-dotenv read (load_startup_env sets process env, which no test may do) or the two workspace.toml reads (agent/mod.rs read_discover_settings, workspace_summary) with a special file; they call the same helper the tested loaders call. Adjacent reads NOT changed and still unbounded on a linked FIFO: src/workspace.rs read_file_capped (manifest File::open, discover_projects) and the .codescout/system-prompt.md read (type-checked regular file, no size cap). The /dev/zero case was never read on the real code; a FIFO stood in for it (same mechanism: reported length 0, no end)."
+unverified: "The /dev/zero case was never read on the real code; a FIFO stood in for it (same mechanism: reported length 0, no end). O_NOCTTY has no test (it needs a terminal device); the open of a device still happens before fstat refuses it (documented in the helper's rustdoc). Reads of repository files that this branch did not touch are listed in docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md."
 ---
 
 # BUG: the config loaders check a file's reported length and then read it without a bound, so a project.toml that is a link to an endless special file is read until memory runs out
@@ -96,8 +96,46 @@ Applied on branch `fix/config-bounded-read-2026-10-20` (base `experiments` 79dcf
   nothing from it); `read_project_toml_table` and `security_on_disk` return `None` (an unreadable
   file, which tightens the gates and counts as an empty "before"), as for any other unreadable file.
 
-Not changed: `src/workspace.rs` `read_file_capped` (manifest reads) and the `system-prompt.md`
-read; see `unverified`.
+Review round 1 (an Opus review of `a3bdc48fb` found the helper correct and these gaps), fixed by:
+
+- `a2046871a` (patch-id `06cd9dea525f8b34f48c6be6b3572b35eae84318`), **a security regression in
+  the first pass**: `security_on_disk` returned `None` for a file over the cap or not a regular
+  file, and the write guard compared `None == None` as "unchanged". Two steps then dropped
+  `[security]` from a protected file: pad `project.toml` past 1 MiB with the table unchanged
+  (allowed), then write a small file with no table (allowed; at 79dcf2c58 it was refused, because
+  the old code read any size). `security_on_disk` is now `Result<Option<_>, String>`: a file that
+  is present and cannot be read as it is (non-regular, over the cap, or an OS error other than
+  not-found / non-UTF-8) is an `Err`, and `check_write_with` refuses every write to it. Absent,
+  dangling-link and non-TOML / non-UTF-8 files keep the old meaning (an empty "before"). Whether
+  the write tools can deliver more than 1 MiB was not driven end to end; a grep of `src/tools` for a
+  content-size limit found none, and `edit_file` and `create_file` take the text as a tool argument.
+- `a47a425cc` (patch-id `8b39e8ce0971b3dc64eac8710d5a9d2cec314c60`), reads the first pass missed:
+  `ProjectStatus` (`workspace(action="status")`) and `build_system_prompt_draft` read
+  `workspace.toml` with a plain `read_to_string` (a link to a FIFO: no answer, driven by the
+  reviewer on the dev binary), and server start-up read `.codescout/cc_session_id` the same way (a
+  FIFO held startup; a link to `/dev/stdin` made the server read the client's `initialize` as its
+  session id). All four `workspace.toml` reads now use one `config::workspace::load_workspace_config`;
+  `cc_session_id` goes through `read_cc_session_id` with a 4 KiB cap (`MAX_SESSION_ID_FILE_BYTES`,
+  `cap-class: NOT_A_CAP`).
+- `def666def` (patch-id `c5ae922b20a18bb7aea2bcdc0fc8fb9e57d35aef`): the project and global loaders
+  wrapped the helper's error in a context layer, so a caller printing `{e}` (the embedding-config
+  loader) saw `reading <path>` and no reason. The reason is now in the message
+  (`exceeds the 1048576 byte limit`, `not a regular file ...`, or the OS error), still no content.
+  `read_dotenv_pairs` is split out of `load_startup_env` as a test seam.
+- `7270d5c89` (patch-id `fe005621af6255511921b7934e847e7552adf7df`): `read_bounded<R: Read>` is split
+  out so the `take(max + 1)` bound is tested alone (the mutant `take(u64::MAX)` survived the first
+  pass because the length check after the read still caught it); `O_NOCTTY` added; a socket (`open`
+  fails `ENXIO`) is reported as `NotRegular`; `within_deadline` re-raises a panic from its closure
+  instead of calling it a hang; the `MAX_CONFIG_FILE_BYTES` doc no longer says "every loader".
+- `4f218e6c9` (patch-id `e5fd1ae64174e99d8951d5cf8d2223e36ff001c3`): the status test owns its thread
+  and a 120 s deadline (`status` takes ~19 s on this machine even with no `workspace.toml`), and
+  `within_deadline_of` is added.
+
+Correction to the first pass: this file said `src/workspace.rs` `read_file_capped` was unbounded on
+a linked FIFO. It is not: it caps with `take(max_bytes)` (`:24`) and is reached only for entries the
+`ignore` walker reports as regular files by their own type (`entry.file_type().is_file()`, `:61`;
+no `follow_links`), so a linked FIFO is never opened there. The unbounded reads that remain are in
+`docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md`.
 
 ## Tests added
 
@@ -116,6 +154,20 @@ refused a regular file over 1 MiB by its length and read a link to a regular fil
 `a_global_config_over_the_cap_is_refused_and_one_at_the_cap_is_read`,
 `a_project_toml_that_links_to_a_regular_file_still_loads`,
 `a_global_config_that_is_a_link_to_a_regular_file_still_loads`.
+
+Added in review round 1 (red before on the pre-fix lines, restored byte for byte for the reads and
+as the one-line equivalent for the guard, the message and the two mutants; green after):
+`a_file_over_the_cap_refuses_every_write_to_a_protected_path`,
+`a_non_regular_file_at_a_protected_path_refuses_every_write`,
+`status_answers_when_workspace_toml_is_a_fifo_or_a_link_to_one` (with a regular-file control),
+`a_fifo_workspace_toml_does_not_hold_the_draft_and_a_regular_one_still_adds_dependencies`,
+`read_discover_settings_refuses_a_special_file_and_reads_a_linked_regular_one`,
+`cc_session_id_tests::*`, `a_refused_project_toml_says_why_in_the_top_level_message_and_quotes_nothing`,
+`a_refused_global_config_says_why_in_the_top_level_message_and_quotes_nothing`,
+`the_startup_dotenv_read_refuses_a_special_file_and_reads_a_regular_one`,
+`the_read_itself_stops_one_byte_past_the_cap_and_never_pulls_more`,
+`a_socket_is_refused_as_not_a_regular_file`, `within_deadline_reraises_a_panic_from_the_closure`.
+No test covers `O_NOCTTY` (it needs a terminal device).
 
 Helper tests in `util::fs::bounded_read_tests` (they test the new function, so they have no
 "before"): FIFO, link to a FIFO, link to `/dev/zero`, directory and link to one, link to a regular
