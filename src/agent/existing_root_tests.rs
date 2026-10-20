@@ -426,6 +426,39 @@ fn the_real_loader_failures_become_the_marker_and_quote_nothing() {
     }
 }
 
+/// A `project.toml` that is a FIFO or a link to a directory is not silently defaulted: the real
+/// loader refuses it and `load_project_config` marks it `ConfigLoadFailed` for the project's own
+/// file, which is what the pin refusal and the failed-reload notice are built from. On the old
+/// loader the FIFO case never returned at all.
+#[cfg(unix)]
+#[test]
+fn a_special_file_as_project_toml_becomes_the_marker_not_a_hang_or_a_default() {
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+    for label in ["fifo", "link to a directory"] {
+        let host = tempdir().unwrap();
+        let root = std::fs::canonicalize(host.path()).unwrap();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        let file = root.join(".codescout/project.toml");
+        if label == "fifo" {
+            make_fifo(&file);
+        } else {
+            let real = root.join("a-directory");
+            std::fs::create_dir(&real).unwrap();
+            std::os::unix::fs::symlink(&real, &file).unwrap();
+        }
+        let r = root.clone();
+        let err = within_deadline(label, move || load_project_config(&r)).unwrap_err();
+        let failure =
+            config_load_failure(&err).unwrap_or_else(|| panic!("{label}: not the marker: {err:#}"));
+        assert!(!failure.global, "{label}: the project's file failed");
+        assert_eq!(failure.path, file, "{label}");
+        assert!(
+            format!("{failure}").contains("could not be loaded"),
+            "{label}: got: {failure}"
+        );
+    }
+}
+
 /// L3 for the mapper: the pin, and the text of a non-config failure, are echoed bounded and
 /// escaped, like every other echo of caller-supplied text.
 #[test]

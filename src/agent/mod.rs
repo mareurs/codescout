@@ -759,7 +759,7 @@ fn load_discover_settings(root: &std::path::Path) -> (usize, Vec<String>) {
 /// fallback always has.
 fn read_discover_settings(root: &std::path::Path) -> Option<(usize, Vec<String>)> {
     let ws_path = crate::config::workspace::workspace_config_path(root);
-    let content = std::fs::read_to_string(&ws_path).ok()?;
+    let content = crate::util::fs::read_regular_config_text(&ws_path).ok()?;
     let ws = toml::from_str::<crate::config::workspace::WorkspaceConfig>(&content).ok()?;
     Some((ws.workspace.discovery_max_depth, ws.exclude_projects))
 }
@@ -2021,9 +2021,11 @@ impl Agent {
             return None;
         }
         let ws_cfg: Option<crate::config::workspace::WorkspaceConfig> =
-            std::fs::read_to_string(crate::config::workspace::workspace_config_path(&ws.root))
-                .ok()
-                .and_then(|s| toml::from_str(&s).ok());
+            crate::util::fs::read_regular_config_text(
+                &crate::config::workspace::workspace_config_path(&ws.root),
+            )
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok());
 
         let summaries = ws
             .projects

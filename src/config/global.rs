@@ -217,8 +217,10 @@ pub fn load_startup_env() {
         StartupEnvPlan::Nothing => return,
     };
 
-    let pairs = match dotenvy::from_path_iter(&path) {
-        Ok(iter) => iter.filter_map(|r| r.ok()).collect::<Vec<_>>(),
+    let pairs = match crate::util::fs::read_regular_config_bytes(&path) {
+        Ok(bytes) => dotenvy::from_read_iter(bytes.as_slice())
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>(),
         Err(e) => {
             tracing::warn!("failed to load startup env from {}: {e}", path.display());
             return;
@@ -247,26 +249,16 @@ impl GlobalConfig {
         let path = config_dir.join("config.toml");
         // Race-tolerant: under parallel test runs another tempdir may delete
         // the path between an exists()-check and a subsequent read. Always
-        // attempt the I/O and treat ENOENT as Ok(None) at each step.
-        let metadata = match std::fs::metadata(&path) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => {
-                return Err(e).with_context(|| format!("reading global config {}", path.display()));
-            }
-        };
-        if metadata.len() > 1024 * 1024 {
-            anyhow::bail!(
-                "global config {} exceeds 1 MiB limit ({} bytes)",
-                path.display(),
-                metadata.len()
-            );
-        }
-        let text = match std::fs::read_to_string(&path) {
+        // attempt the I/O and treat ENOENT as Ok(None).
+        //
+        // One bounded read of a regular file (following links): the global config can be a
+        // link, and a link to a FIFO or `/dev/zero` must be refused, not read.
+        let text = match crate::util::fs::read_regular_config_text(&path) {
             Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.is_not_found() => return Ok(None),
             Err(e) => {
-                return Err(e).with_context(|| format!("reading global config {}", path.display()));
+                return Err(anyhow::Error::new(e))
+                    .with_context(|| format!("reading global config {}", path.display()));
             }
         };
         let config: GlobalConfig = toml::from_str(&text).map_err(|e| {
@@ -440,6 +432,67 @@ mod tests {
             msg.contains("config.toml"),
             "error should mention file path: {msg}"
         );
+    }
+
+    // --- the global config may be a link, and a link can point at anything ---
+
+    /// A `config.toml` that is a FIFO: the old loader's length check read 0 and the read then
+    /// blocked for ever. Now it is an error naming the file, with nothing from inside it.
+    #[cfg(unix)]
+    #[test]
+    fn a_global_config_that_is_a_fifo_is_refused_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        crate::util::fs::special_file_fixtures::make_fifo(&path);
+        let root = dir.path().to_path_buf();
+        let err = crate::util::fs::special_file_fixtures::within_deadline(
+            "GlobalConfig::load_from_dir on a FIFO",
+            move || GlobalConfig::load_from_dir(&root),
+        )
+        .unwrap_err();
+        let shown = format!("{err:#}");
+        assert!(shown.contains("config.toml"), "names the file: {shown}");
+        assert!(shown.contains("not a regular file"), "says why: {shown}");
+    }
+
+    /// A link to a directory and a directory in place of the file are both refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_global_config_that_is_a_link_to_a_directory_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("elsewhere");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("config.toml")).unwrap();
+        let err = GlobalConfig::load_from_dir(dir.path()).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("not a regular file"),
+            "got: {err:#}"
+        );
+    }
+
+    /// Over 1 MiB is refused whole, by length and (see `util::fs`) by bytes read.
+    #[test]
+    fn a_global_config_over_the_cap_is_refused_and_one_at_the_cap_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cap = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        std::fs::write(&path, format!("{}\n", "#".repeat(cap))).unwrap();
+        let err = GlobalConfig::load_from_dir(dir.path()).unwrap_err();
+        assert!(format!("{err:#}").contains("exceeds"), "got: {err:#}");
+        std::fs::write(&path, "#".repeat(cap)).unwrap();
+        assert!(GlobalConfig::load_from_dir(dir.path()).unwrap().is_some());
+    }
+
+    /// An allowed layout: the config kept elsewhere and linked in.
+    #[cfg(unix)]
+    #[test]
+    fn a_global_config_that_is_a_link_to_a_regular_file_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles-config.toml");
+        std::fs::write(&real, "[embeddings]\nmodel = \"local:BGESmallENV15\"\n").unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("config.toml")).unwrap();
+        let cfg = GlobalConfig::load_from_dir(dir.path()).unwrap().unwrap();
+        assert_eq!(cfg.embeddings.model.as_deref(), Some("local:BGESmallENV15"));
     }
 
     #[test]

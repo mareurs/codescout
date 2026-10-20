@@ -104,7 +104,7 @@ pub(crate) fn check_write_with(
 /// TOML, or has no such table. An unreadable "before" is the same as an empty one, so a
 /// write cannot use a broken file to smuggle a table in.
 fn security_on_disk(path: &Path) -> Option<toml::Value> {
-    let text = std::fs::read_to_string(path).ok()?;
+    let text = crate::util::fs::read_regular_config_text(path).ok()?;
     let table: toml::Table = toml::from_str(&text).ok()?;
     table.get(PROTECTED_TABLE).cloned()
 }
@@ -380,6 +380,36 @@ mod tests {
         assert_eq!(
             check_write_with(&p, "[project]\nname = \"t\"\n", None, &[]),
             Ok(())
+        );
+    }
+
+    /// The write guard reads the file as it is now. A FIFO there used to hang the write; it is
+    /// an unreadable "before", the same as a broken file, so it confirms nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_or_a_directory_on_disk_is_an_unreadable_before_and_never_a_hang() {
+        use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe.toml");
+        make_fifo(&fifo);
+        let got = within_deadline("security_on_disk on a FIFO", move || {
+            security_on_disk(&fifo)
+        });
+        assert_eq!(got, None);
+
+        let real = dir.path().join("a-dir");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("dir-link.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(security_on_disk(&link), None);
+
+        let file = dir.path().join("ok.toml");
+        std::fs::write(&file, "[security]\nshell_command_mode = \"warn\"\n").unwrap();
+        let linked = dir.path().join("ok-link.toml");
+        std::os::unix::fs::symlink(&file, &linked).unwrap();
+        assert!(
+            security_on_disk(&linked).is_some(),
+            "a link to a regular file is still read"
         );
     }
 
