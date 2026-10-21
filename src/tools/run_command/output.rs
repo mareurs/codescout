@@ -1251,21 +1251,27 @@ pub(super) fn store_capture(
     Some((ref_id, held, line_count, pool_cut))
 }
 
-/// Add what a timed-out filtered command recovered to its `timed_out` response: the filter's
-/// output over the partial capture (`filtered`, already scrubbed; `None` when the filter's grace
-/// expired) and the capture's handle (`unfiltered`, from [`store_capture`]).
+/// Add what a timed-out filtered command recovered to its `timed_out` response: what its filter
+/// made of the partial capture (`run`, its streams already scrubbed) and the capture's handle
+/// (`unfiltered`, from [`store_capture`]).
 ///
 /// The response gains `capture_incomplete`, the `unfiltered_*` keys and the redaction note through
-/// [`attachments`], the helper the normal path uses for them, then either `stdout` or
-/// `filter_grace_expired`. `stdout` is cut to the room the response's other keys leave within the
-/// inline limit, MEASURED from the response itself: nothing bounds a filter's output, and this
-/// response is built outside `handle_successful_output_with`'s gate. A cut `stdout` says so with
-/// `truncated`, `stdout_shown` and `stdout_total`, the keys a cut buffer query carries.
+/// [`attachments`], the helper the normal path uses for them, then by `run`:
+/// - `Ran`: `filter_exit_code` when it is not 0 (grep's 1 included: it says "no match", which an
+///   empty `stdout` alone does not), `filter_stderr` when there is any (cut to
+///   [`FILTER_STDERR_BYTE_BUDGET`] behind a marker), and `stdout`;
+/// - `GraceExpired`: `filter_grace_expired`, no `stdout`;
+/// - `NotRun(reason)`: `filter_not_run: reason`, no `stdout`.
+///
+/// `stdout` is cut to the room every other key leaves within the inline limit, MEASURED from the
+/// response itself: nothing bounds a filter's output, and this response is built outside
+/// `handle_successful_output_with`'s gate. A cut `stdout` says so with `truncated`, `stdout_shown`
+/// and `stdout_total`, the keys a cut buffer query carries.
 ///
 /// A response with no handle (`unfiltered` is `None`: an empty capture) is left as it is.
 pub(super) fn attach_partial_capture(
     response: &mut Value,
-    filtered: Option<String>,
+    run: super::inner::FilterRun,
     unfiltered: Option<(
         String,
         Option<crate::tools::output_buffer::Truncation>,
@@ -1276,6 +1282,7 @@ pub(super) fn attach_partial_capture(
     original_command: &str,
 ) {
     use super::super::command_summary::{count_lines, truncate_lines_and_bytes};
+    use super::inner::FilterRun;
     if unfiltered.is_none() {
         return;
     }
@@ -1285,9 +1292,28 @@ pub(super) fn attach_partial_capture(
     };
     obj.insert("capture_incomplete".into(), json!(true));
     obj.extend(keys);
-    let Some(text) = filtered else {
-        obj.insert("filter_grace_expired".into(), json!(true));
-        return;
+    let text = match run {
+        FilterRun::GraceExpired => {
+            obj.insert("filter_grace_expired".into(), json!(true));
+            return;
+        }
+        FilterRun::NotRun(reason) => {
+            obj.insert("filter_not_run".into(), json!(reason));
+            return;
+        }
+        FilterRun::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            if exit_code != 0 {
+                obj.insert("filter_exit_code".into(), json!(exit_code));
+            }
+            if !stderr.is_empty() {
+                obj.insert("filter_stderr".into(), json!(bound_filter_stderr(&stderr)));
+            }
+            stdout
+        }
     };
     // Output that fits beside the response as it stands is kept byte for byte, as the normal path
     // keeps it: the cut rejoins lines and would drop a trailing newline.
@@ -1313,6 +1339,25 @@ pub(super) fn attach_partial_capture(
         response["stdout_total"] = json!(cut.total);
     }
     response["stdout"] = json!(cut.text);
+}
+
+/// The most JSON-escaped bytes of a timed-out command's filter stderr the response carries
+/// (`filter_stderr`). It reports why the filter failed (a bad regex, a missing command), which is
+/// one or two lines; a filter that writes more is cut in the middle behind a marker. Stored
+/// nowhere: the filter can be re-run on the `unfiltered_output` handle for all of it.
+// cap-class: RESULT_CAP run_command.filter_stderr_bytes — probed
+pub(super) const FILTER_STDERR_BYTE_BUDGET: usize = 500;
+
+/// `filter_stderr`, cut to [`FILTER_STDERR_BYTE_BUDGET`] escaped bytes behind a marker whose
+/// remedy is true.
+fn bound_filter_stderr(stderr: &str) -> String {
+    crate::util::text::elide_middle_escaped(
+        stderr,
+        stderr.len(),
+        FILTER_STDERR_BYTE_BUDGET,
+        "filter_stderr",
+        "re-run the filter on the `unfiltered_output` handle for all of it",
+    )
 }
 
 /// Build the response for a command that ran to completion — at any exit code.

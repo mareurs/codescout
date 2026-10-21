@@ -1294,6 +1294,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test hands
+        // `attach_partial_capture` a filter stderr of 5,000 units in four escape classes (ASCII,
+        // `"`, `\x01`, `€`) beside a 1 MB stdout and a 600 B hint, and asserts the marker, both
+        // ends kept, an escaped length within `FILTER_STDERR_BYTE_BUDGET` 500 and a response that
+        // fits the inline limit. Nothing else bounds the field: it is whatever the filter wrote to
+        // stderr. Marker written by production in `util::text::elide_middle_escaped`, called from
+        // `bound_filter_stderr`.
+        id: "run_command.filter_stderr_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("bytes shown"),
+            mutation: Mutation::Killed,
+            cited_test: "a_wide_filter_stderr_is_cut_behind_a_marker_and_the_response_fits",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test names
         // `JOBS_LISTED_MAX` + 4 live background jobs in one foreground command through the real
         // tool and asserts the first eight are listed in the command's order, the note counts the

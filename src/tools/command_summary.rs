@@ -337,35 +337,34 @@ fn unquoted_pipes(cmd: &str) -> Vec<(usize, usize)> {
     pipes
 }
 
+/// The commands a pipeline may end in for `run_command` to capture its unfiltered stream
+/// ([`detect_terminal_filter`]), and the only commands a filter may be made of for the timeout path
+/// to run it again over that capture ([`filter_is_replayable`]).
+const TERMINAL_FILTERS: &[&str] = &[
+    "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq", "tr",
+];
+
+/// The command a pipeline stage runs: its first whitespace-separated word with any path prefix
+/// stripped, so `/usr/bin/grep` is `grep`.
+fn stage_command_name(stage: &str) -> &str {
+    let token = stage
+        .trim_start()
+        .split(|c: char| c.is_whitespace())
+        .next()
+        .unwrap_or("");
+    token.rsplit('/').next().unwrap_or(token)
+}
+
 /// Returns the byte offset of the `|` pipe character that separates a command
-/// from a terminal filter stage (grep, head, tail, sed, awk, cut, wc, sort,
-/// uniq, tr, rg, egrep, fgrep).
+/// from a terminal filter stage (one of [`TERMINAL_FILTERS`]).
 ///
 /// Returns `None` if the command has no pipe, or if the last pipe stage is not
 /// a known terminal filter. Pipe characters inside quoted strings are ignored.
 pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
-    const TERMINAL_FILTERS: &[&str] = &[
-        "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq",
-        "tr",
-    ];
-
     let (pipe_pos, _depth) = *unquoted_pipes(cmd).last()?;
-
-    // Extract the first token of the stage after the pipe
-    let after_pipe = cmd[pipe_pos + 1..].trim_start();
-    let token = after_pipe
-        .split(|c: char| c.is_whitespace())
-        .next()
-        .unwrap_or("");
-
-    // Strip any path prefix so "/usr/bin/grep" matches "grep"
-    let name = token.rsplit('/').next().unwrap_or(token);
-
-    if TERMINAL_FILTERS.contains(&name) {
-        Some(pipe_pos)
-    } else {
-        None
-    }
+    TERMINAL_FILTERS
+        .contains(&stage_command_name(&cmd[pipe_pos + 1..]))
+        .then_some(pipe_pos)
 }
 
 /// Where to splice the unfiltered-output `tee` into `cmd`, or `None` when the command cannot be
@@ -437,6 +436,169 @@ pub(crate) fn splice_tee(cmd: &str, pipe_pos: usize, tee_path: &str, drain_bytes
         cmd[pipe_pos + 1..].trim_start(),
         drain_bytes
     )
+}
+
+/// Whether the filter of a timed-out command may be run AGAIN, alone, over its partial capture:
+/// `Ok` only when the replay can neither see a different context nor repeat a side effect. `Err`
+/// names the rule that failed; the timeout path reports it as `filter_not_run` and runs nothing.
+///
+/// `prefix` is the command text before the spliced pipe (the producer side) and `filter` the text
+/// after it (`TeeInjection::filter`). In the original run the filter group sits in the SAME shell
+/// script as the producer side; the replay runs `filter` by itself in the same directory. So:
+///
+/// 1. `prefix` is one pipeline ([`crate::util::path_security::is_one_pipeline`]): a `cd`, a `;`,
+///    `&&` or `||` list, or a `P=…;` assignment there can change what the filter reads or expands
+///    (`P=77; seq 1 9 | grep "$P"`), and none of it exists in the replay;
+/// 2. `filter` has no `$`, backtick, `>` or `<` (an expansion, substitution or redirection), and
+///    does not name `system`, `getline`, `--in-place` or `--output`;
+/// 3. EVERY stage of `filter` (split at its depth-0 pipes by [`unquoted_pipes`]) is one of
+///    [`TERMINAL_FILTERS`]: only the last stage had to be one for the capture, and a middle
+///    `xargs curl -X POST` would run again;
+/// 4. per command, the flags that write, run or load something: `sed -i`/`-f` and any `w`, `W` or
+///    `e` in a sed script (refused by letter, not parsed: those commands write a file or run one);
+///    `awk -f`/`-i`/`-l`/`-E`, `@include`/`@load` and any `|` (a quoted `print | "cmd"`);
+///    `sort -o`/`--compress-program`; `rg --pre`; a `uniq` file operand (its second is an OUTPUT).
+///    `grep -o` stays allowed: flags are judged per command.
+///
+/// Conservative by design: an `Err` costs the caller the filtered view of the partial capture (the
+/// handle is still returned); a wrong `Ok` returns another command's result or repeats its effects.
+pub(crate) fn filter_is_replayable(prefix: &str, filter: &str) -> Result<(), &'static str> {
+    use crate::util::path_security::is_one_pipeline;
+    if !is_one_pipeline(prefix) {
+        return Err(
+            "the command before the first pipe is not one pipeline, and a `cd`, `;`, \
+                    `&&`, `||` or assignment there sets context the filter would not have alone",
+        );
+    }
+    if !is_one_pipeline(filter) {
+        return Err("the filter is not one pipeline");
+    }
+    if filter.contains(['$', '`', '>', '<']) {
+        return Err(
+            "the filter contains `$`, a backtick, `>` or `<`: an expansion or redirection \
+                    that would not run the same way alone",
+        );
+    }
+    if ["system", "getline", "--in-place", "--output"]
+        .iter()
+        .any(|word| filter.contains(word))
+    {
+        return Err(
+            "the filter names `system`, `getline`, `--in-place` or `--output`, which can \
+                    run a command or write a file",
+        );
+    }
+    let mut starts = vec![0];
+    starts.extend(
+        unquoted_pipes(filter)
+            .into_iter()
+            .filter(|&(_, depth)| depth == 0)
+            .map(|(pos, _)| pos + 1),
+    );
+    let mut ends: Vec<usize> = starts[1..].iter().map(|start| start - 1).collect();
+    ends.push(filter.len());
+    for (&start, &end) in starts.iter().zip(&ends) {
+        let stage = &filter[start..end];
+        let tokens = crate::platform::posix_tokenize(stage)
+            .map_err(|_| "a filter stage could not be split into words")?;
+        let Some(head) = tokens.first() else {
+            return Err("the filter has an empty stage");
+        };
+        let name = stage_command_name(head);
+        if !TERMINAL_FILTERS.contains(&name) {
+            return Err(
+                "a filter stage is not one of the terminal filters (grep, egrep, fgrep, \
+                        rg, head, tail, sed, awk, cut, wc, sort, uniq, tr), and running it again \
+                        could repeat what it does",
+            );
+        }
+        stage_is_replayable(name, stage, &tokens[1..])?;
+    }
+    Ok(())
+}
+
+/// Rule 4 of [`filter_is_replayable`] for one stage: `name` is its command, `args` its words.
+fn stage_is_replayable(name: &str, stage: &str, args: &[String]) -> Result<(), &'static str> {
+    // The letters of a short-option cluster (`-ni` is `-n -i`), `None` for a long option or a word.
+    let short = |arg: &str| -> Option<String> {
+        (arg.len() > 1 && arg.starts_with('-') && !arg.starts_with("--")).then(|| arg[1..].into())
+    };
+    match name {
+        "sed" => {
+            const SED: &str = "a `sed` stage edits in place (`-i`), reads its script from a file \
+                               (`-f`), or has a `w`, `W` or `e` in its script, which can write a \
+                               file or run a command";
+            for arg in args {
+                let script = if let Some(flags) = short(arg) {
+                    if flags.contains(['i', 'f']) {
+                        return Err(SED);
+                    }
+                    // `-e<script>`: the rest of the cluster is a script.
+                    flags.find('e').map(|at| flags[at + 1..].to_string())
+                } else if arg.starts_with("--file") {
+                    return Err(SED);
+                } else if let Some(value) = arg.strip_prefix("--expression=") {
+                    Some(value.to_string())
+                } else if arg.starts_with("--") {
+                    None
+                } else {
+                    Some(arg.clone())
+                };
+                if script.is_some_and(|s| s.contains(['w', 'W', 'e'])) {
+                    return Err(SED);
+                }
+            }
+        }
+        "awk" => {
+            const AWK: &str = "an `awk` stage loads code (`-f`, `-i`, `-l`, `-E`, `@include`, \
+                               `@load`) or pipes to a command (`|`)";
+            if stage.contains('|') || stage.contains("@include") || stage.contains("@load") {
+                return Err(AWK);
+            }
+            for arg in args {
+                if let Some(flags) = short(arg) {
+                    // `-F<sep>` and `-v<var>=<value>` carry a value, not more flags.
+                    if !flags.starts_with(['F', 'v']) && flags.contains(['f', 'i', 'l', 'E']) {
+                        return Err(AWK);
+                    }
+                } else if ["--file", "--include", "--load", "--exec"]
+                    .iter()
+                    .any(|long| arg.starts_with(long))
+                {
+                    return Err(AWK);
+                }
+            }
+        }
+        "sort" => {
+            if args.iter().any(|arg| {
+                short(arg).is_some_and(|flags| flags.contains('o'))
+                    || arg.starts_with("--compress-program")
+            }) {
+                return Err("a `sort` stage writes a file (`-o`) or runs a program \
+                            (`--compress-program`)");
+            }
+        }
+        "rg" => {
+            if args.iter().any(|arg| arg.starts_with("--pre")) {
+                return Err("an `rg` stage runs a preprocessor (`--pre`)");
+            }
+        }
+        "uniq" => {
+            let mut args = args.iter();
+            while let Some(arg) = args.next() {
+                if matches!(arg.as_str(), "-f" | "-s" | "-w") {
+                    args.next();
+                } else if arg != "-" && !arg.starts_with('-') {
+                    return Err(
+                        "a `uniq` stage names a file operand, and its second one is an \
+                                output file",
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Whether the shell accepts `text` as a syntactically valid command, WITHOUT running it: the
@@ -2778,5 +2940,103 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             let want = want.map(|marker| cmd.find(marker).expect(marker));
             assert_eq!(tee_splice_point(cmd), want, "{cmd}");
         }
+    }
+
+    /// R19: the timeout path replays a filter only when the replay is provably pure. One row per rule,
+    /// the reviewer's shapes (each must be refused), and the plain filters that must stay replayable.
+    #[test]
+    fn filter_is_replayable_refuses_every_shape_whose_replay_could_differ_or_repeat_an_effect() {
+        let ok = |prefix: &str, filter: &str| filter_is_replayable(prefix, filter).is_ok();
+        // Plain filters, with a plain producer.
+        for filter in [
+            "grep 77",
+            "grep -o 'a.b' | head -3",
+            "sort | uniq -c | head",
+            "grep -v x | sort -u | head -n 5",
+            "sed -n '1,5p'",
+            "awk -F: -v n=2 'NR==n'",
+            "cut -d, -f2 | tr a-z A-Z",
+            "wc -l",
+            "uniq -c -f 2 -",
+            "rg -n foo",
+            "/usr/bin/grep x",
+        ] {
+            assert!(ok("seq 1 10", filter), "{filter:?} must be replayable");
+        }
+        assert!(
+            ok("sh -c 'seq 1 9; sleep 30'", "grep 7"),
+            "a quoted list is one word"
+        );
+        assert!(
+            ok("cargo test 2>&1", "grep FAILED"),
+            "a producer redirect is not a list"
+        );
+
+        for (prefix, filter, why) in [
+            // Rule 1: the producer side sets context the replay would not have.
+            (
+                "P=77; (seq 1 1000; sleep 30)",
+                "grep \"$P\"",
+                "assignment + $",
+            ),
+            ("P=77; seq 1 9", "grep 7", "assignment list"),
+            ("cd sub && cat f", "grep -f pats", "cd &&"),
+            ("export LC_ALL=C; seq 1 9", "sort", "export ;"),
+            ("false || seq 1 9", "grep 7", "||"),
+            ("(seq 1 1000; sleep 30)", "grep 77", "subshell list"),
+            // Rule 2: expansion, substitution, redirection, named effects.
+            ("seq 1 9", "grep \"$P\"", "$"),
+            ("seq 1 9", "grep `cat pat`", "backtick"),
+            ("seq 1 9", "grep x > out", ">"),
+            ("seq 1 9", "grep -f - <pats", "<"),
+            ("seq 1 9", "awk '{system(\"rm x\")}'", "system"),
+            ("seq 1 9", "awk '{getline l}'", "getline"),
+            ("seq 1 9", "sed --in-place s/a/b/", "--in-place"),
+            ("seq 1 9", "sort --output=f", "--output"),
+            // Rule 3: a middle stage that is not a terminal filter.
+            ("cat urls", "xargs -n1 curl -X POST | grep ok", "xargs"),
+            (
+                "seq 1 9",
+                "xargs -I{} touch touched{} | grep x",
+                "xargs touch",
+            ),
+            ("seq 1 9", "tee copy | grep x", "tee"),
+            ("seq 1 9", "grep x | (head -1)", "subshell stage"),
+            ("seq 1 9", "LC_ALL=C sort", "assignment stage"),
+            ("seq 1 9", "grep x |& head", "|& stage"),
+            ("seq 1 9", "grep x; rm y", "not one pipeline"),
+            // Rule 4: per-command flags that write, run or load.
+            ("seq 1 9", "sed -i s/a/b/ f", "sed -i"),
+            ("seq 1 9", "sed -i.bak s/a/b/ f", "sed -i<suffix>"),
+            ("seq 1 9", "sed -ni p", "sed -ni"),
+            ("seq 1 9", "sed -f script", "sed -f"),
+            ("seq 1 9", "sed 's/a/b/w out'", "sed w flag"),
+            ("seq 1 9", "sed '1e touch x'", "sed e command"),
+            ("seq 1 9", "sed -e 'W out'", "sed W command"),
+            ("seq 1 9", "awk -f prog.awk", "awk -f"),
+            ("seq 1 9", "awk -i inplace '{print}'", "awk -i"),
+            ("seq 1 9", "awk '@include \"x\"'", "@include"),
+            ("seq 1 9", "awk '{print | \"sh\"}'", "awk pipe"),
+            ("seq 1 9", "sort -o out", "sort -o"),
+            ("seq 1 9", "sort -uo out", "sort -uo"),
+            ("seq 1 9", "sort --compress-program=gzip", "sort compress"),
+            ("seq 1 9", "rg --pre ./x foo", "rg --pre"),
+            ("seq 1 9", "uniq - out", "uniq output operand"),
+        ] {
+            assert!(
+                !ok(prefix, filter),
+                "{why}: {prefix:?} | {filter:?} must not be replayed"
+            );
+        }
+        assert!(
+            !ok("seq 1 9", "awk '{print $1}' | head"),
+            "rule 2 refuses `$`"
+        );
+        // `grep -o` is judged per command: `-o` is refused only on `sort`.
+        assert!(ok("seq 1 9", "grep -o x | sort"));
+        // The reason is the one for the rule that failed.
+        assert!(filter_is_replayable("seq 1", "xargs echo | grep x")
+            .unwrap_err()
+            .contains("terminal filters"));
     }
 }
