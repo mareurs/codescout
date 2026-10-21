@@ -274,14 +274,15 @@ const TERMINAL_FILTER_NAMES: &str =
     "grep, egrep, fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr";
 
 /// Whether the unfiltered-output capture can serve `command`: asked of the SAME function the tee
-/// splice asks (`inject_tee_in`: `tee_splice_point` on a heredoc-masked copy), so a command this
-/// calls capturable is one `inject_tee_in` splices. The reverse can differ only where the splice is
-/// skipped for a reason `tee_splice_point` also refuses (`buffer_only` needs a buffer ref in the
-/// text, which it rejects), so the refusal below is never skipped for a command that then runs with
-/// no capture.
+/// splice asks (`inject_tee_in`: `tee_splice_point`), so a command this calls capturable is one
+/// `inject_tee_in` splices, except in one case: when the capture's temp file cannot be created
+/// (a full or unwritable temp directory) the splice is skipped on purpose, the command runs
+/// un-teed, and the response says so in `unfiltered_output_skipped`. That is a best-effort failure,
+/// not a refusal, so a command the refusal let through can still run with no capture then. In the
+/// other direction (`buffer_only` needs a buffer ref in the text, which `tee_splice_point` rejects)
+/// the two cannot disagree.
 fn capture_can_serve(command: &str) -> bool {
-    let masked = crate::util::path_security::mask_heredoc_bodies(command);
-    crate::tools::command_summary::tee_splice_point(&masked).is_some()
+    crate::tools::command_summary::tee_splice_point(command).is_some()
 }
 
 /// The IL-3 refusal for `command`, or `None` when it is allowed to run. The ONE place that decides
@@ -290,14 +291,14 @@ fn capture_can_serve(command: &str) -> bool {
 /// - **Background:** the verdict of `detect_il3_violation`, worded for a background run. A
 ///   background run sends its stdout straight to a log and keeps no unfiltered stream, so what the
 ///   pipe's trimmer drops is gone, whatever its last stage is.
-/// - **Foreground:** refused only when `detect_il3_violation` fires AND the capture cannot serve the
-///   command (`capture_can_serve`, which asks the tee's own `tee_splice_point`). A command it
-///   serves is run to the end through the capture and keeps the producer's full stream as
-///   `unfiltered_output`, so there is nothing to refuse. One it does not serve (the last stage is
-///   not a terminal filter, the first top-level pipe is followed by a `;` / `&&` tail, or a buffer
-///   ref is present) runs untouched, with no capture, so the trimmer's loss would be real and the
-///   refusal stands. The refusal and the splice read the same function, so a command the foreground
-///   refusal lets through is one the splice captures.
+/// - **Foreground:** refused only when `detect_il3_violation` fires AND the capture cannot be spliced
+///   into the command (`capture_can_serve`, which asks the tee's own `tee_splice_point`). A command
+///   it serves is run to the end through the capture and keeps the producer's full stream as
+///   `unfiltered_output`, so there is nothing to refuse. One it does not serve runs untouched, with
+///   no capture, so the trimmer's loss would be real and the refusal stands. That is every command
+///   whose last stage is not a terminal filter, or whose first top-level pipe is followed by a
+///   `;` / `&&` list, a comment, a heredoc, `$(` or a backtick, or whose pipe is nested in a group or
+///   substitution, or is `|&`, or that names a buffer ref, or whose splice the shell does not parse.
 pub(super) fn pipe_refusal(command: &str, run_in_background: bool) -> Option<String> {
     if run_in_background {
         return crate::util::path_security::detect_il3_violation(command);
@@ -307,14 +308,17 @@ pub(super) fn pipe_refusal(command: &str, run_in_background: bool) -> Option<Str
         return None;
     }
     Some(format!(
-        "IL3 violation — piped `{segment}` to a log-trimmer, and no unfiltered capture can be kept \
-         for this command. BLOCKED.\n\n\
-         A capture is kept only when the pipeline's LAST stage is a terminal filter \
-         ({TERMINAL_FILTER_NAMES}), its first top-level pipe is followed by nothing but the rest of \
-         that pipeline (no `;` or `&&` after it), and the command names no @cmd_* buffer. Here \
-         what the trimmer drops is gone. Either:\n  \
-         (a) rewrite it as one pipeline ending in its filter: the full stream of the first command \
-         is then kept as `unfiltered_output`\n  \
+        "IL3 violation — piped `{segment}` to a log-trimmer, and the capture cannot be spliced into \
+         this command. BLOCKED.\n\n\
+         A foreground pipe keeps the full stream of its first command as `unfiltered_output` only \
+         when its LAST stage is a terminal filter ({TERMINAL_FILTER_NAMES}) and the first top-level \
+         pipe is followed by nothing but the rest of that one pipeline. The capture is not kept when \
+         that pipe is followed by a `;` or `&&` list, a comment, a heredoc, `$(` or a backtick; when \
+         the pipe sits inside a group, `$(...)` or `<(...)`; when it is `|&`; when the command names a \
+         buffer (@cmd_*, @bg_*, @file_*, @tool_*, @ack_*); or when the spliced command would not \
+         parse. Here what the trimmer drops is gone. Either:\n  \
+         (a) rewrite it as one plain pipeline ending in its filter: the full stream of the first \
+         command is then kept as `unfiltered_output`\n  \
          (b) run_command(\"{lead}\") bare, then query the @cmd_* buffer: grep PATTERN @cmd_xxx"
     ))
 }
@@ -474,10 +478,13 @@ impl Tool for RunCommand {
             // --- Step 1: Resolve @cmd_ buffer references ---
             // IL3 gate runs BEFORE resolve_refs so buffer refs are still visible —
             // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op). `pipe_refusal` decides the
-            // rest: a BACKGROUND pipe is refused (its log keeps only what the pipe passes), and
-            // so is a foreground one the capture cannot serve (no terminal filter last). A
-            // foreground pipe ending in a terminal filter is run to the end through a capture
-            // that keeps the full stream (`unfiltered_output`), so there is nothing to refuse.
+            // rest: a BACKGROUND pipe is refused (its log keeps only what the pipe passes). A
+            // foreground pipe is refused when the detector fires AND the capture cannot be spliced
+            // into it: last stage not a terminal filter, a list/comment/heredoc/`$(` after the
+            // first pipe, a pipe nested in a group or substitution, `|&`, a buffer ref, or a
+            // splice the shell does not parse. Such a command would run with no capture, so what
+            // its trimmer drops would be lost. Every other foreground pipe is run to the end
+            // through a capture that keeps the full stream (`unfiltered_output`).
             if let Some(hint) = pipe_refusal(command, run_in_background) {
                 return Err(super::RecoverableError::new(hint).into());
             }

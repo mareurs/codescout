@@ -232,14 +232,10 @@ pub(super) fn inject_tee_in(
     if buffer_only {
         return Ok(untouched(None));
     }
-    // A `|` inside a heredoc BODY is data destined for a file, not pipeline syntax, and
-    // `detect_terminal_filter` — quote-aware but with no notion of a heredoc — read it as
-    // a pipeline stage, so the splice below landed in written content. Detect on a masked
-    // copy: masking blanks body bytes in place, so `pipe_pos` still addresses the original
-    // and the splice is unchanged. See
+    // `tee_splice_point` scans a heredoc-masked copy: a `|` inside a heredoc BODY is data
+    // destined for a file, not pipeline syntax, and the splice used to land in written content. See
     // docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
-    let masked = crate::util::path_security::mask_heredoc_bodies(resolved_command);
-    let Some(pipe_pos) = tee_splice_point(&masked) else {
+    let Some(pipe_pos) = tee_splice_point(resolved_command) else {
         return Ok(untouched(None));
     };
     let skip = |why: &dyn std::fmt::Display| {
@@ -282,8 +278,9 @@ pub(super) fn inject_tee_in(
     // not anticipate (a future temp-dir naming scheme, a space in the path).
     // `'` itself is excluded by the allowlist, so the quoting cannot be
     // escaped from.
-    // The tee goes at the splice point (`tee_splice_point`: the first pipe at nesting depth 0, and
-    // only when the rest is one pipeline ending in a terminal filter), so in a chain
+    // The tee goes at the splice point (`tee_splice_point`: the first pipe at nesting depth 0, only
+    // when the rest is one pipeline ending in a terminal filter and the shell parses both the
+    // command and the spliced text), so in a chain
     // (`cargo test | grep x | head -20`) the capture is the producer's own stream and the
     // whole chain runs inside the group. A command that does not qualify never reaches here:
     // it runs untouched, with no capture and no fallback to another pipe.
@@ -297,16 +294,15 @@ pub(super) fn inject_tee_in(
     // than the bound before `timeout_secs`) never reaches the bound, so it runs to the
     // timeout; until the timeout path recovers output (plan Task 4) that returns a bare
     // `timed_out`. Pinned by `a_slow_endless_producer_into_head_runs_to_the_timeout`.
-    // POSIX only: `sh -c` may be dash. The newline before `s=$?` (not `;`) is load-bearing: a
-    // trailing `# comment` in the filter would otherwise swallow the closing brace. The group
+    // POSIX only: `sh -c` may be dash. The shape (`splice_tee`) puts the newline before `s=$?` (not
+    // `;`) so a trailing `# comment` in the filter cannot swallow the closing brace. The group
     // sits on the filter's side of the pipe, so the producer's stderr is not piped into it.
     let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
-    let command = format!(
-        "{} | tee '{}' | {{ {}\ns=$?; head -c {} >/dev/null; exit $s; }}",
-        resolved_command[..pipe_pos].trim_end(),
-        tmpfile,
-        filter,
-        super::output::CAPTURE_STORE_LIMIT_BYTES
+    let command = super::super::command_summary::splice_tee(
+        resolved_command,
+        pipe_pos,
+        &tmpfile,
+        super::output::CAPTURE_STORE_LIMIT_BYTES,
     );
     Ok(TeeInjection {
         command,

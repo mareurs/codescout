@@ -68,7 +68,7 @@ Count semantics: `unfiltered_output_lines` is the line count of the capture file
 
 ## Tests added
 
-In `src/tools/run_command/tests.rs`: `inject_tee_in_wraps_the_filter_in_a_draining_group`, `a_head_pipe_still_captures_the_whole_stream`, `a_filter_exit_status_survives_the_drain`, `a_comment_after_the_filter_does_not_break_the_drain`, `a_producers_stderr_is_not_piped_into_the_filter`, `an_endless_producer_into_head_ends_at_once_with_a_bounded_capture`, `a_urandom_password_idiom_ends_at_once`, `a_slow_endless_producer_into_head_runs_to_the_timeout` (pins the slow-producer cost), `a_head_pipe_over_the_store_limit_reports_a_lower_bound_and_the_truncated_flag`, `a_semicolon_tail_after_the_filter_keeps_the_filters_status_and_output`. The first two fail before the fix; the others guard properties the group must keep.
+In `src/tools/run_command/tests.rs`: `inject_tee_in_wraps_the_filter_in_a_draining_group`, `a_head_pipe_still_captures_the_whole_stream`, `a_filter_exit_status_survives_the_drain`, `a_comment_after_the_filter_does_not_break_the_drain`, `a_producers_stderr_is_not_piped_into_the_filter`, `an_endless_producer_into_head_ends_at_once_with_a_bounded_capture`, `a_urandom_password_idiom_ends_at_once`, `a_slow_endless_producer_into_head_runs_to_the_timeout` (pins the slow-producer cost), `a_head_pipe_over_the_store_limit_reports_a_lower_bound_and_the_truncated_flag`, `a_semicolon_tail_after_the_filter_runs_untouched_with_no_capture`. The first two fail before the fix; the others guard properties the group must keep.
 
 ## Workarounds
 

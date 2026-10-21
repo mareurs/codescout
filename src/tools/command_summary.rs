@@ -371,22 +371,30 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
 /// Where to splice the unfiltered-output `tee` into `cmd`, or `None` when the command cannot be
 /// captured and must run UNTOUCHED. The ONE function that decides it: `inject_tee_in` splices at
 /// the offset it returns and `run_command`'s foreground refusal asks whether it returns `Some`, so
-/// the splice and the refusal cannot disagree. `cmd` is a heredoc-masked copy
-/// ([`crate::util::path_security::mask_heredoc_bodies`]).
+/// the splice and the refusal cannot disagree. `cmd` is the command text as it will run; heredoc
+/// bodies are masked here for the structural scan only
+/// ([`crate::util::path_security::mask_heredoc_bodies`] keeps every offset).
 ///
 /// The offset is the `|` that starts the filter group, and the capture is the stream that enters
 /// it, so it must be the producer's own stdout. `Some` only when ALL of these hold:
 ///
-/// 1. the last stage of the whole text is a terminal filter ([`detect_terminal_filter`]);
-/// 2. that last pipe is at nesting depth 0, and the pipe chosen is the FIRST unquoted `|` at depth
-///    0 (see [`unquoted_pipes`]: parentheses, `$( )`, `<( )`, backticks and `{ }` groups nest), so
-///    the splice never lands inside a subshell or substitution;
-/// 3. the text after the chosen pipe is one pipeline
+/// 1. `cmd` holds no buffer ref: `resolve_refs` may then mark the call `buffer_only`, which turns
+///    the capture off, so a command that mentions one is never promised a capture;
+/// 2. the last stage of the whole text is a terminal filter ([`detect_terminal_filter`]), and that
+///    last pipe is at nesting depth 0;
+/// 3. the pipe chosen is the FIRST unquoted `|` at depth 0 (see [`unquoted_pipes`]: parentheses,
+///    `$( )`, `<( )`, backticks and `{ }` groups nest), so the splice does not land inside a
+///    subshell or substitution;
+/// 4. the text after the chosen pipe is one pipeline
 ///    ([`crate::util::path_security::is_one_pipeline`]): the group holds exactly the rest of that
 ///    pipeline, and nothing after a `;` / `&&` / newline;
-/// 4. the chosen pipe is not `|&` (stderr is piped too, and the command is left untouched);
-/// 5. `cmd` holds no buffer ref: `resolve_refs` may then mark the call `buffer_only`, which turns
-///    the capture off, so a command that mentions one is never promised a capture.
+/// 5. the chosen pipe is not `|&` (stderr is piped too, and the command is left untouched);
+/// 6. the shell PARSES both `cmd` and the spliced text ([`splice_tee`] with a dummy path). The
+///    scan above is not a shell parser (a `|` in a double-quoted string inside a `$( )`, a stray
+///    `}` or `)` in a group each fool it), and a splice the shell rejects turns a working command
+///    into a syntax error, so this is the backstop for that whole class. The check runs
+///    `set -n` + the text through the platform shell, which parses and executes nothing, and only
+///    when conditions 1 to 5 hold.
 ///
 /// There is no fallback to another pipe. When a condition fails the command runs as the caller
 /// wrote it, with no capture, because a capture of a different segment's stream would leave the
@@ -395,18 +403,69 @@ pub fn tee_splice_point(cmd: &str) -> Option<usize> {
     if crate::util::path_security::contains_buffer_ref(cmd) {
         return None;
     }
-    let pipes = unquoted_pipes(cmd);
+    let masked = crate::util::path_security::mask_heredoc_bodies(cmd);
+    let pipes = unquoted_pipes(&masked);
     let &(_, last_depth) = pipes.last()?;
-    detect_terminal_filter(cmd)?;
+    detect_terminal_filter(&masked)?;
     if last_depth != 0 {
         return None;
     }
     let &(first, _) = pipes.iter().find(|&&(_, depth)| depth == 0)?;
-    let rest = cmd[first + 1..].trim_end();
+    let rest = masked[first + 1..].trim_end();
     if rest.starts_with('&') || !crate::util::path_security::is_one_pipeline(rest) {
         return None;
     }
+    // The structural candidate exists; ask the shell whether it is real. The splice is checked with
+    // the same shape the real one has, so a parse failure here is the one the command would hit.
+    if !shell_parses(cmd) || !shell_parses(&splice_tee(cmd, first, "/dev/null", 0)) {
+        return None;
+    }
     Some(first)
+}
+
+/// `cmd` with the unfiltered-output capture spliced in at `pipe_pos` (the `|` that
+/// [`tee_splice_point`] returned): `A | tee '<tee_path>' | { B` + a newline + `s=$?; head -c
+/// <drain_bytes> >/dev/null; exit $s; }`. The ONE place that builds the shape, for the real splice
+/// (`inject_tee_in`) and for the parse check in [`tee_splice_point`], so what is checked is what
+/// runs. The newline before `s=$?` (not `;`) is load-bearing: a trailing `# comment` in the filter
+/// would otherwise swallow the closing brace.
+pub(crate) fn splice_tee(cmd: &str, pipe_pos: usize, tee_path: &str, drain_bytes: usize) -> String {
+    format!(
+        "{} | tee '{}' | {{ {}\ns=$?; head -c {} >/dev/null; exit $s; }}",
+        cmd[..pipe_pos].trim_end(),
+        tee_path,
+        cmd[pipe_pos + 1..].trim_start(),
+        drain_bytes
+    )
+}
+
+/// Whether the shell accepts `text` as a syntactically valid command, WITHOUT running it: the
+/// platform shell ([`crate::platform::shell_command_configured`], `sh` on Unix and Git Bash on
+/// Windows) is given `set -n` and a newline before `text`, so it reads and parses every line and
+/// executes none (`touch f | tee x` creates no `f`). A shell that cannot be started counts as "does
+/// not parse": nothing would run the command either, and a capture is never worth a guess.
+///
+/// The platform builder returns a `tokio` command, which cannot be waited on from this sync
+/// function, so its program, arguments and environment are copied into a `std` one. That is the
+/// whole of what the builders set on Windows; on Unix the process group and `SIGPIPE` reset they
+/// add do not matter to a parse.
+fn shell_parses(text: &str) -> bool {
+    let configured = crate::platform::shell_command_configured(&format!("set -n\n{text}"));
+    let configured = configured.as_std();
+    let mut probe = std::process::Command::new(configured.get_program());
+    probe.args(configured.get_args());
+    for (key, value) in configured.get_envs() {
+        match value {
+            Some(value) => probe.env(key, value),
+            None => probe.env_remove(key),
+        };
+    }
+    probe
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// Returns `true` when the combined output is large enough to benefit from
@@ -2619,6 +2678,68 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         assert_eq!(tee_splice_point("a | grep x | head -1; echo done"), None);
         assert_eq!(tee_splice_point("a | grep x | cat; echo | head -1"), None);
     }
+    /// R18: the structural scan is not a shell parser, so `tee_splice_point` asks the shell. A
+    /// candidate whose ORIGINAL does not parse, or whose SPLICE does not, is not spliced; a normal
+    /// one is.
+    #[cfg(unix)]
+    #[test]
+    fn the_parse_guard_declines_what_the_shell_would_reject() {
+        // Passes every structural condition (one pipeline after the first pipe, a filter last,
+        // balanced quotes) but the original has a stray `)`: it does not parse, so it is not spliced.
+        let unparsable = "seq 3 | head -1 )";
+        assert!(
+            !shell_parses(unparsable),
+            "the premise: the shell rejects it"
+        );
+        assert_eq!(tee_splice_point(unparsable), None);
+        // The original parses, the splice does not (the scan reads the `|` inside the nested string
+        // as top-level): not spliced.
+        let fooled = r#"echo "$(printf '%s' "a|b")" | head -1"#;
+        assert!(shell_parses(fooled), "the premise: the original parses");
+        let at = fooled.find("a|b").unwrap() + 1;
+        assert!(
+            !shell_parses(&splice_tee(fooled, at, "/dev/null", 0)),
+            "the premise: splicing there does not parse"
+        );
+        assert_eq!(tee_splice_point(fooled), None);
+        // A normal candidate: spliced, and its splice parses.
+        let normal = "seq 3 | grep 2 | head -1";
+        assert_eq!(tee_splice_point(normal), normal.find("| grep"));
+        assert!(shell_parses(&splice_tee(
+            normal,
+            normal.find("| grep").unwrap(),
+            "/dev/null",
+            0
+        )));
+    }
+
+    /// The parse check must not RUN anything: `set -n` reads and parses and executes nothing. A
+    /// command that would create a file creates none while `tee_splice_point` decides, and does when
+    /// run for real (so the sentinel is evidence).
+    #[cfg(unix)]
+    #[test]
+    fn the_parse_guard_never_runs_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let sentinel = dir.path().join("SENTINEL");
+        let cmd = format!("touch '{}' | grep x | head -1", sentinel.display());
+        assert!(
+            tee_splice_point(&cmd).is_some(),
+            "the premise: a real candidate"
+        );
+        assert!(
+            !sentinel.exists(),
+            "the parse check must not execute the command"
+        );
+        // Control: run for real, the sentinel appears.
+        std::process::Command::new("sh")
+            .args(["-c", &cmd])
+            .status()
+            .unwrap();
+        assert!(
+            sentinel.exists(),
+            "the control: the command does create it when run"
+        );
+    }
 
     #[test]
     fn tee_splice_point_decides_from_the_depth_zero_pipes() {
@@ -2650,6 +2771,9 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
             // A buffer ref: `resolve_refs` may turn the capture off, so none is promised.
             ("seq 3 | grep 1 | head -1; grep y @cmd_abc", None),
             ("cat @cmd_abc | grep 1 | head -1", None),
+            // The scan reads a pipe here as top-level, and the shell rejects the splice (R18): none.
+            (r#"echo "$(printf '%s' "a|b")" | head -1"#, None),
+            ("(echo }; seq 3 | grep 1) | head -1", None),
         ] {
             let want = want.map(|marker| cmd.find(marker).expect(marker));
             assert_eq!(tee_splice_point(cmd), want, "{cmd}");

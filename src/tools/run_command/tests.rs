@@ -6871,9 +6871,16 @@ fn pipe_refusal_decides_the_three_branches() {
     assert_eq!(pipe_refusal("cargo test | grep FAILED", false), None);
     // R15: a `;` tail after the first pipe means no splice and no fallback, so it is refused.
     assert!(pipe_refusal("cargo test | grep x | head -1; echo done", false).is_some());
-    // R16: a buffer ref disables the capture (`resolve_refs` may mark the call `buffer_only`), so the
-    // detector firing on another segment still refuses in the foreground.
-    assert!(pipe_refusal("cargo --version | grep x | head -1; grep y @cmd_abc", false).is_some());
+    // R16-5 isolated: `cargo --version | grep x @cmd_abc | head -1` is ONE plain pipeline that
+    // ends in a terminal filter (every other condition holds), and the detector fires on its `cargo`
+    // producer, so the buffer ref in the second stage is the only thing that disables the capture
+    // (`resolve_refs` may mark the call `buffer_only`). Refused in the foreground; the same text
+    // without the ref is captured.
+    assert!(pipe_refusal("cargo --version | grep x @cmd_abc | head -1", false).is_some());
+    assert_eq!(
+        pipe_refusal("cargo --version | grep x | head -1", false),
+        None
+    );
     // Nothing for the detector to refuse: not refused in either mode.
     assert_eq!(pipe_refusal("ls | head -1", false), None);
     assert_eq!(pipe_refusal("ls | head -1", true), None);
@@ -6991,6 +6998,54 @@ async fn a_foreground_pipe_with_a_list_tail_is_refused_not_captured_elsewhere() 
             "`{command}`: {err}"
         );
     }
+}
+/// R18: a `|` inside a nested double-quoted string inside a `$( )` reads as a depth-0 pipe to the
+/// scanner, and the splice there is a syntax error. The parse guard sees that the spliced text does
+/// not parse, so the command runs exactly as written (and has no capture).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_substitution_with_a_quoted_pipe_inside_runs_as_it_does_bare() {
+    let (_dir, ctx) = project_ctx().await;
+    let command = r#"echo "$(printf '%s' "a|b")" | head -1"#;
+    let result = RunCommand
+        .call(json!({ "command": command, "timeout_secs": 20 }), &ctx)
+        .await
+        .expect("a pipe in a nested string is run, not refused");
+    assert_eq!(result["exit_code"], 0, "{result}");
+    assert_eq!(
+        result["stdout"].as_str().unwrap_or_default(),
+        "a|b\n",
+        "{result}"
+    );
+    assert!(
+        result.get("unfiltered_output").is_none(),
+        "the only candidate splice does not parse, so nothing is captured; got: {result}"
+    );
+}
+
+/// R18: a stray `}` sends the scanner's depth to 0 inside a `( )` group, so the inner pipe looks
+/// top-level. Bare, the command prints `}` (the `echo`) and `1`, and `head -1` keeps the first.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stray_brace_in_a_group_runs_as_it_does_bare() {
+    let (_dir, ctx) = project_ctx().await;
+    let command = "(echo }; seq 3 | grep 1) | head -1";
+    let bare = std::process::Command::new("sh")
+        .args(["-c", command])
+        .output()
+        .expect("sh runs");
+    assert!(bare.status.success(), "the premise: it works bare");
+    let result = RunCommand
+        .call(json!({ "command": command, "timeout_secs": 20 }), &ctx)
+        .await
+        .expect("a stray brace in a group is run, not refused");
+    assert_eq!(result["exit_code"], 0, "{result}");
+    assert_eq!(
+        result["stdout"].as_str().unwrap_or_default(),
+        String::from_utf8_lossy(&bare.stdout),
+        "{result}"
+    );
+    assert_eq!(result["stdout"], "}\n", "{result}");
 }
 
 #[test]
