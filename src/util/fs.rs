@@ -1940,12 +1940,14 @@ mod bounded_read_tests {
                 .finish(),
         );
 
-        // A SECOND live dispatcher, kept for the whole test. With exactly one registered
-        // dispatcher tracing-core decides a callsite's interest from whichever thread first
-        // reaches it; the sibling `read_git_pointer` tests reach this `debug!` from threads with
-        // no dispatcher, cache "never", and this test then reads an empty log (it failed 3 of 3
-        // runs under `cargo test --lib util::fs`). With two, interest is "sometimes" and every
-        // event asks the current thread's dispatcher.
+        // Keeps a SECOND dispatcher live for the whole test. This test reads the log of a
+        // callsite that sibling `read_git_pointer` tests also reach, from threads with no
+        // dispatcher; with only one registered dispatcher it failed in most runs of
+        // `cargo test --lib util::fs` (the log came back empty). Holding a second one for the
+        // whole test is the robust choice when other tests register and drop dispatchers. The
+        // exact trigger is an internal tracing-core detail (callsite interest bookkeeping at
+        // registration time), and a dispatcher dropped at once happened to pass as well, so this
+        // is not claimed to be the only thing that works.
         let _second = tracing::Dispatch::new(
             tracing_subscriber::fmt()
                 .with_writer(std::io::sink)
