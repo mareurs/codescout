@@ -1859,6 +1859,15 @@ fn quotes_balanced(s: &str) -> bool {
 /// wastes a tool call. Server-side enforcement covers all MCP clients (Claude
 /// Code, Copilot, Gemini, …).
 ///
+/// **Only a BACKGROUND run is refused on this verdict.** A foreground pipe whose last
+/// stage is a terminal filter is run to the end through a capture, and the full stream
+/// is kept as `unfiltered_output`, so nothing is hidden. A background run sends its
+/// stdout straight to a log and keeps no unfiltered stream, so what its pipe drops is
+/// gone; `RunCommand::call` asks this function for the verdict only when
+/// `run_in_background` is set. The detection below is unchanged by that: it still says
+/// which pipes would hide output, and the message it returns is written for the
+/// background case.
+///
 /// *(The doc comment here used to name `codescout-companion/hooks/il3-deny-hook.sh`
 /// as a mirror to keep in sync. That file still exists but is no longer wired:
 /// measured 2026-08-27, no `hooks.json` PreToolUse matcher targets `run_command`,
@@ -1917,17 +1926,13 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
     let lead = lead.trim();
 
     Some(format!(
-        "IL3 violation — piped `{segment}` to a log-trimmer. BLOCKED.\n\n\
-         The @cmd_* buffer system saves context tokens:\n  \
-         1. run_command(\"{lead}\")               — full output stored as @cmd_xxx\n  \
-         2. grep PATTERN @cmd_xxx                 — query the buffer at any granularity\n  \
-                                                    (also: tail -20 @cmd_xxx, head -50 @cmd_xxx)\n\n\
-         ⚠ That buffer is CAPPED. When the response carries `unfiltered_truncated: true`\n\
-         it holds only a PREFIX, and nothing in the buffer marks where it was cut — so a\n\
-         grep over it can report `0` for something present, and a hash of it\n\
-         (`git patch-id`, `sha256sum`) is a valid-looking WRONG digest. For whole-input\n\
-         work, redirect to a file instead:\n  \
-         git show <sha> > /tmp/x.patch && git patch-id --stable < /tmp/x.patch\n\n\
+        "IL3 violation — piped `{segment}` to a log-trimmer in a BACKGROUND run. BLOCKED.\n\n\
+         A background run keeps only what its pipe passes: its log gets the FILTERED\n\
+         output, and what the trimmer drops is gone. Either:\n  \
+         (a) run_command(\"{lead}\", run_in_background=true)  — the log holds the full output\n      \
+         as @bg_xxx; then grep PATTERN @bg_xxx (also: tail -20 @bg_xxx, head -50 @bg_xxx)\n  \
+         (b) run the pipe in the FOREGROUND (drop run_in_background) — it runs to the end\n      \
+         and the full stream is kept as `unfiltered_output`.\n\n\
          Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c). A pipeline that collapses\n\
          ANYWHERE (wc, grep -c, sha256sum, git patch-id) is allowed whatever follows it,\n\
@@ -1940,8 +1945,7 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          Single-line plumbing (rev-parse, patch-id, merge-base, describe) is always bounded,\n\
          as is plumbing bounded by its argument count (check-ignore without --stdin,\n\
          cat-file -t/-s/-e). One path does NOT bound `git diff -- <file>` or\n\
-         `git ls-files <path>` — a pathspec expands and a single diff has no size limit.\n\n\
-         Rerun the command bare and query the returned @cmd_* buffer."
+         `git ls-files <path>` — a pathspec expands and a single diff has no size limit."
     ))
 }
 
@@ -7033,23 +7037,26 @@ EOF"#;
     }
 
     #[test]
-    fn il3_error_warns_that_the_buffer_it_recommends_is_capped() {
-        // The remedy this error prescribes routes the caller to an @cmd_* buffer
-        // that may hold only a prefix. For a grep that is a partial answer; for a
-        // hash it is a confident wrong one, in the exact workflow
-        // `get_guide("tracker-conventions")` mandates.
+    fn il3_error_says_a_background_run_keeps_only_what_its_pipe_passes() {
+        // The refusal now applies to a BACKGROUND run only (a foreground pipe is run with a capture).
+        // Its message must say why, and offer both routes: the bare background run queried through its
+        // `@bg_*` log (a file on disk, not a capped buffer, so no prefix warning belongs here), or the
+        // pipe in the foreground, where the full stream is kept as `unfiltered_output`.
         let hint = detect_il3_violation("cargo test | grep FAILED").expect("should block");
+        assert!(hint.starts_with("IL3 violation"), "{hint}");
+        assert!(hint.contains("BACKGROUND"), "must name the case: {hint}");
         assert!(
-            hint.contains("unfiltered_truncated"),
-            "must name the flag: {hint}"
+            hint.contains("run_command(\"cargo test\", run_in_background=true)"),
+            "must offer the bare background run: {hint}"
+        );
+        assert!(hint.contains("@bg_"), "must name the log to query: {hint}");
+        assert!(
+            hint.contains("FOREGROUND") && hint.contains("unfiltered_output"),
+            "must offer the foreground route and what it keeps: {hint}"
         );
         assert!(
-            hint.contains("WRONG"),
-            "must not soften the hash failure: {hint}"
-        );
-        assert!(
-            hint.contains("git show <sha> > /tmp/x.patch"),
-            "must offer the redirect pattern as the whole-input remedy: {hint}"
+            !hint.contains("unfiltered_truncated"),
+            "the capped-buffer warning does not apply to a background log: {hint}"
         );
     }
 

@@ -635,13 +635,13 @@ fn plain_slice_window(command: &str) -> Option<(usize, Option<usize>)> {
     }
 }
 
-/// Whether `stage` appended to `query` reads all of the query's output AND would be run: the query
-/// is one pipeline, and the IL3 gate does not refuse the joined command. Asked of the gate itself,
-/// so a route a hint offers is one `run_command` accepts; a list of "safe" producers kept here
-/// would drift from it.
-fn can_append_stage(query: &str, stage: &str) -> bool {
+/// Whether a stage appended to `query` reads all of the query's output: the query is one pipeline,
+/// so the appended stage reads the LAST command's stdout and that IS the pipeline's. Nothing else
+/// is asked. The IL-3 gate used to be asked as well, "would `run_command` accept the joined
+/// command", but a foreground `query | stage` is always run now (the pipe is run to the end
+/// through a capture), so there is no refusal to predict.
+fn can_append_stage(query: &str) -> bool {
     crate::util::path_security::is_one_pipeline(query)
-        && crate::util::path_security::detect_il3_violation(&format!("{query} {stage}")).is_none()
 }
 
 /// Whether `query` can be wrapped in a subshell, `( query; ) 2>&1 >/dev/null | cut -c1-4000`, to
@@ -651,12 +651,12 @@ fn can_append_stage(query: &str, stage: &str) -> bool {
 /// stages there are; it needs the query to be one pipeline, so that the `; )` closes it and nothing
 /// else.
 ///
-/// No IL-3 question is asked, unlike [`can_append_stage`], and that is on purpose: the query already
-/// passed the gate when it ran, and the wrap adds only `) 2>&1 >/dev/null | cut -c1-4000`, whose last
-/// stage `cut` is a field selector the gate never counts as a trimmer. (The group also hides an
-/// unbounded producer from the gate's segment scan, so a verdict on the wrapped text would say
-/// nothing the query's own run had not already said.) If the stage ever becomes a trimmer, this is
-/// the place that needs the question back.
+/// No IL-3 question is asked, and that is on purpose: the query already passed the gate when it
+/// ran, and the wrap adds only `) 2>&1 >/dev/null | cut -c1-4000`, whose last stage `cut` is a field
+/// selector the gate never counts as a trimmer. (The group also hides an unbounded producer from
+/// the gate's segment scan, so a verdict on the wrapped text would say nothing the query's own run
+/// had not already said.) If the stage ever becomes a trimmer, this is the place that needs the
+/// question back.
 fn can_wrap_query(query: &str) -> bool {
     crate::util::path_security::is_one_pipeline(query)
 }
@@ -682,7 +682,7 @@ fn wide_line_route(command: &str) -> String {
         (Some(1), Some(r)) => format!(
             "read a window of it with `grep -o 'TEXT.\\{{0,200\\}}' {r}` or `cut -c1-4000 {r}`"
         ),
-        _ if can_append_stage(command, WIDE_LINE_STAGE) => {
+        _ if can_append_stage(command) => {
             format!("read a window of it by appending `{WIDE_LINE_STAGE}` to this query")
         }
         _ => "it is stored nowhere, so narrow the query to print less of it".to_string(),
@@ -725,7 +725,7 @@ fn trailing_pager(query: &str) -> Option<(usize, usize)> {
         a.as_str().parse::<usize>().ok()?,
         b.as_str().parse::<usize>().ok()?,
     );
-    (a >= 1 && b >= a && can_append_stage(base, &format!("| sed -n '{a},{b}p'"))).then_some((a, b))
+    (a >= 1 && b >= a && can_append_stage(base)).then_some((a, b))
 }
 
 /// The hint on a buffer query that was NOT cut, when there may still be more: the query ends in
@@ -934,7 +934,7 @@ fn capped_hint(
                         shown + 1,
                         shown + BUFFER_QUERY_INLINE_CAP
                     );
-                    if can_append_stage(query, &pager) {
+                    if can_append_stage(query) {
                         hint.push_str(&format!(
                             " Next page: append `{pager}` to this query. Each page names the next."
                         ));

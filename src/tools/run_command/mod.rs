@@ -423,10 +423,15 @@ impl Tool for RunCommand {
 
             // --- Step 1: Resolve @cmd_ buffer references ---
             // IL3 gate runs BEFORE resolve_refs so buffer refs are still visible —
-            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op), but
-            // `cargo test | grep FAILED` is not. See `detect_il3_violation`.
-            if let Some(hint) = crate::util::path_security::detect_il3_violation(command) {
-                return Err(super::RecoverableError::new(hint).into());
+            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op). It refuses only a
+            // BACKGROUND run: `cargo test | grep FAILED` in the background logs just what
+            // the pipe passes. A foreground pipe is run to the end through a capture that
+            // keeps the full stream (`unfiltered_output`), so there is nothing to refuse.
+            // See `detect_il3_violation`.
+            if run_in_background {
+                if let Some(hint) = crate::util::path_security::detect_il3_violation(command) {
+                    return Err(super::RecoverableError::new(hint).into());
+                }
             }
             let (resolved_command, temp_files, buffer_only, refreshed_handles) =
                 ctx.output_buffer.resolve_refs(command)?;

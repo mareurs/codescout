@@ -5282,15 +5282,20 @@ async fn run_command_buffered_output_has_output_id_before_stdout() {
 async fn il3_blocks_cargo_pipe_grep_via_run_command() {
     // Integration check that the IL3 gate fires through the full run_command
     // path (not just the unit fn). cat|grep is now bounded-LHS and allowed —
-    // use cargo as the canonical unbounded LHS sentinel.
+    // use cargo as the canonical unbounded LHS sentinel. Only a BACKGROUND run is refused (a
+    // foreground pipe is run with a capture), and the refusal comes before anything runs, so
+    // this does not run `cargo test`.
     let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
-        .call(json!({ "command": "cargo test | grep FAILED" }), &ctx)
+        .call(
+            json!({ "command": "cargo test | grep FAILED", "run_in_background": true }),
+            &ctx,
+        )
         .await
-        .expect_err("IL3 should block live `cargo test | grep`");
+        .expect_err("IL3 should block background `cargo test | grep`");
     let msg = err.to_string();
     assert!(msg.contains("IL3 violation"), "missing IL3 marker: {msg}");
-    assert!(msg.contains("buffer system"), "missing rewrite hint: {msg}");
+    assert!(msg.contains("@bg_"), "missing rewrite hint: {msg}");
 }
 
 #[tokio::test]
@@ -6607,16 +6612,17 @@ async fn read_file_renders_the_truncation_notice_not_just_carries_it() {
 
 #[tokio::test]
 async fn il3_blocks_chained_unbounded_pipe() {
-    // Chained pipes off an unbounded LHS still block (was originally
-    // cat|grep|head; cat is now bounded — substitute cargo).
+    // Chained pipes off an unbounded LHS still block in the background (was originally
+    // cat|grep|head; cat is now bounded — substitute cargo). Background, so it is refused
+    // before anything runs; a foreground call would run `cargo test`.
     let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
         .call(
-            json!({ "command": "cargo test | grep zzz | head -5" }),
+            json!({ "command": "cargo test | grep zzz | head -5", "run_in_background": true }),
             &ctx,
         )
         .await
-        .expect_err("IL3 should block live `cargo test | grep | head`");
+        .expect_err("IL3 should block background `cargo test | grep | head`");
     assert!(err.to_string().contains("IL3 violation"));
 }
 
@@ -6625,13 +6631,68 @@ async fn il3_blocks_unbounded_pipe_pre_exec() {
     // IL3 fires before exec — verifies the gate does not depend on actual
     // output size. (Original test built a >MAX_INLINE_TOKENS file behind
     // `cat big.txt | grep`; cat is now bounded-LHS, so we use cargo as the
-    // unconditionally-unbounded LHS.)
+    // unconditionally-unbounded LHS.) Background: only a background run is refused.
     let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
-        .call(json!({ "command": "cargo test | grep line0" }), &ctx)
+        .call(
+            json!({ "command": "cargo test | grep line0", "run_in_background": true }),
+            &ctx,
+        )
         .await
         .expect_err("IL3 should block regardless of payload size");
     assert!(err.to_string().contains("IL3 violation"));
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn a_foreground_pipe_from_an_unbounded_producer_is_not_refused() {
+    // `cargo` is on the gate's unbounded-producer list, and `head` is a terminal filter: the pipe
+    // is run to the end through the capture and the full stream is kept as `unfiltered_output`,
+    // so there is nothing for the gate to refuse. The producer is `cargo --version` on purpose: a
+    // foreground `cargo test | grep` would run `cargo test` for real.
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "cargo --version | head -1", "timeout_secs": 20 }),
+            &ctx,
+        )
+        .await
+        .expect("a foreground pipe with a terminal filter is run, not refused");
+    assert!(
+        result["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("cargo"),
+        "the command must have run; got: {result}"
+    );
+    assert!(
+        result["unfiltered_output"].is_string(),
+        "the full stream must be offered as a buffer; got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn a_background_pipe_from_an_unbounded_producer_is_still_refused() {
+    // A background run sends its stdout straight to a log and keeps no unfiltered stream, so a
+    // pipe from an unbounded producer would lose what its filter drops. It is refused before
+    // anything runs.
+    let (_dir, ctx) = project_ctx().await;
+    let err = RunCommand
+        .call(
+            json!({ "command": "cargo --version | head -1", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .expect_err("a background pipe from an unbounded producer must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("IL3 violation"),
+        "missing IL3 marker: {msg}"
+    );
+    assert!(
+        msg.contains("background"),
+        "must say why it is background: {msg}"
+    );
+    assert!(msg.contains("@bg_"), "must name the buffer to query: {msg}");
 }
 
 #[test]
@@ -9813,23 +9874,28 @@ async fn a_non_slice_query_of_the_err_stream_pages_that_stream() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_pager_the_il3_gate_or_a_list_would_defeat_is_never_offered() {
+async fn a_pager_a_list_would_defeat_is_never_offered() {
     let (_dir, ctx) = project_ctx().await;
     let id = ctx
         .output_buffer
         .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
-    let gated = format!("cargo --version | cat - {id}");
-    // The premise, pinned against the gate itself: appending a pager to this query is refused,
-    // because the pipe's left-hand side is `cargo` and the buffer is only in its second stage.
+    // Used to be withheld: the IL-3 gate refused a pager after a `cargo` left-hand side. A
+    // foreground `query | stage` is run now, so the pager IS offered for this one pipeline.
+    let piped = format!("cargo --version | cat - {id}");
     assert!(
-        crate::util::path_security::detect_il3_violation(&format!("{gated} | sed -n '101,200p'"))
-            .is_some(),
-        "the premise needs a query the gate would refuse a pager on"
+        crate::util::path_security::is_one_pipeline(&piped),
+        "the premise needs one pipeline"
     );
-    // A list: an appended stage would read the LAST command only.
-    let listed = format!("grep -c 1 {id}; grep -n \"\" {id}");
+    let (_, hint, parsed) = lines_and_hint(&ctx, piped.clone()).await;
+    assert_eq!(parsed["truncated"], true, "`{piped}`: {parsed}");
+    assert!(
+        hint.contains("| sed -n"),
+        "`{piped}`: a route that works is withheld: {hint}"
+    );
 
-    for query in [gated, listed] {
+    // A list: an appended stage would read the LAST command only.
+    let query = format!("grep -c 1 {id}; grep -n \"\" {id}");
+    {
         let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
         assert_eq!(parsed["truncated"], true, "`{query}`: {parsed}");
         assert!(
@@ -10323,9 +10389,9 @@ fn adversarial_table() -> Vec<(&'static str, &'static str)> {
         (r#"grep -n "" "{A}""#, "pager"),
         (r#"rg -n "" {A}"#, "pager"),
         (r#"rg -n "" {A} | cat"#, "pager"),
-        (r#"cargo --version | cat - {A}"#, "withheld"), // IL3 refuses a pager after a `cargo` left-hand side
-        (r#"git --version | cat - {A}"#, "withheld"), // IL3 refuses a pager after a `git` left-hand side
-        (r#"grep -n "\\" {A} ; true"#, "none"),       // no line matches
+        (r#"cargo --version | cat - {A}"#, "pager"), // once withheld by IL3 after a `cargo` left-hand side; a foreground pipe is run now
+        (r#"git --version | cat - {A}"#, "pager"), // once withheld by IL3 after a `git` left-hand side; a foreground pipe is run now
+        (r#"grep -n "\\" {A} ; true"#, "none"),    // no line matches
         ("grep -c \"`echo '\"'`\" {A}; grep -n \"\" {A}", "withheld"), // a backtick and a list
         (r#"grep -n "$(echo '"')" {A} # x"#, "withheld"), // `$(…)` hiding a comment
         (r#"grep -n "" {A} | tee /dev/stderr"#, "handle"), // `/dev/stderr` names a path
