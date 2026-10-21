@@ -6653,6 +6653,50 @@ async fn a_filter_that_depends_on_the_producer_side_is_not_replayed() {
     assert_eq!(result["unfiltered_output_lines"], 1000, "{result}");
 }
 
+/// R23, reviewer's shape: `sort --out=FILE` is `--output` abbreviated (getopt_long takes any
+/// unambiguous prefix). Replayed, it wrote the capture to FILE. The producer side is `sh -c '…'`,
+/// one pipeline, so only the flag allowlist stands between this filter and a replay. GNU `sort`
+/// opens (creates, truncates) its output file at START, before it reads (measured by hand
+/// 2026-10-21: a 0-byte file 1 s into a run whose producer sleeps, the 10 sorted bytes only at
+/// EOF), so the ORIGINAL run creates FILE empty and the timeout kills it before EOF. What only a
+/// replay does is write the capture into it: the sentinel must hold nothing.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_abbreviated_writing_flag_is_not_replayed_and_writes_nothing() {
+    let (_dir, ctx) = project_ctx().await;
+    let scratch = tempfile::tempdir().unwrap();
+    let sentinel = scratch.path().join("written");
+    let result = RunCommand
+        .call(
+            json!({
+                "command": format!(
+                    "sh -c 'seq 1 5; sleep 30' | sort --out={}",
+                    sentinel.display()
+                ),
+                "timeout_secs": 1,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    // First, so a regression shows what the replay wrote.
+    let written = std::fs::read_to_string(&sentinel).unwrap_or_default();
+    assert!(
+        written.is_empty(),
+        "the replay wrote the capture into {}: {written:?} {result}",
+        sentinel.display()
+    );
+    assert_eq!(result["timed_out"], true, "{result}");
+    assert_eq!(result["capture_incomplete"], true, "{result}");
+    assert!(
+        result["filter_not_run"]
+            .as_str()
+            .is_some_and(|r| r.contains("is not known to be pure")),
+        "{result}"
+    );
+    assert!(result.get("stdout").is_none(), "{result}");
+}
+
 /// R20: a filter that FAILS on the capture is not shown as an empty success. `grep '['` is a bad
 /// regex (exit 2); the response carries the exit code and grep's own complaint.
 #[cfg(unix)]
@@ -6845,7 +6889,7 @@ fn a_filter_not_run_names_its_reason_and_carries_no_stdout() {
     let mut response = json!({ "timed_out": true });
     super::output::attach_partial_capture(
         &mut response,
-        super::inner::FilterRun::NotRun("because"),
+        super::inner::FilterRun::NotRun("because".into()),
         a_capture_handle(),
         0,
         "x | grep y",

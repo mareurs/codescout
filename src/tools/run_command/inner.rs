@@ -362,13 +362,13 @@ pub(super) async fn run_filter_on_capture(
         Ok(file) => file,
         Err(e) => {
             tracing::warn!(path = %capture_path, error = %e, "tee capture unreadable for the filter");
-            return FilterRun::NotRun("the capture file could not be opened for the filter");
+            return FilterRun::NotRun("the capture file could not be opened for the filter".into());
         }
     };
     let mut cmd = crate::platform::shell_command_configured(filter);
     if let Err(e) = crate::tools::invocation_context::apply_to_shell(&mut cmd) {
         tracing::warn!(error = %e, "the filter of a timed-out command could not be configured");
-        return FilterRun::NotRun("the filter's shell could not be configured");
+        return FilterRun::NotRun("the filter's shell could not be configured".into());
     }
     cmd.current_dir(work_dir)
         .stdin(std::process::Stdio::from(stdin))
@@ -379,7 +379,7 @@ pub(super) async fn run_filter_on_capture(
         Ok(child) => child,
         Err(e) => {
             tracing::warn!(error = %e, "the filter of a timed-out command could not be started");
-            return FilterRun::NotRun("the filter could not be started");
+            return FilterRun::NotRun("the filter could not be started".into());
         }
     };
     // `process_group(0)` in the platform builder: the group id is the shell's pid. Armed until the
@@ -404,7 +404,7 @@ pub(super) async fn run_filter_on_capture(
         }
         Ok(Err(e)) => {
             tracing::warn!(error = %e, "the filter of a timed-out command failed");
-            FilterRun::NotRun("waiting on the filter failed")
+            FilterRun::NotRun("waiting on the filter failed".into())
         }
         // The guard, still armed, kills the group as this returns.
         Err(_) => FilterRun::GraceExpired,
@@ -423,7 +423,7 @@ pub(super) enum FilterRun {
     /// The filter was still running when its grace expired, and was killed.
     GraceExpired,
     /// Nothing ran, or nothing usable came back, for this reason (`filter_not_run`).
-    NotRun(&'static str),
+    NotRun(String),
 }
 
 /// Classify a command into a known-slow bucket. Returns a short label used
