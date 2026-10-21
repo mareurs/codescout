@@ -6032,10 +6032,10 @@ fn the_compact_summary_names_a_redaction_and_stays_silent_without_one() {
 #[tokio::test]
 async fn unfiltered_output_line_count_survives_inline_truncation() {
     let (_dir, ctx) = project_ctx().await;
-    // Enough lines to exceed the inline-storage cap (MAX_INLINE_TOKENS * 4 bytes),
-    // so the stored copy is truncated but the reported count must still be the full
-    // pre-truncation line count.
-    let line_count = 20_000;
+    // Enough lines to exceed the capture store limit (CAPTURE_STORE_LIMIT_BYTES, 4 MiB;
+    // `seq 1 1000000` is ~6.9 MB), so the stored copy is truncated but the reported count
+    // must still be the full pre-truncation line count.
+    let line_count = 1_000_000;
     let result = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6045,7 +6045,7 @@ async fn unfiltered_output_line_count_survives_inline_truncation() {
         .unwrap();
     assert!(
         result.get("unfiltered_truncated").is_some(),
-        "fixture must actually exceed the inline cap to exercise truncation: {result}"
+        "fixture must actually exceed the store limit to exercise truncation: {result}"
     );
     assert_eq!(
         result["unfiltered_output_lines"], line_count,
@@ -6060,7 +6060,7 @@ async fn unfiltered_output_line_count_survives_inline_truncation() {
 #[tokio::test]
 async fn a_truncated_buffer_reports_the_count_it_will_actually_serve() {
     let (_dir, ctx) = project_ctx().await;
-    let line_count = 20_000;
+    let line_count = 1_000_000;
     let result = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6100,7 +6100,7 @@ async fn a_truncated_buffer_reports_the_count_it_will_actually_serve() {
 #[tokio::test]
 async fn a_truncated_buffer_ends_with_a_sentinel_naming_both_counts() {
     let (_dir, ctx) = project_ctx().await;
-    let line_count = 20_000;
+    let line_count = 1_000_000;
     let result = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6139,7 +6139,7 @@ async fn a_truncated_buffer_ends_with_a_sentinel_naming_both_counts() {
 #[tokio::test]
 async fn a_grep_over_a_truncated_ref_carries_the_truncation_notice() {
     let (_dir, ctx) = project_ctx().await;
-    let line_count = 20_000;
+    let line_count = 1_000_000;
     let first = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6160,7 +6160,7 @@ async fn a_grep_over_a_truncated_ref_carries_the_truncation_notice() {
     // stored prefix. Without the notice this returns `0` and says nothing else.
     let second = RunCommand
         .call(
-            json!({ "command": format!("grep -c '^19999$' {handle}") }),
+            json!({ "command": format!("grep -c '^999999$' {handle}") }),
             &ctx,
         )
         .await
@@ -6220,6 +6220,110 @@ async fn a_complete_buffer_carries_no_sentinel_and_no_notice() {
         "no notice may fire for a complete buffer: {second}"
     );
 }
+/// The unfiltered capture is the source `run_command` re-reads when a filter hid what the caller
+/// wanted, so the limit it is stored under decides how often "re-read it" works. At 10 KB a
+/// 100,000-line stream was cut to ~2,200 lines. A capture under `CAPTURE_STORE_LIMIT_BYTES` is kept
+/// whole: no marker, no cut record, and the handle holds every line.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_capture_under_the_store_limit_is_kept_whole() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 100000 | grep 77777" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result["unfiltered_output_lines"], 100_000,
+        "the count is the stream's: {result}"
+    );
+    assert!(
+        result.get("unfiltered_truncated").is_none(),
+        "a capture under the limit must not be cut: {result}"
+    );
+    assert!(
+        result.get("unfiltered_buffered_lines").is_none(),
+        "a whole capture has nothing to distinguish from its stream: {result}"
+    );
+    let handle = result["unfiltered_output"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let counted = RunCommand
+        .call(json!({ "command": format!("wc -l {handle}") }), &ctx)
+        .await
+        .unwrap();
+    let stdout = counted["stdout"].as_str().expect("stdout");
+    assert!(
+        stdout.trim_start().starts_with("100000"),
+        "the handle must serve every line of the stream: {counted}"
+    );
+}
+
+/// Over the limit the capture is cut at a line boundary and marked, and the count is still the
+/// whole stream's. `seq 1 1000000` is ~6.9 MB, so a cut at 4 MiB keeps roughly 600,000 lines.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_capture_over_the_store_limit_is_cut_and_marked() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 1000000 | grep 99999" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result["unfiltered_truncated"],
+        json!(true),
+        "a capture over the limit must say it was cut: {result}"
+    );
+    assert_eq!(
+        result["unfiltered_output_lines"], 1_000_000,
+        "the count is on the FULL capture, before the cut: {result}"
+    );
+    let served = result["unfiltered_buffered_lines"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no unfiltered_buffered_lines: {result}"));
+    assert!(
+        served > 500_000 && served < 1_000_000,
+        "a cut at 4 MiB keeps most of ~6.9 MB, not all and not ~2,200 lines: served={served}"
+    );
+    let handle = result["unfiltered_output"].as_str().expect("handle");
+    let stored = ctx.output_buffer.get(handle).expect("entry").stdout;
+    assert!(
+        stored
+            .lines()
+            .next_back()
+            .is_some_and(|l| l.starts_with(crate::tools::output_buffer::TRUNCATION_SENTINEL_PREFIX)),
+        "the marker travels with the data"
+    );
+}
+
+/// Bug bc0cb248b224d1dd, at the new size: the scrub runs on the whole capture before the cut, so a
+/// credential that now lands inside the kept 4 MiB (it sat past the old 10 KB cut) is redacted in
+/// the handle, not merely absent from it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_credential_in_a_large_capture_is_redacted_in_the_handle() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "{ seq 1 3000; printf 'ghp_%036d\\n' 0; seq 1 10; } | grep zzz" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "", "the filter hides it inline: {result}");
+    let handle = result["unfiltered_output"].as_str().expect("tee ref");
+    let stored = ctx.output_buffer.get(handle).unwrap().stdout;
+    assert!(
+        stored.contains("<redacted-credential>"),
+        "the credential sits past the old 10 KB cut and must be in the handle, redacted"
+    );
+    assert!(
+        !stored.contains(&printed_token()),
+        "a later `grep @cmd_*` must not be able to surface the token"
+    );
+    assert!(!result.to_string().contains(&printed_token()), "{result}");
+    assert_eq!(result["redacted_credentials"], 1, "{result}");
+}
 
 /// The `read_file` half of Option C, pinned on the RENDERED surface.
 ///
@@ -6237,7 +6341,7 @@ async fn a_complete_buffer_carries_no_sentinel_and_no_notice() {
 #[tokio::test]
 async fn read_file_renders_the_truncation_notice_not_just_carries_it() {
     let (_dir, ctx) = project_ctx().await;
-    let line_count = 20_000;
+    let line_count = 1_000_000;
     let first = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -10380,14 +10484,14 @@ async fn a_grep_of_a_cut_handle_carries_the_truncation_notice() {
 }
 
 /// Fix 7: the tee capture keeps the line that empties its budget, however long, so the pool can
-/// cut it. The response must report the HANDLE (0 of 1 lines kept for one 1.5 MB line, not 1)
-/// and announce the pool's cut.
+/// cut it. The response must report the HANDLE (0 of 1 lines kept for one 5 MB line, over the
+/// 4 MiB capture limit, not 1) and announce the pool's cut.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_tee_capture_the_pool_cuts_reports_the_handle_it_kept() {
     let (_dir, ctx) = floor_ctx().await;
     let (text, parsed) =
-        buffer_query_free(&ctx, "head -c 1500000 /dev/zero | tr '\\0' x | grep -c x").await;
+        buffer_query_free(&ctx, "head -c 5000000 /dev/zero | tr '\\0' x | grep -c x").await;
     let tee = parsed["unfiltered_output"]
         .as_str()
         .unwrap_or_else(|| panic!("no tee capture: {text:.600}"))
@@ -10420,7 +10524,7 @@ async fn a_tee_capture_the_pool_cuts_reports_the_handle_it_kept() {
 async fn a_tee_capture_the_pool_keeps_as_given_announces_no_pool_cut() {
     let (_dir, ctx) = project_ctx().await;
     let result = RunCommand
-        .call(json!({ "command": "seq 1 20000 | grep zzz" }), &ctx)
+        .call(json!({ "command": "seq 1 1000000 | grep zzz" }), &ctx)
         .await
         .unwrap();
     let tee = result["unfiltered_output"]

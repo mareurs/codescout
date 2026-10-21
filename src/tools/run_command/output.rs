@@ -1119,6 +1119,132 @@ fn inline_stdout_room(skeleton: &Value) -> usize {
     crate::tools::response_room(skeleton).saturating_sub(EMPTY_STDOUT_KEY.len())
 }
 
+/// The most bytes of an unfiltered capture the `@cmd_*` handle behind `unfiltered_output` keeps.
+/// A capture over it is cut at a line boundary and marked; one under it is kept whole.
+///
+/// It was `MAX_INLINE_TOKENS * 4` (10 KB), the size of an INLINE response, though the handle is
+/// not inline: a 100,000-line stream was cut to ~2,200 lines behind a ref whose point is to be
+/// re-read. The pool's own per-entry cap (`OutputBuffer::entry_cap`, half the pool) still applies
+/// on top of it.
+pub(super) const CAPTURE_STORE_LIMIT_BYTES: usize = 4 * 1024 * 1024;
+
+/// Read the tee capture behind `tmpfile`, scrubbed of credentials: `(text, values redacted)`.
+///
+/// `None` on a read error, which is logged. `.ok()` here used to discard the error, and that is
+/// how a transient read failure became an ABSENT key group rather than a reported one: the caller
+/// sees a response with no `unfiltered_output`, indistinguishable from a run that produced no
+/// capture at all. Named as the highest-value instrumentation point in
+/// `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` § Resume, after
+/// a load-contention flake on the wine lane dropped exactly this key group — the tell being that
+/// the surviving keys are set in the same block as the missing ones, so the response could not
+/// have come from that block.
+///
+/// Behaviour is deliberately unchanged: still `None` on error, no retry, no timeout tuning — that
+/// file rules both out as actively harmful on one unreproduced occurrence. The only difference is
+/// that the next occurrence leaves a trace instead of a silence.
+///
+/// Bug bc0cb248b224d1dd: this is the UNFILTERED stream, read from a file, so it never passed the
+/// decode in `run_command_inner` that scrubs `stdout`. `env | grep PATH` shows one line inline
+/// while this buffer holds the whole environment.
+pub(super) fn read_capture(tmp: &TmpfileGuard) -> Option<(String, usize)> {
+    match std::fs::read_to_string(&tmp.0) {
+        Ok(content) => {
+            let scrubbed = redact_credentials(&content);
+            let count = scrubbed.count;
+            Some((scrubbed.text.into_owned(), count))
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %tmp.0,
+                error = %e,
+                "tee capture unreadable; unfiltered_output keys will be absent from \
+                 this response"
+            );
+            None
+        }
+    }
+}
+
+/// Store an already-scrubbed capture as an `@cmd_*` handle, cut at [`CAPTURE_STORE_LIMIT_BYTES`].
+///
+/// Returns `(handle, cut record the pool kept, line count of the FULL capture, pool-cut notices)`,
+/// the tuple `unfiltered_ref` carries. `None` for an empty capture: when the terminal filter
+/// matched nothing, both `raw_stdout` and the tee file are empty, and surfacing a handle is
+/// misleading.
+pub(super) fn store_capture(
+    content: String,
+    original_command: &str,
+    exit_code: i32,
+    ctx: &ToolContext,
+) -> Option<(
+    String,
+    Option<crate::tools::output_buffer::Truncation>,
+    usize,
+    Vec<String>,
+)> {
+    use super::super::command_summary::count_lines;
+    if content.is_empty() {
+        return None;
+    }
+    // Counted on the FULL capture, before any storage truncation below — the whole point is
+    // telling the caller how much is behind the ref, not how much of it happened to fit.
+    let line_count = count_lines(&content);
+    let (stored, truncation) = if content.len() > CAPTURE_STORE_LIMIT_BYTES {
+        let mut byte_budget = CAPTURE_STORE_LIMIT_BYTES;
+        let capped: String = content
+            .lines()
+            .take_while(|line| {
+                if byte_budget == 0 {
+                    return false;
+                }
+                byte_budget = byte_budget.saturating_sub(line.len() + 1);
+                true
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let t = crate::tools::output_buffer::Truncation {
+            kept_lines: count_lines(&capped),
+            total_lines: line_count,
+        };
+        // The marker travels WITH the data, so every reader trips over it
+        // without having to know the field exists: `tail` shows it, `wc -l`
+        // counts it, any slice near the end hits it, and a grep that returns
+        // nothing at least sits beside something explaining why. The inline
+        // summary path has used this device for a while
+        // (`--- N lines omitted ---`); it just never reached this buffer.
+        //
+        // The trailing newline is deliberate. Without it the sentinel's own
+        // line has no terminator, `wc -l` lands back on the content count,
+        // and a test asserting the two differ would pass for the wrong reason.
+        let marked = format!(
+            "{capped}\n{}\n",
+            crate::tools::output_buffer::truncation_marker(t)
+        );
+        (marked, Some(t))
+    } else {
+        (content, None)
+    };
+    let (ref_id, held) = ctx.output_buffer.store_truncated_kept(
+        original_command.to_string(),
+        stored,
+        String::new(), // unfiltered capture is stdout-only
+        exit_code,
+        truncation,
+    );
+    // `take_while` keeps the line that empties the budget, however long, so the pool can cut
+    // the capture again. What the response reports is the HANDLE's own record, and a cut the
+    // pool made is announced (review probe: a 1.5 MB single line reported 1 buffered line
+    // while the handle kept 0 of 1). The record comes from the store's own lock hold: looked
+    // up afterwards, it was lost when another store evicted the handle in between.
+    let pool_cut = match held {
+        Some(t) if held != truncation => {
+            vec![crate::tools::output_buffer::cut_notice(&ref_id, t)]
+        }
+        _ => Vec::new(),
+    };
+    Some((ref_id, held, line_count, pool_cut))
+}
+
 /// Build the response for a command that ran to completion — at any exit code.
 ///
 /// The name says "successful" about the *process*, not the *outcome*: a failing
@@ -1200,104 +1326,12 @@ pub(crate) async fn handle_successful_output_with(
         usize,
         Vec<String>,
     )> = if let Some(ref tmpfile) = unfiltered_tmpfile {
-        // `.ok()` here used to discard the error, and that is how a transient read
-        // failure became an ABSENT key group rather than a reported one: the caller
-        // sees a response with no `unfiltered_output`, indistinguishable from a run
-        // that produced no capture at all. Named as the highest-value instrumentation
-        // point in `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md`
-        // § Resume, after a load-contention flake on the wine lane dropped exactly this
-        // key group — the tell being that the surviving keys are set in the same block
-        // as the missing ones, so the response could not have come from that block.
-        //
-        // Behaviour is deliberately unchanged: still `None` on error, no retry, no
-        // timeout tuning — that file rules both out as actively harmful on one
-        // unreproduced occurrence. The only difference is that the next occurrence
-        // leaves a trace instead of a silence.
-        let capture = match std::fs::read_to_string(&tmpfile.0) {
-            // Bug bc0cb248b224d1dd: this is the UNFILTERED stream, read from a file, so it never
-            // passed the decode in `run_command_inner` that scrubs `stdout`. `env | grep PATH` shows
-            // one line inline while this buffer holds the whole environment.
-            Ok(content) => {
-                let scrubbed = redact_credentials(&content);
-                tee_redacted = scrubbed.count;
-                Some(scrubbed.text.into_owned())
-            }
-            Err(e) => {
-                tracing::warn!(
-                    path = %tmpfile.0,
-                    error = %e,
-                    "tee capture unreadable; unfiltered_output keys will be absent from \
-                     this response"
-                );
-                None
-            }
-        };
         // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
-        // Skip empty captures: when the terminal filter matched nothing, both
-        // raw_stdout and the tee file are empty — surfacing a handle is misleading.
-        capture.and_then(|content| {
-            if content.is_empty() {
-                return None;
-            }
-            // Counted on the FULL capture, before any inline-storage truncation below —
-            // the whole point is telling the caller how much is behind the ref, not how
-            // much of it happened to fit inline.
-            let line_count = count_lines(&content);
-            let (stored, truncation) = if crate::tools::body_alone_overflows(&content) {
-                let mut byte_budget = crate::tools::MAX_INLINE_TOKENS * 4;
-                let capped: String = content
-                    .lines()
-                    .take_while(|line| {
-                        if byte_budget == 0 {
-                            return false;
-                        }
-                        byte_budget = byte_budget.saturating_sub(line.len() + 1);
-                        true
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let t = crate::tools::output_buffer::Truncation {
-                    kept_lines: count_lines(&capped),
-                    total_lines: line_count,
-                };
-                // The marker travels WITH the data, so every reader trips over it
-                // without having to know the field exists: `tail` shows it, `wc -l`
-                // counts it, any slice near the end hits it, and a grep that returns
-                // nothing at least sits beside something explaining why. The inline
-                // summary path has used this device for a while
-                // (`--- N lines omitted ---`); it just never reached this buffer.
-                //
-                // The trailing newline is deliberate. Without it the sentinel's own
-                // line has no terminator, `wc -l` lands back on the content count,
-                // and a test asserting the two differ would pass for the wrong reason.
-                let marked = format!(
-                    "{capped}\n{}\n",
-                    crate::tools::output_buffer::truncation_marker(t)
-                );
-                (marked, Some(t))
-            } else {
-                (content, None)
-            };
-            let (ref_id, held) = ctx.output_buffer.store_truncated_kept(
-                original_command.to_string(),
-                stored,
-                String::new(), // unfiltered capture is stdout-only
-                exit_code,
-                truncation,
-            );
-            // The capture is not inline-sized: `take_while` keeps the line that empties the
-            // budget, however long, so the pool can cut it again. What the response reports is
-            // the HANDLE's own record, and a cut the pool made is announced (review probe: a
-            // 1.5 MB single line reported 1 buffered line while the handle kept 0 of 1). The
-            // record comes from the store's own lock hold: looked up afterwards, it was lost
-            // when another store evicted the handle in between.
-            let pool_cut = match held {
-                Some(t) if held != truncation => {
-                    vec![crate::tools::output_buffer::cut_notice(&ref_id, t)]
-                }
-                _ => Vec::new(),
-            };
-            Some((ref_id, held, line_count, pool_cut))
+        // `read_capture` is `None` on a logged read error; `store_capture` is `None` for an
+        // empty capture (the terminal filter matched nothing, so there is no handle to show).
+        read_capture(tmpfile).and_then(|(content, redacted)| {
+            tee_redacted = redacted;
+            store_capture(content, original_command, exit_code, ctx)
         })
     } else {
         None
