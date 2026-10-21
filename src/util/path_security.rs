@@ -1850,6 +1850,32 @@ fn quotes_balanced(s: &str) -> bool {
     !in_single && !in_double
 }
 
+/// The first pipeline [`detect_il3_violation`] refuses, as `(segment, lead)`: the offending
+/// `;`/`&&`/`||`-separated segment and the unbounded producer's own command, both trimmed. `None`
+/// when no segment violates IL3. The detection lives here, once, so a caller that words the
+/// refusal differently from `detect_il3_violation` (the foreground one in `run_command`) cannot
+/// disagree with it about WHICH pipes are refused.
+pub fn il3_offender(command: &str) -> Option<(String, String)> {
+    // Analyse shell *structure*, not the raw string: drop heredoc bodies (data, not
+    // syntax) and consider each `;`/`&&`/`||`-separated command on its own. Both
+    // were real false positives — a commit message describing a pipe, and a
+    // `;`-chain whose first word happened to be `git`.
+    let stripped = strip_heredoc_bodies(command);
+
+    // Carry the offending SEGMENT out alongside its lead, and quote the segment
+    // rather than the whole `command`, so a multi-statement script is localized.
+    // Quoting the whole input rendered a five-line script with a `for` loop as
+    // "the thing piped to a log-trimmer" — including a trailing `git branch
+    // --contains` with no pipe in it at all, leaving the reader to find the
+    // offending pipe themselves. The segment comes from the heredoc-stripped
+    // text, so a heredoc's body is elided from the echo; that is the syntax the
+    // decision was actually made on.
+    let (segment, lead) = pipeline_segments(&stripped)
+        .into_iter()
+        .find_map(|seg| il3_offending_lead(&seg).map(|lead| (seg, lead)))?;
+    Some((segment.trim().to_string(), lead.trim().to_string()))
+}
+
 /// Detect Iron Law 3 violation: piping a **live, potentially-unbounded**
 /// command's output to a **trimmer** that hides a subset of it
 /// (`tail`/`head`/`grep`/`less`/`sed`/`awk`/`sort`/`uniq`/`fmt`).
@@ -1859,14 +1885,12 @@ fn quotes_balanced(s: &str) -> bool {
 /// wastes a tool call. Server-side enforcement covers all MCP clients (Claude
 /// Code, Copilot, Gemini, …).
 ///
-/// **Only a BACKGROUND run is refused on this verdict.** A foreground pipe whose last
-/// stage is a terminal filter is run to the end through a capture, and the full stream
-/// is kept as `unfiltered_output`, so nothing is hidden. A background run sends its
-/// stdout straight to a log and keeps no unfiltered stream, so what its pipe drops is
-/// gone; `RunCommand::call` asks this function for the verdict only when
-/// `run_in_background` is set. The detection below is unchanged by that: it still says
-/// which pipes would hide output, and the message it returns is written for the
-/// background case.
+/// **The message is worded for a BACKGROUND run.** A background run sends its stdout
+/// straight to a log and keeps no unfiltered stream, so what its pipe drops is gone.
+/// A foreground pipe whose last stage is a terminal filter is run to the end through a
+/// capture and the full stream is kept as `unfiltered_output`; one the capture cannot
+/// serve is still refused, in the words of `run_command`'s `pipe_refusal`, which asks
+/// [`il3_offender`] (the detection below) which pipe it is.
 ///
 /// *(The doc comment here used to name `codescout-companion/hooks/il3-deny-hook.sh`
 /// as a mirror to keep in sync. That file still exists but is no longer wired:
@@ -1905,25 +1929,8 @@ fn quotes_balanced(s: &str) -> bool {
 ///
 /// Returns `Some(hint)` when the command violates IL3; `None` otherwise.
 pub fn detect_il3_violation(command: &str) -> Option<String> {
-    // Analyse shell *structure*, not the raw string: drop heredoc bodies (data, not
-    // syntax) and consider each `;`/`&&`/`||`-separated command on its own. Both
-    // were real false positives — a commit message describing a pipe, and a
-    // `;`-chain whose first word happened to be `git`.
-    let stripped = strip_heredoc_bodies(command);
-
-    // Carry the offending SEGMENT out alongside its lead, and quote the segment
-    // rather than the whole `command`, so a multi-statement script is localized.
-    // Quoting the whole input rendered a five-line script with a `for` loop as
-    // "the thing piped to a log-trimmer" — including a trailing `git branch
-    // --contains` with no pipe in it at all, leaving the reader to find the
-    // offending pipe themselves. The segment comes from the heredoc-stripped
-    // text, so a heredoc's body is elided from the echo; that is the syntax the
-    // decision was actually made on.
-    let (segment, lead) = pipeline_segments(&stripped)
-        .into_iter()
-        .find_map(|seg| il3_offending_lead(&seg).map(|lead| (seg, lead)))?;
-    let segment = segment.trim();
-    let lead = lead.trim();
+    let (segment, lead) = il3_offender(command)?;
+    let (segment, lead) = (segment.as_str(), lead.as_str());
 
     Some(format!(
         "IL3 violation — piped `{segment}` to a log-trimmer in a BACKGROUND run. BLOCKED.\n\n\
@@ -1931,8 +1938,9 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          output, and what the trimmer drops is gone. Either:\n  \
          (a) run_command(\"{lead}\", run_in_background=true)  — the log holds the full output\n      \
          as @bg_xxx; then grep PATTERN @bg_xxx (also: tail -20 @bg_xxx, head -50 @bg_xxx)\n  \
-         (b) run the pipe in the FOREGROUND (drop run_in_background) — it runs to the end\n      \
-         and the full stream is kept as `unfiltered_output`.\n\n\
+         (b) run the pipe in the FOREGROUND (drop run_in_background), ending it in a filter\n      \
+         (grep, head, tail, ...): it runs to the end and the full stream is kept as\n      \
+         `unfiltered_output`.\n\n\
          Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c). A pipeline that collapses\n\
          ANYWHERE (wc, grep -c, sha256sum, git patch-id) is allowed whatever follows it,\n\

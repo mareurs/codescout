@@ -268,6 +268,49 @@ pub(crate) fn declared_effect(input: &Value) -> Option<&'static str> {
         Some(_) => None,
     }
 }
+/// The terminal filters, as `detect_terminal_filter` knows them. Only worded into the foreground
+/// refusal below; `pipe_refusal_names_every_terminal_filter_the_capture_knows` keeps the two in step.
+const TERMINAL_FILTER_NAMES: &str =
+    "grep, egrep, fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr";
+
+/// Whether the unfiltered-output capture can serve `command`: asked of the SAME function the tee
+/// splice asks (`inject_tee_in`: `first_pipe_before_terminal_filter` on a heredoc-masked copy), so
+/// the refusal below and the splice cannot disagree about which commands are captured.
+fn capture_can_serve(command: &str) -> bool {
+    let masked = crate::util::path_security::mask_heredoc_bodies(command);
+    crate::tools::command_summary::first_pipe_before_terminal_filter(&masked).is_some()
+}
+
+/// The IL-3 refusal for `command`, or `None` when it is allowed to run. The ONE place that decides
+/// it, so `RunCommand::call` and the pager hints (`output::can_append_stage`) agree.
+///
+/// - **Background:** the verdict of `detect_il3_violation`, worded for a background run. A
+///   background run sends its stdout straight to a log and keeps no unfiltered stream, so what the
+///   pipe's trimmer drops is gone, whatever its last stage is.
+/// - **Foreground:** refused only when `detect_il3_violation` fires AND the capture cannot serve the
+///   command. A foreground pipe whose last stage is a terminal filter is run to the end through
+///   the capture and keeps the producer's full stream as `unfiltered_output`, so there is nothing to
+///   refuse. One that does not end in a terminal filter (`cargo test | grep x | cat`) runs with no
+///   capture, so the trimmer's loss is real and the refusal stands.
+pub(super) fn pipe_refusal(command: &str, run_in_background: bool) -> Option<String> {
+    if run_in_background {
+        return crate::util::path_security::detect_il3_violation(command);
+    }
+    let (segment, lead) = crate::util::path_security::il3_offender(command)?;
+    if capture_can_serve(command) {
+        return None;
+    }
+    Some(format!(
+        "IL3 violation — piped `{segment}` to a log-trimmer, and this pipe does not end in a \
+         terminal filter. BLOCKED.\n\n\
+         Only a pipe whose LAST stage is a terminal filter ({TERMINAL_FILTER_NAMES}) keeps the \
+         full stream of its first command, so none is kept here and what the trimmer drops is gone. \
+         Either:\n  \
+         (a) end the pipe with its filter: the full stream of the first command is then kept as \
+         `unfiltered_output`\n  \
+         (b) run_command(\"{lead}\") bare, then query the @cmd_* buffer: grep PATTERN @cmd_xxx"
+    ))
+}
 
 #[async_trait::async_trait]
 impl Tool for RunCommand {
@@ -423,15 +466,13 @@ impl Tool for RunCommand {
 
             // --- Step 1: Resolve @cmd_ buffer references ---
             // IL3 gate runs BEFORE resolve_refs so buffer refs are still visible —
-            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op). It refuses only a
-            // BACKGROUND run: `cargo test | grep FAILED` in the background logs just what
-            // the pipe passes. A foreground pipe is run to the end through a capture that
-            // keeps the full stream (`unfiltered_output`), so there is nothing to refuse.
-            // See `detect_il3_violation`.
-            if run_in_background {
-                if let Some(hint) = crate::util::path_security::detect_il3_violation(command) {
-                    return Err(super::RecoverableError::new(hint).into());
-                }
+            // `grep PATTERN @cmd_xxx | sort` is allowed (buffer-op). `pipe_refusal` decides the
+            // rest: a BACKGROUND pipe is refused (its log keeps only what the pipe passes), and
+            // so is a foreground one the capture cannot serve (no terminal filter last). A
+            // foreground pipe ending in a terminal filter is run to the end through a capture
+            // that keeps the full stream (`unfiltered_output`), so there is nothing to refuse.
+            if let Some(hint) = pipe_refusal(command, run_in_background) {
+                return Err(super::RecoverableError::new(hint).into());
             }
             let (resolved_command, temp_files, buffer_only, refreshed_handles) =
                 ctx.output_buffer.resolve_refs(command)?;

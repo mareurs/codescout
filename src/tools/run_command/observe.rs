@@ -557,7 +557,7 @@ mod tests {
     /// A refused call ran no command, so it records no observation: `Err` must not become
     /// "observed, unchanged". An unbounded `rg` piped to a trimmer in a BACKGROUND run is refused by
     /// the IL-3 gate AFTER the before-snapshot is taken, which is the path that needs this guard.
-    /// (A foreground pipe is no longer refused: it is run with a capture.)
+    /// (A foreground pipe ending in a terminal filter is not refused: it is run with a capture.)
     #[tokio::test]
     async fn a_refused_call_records_no_observation() {
         let dir = repo();

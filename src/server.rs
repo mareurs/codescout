@@ -15377,7 +15377,7 @@ mod guide_hint_tests {
         async fn call(server: &CodeScoutServer, principal: Option<&str>, command: &str) -> usize {
             let mut arguments = serde_json::Map::new();
             arguments.insert("command".to_string(), json!(command));
-            // Only a BACKGROUND pipe is refused; a foreground one would run `cargo test`.
+            // A background pipe is refused; a foreground one ending in a filter would run `cargo test`.
             if command.contains(" | ") {
                 arguments.insert("run_in_background".to_string(), json!(true));
             }

@@ -5282,9 +5282,9 @@ async fn run_command_buffered_output_has_output_id_before_stdout() {
 async fn il3_blocks_cargo_pipe_grep_via_run_command() {
     // Integration check that the IL3 gate fires through the full run_command
     // path (not just the unit fn). cat|grep is now bounded-LHS and allowed —
-    // use cargo as the canonical unbounded LHS sentinel. Only a BACKGROUND run is refused (a
-    // foreground pipe is run with a capture), and the refusal comes before anything runs, so
-    // this does not run `cargo test`.
+    // use cargo as the canonical unbounded LHS sentinel. A BACKGROUND run is always refused (a
+    // foreground pipe ending in a terminal filter is run with a capture instead), and the refusal
+    // comes before anything runs, so this does not run `cargo test`.
     let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
         .call(
@@ -6708,7 +6708,8 @@ async fn il3_blocks_unbounded_pipe_pre_exec() {
     // IL3 fires before exec — verifies the gate does not depend on actual
     // output size. (Original test built a >MAX_INLINE_TOKENS file behind
     // `cat big.txt | grep`; cat is now bounded-LHS, so we use cargo as the
-    // unconditionally-unbounded LHS.) Background: only a background run is refused.
+    // unconditionally-unbounded LHS.) Background, so it is refused before anything runs (a
+    // foreground pipe ending in a terminal filter would run `cargo test`).
     let (_dir, ctx) = project_ctx().await;
     let err = RunCommand
         .call(
@@ -6770,6 +6771,123 @@ async fn a_background_pipe_from_an_unbounded_producer_is_still_refused() {
         "must say why it is background: {msg}"
     );
     assert!(msg.contains("@bg_"), "must name the buffer to query: {msg}");
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn a_foreground_pipe_the_capture_cannot_serve_is_still_refused() {
+    // The last stage (`cat`) is not a terminal filter, so no unfiltered capture is kept and the
+    // `grep` in the middle would drop output for good: refused, as it always was. `cargo
+    // --version` is the producer so that nothing here does real work if the gate lets it through.
+    let (_dir, ctx) = project_ctx().await;
+    let err = RunCommand
+        .call(
+            json!({ "command": "cargo --version | grep cargo | cat", "timeout_secs": 20 }),
+            &ctx,
+        )
+        .await
+        .expect_err("a foreground pipe with no terminal filter last must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("IL3 violation"),
+        "missing IL3 marker: {msg}"
+    );
+    assert!(
+        msg.contains("unfiltered_output"),
+        "must offer the route that keeps the stream: {msg}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_foreground_chain_ending_in_a_filter_is_not_refused() {
+    // A chain whose last stage is a terminal filter is captured at its FIRST pipe, so the handle is
+    // the producer's own stream: one line here, not what `grep` passed on.
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "cargo --version | grep cargo | head -1", "timeout_secs": 20 }),
+            &ctx,
+        )
+        .await
+        .expect("a foreground chain ending in a terminal filter is run, not refused");
+    assert!(
+        result["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("cargo"),
+        "the command must have run; got: {result}"
+    );
+    assert_eq!(result["unfiltered_output_lines"], 1, "{result}");
+}
+
+#[tokio::test]
+async fn a_background_pipe_is_refused_whatever_its_last_stage() {
+    // A background run keeps no unfiltered stream even when the pipe ends in a terminal filter.
+    let (_dir, ctx) = project_ctx().await;
+    let err = RunCommand
+        .call(
+            json!({ "command": "cargo --version | grep cargo | head -1", "run_in_background": true }),
+            &ctx,
+        )
+        .await
+        .expect_err("a background pipe must be refused whatever its last stage");
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("IL3 violation"),
+        "missing IL3 marker: {msg}"
+    );
+    assert!(msg.contains("background"), "{msg}");
+}
+
+#[test]
+fn pipe_refusal_decides_the_three_branches() {
+    use super::pipe_refusal;
+    // Background: the detector's verdict, whatever the last stage is.
+    for command in ["cargo test | grep x | head -1", "cargo test | grep x | cat"] {
+        let hint = pipe_refusal(command, true).expect(command);
+        assert_eq!(
+            Some(hint),
+            crate::util::path_security::detect_il3_violation(command),
+            "{command}"
+        );
+    }
+    // Foreground, the capture cannot serve it: refused, and the text says why and names the
+    // segment and both routes.
+    let hint = pipe_refusal("cargo test | grep x | cat", false).expect("refused");
+    assert!(hint.starts_with("IL3 violation"), "{hint}");
+    assert!(hint.contains("`cargo test | grep x | cat`"), "{hint}");
+    assert!(hint.contains("terminal filter"), "{hint}");
+    assert!(hint.contains("unfiltered_output"), "{hint}");
+    assert!(hint.contains("run_command(\"cargo test\")"), "{hint}");
+    assert!(hint.contains("@cmd_"), "{hint}");
+    // `|&` pipes stderr too, and the capture leaves such a command untouched: still refused.
+    assert!(pipe_refusal("cargo test |& grep x | head -1", false).is_some());
+    // Foreground, the capture serves it: not refused.
+    assert_eq!(pipe_refusal("cargo test | grep x | head -1", false), None);
+    assert_eq!(pipe_refusal("cargo test | grep FAILED", false), None);
+    // Nothing for the detector to refuse: not refused in either mode.
+    assert_eq!(pipe_refusal("ls | head -1", false), None);
+    assert_eq!(pipe_refusal("ls | head -1", true), None);
+}
+
+#[test]
+fn pipe_refusal_names_every_terminal_filter_the_capture_knows() {
+    // The foreground refusal lists the terminal filters in prose; the capture decides from
+    // `detect_terminal_filter`. Every listed name must be one the capture accepts, and the list
+    // must be the whole set (13).
+    let listed: Vec<&str> = super::TERMINAL_FILTER_NAMES.split(", ").collect();
+    assert_eq!(listed.len(), 13, "{listed:?}");
+    for name in &listed {
+        assert!(
+            crate::tools::command_summary::detect_terminal_filter(&format!("x | {name} a"))
+                .is_some(),
+            "`{name}` is listed but is not a terminal filter"
+        );
+    }
+    assert!(
+        crate::tools::command_summary::detect_terminal_filter("x | cat").is_none(),
+        "the premise: `cat` is not one"
+    );
 }
 
 #[test]
@@ -9956,9 +10074,20 @@ async fn a_pager_a_list_would_defeat_is_never_offered() {
     let id = ctx
         .output_buffer
         .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
-    // Used to be withheld: the IL-3 gate refused a pager after a `cargo` left-hand side. A
-    // foreground `query | stage` is run now, so the pager IS offered for this one pipeline.
+    // Used to be withheld: the IL-3 gate refused a pager after a `cargo` left-hand side. The
+    // joined command ends in a terminal filter (`sed`), so the capture serves it, a foreground run
+    // is not refused, and the hint may offer it. Pinned against the gate itself: `detect_il3_violation`
+    // still sees the unbounded producer, and `pipe_refusal` (what `run_command` asks) lets it run.
     let piped = format!("cargo --version | cat - {id}");
+    let joined = format!("{piped} | sed -n '101,200p'");
+    assert!(
+        crate::util::path_security::detect_il3_violation(&joined).is_some(),
+        "the premise needs a query whose producer the detector refuses"
+    );
+    assert!(
+        super::pipe_refusal(&joined, false).is_none(),
+        "the premise needs the foreground gate to accept it"
+    );
     assert!(
         crate::util::path_security::is_one_pipeline(&piped),
         "the premise needs one pipeline"
