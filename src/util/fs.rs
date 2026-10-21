@@ -1940,6 +1940,18 @@ mod bounded_read_tests {
                 .finish(),
         );
 
+        // A SECOND live dispatcher, kept for the whole test. With exactly one registered
+        // dispatcher tracing-core decides a callsite's interest from whichever thread first
+        // reaches it; the sibling `read_git_pointer` tests reach this `debug!` from threads with
+        // no dispatcher, cache "never", and this test then reads an empty log (it failed 3 of 3
+        // runs under `cargo test --lib util::fs`). With two, interest is "sometimes" and every
+        // event asks the current thread's dispatcher.
+        let _second = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .with_writer(std::io::sink)
+                .finish(),
+        );
+
         let dir = tempdir().unwrap();
         let dot_git = dir.path().join(".git");
         std::fs::create_dir(&dot_git).unwrap();
