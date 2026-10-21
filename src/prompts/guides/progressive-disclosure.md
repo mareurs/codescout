@@ -161,9 +161,20 @@ not hash, diff, or positionally parse it without allowing for that.
   buffers live only in codescout's server process — they resolve exclusively
   through codescout's own `read_file`, `run_command`, or `grep`. Any other
   tool reports the handle as a missing file, because it is not one.
-- **Piping unbounded `run_command` output to log-trimmers** (`cargo
-  test 2>&1 | grep FAILED`). Server-side enforcement blocks this.
-  Run bare, then `grep FAILED @cmd_id` against the buffer.
+- **Piping an unbounded `run_command` into a trimmer when the pipe cannot keep a
+  capture.** A foreground pipe whose last stage is a terminal filter (`grep`, `egrep`,
+  `fgrep`, `rg`, `head`, `tail`, `sed`, `awk`, `cut`, `wc`, `sort`, `uniq`, `tr`) is run
+  through a capture (`cargo test 2>&1 | grep FAILED`): you get the filtered result and an
+  `unfiltered_output` handle to the first command's whole stdout (up to 4 MiB;
+  `unfiltered_truncated` marks a cut; `unfiltered_output_lines` is then a lower bound when an
+  early-exit filter such as `head` leaves the producer running to the limit). Query it with
+  `grep FAILED @cmd_id`. Server-side enforcement still blocks (`IL3 violation`) an unbounded
+  pipe the capture cannot be spliced into — a last stage that is not a terminal filter, a
+  `;`/`&&` list after the first pipe, a nested or `|&` pipe, a buffer ref — and every such
+  pipe under `run_in_background`, which keeps no unfiltered stream. Run bare, then
+  `grep FAILED @cmd_id` against the buffer. On `timeout_secs` the process group is killed
+  and the filter is run on the partial capture, flagged `capture_incomplete` (that call can
+  take up to `timeout_secs` + 5 s).
 - **Treating the summary as authoritative.** It's a preview, not the
   whole result. Pull from the buffer before drawing conclusions.
 - **Trying to round-trip oversized data back into a tool argument.** A

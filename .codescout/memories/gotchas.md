@@ -230,8 +230,8 @@ from the object DB rather than merely unreferenced — so the reflog cannot help
 patch-ids were the same change appearing on two branches, which is the anchor working.
 
 There is no promotion path to check and nothing owed later — record the pair once at fix
-time. To recover an already-orphaned commit, resolve its patch-id with **redirects**, since
-Iron Law 3 blocks an unbounded `git log -p` piped to a trimmer:
+time. To recover an already-orphaned commit, resolve its patch-id with **redirects**, since a pipe from an unbounded `git log -p` into a trimmer is refused by Iron Law 3 when the
+capture cannot be kept (always in the background), and a capture keeps at most 4 MiB of it:
 
 ```
 git log --all -p > /tmp/all.patch

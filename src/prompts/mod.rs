@@ -880,7 +880,13 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
              `edit_code` (action=replace|insert|remove|rename)."
         }
         "il3_pipe_to_trimmer" => {
-            "IL-3 gate condition: the check reads the LEFT side of the pipe. Unbounded producers \
+            "IL-3 gate condition: a pipe is refused only when its LEFT side is unbounded AND no capture \
+                 can be kept. A FOREGROUND pipe whose last stage is a terminal filter (grep, rg, \
+                 head, tail, sed, awk, cut, wc, sort, uniq, tr) and whose first top-level pipe is \
+                 followed by one plain pipeline runs to the end and returns `unfiltered_output`, the \
+                 first command's whole stdout. Still refused: a last stage that is not a terminal \
+                 filter, a `;`/`&&` list after the pipe, a nested or `|&` pipe, a buffer ref, and \
+                 EVERY such pipe under run_in_background. Unbounded producers \
                  are cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd, recursive grep, and \
                  `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \
                  (-n, --max-count, -3, --show-current, --porcelain/--short, --stat) — `--oneline` is \
@@ -889,7 +895,7 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
                  plumbing bounded by its argument count (check-ignore without --stdin, \
                  cat-file -t/-s/-e) — but `git diff -- <file>` and `git ls-files <path>` are \
                  NOT: one path bounds neither. On the RIGHT, \
-                 trimmers (head, tail, grep, sed, awk, sort) block — but `cut`/`tr` are 1:1 on \
+                 trimmers (head, tail, grep, sed, awk, sort) count — but `cut`/`tr` are 1:1 on \
                  records and never do, and a stage that COLLAPSES anywhere in the chain (wc, \
                  grep -c, sha256sum, git patch-id) allows the whole pipeline whatever follows it."
         }

@@ -7569,8 +7569,9 @@ fn scan_archived_fix_sha_unresolvable(
             let remedy = match patch_id {
                 Some(p) => format!(
                     "Recover it by patch-id `{p}` — a content hash of the diff, invariant under \
-                 rebase and cherry-pick. Use redirects, not pipes (Iron Law 3 blocks an \
-                 unbounded `git log -p` piped to a trimmer): `git log --all -p > /tmp/all.patch` \
+                 rebase and cherry-pick. Use redirects, not pipes (a capture keeps at most 4 MiB of an \
+                 unbounded `git log -p`, and Iron Law 3 refuses the pipe when none can be kept): \
+                 `git log --all -p > /tmp/all.patch` \
                  then `git patch-id --stable < /tmp/all.patch > /tmp/ids.txt` and grep it."
                 ),
                 None => "No patch-id was recorded next to it, so there is no content-addressed \

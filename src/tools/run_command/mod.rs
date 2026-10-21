@@ -334,7 +334,7 @@ impl Tool for RunCommand {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command in the project root. Large output is buffered as @cmd_* refs."
+        "Run a shell command in the project root. Large output → @cmd_* refs."
     }
 
     fn long_docs(&self) -> Option<&str> {
@@ -382,12 +382,12 @@ impl Tool for RunCommand {
                     "type": "string",
                     "description": "Shell command. May reference @cmd_* buffers (e.g. grep FAILED @cmd_abc)."
                 },
-                "timeout_secs": { "type": "integer", "default": 30, "description": "Max seconds (default 30)." },
-                "cwd": { "type": "string", "description": "Subdirectory relative to project root." },
-                "acknowledge_risk": { "type": "boolean", "description": "Bypass dangerous-command check. Prefer @ack_* handle from the rejected response." },
-                "run_in_background": { "type": "boolean", "description": "Detach and return immediately. Use for long-running or backgrounded (&) commands." },
-                "interactive": { "type": "boolean", "description": "Spawn process with interactive stdin/stdout. Elicits input after each output chunk. Use for REPLs, prompts, and interactive CLIs." },
-                "effect": { "type": "string", "enum": ["read", "write"], "default": "write", "description": "What the command does to files. Recorded in telemetry; takes no lock." }
+                "timeout_secs": { "type": "integer", "default": 30, "description": "Max seconds. A timed-out `cmd | filter` returns the filter of the partial capture (capture_incomplete); may take timeout_secs + 5 s." },
+                "cwd": { "type": "string", "description": "Subdirectory of project root." },
+                "acknowledge_risk": { "type": "boolean", "description": "Bypass dangerous-command check. Prefer @ack_* handle from the rejection." },
+                "run_in_background": { "type": "boolean", "description": "Detach, return immediately. For long-running or backgrounded (&) commands." },
+                "interactive": { "type": "boolean", "description": "Interactive stdin/stdout; elicits input per output chunk. For REPLs/prompts." },
+                "effect": { "type": "string", "enum": ["read", "write"], "default": "write", "description": "Effect on files. Telemetry only; takes no lock." }
             }
         })
     }

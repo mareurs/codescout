@@ -6194,6 +6194,9 @@ mod tests {
             // surfaces a tool rename touches. Not a tool and never will be.
             "onboarding_prompt",
             "protected_memories",
+            // A `run_command` response key, named by Iron Law 3 in the server_instructions
+            // slice: the handle a foreground pipe ending in a terminal filter leaves behind.
+            "unfiltered_output",
             "untracked",
             "url",
         ];
