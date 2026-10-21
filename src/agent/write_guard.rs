@@ -318,8 +318,13 @@ pub async fn acquire(
 /// refused unless it is a regular file. The `flock` is unaffected by `O_NONBLOCK`.
 ///
 /// **Policy: a link is never unlinked or replaced** (codescout does not delete user data); the
-/// open is refused with an error naming the path, and every caller turns that into a failed
-/// activation (`failed to open write.lock for <root>`), not into running without the lock. Only
+/// open is refused with an error naming the path. Every caller turns a failed open into a failed
+/// call, not into running without the lock, and one of them is `Agent::new` (`agent/mod.rs:943`),
+/// which `server::run` calls at startup with the launch directory as the project: a link at
+/// `.codescout/write.lock` there makes the MCP SERVER FAIL TO START, and `load_project_resources`
+/// (`agent/mod.rs:1095`, reached from `ensure_resident`) fails the first pinned call to such a
+/// project. The old plain open followed a link to a regular file without complaint, so this is a
+/// deliberate behaviour change for anyone who linked `write.lock` on purpose. Only
 /// the LEAF is checked: a link in a parent directory (`.codescout` itself) is still followed.
 /// docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md
 pub fn open_lock_file(root: &Path) -> std::io::Result<Arc<File>> {
@@ -333,8 +338,11 @@ pub fn open_lock_file(root: &Path) -> std::io::Result<Arc<File>> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let file = options.open(&path).map_err(|e| {
-        #[cfg(unix)]
+    let file = options.open(&path);
+    // The friendly refusal exists only where `O_NOFOLLOW` does (unix); elsewhere the result is
+    // used as is, with no identity mapping for clippy to flag.
+    #[cfg(unix)]
+    let file = file.map_err(|e| {
         if e.raw_os_error() == Some(libc::ELOOP) {
             return std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -345,7 +353,8 @@ pub fn open_lock_file(root: &Path) -> std::io::Result<Arc<File>> {
             );
         }
         e
-    })?;
+    });
+    let file = file?;
     #[cfg(unix)]
     if !file.metadata()?.file_type().is_file() {
         return Err(std::io::Error::new(
