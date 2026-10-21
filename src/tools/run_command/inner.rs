@@ -170,12 +170,13 @@ pub(super) struct TeeInjection {
     /// `None` both when there was nothing to capture (no terminal filter) and when the
     /// capture is in place — only a capture that was wanted and could not be made sets it.
     pub(super) skipped: Option<String>,
-    /// Everything after the LAST spliced `|` (`B` in `A | tee cap | B`), `None` when nothing is
-    /// captured. It is NOT necessarily just a filter: `detect_terminal_filter` checks only the
-    /// first token after the last `|`, so `B` can carry a tail (`head -2; git commit ...`,
-    /// `grep x && deploy`) or a heredoc body. A consumer must not re-run it unless
-    /// `crate::util::path_security::is_one_pipeline(original_command)` holds. Read by the
-    /// timeout path (plan Task 4); until that lands only the tests read it.
+    /// Everything after the FIRST spliced `|` (`B | C` in `A | tee cap | B | C`; just `B` for a
+    /// single pipe), `None` when nothing is captured. The tee sits at the first pipe so the
+    /// capture is the producer's own stream. It is NOT necessarily just filters: the
+    /// detection checks only that the LAST stage is a terminal filter, so this can carry a
+    /// tail (`head -2; git commit ...`, `grep x && deploy`) or a heredoc body. A consumer must
+    /// not re-run it unless `crate::util::path_security::is_one_pipeline(original_command)`
+    /// holds. Read by the timeout path (plan Task 4); until that lands only the tests read it.
     #[allow(dead_code)]
     pub(super) filter: Option<String>,
 }
@@ -221,7 +222,7 @@ pub(super) fn inject_tee_in(
     buffer_only: bool,
     tmp_dir: &std::path::Path,
 ) -> anyhow::Result<TeeInjection> {
-    use super::super::command_summary::detect_terminal_filter;
+    use super::super::command_summary::first_pipe_before_terminal_filter;
     let untouched = |skipped: Option<String>| TeeInjection {
         command: resolved_command.to_string(),
         capture: None,
@@ -238,7 +239,7 @@ pub(super) fn inject_tee_in(
     // and the splice is unchanged. See
     // docs/issues/archive/2026-08-19-run-command-rewrites-pipes-inside-heredoc-content.md.
     let masked = crate::util::path_security::mask_heredoc_bodies(resolved_command);
-    let Some(pipe_pos) = detect_terminal_filter(&masked) else {
+    let Some(pipe_pos) = first_pipe_before_terminal_filter(&masked) else {
         return Ok(untouched(None));
     };
     let skip = |why: &dyn std::fmt::Display| {
@@ -281,6 +282,9 @@ pub(super) fn inject_tee_in(
     // not anticipate (a future temp-dir naming scheme, a space in the path).
     // `'` itself is excluded by the allowlist, so the quoting cannot be
     // escaped from.
+    // The tee goes at the FIRST pipe (`first_pipe_before_terminal_filter`), so in a chain
+    // (`cargo test | grep x | head -20`) the capture is the producer's own stream and the
+    // whole chain runs inside the group.
     // The filter side is wrapped in a group that, once the filter exits, drains up to the
     // capture store limit of what it left unread and then exits with the FILTER's status.
     // Without the drain an early-exit filter (`head -N`) closes the pipe, `tee` takes SIGPIPE,

@@ -295,19 +295,11 @@ pub fn detect_command_type(command: &str) -> CommandType {
     }
 }
 
-/// Returns the byte offset of the `|` pipe character that separates a command
-/// from a terminal filter stage (grep, head, tail, sed, awk, cut, wc, sort,
-/// uniq, tr, rg, egrep, fgrep).
-///
-/// Returns `None` if the command has no pipe, or if the last pipe stage is not
-/// a known terminal filter. Pipe characters inside quoted strings are ignored.
-pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
-    const TERMINAL_FILTERS: &[&str] = &[
-        "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq",
-        "tr",
-    ];
-
-    let mut last_pipe: Option<usize> = None;
+/// Byte offsets of every unquoted `|` that joins two pipeline stages, in order. Quote-aware
+/// (single, double, backslash); `||` is not a pipe. Shared by [`detect_terminal_filter`] and
+/// [`first_pipe_before_terminal_filter`] so there is one quote-state machine.
+fn unquoted_pipes(cmd: &str) -> Vec<usize> {
+    let mut pipes = Vec::new();
     let mut in_single = false;
     let mut in_double = false;
     let mut escape_next = false;
@@ -326,14 +318,28 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
                 let next_char = cmd[i + 1..].chars().next();
                 let prev_char = if i > 0 { cmd[..i].chars().last() } else { None };
                 if next_char != Some('|') && prev_char != Some('|') {
-                    last_pipe = Some(i);
+                    pipes.push(i);
                 }
             }
             _ => {}
         }
     }
+    pipes
+}
 
-    let pipe_pos = last_pipe?;
+/// Returns the byte offset of the `|` pipe character that separates a command
+/// from a terminal filter stage (grep, head, tail, sed, awk, cut, wc, sort,
+/// uniq, tr, rg, egrep, fgrep).
+///
+/// Returns `None` if the command has no pipe, or if the last pipe stage is not
+/// a known terminal filter. Pipe characters inside quoted strings are ignored.
+pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
+    const TERMINAL_FILTERS: &[&str] = &[
+        "grep", "egrep", "fgrep", "rg", "head", "tail", "sed", "awk", "cut", "wc", "sort", "uniq",
+        "tr",
+    ];
+
+    let pipe_pos = *unquoted_pipes(cmd).last()?;
 
     // Extract the first token of the stage after the pipe
     let after_pipe = cmd[pipe_pos + 1..].trim_start();
@@ -349,6 +355,32 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
         Some(pipe_pos)
     } else {
         None
+    }
+}
+
+/// Where to splice the unfiltered-output `tee` for a command whose LAST stage is a terminal
+/// filter ([`detect_terminal_filter`]): at the FIRST unquoted `|`, so the capture is the
+/// producer's own stdout and not an intermediate stage's (`seq 1 1000 | grep 7 | head -2` must
+/// capture 1000 lines, not grep's 271). For a single pipe the first and the last coincide.
+///
+/// Returns `None` when the command does not qualify, and also when the first pipe is `|&`
+/// (stderr is piped too; the command is left untouched). Falls back to the LAST pipe when the
+/// text after the first pipe is not one pipeline (`a | b; c | head`, a heredoc, a comment, a
+/// `$(…)`): grouping that text behind the tee would hand its later commands the producer's
+/// stream, which they never read before.
+pub fn first_pipe_before_terminal_filter(cmd: &str) -> Option<usize> {
+    let last = detect_terminal_filter(cmd)?;
+    let first = *unquoted_pipes(cmd).first()?;
+    if first == last {
+        return Some(last);
+    }
+    if cmd[first + 1..].starts_with('&') {
+        return None;
+    }
+    if crate::util::path_security::is_one_pipeline(&cmd[first + 1..]) {
+        Some(first)
+    } else {
+        Some(last)
     }
 }
 
@@ -2523,5 +2555,53 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
         // |& is bash's stderr pipe — the & becomes part of the filter name
         // ("&grep"), which doesn't match any known filter, so correctly returns None
         assert!(detect_terminal_filter("cmd |& grep foo").is_none());
+    }
+    #[test]
+    fn first_pipe_is_the_producers_pipe_in_a_chain() {
+        let cmd = "seq 1 3 | grep 2 | head -1";
+        assert_eq!(first_pipe_before_terminal_filter(cmd), Some(8));
+        // A single pipe: first and last coincide.
+        let single = "seq 1 3 | head -1";
+        assert_eq!(
+            first_pipe_before_terminal_filter(single),
+            detect_terminal_filter(single)
+        );
+        // Quote-aware: the quoted `|` is data, the first real pipe is the splice point.
+        let quoted = "echo 'a|b' | grep a | head -1";
+        assert_eq!(
+            first_pipe_before_terminal_filter(quoted),
+            quoted.find("| grep")
+        );
+        // `||` is not a pipe.
+        let or = "a || b | grep x | head -1";
+        assert_eq!(first_pipe_before_terminal_filter(or), or.find("| grep"));
+    }
+
+    #[test]
+    fn first_pipe_does_not_qualify_a_command_whose_last_stage_is_not_a_filter() {
+        assert_eq!(
+            first_pipe_before_terminal_filter("a | grep x | cargo run"),
+            None
+        );
+        assert_eq!(first_pipe_before_terminal_filter("cargo build"), None);
+    }
+
+    #[test]
+    fn first_pipe_leaves_a_stderr_pipe_chain_untouched() {
+        // `|&` as the FIRST pipe: stderr is piped too, so the command is left alone.
+        assert_eq!(
+            first_pipe_before_terminal_filter("a |& grep x | head -1"),
+            None
+        );
+    }
+
+    #[test]
+    fn first_pipe_falls_back_to_the_last_when_the_rest_is_not_one_pipeline() {
+        // The text after the first pipe holds a second command list: grouping it behind the
+        // tee would feed `c` the producer's stream, so the splice stays at the last pipe.
+        let list = "a | b; c | head -1";
+        assert_eq!(first_pipe_before_terminal_filter(list), list.rfind('|'));
+        let and = "a | b && c | head -1";
+        assert_eq!(first_pipe_before_terminal_filter(and), and.rfind('|'));
     }
 }

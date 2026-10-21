@@ -6485,6 +6485,83 @@ async fn a_semicolon_tail_after_the_filter_keeps_the_filters_status_and_output()
     assert_eq!(result["exit_code"], 0, "{result}");
     assert_eq!(result["unfiltered_output_lines"], 10, "{result}");
 }
+/// In a chain the tee goes at the FIRST pipe, so the handle is the producer's own stream. With the
+/// splice at the last pipe, `seq 1 1000 | grep 7 | head -2` captured grep's 271 lines.
+#[test]
+fn inject_tee_in_splices_a_chain_at_its_first_pipe() {
+    let dir = tempdir().unwrap();
+    let injected =
+        super::inner::inject_tee_in("seq 1 3 | grep 2 | head -1", false, dir.path()).unwrap();
+    let cap = injected
+        .capture
+        .as_ref()
+        .expect("a terminal filter must be captured")
+        .0
+        .clone();
+    assert_eq!(
+        injected.command,
+        format!(
+            "seq 1 3 | tee '{cap}' | {{ grep 2 | head -1\ns=$?; head -c {} >/dev/null; exit $s; }}",
+            super::output::CAPTURE_STORE_LIMIT_BYTES
+        ),
+    );
+    assert_eq!(injected.filter.as_deref(), Some("grep 2 | head -1"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_chain_keeps_the_producers_whole_stream_in_the_handle() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 1000 | grep 7 | head -2" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "7\n17\n", "{result}");
+    assert_eq!(
+        result["unfiltered_output_lines"], 1000,
+        "the handle must hold the producer's stream, not grep's output: {result}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_chain_keeps_the_last_stages_exit_status() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 10 | sort | grep zzz" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["exit_code"], 1, "{result}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_endless_producer_through_a_chain_into_head_ends_at_once() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "yes | grep y | head -1", "timeout_secs": 10 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(result.get("timed_out").is_none(), "{result}");
+    assert_eq!(result["stdout"], "y\n", "{result}");
+    assert_eq!(result["unfiltered_truncated"], true, "{result}");
+}
+
+/// The `|` inside quotes is data: the first REAL pipe is the splice point.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_quoted_pipe_before_a_chain_is_not_its_first_pipe() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "echo 'a|b' | grep a | head -1" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "a|b\n", "{result}");
+    assert_eq!(result["unfiltered_output_lines"], 1, "{result}");
+}
 
 /// Over the limit the capture is cut at a line boundary and marked, and the count is still the
 /// whole stream's. `seq 1 1000000` is ~6.9 MB, so a cut at 4 MiB keeps roughly 600,000 lines.
