@@ -6399,7 +6399,7 @@ async fn a_urandom_password_idiom_ends_at_once() {
     let result = RunCommand
         .call(
             json!({
-                "command": "cat /dev/urandom | tr -dc a-z | head -c 20",
+                "command": "cat /dev/urandom | LC_ALL=C tr -dc a-z | head -c 20",
                 "timeout_secs": 10,
             }),
             &ctx,
@@ -6415,6 +6415,70 @@ async fn a_urandom_password_idiom_ends_at_once() {
         stdout.len() == 20 && stdout.bytes().all(|b| b.is_ascii_lowercase()),
         "expected 20 lowercase letters, got {stdout:?}: {result}"
     );
+}
+/// The cost the bounded drain does not remove: a SLOW endless producer writes less than the bound
+/// before `timeout_secs`, so the drain never closes the pipe and the command runs to the timeout.
+/// Before the drain SIGPIPE ended it at once. Until the timeout path recovers output (plan
+/// Task 4) the response is a bare `timed_out`; this pins the cost so Task 4 changes it on purpose.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_slow_endless_producer_into_head_runs_to_the_timeout() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({
+                "command": "(while :; do echo x; sleep 0.2; done) | head -1",
+                "timeout_secs": 2,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["timed_out"], true, "{result}");
+}
+
+/// Past the store limit the drain stops the stream, so the capture file is a prefix of it and
+/// `unfiltered_output_lines` (the capture's line count) is a LOWER BOUND of the stream, which
+/// `unfiltered_truncated` marks. The same stream through `grep` reads to its end and reports
+/// 1,000,000; pinning "strictly between" is what keeps this from being read as the total.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_head_pipe_over_the_store_limit_reports_a_lower_bound_and_the_truncated_flag() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "seq 1 1000000 | head -3", "timeout_secs": 30 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "1\n2\n3\n", "{result}");
+    assert_eq!(
+        result["unfiltered_truncated"], true,
+        "a stream cut by the drain must be marked: {result}"
+    );
+    let lines = result["unfiltered_output_lines"]
+        .as_u64()
+        .expect("a line count");
+    assert!(
+        lines > 500_000 && lines < 1_000_000,
+        "a lower bound of the 1,000,000-line stream, not its total: {result}"
+    );
+}
+
+/// The group sits after the whole `B`, so a `;` tail after the filter runs and keeps its place:
+/// the pipeline still ends in the tail's status and the capture still holds the whole stream.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_semicolon_tail_after_the_filter_keeps_the_filters_status_and_output() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 10 | head -2; echo done" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "1\n2\ndone\n", "{result}");
+    assert_eq!(result["exit_code"], 0, "{result}");
+    assert_eq!(result["unfiltered_output_lines"], 10, "{result}");
 }
 
 /// Over the limit the capture is cut at a line boundary and marked, and the count is still the

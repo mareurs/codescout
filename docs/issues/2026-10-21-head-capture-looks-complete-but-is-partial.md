@@ -60,11 +60,13 @@ Plan: wrap the filter in a group that drains what the filter leaves unread, up t
 
 Fix SHA / patch-id: not yet recorded (branch `feat/il3-run-to-completion-20261021`, not committed to `experiments`).
 
-Cost: a drained finite producer now runs to completion, so `seq 1 N | head -3` takes as long as the producer; that is the price of a complete capture and is the design in `docs/superpowers/specs/2026-10-21-il3-run-to-completion-pipe-design.md`. An endless producer ends after the 4 MiB bound.
+Cost: a drained finite producer now runs to completion, so `seq 1 N | head -3` takes as long as the producer; that is the price of a complete capture and is the design in `docs/superpowers/specs/2026-10-21-il3-run-to-completion-pipe-design.md`. A FAST endless producer ends when the 4 MiB drain closes the pipe. A SLOW one (fewer than 4 MiB before `timeout_secs`) runs to `timeout_secs` and, until the timeout path recovers output (plan Task 4), returns a bare `timed_out` (measured by hand 2026-10-21: `while :; do echo x; sleep 0.2; done | head -1` -> rc=124 at the timeout; the old layout ended at once). The spec accepts this cost.
+
+Count semantics: `unfiltered_output_lines` is the line count of the capture file. For a stream that ended on its own it is the stream's total. When the drain stopped the stream early (a stream over 4 MiB into `head`), it is a LOWER BOUND of the stream, and `unfiltered_truncated` marks it: `seq 1 1000000 | head -3` reports a number between 500000 and 1000000, where the same stream through `grep` reports 1000000.
 
 ## Tests added
 
-In `src/tools/run_command/tests.rs`: `inject_tee_in_wraps_the_filter_in_a_draining_group`, `a_head_pipe_still_captures_the_whole_stream`, `a_filter_exit_status_survives_the_drain`, `a_comment_after_the_filter_does_not_break_the_drain`, `a_producers_stderr_is_not_piped_into_the_filter`, `an_endless_producer_into_head_ends_at_once_with_a_bounded_capture`, `a_urandom_password_idiom_ends_at_once`. The first two fail before the fix; the others guard properties the group must keep (the last two guard the bound).
+In `src/tools/run_command/tests.rs`: `inject_tee_in_wraps_the_filter_in_a_draining_group`, `a_head_pipe_still_captures_the_whole_stream`, `a_filter_exit_status_survives_the_drain`, `a_comment_after_the_filter_does_not_break_the_drain`, `a_producers_stderr_is_not_piped_into_the_filter`, `an_endless_producer_into_head_ends_at_once_with_a_bounded_capture`, `a_urandom_password_idiom_ends_at_once`, `a_slow_endless_producer_into_head_runs_to_the_timeout` (pins the slow-producer cost), `a_head_pipe_over_the_store_limit_reports_a_lower_bound_and_the_truncated_flag`, `a_semicolon_tail_after_the_filter_keeps_the_filters_status_and_output`. The first two fail before the fix; the others guard properties the group must keep.
 
 ## Workarounds
 

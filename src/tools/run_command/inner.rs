@@ -170,9 +170,12 @@ pub(super) struct TeeInjection {
     /// `None` both when there was nothing to capture (no terminal filter) and when the
     /// capture is in place — only a capture that was wanted and could not be made sets it.
     pub(super) skipped: Option<String>,
-    /// The text after the spliced `|` (the filter, `B` in `A | tee cap | B`). `None` when
-    /// nothing is captured. Read by the timeout path (plan Task 4); until that lands only the
-    /// tests read it.
+    /// Everything after the LAST spliced `|` (`B` in `A | tee cap | B`), `None` when nothing is
+    /// captured. It is NOT necessarily just a filter: `detect_terminal_filter` checks only the
+    /// first token after the last `|`, so `B` can carry a tail (`head -2; git commit ...`,
+    /// `grep x && deploy`) or a heredoc body. A consumer must not re-run it unless
+    /// `crate::util::path_security::is_one_pipeline(original_command)` holds. Read by the
+    /// timeout path (plan Task 4); until that lands only the tests read it.
     #[allow(dead_code)]
     pub(super) filter: Option<String>,
 }
@@ -283,8 +286,11 @@ pub(super) fn inject_tee_in(
     // Without the drain an early-exit filter (`head -N`) closes the pipe, `tee` takes SIGPIPE,
     // and the capture is cut to what arrived before that — which the response then reported
     // as the whole stream. The drain is bounded because the handle keeps no more than that
-    // limit anyway: an endless producer (`yes | head -1`) must still end at once, with the
-    // closed pipe stopping it once the bound is read.
+    // limit anyway. A FAST endless producer (`yes | head -1`) still ends at once: the group
+    // exits after the bound, the pipe closes and the producer stops. A SLOW one (fewer bytes
+    // than the bound before `timeout_secs`) never reaches the bound, so it runs to the
+    // timeout; until the timeout path recovers output (plan Task 4) that returns a bare
+    // `timed_out`. Pinned by `a_slow_endless_producer_into_head_runs_to_the_timeout`.
     // POSIX only: `sh -c` may be dash. The newline before `s=$?` (not `;`) is load-bearing: a
     // trailing `# comment` in the filter would otherwise swallow the closing brace. The group
     // sits on the filter's side of the pipe, so the producer's stderr is not piped into it.
@@ -525,8 +531,8 @@ pub(crate) async fn run_command_inner(
     // and keeps going.  The reset keeps that ending for pipelines we do not splice.  For a
     // spliced `| tee cap | { filter; drain; }` the bounded drain, not SIGPIPE, decides how far
     // the producer runs: the group reads up to the capture store limit after the filter exits,
-    // so a finite stream within it is captured whole, and an endless one ends once the bound
-    // is read and the pipe closes (see `inject_tee_in`).
+    // so a finite stream within it is captured whole. A fast endless one ends when that bound
+    // is read and the pipe closes; a slow one runs to the timeout (see `inject_tee_in`).
     #[cfg(unix)]
     let (child_output_fut, child_pgid) = {
         // Base config (sh -c, GIT_PAGER, process_group(0), SIGPIPE reset,

@@ -1055,9 +1055,13 @@ fn attachments(
         keys.insert("unfiltered_output_lines".into(), json!(line_count));
         if let Some(t) = truncation {
             keys.insert("unfiltered_truncated".into(), json!(true));
-            // `unfiltered_output_lines` describes the STREAM; this describes the HANDLE sitting
-            // next to it. Naming only the first left a reader to assume one number covered both,
-            // which is the misread this key exists to prevent.
+            // `unfiltered_output_lines` counts the lines of the CAPTURE FILE, before the store cut;
+            // this key describes the HANDLE sitting next to it. Naming only the first left a
+            // reader to assume one number covered both, which is the misread this key exists to
+            // prevent. The capture file is the whole stream only when the stream ended on its own:
+            // when an early-exit filter (`| head -N`) stopped the producer, the drain group read
+            // at most `CAPTURE_STORE_LIMIT_BYTES` more, so the count is then a LOWER BOUND of the
+            // stream, and this `unfiltered_truncated` is what marks it.
             keys.insert("unfiltered_buffered_lines".into(), json!(t.kept_lines));
         }
         if !pool_cut.is_empty() {
