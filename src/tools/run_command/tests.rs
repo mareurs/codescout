@@ -2254,7 +2254,7 @@ async fn a_huge_stdout_line_is_summarized_inline_not_rebuffered() {
     let content = RunCommand
         .call_content(
             json!({
-                "command": "seq 1 9500 | sed 's/.*/abcdefghij/' | tr -d '\\n' | head -c 95000",
+                "command": "yes 'abcdefghij' | tr -d '\\n' | head -c 95000",
                 "timeout_secs": 10,
             }),
             &ctx,
@@ -6274,8 +6274,11 @@ fn inject_tee_in_wraps_the_filter_in_a_draining_group() {
         .clone();
     assert_eq!(
         injected.command,
-        format!("seq 1 3 | tee '{cap}' | {{ head -1\ns=$?; cat >/dev/null; exit $s; }}"),
-        "the filter must run inside the draining group"
+        format!(
+            "seq 1 3 | tee '{cap}' | {{ head -1\ns=$?; head -c {} >/dev/null; exit $s; }}",
+            super::output::CAPTURE_STORE_LIMIT_BYTES
+        ),
+        "the filter must run inside the bounded draining group"
     );
     assert_eq!(injected.filter.as_deref(), Some("head -1"));
 
@@ -6360,6 +6363,57 @@ async fn a_producers_stderr_is_not_piped_into_the_filter() {
             .unwrap_or_default()
             .contains("err"),
         "the producer's stderr must reach the response: {result}"
+    );
+}
+/// The drain is bounded by the capture store limit. An endless producer into an early-exit filter
+/// ended at once before the drain (SIGPIPE); an unbounded drain would read it until the timeout and
+/// fill the disk. With the bound, `yes` is stopped by the closed pipe once the bound is read, and
+/// the capture is exactly what the handle can keep, so it is flagged truncated.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_endless_producer_into_head_ends_at_once_with_a_bounded_capture() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "yes | head -1", "timeout_secs": 10 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        result.get("timed_out").is_none(),
+        "the bounded drain must let an endless producer end: {result}"
+    );
+    assert_eq!(result["stdout"], "y\n", "{result}");
+    assert_eq!(
+        result["unfiltered_truncated"], true,
+        "an endless stream cannot be captured whole: {result}"
+    );
+}
+
+/// The password idiom: an endless random stream trimmed to a few bytes.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_urandom_password_idiom_ends_at_once() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({
+                "command": "cat /dev/urandom | tr -dc a-z | head -c 20",
+                "timeout_secs": 10,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        result.get("timed_out").is_none(),
+        "the bounded drain must let an endless producer end: {result}"
+    );
+    let stdout = result["stdout"].as_str().expect("stdout");
+    assert!(
+        stdout.len() == 20 && stdout.bytes().all(|b| b.is_ascii_lowercase()),
+        "expected 20 lowercase letters, got {stdout:?}: {result}"
     );
 }
 

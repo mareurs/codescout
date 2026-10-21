@@ -278,19 +278,23 @@ pub(super) fn inject_tee_in(
     // not anticipate (a future temp-dir naming scheme, a space in the path).
     // `'` itself is excluded by the allowlist, so the quoting cannot be
     // escaped from.
-    // The filter side is wrapped in a group that, once the filter exits, drains whatever it
-    // left unread and then exits with the FILTER's status. Without the drain an early-exit
-    // filter (`head -N`) closes the pipe, `tee` takes SIGPIPE, and the capture is cut to what
-    // arrived before that — which the response then reported as the whole stream.
+    // The filter side is wrapped in a group that, once the filter exits, drains up to the
+    // capture store limit of what it left unread and then exits with the FILTER's status.
+    // Without the drain an early-exit filter (`head -N`) closes the pipe, `tee` takes SIGPIPE,
+    // and the capture is cut to what arrived before that — which the response then reported
+    // as the whole stream. The drain is bounded because the handle keeps no more than that
+    // limit anyway: an endless producer (`yes | head -1`) must still end at once, with the
+    // closed pipe stopping it once the bound is read.
     // POSIX only: `sh -c` may be dash. The newline before `s=$?` (not `;`) is load-bearing: a
     // trailing `# comment` in the filter would otherwise swallow the closing brace. The group
     // sits on the filter's side of the pipe, so the producer's stderr is not piped into it.
     let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
     let command = format!(
-        "{} | tee '{}' | {{ {}\ns=$?; cat >/dev/null; exit $s; }}",
+        "{} | tee '{}' | {{ {}\ns=$?; head -c {} >/dev/null; exit $s; }}",
         resolved_command[..pipe_pos].trim_end(),
         tmpfile,
-        filter
+        filter,
+        super::output::CAPTURE_STORE_LIMIT_BYTES
     );
     Ok(TeeInjection {
         command,
@@ -519,9 +523,10 @@ pub(crate) async fn run_command_inner(
     // SIGPIPE=SIG_IGN; every spawned process inherits it, so with SIG_IGN a pipeline whose
     // reader exits early (`yes | head -1`) would never end: the writer gets EPIPE it ignores
     // and keeps going.  The reset keeps that ending for pipelines we do not splice.  For a
-    // spliced `| tee cap | { filter; drain; }` the drain, not SIGPIPE, decides how far the
-    // producer runs: the group reads the stream to its end after the filter exits, so `tee`
-    // never sees a closed pipe and the capture holds the whole stream (see `inject_tee_in`).
+    // spliced `| tee cap | { filter; drain; }` the bounded drain, not SIGPIPE, decides how far
+    // the producer runs: the group reads up to the capture store limit after the filter exits,
+    // so a finite stream within it is captured whole, and an endless one ends once the bound
+    // is read and the pipe closes (see `inject_tee_in`).
     #[cfg(unix)]
     let (child_output_fut, child_pgid) = {
         // Base config (sh -c, GIT_PAGER, process_group(0), SIGPIPE reset,

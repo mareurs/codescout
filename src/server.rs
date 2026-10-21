@@ -16316,7 +16316,7 @@ mod guide_hint_tests {
         warm_ledger(&ctx);
         let tool = tool_by_name(&server, "run_command");
         let big = tool
-            .call_content(json!({"command": "seq 100000 102000 | head -2000"}), &ctx)
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
             .await
             .unwrap();
         assert!(
@@ -16327,7 +16327,7 @@ mod guide_hint_tests {
             render_content(&big)
         );
         let second = tool
-            .call_content(json!({"command": "seq 100000 102000 | head -2000"}), &ctx)
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
             .await
             .unwrap();
         assert!(
@@ -17831,7 +17831,7 @@ mod guide_hint_tests {
         let ctx = shared_ctx(&server);
         warm_ledger(&ctx);
         let buffered = tool_by_name(&server, "run_command")
-            .call_content(json!({"command": "seq 100000 102000 | head -2000"}), &ctx)
+            .call_content(json!({"command": "yes filler | head -2000"}), &ctx)
             .await
             .unwrap();
         assert!(
