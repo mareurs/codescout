@@ -8,7 +8,7 @@ related: [docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded
 tags:
 - cluster/unclassified
 kind: bug
-unverified: "The fix is on branch fix/bounded-repo-reads-2026-10-20 only; not merged to experiments. A hard link at the record path is still followed and untested as a fix (deliberately: see Resume). A link in a PARENT directory (.codescout itself) is still followed by both lock files. build_check.rs cargo_lock_is_free has the same shape and is NOT fixed. The reachability of the FIFO hang through a real write-tool call (as opposed to the acquire function) was not driven; the activation failure text for a refused write.lock was read from the code, not provoked end to end."
+unverified: "The fix is on branch fix/bounded-repo-reads-2026-10-20 only; not merged to experiments. A hard link at the record path is still followed and untested as a fix (deliberately: see Resume). A link in a PARENT directory (.codescout itself) is still followed by both lock files. agent/build_check.rs cargo_lock_is_free has the same shape and is NOT fixed. The reachability of the FIFO hang through a real write-tool call (as opposed to the acquire function) was not driven by me. The refusal text a user sees was provoked by the round-4 reviewer through Agent::new and Agent::activate: failed to open write.lock for <root>: <root>/.codescout/write.lock is a link; codescout does not follow or replace it. Remove it so the lock file can be created. FreeBSD (EMLINK instead of ELOOP) untested."
 ---
 
 # BUG: the write-lock holder record is written and cleared with a plain `fs::write`, which follows a link and opens a FIFO blocking
@@ -86,7 +86,7 @@ a regular target before the check). Both `write_holder_record` and `Drop` go thr
 is best effort exactly as before (`let _ =`); the flock release in `Drop` runs either way. Other
 platforms keep the plain open with truncate. Bytes written for an ordinary file are unchanged.
 
-**Lock file** (commit `357d0c968`, patch-id `0dbe98632c15ed80e664206cedc93165a3965a20`):
+**Lock file** (commit `357d0c968`, patch-id `0dbe98632c15ed80e664206cedc93165a3965a20`; follow-up `9e070eeaa`, patch-id `3a2c798ca625d7151059b68eae1e7528ac41082d`, which applies the `ELOOP` message mapping only on unix because the identity `map_err` it left on Windows failed `clippy::map_identity`):
 `open_lock_file` has the same shape and was fixed the same way. Probes by the reviewer on the old
 code: a link to a FIFO did not hang (a read+write open of a FIFO does not block on Linux, so no
 reader is needed to avoid the hang); a link to an existing outside file was flocked, not modified;
@@ -97,13 +97,29 @@ a regular file, with an error naming the path only (no content). **Policy: a lin
 or replaced** (codescout does not delete user data); the user removes it. The `flock` is not
 affected by `O_NONBLOCK`.
 
-**What a refusal does at activation, read at the bytes (`src/agent/mod.rs`):** all three callers
-(`:943` workspace build, `:1095` `load_project_resources`, `:1729` sub-project activation) call
-`open_lock_file(..).with_context(|| format!("failed to open write.lock for {}", ..))?`, so a
-refused open FAILS THE ACTIVATION with `failed to open write.lock for <root>` and the refusal text
-as its cause. It does not run without the lock. That is the behaviour for any open error before
-this change and it is unchanged; the cost is that a planted link makes the project unactivatable
-until it is removed, which is a denial of service by a repository, not a silent loss of exclusion.
+**What a refusal does, read at the bytes (`src/agent/mod.rs`, `src/server.rs`):** all three callers
+call `open_lock_file(..).with_context(|| format!("failed to open write.lock for {}", ..))?`, so a
+refused open FAILS the call; nothing runs without the lock. They are:
+- `agent/mod.rs:943`, inside `Agent::new` (`:910`), which `server::run` (`server.rs:2928`) calls at
+  `server.rs:2955` with the project falling back to `std::env::current_dir()` (`server.rs:2942`):
+  **a link at `.codescout/write.lock` in the directory the server is launched from makes the MCP
+  SERVER FAIL TO START**, not merely an activation fail;
+- `agent/mod.rs:1095`, in `load_project_resources` (`:1076`), reached from `ensure_resident`
+  (`:1135`, and another caller at `:1052`): the first pinned call to such a project fails;
+- `agent/mod.rs:1729`, sub-project activation.
+
+The exact text a user sees (provoked by the round-4 reviewer through `Agent::new` and
+`Agent::activate`): `failed to open write.lock for <root>: <root>/.codescout/write.lock is a link;
+codescout does not follow or replace it. Remove it so the lock file can be created`.
+
+**This is a deliberate behaviour change.** The old plain open followed a link to a regular file
+without complaint (reviewer probe: it opened fine), so anyone who linked `write.lock` on purpose
+now cannot start or activate. Nothing in this repository or on this machine creates such a link:
+no `symlink(` outside tests in `src/`, `scripts/` only `ln -sf` for LSP binaries, no document
+describes a linked `write.lock`, and `write.lock` is gitignored (`.gitignore:120`; the holder at
+`:125`), so a planted link has to come through a path that bypasses the ignore (a force-add, an
+archive). The cost of the policy is that a planted link is a denial of service by the repository,
+not a silent loss of exclusion; the user removes the link.
 
 **Leaf only.** `O_NOFOLLOW` covers the last path component. A link in a PARENT directory
 (`.codescout` itself a link to a directory elsewhere) is still followed, and both `write.lock` and
@@ -136,7 +152,14 @@ after each):
   test failed (the other tests stay green because `ftruncate` fails on a FIFO anyway).
 - `open_lock_file` without `O_NOFOLLOW`: the dangling-link and outside-file tests failed.
 - `open_lock_file`'s `fstat` check neutralised: the FIFO test failed.
-- Not mutated: the `ELOOP` message mapping (the tests assert its text, but no mutant was run on it).
+- Not mutated by me: the `ELOOP` message mapping. The round-4 reviewer ran mutants on it (the
+  refusal kind changed to `Other`, in both the `fstat` branch and the `ELOOP` branch) and the tests
+  killed them.
+- Survives all tests, recorded as defence in depth: dropping `O_NONBLOCK` in `open_lock_file`. It
+  is unobservable on Linux (a read+write open of a FIFO never blocks; a device leaf needs `mknod`
+  or a link, and a link is refused by `ELOOP`).
+- Platform note, untested: FreeBSD returns `EMLINK`, not `ELOOP`, for `O_NOFOLLOW` on a link, so
+  the friendly message would not show there; the link is still refused, with the raw OS error.
 
 ## Workarounds
 
@@ -152,7 +175,7 @@ Open, recorded and deliberately not fixed:
   link count of 2, so a refusal would leave the record permanently anonymous there, while git never
   creates hard links in a checkout. If it is ever addressed: break the link (unlink, then recreate
   with `O_CREAT | O_EXCL | O_NOFOLLOW` under the lock).
-- **`src/build_check.rs:397-405` `cargo_lock_is_free`** opens `target/debug/.cargo-lock` read +
+- **`src/agent/build_check.rs:395-405` `cargo_lock_is_free`** opens `target/debug/.cargo-lock` read +
   write + create and follows links: the same class. `target/` is normally untracked, so it was left
   alone.
 - A link in a parent directory (`.codescout`) is still followed (see Fix).
