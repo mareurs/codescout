@@ -1309,6 +1309,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
         },
     },
     ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test runs
+        // `seq 1 1000000 | grep 99999` (a ~6.9 MB unfiltered stream) through the real tool against
+        // `CAPTURE_STORE_LIMIT_BYTES` 4 MiB and asserts `unfiltered_truncated`, the count of the
+        // FULL capture (1,000,000), a kept count strictly between 500,000 and 1,000,000, and the
+        // truncation sentinel as the stored handle's last line. Before the limit the cut was
+        // `MAX_INLINE_TOKENS * 4` (10 KB): a 100,000-line stream kept ~2,200 lines. Marker written
+        // by production in `attachments` from the `Truncation` that `store_capture` returns.
+        id: "run_command.capture_store_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.unfiltered_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "a_capture_over_the_store_limit_is_cut_and_marked",
+        },
+    },
+    ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test names
         // `JOBS_LISTED_MAX` + 4 live background jobs in one foreground command through the real
         // tool and asserts the first eight are listed in the command's order, the note counts the

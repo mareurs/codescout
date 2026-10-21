@@ -1132,6 +1132,7 @@ fn inline_stdout_room(skeleton: &Value) -> usize {
 /// not inline: a 100,000-line stream was cut to ~2,200 lines behind a ref whose point is to be
 /// re-read. The pool's own per-entry cap (`OutputBuffer::entry_cap`, half the pool) still applies
 /// on top of it.
+// cap-class: RESULT_CAP run_command.capture_store_bytes — probed
 pub(super) const CAPTURE_STORE_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 
 /// Read the tee capture behind `tmpfile`, scrubbed of credentials: `(text, values redacted)`.
