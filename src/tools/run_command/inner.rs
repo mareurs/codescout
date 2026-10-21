@@ -170,6 +170,11 @@ pub(super) struct TeeInjection {
     /// `None` both when there was nothing to capture (no terminal filter) and when the
     /// capture is in place — only a capture that was wanted and could not be made sets it.
     pub(super) skipped: Option<String>,
+    /// The text after the spliced `|` (the filter, `B` in `A | tee cap | B`). `None` when
+    /// nothing is captured. Read by the timeout path (plan Task 4); until that lands only the
+    /// tests read it.
+    #[allow(dead_code)]
+    pub(super) filter: Option<String>,
 }
 
 #[cfg(test)]
@@ -218,6 +223,7 @@ pub(super) fn inject_tee_in(
         command: resolved_command.to_string(),
         capture: None,
         skipped,
+        filter: None,
     };
     if buffer_only {
         return Ok(untouched(None));
@@ -272,16 +278,25 @@ pub(super) fn inject_tee_in(
     // not anticipate (a future temp-dir naming scheme, a space in the path).
     // `'` itself is excluded by the allowlist, so the quoting cannot be
     // escaped from.
+    // The filter side is wrapped in a group that, once the filter exits, drains whatever it
+    // left unread and then exits with the FILTER's status. Without the drain an early-exit
+    // filter (`head -N`) closes the pipe, `tee` takes SIGPIPE, and the capture is cut to what
+    // arrived before that — which the response then reported as the whole stream.
+    // POSIX only: `sh -c` may be dash. The newline before `s=$?` (not `;`) is load-bearing: a
+    // trailing `# comment` in the filter would otherwise swallow the closing brace. The group
+    // sits on the filter's side of the pipe, so the producer's stderr is not piped into it.
+    let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
     let command = format!(
-        "{} | tee '{}' | {}",
+        "{} | tee '{}' | {{ {}\ns=$?; cat >/dev/null; exit $s; }}",
         resolved_command[..pipe_pos].trim_end(),
         tmpfile,
-        resolved_command[pipe_pos + 1..].trim_start()
+        filter
     );
     Ok(TeeInjection {
         command,
         capture: Some(TmpfileGuard(tmpfile)),
         skipped: None,
+        filter: Some(filter),
     })
 }
 
@@ -485,6 +500,7 @@ pub(crate) async fn run_command_inner(
         command: effective_command,
         capture: unfiltered_tmpfile,
         skipped: tee_skipped,
+        ..
     } = inject_tee(resolved_command, buffer_only)?;
 
     // --- Step 5: Execute command ---
@@ -500,9 +516,12 @@ pub(crate) async fn run_command_inner(
     // the pipeline (curl, grep, tee, etc.), but killpg() reaps the whole group.
     //
     // We also reset SIGPIPE to SIG_DFL in pre_exec.  Claude Code's Node.js parent sets
-    // SIGPIPE=SIG_IGN; every spawned process inherits it.  With SIG_IGN, a `| head -N`
-    // pipeline never terminates via SIGPIPE: tee ignores the broken pipe from head and
-    // keeps draining curl's output into the tmpfile until the download completes.
+    // SIGPIPE=SIG_IGN; every spawned process inherits it, so with SIG_IGN a pipeline whose
+    // reader exits early (`yes | head -1`) would never end: the writer gets EPIPE it ignores
+    // and keeps going.  The reset keeps that ending for pipelines we do not splice.  For a
+    // spliced `| tee cap | { filter; drain; }` the drain, not SIGPIPE, decides how far the
+    // producer runs: the group reads the stream to its end after the filter exits, so `tee`
+    // never sees a closed pipe and the capture holds the whole stream (see `inject_tee_in`).
     #[cfg(unix)]
     let (child_output_fut, child_pgid) = {
         // Base config (sh -c, GIT_PAGER, process_group(0), SIGPIPE reset,

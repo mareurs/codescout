@@ -2254,7 +2254,7 @@ async fn a_huge_stdout_line_is_summarized_inline_not_rebuffered() {
     let content = RunCommand
         .call_content(
             json!({
-                "command": "yes 'abcdefghij' | tr -d '\\n' | head -c 95000",
+                "command": "seq 1 9500 | sed 's/.*/abcdefghij/' | tr -d '\\n' | head -c 95000",
                 "timeout_secs": 10,
             }),
             &ctx,
@@ -6256,6 +6256,110 @@ async fn a_capture_under_the_store_limit_is_kept_whole() {
     assert!(
         stdout.trim_start().starts_with("100000"),
         "the handle must serve every line of the stream: {counted}"
+    );
+}
+/// The splice wraps the filter in a group that drains what the filter leaves unread, so an
+/// early-exit filter (`head -1`) cannot close the pipe and stop the producer mid-stream. The
+/// newline before `s=$?` (not `;`) keeps a trailing `# comment` in the filter from swallowing the
+/// closing brace. `filter` is the text after the spliced `|`.
+#[test]
+fn inject_tee_in_wraps_the_filter_in_a_draining_group() {
+    let dir = tempdir().unwrap();
+    let injected = super::inner::inject_tee_in("seq 1 3 | head -1", false, dir.path()).unwrap();
+    let cap = injected
+        .capture
+        .as_ref()
+        .expect("a terminal filter must be captured")
+        .0
+        .clone();
+    assert_eq!(
+        injected.command,
+        format!("seq 1 3 | tee '{cap}' | {{ head -1\ns=$?; cat >/dev/null; exit $s; }}"),
+        "the filter must run inside the draining group"
+    );
+    assert_eq!(injected.filter.as_deref(), Some("head -1"));
+
+    // Control: nothing captured, nothing to name.
+    let plain = super::inner::inject_tee_in("echo hi", false, dir.path()).unwrap();
+    assert_eq!(plain.filter, None);
+}
+
+/// `| head -N` closed the pipe after N lines, and the capture was cut to whatever had reached
+/// `tee` by then (1860 lines of a 300000-line stream), yet the response reported that partial
+/// stream as if it were the whole. With the drain the producer runs to completion.
+/// docs/issues/2026-10-21-head-capture-looks-complete-but-is-partial.md
+#[cfg(unix)]
+#[tokio::test]
+async fn a_head_pipe_still_captures_the_whole_stream() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "seq 1 300000 | head -3", "timeout_secs": 30 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "1\n2\n3\n", "{result}");
+    assert_eq!(
+        result["unfiltered_output_lines"], 300_000,
+        "the capture must hold the whole stream, not what arrived before head closed: {result}"
+    );
+    assert!(
+        result.get("unfiltered_truncated").is_none(),
+        "a 300000-line stream is ~1.9 MiB, under the capture limit: {result}"
+    );
+}
+
+/// The drain group ends in `exit $s`, so the filter's own status is the pipeline's.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_filter_exit_status_survives_the_drain() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 10 | grep zzz" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(
+        result["exit_code"], 1,
+        "grep's no-match status must survive: {result}"
+    );
+    assert!(result.get("unfiltered_output").is_some(), "{result}");
+}
+
+/// A `# comment` after the filter lands on the filter's line; the newline before `s=$?` is what
+/// keeps it from commenting out the rest of the group.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_comment_after_the_filter_does_not_break_the_drain() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "seq 1 10 | head -2 # why" }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "1\n2\n", "{result}");
+    assert_eq!(result["exit_code"], 0, "{result}");
+}
+
+/// The group is on the filter side of the pipe only: the producer's stderr must not be piped
+/// into the filter.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_producers_stderr_is_not_piped_into_the_filter() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "(echo out; echo err >&2) | grep err" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "", "{result}");
+    assert!(
+        result["stderr"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("err"),
+        "the producer's stderr must reach the response: {result}"
     );
 }
 
