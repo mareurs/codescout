@@ -86,9 +86,9 @@ terminal filters are `grep`, `egrep`, `fgrep`, `rg`, `head`, `tail`,
 is one of them and the first top-level pipe is followed by one plain
 pipeline (nothing after it but `|` stages), the server runs
 `A | tee <capture> | { REST; drain; }`: the first command `A` runs
-until it ends or `timeout_secs` expires, and a filter that reads to
-the end (`grep`, `sort`, `tail`) receives the whole stream. The
-response carries the filtered result and:
+until it ends, the capture limit is reached or `timeout_secs` expires,
+and a filter that reads to the end (`grep`, `sort`, `tail`) receives
+the whole stream. The response carries the filtered result and:
 
 - `unfiltered_output` — a `@cmd_*` handle to `A`'s own stdout
   (redacted, kept up to 4 MiB), queried like any buffer:
@@ -97,19 +97,22 @@ response carries the filtered result and:
 - `unfiltered_truncated` and `unfiltered_buffered_lines` when the
   stream was cut.
 
-Only an early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves part of the stream unread: it does not stop `A`, a drain after the filter keeps
-it running and reads at most 4 MiB more into the capture, so
-`unfiltered_output_lines` is then a lower bound of the stream, and
-`unfiltered_truncated` marks it.
+Only an early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves
+part of the stream unread: it does not stop `A`, a drain after the
+filter keeps it running and reads at most 4 MiB more into the
+capture, so `unfiltered_output_lines` is then a lower bound of the
+stream, and `unfiltered_truncated` marks it. The `exit_code` of the
+call is the filter's, as in any pipe without `pipefail`: the
+producer's own exit status is not reported.
 
 On `timeout_secs` the server kills the process group and returns the
 usual `timed_out` shape plus `capture_incomplete: true`, the
 `unfiltered_*` keys and the filter's result on the partial capture
 (`stdout`) when the filter is provably pure. A filter that is not is
 never re-run: the response then carries `filter_not_run` with the
-reason, or
-`filter_grace_expired` when the filter itself ran out of time, and
-`filter_exit_code` / `filter_stderr` when the replayed filter failed.
+reason. A replayed filter that did not finish in time gives
+`filter_grace_expired` instead, and one that finished and failed adds
+`filter_exit_code` / `filter_stderr`.
 A timed-out filtered call can take up to `timeout_secs` + 5 s.
 
 **Gate fires when** the command's left side is an unbounded producer

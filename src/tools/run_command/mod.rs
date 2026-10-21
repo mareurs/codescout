@@ -344,10 +344,11 @@ impl Tool for RunCommand {
              Short output (< 50 lines) is returned inline.\n\
              Long output is stored as `@cmd_xxxx` and a smart summary is returned.\n\
              Query the buffer in a follow-up: `run_command(\"grep FAILED @cmd_xxxx\")`.\n\
-             A foreground `cmd | grep/head/tail…` (one pipeline ending in a terminal filter) returns \
-             the filtered result plus `unfiltered_output`, a handle to `cmd`'s stdout; any other \
-             pipe from an unbounded command, and every one in the background, is refused: run it \
-             bare and query the `@cmd_*` buffer.\n\
+             A foreground `cmd | grep/head/tail…` (last stage a terminal filter, no `;`/`&&`/`||` \
+             list after the first pipe) returns the filtered result plus `unfiltered_output`, a \
+             handle to `cmd`'s stdout (up to 4 MiB); `exit_code` is the filter's. A pipe from an \
+             unbounded command into a trimmer that the capture cannot serve is refused, and so is \
+             every such pipe in the background: run it bare and query the `@cmd_*` buffer.\n\
              \n\
              ## Key parameters\n\
              \n\

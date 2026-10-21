@@ -883,11 +883,12 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
             "IL-3 gate condition: a pipe is refused only when its LEFT side is unbounded AND no capture \
                  can be kept. A FOREGROUND pipe whose last stage is a terminal filter (grep, egrep, \
                  fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr) and whose first top-level \
-                 pipe is followed by one plain pipeline runs to the end and returns \
+                 pipe is followed by one plain pipeline is run through a capture until it ends, the \
+                 capture limit (4 MiB) or the timeout, and returns \
                  `unfiltered_output`, a handle to the first command's stdout. Still refused, for \
                  example: a last stage that is not a terminal filter, a `;`/`&&`/`||`/newline list, \
                  comment or heredoc after the first pipe, a nested or `|&` pipe, a buffer ref, and \
-                 EVERY such pipe under run_in_background (the full list is in \
+                 EVERY such pipe under run_in_background (more cases are in \
                  get_guide(iron-laws-detail)). Unbounded producers \
                  are cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd, recursive grep, and \
                  `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \

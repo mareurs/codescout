@@ -172,7 +172,7 @@ not hash, diff, or positionally parse it without allowing for that.
   pipe the capture cannot be spliced into — for example a last stage that is not a terminal
   filter, a `;`/`&&`/`||`/newline list, comment or heredoc after the first pipe
   (`cmd | tail -20; echo $?`, `cmd | grep X || true`), a nested or `|&` pipe, a buffer ref;
-  the full list is in `iron-laws-detail` — and every such pipe under `run_in_background`,
+  more cases are in `iron-laws-detail` — and every such pipe under `run_in_background`,
   which keeps no unfiltered stream. Run bare, then `grep FAILED @cmd_id` against the buffer.
   On `timeout_secs` the process group is killed and, when the filter is provably pure, it is
   run on the partial capture and the result flagged `capture_incomplete`; otherwise
