@@ -38,7 +38,10 @@ impl Drop for WriteGuard {
         // Clear the record BEFORE unlocking. The reverse order leaves a window in which
         // the next holder has already taken the flock and written its record,
         // and this clear erases it — reporting a live holder as anonymous.
-        let _ = std::fs::write(&self.holder_path, "");
+        // Through `open_holder_record`, like the write: a plain `fs::write("")` follows a
+        // planted link (empties a file outside the root) and blocks on a FIFO. A refusal is
+        // ignored, and the unlock below runs either way.
+        let _ = open_holder_record(&self.holder_path);
         let _ = FileExt::unlock(&*self.file);
     }
 }
@@ -63,8 +66,58 @@ fn now_ms() -> u128 {
 /// the lock. That is what makes it trustworthy without a second lock protecting
 /// it, and moving the bytes out of the lock file does not weaken it.
 fn write_holder_record(path: &Path, holder: &str) -> std::io::Result<()> {
-    std::fs::write(path, format!("{}\t{}", now_ms(), holder))
+    use std::io::Write;
+    let mut file = open_holder_record(path)?;
+    file.write_all(format!("{}\t{}", now_ms(), holder).as_bytes())
 }
+
+/// Open the holder record for writing, emptied: created if absent, not through a link AT THE
+/// LEAF, never blocking, and only if it is a regular file.
+///
+/// The record sits at `.codescout/write.lock.holder` inside the repository, so the path can be a
+/// planted link. `std::fs::write` follows it: to a FIFO it blocks in `open` (on the acquire path,
+/// with the in-process mutex held), and to a regular file outside the root it overwrites that file
+/// while the lock is held and empties it on release. On unix the open is `O_NOFOLLOW |
+/// O_NONBLOCK` (a link at the leaf is `ELOOP`, a FIFO nobody reads is `ENXIO`), the opened
+/// descriptor is `fstat`ed and anything but a regular file is refused, and truncation happens
+/// only after that check: `O_TRUNC` on open would empty a hard-linked or otherwise regular
+/// target before the check could look at it. **Only the leaf is protected**: `O_NOFOLLOW` does not
+/// look at parent directories, so if `.codescout` itself is a link to a directory elsewhere, both
+/// `write.lock` and `write.lock.holder` are created and written there (damage limited to those two
+/// fixed names). A hard link to a file elsewhere is also still followed (it is the same inode);
+/// that is not detectable here, and refusing on a link count above one would break `cp -al` /
+/// snapshot copies. Other platforms keep the plain open.
+/// Callers treat a refusal as best effort, as they treat any failed write of the record.
+/// docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md
+fn open_holder_record(path: &Path) -> std::io::Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    options.truncate(true);
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        if !file.metadata()?.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "holder record is not a regular file",
+            ));
+        }
+        file.set_len(0)?;
+    }
+    Ok(file)
+}
+
+/// The most bytes the holder record (`<epoch_ms>\t<holder>`) may hold. The holder is a short label
+/// for the process that took the lock; a record past this is not one, and reads as "no usable
+/// owner information" like any other unparseable record, never as a free lock.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as unparseable, no result is shortened and nothing is presented as complete
+const MAX_HOLDER_RECORD_BYTES: u64 = 64 * 1024;
 
 /// Read the holder record, or `None` when it is absent, empty or unparseable.
 ///
@@ -72,7 +125,7 @@ fn write_holder_record(path: &Path, holder: &str) -> std::io::Result<()> {
 /// holder" — the flock already established that someone holds it. The caller
 /// must not turn a `None` into a claim that the lock is free.
 fn read_holder_record(path: &Path) -> Option<(u128, String)> {
-    let buf = std::fs::read_to_string(path).ok()?;
+    let buf = crate::util::fs::read_regular_text(path, MAX_HOLDER_RECORD_BYTES).ok()?;
     let (ts, holder) = buf.trim_end().split_once('\t')?;
     let holder = holder.trim();
     if holder.is_empty() {
@@ -92,7 +145,7 @@ fn read_holder_record(path: &Path) -> Option<(u128, String)> {
 /// thirty lines from the text that needed it.
 ///
 /// LOAD-BEARING, and the reason the empty arm comes first: **`Drop` truncates the
-/// record, it does not delete it** (`write(path, "")`), so *exists, 0 bytes* is the
+/// record, it does not delete it** (it opens the record and sets its length to 0), so *exists, 0 bytes* is the
 /// state left behind by every clean release. It is by far the commonest cause of an
 /// anonymous refusal, and the superseded text named it "an older codescout" — the
 /// rarest cause. That sent a peer to run `strings` on the running binary to check
@@ -255,18 +308,60 @@ pub async fn acquire(
 }
 
 /// Open (or create) the lock file at `.codescout/write.lock` under `root`.
-/// Idempotent; safe to call on an existing file. Returns an `Arc<File>` so
+/// Idempotent; safe to call on an existing file (never truncated). Returns an `Arc<File>` so
 /// the descriptor can be shared by every tool call without re-opening.
+///
+/// `.codescout/` is committed content, so the leaf can be a planted link. A plain create-open
+/// follows it: a link to a path that does not exist CREATES an empty file there, outside the
+/// root. On unix the open is `O_NOFOLLOW | O_NONBLOCK` (a link at the leaf is refused; a
+/// FIFO or device leaf cannot hold the open), and the opened descriptor is `fstat`ed and
+/// refused unless it is a regular file. The `flock` is unaffected by `O_NONBLOCK`.
+///
+/// **Policy: a link is never unlinked or replaced** (codescout does not delete user data); the
+/// open is refused with an error naming the path. Every caller turns a failed open into a failed
+/// call, not into running without the lock, and one of them is `Agent::new` (`agent/mod.rs:943`),
+/// which `server::run` calls at startup with the launch directory as the project: a link at
+/// `.codescout/write.lock` there makes the MCP SERVER FAIL TO START, and `load_project_resources`
+/// (`agent/mod.rs:1095`, reached from `ensure_resident`) fails the first pinned call to such a
+/// project. The old plain open followed a link to a regular file without complaint, so this is a
+/// deliberate behaviour change for anyone who linked `write.lock` on purpose. Only
+/// the LEAF is checked: a link in a parent directory (`.codescout` itself) is still followed.
+/// docs/issues/2026-10-20-the-write-lock-holder-record-is-written-through-a-link.md
 pub fn open_lock_file(root: &Path) -> std::io::Result<Arc<File>> {
     let dir = root.join(".codescout");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("write.lock");
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(&path);
+    // The friendly refusal exists only where `O_NOFOLLOW` does (unix); elsewhere the result is
+    // used as is, with no identity mapping for clippy to flag.
+    #[cfg(unix)]
+    let file = file.map_err(|e| {
+        if e.raw_os_error() == Some(libc::ELOOP) {
+            return std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{} is a link; codescout does not follow or replace it. Remove it so the lock file can be created",
+                    path.display()
+                ),
+            );
+        }
+        e
+    });
+    let file = file?;
+    #[cfg(unix)]
+    if !file.metadata()?.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a regular file", path.display()),
+        ));
+    }
     Ok(Arc::new(file))
 }
 
@@ -506,7 +601,7 @@ mod tests {
     /// second one for both. This is the case that actually occurred in the field.
     ///
     /// LOAD-BEARING: the record is **truncated, not deleted**. `Drop` clears it
-    /// with `write(path, "")`, so *exists, 0 bytes* is what every clean release
+    /// (`open_holder_record` sets its length to 0), so *exists, 0 bytes* is what every clean release
     /// leaves behind, and is therefore the commonest cause of an anonymous
     /// refusal. A tidy-up that `remove_file`s it here instead leaves this test
     /// passing against the ABSENT state — which the next test already covers, so
@@ -600,5 +695,328 @@ mod tests {
             "must not report a lost race when no record was ever written — that is \
              the fix applied in the wrong direction: {rendered}"
         );
+    }
+}
+/// `.codescout/write.lock.holder` is written by this process, but the path is inside the repository
+/// and can be a planted link to a FIFO or a device.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod holder_record_bounded_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    /// A FIFO, or a link to one, is "no usable owner information" (`None`), never a hang and
+    /// never a claim that the lock is free (that is the caller's `Err`, untouched).
+    #[test]
+    fn a_fifo_or_a_link_to_one_is_no_usable_record_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("write.lock.holder");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &path).unwrap();
+            } else {
+                make_fifo(&path);
+            }
+            let got = within_deadline("read_holder_record on a FIFO", move || {
+                let _keep = dir;
+                read_holder_record(&path)
+            });
+            assert_eq!(got, None, "linked={linked}");
+        }
+    }
+
+    /// Control: a regular record parses as before; absent, empty, unparseable and invalid UTF-8
+    /// are `None`. Exactly at the limit is read; one byte over is `None` (the padding is
+    /// trailing whitespace the parse trims, so a read without the limit would parse it).
+    #[test]
+    fn a_regular_record_parses_and_an_oversized_one_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("write.lock.holder");
+        assert_eq!(read_holder_record(&path), None, "absent");
+        std::fs::write(&path, "1700000000000\treindex pid 42").unwrap();
+        assert_eq!(
+            read_holder_record(&path),
+            Some((1700000000000, "reindex pid 42".to_string()))
+        );
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(read_holder_record(&path), None, "empty");
+        std::fs::write(&path, "no tab here").unwrap();
+        assert_eq!(read_holder_record(&path), None, "unparseable");
+        std::fs::write(&path, [0xff, 0xfe]).unwrap();
+        assert_eq!(read_holder_record(&path), None, "invalid UTF-8");
+
+        let limit = MAX_HOLDER_RECORD_BYTES as usize;
+        let rec = "1700000000000\treindex";
+        std::fs::write(&path, format!("{rec}{}", " ".repeat(limit - rec.len()))).unwrap();
+        assert_eq!(
+            read_holder_record(&path),
+            Some((1700000000000, "reindex".to_string())),
+            "at the limit"
+        );
+        std::fs::write(&path, format!("{rec}{}", " ".repeat(limit + 1 - rec.len()))).unwrap();
+        assert_eq!(read_holder_record(&path), None, "over the limit");
+    }
+
+    /// Run `acquire` and the guard's drop to completion on a private runtime, on this thread (the
+    /// caller wraps it in `within_deadline`). Returns whether the acquire succeeded and, while the
+    /// guard is held, `during()`'s answer.
+    fn acquire_hold_release<T>(
+        root: &Path,
+        during: impl FnOnce() -> T,
+    ) -> (Result<(), RecoverableError>, Option<T>) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let file = open_lock_file(root).unwrap();
+            let guard = acquire(
+                Arc::new(AsyncMutex::new(())),
+                file,
+                holder_record_path(root),
+                Duration::from_secs(5),
+                "holder-x",
+            )
+            .await;
+            match guard {
+                Ok(guard) => {
+                    let seen = during();
+                    drop(guard);
+                    (Ok(()), Some(seen))
+                }
+                Err(e) => (Err(e), None),
+            }
+        })
+    }
+
+    /// A record path that is a link to a FIFO (or a FIFO itself) made an uncontended acquire block
+    /// in `write_holder_record` with the in-process mutex held; the release then blocked the same
+    /// way in the clear. Both are now refused, best effort, and the acquire is granted.
+    #[test]
+    fn a_holder_record_that_is_a_fifo_or_a_link_to_one_does_not_hang_acquire_or_release() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            let record = holder_record_path(dir.path());
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &record).unwrap();
+            } else {
+                make_fifo(&record);
+            }
+            let root = dir.path().to_path_buf();
+            let (granted, _) = within_deadline("acquire with a FIFO holder record", move || {
+                let _keep = dir;
+                acquire_hold_release(&root, || ())
+            });
+            assert!(
+                granted.is_ok(),
+                "linked={linked}: the lock is still granted"
+            );
+        }
+    }
+
+    /// A record path that is a link to a regular file outside the root: the outside file is not
+    /// written while the lock is held and not emptied on release. A link to a path that does not
+    /// exist does not create it.
+    #[test]
+    fn a_holder_record_that_is_a_link_to_an_outside_file_leaves_it_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let target = outside.path().join("precious.txt");
+        std::fs::write(&target, "OUTSIDE-BYTES").unwrap();
+        std::os::unix::fs::symlink(&target, holder_record_path(dir.path())).unwrap();
+
+        let t = target.clone();
+        let (granted, during) =
+            acquire_hold_release(dir.path(), move || std::fs::read_to_string(&t).unwrap());
+        assert!(granted.is_ok());
+        assert_eq!(during.as_deref(), Some("OUTSIDE-BYTES"), "during the hold");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "OUTSIDE-BYTES");
+
+        let dangling = outside.path().join("never-created.txt");
+        std::fs::remove_file(holder_record_path(dir.path())).unwrap();
+        std::os::unix::fs::symlink(&dangling, holder_record_path(dir.path())).unwrap();
+        let (granted, _) = acquire_hold_release(dir.path(), || ());
+        assert!(granted.is_ok());
+        assert!(!dangling.exists(), "a dangling link target is not created");
+    }
+
+    /// Control: an ordinary record is written during the hold, byte for byte as before
+    /// (`<epoch_ms>\t<holder>`), and emptied (not removed) on release.
+    #[test]
+    fn an_ordinary_holder_record_is_written_during_the_hold_and_cleared_on_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = holder_record_path(dir.path());
+        let r = record.clone();
+        let (granted, during) = acquire_hold_release(dir.path(), move || read_holder_record(&r));
+        assert!(granted.is_ok());
+        let (ts, holder) = during.unwrap().expect("a parseable record during the hold");
+        assert_eq!(holder, "holder-x");
+        assert!(ts > 0);
+        let meta = std::fs::metadata(&record).expect("emptied, not removed");
+        assert!(meta.is_file());
+        assert_eq!(meta.len(), 0);
+        // A stale, longer record from a previous holder is fully replaced, not overlaid.
+        std::fs::write(
+            &record,
+            "1\tan-old-holder-with-a-long-label-xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        )
+        .unwrap();
+        let r = record.clone();
+        let (_, during) =
+            acquire_hold_release(dir.path(), move || std::fs::read_to_string(&r).unwrap());
+        let text = during.unwrap();
+        assert!(
+            text.ends_with("\tholder-x") && !text.contains("old-holder"),
+            "{text:?}"
+        );
+    }
+
+    /// The type check on the opened descriptor, pinned: a FIFO that HAS a reader opens fine for
+    /// writing (`O_WRONLY | O_NONBLOCK`), so only the `fstat` stands between it and a write. The
+    /// refusal must be ours (`not a regular file`), not the later `ftruncate` failing on its own
+    /// (`Invalid argument`, which happens to be the same `ErrorKind` on Linux), and the reader
+    /// must see no bytes.
+    #[test]
+    fn a_fifo_with_a_reader_is_refused_by_the_type_check_and_receives_nothing() {
+        use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("write.lock.holder");
+        make_fifo(&path);
+        let mut reader = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+        let p = path.clone();
+        let err = within_deadline("open_holder_record on a FIFO with a reader", move || {
+            open_holder_record(&p)
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("not a regular file"), "{err}");
+        let mut buf = [0u8; 16];
+        assert_eq!(
+            reader.read(&mut buf).unwrap(),
+            0,
+            "no bytes, and no writer left"
+        );
+    }
+
+    /// `open_lock_file` on `.codescout/write.lock`, which is committed content.
+    fn lock_path(root: &Path) -> PathBuf {
+        root.join(".codescout").join("write.lock")
+    }
+
+    /// A dangling link at `write.lock` created an empty file at its target, outside the root. It
+    /// is now refused, naming the path, and nothing is created.
+    #[test]
+    fn a_dangling_link_at_the_lock_file_is_refused_and_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let target = outside.path().join("created-by-the-lock.txt");
+        std::os::unix::fs::symlink(&target, lock_path(dir.path())).unwrap();
+        let root = dir.path().to_path_buf();
+        let err = within_deadline("open_lock_file on a dangling link", move || {
+            open_lock_file(&root)
+        })
+        .unwrap_err();
+        assert!(!target.exists(), "no file is created at the link's target");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("write.lock") && msg.contains("is a link"),
+            "{msg}"
+        );
+        assert!(
+            std::fs::symlink_metadata(lock_path(dir.path()))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link itself is left in place, never unlinked or replaced"
+        );
+    }
+
+    /// A link to an existing file outside the root is refused too, and the file is not modified.
+    #[test]
+    fn a_link_to_an_outside_file_at_the_lock_file_is_refused_and_left_unmodified() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        let target = outside.path().join("precious.txt");
+        std::fs::write(&target, "OUTSIDE-BYTES").unwrap();
+        std::os::unix::fs::symlink(&target, lock_path(dir.path())).unwrap();
+        let root = dir.path().to_path_buf();
+        let err = within_deadline("open_lock_file on a link to a file", move || {
+            open_lock_file(&root)
+        })
+        .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "OUTSIDE-BYTES");
+    }
+
+    /// A link to a FIFO is refused without a hang; so is a FIFO itself (type check on the
+    /// descriptor: a read+write open of a FIFO does not block, so only that check refuses it).
+    #[test]
+    fn a_fifo_or_a_link_to_one_at_the_lock_file_is_refused_without_a_hang() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+            let lock = lock_path(dir.path());
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &lock).unwrap();
+            } else {
+                make_fifo(&lock);
+            }
+            let root = dir.path().to_path_buf();
+            let err = within_deadline("open_lock_file on a FIFO", move || {
+                let _keep = dir;
+                open_lock_file(&root)
+            })
+            .unwrap_err();
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::InvalidInput,
+                "linked={linked}"
+            );
+            if !linked {
+                assert!(
+                    err.to_string().contains("not a regular file"),
+                    "the type check refused it: {err}"
+                );
+            }
+        }
+    }
+
+    /// Control: an ordinary lock file is created and the flock can be taken; an existing one is
+    /// reused across two opens, never truncated, and a second handle sees the first's lock.
+    #[test]
+    fn an_ordinary_lock_file_is_created_locked_and_reused_not_truncated() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = open_lock_file(dir.path()).unwrap();
+        assert!(lock_path(dir.path()).is_file());
+        FileExt::try_lock_exclusive(&*first).unwrap();
+
+        std::fs::write(lock_path(dir.path()), "kept").unwrap();
+        let second = open_lock_file(dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(lock_path(dir.path())).unwrap(),
+            "kept"
+        );
+        assert!(
+            FileExt::try_lock_exclusive(&*second).is_err(),
+            "the second handle is excluded by the first's lock"
+        );
+        FileExt::unlock(&*first).unwrap();
+        FileExt::try_lock_exclusive(&*second).unwrap();
     }
 }

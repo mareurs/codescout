@@ -39,13 +39,25 @@ pub fn read_anchor_file(path: &Path) -> Result<AnchorFile> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(AnchorFile::default()),
         Err(e) => return Err(e.into()),
     }
-    match std::fs::read_to_string(path) {
+    // The type was checked on the path above; the open checks it again on the descriptor (a FIFO
+    // swapped in since cannot hold the read) and the length is bounded, so a huge sidecar cannot
+    // fill memory. Both refusals are the same `RecoverableError` as a link: named per topic by
+    // `check_all_memories`, never fatal to the other topics.
+    match crate::util::fs::read_regular_config_text(path) {
         Ok(contents) => {
             let anchor_file: AnchorFile = toml::from_str(&contents)?;
             Ok(anchor_file)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AnchorFile::default()),
-        Err(e) => Err(e.into()),
+        Err(e) if e.is_not_found() => Ok(AnchorFile::default()),
+        Err(
+            e @ (crate::util::fs::BoundedReadError::NotRegular
+            | crate::util::fs::BoundedReadError::TooLarge { .. }),
+        ) => Err(crate::tools::RecoverableError::with_hint(
+            format!("anchor sidecar cannot be read: {} ({e})", path.display()),
+            "Replace it with a regular file within the size limit, or remove it.",
+        )
+        .into()),
+        Err(crate::util::fs::BoundedReadError::Io(e)) => Err(e.into()),
     }
 }
 
@@ -123,8 +135,15 @@ pub fn seed_anchors(project_root: &Path, content: &str) -> Result<AnchorFile> {
         }
         let full = project_root.join(&p);
         if full.is_file() {
-            let hash = super::hash::hash_file(&full)?;
-            anchors.push(PathAnchor { path: p, hash });
+            match super::hash::hash_file(&full) {
+                Ok(hash) => anchors.push(PathAnchor { path: p, hash }),
+                // Over the hashing limit: not anchorable, like a path that is no file. It must
+                // not fail the memory write that merely mentions it.
+                Err(e) if super::hash::is_refusal(&e) => {
+                    tracing::debug!("not anchoring {p}: {e}");
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
     Ok(AnchorFile { anchors })
@@ -210,8 +229,16 @@ pub fn check_path_staleness(
                 status: AnchorStatus::Deleted,
             });
         } else {
-            let current_hash = super::hash::hash_file(&full)?;
-            if current_hash != anchor.hash {
+            let changed = match super::hash::hash_file(&full) {
+                Ok(current_hash) => current_hash != anchor.hash,
+                // What is at the path is no longer a file that can be hashed (a FIFO, a
+                // device, a directory, or one past the limit): it is not what was anchored.
+                // Named per anchor, not fatal: one planted path must not drop the staleness
+                // of every other topic with it.
+                Err(e) if super::hash::is_refusal(&e) => true,
+                Err(e) => return Err(e),
+            };
+            if changed {
                 stale_files.push(StaleFile {
                     path: anchor.path.clone(),
                     status: AnchorStatus::Changed,
@@ -1177,5 +1204,222 @@ mod tests {
             reread.anchors[0].hash, "stale",
             "the surviving anchor must still be re-hashed"
         );
+    }
+}
+/// An anchor names a path of the repository, and the stored sidecar is repository content too, so
+/// the path can be a FIFO, a link to one, a link to `/dev/zero` or a very large file by the time
+/// it is hashed. `workspace status` runs `check_all_memories` over every sidecar.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod bounded_anchor_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+    use tempfile::tempdir;
+
+    /// A project with `src/ok.rs` (regular), and `src/pipe.rs` a FIFO or a link to one, with a
+    /// sidecar for topic `arch` that anchors both (hashes recorded as the pair was before the
+    /// path was swapped: any value, the FIFO never gets compared to it).
+    fn project_with_a_swapped_path(linked: bool) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/ok.rs"), "stable").unwrap();
+        let pipe = root.join("src/pipe.rs");
+        if linked {
+            let fifo = root.join("elsewhere-pipe");
+            make_fifo(&fifo);
+            std::os::unix::fs::symlink(&fifo, &pipe).unwrap();
+        } else {
+            make_fifo(&pipe);
+        }
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        std::fs::write(memories_dir.join("arch.md"), "`src/ok.rs` `src/pipe.rs`").unwrap();
+        let sidecar = AnchorFile {
+            anchors: vec![
+                PathAnchor {
+                    path: "src/ok.rs".into(),
+                    hash: super::super::hash::hash_file(&root.join("src/ok.rs")).unwrap(),
+                },
+                PathAnchor {
+                    path: "src/pipe.rs".into(),
+                    hash: "0".repeat(64),
+                },
+            ],
+        };
+        write_anchor_file(&anchor_path_for_topic(&memories_dir, "arch"), &sidecar).unwrap();
+        (dir, memories_dir)
+    }
+
+    /// `status` held on the FIFO for good; a link to `/dev/zero` would have filled memory. The
+    /// path is `Changed` (it is not what was anchored), the other anchor is judged on its own,
+    /// and the report is still an `Ok` naming the topic: one planted path does not blank the
+    /// staleness section.
+    #[test]
+    fn a_fifo_or_a_link_to_one_at_an_anchored_path_is_changed_and_the_check_still_answers() {
+        for linked in [false, true] {
+            let (dir, memories_dir) = project_with_a_swapped_path(linked);
+            let root = dir.path().to_path_buf();
+            let memories = memories_dir.clone();
+            let report = within_deadline("check_all_memories with a FIFO anchor", move || {
+                check_all_memories(&root, &memories)
+            })
+            .unwrap_or_else(|e| panic!("linked={linked}: {e:#}"));
+            let stale = report["stale"].as_array().unwrap();
+            assert_eq!(stale.len(), 1, "linked={linked}: {report}");
+            assert_eq!(stale[0]["topic"], "arch");
+            assert_eq!(
+                stale[0]["changed_files"],
+                serde_json::json!(["src/pipe.rs"]),
+                "linked={linked}: only the swapped path, not src/ok.rs"
+            );
+            assert_eq!(stale[0]["reason"], "1 of 2 anchored files changed");
+        }
+    }
+
+    /// `/dev/null` stands for the device case (`/dev/zero` is not driven on a machine in use):
+    /// a character device is not a regular file, so it is `Changed`, never read.
+    #[test]
+    fn a_link_to_a_device_at_an_anchored_path_is_changed() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::os::unix::fs::symlink("/dev/null", root.join("dev.rs")).unwrap();
+        let af = AnchorFile {
+            anchors: vec![PathAnchor {
+                path: "dev.rs".into(),
+                hash: "0".repeat(64),
+            }],
+        };
+        let report = check_path_staleness(root, &af).unwrap();
+        assert_eq!(report.stale_files.len(), 1);
+        assert_eq!(report.stale_files[0].status, AnchorStatus::Changed);
+    }
+
+    /// Control: the ordinary answers are unchanged: an untouched file is fresh, an edited one
+    /// is `Changed`, a removed one is `Deleted`.
+    #[test]
+    fn regular_anchors_are_still_fresh_changed_or_deleted() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/fresh.rs"), "a").unwrap();
+        std::fs::write(root.join("src/edited.rs"), "b").unwrap();
+        std::fs::write(root.join("src/gone.rs"), "c").unwrap();
+        let af = seed_anchors(root, "`src/fresh.rs` `src/edited.rs` `src/gone.rs`").unwrap();
+        assert_eq!(af.anchors.len(), 3);
+        std::fs::write(root.join("src/edited.rs"), "b2").unwrap();
+        std::fs::remove_file(root.join("src/gone.rs")).unwrap();
+        let report = check_path_staleness(root, &af).unwrap();
+        let by_path: std::collections::BTreeMap<_, _> = report
+            .stale_files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status.clone()))
+            .collect();
+        assert_eq!(by_path.len(), 2, "{by_path:?}");
+        assert_eq!(by_path["src/edited.rs"], AnchorStatus::Changed);
+        assert_eq!(by_path["src/gone.rs"], AnchorStatus::Deleted);
+    }
+
+    /// Re-anchoring (a memory write merges, `refresh_anchors` re-hashes) over a swapped path
+    /// returns instead of holding, and drops the anchor as for any path that cannot be hashed;
+    /// the regular anchor keeps its hash.
+    #[test]
+    fn merging_and_refreshing_over_a_fifo_return_and_keep_the_regular_anchor() {
+        let (dir, memories_dir) = project_with_a_swapped_path(false);
+        let root = dir.path().to_path_buf();
+        let existing = read_anchor_file(&anchor_path_for_topic(&memories_dir, "arch")).unwrap();
+
+        let (r, e) = (root.clone(), existing.clone());
+        let merged = within_deadline("merge_anchors over a FIFO", move || {
+            merge_anchors(&r, &e, &AnchorFile { anchors: vec![] })
+        })
+        .unwrap();
+        let paths: Vec<_> = merged.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(paths, ["src/ok.rs"]);
+
+        let (r, m) = (root.clone(), memories_dir.clone());
+        let dropped = within_deadline("refresh_hashes over a FIFO", move || {
+            refresh_hashes(&r, &m, "arch")
+        })
+        .unwrap();
+        assert!(dropped.is_empty(), "nothing is gitignored: {dropped:?}");
+        let after = read_anchor_file(&anchor_path_for_topic(&memories_dir, "arch")).unwrap();
+        let paths: Vec<_> = after.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(paths, ["src/ok.rs"]);
+    }
+
+    /// A memory text that names a file over the hashing limit still writes: the file is simply
+    /// not anchored, as a path that is no file is not. (Sparse, so no 64 MiB is written.)
+    #[test]
+    fn seeding_skips_a_file_over_the_hashing_limit_without_failing_the_write() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/small.rs"), "x").unwrap();
+        let big = std::fs::File::create(root.join("src/big.bin")).unwrap();
+        big.set_len(crate::memory::hash::MAX_HASHED_FILE_BYTES + 1)
+            .unwrap();
+        drop(big);
+        let af = seed_anchors(root, "`src/small.rs` and `src/big.bin`").unwrap();
+        let paths: Vec<_> = af.anchors.iter().map(|a| a.path.as_str()).collect();
+        assert_eq!(paths, ["src/small.rs"]);
+    }
+
+    /// The sidecar itself is repository content: it is checked as a regular file first and then
+    /// read, and the read had no size bound. At the limit it still reads; one byte over is a
+    /// `RecoverableError` (named per topic by `check_all_memories`, not fatal to the others).
+    /// The padding is TOML whitespace, so the plain read would parse the over-limit file.
+    #[test]
+    fn a_sidecar_over_the_size_limit_is_refused_per_topic_and_one_at_the_limit_reads() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/ok.rs"), "stable").unwrap();
+        let memories_dir = root.join("memories");
+        std::fs::create_dir_all(&memories_dir).unwrap();
+        for topic in ["big", "fine"] {
+            std::fs::write(memories_dir.join(format!("{topic}.md")), "`src/ok.rs`").unwrap();
+            let af = seed_anchors(root, "`src/ok.rs`").unwrap();
+            write_anchor_file(&anchor_path_for_topic(&memories_dir, topic), &af).unwrap();
+        }
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let big = anchor_path_for_topic(&memories_dir, "big");
+        let mut body = std::fs::read_to_string(&big).unwrap();
+        body.push_str(&" ".repeat(limit - body.len()));
+        std::fs::write(&big, &body).unwrap();
+        assert_eq!(body.len(), limit);
+        assert_eq!(
+            read_anchor_file(&big).unwrap().anchors.len(),
+            1,
+            "at the limit"
+        );
+
+        body.push(' ');
+        std::fs::write(&big, &body).unwrap();
+        let err = read_anchor_file(&big).unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::tools::RecoverableError>()
+                .is_some(),
+            "{err:#}"
+        );
+        let report = check_all_memories(root, &memories_dir).unwrap();
+        assert_eq!(report["unreadable"][0]["topic"], "big", "{report}");
+        assert_eq!(report["fresh"], serde_json::json!(["fine"]), "{report}");
+    }
+
+    /// Control: a FIFO at the sidecar path is still refused by the path check, without a hang.
+    #[test]
+    fn a_fifo_sidecar_is_refused_without_a_hang() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.anchors.toml");
+        make_fifo(&path);
+        let err = within_deadline("read_anchor_file on a FIFO", move || {
+            let _keep = dir;
+            read_anchor_file(&path)
+        })
+        .unwrap_err();
+        assert!(err
+            .downcast_ref::<crate::tools::RecoverableError>()
+            .is_some());
     }
 }

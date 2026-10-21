@@ -431,7 +431,10 @@ impl CodeScoutServer {
             );
         }
         #[cfg(feature = "librarian")]
-        if librarian_enabled_at_runtime(status.as_ref().map(|s| s.path.as_str())) {
+        if librarian_enabled_at_runtime(
+            std::env::var("LIBRARIAN_ENABLED").ok().as_deref(),
+            status.as_ref().map(|s| s.path.as_str()),
+        ) {
             if let Some(lib_ctx) =
                 crate::librarian::try_build_runtime_with(lsp.clone(), &env.librarian).await
             {
@@ -1873,10 +1876,7 @@ pub(crate) fn server_output_buffer() -> crate::tools::output_buffer::OutputBuffe
     )
 }
 
-/// The most bytes `.codescout/cc_session_id` may hold. A session id is a UUID (36 bytes); a file
-/// longer than a few KiB is not one, and is refused rather than read.
-// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
-const MAX_SESSION_ID_FILE_BYTES: u64 = 4096;
+use crate::util::fs::MAX_SESSION_ID_FILE_BYTES;
 
 /// The Claude Code session id the companion plugin left in `<root>/.codescout/cc_session_id`, or
 /// `None`. Used only when no session id is in the environment.
@@ -2008,6 +2008,174 @@ mod cc_session_id_tests {
         );
     }
 }
+/// `<project>/.codescout/project.toml` is read again by the `*_enabled_at_runtime` switches after
+/// the bounded loader read it; a path swapped in since would hold a plain read.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod project_toml_enabled_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    fn project_with(body: Option<&str>) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        if let Some(body) = body {
+            std::fs::write(dir.path().join(".codescout/project.toml"), body).unwrap();
+        }
+        dir
+    }
+
+    fn root(dir: &tempfile::TempDir) -> String {
+        dir.path().to_str().unwrap().to_string()
+    }
+
+    /// A FIFO, and a link to one, at `project.toml` leave the default: not a hang.
+    #[test]
+    fn a_fifo_or_a_link_to_one_leaves_the_default_and_never_a_hang() {
+        for linked in [false, true] {
+            let dir = project_with(None);
+            let file = dir.path().join(".codescout/project.toml");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &file).unwrap();
+            } else {
+                make_fifo(&file);
+            }
+            let r = root(&dir);
+            let (flag, peer) = within_deadline("project_toml_enabled on a FIFO", move || {
+                let _keep = dir;
+                (
+                    project_toml_enabled(&r, "peer"),
+                    peer_enabled_at_runtime(None, Some(&r)),
+                )
+            });
+            assert_eq!(flag, None, "linked={linked}");
+            assert!(!peer, "peer defaults off, linked={linked}");
+        }
+    }
+
+    /// Control: a regular file sets the switch as before; absent, no key, invalid TOML and a
+    /// wrong type all leave the default. At the limit is read, one byte over is the default
+    /// (whitespace padding, so a read without the limit would find the key).
+    #[test]
+    fn a_regular_project_toml_still_sets_the_switch_and_an_oversized_one_does_not() {
+        let dir = project_with(Some(
+            "[peer]\nenabled = true\n[librarian]\nenabled = false\n",
+        ));
+        let r = root(&dir);
+        assert_eq!(project_toml_enabled(&r, "peer"), Some(true));
+        assert_eq!(project_toml_enabled(&r, "librarian"), Some(false));
+        assert_eq!(project_toml_enabled(&r, "other"), None);
+        assert!(peer_enabled_at_runtime(None, Some(&r)));
+
+        for (body, what) in [
+            (None, "absent"),
+            (Some("[peer]\n"), "no key"),
+            (Some("[peer\nenabled = true"), "invalid toml"),
+            (Some("[peer]\nenabled = \"yes\"\n"), "wrong type"),
+        ] {
+            let dir = project_with(body);
+            assert_eq!(project_toml_enabled(&root(&dir), "peer"), None, "{what}");
+        }
+
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let head = "[peer]\nenabled = true\n";
+        let dir = project_with(Some(&format!("{head}{}", " ".repeat(limit - head.len()))));
+        assert_eq!(
+            project_toml_enabled(&root(&dir), "peer"),
+            Some(true),
+            "at the limit"
+        );
+        let dir = project_with(Some(&format!(
+            "{head}{}",
+            " ".repeat(limit + 1 - head.len())
+        )));
+        assert_eq!(
+            project_toml_enabled(&root(&dir), "peer"),
+            None,
+            "over the limit"
+        );
+        assert!(!peer_enabled_at_runtime(None, Some(&root(&dir))));
+    }
+
+    /// `librarian_enabled_at_runtime` itself, through all of its layers: a FIFO or a link to one at
+    /// `project.toml` leaves the default (enabled) and does not hang; an ordinary file sets it;
+    /// the env override wins over the file; one byte over the limit is ignored (the padding is
+    /// whitespace, so a plain read would honour `enabled = false`).
+    #[cfg(feature = "librarian")]
+    #[test]
+    fn librarian_enabled_at_runtime_reads_project_toml_bounded_and_keeps_its_layers() {
+        for linked in [false, true] {
+            let dir = project_with(None);
+            let file = dir.path().join(".codescout/project.toml");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &file).unwrap();
+            } else {
+                make_fifo(&file);
+            }
+            let r = root(&dir);
+            let got = within_deadline("librarian_enabled_at_runtime on a FIFO", move || {
+                let _keep = dir;
+                librarian_enabled_at_runtime(None, Some(&r))
+            });
+            assert!(got, "the default is enabled, linked={linked}");
+        }
+
+        let off = "[librarian]\nenabled = false\n";
+        let dir = project_with(Some(off));
+        let r = root(&dir);
+        assert!(
+            !librarian_enabled_at_runtime(None, Some(&r)),
+            "file sets it"
+        );
+        assert!(
+            librarian_enabled_at_runtime(Some("on"), Some(&r)),
+            "env on wins"
+        );
+        assert!(
+            !librarian_enabled_at_runtime(Some("0"), None),
+            "env off wins"
+        );
+        assert!(
+            !librarian_enabled_at_runtime(Some("banana"), Some(&r)),
+            "junk env falls to file"
+        );
+        assert!(librarian_enabled_at_runtime(None, None), "default");
+
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let dir = project_with(Some(&format!("{off}{}", " ".repeat(limit - off.len()))));
+        assert!(
+            !librarian_enabled_at_runtime(None, Some(&root(&dir))),
+            "at the limit"
+        );
+        let dir = project_with(Some(&format!("{off}{}", " ".repeat(limit + 1 - off.len()))));
+        assert!(
+            librarian_enabled_at_runtime(None, Some(&root(&dir))),
+            "over the limit"
+        );
+    }
+}
+
+/// `[<section>] enabled = true|false` from `<root>/.codescout/project.toml`, or `None` when the
+/// file is absent, cannot be read as a bounded regular file (a FIFO or a link to a device, or one
+/// over the config limit: the bounded loader read the same path first, but a path swapped since
+/// would hold a plain read), does not parse, or does not set the key. The caller supplies the
+/// default, exactly as it did when a failed read fell through.
+#[cfg(any(feature = "librarian", unix))]
+fn project_toml_enabled(root: &str, section: &str) -> Option<bool> {
+    let cfg = std::path::Path::new(root)
+        .join(".codescout")
+        .join("project.toml");
+    let text = crate::util::fs::read_regular_config_text(&cfg).ok()?;
+    let parsed = toml::from_str::<toml::Value>(&text).ok()?;
+    parsed
+        .get(section)
+        .and_then(|t| t.get("enabled"))
+        .and_then(|v| v.as_bool())
+}
 
 /// Whether to register the embedded librarian tool surface for this session.
 ///
@@ -2016,9 +2184,13 @@ mod cc_session_id_tests {
 /// 2. `LIBRARIAN_ENABLED=1|true|on` env var enables (overrides config).
 /// 3. `[librarian] enabled = true|false` in `<project>/.codescout/project.toml`.
 /// 4. Default: enabled (set `LIBRARIAN_ENABLED=0` or `[librarian] enabled = false` to opt out).
+///
+/// `env_override` is the value of `LIBRARIAN_ENABLED`; the one production caller reads the
+/// variable and passes it, so the layers behave as before and a test can supply the value
+/// without touching the process environment (as for [`peer_enabled_at_runtime`]).
 #[cfg(feature = "librarian")]
-fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
-    if let Ok(v) = std::env::var("LIBRARIAN_ENABLED") {
+fn librarian_enabled_at_runtime(env_override: Option<&str>, project_path: Option<&str>) -> bool {
+    if let Some(v) = env_override {
         let v = v.trim().to_ascii_lowercase();
         if matches!(v.as_str(), "0" | "false" | "off" | "no") {
             return false;
@@ -2028,19 +2200,8 @@ fn librarian_enabled_at_runtime(project_path: Option<&str>) -> bool {
         }
     }
     if let Some(root) = project_path {
-        let cfg = std::path::Path::new(root)
-            .join(".codescout")
-            .join("project.toml");
-        if let Ok(text) = std::fs::read_to_string(&cfg) {
-            if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
-                if let Some(v) = parsed
-                    .get("librarian")
-                    .and_then(|t| t.get("enabled"))
-                    .and_then(|v| v.as_bool())
-                {
-                    return v;
-                }
-            }
+        if let Some(v) = project_toml_enabled(root, "librarian") {
+            return v;
         }
     }
     true
@@ -2079,19 +2240,8 @@ fn peer_enabled_at_runtime(env_override: Option<&str>, project_path: Option<&str
         }
     }
     if let Some(root) = project_path {
-        let cfg = std::path::Path::new(root)
-            .join(".codescout")
-            .join("project.toml");
-        if let Ok(text) = std::fs::read_to_string(&cfg) {
-            if let Ok(parsed) = toml::from_str::<toml::Value>(&text) {
-                if let Some(v) = parsed
-                    .get("peer")
-                    .and_then(|t| t.get("enabled"))
-                    .and_then(|v| v.as_bool())
-                {
-                    return v;
-                }
-            }
+        if let Some(v) = project_toml_enabled(root, "peer") {
+            return v;
         }
     }
     false

@@ -125,6 +125,15 @@ impl std::error::Error for BoundedReadError {
 /// Links are followed on purpose: a `project.toml` that is a link to a real file is an accepted
 /// layout. Pattern: `MemoryStore`'s `read_regular_file`, which refuses links instead.
 pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, BoundedReadError> {
+    let file = open_regular(path, max_bytes)?;
+    read_bounded(file, max_bytes)
+}
+
+/// The open and the two up-front checks of [`read_regular_bytes`] (see there for the contract:
+/// `O_NONBLOCK | O_NOCTTY` on unix, the type taken from the opened descriptor, a socket as
+/// `NotRegular`, the reported length against `max_bytes`), without the read. The one place that
+/// opens a file for a bounded read, shared with [`stream_regular`].
+fn open_regular(path: &Path, max_bytes: u64) -> Result<std::fs::File, BoundedReadError> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -147,7 +156,40 @@ pub fn read_regular_bytes(path: &Path, max_bytes: u64) -> Result<Vec<u8>, Bounde
     if metadata.len() > max_bytes {
         return Err(BoundedReadError::TooLarge { max: max_bytes });
     }
-    read_bounded(file, max_bytes)
+    Ok(file)
+}
+
+/// [`read_regular_bytes`] without the buffer: the bytes of `path` are handed to `sink` in chunks as
+/// they are read, for a caller that only digests them (a hash). Same open, same refusals, same
+/// bound: at most `max_bytes + 1` bytes are ever pulled from the file, and a file that turns out to
+/// hold more than `max_bytes` is [`BoundedReadError::TooLarge`]. **On an `Err` the sink may already
+/// have seen up to `max_bytes + 1` bytes**, so a caller must discard what it built from them.
+/// Returns the number of bytes streamed.
+pub fn stream_regular(
+    path: &Path,
+    max_bytes: u64,
+    mut sink: impl FnMut(&[u8]),
+) -> Result<u64, BoundedReadError> {
+    use std::io::Read;
+    let file = open_regular(path, max_bytes)?;
+    let mut reader = file.take(max_bytes.saturating_add(1));
+    let mut chunk = [0u8; 64 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                total += n as u64;
+                sink(&chunk[..n]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(BoundedReadError::Io(e)),
+        }
+    }
+    if total > max_bytes {
+        return Err(BoundedReadError::TooLarge { max: max_bytes });
+    }
+    Ok(total)
 }
 
 /// Read `reader` to its end, but never more than `max_bytes + 1` bytes from it: more than
@@ -185,6 +227,40 @@ pub fn read_regular_config_bytes(path: &Path) -> Result<Vec<u8>, BoundedReadErro
 /// [`read_regular_text`] at [`MAX_CONFIG_FILE_BYTES`]: the one way a config loader reads a file.
 pub fn read_regular_config_text(path: &Path) -> Result<String, BoundedReadError> {
     read_regular_text(path, MAX_CONFIG_FILE_BYTES)
+}
+/// The most bytes a git pointer file may hold: a worktree's `.git` file (`gitdir: <path>`), the
+/// `gitdir` file under `.git/worktrees/<name>/`, or a `HEAD` (a SHA or `ref: refs/heads/<name>`).
+/// Each is a line or two; the limit is far above any path or ref name and far below anything that
+/// matters to memory.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT git pointer file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+pub const MAX_GIT_POINTER_BYTES: u64 = 64 * 1024;
+
+/// The most bytes a `.codescout/cc_session_id` may hold. A session id is a UUID (36 bytes); a file
+/// longer than a few KiB is not one, and is refused rather than read. One number for the server's
+/// start-up read and the doctor's read of other worktrees.
+// cap-class: NOT_A_CAP — bounds how many bytes of an INPUT file are read; a file over it is treated as absent, no result is shortened and nothing is presented as complete
+pub const MAX_SESSION_ID_FILE_BYTES: u64 = 4096;
+
+/// Read a git pointer file (see [`MAX_GIT_POINTER_BYTES`]) as text, or `None` when it cannot be
+/// used: absent, unreadable, not UTF-8, not a regular file, or over the limit. The path is a
+/// `.git` file in a directory the server was pointed at, or a path that file names (so anyone who
+/// wrote the pointer chose it), and a plain read of a FIFO there holds the caller for good. The
+/// reason, never the content, is logged at debug.
+pub fn read_git_pointer(path: &Path) -> Option<String> {
+    match read_regular_text(path, MAX_GIT_POINTER_BYTES) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            // A directory is the ordinary `.git` of a normal checkout, read on every usage row:
+            // it is expected, not worth a line, as EISDIR never was. A FIFO, a device or an
+            // oversized file is.
+            let ordinary =
+                e.is_not_found() || (matches!(e, BoundedReadError::NotRegular) && path.is_dir());
+            if !ordinary {
+                tracing::debug!("git pointer {} skipped: {e}", path.display());
+            }
+            None
+        }
+    }
 }
 
 /// How many staging names `atomic_write` tries before it gives up. A collision needs an
@@ -1806,6 +1882,155 @@ mod bounded_read_tests {
             read_regular_text(&link, MAX_CONFIG_FILE_BYTES)
         });
         assert!(refused_as_not_regular(r));
+    }
+    /// The git pointer reader answers `None` for everything but a regular file of at most
+    /// `MAX_GIT_POINTER_BYTES`, and never holds on a FIFO.
+    #[test]
+    fn read_git_pointer_reads_a_regular_file_and_refuses_the_rest() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("HEAD");
+        std::fs::write(&file, "ref: refs/heads/main\n").unwrap();
+        assert_eq!(
+            read_git_pointer(&file).as_deref(),
+            Some("ref: refs/heads/main\n")
+        );
+        assert_eq!(read_git_pointer(&dir.path().join("absent")), None);
+
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        assert_eq!(
+            within_deadline("read_git_pointer on a FIFO", move || read_git_pointer(
+                &fifo
+            )),
+            None
+        );
+
+        let big = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+        big.set_len(MAX_GIT_POINTER_BYTES + 1).unwrap();
+        drop(big);
+        assert_eq!(read_git_pointer(&file), None, "over the limit");
+    }
+
+    /// `.git` is a directory in every ordinary checkout and is read on every usage row, so a
+    /// directory is `None` WITHOUT a log line; a FIFO still logs. The log is captured with a
+    /// scoped dispatcher, set explicitly on each thread that reads (the FIFO read runs under
+    /// `within_deadline`, i.e. on another thread, so a plain read there fails the test with the
+    /// deadline panic instead of hanging it).
+    #[test]
+    fn read_git_pointer_is_silent_for_a_directory_and_logs_a_fifo() {
+        use std::sync::{Arc, Mutex};
+        #[derive(Clone, Default)]
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let capture = Capture::default();
+        let sink = capture.clone();
+        let dispatch = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::DEBUG)
+                .with_ansi(false)
+                .with_writer(move || sink.clone())
+                .finish(),
+        );
+
+        // Keeps a SECOND dispatcher live for the whole test. This test reads the log of a
+        // callsite that sibling `read_git_pointer` tests also reach, from threads with no
+        // dispatcher; with only one registered dispatcher it failed in most runs of
+        // `cargo test --lib util::fs` (the log came back empty). Holding a second one for the
+        // whole test is the robust choice when other tests register and drop dispatchers. The
+        // exact trigger is an internal tracing-core detail (callsite interest bookkeeping at
+        // registration time), and a dispatcher dropped at once happened to pass as well, so this
+        // is not claimed to be the only thing that works.
+        let _second = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .with_writer(std::io::sink)
+                .finish(),
+        );
+
+        let dir = tempdir().unwrap();
+        let dot_git = dir.path().join(".git");
+        std::fs::create_dir(&dot_git).unwrap();
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+
+        let dir_got = tracing::dispatcher::with_default(&dispatch, || read_git_pointer(&dot_git));
+        assert_eq!(dir_got, None);
+        assert_eq!(
+            capture.0.lock().unwrap().len(),
+            0,
+            "a directory logs nothing"
+        );
+
+        let d = dispatch.clone();
+        let fifo_got = within_deadline("read_git_pointer on a FIFO", move || {
+            tracing::dispatcher::with_default(&d, || read_git_pointer(&fifo))
+        });
+        assert_eq!(fifo_got, None);
+        let log = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            log.contains("not a regular file"),
+            "a FIFO is logged: {log:?}"
+        );
+    }
+
+    /// `stream_regular` hands over exactly the bytes `read_regular_bytes` returns, across several
+    /// chunks, and refuses what it refuses: a FIFO (without a hang), a directory, a file one byte
+    /// over the cap; a file exactly at the cap streams whole.
+    #[test]
+    fn stream_regular_streams_the_same_bytes_and_refuses_the_same_files() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("multi.bin");
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &body).unwrap();
+        let mut got = Vec::new();
+        let n = stream_regular(&file, body.len() as u64, |c| got.extend_from_slice(c)).unwrap();
+        assert_eq!(n, body.len() as u64, "at the cap");
+        assert_eq!(got, body);
+        assert_eq!(got, read_regular_bytes(&file, body.len() as u64).unwrap());
+
+        let over = stream_regular(&file, body.len() as u64 - 1, |_| {}).unwrap_err();
+        assert!(matches!(over, BoundedReadError::TooLarge { .. }), "{over}");
+
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        let err = within_deadline("stream_regular on a FIFO", move || {
+            stream_regular(&fifo, 1024, |_| {})
+        })
+        .unwrap_err();
+        assert!(matches!(err, BoundedReadError::NotRegular), "{err}");
+        let err = stream_regular(dir.path(), 1024, |_| {}).unwrap_err();
+        assert!(matches!(err, BoundedReadError::NotRegular), "{err}");
+        let err = stream_regular(&dir.path().join("absent"), 1024, |_| {}).unwrap_err();
+        assert!(err.is_not_found());
+    }
+
+    /// A file that reports length 0 but returns bytes (`/proc`): the up-front length check cannot
+    /// refuse it, so the bound on the bytes actually read must. Without the bound the sink would
+    /// see the whole file; without the final count check an `Ok` would carry a TRUNCATED prefix
+    /// (and a hash of it). No seam: the real procfs file is the liar.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stream_regular_cuts_a_file_that_lies_about_its_length() {
+        let status = Path::new("/proc/self/status");
+        assert_eq!(
+            std::fs::metadata(status).unwrap().len(),
+            0,
+            "premise: procfs reports no length"
+        );
+        let mut seen = 0usize;
+        let r = stream_regular(status, 16, |c| seen += c.len());
+        assert!(
+            matches!(r, Err(BoundedReadError::TooLarge { max: 16 })),
+            "{r:?}"
+        );
+        assert!(seen <= 17, "seen={seen}");
     }
 
     /// `/dev/zero` never ends. It is refused on its type, and even if it were not, the read is

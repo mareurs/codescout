@@ -961,7 +961,7 @@ pub fn detect_worktree_info(root: &std::path::Path) -> Option<WorktreeInfo> {
     if !meta.file_type().is_file() {
         return None;
     }
-    let pointer = std::fs::read_to_string(&dot_git).ok()?;
+    let pointer = crate::util::fs::read_git_pointer(&dot_git)?;
     let gitdir_line = pointer
         .lines()
         .find_map(|l| l.strip_prefix("gitdir:").map(str::trim))?;
@@ -987,13 +987,11 @@ pub fn detect_worktree_info(root: &std::path::Path) -> Option<WorktreeInfo> {
 
     // Branch comes from <gitdir>/HEAD: either `ref: refs/heads/<name>` or
     // a raw SHA (detached HEAD).
-    let branch = std::fs::read_to_string(gitdir.join("HEAD"))
-        .ok()
-        .and_then(|s| {
-            s.trim()
-                .strip_prefix("ref: refs/heads/")
-                .map(|b| b.trim().to_string())
-        });
+    let branch = crate::util::fs::read_git_pointer(&gitdir.join("HEAD")).and_then(|s| {
+        s.trim()
+            .strip_prefix("ref: refs/heads/")
+            .map(|b| b.trim().to_string())
+    });
 
     Some(WorktreeInfo {
         branch,
@@ -3296,6 +3294,115 @@ mod tests {
     fn prompt_surfaces_system_prompt_draft_empty_snapshot() {
         let draft = crate::prompts::builders::build_system_prompt_draft(&[], &[], None, None, &[]);
         check_or_update_snapshot("build_system_prompt_draft_empty.md", &draft);
+    }
+}
+/// The `.git` pointer file and the `<gitdir>/HEAD` it names are read by `detect_worktree_info` on
+/// every status build; whoever wrote the pointer chose where `HEAD` is.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod git_pointer_read_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    /// `<tmp>/wt/.git` -> `gitdir: <tmp>/main/.git/worktrees/wt`; returns (tmp, wt, admin dir).
+    fn linked_worktree() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let wt = tmp.path().join("wt");
+        let admin = tmp.path().join("main/.git/worktrees/wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", admin.display())).unwrap();
+        (tmp, wt, admin)
+    }
+
+    /// A FIFO (or a link to one) as `HEAD` held the status build. The worktree is still
+    /// recognised, with no branch, as for an unreadable `HEAD`.
+    #[test]
+    fn a_fifo_head_is_no_branch_and_never_a_hang() {
+        for linked in [false, true] {
+            let (tmp, wt, admin) = linked_worktree();
+            if linked {
+                let fifo = tmp.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, admin.join("HEAD")).unwrap();
+            } else {
+                make_fifo(&admin.join("HEAD"));
+            }
+            let info = within_deadline("detect_worktree_info, HEAD a FIFO", move || {
+                let _keep = tmp;
+                detect_worktree_info(&wt)
+            })
+            .unwrap_or_else(|| panic!("linked={linked}: worktree not detected"));
+            assert_eq!(info.branch, None, "linked={linked}");
+            assert_eq!(info.name.as_deref(), Some("wt"));
+            assert!(info.main_repo.is_some());
+        }
+    }
+
+    /// Control: a regular `HEAD` (and a detached one) read as before.
+    #[test]
+    fn a_regular_head_still_names_the_branch() {
+        let (_tmp, wt, admin) = linked_worktree();
+        std::fs::write(admin.join("HEAD"), "ref: refs/heads/feat/x\n").unwrap();
+        let info = detect_worktree_info(&wt).unwrap();
+        assert_eq!(info.branch.as_deref(), Some("feat/x"));
+        std::fs::write(admin.join("HEAD"), "0123456789abcdef\n").unwrap();
+        assert_eq!(detect_worktree_info(&wt).unwrap().branch, None);
+        std::fs::remove_file(admin.join("HEAD")).unwrap();
+        assert_eq!(detect_worktree_info(&wt).unwrap().branch, None, "no HEAD");
+    }
+
+    /// An oversized `HEAD` under a pointer-named gitdir gives no branch (the worktree is still
+    /// recognised). It starts with a valid `ref:` line and is then extended sparse, so only the
+    /// length check can refuse it: a plain read finds the branch.
+    #[test]
+    fn an_oversized_head_is_no_branch() {
+        let (_tmp, wt, admin) = linked_worktree();
+        std::fs::write(admin.join("HEAD"), "ref: refs/heads/feat/x\n").unwrap();
+        assert_eq!(
+            detect_worktree_info(&wt).unwrap().branch.as_deref(),
+            Some("feat/x"),
+            "control"
+        );
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(admin.join("HEAD"))
+            .unwrap();
+        file.set_len(crate::util::fs::MAX_GIT_POINTER_BYTES + 1)
+            .unwrap();
+        drop(file);
+        let info = detect_worktree_info(&wt).unwrap();
+        assert_eq!(info.branch, None);
+        assert_eq!(info.name.as_deref(), Some("wt"));
+    }
+
+    /// The pointer is a regular file (that is checked first), but it had no size bound. Here it
+    /// starts with a valid pointer and is then extended sparse: only the length check refuses it.
+    #[test]
+    fn an_oversized_dot_git_pointer_is_not_a_worktree() {
+        let (_tmp, wt, _admin) = linked_worktree();
+        assert!(detect_worktree_info(&wt).is_some(), "control");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(wt.join(".git"))
+            .unwrap();
+        file.set_len(crate::util::fs::MAX_GIT_POINTER_BYTES + 1)
+            .unwrap();
+        drop(file);
+        assert!(detect_worktree_info(&wt).is_none());
+    }
+
+    /// A `.git` that is a FIFO or a link to one is no worktree (the path check already said so).
+    #[test]
+    fn a_fifo_dot_git_is_not_a_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        make_fifo(&tmp.path().join(".git"));
+        let root = tmp.path().to_path_buf();
+        let got = within_deadline("detect_worktree_info, .git a FIFO", move || {
+            let _keep = tmp;
+            detect_worktree_info(&root)
+        });
+        assert!(got.is_none());
     }
 }
 

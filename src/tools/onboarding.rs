@@ -109,7 +109,14 @@ fn patch_project_table(
     config_path: &std::path::Path,
     set: impl FnOnce(&mut toml::Table),
 ) -> anyhow::Result<()> {
-    let text = std::fs::read_to_string(config_path)?;
+    // A bounded regular-file read, like the loader that ran first: a path swapped in since then
+    // (or a caller that did not load) must not be a FIFO that holds this read, and a refusal
+    // returns before the write below ever opens the path.
+    let text = crate::util::fs::read_regular_config_text(config_path).map_err(|e| match e {
+        // The error `read_to_string` gave, unchanged.
+        crate::util::fs::BoundedReadError::Io(io) => anyhow::Error::from(io),
+        refused => anyhow::anyhow!("{}: {refused}", config_path.display()),
+    })?;
     let mut doc: toml::Table = toml::from_str(&text).map_err(|e| {
         anyhow::anyhow!(
             "parsing {}: {}",
@@ -1702,6 +1709,140 @@ mod global_strictness_tests {
                     );
                 })
             },
+        );
+    }
+}
+/// `patch_project_table` re-reads `project.toml` after the loader did, and `hash_system_prompt`
+/// reads `.codescout/system-prompt.md` with no loader before it: both paths are repository
+/// content.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod bounded_read_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    /// A FIFO (or a link to one) at the path held the re-read for good, before the write below
+    /// it could be refused. Now it returns an error that names the path, quotes nothing, and
+    /// the path is left a FIFO: nothing was written through it.
+    #[test]
+    fn patch_project_table_refuses_a_fifo_or_a_link_to_one_and_writes_nothing() {
+        for linked in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let p = dir.path().join("project.toml");
+            if linked {
+                let fifo = dir.path().join("elsewhere-pipe");
+                make_fifo(&fifo);
+                std::os::unix::fs::symlink(&fifo, &p).unwrap();
+            } else {
+                make_fifo(&p);
+            }
+            let path = p.clone();
+            let err = within_deadline("patch_project_table on a FIFO", move || {
+                patch_project_table(&path, |t| {
+                    t.insert("touched".into(), toml::Value::Boolean(true));
+                })
+            })
+            .unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("not a regular file"), "linked={linked}: {msg}");
+            assert!(msg.contains("project.toml"), "names the path: {msg}");
+            let ft = std::fs::metadata(&p).unwrap().file_type();
+            assert!(!ft.is_file(), "still a FIFO, nothing written through it");
+        }
+    }
+
+    /// Control: a regular `project.toml` (and a link to one) is patched as before, the other
+    /// keys survive; a missing file keeps the I/O error it always gave.
+    #[test]
+    fn patch_project_table_still_patches_a_regular_file_and_reports_a_missing_one_as_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        std::fs::write(&p, "[project]\nname = \"keep\"\n").unwrap();
+        patch_project_table(&p, |t| {
+            t.insert("added".into(), toml::Value::Integer(7));
+        })
+        .unwrap();
+        let doc: toml::Table = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(doc["project"]["name"].as_str(), Some("keep"));
+        assert_eq!(doc["project"]["added"].as_integer(), Some(7));
+
+        let real = dir.path().join("real.toml");
+        std::fs::write(&real, "[project]\nname = \"linked\"\n").unwrap();
+        let link = dir.path().join("link.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        patch_project_table(&link, |t| {
+            t.insert("added".into(), toml::Value::Integer(8));
+        })
+        .unwrap();
+        let doc: toml::Table = toml::from_str(&std::fs::read_to_string(&real).unwrap()).unwrap();
+        assert_eq!(doc["project"]["added"].as_integer(), Some(8));
+
+        let err = patch_project_table(&dir.path().join("missing.toml"), |_| {}).unwrap_err();
+        assert!(
+            err.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound),
+            "an io::Error as before: {err:#}"
+        );
+    }
+
+    /// Exactly at the limit is patched; one byte over is refused with the limit named and the file
+    /// left byte for byte as it was. The padding is TOML whitespace, so a read without the limit
+    /// would parse the over-limit file and rewrite it.
+    #[test]
+    fn patch_project_table_refuses_a_file_over_the_limit_and_leaves_it_unwritten() {
+        let limit = crate::util::fs::MAX_CONFIG_FILE_BYTES as usize;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        let mut body = "[project]\nname = \"keep\"\n".to_string();
+        body.push_str(&" ".repeat(limit - body.len()));
+        std::fs::write(&p, &body).unwrap();
+        patch_project_table(&p, |t| {
+            t.insert("added".into(), toml::Value::Integer(1));
+        })
+        .unwrap();
+        assert!(std::fs::read_to_string(&p).unwrap().contains("added"));
+
+        std::fs::write(&p, format!("{body} ")).unwrap();
+        let before = std::fs::read(&p).unwrap();
+        let err = patch_project_table(&p, |t| {
+            t.insert("added".into(), toml::Value::Integer(2));
+        })
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("byte limit"), "{msg}");
+        assert!(!msg.contains("keep"), "no content in the error: {msg}");
+        assert_eq!(std::fs::read(&p).unwrap(), before, "left unwritten");
+    }
+
+    /// A FIFO or a link to a device at `system-prompt.md` hashes as an absent prompt (empty
+    /// content), without a hang; a regular prompt hashes its bytes.
+    #[test]
+    fn hash_system_prompt_treats_a_special_file_as_absent_and_hashes_a_regular_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let cs = dir.path().join(".codescout");
+        std::fs::create_dir_all(&cs).unwrap();
+        let absent = hash_system_prompt(dir.path());
+        let file = cs.join("system-prompt.md");
+
+        make_fifo(&file);
+        let root = dir.path().to_path_buf();
+        let got = within_deadline("hash_system_prompt on a FIFO", move || {
+            hash_system_prompt(&root)
+        });
+        assert_eq!(got, absent, "FIFO");
+
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &file).unwrap();
+        assert_eq!(hash_system_prompt(dir.path()), absent, "device link");
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(&file, "Always use pytest.\n").unwrap();
+        let regular = hash_system_prompt(dir.path());
+        assert_ne!(regular, absent);
+        assert_eq!(
+            regular,
+            crate::memory::hash::hash_file(&file).unwrap(),
+            "the same bytes hash the same through both"
         );
     }
 }

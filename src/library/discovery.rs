@@ -41,6 +41,23 @@ pub fn discover_library_root(file_path: &Path) -> Option<DiscoveredLibrary> {
     })
 }
 
+/// Read a package manifest found while walking up from a library file, or `None` when it cannot
+/// be used. The walk runs through third-party source trees, so a manifest name can be a link to a
+/// FIFO or a device (or a directory) and a plain read would hold the caller: the read is a
+/// bounded regular-file read, and a refused, oversized, non-UTF-8 or unreadable manifest is
+/// "no manifest here", so the walk goes on to the parent directory as it did for a failed read.
+fn read_manifest_text(path: &Path) -> Option<String> {
+    match crate::util::fs::read_regular_config_text(path) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            if !e.is_not_found() {
+                tracing::debug!("manifest {} skipped: {e}", path.display());
+            }
+            None
+        }
+    }
+}
+
 fn try_manifest(
     dir: &Path,
     filename: &str,
@@ -51,7 +68,7 @@ fn try_manifest(
     if !manifest.exists() {
         return None;
     }
-    let text = std::fs::read_to_string(&manifest).ok()?;
+    let text = read_manifest_text(&manifest)?;
 
     let name = extract(&text, "name")?;
     let version = extract(&text, "version");
@@ -81,7 +98,7 @@ fn try_go_mod(dir: &Path) -> Option<DiscoveredLibrary> {
     if !manifest.exists() {
         return None;
     }
-    let text = std::fs::read_to_string(&manifest).ok()?;
+    let text = read_manifest_text(&manifest)?;
 
     let name = text
         .lines()
@@ -222,5 +239,139 @@ mod tests {
         assert_eq!(extract_json_value(json, "name"), Some("lodash".into()));
         assert_eq!(extract_json_value(json, "version"), Some("4.17.21".into()));
         assert_eq!(extract_json_value(json, "missing"), None);
+    }
+}
+/// A library root is a third-party source tree, so any manifest name on the walk up from a file can
+/// be a link to a FIFO or a device.
+/// docs/issues/2026-10-20-reads-of-repository-files-that-remain-unbounded-after-the-config-loader-fix.md
+#[cfg(all(test, unix))]
+mod bounded_manifest_tests {
+    use super::*;
+    use crate::util::fs::special_file_fixtures::{make_fifo, within_deadline};
+
+    const OUTER_CARGO: &str = "[package]\nname = \"outer_crate\"\nversion = \"0.1.0\"\n";
+
+    /// `<root>/Cargo.toml` is a regular file; `<root>/inner/` holds the file asked about and, in
+    /// place of a manifest, a FIFO or a link to one.
+    fn walk_from_inner(manifest: &str, linked: bool) -> Option<DiscoveredLibrary> {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = dir.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), OUTER_CARGO).unwrap();
+        let file = inner.join(manifest);
+        if linked {
+            let fifo = dir.path().join("elsewhere-pipe");
+            make_fifo(&fifo);
+            std::os::unix::fs::symlink(&fifo, &file).unwrap();
+        } else {
+            make_fifo(&file);
+        }
+        let asked = inner.join("lib.rs");
+        // The tempdir must outlive the walk, so it moves into the closure.
+        within_deadline(
+            &format!("discover_library_root, {manifest} a FIFO"),
+            move || {
+                let found = discover_library_root(&asked);
+                drop(dir);
+                found
+            },
+        )
+    }
+
+    /// A FIFO, and a link to one, named like each manifest held the walk. It is "no manifest
+    /// here": the walk goes on to the parent and finds the regular `Cargo.toml` there.
+    #[test]
+    fn a_fifo_or_a_link_to_one_in_place_of_a_manifest_is_skipped_and_the_walk_goes_on() {
+        for manifest in ["Cargo.toml", "package.json", "pyproject.toml", "go.mod"] {
+            for linked in [false, true] {
+                let found = walk_from_inner(manifest, linked)
+                    .unwrap_or_else(|| panic!("{manifest} linked={linked}: nothing found"));
+                assert_eq!(found.name, "outer_crate", "{manifest} linked={linked}");
+                assert_eq!(found.language, "rust", "{manifest} linked={linked}");
+            }
+        }
+    }
+
+    /// Control: the same manifest names as regular files are read where they stand, and a
+    /// directory, an empty file and invalid UTF-8 are skipped as before.
+    #[test]
+    fn regular_manifests_are_read_where_they_stand_and_unusable_ones_are_skipped() {
+        for (manifest, body, name, language) in [
+            (
+                "Cargo.toml",
+                "[package]\nname = \"inner_crate\"\nversion = \"1.2.3\"\n",
+                "inner_crate",
+                "rust",
+            ),
+            (
+                "package.json",
+                "{\n  \"name\": \"inner-pkg\",\n  \"version\": \"1.2.3\"\n}\n",
+                "inner-pkg",
+                "javascript",
+            ),
+            (
+                "pyproject.toml",
+                "[project]\nname = \"inner-py\"\nversion = \"1.2.3\"\n",
+                "inner-py",
+                "python",
+            ),
+            (
+                "go.mod",
+                "module example.com/inner\n",
+                "example.com/inner",
+                "go",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let inner = dir.path().join("inner");
+            std::fs::create_dir_all(&inner).unwrap();
+            std::fs::write(dir.path().join("Cargo.toml"), OUTER_CARGO).unwrap();
+            std::fs::write(inner.join(manifest), body).unwrap();
+            let found = discover_library_root(&inner.join("lib.rs")).unwrap();
+            assert_eq!(
+                (found.name.as_str(), found.language.as_str()),
+                (name, language)
+            );
+            assert_eq!(found.path, inner, "{manifest}");
+
+            // Linked to a regular file: still read.
+            std::fs::remove_file(inner.join(manifest)).unwrap();
+            let real = dir.path().join("real-manifest");
+            std::fs::write(&real, body).unwrap();
+            std::os::unix::fs::symlink(&real, inner.join(manifest)).unwrap();
+            let found = discover_library_root(&inner.join("lib.rs")).unwrap();
+            assert_eq!(found.name, name, "linked {manifest}");
+
+            // Directory, empty and invalid UTF-8 in its place: the outer manifest answers.
+            std::fs::remove_file(inner.join(manifest)).unwrap();
+            std::fs::create_dir(inner.join(manifest)).unwrap();
+            let found = discover_library_root(&inner.join("lib.rs")).unwrap();
+            assert_eq!(found.name, "outer_crate", "directory {manifest}");
+            std::fs::remove_dir(inner.join(manifest)).unwrap();
+            std::fs::write(inner.join(manifest), "").unwrap();
+            let found = discover_library_root(&inner.join("lib.rs")).unwrap();
+            assert_eq!(found.name, "outer_crate", "empty {manifest}");
+            std::fs::write(inner.join(manifest), [0xff, 0xfe]).unwrap();
+            let found = discover_library_root(&inner.join("lib.rs")).unwrap();
+            assert_eq!(found.name, "outer_crate", "invalid {manifest}");
+        }
+    }
+
+    /// A manifest over the limit is "no manifest here". It starts with a valid manifest and is
+    /// then extended sparse, so only the length check can skip it.
+    #[test]
+    fn a_manifest_over_the_limit_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = dir.path().join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), OUTER_CARGO).unwrap();
+        let path = inner.join("Cargo.toml");
+        std::fs::write(&path, "[package]\nname = \"inner_crate\"\n").unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len(crate::util::fs::MAX_CONFIG_FILE_BYTES + 1)
+            .unwrap();
+        drop(file);
+        let found = discover_library_root(&inner.join("lib.rs")).unwrap();
+        assert_eq!(found.name, "outer_crate");
     }
 }
