@@ -295,14 +295,21 @@ pub fn detect_command_type(command: &str) -> CommandType {
     }
 }
 
-/// Byte offsets of every unquoted `|` that joins two pipeline stages, in order. Quote-aware
-/// (single, double, backslash); `||` is not a pipe. Shared by [`detect_terminal_filter`] and
-/// [`first_pipe_before_terminal_filter`] so there is one quote-state machine.
-fn unquoted_pipes(cmd: &str) -> Vec<usize> {
+/// Byte offsets of every unquoted `|` that joins two pipeline stages, in order, each with its
+/// NESTING DEPTH. Quote-aware (single, double, backslash); `||` is not a pipe. Depth counts what
+/// the shell nests a pipe inside: parentheses (so `( )`, `$( )`, `$(( ))`, `<( )` and `>( )`), a
+/// backtick substitution, and a `{ … }` group. A pipe at depth 0 is a stage of the command's own
+/// pipeline; one at depth > 0 belongs to a subshell or substitution, and splicing a `tee` and a
+/// `{` group at it breaks the nesting (`(seq 1 5 | tee cap | { grep 2) | head`). Depth saturates at
+/// 0 on a stray closer, so an unbalanced `)` cannot hide a later depth-0 pipe by going negative.
+/// Shared by [`detect_terminal_filter`] and [`tee_splice_point`] so there is one scanner.
+fn unquoted_pipes(cmd: &str) -> Vec<(usize, usize)> {
     let mut pipes = Vec::new();
     let mut in_single = false;
     let mut in_double = false;
+    let mut in_backtick = false;
     let mut escape_next = false;
+    let mut nesting = 0usize;
 
     for (i, ch) in cmd.char_indices() {
         if escape_next {
@@ -313,12 +320,15 @@ fn unquoted_pipes(cmd: &str) -> Vec<usize> {
             '\\' if !in_single => escape_next = true,
             '\'' if !in_double => in_single = !in_single,
             '"' if !in_single => in_double = !in_double,
+            '`' if !in_single && !in_double => in_backtick = !in_backtick,
+            '(' | '{' if !in_single && !in_double => nesting += 1,
+            ')' | '}' if !in_single && !in_double => nesting = nesting.saturating_sub(1),
             '|' if !in_single && !in_double => {
                 // Skip `||` (logical OR) — not a pipeline pipe.
                 let next_char = cmd[i + 1..].chars().next();
                 let prev_char = if i > 0 { cmd[..i].chars().last() } else { None };
                 if next_char != Some('|') && prev_char != Some('|') {
-                    pipes.push(i);
+                    pipes.push((i, nesting + usize::from(in_backtick)));
                 }
             }
             _ => {}
@@ -339,7 +349,7 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
         "tr",
     ];
 
-    let pipe_pos = *unquoted_pipes(cmd).last()?;
+    let (pipe_pos, _depth) = *unquoted_pipes(cmd).last()?;
 
     // Extract the first token of the stage after the pipe
     let after_pipe = cmd[pipe_pos + 1..].trim_start();
@@ -358,30 +368,45 @@ pub fn detect_terminal_filter(cmd: &str) -> Option<usize> {
     }
 }
 
-/// Where to splice the unfiltered-output `tee` for a command whose LAST stage is a terminal
-/// filter ([`detect_terminal_filter`]): at the FIRST unquoted `|`, so the capture is the
-/// producer's own stdout and not an intermediate stage's (`seq 1 1000 | grep 7 | head -2` must
-/// capture 1000 lines, not grep's 271). For a single pipe the first and the last coincide.
+/// Where to splice the unfiltered-output `tee` into `cmd`, or `None` when the command cannot be
+/// captured and must run UNTOUCHED. The ONE function that decides it: `inject_tee_in` splices at
+/// the offset it returns and `run_command`'s foreground refusal asks whether it returns `Some`, so
+/// the splice and the refusal cannot disagree. `cmd` is a heredoc-masked copy
+/// ([`crate::util::path_security::mask_heredoc_bodies`]).
 ///
-/// Returns `None` when the command does not qualify, and also when the first pipe is `|&`
-/// (stderr is piped too; the command is left untouched). Falls back to the LAST pipe when the
-/// text after the first pipe is not one pipeline (`a | b; c | head`, a heredoc, a comment, a
-/// `$(…)`): grouping that text behind the tee would hand its later commands the producer's
-/// stream, which they never read before.
-pub fn first_pipe_before_terminal_filter(cmd: &str) -> Option<usize> {
-    let last = detect_terminal_filter(cmd)?;
-    let first = *unquoted_pipes(cmd).first()?;
-    if first == last {
-        return Some(last);
-    }
-    if cmd[first + 1..].starts_with('&') {
+/// The offset is the `|` that starts the filter group, and the capture is the stream that enters
+/// it, so it must be the producer's own stdout. `Some` only when ALL of these hold:
+///
+/// 1. the last stage of the whole text is a terminal filter ([`detect_terminal_filter`]);
+/// 2. that last pipe is at nesting depth 0, and the pipe chosen is the FIRST unquoted `|` at depth
+///    0 (see [`unquoted_pipes`]: parentheses, `$( )`, `<( )`, backticks and `{ }` groups nest), so
+///    the splice never lands inside a subshell or substitution;
+/// 3. the text after the chosen pipe is one pipeline
+///    ([`crate::util::path_security::is_one_pipeline`]): the group holds exactly the rest of that
+///    pipeline, and nothing after a `;` / `&&` / newline;
+/// 4. the chosen pipe is not `|&` (stderr is piped too, and the command is left untouched);
+/// 5. `cmd` holds no buffer ref: `resolve_refs` may then mark the call `buffer_only`, which turns
+///    the capture off, so a command that mentions one is never promised a capture.
+///
+/// There is no fallback to another pipe. When a condition fails the command runs as the caller
+/// wrote it, with no capture, because a capture of a different segment's stream would leave the
+/// trimmed producer's output lost while the response offered a handle to something else.
+pub fn tee_splice_point(cmd: &str) -> Option<usize> {
+    if crate::util::path_security::contains_buffer_ref(cmd) {
         return None;
     }
-    if crate::util::path_security::is_one_pipeline(&cmd[first + 1..]) {
-        Some(first)
-    } else {
-        Some(last)
+    let pipes = unquoted_pipes(cmd);
+    let &(_, last_depth) = pipes.last()?;
+    detect_terminal_filter(cmd)?;
+    if last_depth != 0 {
+        return None;
     }
+    let &(first, _) = pipes.iter().find(|&&(_, depth)| depth == 0)?;
+    let rest = cmd[first + 1..].trim_end();
+    if rest.starts_with('&') || !crate::util::path_security::is_one_pipeline(rest) {
+        return None;
+    }
+    Some(first)
 }
 
 /// Returns `true` when the combined output is large enough to benefit from
@@ -2559,49 +2584,75 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     #[test]
     fn first_pipe_is_the_producers_pipe_in_a_chain() {
         let cmd = "seq 1 3 | grep 2 | head -1";
-        assert_eq!(first_pipe_before_terminal_filter(cmd), Some(8));
+        assert_eq!(tee_splice_point(cmd), Some(8));
         // A single pipe: first and last coincide.
         let single = "seq 1 3 | head -1";
-        assert_eq!(
-            first_pipe_before_terminal_filter(single),
-            detect_terminal_filter(single)
-        );
+        assert_eq!(tee_splice_point(single), detect_terminal_filter(single));
         // Quote-aware: the quoted `|` is data, the first real pipe is the splice point.
         let quoted = "echo 'a|b' | grep a | head -1";
-        assert_eq!(
-            first_pipe_before_terminal_filter(quoted),
-            quoted.find("| grep")
-        );
+        assert_eq!(tee_splice_point(quoted), quoted.find("| grep"));
         // `||` is not a pipe.
         let or = "a || b | grep x | head -1";
-        assert_eq!(first_pipe_before_terminal_filter(or), or.find("| grep"));
+        assert_eq!(tee_splice_point(or), or.find("| grep"));
     }
 
     #[test]
     fn first_pipe_does_not_qualify_a_command_whose_last_stage_is_not_a_filter() {
-        assert_eq!(
-            first_pipe_before_terminal_filter("a | grep x | cargo run"),
-            None
-        );
-        assert_eq!(first_pipe_before_terminal_filter("cargo build"), None);
+        assert_eq!(tee_splice_point("a | grep x | cargo run"), None);
+        assert_eq!(tee_splice_point("cargo build"), None);
     }
 
     #[test]
     fn first_pipe_leaves_a_stderr_pipe_chain_untouched() {
         // `|&` as the FIRST pipe: stderr is piped too, so the command is left alone.
-        assert_eq!(
-            first_pipe_before_terminal_filter("a |& grep x | head -1"),
-            None
-        );
+        assert_eq!(tee_splice_point("a |& grep x | head -1"), None);
     }
 
     #[test]
-    fn first_pipe_falls_back_to_the_last_when_the_rest_is_not_one_pipeline() {
-        // The text after the first pipe holds a second command list: grouping it behind the
-        // tee would feed `c` the producer's stream, so the splice stays at the last pipe.
-        let list = "a | b; c | head -1";
-        assert_eq!(first_pipe_before_terminal_filter(list), list.rfind('|'));
-        let and = "a | b && c | head -1";
-        assert_eq!(first_pipe_before_terminal_filter(and), and.rfind('|'));
+    fn a_list_after_the_first_pipe_means_no_splice_and_no_fallback() {
+        // The text after the first pipe holds a second command list: grouping it behind the tee would
+        // feed `c` the producer's stream. There is no fallback to the last pipe either (that captured
+        // a different segment's stream while the first command's trimmed output was lost): the command
+        // runs untouched.
+        assert_eq!(tee_splice_point("a | b; c | head -1"), None);
+        assert_eq!(tee_splice_point("a | b && c | head -1"), None);
+        assert_eq!(tee_splice_point("a | grep x | head -1; echo done"), None);
+        assert_eq!(tee_splice_point("a | grep x | cat; echo | head -1"), None);
+    }
+
+    #[test]
+    fn tee_splice_point_decides_from_the_depth_zero_pipes() {
+        // (command, the text the splice `|` starts, or None when the command runs untouched)
+        for (cmd, want) in [
+            ("seq 1 3 | head -1", Some("| head")),
+            ("seq 1 3 | grep 2 | head -1", Some("| grep")),
+            ("echo 'a|b' | grep a | head -1", Some("| grep")),
+            ("a || b | grep x | head -1", Some("| grep")),
+            ("a |& grep x | head -1", None),
+            ("a | grep x | cargo run", None),
+            ("cargo build", None),
+            // A group or substitution that holds a pipe nests it: splice at a pipe outside it only.
+            ("(seq 1 5 | grep 2) | head -1", Some("| head")),
+            ("(seq 1 5 | head -1)", None),
+            ("echo $(seq 3 | head -1)", None),
+            ("echo $(seq 1 5 | wc -l) | grep 5 | head -1", Some("| grep")),
+            ("echo $((1|2)) | grep 3 | head -1", Some("| grep")),
+            ("diff <(seq 3 | sort) <(seq 3) | head -1", Some("| head")),
+            ("echo `seq 3 | head -1`", None),
+            ("echo `seq 3 | wc -l` | grep 3 | head -1", Some("| grep")),
+            ("{ seq 1 5 | grep 4; } | head -1", Some("| head")),
+            ("{ seq 1 5 | head -1; }", None),
+            // A prefix list is fine: the first pipe is at depth 0 and the rest is one pipeline.
+            ("cd /tmp && seq 1 1000 | grep 7 | head -2", Some("| grep")),
+            // A `;` / `&&` after the first pipe is a list, not one pipeline.
+            ("a | grep x | head -1; echo done", None),
+            ("a | b && c | head -1", None),
+            // A buffer ref: `resolve_refs` may turn the capture off, so none is promised.
+            ("seq 3 | grep 1 | head -1; grep y @cmd_abc", None),
+            ("cat @cmd_abc | grep 1 | head -1", None),
+        ] {
+            let want = want.map(|marker| cmd.find(marker).expect(marker));
+            assert_eq!(tee_splice_point(cmd), want, "{cmd}");
+        }
     }
 }

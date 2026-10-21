@@ -638,9 +638,9 @@ fn plain_slice_window(command: &str) -> Option<(usize, Option<usize>)> {
 /// Whether `stage` appended to `query` reads all of the query's output AND would be run: the query
 /// is one pipeline, and the IL3 gate does not refuse the joined command. Asked of the gate itself
 /// (`pipe_refusal`, foreground), so a route a hint offers is one `run_command` accepts; a list of
-/// "safe" producers kept here would drift from it. (A foreground pipe ending in a terminal filter
-/// is never refused, so for the pagers and `| cut` this refuses only a command the capture cannot
-/// serve and a trimmer would hide output from.)
+/// "safe" producers kept here would drift from it. A pager (`| sed -n`) and `| cut` are terminal
+/// filters, so the gate refuses the joined command only where the capture cannot be promised (a
+/// buffer ref in the text, a `|&` first pipe) and an unbounded producer is piped into a trimmer.
 fn can_append_stage(query: &str, stage: &str) -> bool {
     crate::util::path_security::is_one_pipeline(query)
         && super::pipe_refusal(&format!("{query} {stage}"), false).is_none()

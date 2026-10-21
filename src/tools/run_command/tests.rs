@@ -6471,11 +6471,12 @@ async fn a_head_pipe_over_the_store_limit_reports_a_lower_bound_and_the_truncate
     );
 }
 
-/// The group sits after the whole `B`, so a `;` tail after the filter runs and keeps its place:
-/// the pipeline still ends in the tail's status and the capture still holds the whole stream.
+/// R15: a `;` tail after the filter means the text after the first pipe is not ONE pipeline, so the
+/// command is not spliced and there is no fallback to another pipe. It runs exactly as written (the
+/// tail runs, the status is the tail's) and has no capture.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_semicolon_tail_after_the_filter_keeps_the_filters_status_and_output() {
+async fn a_semicolon_tail_after_the_filter_runs_untouched_with_no_capture() {
     let (_dir, ctx) = project_ctx().await;
     let result = RunCommand
         .call(json!({ "command": "seq 1 10 | head -2; echo done" }), &ctx)
@@ -6483,7 +6484,10 @@ async fn a_semicolon_tail_after_the_filter_keeps_the_filters_status_and_output()
         .unwrap();
     assert_eq!(result["stdout"], "1\n2\ndone\n", "{result}");
     assert_eq!(result["exit_code"], 0, "{result}");
-    assert_eq!(result["unfiltered_output_lines"], 10, "{result}");
+    assert!(
+        result.get("unfiltered_output").is_none(),
+        "nothing was spliced, so no capture may be offered; got: {result}"
+    );
 }
 /// In a chain the tee goes at the FIRST pipe, so the handle is the producer's own stream. With the
 /// splice at the last pipe, `seq 1 1000 | grep 7 | head -2` captured grep's 271 lines.
@@ -6865,6 +6869,11 @@ fn pipe_refusal_decides_the_three_branches() {
     // Foreground, the capture serves it: not refused.
     assert_eq!(pipe_refusal("cargo test | grep x | head -1", false), None);
     assert_eq!(pipe_refusal("cargo test | grep FAILED", false), None);
+    // R15: a `;` tail after the first pipe means no splice and no fallback, so it is refused.
+    assert!(pipe_refusal("cargo test | grep x | head -1; echo done", false).is_some());
+    // R16: a buffer ref disables the capture (`resolve_refs` may mark the call `buffer_only`), so the
+    // detector firing on another segment still refuses in the foreground.
+    assert!(pipe_refusal("cargo --version | grep x | head -1; grep y @cmd_abc", false).is_some());
     // Nothing for the detector to refuse: not refused in either mode.
     assert_eq!(pipe_refusal("ls | head -1", false), None);
     assert_eq!(pipe_refusal("ls | head -1", true), None);
@@ -6888,6 +6897,100 @@ fn pipe_refusal_names_every_terminal_filter_the_capture_knows() {
         crate::tools::command_summary::detect_terminal_filter("x | cat").is_none(),
         "the premise: `cat` is not one"
     );
+}
+/// A command with a pipe nested inside `( )`, `$( )`, `$(( ))` or `<( )` must run exactly as it does
+/// bare. The splice used to land on the nested pipe and turn it into a syntax error.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pipe_nested_in_a_group_or_substitution_runs_as_it_does_bare() {
+    let (_dir, ctx) = project_ctx().await;
+    for (command, want_stdout) in [
+        ("(seq 1 5 | grep 2) | head -1", "2\n"),
+        ("echo $(seq 1 5 | wc -l) | grep 5 | head -1", "5\n"),
+        ("echo $((1|2)) | grep 3 | head -1", "3\n"),
+        ("diff <(seq 3 | sort) <(seq 3) | head -1", ""),
+        ("{ seq 1 5 | grep 4; } | head -1", "4\n"),
+    ] {
+        let result = RunCommand
+            .call(json!({ "command": command, "timeout_secs": 20 }), &ctx)
+            .await
+            .unwrap_or_else(|e| panic!("`{command}` must run, not be refused: {e}"));
+        assert_eq!(result["exit_code"], 0, "`{command}`: {result}");
+        assert_eq!(
+            result["stdout"].as_str().unwrap_or_default(),
+            want_stdout,
+            "`{command}`: {result}"
+        );
+    }
+}
+
+/// With no pipe at nesting depth 0 there is nothing to splice at: the command runs untouched, so
+/// it has no `unfiltered_output`. (The splice used to land inside the `$( )`.)
+#[cfg(unix)]
+#[tokio::test]
+async fn a_command_whose_only_pipe_is_nested_runs_untouched() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "echo $(seq 3 | head -1)", "timeout_secs": 20 }),
+            &ctx,
+        )
+        .await
+        .expect("a nested pipe is run, not refused");
+    assert_eq!(result["exit_code"], 0, "{result}");
+    assert_eq!(
+        result["stdout"].as_str().unwrap_or_default(),
+        "1\n",
+        "{result}"
+    );
+    assert!(
+        result.get("unfiltered_output").is_none(),
+        "nothing was spliced, so no capture may be offered; got: {result}"
+    );
+}
+
+/// A compound whose FIRST pipe is at depth 0 is captured at that pipe: the handle holds the
+/// producer's own stream (1000 lines), not what `grep` passed on.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_compound_with_a_depth_zero_pipe_is_captured_at_its_first_pipe() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "cd /tmp && seq 1 1000 | grep 7 | head -2", "timeout_secs": 20 }),
+            &ctx,
+        )
+        .await
+        .expect("a compound ending in a filter is run");
+    assert_eq!(
+        result["stdout"].as_str().unwrap_or_default(),
+        "7\n17\n",
+        "{result}"
+    );
+    assert_eq!(result["unfiltered_output_lines"], 1000, "{result}");
+}
+
+/// R15: when the splice conditions do not hold, the command is NOT captured, and the foreground
+/// refusal applies if the detector fires. A `;` tail after the pipe made the old fallback capture a
+/// different segment's stream while the first command's trimmed output was lost.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_foreground_pipe_with_a_list_tail_is_refused_not_captured_elsewhere() {
+    let (_dir, ctx) = project_ctx().await;
+    for command in [
+        "cargo --version | grep cargo | head -1; echo done",
+        "cargo --version | grep cargo && ls | head -1",
+        "cargo --version | grep cargo | cat; echo | head -1",
+    ] {
+        let err = RunCommand
+            .call(json!({ "command": command, "timeout_secs": 20 }), &ctx)
+            .await
+            .expect_err(command);
+        assert!(
+            err.to_string().starts_with("IL3 violation"),
+            "`{command}`: {err}"
+        );
+    }
 }
 
 #[test]
@@ -10069,39 +10172,29 @@ async fn a_non_slice_query_of_the_err_stream_pages_that_stream() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_pager_a_list_would_defeat_is_never_offered() {
+async fn a_pager_the_il3_gate_or_a_list_would_defeat_is_never_offered() {
     let (_dir, ctx) = project_ctx().await;
     let id = ctx
         .output_buffer
         .store("seq 1 3000".into(), seq_lines(3000), String::new(), 0);
-    // Used to be withheld: the IL-3 gate refused a pager after a `cargo` left-hand side. The
-    // joined command ends in a terminal filter (`sed`), so the capture serves it, a foreground run
-    // is not refused, and the hint may offer it. Pinned against the gate itself: `detect_il3_violation`
-    // still sees the unbounded producer, and `pipe_refusal` (what `run_command` asks) lets it run.
-    let piped = format!("cargo --version | cat - {id}");
-    let joined = format!("{piped} | sed -n '101,200p'");
+    let gated = format!("cargo --version | cat - {id}");
+    // The premise, pinned against the gate itself: appending a pager to this query is refused,
+    // because the pipe's left-hand side is `cargo` and the buffer is only in its second stage. The
+    // joined command names a buffer, so the capture is not promised (`tee_splice_point`) and the
+    // foreground gate (`pipe_refusal`, what `run_command` asks) refuses it.
+    let joined = format!("{gated} | sed -n '101,200p'");
     assert!(
         crate::util::path_security::detect_il3_violation(&joined).is_some(),
-        "the premise needs a query whose producer the detector refuses"
+        "the premise needs a query the detector would refuse a pager on"
     );
     assert!(
-        super::pipe_refusal(&joined, false).is_none(),
-        "the premise needs the foreground gate to accept it"
+        super::pipe_refusal(&joined, false).is_some(),
+        "the premise needs a query the foreground gate would refuse a pager on"
     );
-    assert!(
-        crate::util::path_security::is_one_pipeline(&piped),
-        "the premise needs one pipeline"
-    );
-    let (_, hint, parsed) = lines_and_hint(&ctx, piped.clone()).await;
-    assert_eq!(parsed["truncated"], true, "`{piped}`: {parsed}");
-    assert!(
-        hint.contains("| sed -n"),
-        "`{piped}`: a route that works is withheld: {hint}"
-    );
-
     // A list: an appended stage would read the LAST command only.
-    let query = format!("grep -c 1 {id}; grep -n \"\" {id}");
-    {
+    let listed = format!("grep -c 1 {id}; grep -n \"\" {id}");
+
+    for query in [gated, listed] {
         let (_, hint, parsed) = lines_and_hint(&ctx, query.clone()).await;
         assert_eq!(parsed["truncated"], true, "`{query}`: {parsed}");
         assert!(
@@ -10595,9 +10688,9 @@ fn adversarial_table() -> Vec<(&'static str, &'static str)> {
         (r#"grep -n "" "{A}""#, "pager"),
         (r#"rg -n "" {A}"#, "pager"),
         (r#"rg -n "" {A} | cat"#, "pager"),
-        (r#"cargo --version | cat - {A}"#, "pager"), // once withheld by IL3 after a `cargo` left-hand side; a foreground pipe is run now
-        (r#"git --version | cat - {A}"#, "pager"), // once withheld by IL3 after a `git` left-hand side; a foreground pipe is run now
-        (r#"grep -n "\\" {A} ; true"#, "none"),    // no line matches
+        (r#"cargo --version | cat - {A}"#, "withheld"), // IL3 refuses a pager after a `cargo` left-hand side
+        (r#"git --version | cat - {A}"#, "withheld"), // IL3 refuses a pager after a `git` left-hand side
+        (r#"grep -n "\\" {A} ; true"#, "none"),       // no line matches
         ("grep -c \"`echo '\"'`\" {A}; grep -n \"\" {A}", "withheld"), // a backtick and a list
         (r#"grep -n "$(echo '"')" {A} # x"#, "withheld"), // `$(…)` hiding a comment
         (r#"grep -n "" {A} | tee /dev/stderr"#, "handle"), // `/dev/stderr` names a path

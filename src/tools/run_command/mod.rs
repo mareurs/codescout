@@ -274,11 +274,14 @@ const TERMINAL_FILTER_NAMES: &str =
     "grep, egrep, fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr";
 
 /// Whether the unfiltered-output capture can serve `command`: asked of the SAME function the tee
-/// splice asks (`inject_tee_in`: `first_pipe_before_terminal_filter` on a heredoc-masked copy), so
-/// the refusal below and the splice cannot disagree about which commands are captured.
+/// splice asks (`inject_tee_in`: `tee_splice_point` on a heredoc-masked copy), so a command this
+/// calls capturable is one `inject_tee_in` splices. The reverse can differ only where the splice is
+/// skipped for a reason `tee_splice_point` also refuses (`buffer_only` needs a buffer ref in the
+/// text, which it rejects), so the refusal below is never skipped for a command that then runs with
+/// no capture.
 fn capture_can_serve(command: &str) -> bool {
     let masked = crate::util::path_security::mask_heredoc_bodies(command);
-    crate::tools::command_summary::first_pipe_before_terminal_filter(&masked).is_some()
+    crate::tools::command_summary::tee_splice_point(&masked).is_some()
 }
 
 /// The IL-3 refusal for `command`, or `None` when it is allowed to run. The ONE place that decides
@@ -288,10 +291,13 @@ fn capture_can_serve(command: &str) -> bool {
 ///   background run sends its stdout straight to a log and keeps no unfiltered stream, so what the
 ///   pipe's trimmer drops is gone, whatever its last stage is.
 /// - **Foreground:** refused only when `detect_il3_violation` fires AND the capture cannot serve the
-///   command. A foreground pipe whose last stage is a terminal filter is run to the end through
-///   the capture and keeps the producer's full stream as `unfiltered_output`, so there is nothing to
-///   refuse. One that does not end in a terminal filter (`cargo test | grep x | cat`) runs with no
-///   capture, so the trimmer's loss is real and the refusal stands.
+///   command (`capture_can_serve`, which asks the tee's own `tee_splice_point`). A command it
+///   serves is run to the end through the capture and keeps the producer's full stream as
+///   `unfiltered_output`, so there is nothing to refuse. One it does not serve (the last stage is
+///   not a terminal filter, the first top-level pipe is followed by a `;` / `&&` tail, or a buffer
+///   ref is present) runs untouched, with no capture, so the trimmer's loss would be real and the
+///   refusal stands. The refusal and the splice read the same function, so a command the foreground
+///   refusal lets through is one the splice captures.
 pub(super) fn pipe_refusal(command: &str, run_in_background: bool) -> Option<String> {
     if run_in_background {
         return crate::util::path_security::detect_il3_violation(command);
@@ -301,13 +307,14 @@ pub(super) fn pipe_refusal(command: &str, run_in_background: bool) -> Option<Str
         return None;
     }
     Some(format!(
-        "IL3 violation — piped `{segment}` to a log-trimmer, and this pipe does not end in a \
-         terminal filter. BLOCKED.\n\n\
-         Only a pipe whose LAST stage is a terminal filter ({TERMINAL_FILTER_NAMES}) keeps the \
-         full stream of its first command, so none is kept here and what the trimmer drops is gone. \
-         Either:\n  \
-         (a) end the pipe with its filter: the full stream of the first command is then kept as \
-         `unfiltered_output`\n  \
+        "IL3 violation — piped `{segment}` to a log-trimmer, and no unfiltered capture can be kept \
+         for this command. BLOCKED.\n\n\
+         A capture is kept only when the pipeline's LAST stage is a terminal filter \
+         ({TERMINAL_FILTER_NAMES}), its first top-level pipe is followed by nothing but the rest of \
+         that pipeline (no `;` or `&&` after it), and the command names no @cmd_* buffer. Here \
+         what the trimmer drops is gone. Either:\n  \
+         (a) rewrite it as one pipeline ending in its filter: the full stream of the first command \
+         is then kept as `unfiltered_output`\n  \
          (b) run_command(\"{lead}\") bare, then query the @cmd_* buffer: grep PATTERN @cmd_xxx"
     ))
 }

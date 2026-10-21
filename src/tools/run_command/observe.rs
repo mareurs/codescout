@@ -555,9 +555,10 @@ mod tests {
     }
 
     /// A refused call ran no command, so it records no observation: `Err` must not become
-    /// "observed, unchanged". An unbounded `rg` piped to a trimmer in a BACKGROUND run is refused by
-    /// the IL-3 gate AFTER the before-snapshot is taken, which is the path that needs this guard.
-    /// (A foreground pipe ending in a terminal filter is not refused: it is run with a capture.)
+    /// "observed, unchanged". The call is a FOREGROUND `read` (a background one takes no snapshot, so
+    /// `seen == None` would hold whatever the refusal path did): an unbounded `rg` piped through a
+    /// trimmer into `cat`, which is no terminal filter, so no capture can be kept and the IL-3 gate
+    /// refuses it AFTER the before-snapshot is taken. That is the path that needs this guard.
     #[tokio::test]
     async fn a_refused_call_records_no_observation() {
         let dir = repo();
@@ -568,9 +569,8 @@ mod tests {
                 let r = super::super::RunCommand
                     .call(
                         json!({
-                            "command": "rg needle . | head -1",
-                            "effect": "read",
-                            "run_in_background": true
+                            "command": "rg needle . | grep x | cat",
+                            "effect": "read"
                         }),
                         &ctx,
                     )

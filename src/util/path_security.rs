@@ -1887,10 +1887,11 @@ pub fn il3_offender(command: &str) -> Option<(String, String)> {
 ///
 /// **The message is worded for a BACKGROUND run.** A background run sends its stdout
 /// straight to a log and keeps no unfiltered stream, so what its pipe drops is gone.
-/// A foreground pipe whose last stage is a terminal filter is run to the end through a
-/// capture and the full stream is kept as `unfiltered_output`; one the capture cannot
-/// serve is still refused, in the words of `run_command`'s `pipe_refusal`, which asks
-/// [`il3_offender`] (the detection below) which pipe it is.
+/// A foreground pipe the capture serves (`tee_splice_point`: last stage a terminal filter,
+/// first top-level pipe followed by one pipeline, no buffer ref) is run to the end through the
+/// capture and the full stream is kept as `unfiltered_output`; one it cannot serve is still
+/// refused, in the words of `run_command`'s `pipe_refusal`, which asks [`il3_offender`] (the
+/// detection below) which pipe it is.
 ///
 /// *(The doc comment here used to name `codescout-companion/hooks/il3-deny-hook.sh`
 /// as a mirror to keep in sync. That file still exists but is no longer wired:
@@ -1957,12 +1958,25 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
     ))
 }
 
+/// The one pattern for a buffer handle in a command text (`@cmd_*`, `@bg_*`, `@file_*`, `@tool_*`,
+/// `@ack_*`), shared by the IL-3 buffer-op allowance and [`contains_buffer_ref`].
+fn buffer_ref_regex() -> &'static Regex {
+    static BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    BUFFER_REF.get_or_init(|| {
+        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("buffer ref regex compiles")
+    })
+}
+
+/// Whether `command` mentions a buffer handle anywhere. `resolve_refs` may then rewrite it and mark
+/// the call `buffer_only`, which turns the unfiltered-output capture off, so a caller that must
+/// agree with the capture (`tee_splice_point`) treats such a command as one it cannot serve.
+pub(crate) fn contains_buffer_ref(command: &str) -> bool {
+    buffer_ref_regex().is_match(command)
+}
+
 /// The offending left-hand side of a single command segment, if it violates IL3.
 fn il3_offending_lead(segment: &str) -> Option<String> {
-    static IL3_BUFFER_REF: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let buf_re = IL3_BUFFER_REF.get_or_init(|| {
-        Regex::new(r"@(cmd|bg|file|tool|ack)_[A-Za-z0-9_]+").expect("IL3_BUFFER_REF regex compiles")
-    });
+    let buf_re = buffer_ref_regex();
 
     // Quote-aware. A `|` inside a quoted argument is data, not a pipe, and splitting
     // on it fabricates stages the shell will never create — see
