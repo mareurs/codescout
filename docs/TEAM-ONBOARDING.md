@@ -99,8 +99,10 @@ plus a summary. The full result is on the server — query it (`grep FAILED @cmd
 `read_file("@tool_xyz", json_path="$.items[*].id")`) instead of re-running the tool. The
 response's `hint` field names the most useful follow-up call; trust it.
 
-**Gates.** Shell commands that pipe unbounded output into a trimmer are blocked (run bare, then
-query the buffer). Content-readers (`cat`, `grep`, `sed`) aimed at source files are blocked
+**Gates.** Shell commands that pipe unbounded output into a trimmer are blocked when the server
+cannot keep a capture of the stream (run bare, then query the buffer); one pipeline ending in a
+filter such as `| grep` is allowed in the foreground and keeps the full stream as
+`unfiltered_output`. Content-readers (`cat`, `grep`, `sed`) aimed at source files are blocked
 (use `symbols`). Dangerous commands need an `@ack_*` handle. These are not permissions theater —
 each gate exists because the pattern it blocks produced a specific documented failure (e.g. the
 pipe gate exists partly because `cargo test | grep` once masked a non-zero exit and a truncated

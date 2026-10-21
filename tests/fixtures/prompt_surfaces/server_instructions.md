@@ -1,5 +1,5 @@
 codescout MCP — semantic code intelligence.
-Subagents inherit these rules. Pass them along.
+Subagents inherit these rules.
 
 ## Iron Laws (never X, do Y)
 
@@ -8,8 +8,8 @@ Subagents inherit these rules. Pass them along.
    read_file is right for imports/glue; force=true overrides.
 2. NEVER edit_file structural code → edit_code (LSP-aware).
 3. NEVER pipe unbounded run_command → run bare, query @cmd_* buffer.
-   OK: bounded LHS; foreground `| grep/head/tail…` (→ `unfiltered_output`).
-   Shell on source files is blocked.
+   OK: bounded LHS; one fg pipeline ending `| grep/head/tail…` (→
+   `unfiltered_output`). Shell on source is blocked.
 4. `read_file` on markdown → heading-addressed (force=true raw).
 5. `edit_file` on markdown → heading+action (managed → doc).
 6. Subagents see only what you brief them with. Name the guides they

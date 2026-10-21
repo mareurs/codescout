@@ -85,9 +85,10 @@ terminal filters are `grep`, `egrep`, `fgrep`, `rg`, `head`, `tail`,
 `sed`, `awk`, `cut`, `wc`, `sort`, `uniq`, `tr`. When the last stage
 is one of them and the first top-level pipe is followed by one plain
 pipeline (nothing after it but `|` stages), the server runs
-`A | tee <capture> | REST`: the first command `A` runs to the end,
-the capture reaches 4 MiB, or `timeout_secs` expires. The response
-carries the filtered result and:
+`A | tee <capture> | { REST; drain; }`: the first command `A` runs
+until it ends or `timeout_secs` expires, and a filter that reads to
+the end (`grep`, `sort`, `tail`) receives the whole stream. The
+response carries the filtered result and:
 
 - `unfiltered_output` — a `@cmd_*` handle to `A`'s own stdout
   (redacted, kept up to 4 MiB), queried like any buffer:
@@ -96,27 +97,32 @@ carries the filtered result and:
 - `unfiltered_truncated` and `unfiltered_buffered_lines` when the
   stream was cut.
 
-An early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) does not
-stop `A`: a drain keeps it running until the capture limit, so
+Only an early-exit filter (`head`, `sed -n 1,5p`, `grep -m1`) leaves part of the stream unread: it does not stop `A`, a drain after the filter keeps
+it running and reads at most 4 MiB more into the capture, so
 `unfiltered_output_lines` is then a lower bound of the stream, and
 `unfiltered_truncated` marks it.
 
 On `timeout_secs` the server kills the process group and returns the
 usual `timed_out` shape plus `capture_incomplete: true`, the
 `unfiltered_*` keys and the filter's result on the partial capture
-(`stdout`). A filter that is not provably pure is never re-run: the
-response then carries `filter_not_run` with the reason, or
+(`stdout`) when the filter is provably pure. A filter that is not is
+never re-run: the response then carries `filter_not_run` with the
+reason, or
 `filter_grace_expired` when the filter itself ran out of time, and
 `filter_exit_code` / `filter_stderr` when the replayed filter failed.
 A timed-out filtered call can take up to `timeout_secs` + 5 s.
 
 **Gate fires when** the command's left side is an unbounded producer
 (`cargo`, `npm`, `pytest`, `git`, `rg`, `fd`, `grep -r`, bare
-`find`) piped to a trimmer AND the capture cannot be spliced in:
-a last stage that is not a terminal filter, a `;` / `&&` list, a
-comment, a heredoc, `$(` or a backtick after the first pipe, a pipe
-nested in `( )` / `$( )` / `{ }`, `|&`, a buffer ref (`@cmd_*`), or a
-spliced command the shell does not parse. **Every such pipe in a
+`find`) piped to a trimmer AND the capture cannot be spliced in.
+That is the case when, for example, the last stage is not a terminal
+filter; a `;`, `&&`, `||` or newline list, a comment, a heredoc, `$(`
+or a backtick follows the first top-level pipe (`cmd | tail -20;
+echo $?`, `cmd | grep X || true`); the first pipe is nested in
+`( )` / `$( )` / `{ }` / backticks; the pipe is `|&`; the command
+names a buffer (`@cmd_*`); or the spliced command does not parse in
+the shell. A prefix list before the first pipe is fine
+(`cd d && cmd | grep X`). **Every such pipe in a
 `run_in_background` call is refused too**, whatever its last stage,
 because a background run sends its stdout straight to a log and keeps
 no unfiltered stream. Error message starts:

@@ -881,12 +881,14 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
         }
         "il3_pipe_to_trimmer" => {
             "IL-3 gate condition: a pipe is refused only when its LEFT side is unbounded AND no capture \
-                 can be kept. A FOREGROUND pipe whose last stage is a terminal filter (grep, rg, \
-                 head, tail, sed, awk, cut, wc, sort, uniq, tr) and whose first top-level pipe is \
-                 followed by one plain pipeline runs to the end and returns `unfiltered_output`, the \
-                 first command's whole stdout. Still refused: a last stage that is not a terminal \
-                 filter, a `;`/`&&` list after the pipe, a nested or `|&` pipe, a buffer ref, and \
-                 EVERY such pipe under run_in_background. Unbounded producers \
+                 can be kept. A FOREGROUND pipe whose last stage is a terminal filter (grep, egrep, \
+                 fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr) and whose first top-level \
+                 pipe is followed by one plain pipeline runs to the end and returns \
+                 `unfiltered_output`, a handle to the first command's stdout. Still refused, for \
+                 example: a last stage that is not a terminal filter, a `;`/`&&`/`||`/newline list, \
+                 comment or heredoc after the first pipe, a nested or `|&` pipe, a buffer ref, and \
+                 EVERY such pipe under run_in_background (the full list is in \
+                 get_guide(iron-laws-detail)). Unbounded producers \
                  are cargo/npm/pnpm/yarn/python/pytest/go/mvn/gradle/rg/fd, recursive grep, and \
                  `find` without -maxdepth. `git` is unbounded ONLY without an output limiter \
                  (-n, --max-count, -3, --show-current, --porcelain/--short, --stat) — `--oneline` is \
@@ -2001,6 +2003,28 @@ mod tests {
             });
             assert!(!body.is_empty(), "topic '{topic}' has an empty body");
         }
+    }
+
+    /// Iron Law 3 was retired for foreground pipes ending in a terminal filter; the
+    /// progressive-disclosure guide must say so. Pins the three things that carry the meaning: the
+    /// capture handle (`unfiltered_output`), the case that is still refused (`run_in_background`),
+    /// and the absence of the old unconditional sentence.
+    #[test]
+    fn progressive_disclosure_guide_states_the_foreground_pipe_capture() {
+        let body = crate::prompts::topic_body("progressive-disclosure").expect("guide body");
+        assert!(
+            body.contains("unfiltered_output"),
+            "the guide must name the capture handle a foreground filter pipe returns"
+        );
+        assert!(
+            body.contains("run_in_background"),
+            "the guide must say a background pipe is still refused"
+        );
+        assert!(
+            !body.contains("Server-side enforcement blocks this"),
+            "the old unconditional claim that a pipe into a trimmer is blocked is false for a \
+             foreground pipe ending in a terminal filter"
+        );
     }
 
     /// `PULL_ONLY_GUIDE_TOPICS` membership and reason-quality checks that used to

@@ -127,7 +127,7 @@ When output exceeds the inline threshold, the full content is stored in a sessio
 }
 ```
 
-Query the buffer in a follow-up call — **do not pipe**:
+Query the buffer in a follow-up call:
 
 ```json
 { "command": "grep 'FAILED\\|error' @cmd_a1b2c3" }
@@ -214,7 +214,7 @@ how commands resolve.
 
 **Tips:**
 
-- **A pipe from an unbounded command into a filter is allowed in the foreground when it ends in `grep`, `head`, `tail`, `sed`, `awk`, `cut`, `wc`, `sort`, `uniq` or `tr`** (`cargo test 2>&1 | grep FAILED`). You get the filtered result plus `unfiltered_output`, a `@cmd_*` handle to the first command's whole stdout (up to 4 MiB; `unfiltered_truncated` marks a cut): query it with `grep FAILED @cmd_id` in a follow-up call. Any other unbounded pipe — a last stage that is not one of those filters, a `;`/`&&` list after the pipe, a buffer ref — and every such pipe under `run_in_background` is refused (`IL3 violation`): run the command bare, then query the `@cmd_*` buffer. On `timeout_secs` a filtered call returns the filter of the partial capture, flagged `capture_incomplete`, and can take up to `timeout_secs` + 5 s.
+- **A pipe from an unbounded command into a filter is allowed in the foreground when the whole command is one pipeline ending in a terminal filter** (`grep`, `egrep`, `fgrep`, `rg`, `head`, `tail`, `sed`, `awk`, `cut`, `wc`, `sort`, `uniq`, `tr`), e.g. `cargo test 2>&1 | grep FAILED`. You get the filtered result plus `unfiltered_output`, a `@cmd_*` handle to the first command's stdout (up to 4 MiB; `unfiltered_truncated` marks a cut): query it with `grep FAILED @cmd_id` in a follow-up call. Other unbounded pipes are refused (`IL3 violation`) when the capture cannot be spliced in — for example a last stage that is not one of those filters, a `;`, `&&`, `||` or newline list, a comment or a heredoc after the first pipe (`cmd | tail -20; echo $?`, `cmd | grep X || true`), a nested or `|&` pipe, or a buffer ref — and every such pipe is refused under `run_in_background`. Then run the command bare and query the `@cmd_*` buffer. On `timeout_secs` the process group is killed and, when the filter is provably pure, it is run on the partial capture and the result flagged `capture_incomplete`; otherwise `filter_not_run` says why. A timed-out filtered call can take up to `timeout_secs` + 5 s.
 - For slow build steps (`cargo build`, full test suites), increase `timeout_secs` to 120–300.
 - Use `cwd` to run commands in subdirectories rather than `cd subdir &&` prefixes.
 - For commands that background subprocesses with `&`, use `run_in_background: true` — otherwise `run_command` will hang until timeout waiting for the shell to exit.
