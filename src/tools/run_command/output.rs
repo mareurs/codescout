@@ -1251,6 +1251,70 @@ pub(super) fn store_capture(
     Some((ref_id, held, line_count, pool_cut))
 }
 
+/// Add what a timed-out filtered command recovered to its `timed_out` response: the filter's
+/// output over the partial capture (`filtered`, already scrubbed; `None` when the filter's grace
+/// expired) and the capture's handle (`unfiltered`, from [`store_capture`]).
+///
+/// The response gains `capture_incomplete`, the `unfiltered_*` keys and the redaction note through
+/// [`attachments`], the helper the normal path uses for them, then either `stdout` or
+/// `filter_grace_expired`. `stdout` is cut to the room the response's other keys leave within the
+/// inline limit, MEASURED from the response itself: nothing bounds a filter's output, and this
+/// response is built outside `handle_successful_output_with`'s gate. A cut `stdout` says so with
+/// `truncated`, `stdout_shown` and `stdout_total`, the keys a cut buffer query carries.
+///
+/// A response with no handle (`unfiltered` is `None`: an empty capture) is left as it is.
+pub(super) fn attach_partial_capture(
+    response: &mut Value,
+    filtered: Option<String>,
+    unfiltered: Option<(
+        String,
+        Option<crate::tools::output_buffer::Truncation>,
+        usize,
+        Vec<String>,
+    )>,
+    redacted: usize,
+    original_command: &str,
+) {
+    use super::super::command_summary::{count_lines, truncate_lines_and_bytes};
+    if unfiltered.is_none() {
+        return;
+    }
+    let keys = attachments(&[], &unfiltered, redacted, &None, &serde_json::Map::new());
+    let Some(obj) = response.as_object_mut() else {
+        return;
+    };
+    obj.insert("capture_incomplete".into(), json!(true));
+    obj.extend(keys);
+    let Some(text) = filtered else {
+        obj.insert("filter_grace_expired".into(), json!(true));
+        return;
+    };
+    // Output that fits beside the response as it stands is kept byte for byte, as the normal path
+    // keeps it: the cut rejoins lines and would drop a trailing newline.
+    if crate::util::text::json_escaped_len(&text) <= inline_stdout_room(response) {
+        response["stdout"] = json!(text);
+        return;
+    }
+    let total = count_lines(&text);
+    // The cut keys at their widest (`stdout_shown` can be no larger than the total).
+    let mut skeleton = response.clone();
+    skeleton["truncated"] = json!(true);
+    skeleton["stdout_shown"] = json!(total);
+    skeleton["stdout_total"] = json!(total);
+    let cut = truncate_lines_and_bytes(
+        &text,
+        usize::MAX,
+        inline_stdout_room(&skeleton),
+        &wide_line_remedy(original_command),
+    );
+    if cut.shown < cut.total || cut.clipped_wide {
+        response["truncated"] = json!(true);
+        response["stdout_shown"] = json!(cut.shown);
+        response["stdout_total"] = json!(cut.total);
+    }
+    response["stdout"] = json!(cut.text);
+}
+
 /// Build the response for a command that ran to completion — at any exit code.
 ///
 /// The name says "successful" about the *process*, not the *outcome*: a failing

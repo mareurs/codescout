@@ -6423,8 +6423,8 @@ async fn a_urandom_password_idiom_ends_at_once() {
 }
 /// The cost the bounded drain does not remove: a SLOW endless producer writes less than the bound
 /// before `timeout_secs`, so the drain never closes the pipe and the command runs to the timeout.
-/// Before the drain SIGPIPE ended it at once. Until the timeout path recovers output (plan
-/// Task 4) the response is a bare `timed_out`; this pins the cost so Task 4 changes it on purpose.
+/// Before the drain SIGPIPE ended it at once. The timeout path then runs the filter once on the
+/// partial capture, so the response carries `head -1`'s line, flagged `capture_incomplete`.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_slow_endless_producer_into_head_runs_to_the_timeout() {
@@ -6440,6 +6440,233 @@ async fn a_slow_endless_producer_into_head_runs_to_the_timeout() {
         .await
         .unwrap();
     assert_eq!(result["timed_out"], true, "{result}");
+    assert_eq!(result["capture_incomplete"], true, "{result}");
+    assert_eq!(result["stdout"], "x\n", "{result}");
+}
+
+/// A timed-out filtered command returns its filter run once over the partial capture,
+/// with the capture behind `unfiltered_output`, and says the capture is incomplete.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_timed_out_filtered_command_returns_the_filter_of_the_partial_capture() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "(seq 1 1000; sleep 30) | grep 77", "timeout_secs": 1 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["timed_out"], true, "{result}");
+    assert_eq!(result["capture_incomplete"], true, "{result}");
+    assert_eq!(result["exit_code"], Value::Null, "{result}");
+    assert!(
+        result["stderr"]
+            .as_str()
+            .is_some_and(|s| s.contains("timed out after 1 seconds")),
+        "{result}"
+    );
+    let stdout = result["stdout"].as_str().expect("the filter's output");
+    assert!(
+        stdout.lines().any(|l| l == "977") && stdout.lines().all(|l| l.contains("77")),
+        "{stdout}"
+    );
+    assert_eq!(result["unfiltered_output_lines"], 1000, "{result}");
+    assert!(
+        result["unfiltered_output"]
+            .as_str()
+            .is_some_and(|h| h.starts_with("@cmd_")),
+        "{result}"
+    );
+    assert!(result.get("filter_grace_expired").is_none(), "{result}");
+}
+
+/// A slow endless producer into `head` runs to the timeout (the drain never reaches its bound), and
+/// ends there with `head`'s line taken from the capture.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_endless_producer_into_head_ends_at_the_cap_flagged_incomplete() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({
+                "command": "(while :; do echo x; sleep 0.01; done) | head -1",
+                "timeout_secs": 1,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["timed_out"], true, "{result}");
+    assert_eq!(result["capture_incomplete"], true, "{result}");
+    assert_eq!(result["stdout"], "x\n", "{result}");
+}
+
+/// The filter's output on a timeout is not bounded by anything the shell does, so the response
+/// clamps it: far over the inline limit, it is still delivered inline (no `@tool_*` wrap) with its
+/// status and handle at top level.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_timed_out_filter_with_output_over_the_limit_stays_inline() {
+    let (_dir, ctx) = project_ctx().await;
+    let (text, parsed) = run_query(
+        &ctx,
+        json!({ "command": "(seq 1 200000; sleep 30) | grep .", "timeout_secs": 1 }),
+    )
+    .await;
+    assert!(
+        text.len() <= crate::tools::INLINE_MAX_RESPONSE_LEN,
+        "delivered {} B, over the limit: {text:.400}",
+        text.len()
+    );
+    assert!(!text.contains("@tool_"), "{text:.400}");
+    assert_eq!(parsed["timed_out"], true, "{text:.400}");
+    assert_eq!(parsed["capture_incomplete"], true, "{text:.400}");
+    assert!(
+        parsed["unfiltered_output"]
+            .as_str()
+            .is_some_and(|h| h.starts_with("@cmd_")),
+        "{text:.400}"
+    );
+    let stdout = parsed["stdout"].as_str().expect("a clamped stdout");
+    assert!(stdout.starts_with("1\n2\n3\n"), "{stdout:.200}");
+    assert_eq!(
+        parsed["truncated"], true,
+        "a cut stdout says so: {text:.400}"
+    );
+    assert_eq!(parsed["stdout_total"], 200000, "{text:.400}");
+}
+
+/// Bug bc0cb248b224d1dd on the timeout path: the filter reads the capture file as it is on disk, so
+/// its output and the stored capture are each scrubbed before they reach the response or the pool.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_credential_before_a_timeout_is_redacted_in_stdout_and_the_handle() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({
+                "command": "(printf 'ghp_%036d\\n' 0; seq 1 5; sleep 30) | grep .",
+                "timeout_secs": 1,
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["capture_incomplete"], true, "{result}");
+    assert!(!result.to_string().contains(&printed_token()), "{result}");
+    let stdout = result["stdout"].as_str().expect("stdout");
+    assert!(stdout.contains("<redacted-credential>"), "{stdout}");
+    let handle = result["unfiltered_output"].as_str().expect("tee ref");
+    let stored = ctx.output_buffer.get(handle).unwrap().stdout;
+    assert!(stored.contains("<redacted-credential>"), "{stored}");
+    assert!(!stored.contains(&printed_token()), "{stored}");
+    assert_eq!(
+        result["redacted_credentials"], 2,
+        "one value in the filter's output plus the same value in the capture: {result}"
+    );
+}
+
+/// A timeout with no filter to re-run keeps the old shape: none of the partial-capture keys.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_timeout_with_no_filter_carries_none_of_the_capture_keys() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(json!({ "command": "sleep 10", "timeout_secs": 1 }), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(result["timed_out"], true, "{result}");
+    for key in [
+        "capture_incomplete",
+        "filter_grace_expired",
+        "unfiltered_output",
+        "unfiltered_output_lines",
+        "stdout",
+    ] {
+        assert!(result.get(key).is_none(), "{key}: {result}");
+    }
+}
+
+/// A filter that outlives its grace returns `None` at the grace, and its whole process group is
+/// killed: the backgrounded `sleep 30` (same group, a non-interactive shell has no job control)
+/// must not be left running.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_filter_on_capture_returns_none_when_the_grace_expires() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join("capture");
+    std::fs::write(&capture, "a\nb\n").unwrap();
+    let pidfile = dir.path().join("pid");
+    let filter = format!("sleep 30 & echo $! > '{}'; wait", pidfile.display());
+    let started = std::time::Instant::now();
+    let out = super::inner::run_filter_on_capture(
+        &filter,
+        capture.to_str().unwrap(),
+        dir.path(),
+        std::time::Duration::from_millis(200),
+    )
+    .await;
+    assert!(out.is_none(), "{out:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "returned at the grace, not when the filter ended: {:?}",
+        started.elapsed()
+    );
+    let pid = std::fs::read_to_string(&pidfile).expect("the filter ran");
+    let pid = pid.trim();
+    // Gone = no such process, or a zombie awaiting its reaper (it no longer runs).
+    let running = || {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        !stat.is_empty() && !stat.starts_with('Z')
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while running() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        !running(),
+        "the filter's `sleep 30` (pid {pid}) was orphaned"
+    );
+}
+
+/// A filter that ends within its grace returns its stdout, fed the capture file as stdin.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_filter_on_capture_feeds_the_capture_as_stdin() {
+    let dir = tempfile::tempdir().unwrap();
+    let capture = dir.path().join("capture");
+    std::fs::write(&capture, "a\nb77\nc\n").unwrap();
+    let out = super::inner::run_filter_on_capture(
+        "grep 77",
+        capture.to_str().unwrap(),
+        dir.path(),
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(out.as_deref(), Some("b77\n"));
+}
+
+/// When the grace expired the response says so instead of carrying a `stdout`.
+#[test]
+fn an_expired_grace_is_flagged_instead_of_a_stdout() {
+    let mut response = json!({ "timed_out": true, "exit_code": null });
+    super::output::attach_partial_capture(
+        &mut response,
+        None,
+        Some(("@cmd_00000001".to_string(), None, 3, Vec::new())),
+        0,
+        "x | grep y",
+    );
+    assert_eq!(response["filter_grace_expired"], true, "{response}");
+    assert_eq!(response["capture_incomplete"], true, "{response}");
+    assert_eq!(response["unfiltered_output"], "@cmd_00000001", "{response}");
+    assert_eq!(response["unfiltered_output_lines"], 3, "{response}");
+    assert!(response.get("stdout").is_none(), "{response}");
 }
 
 /// Past the store limit the drain stops the stream, so the capture file is a prefix of it and
