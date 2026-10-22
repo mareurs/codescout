@@ -1078,6 +1078,9 @@ async fn execute_shell_command_timeout_is_enforced() {
         hint.contains("run_in_background"),
         "timeout hint should mention run_in_background, got: {hint}"
     );
+    // R29: with no capture the old hint stands, raising timeout_secs included.
+    assert!(result.get("capture_incomplete").is_none(), "{result}");
+    assert!(hint.contains("higher timeout_secs"), "{hint}");
 }
 
 // --- run_command progress test (T11) ---
@@ -1229,7 +1232,7 @@ fn a_tee_capture_that_cannot_be_created_degrades_instead_of_refusing() {
     // Positive: a usable directory still captures — the degrade path is not the only path.
     let captured = super::inner::inject_tee_in("echo hi | head -1", false, good.path()).unwrap();
     assert!(
-        captured.command.contains("| tee '"),
+        captured.command.contains("exec tee '"),
         "a usable dir must splice the tee; got: {}",
         captured.command
     );
@@ -6037,10 +6040,10 @@ fn the_compact_summary_names_a_redaction_and_stays_silent_without_one() {
 #[tokio::test]
 async fn unfiltered_output_line_count_survives_inline_truncation() {
     let (_dir, ctx) = project_ctx().await;
-    // Enough lines to exceed the capture store limit (CAPTURE_STORE_LIMIT_BYTES, 4 MiB;
-    // `seq 1 1000000` is ~6.9 MB), so the stored copy is truncated but the reported count
-    // must still be the full pre-truncation line count.
-    let line_count = 1_000_000;
+    // Enough lines to exceed the capture store limit (CAPTURE_STORE_LIMIT_BYTES, 4 MiB), so the
+    // stored copy is truncated, and few enough that the stream fits the capture FILE's own bound
+    // (R26): the reported count must then be the full pre-truncation line count.
+    let line_count = SEQ_OVER_THE_STORE_UNDER_THE_FILE_BOUND;
     let result = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6055,6 +6058,27 @@ async fn unfiltered_output_line_count_survives_inline_truncation() {
     assert_eq!(
         result["unfiltered_output_lines"], line_count,
         "line count must be the full pre-truncation total, not the truncated-for-storage count: {result}"
+    );
+}
+
+/// `seq 1 N` for an `N` whose stream is over the store limit (`CAPTURE_STORE_LIMIT_BYTES`, so the
+/// handle is cut) and under the capture FILE's bound (`splice_tee`'s `ulimit -f`, R26), so the file
+/// holds the whole stream and `unfiltered_output_lines` is its exact count: 4,228,895 bytes,
+/// between 4,194,304 and 4,259,840. `seq 1 1000000` (6.9 MB) used to serve here; past the file
+/// bound its count is a lower bound.
+const SEQ_OVER_THE_STORE_UNDER_THE_FILE_BOUND: usize = 620_000;
+
+#[test]
+fn the_seq_fixture_sits_between_the_store_limit_and_the_file_bound() {
+    let bytes: usize = (1..=SEQ_OVER_THE_STORE_UNDER_THE_FILE_BOUND)
+        .map(|n| n.to_string().len() + 1)
+        .sum();
+    let file_bound = crate::tools::command_summary::capture_file_blocks(
+        super::output::CAPTURE_STORE_LIMIT_BYTES,
+    ) * 512;
+    assert!(
+        bytes > super::output::CAPTURE_STORE_LIMIT_BYTES && bytes < file_bound,
+        "{bytes} B is not between the store limit and the file bound {file_bound}"
     );
 }
 
@@ -6105,7 +6129,7 @@ async fn a_truncated_buffer_reports_the_count_it_will_actually_serve() {
 #[tokio::test]
 async fn a_truncated_buffer_ends_with_a_sentinel_naming_both_counts() {
     let (_dir, ctx) = project_ctx().await;
-    let line_count = 1_000_000;
+    let line_count = SEQ_OVER_THE_STORE_UNDER_THE_FILE_BOUND;
     let result = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6144,7 +6168,7 @@ async fn a_truncated_buffer_ends_with_a_sentinel_naming_both_counts() {
 #[tokio::test]
 async fn a_grep_over_a_truncated_ref_carries_the_truncation_notice() {
     let (_dir, ctx) = project_ctx().await;
-    let line_count = 1_000_000;
+    let line_count = SEQ_OVER_THE_STORE_UNDER_THE_FILE_BOUND;
     let first = RunCommand
         .call(
             json!({ "command": format!("seq 1 {line_count} | grep zzz") }),
@@ -6165,7 +6189,7 @@ async fn a_grep_over_a_truncated_ref_carries_the_truncation_notice() {
     // stored prefix. Without the notice this returns `0` and says nothing else.
     let second = RunCommand
         .call(
-            json!({ "command": format!("grep -c '^999999$' {handle}") }),
+            json!({ "command": format!("grep -c '^{line_count}$' {handle}") }),
             &ctx,
         )
         .await
@@ -6266,7 +6290,8 @@ async fn a_capture_under_the_store_limit_is_kept_whole() {
 /// The splice wraps the filter in a group that drains what the filter leaves unread, so an
 /// early-exit filter (`head -1`) cannot close the pipe and stop the producer mid-stream. The
 /// newline before `s=$?` (not `;`) keeps a trailing `# comment` in the filter from swallowing the
-/// closing brace. `filter` is the text after the spliced `|`.
+/// closing brace. The `tee` runs under `ulimit -f` (R26), so the capture FILE is bounded for every
+/// filter. `filter` is the text after the spliced `|`.
 #[test]
 fn inject_tee_in_wraps_the_filter_in_a_draining_group() {
     let dir = tempdir().unwrap();
@@ -6277,13 +6302,23 @@ fn inject_tee_in_wraps_the_filter_in_a_draining_group() {
         .expect("a terminal filter must be captured")
         .0
         .clone();
+    let limit = super::output::CAPTURE_STORE_LIMIT_BYTES;
     assert_eq!(
         injected.command,
         format!(
-            "seq 1 3 | tee '{cap}' | {{ head -1\ns=$?; head -c {} >/dev/null; exit $s; }}",
-            super::output::CAPTURE_STORE_LIMIT_BYTES
+            "seq 1 3 | ( trap '' XFSZ; ulimit -f 8320 2>/dev/null; exec tee '{cap}' 2>/dev/null ) \
+             | {{ head -1\ns=$?; head -c {limit} >/dev/null; exit $s; }}"
         ),
-        "the filter must run inside the bounded draining group"
+        "the filter must run inside the bounded draining group, the tee under its file bound"
+    );
+    // 8320 = ceil((4 MiB + 64 KiB) / 512), from the constant.
+    assert_eq!(
+        crate::tools::command_summary::capture_file_blocks(limit),
+        8320
+    );
+    assert!(
+        injected.command.contains("\ns=$?;"),
+        "a NEWLINE, not `;`, before `s=$?`"
     );
     assert_eq!(injected.filter.as_deref(), Some("head -1"));
 
@@ -6334,18 +6369,30 @@ async fn a_filter_exit_status_survives_the_drain() {
     assert!(result.get("unfiltered_output").is_some(), "{result}");
 }
 
-/// A `# comment` after the filter lands on the filter's line; the newline before `s=$?` is what
-/// keeps it from commenting out the rest of the group.
+/// A `# comment` after the filter is not spliced at all: `is_one_pipeline` refuses an unquoted `#`
+/// in the text after the first pipe, so the command runs untouched, with no capture and no handle.
+/// (The newline before `s=$?` in the splice, which would also keep such a comment from swallowing
+/// the group's closing brace, is pinned by `inject_tee_in_wraps_the_filter_in_a_draining_group`.)
 #[cfg(unix)]
 #[tokio::test]
-async fn a_comment_after_the_filter_does_not_break_the_drain() {
+async fn a_comment_after_the_filter_runs_the_command_untouched() {
+    let command = "seq 1 10 | head -2 # why";
+    let dir = tempdir().unwrap();
+    let injected = super::inner::inject_tee_in(command, false, dir.path()).unwrap();
+    assert_eq!(injected.command, command, "not spliced");
+    assert!(injected.capture.is_none());
+
     let (_dir, ctx) = project_ctx().await;
     let result = RunCommand
-        .call(json!({ "command": "seq 1 10 | head -2 # why" }), &ctx)
+        .call(json!({ "command": command }), &ctx)
         .await
         .unwrap();
     assert_eq!(result["stdout"], "1\n2\n", "{result}");
     assert_eq!(result["exit_code"], 0, "{result}");
+    assert!(
+        result.get("unfiltered_output").is_none(),
+        "an untouched command has no capture: {result}"
+    );
 }
 
 /// The group is on the filter side of the pipe only: the producer's stderr must not be piped
@@ -6442,6 +6489,12 @@ async fn a_slow_endless_producer_into_head_runs_to_the_timeout() {
     assert_eq!(result["timed_out"], true, "{result}");
     assert_eq!(result["capture_incomplete"], true, "{result}");
     assert_eq!(result["stdout"], "x\n", "{result}");
+    // R29: this is the case the old "pass a higher timeout_secs" hint got wrong.
+    assert_eq!(
+        result["hint"],
+        super::output::CAPTURE_INCOMPLETE_TIMEOUT_HINT,
+        "{result}"
+    );
 }
 
 /// A timed-out filtered command returns its filter run once over the partial capture,
@@ -6462,6 +6515,22 @@ async fn a_timed_out_filtered_command_returns_the_filter_of_the_partial_capture(
     assert_eq!(result["timed_out"], true, "{result}");
     assert_eq!(result["capture_incomplete"], true, "{result}");
     assert_eq!(result["exit_code"], Value::Null, "{result}");
+    // R29: the hint says what the result is and does not send the caller to a higher timeout.
+    let hint = result["hint"].as_str().expect("a hint");
+    assert_eq!(
+        hint,
+        super::output::CAPTURE_INCOMPLETE_TIMEOUT_HINT,
+        "{result}"
+    );
+    assert!(
+        hint.contains("filter run on the partial capture")
+            && hint.contains("will not help an endless or slow producer")
+            && hint.contains("`timeout 10 cmd`")
+            && hint.contains("`ping -c 3`")
+            && hint.contains("run it bare"),
+        "{hint}"
+    );
+    assert!(!hint.contains("higher timeout_secs"), "{hint}");
     assert!(
         result["stderr"]
             .as_str()
@@ -6741,9 +6810,29 @@ async fn still_running_after_a_grace(pid: &str) -> bool {
     running()
 }
 
+/// The pid a test's filter writes to `pidfile` (`echo $$ > f`), polled until the line is complete or
+/// `deadline` passes. Reading the file once after a fixed window flaked under load: the shell had
+/// not written it yet, or had opened it and not yet written the line.
+#[cfg(unix)]
+async fn wait_for_pid(pidfile: &std::path::Path, deadline: std::time::Duration) -> Option<String> {
+    let until = std::time::Instant::now() + deadline;
+    loop {
+        if let Ok(text) = std::fs::read_to_string(pidfile) {
+            if text.ends_with('\n') && !text.trim().is_empty() {
+                return Some(text.trim().to_string());
+            }
+        }
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
 /// A filter that outlives its grace comes back `GraceExpired` at the grace, and its whole process
 /// group is killed: the backgrounded `sleep 30` (same group, a non-interactive shell has no job
-/// control) must not be left running.
+/// control) must not be left running. The pid is polled for WHILE the grace runs (`wait_for_pid`):
+/// a single read after a 200 ms grace flaked when the shell had not written it yet.
 #[cfg(unix)]
 #[tokio::test]
 async fn run_filter_on_capture_reports_an_expired_grace_and_kills_the_group() {
@@ -6753,23 +6842,24 @@ async fn run_filter_on_capture_reports_an_expired_grace_and_kills_the_group() {
     let pidfile = dir.path().join("pid");
     let filter = format!("sleep 30 & echo $! > '{}'; wait", pidfile.display());
     let started = std::time::Instant::now();
-    let out = super::inner::run_filter_on_capture(
-        &filter,
-        capture.to_str().unwrap(),
-        dir.path(),
-        std::time::Duration::from_millis(200),
-    )
-    .await;
+    let (out, pid) = tokio::join!(
+        super::inner::run_filter_on_capture(
+            &filter,
+            capture.to_str().unwrap(),
+            dir.path(),
+            std::time::Duration::from_secs(2),
+        ),
+        wait_for_pid(&pidfile, std::time::Duration::from_secs(10)),
+    );
     assert_eq!(out, super::inner::FilterRun::GraceExpired);
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
-        "returned at the grace, not when the filter ended: {:?}",
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "returned at the grace, not when the filter's `sleep 30` ended: {:?}",
         started.elapsed()
     );
-    let pid = std::fs::read_to_string(&pidfile).expect("the filter ran");
-    let pid = pid.trim();
+    let pid = pid.expect("the filter wrote its pid within the 2 s grace");
     assert!(
-        !still_running_after_a_grace(pid).await,
+        !still_running_after_a_grace(&pid).await,
         "the filter's `sleep 30` (pid {pid}) was orphaned"
     );
 }
@@ -6777,7 +6867,8 @@ async fn run_filter_on_capture_reports_an_expired_grace_and_kills_the_group() {
 /// R21: a call cancelled DURING the grace drops the filter's wait, and the drop must kill the
 /// filter's whole pipeline, not only the shell `kill_on_drop` reaches. The `sleep 30` is a STAGE of
 /// a two-stage filter (`exec` keeps the pid it wrote), so it is a sibling of the shell's other
-/// children, never its own child process tree.
+/// children, never its own child process tree. The call is dropped once the stage has written its
+/// pid (`wait_for_pid`), not after a fixed window, which flaked when the stage was slower to start.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_filter_whose_call_is_dropped_during_the_grace_leaves_no_stage_running() {
@@ -6789,25 +6880,22 @@ async fn a_filter_whose_call_is_dropped_during_the_grace_leaves_no_stage_running
         "cat >/dev/null | sh -c 'echo $$ > \"{}\"; exec sleep 30'",
         pidfile.display()
     );
-    // The grace is long; the outer timeout drops the future well before it.
-    let dropped = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        super::inner::run_filter_on_capture(
-            &filter,
-            capture.to_str().unwrap(),
-            dir.path(),
-            std::time::Duration::from_secs(30),
-        ),
-    )
-    .await;
+    // The grace is long; the call is dropped as soon as the stage is known to run.
+    let mut call = Box::pin(super::inner::run_filter_on_capture(
+        &filter,
+        capture.to_str().unwrap(),
+        dir.path(),
+        std::time::Duration::from_secs(30),
+    ));
+    let pid = tokio::select! {
+        out = &mut call => panic!("the future must still be waiting: {out:?}"),
+        pid = wait_for_pid(&pidfile, std::time::Duration::from_secs(10)) => {
+            pid.expect("the filter's second stage ran and wrote its pid")
+        }
+    };
+    drop(call);
     assert!(
-        dropped.is_err(),
-        "the future must still be waiting: {dropped:?}"
-    );
-    let pid = std::fs::read_to_string(&pidfile).expect("the filter's second stage ran");
-    let pid = pid.trim();
-    assert!(
-        !still_running_after_a_grace(pid).await,
+        !still_running_after_a_grace(&pid).await,
         "the filter's `sleep 30` stage (pid {pid}) outlived the dropped call"
     );
 }
@@ -6899,6 +6987,37 @@ fn a_filter_not_run_names_its_reason_and_carries_no_stdout() {
     assert_eq!(response["unfiltered_output"], "@cmd_00000001", "{response}");
     assert!(response.get("stdout").is_none(), "{response}");
     assert!(response.get("filter_grace_expired").is_none(), "{response}");
+}
+
+/// Triage (b): `filter_not_run` quotes the caller's own text (a sed script, a flag), which nothing
+/// bounds, so it is cut like `filter_stderr`: at most `FILTER_STDERR_BYTE_BUDGET` escaped bytes,
+/// with a visible marker. A short reason is kept as it is (the test above).
+#[test]
+fn a_long_filter_not_run_reason_is_cut_behind_a_marker() {
+    let mut response = json!({ "timed_out": true });
+    let reason = format!(
+        "flag `--{}` of `sort` is not known to be pure",
+        "x".repeat(5_000)
+    );
+    super::output::attach_partial_capture(
+        &mut response,
+        super::inner::FilterRun::NotRun(reason.clone()),
+        a_capture_handle(),
+        0,
+        "x | sort",
+    );
+    let shown = response["filter_not_run"].as_str().expect("a reason");
+    assert!(
+        crate::util::text::json_escaped_len(shown) <= super::output::FILTER_STDERR_BYTE_BUDGET,
+        "{} B",
+        shown.len()
+    );
+    assert!(
+        shown.contains("--- filter_not_run: ")
+            && shown.contains(&format!(" of {} bytes shown", reason.len())),
+        "a visible marker: {shown}"
+    );
+    assert!(shown.starts_with("flag `--x") && shown.ends_with("not known to be pure"));
 }
 
 /// R20: a non-zero exit code is reported (grep's 1 included: "no match" is what happened), a zero
@@ -7041,7 +7160,11 @@ fn inject_tee_in_splices_a_chain_at_its_first_pipe() {
     assert_eq!(
         injected.command,
         format!(
-            "seq 1 3 | tee '{cap}' | {{ grep 2 | head -1\ns=$?; head -c {} >/dev/null; exit $s; }}",
+            "seq 1 3 | ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '{cap}' 2>/dev/null ) \
+             | {{ grep 2 | head -1\ns=$?; head -c {} >/dev/null; exit $s; }}",
+            crate::tools::command_summary::capture_file_blocks(
+                super::output::CAPTURE_STORE_LIMIT_BYTES
+            ),
             super::output::CAPTURE_STORE_LIMIT_BYTES
         ),
     );
@@ -7104,13 +7227,18 @@ async fn a_quoted_pipe_before_a_chain_is_not_its_first_pipe() {
 }
 
 /// Over the limit the capture is cut at a line boundary and marked, and the count is still the
-/// whole stream's. `seq 1 1000000` is ~6.9 MB, so a cut at 4 MiB keeps roughly 600,000 lines.
+/// whole stream's while the stream fits the capture FILE (R26: its bound is a little over the
+/// limit). The 4,228,895-byte fixture sits between the two; a cut at 4 MiB keeps ~615,000 lines.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_capture_over_the_store_limit_is_cut_and_marked() {
     let (_dir, ctx) = project_ctx().await;
+    let line_count = SEQ_OVER_THE_STORE_UNDER_THE_FILE_BOUND;
     let result = RunCommand
-        .call(json!({ "command": "seq 1 1000000 | grep 99999" }), &ctx)
+        .call(
+            json!({ "command": format!("seq 1 {line_count} | grep 99999") }),
+            &ctx,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -7119,15 +7247,15 @@ async fn a_capture_over_the_store_limit_is_cut_and_marked() {
         "a capture over the limit must say it was cut: {result}"
     );
     assert_eq!(
-        result["unfiltered_output_lines"], 1_000_000,
+        result["unfiltered_output_lines"], line_count,
         "the count is on the FULL capture, before the cut: {result}"
     );
     let served = result["unfiltered_buffered_lines"]
         .as_u64()
         .unwrap_or_else(|| panic!("no unfiltered_buffered_lines: {result}"));
     assert!(
-        served > 500_000 && served < 1_000_000,
-        "a cut at 4 MiB keeps most of ~6.9 MB, not all and not ~2,200 lines: served={served}"
+        served > 600_000 && served < line_count as u64,
+        "a cut at 4 MiB keeps most of ~4.2 MB, not all and not ~2,200 lines: served={served}"
     );
     let handle = result["unfiltered_output"].as_str().expect("handle");
     let stored = ctx.output_buffer.get(handle).expect("entry").stdout;
@@ -7138,6 +7266,282 @@ async fn a_capture_over_the_store_limit_is_cut_and_marked() {
             .is_some_and(|l| l.starts_with(crate::tools::output_buffer::TRUNCATION_SENTINEL_PREFIX)),
         "the marker travels with the data"
     );
+}
+
+/// R26: the capture FILE is bounded for every filter, not only for early-exit ones. `tail -1` reads
+/// the whole stream (its answer is the last line, 3000000), while the file behind the handle stops
+/// a little over the store limit: the count is then a lower bound and `unfiltered_truncated` says so.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_whole_stream_filter_sees_every_line_while_its_capture_is_bounded() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "seq 1 3000000 | tail -1", "timeout_secs": 60 }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        result["stdout"], "3000000\n",
+        "the filter sees the whole stream: {result}"
+    );
+    assert_eq!(result["unfiltered_truncated"], true, "{result}");
+    let lines = result["unfiltered_output_lines"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("no unfiltered_output_lines: {result}"));
+    assert!(
+        lines > 400_000 && lines < 3_000_000,
+        "a lower bound of the stream, from a file of about 4 MiB: {lines}"
+    );
+}
+
+/// R26 at the shell: the spliced text, run as is, gives the filter the whole stream (`grep -c 7`
+/// counts every matching line of 3,000,000) while `ulimit -f` stops the capture FILE at its block
+/// bound, which is over the store limit so the handle is still marked truncated. The tee's EFBIG is
+/// silent: `trap '' XFSZ` keeps it alive and `2>/dev/null` keeps its complaint out of the stderr.
+/// The block unit is measured, not assumed: POSIX `sh` (dash, bash as `sh`) counts 512 bytes, a bash
+/// outside POSIX mode 1024 (measured 2026-10-22 on this machine: 4,259,840 B as `sh`, 8,519,680 B
+/// as `bash`).
+#[cfg(unix)]
+#[test]
+fn the_spliced_capture_file_is_bounded_while_the_filter_reads_the_whole_stream() {
+    use crate::tools::command_summary::{capture_file_blocks, splice_tee};
+    let dir = tempfile::tempdir().unwrap();
+    // The unit this `sh` counts `ulimit -f` in: a 1-block file limit on a 4096-byte write.
+    let probe = dir.path().join("probe");
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "( trap '' XFSZ; ulimit -f 1 2>/dev/null; exec head -c 4096 /dev/zero > '{}' ) 2>/dev/null",
+            probe.display()
+        ))
+        .status()
+        .unwrap();
+    let unit = std::fs::metadata(&probe).unwrap().len() as usize;
+    assert!(
+        unit == 512 || unit == 1024,
+        "`ulimit -f` must bound a file under this `sh`: a 1-block limit let {unit} B through"
+    );
+
+    let cap = dir.path().join("cap");
+    let cmd = "seq 1 3000000 | grep -c 7";
+    let limit = super::output::CAPTURE_STORE_LIMIT_BYTES;
+    let text = splice_tee(cmd, cmd.find('|').unwrap(), cap.to_str().unwrap(), limit);
+    assert!(
+        text.contains(&format!(
+            "| ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '",
+            capture_file_blocks(limit)
+        )),
+        "{text}"
+    );
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&text)
+        .output()
+        .unwrap();
+    let expected = (1..=3_000_000u32)
+        .filter(|n| n.to_string().contains('7'))
+        .count();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        expected.to_string(),
+        "the filter counts the WHOLE stream"
+    );
+    assert!(
+        out.stderr.is_empty(),
+        "no diagnostic: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let size = std::fs::metadata(&cap).unwrap().len() as usize;
+    let bound = capture_file_blocks(limit) * unit;
+    assert!(
+        size <= bound,
+        "the capture file is {size} B, over its {bound} B bound"
+    );
+    if unit == 512 {
+        // The ruling's bound: the store limit + 64 KiB + at most one block of rounding.
+        assert!(size <= limit + 64 * 1024 + 512, "{size}");
+    }
+    assert!(
+        size > limit,
+        "over the store limit, so the handle is marked truncated: {size}"
+    );
+}
+
+/// R26, belt and braces for a shell whose `ulimit -f` does nothing: `read_capture` reads at most
+/// `CAPTURE_READ_LIMIT_BYTES` of a capture file of any size, says the file went on (`cut`), and the
+/// response marks the cut with a lower-bound count.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_capture_file_over_the_read_limit_is_read_bounded_and_flagged() {
+    let (dir, ctx) = project_ctx().await;
+    let read_limit = super::output::CAPTURE_READ_LIMIT_BYTES;
+    let line = "0123456789abcdef\n";
+    let total_lines = (read_limit + 2 * 1024 * 1024) / line.len();
+    let path = dir.path().join("big-capture");
+    std::fs::write(&path, line.repeat(total_lines)).unwrap();
+    let path = path.to_str().unwrap().to_string();
+
+    let guard = super::inner::TmpfileGuard(path.clone());
+    let read = super::output::read_capture(&guard).expect("readable");
+    assert_eq!(read.text.len(), read_limit, "the read stops at its bound");
+    assert!(read.cut, "the file is longer than what was read");
+    std::mem::forget(guard); // the response below reads the same file
+
+    let result = super::output::handle_successful_output(
+        "cat big | grep x",
+        "x\n".to_string(),
+        String::new(),
+        0,
+        false,
+        Some(super::inner::TmpfileGuard(path)),
+        dir.path(),
+        &ctx,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["unfiltered_truncated"], true, "{result}");
+    let lines = result["unfiltered_output_lines"].as_u64().unwrap() as usize;
+    assert_eq!(
+        lines,
+        read_limit / line.len() + 1,
+        "the lines READ (the last one cut mid-line), a lower bound of {total_lines}"
+    );
+    assert!(lines < total_lines);
+}
+
+/// `CaptureRead::cut` compares the FILE with what was read and with the on-disk bound the splice
+/// puts on it: a small file is not cut, a file that reached the `ulimit -f` bound is (the stream
+/// may go on past it), and `store_capture` marks a cut source truncated even when its text fits
+/// the store, as it can after the credential scrub shrinks it.
+#[tokio::test]
+async fn a_cut_capture_source_is_marked_truncated_whatever_its_size() {
+    let (dir, ctx) = project_ctx().await;
+    let read = |name: &str, content: &[u8]| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        super::output::read_capture(&super::inner::TmpfileGuard(
+            path.to_str().unwrap().to_string(),
+        ))
+        .expect("readable")
+    };
+    assert!(!read("small", b"a\nb\n").cut, "a small file is whole");
+    let bound = crate::tools::command_summary::capture_file_blocks(
+        super::output::CAPTURE_STORE_LIMIT_BYTES,
+    ) * 512;
+    assert!(
+        !read("under", &vec![b'u'; bound - 1]).cut,
+        "one byte under the file bound"
+    );
+    assert!(
+        read("at", &vec![b'a'; bound]).cut,
+        "a file AT the bound may have been cut by it"
+    );
+
+    let (_, cut, lines, _) =
+        super::output::store_capture("a\nb\n".to_string(), true, "x | grep a", 0, &ctx).unwrap();
+    let cut = cut.expect("a cut source is marked even when it fits");
+    assert_eq!((cut.kept_lines, cut.total_lines, lines), (2, 2, 2));
+    let (_, cut, _, _) =
+        super::output::store_capture("a\nb\n".to_string(), false, "x | grep a", 0, &ctx).unwrap();
+    assert_eq!(cut, None, "a whole small source is not");
+}
+
+/// R27: a capture that is not UTF-8 keeps its handle. `read_to_string` failed on the first such
+/// byte and the whole key group vanished with no word; the lossy decode keeps it, the bad bytes as
+/// U+FFFD.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_capture_that_is_not_utf8_keeps_its_handle() {
+    let (_dir, ctx) = project_ctx().await;
+    let result = RunCommand
+        .call(
+            json!({ "command": "printf 'ok\\n\\377\\376 bad\\n' | grep ok" }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["stdout"], "ok\n", "{result}");
+    let handle = result["unfiltered_output"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the handle survives: {result}"));
+    let stored = ctx.output_buffer.get(handle).unwrap().stdout;
+    assert!(stored.contains('\u{FFFD}'), "{stored:?}");
+    assert!(stored.contains(" bad"), "{stored:?}");
+}
+
+/// A capture that exists but cannot be read back says so, instead of a silently absent key group.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unreadable_capture_says_so_in_the_response() {
+    let (dir, ctx) = project_ctx().await;
+    let missing = dir.path().join("no-such-capture");
+    let result = super::output::handle_successful_output(
+        "seq 3 | grep 2",
+        "2\n".to_string(),
+        String::new(),
+        0,
+        false,
+        Some(super::inner::TmpfileGuard(
+            missing.to_str().unwrap().to_string(),
+        )),
+        dir.path(),
+        &ctx,
+    )
+    .await
+    .unwrap();
+    assert!(result.get("unfiltered_output").is_none(), "{result}");
+    assert!(
+        result["unfiltered_output_skipped"]
+            .as_str()
+            .is_some_and(|s| s.contains("could not be read")),
+        "{result}"
+    );
+}
+
+/// The store limit's exact edge (spec): content of EXACTLY `CAPTURE_STORE_LIMIT_BYTES` is kept
+/// whole; one byte over is cut; and a last line that crosses the budget is kept whole, the marker
+/// counting it among the kept lines.
+#[tokio::test]
+async fn store_capture_keeps_exactly_the_limit_and_cuts_one_byte_over() {
+    let (_dir, ctx) = project_ctx().await;
+    let limit = super::output::CAPTURE_STORE_LIMIT_BYTES;
+    let line = format!("{}\n", "a".repeat(1023));
+    let at_limit = line.repeat(limit / line.len());
+    assert_eq!(at_limit.len(), limit, "fixture: exactly the limit");
+
+    let (_, cut, lines, _) =
+        super::output::store_capture(at_limit.clone(), false, "x | grep a", 0, &ctx).unwrap();
+    assert_eq!(cut, None, "exactly the limit is kept whole");
+    assert_eq!(lines, 4096);
+
+    let (handle, cut, lines, _) =
+        super::output::store_capture(format!("{at_limit}b"), false, "x | grep a", 0, &ctx).unwrap();
+    let cut = cut.expect("one byte over is cut");
+    assert_eq!((cut.kept_lines, cut.total_lines, lines), (4096, 4097, 4097));
+    let stored = ctx.output_buffer.get(&handle).unwrap().stdout;
+    assert!(
+        stored.ends_with(&format!(
+            "{}\n",
+            crate::tools::output_buffer::truncation_marker(cut)
+        )),
+        "the marker counts 4096 of 4097"
+    );
+
+    let crossing = "c".repeat(2000);
+    let content = format!("{}{crossing}\ntail\n", line.repeat(limit / line.len() - 1));
+    let (handle, cut, lines, _) =
+        super::output::store_capture(content, false, "x | grep a", 0, &ctx).unwrap();
+    let cut = cut.expect("over the limit");
+    assert_eq!(
+        (cut.kept_lines, cut.total_lines, lines),
+        (4096, 4097, 4097),
+        "the crossing line is kept whole, only `tail` is cut"
+    );
+    let stored = ctx.output_buffer.get(&handle).unwrap().stdout;
+    assert!(stored.contains(&format!("\n{crossing}\n")), "kept whole");
+    assert!(!stored.contains("\ntail\n"), "cut");
 }
 
 /// Bug bc0cb248b224d1dd, at the new size: the scrub runs on the whole capture before the cut, so a
@@ -7264,7 +7668,7 @@ async fn il3_blocks_unbounded_pipe_pre_exec() {
 #[tokio::test]
 async fn a_foreground_pipe_from_an_unbounded_producer_is_not_refused() {
     // `cargo` is on the gate's unbounded-producer list, and `head` is a terminal filter: the pipe
-    // is run to the end through the capture and the full stream is kept as `unfiltered_output`,
+    // is run through the capture and its stream (up to 4 MiB) is kept as `unfiltered_output`,
     // so there is nothing for the gate to refuse. The producer is `cargo --version` on purpose: a
     // foreground `cargo test | grep` would run `cargo test` for real.
     let (_dir, ctx) = project_ctx().await;

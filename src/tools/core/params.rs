@@ -33,7 +33,7 @@ fn param_hint(name: &str) -> Option<&'static str> {
         "command" => {
             "Pass the shell command as one string, e.g. command=\"cargo test --lib\". Run it \
              bare and query the @cmd_* buffer, or end a foreground pipe in a filter (`| grep …`) to keep \
-             the whole stream as `unfiltered_output`."
+             its first command's stream (up to 4 MiB) as `unfiltered_output`."
         }
         "pattern" => {
             "Pass the regex to search for, e.g. pattern=\"fn my_func\" — 'query' and 'regex' \

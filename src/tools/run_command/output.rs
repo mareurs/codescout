@@ -639,8 +639,10 @@ fn plain_slice_window(command: &str) -> Option<(usize, Option<usize>)> {
 /// is one pipeline, and the IL3 gate does not refuse the joined command. Asked of the gate itself
 /// (`pipe_refusal`, foreground), so a route a hint offers is one `run_command` accepts; a list of
 /// "safe" producers kept here would drift from it. A pager (`| sed -n`) and `| cut` are terminal
-/// filters, so the gate refuses the joined command only where the capture cannot be promised (a
-/// buffer ref in the text, a `|&` first pipe) and an unbounded producer is piped into a trimmer.
+/// filters, so the gate refuses the joined command only where the capture cannot be promised and an
+/// unbounded producer is piped into a trimmer: a buffer ref in the text, a `|&` first pipe, a first
+/// pipe nested in a group or substitution, a comment, a heredoc, `$(` or a backtick after it, or a
+/// splice the shell does not parse (the full list is `pipe_refusal`'s).
 fn can_append_stage(query: &str, stage: &str) -> bool {
     crate::util::path_security::is_one_pipeline(query)
         && super::pipe_refusal(&format!("{query} {stage}"), false).is_none()
@@ -1057,13 +1059,14 @@ fn attachments(
         keys.insert("unfiltered_output_lines".into(), json!(line_count));
         if let Some(t) = truncation {
             keys.insert("unfiltered_truncated".into(), json!(true));
-            // `unfiltered_output_lines` counts the lines of the CAPTURE FILE, before the store cut;
+            // `unfiltered_output_lines` counts the lines of the capture READ, before the store cut;
             // this key describes the HANDLE sitting next to it. Naming only the first left a
             // reader to assume one number covered both, which is the misread this key exists to
-            // prevent. The capture file is the whole stream only when the stream ended on its own:
-            // when an early-exit filter (`| head -N`) stopped the producer, the drain group read
-            // at most `CAPTURE_STORE_LIMIT_BYTES` more, so the count is then a LOWER BOUND of the
-            // stream, and this `unfiltered_truncated` is what marks it.
+            // prevent. The count is the whole stream only when the stream fit the capture file. The
+            // file is bounded a little over `CAPTURE_STORE_LIMIT_BYTES` for EVERY filter (the
+            // splice's `ulimit -f`; the read is bounded too), and an early-exit filter (`| head -N`)
+            // also stops the producer after the drain reads that much. Either way the count is then
+            // a LOWER BOUND of the stream, and this `unfiltered_truncated` is what marks it.
             keys.insert("unfiltered_buffered_lines".into(), json!(t.kept_lines));
         }
         if !pool_cut.is_empty() {
@@ -1125,17 +1128,37 @@ fn inline_stdout_room(skeleton: &Value) -> usize {
     crate::tools::response_room(skeleton).saturating_sub(EMPTY_STDOUT_KEY.len())
 }
 
-/// The most bytes of an unfiltered capture the `@cmd_*` handle behind `unfiltered_output` keeps.
-/// A capture over it is cut at a line boundary and marked; one under it is kept whole.
+/// The bytes of an unfiltered capture the `@cmd_*` handle behind `unfiltered_output` keeps. A
+/// capture over it is cut at the first line boundary at or past the limit (the line that crosses it
+/// is kept whole, so the handle can hold a little more than this) and marked; one of at most this
+/// many bytes is kept whole.
 ///
 /// It was `MAX_INLINE_TOKENS * 4` (10 KB), the size of an INLINE response, though the handle is
 /// not inline: a 100,000-line stream was cut to ~2,200 lines behind a ref whose point is to be
 /// re-read. The pool's own per-entry cap (`OutputBuffer::entry_cap`, half the pool) still applies
-/// on top of it.
+/// on top of it. The capture FILE is bounded too, a little over this (`splice_tee`'s
+/// `ulimit -f`), and so is the read of it ([`CAPTURE_READ_LIMIT_BYTES`]).
 // cap-class: RESULT_CAP run_command.capture_store_bytes — probed
 pub(super) const CAPTURE_STORE_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 
-/// Read the tee capture behind `tmpfile`, scrubbed of credentials: `(text, values redacted)`.
+/// The most bytes of the capture FILE [`read_capture`] reads into server memory. The file is
+/// already bounded on disk (`splice_tee` runs `tee` under `ulimit -f`, a little over
+/// [`CAPTURE_STORE_LIMIT_BYTES`]); this is the bound for a shell where that `ulimit` does nothing
+/// (Git Bash may lack it), so a `git log --all -p` (268 MB measured) can never be read whole.
+/// Above the store limit by construction, so a capture cut here is always cut again by
+/// [`store_capture`] and flagged `unfiltered_truncated`; its line count is then a lower bound.
+// cap-class: RESULT_CAP run_command.capture_read_bytes — probed
+pub(super) const CAPTURE_READ_LIMIT_BYTES: usize = CAPTURE_STORE_LIMIT_BYTES + 1024 * 1024;
+
+const _: () = assert!(CAPTURE_READ_LIMIT_BYTES > CAPTURE_STORE_LIMIT_BYTES);
+
+/// Read the tee capture behind `tmpfile`, scrubbed of credentials (see [`CaptureRead`]).
+///
+/// At most [`CAPTURE_READ_LIMIT_BYTES`] are read (`Read::take`), never the whole file whatever its
+/// size: `read_to_string` read a 268 MB `git log --all -p` capture into server memory. The bytes
+/// are decoded LOSSILY: `read_to_string` failed on one byte that is not UTF-8 (a latin-1 file under
+/// `rg`), and the whole handle vanished with no word; now such bytes become U+FFFD and the handle
+/// survives. A read cut at the bound can also split a character, which decodes the same way.
 ///
 /// `None` on a read error, which is logged. `.ok()` here used to discard the error, and that is
 /// how a transient read failure became an ABSENT key group rather than a reported one: the caller
@@ -1144,21 +1167,37 @@ pub(super) const CAPTURE_STORE_LIMIT_BYTES: usize = 4 * 1024 * 1024;
 /// `docs/issues/archive/2026-08-26-wine-lane-flakes-under-load-on-three-tests.md` § Resume, after
 /// a load-contention flake on the wine lane dropped exactly this key group — the tell being that
 /// the surviving keys are set in the same block as the missing ones, so the response could not
-/// have come from that block.
-///
-/// Behaviour is deliberately unchanged: still `None` on error, no retry, no timeout tuning — that
-/// file rules both out as actively harmful on one unreproduced occurrence. The only difference is
-/// that the next occurrence leaves a trace instead of a silence.
+/// have come from that block. The response path also says so (`unfiltered_output_skipped`).
 ///
 /// Bug bc0cb248b224d1dd: this is the UNFILTERED stream, read from a file, so it never passed the
 /// decode in `run_command_inner` that scrubs `stdout`. `env | grep PATH` shows one line inline
 /// while this buffer holds the whole environment.
-pub(super) fn read_capture(tmp: &TmpfileGuard) -> Option<(String, usize)> {
-    match std::fs::read_to_string(&tmp.0) {
-        Ok(content) => {
+pub(super) fn read_capture(tmp: &TmpfileGuard) -> Option<CaptureRead> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(&tmp.0).and_then(|file| {
+        let file_len = file.metadata()?.len();
+        file.take(CAPTURE_READ_LIMIT_BYTES as u64)
+            .read_to_end(&mut bytes)?;
+        Ok(file_len)
+    });
+    match read {
+        Ok(file_len) => {
+            // Cut by the read bound (the file is longer than what was read), or the file reached
+            // the bound `splice_tee`'s `ulimit -f` puts on it (512-byte units: what `sh` counts).
+            // Either way the stream may go on past it, whatever the store limit makes of the
+            // text after redaction, so the store marks the handle truncated.
+            let file_bound =
+                (super::super::command_summary::capture_file_blocks(CAPTURE_STORE_LIMIT_BYTES)
+                    * 512) as u64;
+            let cut = file_len > bytes.len() as u64 || file_len >= file_bound;
+            let content = String::from_utf8_lossy(&bytes);
             let scrubbed = redact_credentials(&content);
-            let count = scrubbed.count;
-            Some((scrubbed.text.into_owned(), count))
+            Some(CaptureRead {
+                redacted: scrubbed.count,
+                text: scrubbed.text.into_owned(),
+                cut,
+            })
         }
         Err(e) => {
             tracing::warn!(
@@ -1172,14 +1211,30 @@ pub(super) fn read_capture(tmp: &TmpfileGuard) -> Option<(String, usize)> {
     }
 }
 
+/// What [`read_capture`] read of a capture file.
+#[derive(Debug)]
+pub(super) struct CaptureRead {
+    /// The text read, decoded lossily and scrubbed of credentials.
+    pub(super) text: String,
+    /// How many credential values the scrub replaced.
+    pub(super) redacted: usize,
+    /// The file is longer than what was read, or reached its on-disk bound: the stream may go on
+    /// past `text`, so [`store_capture`] marks the handle truncated even if `text` fits the store.
+    pub(super) cut: bool,
+}
+
 /// Store an already-scrubbed capture as an `@cmd_*` handle, cut at [`CAPTURE_STORE_LIMIT_BYTES`].
 ///
-/// Returns `(handle, cut record the pool kept, line count of the FULL capture, pool-cut notices)`,
-/// the tuple `unfiltered_ref` carries. `None` for an empty capture: when the terminal filter
+/// Returns `(handle, cut record the pool kept, line count of the capture READ, pool-cut notices)`,
+/// the tuple `unfiltered_ref` carries. The count is of everything read, before the store cut: the
+/// whole stream when it fit the capture file, a LOWER BOUND of it when the file or the read was
+/// cut (`source_cut`, which sets the cut record whatever the size, so `unfiltered_truncated` marks
+/// it). `None` for an empty capture: when the terminal filter
 /// matched nothing, both `raw_stdout` and the tee file are empty, and surfacing a handle is
 /// misleading.
 pub(super) fn store_capture(
     content: String,
+    source_cut: bool,
     original_command: &str,
     exit_code: i32,
     ctx: &ToolContext,
@@ -1193,10 +1248,14 @@ pub(super) fn store_capture(
     if content.is_empty() {
         return None;
     }
-    // Counted on the FULL capture, before any storage truncation below — the whole point is
-    // telling the caller how much is behind the ref, not how much of it happened to fit.
+    // Counted on everything read, before any storage truncation below — the whole point is
+    // telling the caller how much is behind the ref, not how much of it happened to fit. A lower
+    // bound of the stream when the capture file or the read was cut, which this cut then marks.
     let line_count = count_lines(&content);
-    let (stored, truncation) = if content.len() > CAPTURE_STORE_LIMIT_BYTES {
+    // `source_cut` (the capture FILE or its read was cut, [`CaptureRead::cut`]) marks the handle even
+    // when the redacted text fits: the stream went on past what is kept. By construction such a
+    // text is over the limit anyway unless the scrub shrank it by a megabyte or more.
+    let (stored, truncation) = if source_cut || content.len() > CAPTURE_STORE_LIMIT_BYTES {
         let mut byte_budget = CAPTURE_STORE_LIMIT_BYTES;
         let capped: String = content
             .lines()
@@ -1252,17 +1311,28 @@ pub(super) fn store_capture(
     Some((ref_id, held, line_count, pool_cut))
 }
 
+/// The `hint` of a timed-out filtered command whose partial capture was kept (`capture_incomplete`).
+/// It replaces the plain timeout hint, which sends the caller to a higher `timeout_secs`: that does
+/// not help a producer that never ends or is slower than any timeout.
+// cap-class: NOT_A_CAP — hint text, not a bound
+pub(super) const CAPTURE_INCOMPLETE_TIMEOUT_HINT: &str =
+    "The producer was killed at the timeout. The result above is the filter run on the partial \
+     capture (or `filter_not_run` / `filter_grace_expired` says why there is none); \
+     `unfiltered_output` holds that partial stream. Raising timeout_secs will not help an endless \
+     or slow producer: bound the producer (`timeout 10 cmd`, `ping -c 3`) or run it bare.";
+
 /// Add what a timed-out filtered command recovered to its `timed_out` response: what its filter
 /// made of the partial capture (`run`, its streams already scrubbed) and the capture's handle
 /// (`unfiltered`, from [`store_capture`]).
 ///
-/// The response gains `capture_incomplete`, the `unfiltered_*` keys and the redaction note through
+/// The response gains `capture_incomplete` (its `hint` becomes [`CAPTURE_INCOMPLETE_TIMEOUT_HINT`]),
+/// the `unfiltered_*` keys and the redaction note through
 /// [`attachments`], the helper the normal path uses for them, then by `run`:
 /// - `Ran`: `filter_exit_code` when it is not 0 (grep's 1 included: it says "no match", which an
 ///   empty `stdout` alone does not), `filter_stderr` when there is any (cut to
 ///   [`FILTER_STDERR_BYTE_BUDGET`] behind a marker), and `stdout`;
 /// - `GraceExpired`: `filter_grace_expired`, no `stdout`;
-/// - `NotRun(reason)`: `filter_not_run: reason`, no `stdout`.
+/// - `NotRun(reason)`: `filter_not_run: reason` (cut like `filter_stderr`), no `stdout`.
 ///
 /// `stdout` is cut to the room every other key leaves within the inline limit, MEASURED from the
 /// response itself: nothing bounds a filter's output, and this response is built outside
@@ -1292,6 +1362,9 @@ pub(super) fn attach_partial_capture(
         return;
     };
     obj.insert("capture_incomplete".into(), json!(true));
+    // The plain timeout hint ("pass a higher timeout_secs") is wrong here: an endless or slow
+    // producer into a filter (`tail -f log | grep -m1 ready`) times out again at any timeout.
+    obj.insert("hint".into(), json!(CAPTURE_INCOMPLETE_TIMEOUT_HINT));
     obj.extend(keys);
     let text = match run {
         FilterRun::GraceExpired => {
@@ -1299,7 +1372,10 @@ pub(super) fn attach_partial_capture(
             return;
         }
         FilterRun::NotRun(reason) => {
-            obj.insert("filter_not_run".into(), json!(reason));
+            obj.insert(
+                "filter_not_run".into(),
+                json!(bound_filter_not_run(&reason)),
+            );
             return;
         }
         FilterRun::Ran {
@@ -1361,6 +1437,19 @@ fn bound_filter_stderr(stderr: &str) -> String {
     )
 }
 
+/// `filter_not_run`, cut like `filter_stderr` to [`FILTER_STDERR_BYTE_BUDGET`] escaped bytes
+/// behind a marker. The reason quotes the caller's own text (a `sed` script, a flag), which nothing
+/// bounds, so a long one would otherwise ride into the response whole.
+fn bound_filter_not_run(reason: &str) -> String {
+    crate::util::text::elide_middle_escaped(
+        reason,
+        reason.len(),
+        FILTER_STDERR_BYTE_BUDGET,
+        "filter_not_run",
+        "the cut part quotes the command as you wrote it",
+    )
+}
+
 /// Build the response for a command that ran to completion — at any exit code.
 ///
 /// The name says "successful" about the *process*, not the *outcome*: a failing
@@ -1413,7 +1502,7 @@ pub(crate) async fn handle_successful_output_with(
     // has it, from `resolve_work_dir`.
     work_dir: &std::path::Path,
     ctx: &ToolContext,
-    late_keys: LateKeys,
+    mut late_keys: LateKeys,
 ) -> anyhow::Result<Value> {
     use super::super::command_summary::{
         count_lines, detect_command_type, inline_response_exceeds_limit, strip_ansi_codes,
@@ -1443,11 +1532,20 @@ pub(crate) async fn handle_successful_output_with(
         Vec<String>,
     )> = if let Some(ref tmpfile) = unfiltered_tmpfile {
         // tmpfile drops at function exit — TmpfileGuard::drop() removes the file.
-        // `read_capture` is `None` on a logged read error; `store_capture` is `None` for an
-        // empty capture (the terminal filter matched nothing, so there is no handle to show).
-        read_capture(tmpfile).and_then(|(content, redacted)| {
-            tee_redacted = redacted;
-            store_capture(content, original_command, exit_code, ctx)
+        // `read_capture` is `None` on a logged read error, which the response then says
+        // (`unfiltered_output_skipped`); `store_capture` is `None` for an empty capture (the
+        // terminal filter matched nothing, so there is no handle to show).
+        let read = read_capture(tmpfile);
+        if read.is_none() {
+            late_keys.tee_skipped.get_or_insert_with(|| {
+                "the unfiltered-output capture was made but could not be read back (logged); \
+                 only the `unfiltered_output` buffer is missing"
+                    .to_string()
+            });
+        }
+        read.and_then(|read| {
+            tee_redacted = read.redacted;
+            store_capture(read.text, read.cut, original_command, exit_code, ctx)
         })
     } else {
         None

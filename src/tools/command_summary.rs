@@ -583,19 +583,46 @@ pub fn tee_splice_point(cmd: &str) -> Option<usize> {
 }
 
 /// `cmd` with the unfiltered-output capture spliced in at `pipe_pos` (the `|` that
-/// [`tee_splice_point`] returned): `A | tee '<tee_path>' | { B` + a newline + `s=$?; head -c
-/// <drain_bytes> >/dev/null; exit $s; }`. The ONE place that builds the shape, for the real splice
+/// [`tee_splice_point`] returned):
+/// `A | ( trap '' XFSZ; ulimit -f <N> 2>/dev/null; exec tee '<tee_path>' 2>/dev/null ) | { B` + a
+/// newline + `s=$?; head -c <store_limit> >/dev/null; exit $s; }`, with `N` =
+/// [`capture_file_blocks`]`(store_limit)`. The ONE place that builds the shape, for the real splice
 /// (`inject_tee_in`) and for the parse check in [`tee_splice_point`], so what is checked is what
 /// runs. The newline before `s=$?` (not `;`) is load-bearing: a trailing `# comment` in the filter
 /// would otherwise swallow the closing brace.
-pub(crate) fn splice_tee(cmd: &str, pipe_pos: usize, tee_path: &str, drain_bytes: usize) -> String {
+///
+/// The `tee` runs under `ulimit -f`, so the capture FILE stops a little over `store_limit` for
+/// EVERY filter, while `tee` keeps copying the whole stream to the filter: past the bound its
+/// writes to the file fail with EFBIG, `trap '' XFSZ` (inherited through `exec`) keeps the signal
+/// from killing it, and its `2>/dev/null` keeps the complaint out of the command's stderr. Before
+/// this a whole-stream filter (`git log --all -p | grep x`, 268 MB measured) filled the capture
+/// file, on a tmpfs `/tmp` that is RAM. A shell where `ulimit -f` fails (the `2>/dev/null` hides
+/// it) leaves the file unbounded and the command working; `read_capture`'s read bound covers that.
+pub(crate) fn splice_tee(cmd: &str, pipe_pos: usize, tee_path: &str, store_limit: usize) -> String {
     format!(
-        "{} | tee '{}' | {{ {}\ns=$?; head -c {} >/dev/null; exit $s; }}",
+        "{} | ( trap '' XFSZ; ulimit -f {} 2>/dev/null; exec tee '{}' 2>/dev/null ) | {{ {}\ns=$?; \
+         head -c {} >/dev/null; exit $s; }}",
         cmd[..pipe_pos].trim_end(),
+        capture_file_blocks(store_limit),
         tee_path,
         cmd[pipe_pos + 1..].trim_start(),
-        drain_bytes
+        store_limit
     )
+}
+
+/// The headroom over the store limit the capture file may grow to (see [`capture_file_blocks`]):
+/// enough that a capture cut by the file bound is always over the store limit, so the handle is
+/// marked `unfiltered_truncated`, and small next to the limit itself.
+// cap-class: NOT_A_CAP — slack over CAPTURE_STORE_LIMIT_BYTES: a capture cut at the file bound is always over the store limit, so the caller meets the store cut and its `unfiltered_truncated`
+pub(crate) const CAPTURE_FILE_HEADROOM_BYTES: usize = 64 * 1024;
+
+/// The `ulimit -f` value [`splice_tee`] sets for a store limit of `store_limit` bytes:
+/// `ceil((store_limit + CAPTURE_FILE_HEADROOM_BYTES) / 512)`. POSIX counts `ulimit -f` in 512-byte
+/// blocks (dash, and bash as `sh`), so the file stops at `N * 512` bytes; a bash outside POSIX
+/// mode counts 1024-byte units, which doubles the bound (about 8 MiB): still bounded and still over
+/// the store limit.
+pub(crate) const fn capture_file_blocks(store_limit: usize) -> usize {
+    (store_limit + CAPTURE_FILE_HEADROOM_BYTES).div_ceil(512)
 }
 
 /// Whether the filter of a timed-out command may be run AGAIN, alone, over its partial capture:

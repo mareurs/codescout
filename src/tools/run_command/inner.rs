@@ -321,6 +321,8 @@ pub(super) fn inject_tee_in(
     // POSIX only: `sh -c` may be dash. The shape (`splice_tee`) puts the newline before `s=$?` (not
     // `;`) so a trailing `# comment` in the filter cannot swallow the closing brace. The group
     // sits on the filter's side of the pipe, so the producer's stderr is not piped into it.
+    // The `tee` runs under `ulimit -f` (`splice_tee`), so the capture FILE is bounded for every
+    // filter, a whole-stream one (`grep`, `tail`) included, while the filter still reads it all.
     let filter = resolved_command[pipe_pos + 1..].trim_start().to_string();
     let prefix = resolved_command[..pipe_pos].to_string();
     let command = super::super::command_summary::splice_tee(
@@ -856,7 +858,12 @@ pub(crate) async fn run_command_inner(
                 tee_prefix.as_deref(),
                 &unfiltered_tmpfile,
             ) {
-                if let Some((content, capture_redacted)) = super::output::read_capture(capture) {
+                if let Some(super::output::CaptureRead {
+                    text: content,
+                    redacted: capture_redacted,
+                    cut: capture_cut,
+                }) = super::output::read_capture(capture)
+                {
                     if !content.is_empty() {
                         let (run, filter_redacted) =
                             match super::super::command_summary::filter_is_replayable(
@@ -893,8 +900,13 @@ pub(crate) async fn run_command_inner(
                                 },
                                 Err(reason) => (FilterRun::NotRun(reason), 0),
                             };
-                        let unfiltered =
-                            super::output::store_capture(content, original_command, -1, ctx);
+                        let unfiltered = super::output::store_capture(
+                            content,
+                            capture_cut,
+                            original_command,
+                            -1,
+                            ctx,
+                        );
                         // The envelope keys go on BEFORE the stdout room is measured, as the
                         // normal path's gate measures them; `call` then leaves them as they are.
                         if unfiltered.is_some() {

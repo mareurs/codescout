@@ -1888,10 +1888,11 @@ pub fn il3_offender(command: &str) -> Option<(String, String)> {
 /// **The message is worded for a BACKGROUND run.** A background run sends its stdout
 /// straight to a log and keeps no unfiltered stream, so what its pipe drops is gone.
 /// A foreground pipe the capture serves (`tee_splice_point`: last stage a terminal filter,
-/// first top-level pipe followed by one pipeline, no buffer ref) is run to the end through the
-/// capture and the full stream is kept as `unfiltered_output`; one it cannot serve is still
-/// refused, in the words of `run_command`'s `pipe_refusal`, which asks [`il3_offender`] (the
-/// detection below) which pipe it is.
+/// first top-level pipe followed by one pipeline, no buffer ref) runs through the capture, and the
+/// stream of its first command, up to 4 MiB, is kept as `unfiltered_output`; one it cannot serve is
+/// still refused, in the words of `run_command`'s `pipe_refusal`, which asks [`il3_offender`] (the
+/// detection below) which pipe it is. Route (b) of the message (the foreground) is offered only for
+/// a pipe the capture serves (`capture_can_serve`).
 ///
 /// *(The doc comment here used to name `codescout-companion/hooks/il3-deny-hook.sh`
 /// as a mirror to keep in sync. That file still exists but is no longer wired:
@@ -1932,16 +1933,22 @@ pub fn il3_offender(command: &str) -> Option<(String, String)> {
 pub fn detect_il3_violation(command: &str) -> Option<String> {
     let (segment, lead) = il3_offender(command)?;
     let (segment, lead) = (segment.as_str(), lead.as_str());
+    // Route (b) is offered only when the foreground would take the SAME pipe: the foreground refuses
+    // exactly the pipes the capture cannot serve, so a route that ignored this sent the caller to a
+    // second refusal.
+    let foreground = if crate::tools::run_command::capture_can_serve(command) {
+        "\n  (b) run the same pipe in the FOREGROUND (drop run_in_background): it runs through a\n      \
+         capture, and the stream of its first command, up to 4 MiB, is kept as `unfiltered_output`."
+    } else {
+        ""
+    };
 
     Some(format!(
         "IL3 violation — piped `{segment}` to a log-trimmer in a BACKGROUND run. BLOCKED.\n\n\
          A background run keeps only what its pipe passes: its log gets the FILTERED\n\
-         output, and what the trimmer drops is gone. Either:\n  \
+         output, and what the trimmer drops is gone. {either}\n  \
          (a) run_command(\"{lead}\", run_in_background=true)  — the log holds the full output\n      \
-         as @bg_xxx; then grep PATTERN @bg_xxx (also: tail -20 @bg_xxx, head -50 @bg_xxx)\n  \
-         (b) run the pipe in the FOREGROUND (drop run_in_background), ending it in a filter\n      \
-         (grep, head, tail, ...): it runs to the end and the full stream is kept as\n      \
-         `unfiltered_output`.\n\n\
+         as @bg_xxx; then grep PATTERN @bg_xxx (also: tail -20 @bg_xxx, head -50 @bg_xxx){foreground}\n\n\
          Bounded LHS (ls, cat, stat, du, diff, awk, sed, non-recursive grep) is allowed,\n\
          as are pure aggregators on the RHS (wc, grep -c). A pipeline that collapses\n\
          ANYWHERE (wc, grep -c, sha256sum, git patch-id) is allowed whatever follows it,\n\
@@ -1954,7 +1961,8 @@ pub fn detect_il3_violation(command: &str) -> Option<String> {
          Single-line plumbing (rev-parse, patch-id, merge-base, describe) is always bounded,\n\
          as is plumbing bounded by its argument count (check-ignore without --stdin,\n\
          cat-file -t/-s/-e). One path does NOT bound `git diff -- <file>` or\n\
-         `git ls-files <path>` — a pathspec expands and a single diff has no size limit."
+         `git ls-files <path>` — a pathspec expands and a single diff has no size limit.",
+        either = if foreground.is_empty() { "Instead:" } else { "Either:" },
     ))
 }
 
@@ -7061,9 +7069,10 @@ EOF"#;
     #[test]
     fn il3_error_says_a_background_run_keeps_only_what_its_pipe_passes() {
         // The refusal now applies to a BACKGROUND run only (a foreground pipe is run with a capture).
-        // Its message must say why, and offer both routes: the bare background run queried through its
-        // `@bg_*` log (a file on disk, not a capped buffer, so no prefix warning belongs here), or the
-        // pipe in the foreground, where the full stream is kept as `unfiltered_output`.
+        // Its message must say why, and offer the routes: the bare background run queried through its
+        // `@bg_*` log (a file on disk, not a capped buffer, so no prefix warning belongs here), and the
+        // pipe in the foreground, where the stream is kept (up to 4 MiB) as `unfiltered_output`, but
+        // ONLY when the foreground takes that pipe (`capture_can_serve`).
         let hint = detect_il3_violation("cargo test | grep FAILED").expect("should block");
         assert!(hint.starts_with("IL3 violation"), "{hint}");
         assert!(hint.contains("BACKGROUND"), "must name the case: {hint}");
@@ -7077,8 +7086,25 @@ EOF"#;
             "must offer the foreground route and what it keeps: {hint}"
         );
         assert!(
+            hint.contains("up to 4 MiB"),
+            "the capture is bounded: {hint}"
+        );
+        assert!(
             !hint.contains("unfiltered_truncated"),
             "the capped-buffer warning does not apply to a background log: {hint}"
+        );
+        // A pipe the foreground refuses too (last stage not a terminal filter): the foreground route is
+        // not offered, only the bare background run.
+        let refused_both = "cargo test | grep FAILED | cat";
+        assert!(!crate::tools::run_command::capture_can_serve(refused_both));
+        let hint = detect_il3_violation(refused_both).expect("should block");
+        assert!(
+            !hint.contains("FOREGROUND") && !hint.contains("unfiltered_output"),
+            "no route to a second refusal: {hint}"
+        );
+        assert!(
+            hint.contains("run_command(\"cargo test\", run_in_background=true)"),
+            "{hint}"
         );
     }
 

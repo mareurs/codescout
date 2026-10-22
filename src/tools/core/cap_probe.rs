@@ -1310,17 +1310,33 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
     },
     ProbeRow {
         // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test runs
-        // `seq 1 1000000 | grep 99999` (a ~6.9 MB unfiltered stream) through the real tool against
-        // `CAPTURE_STORE_LIMIT_BYTES` 4 MiB and asserts `unfiltered_truncated`, the count of the
-        // FULL capture (1,000,000), a kept count strictly between 500,000 and 1,000,000, and the
-        // truncation sentinel as the stored handle's last line. Before the limit the cut was
-        // `MAX_INLINE_TOKENS * 4` (10 KB): a 100,000-line stream kept ~2,200 lines. Marker written
-        // by production in `attachments` from the `Truncation` that `store_capture` returns.
+        // `seq 1 620000 | grep 99999` (a 4,228,895-byte unfiltered stream: over the store limit and
+        // under the capture FILE's `ulimit -f` bound, so the file holds it whole) through the real
+        // tool against `CAPTURE_STORE_LIMIT_BYTES` 4 MiB and asserts `unfiltered_truncated`, the
+        // count of the FULL capture (620,000), a kept count strictly between 600,000 and 620,000,
+        // and the truncation sentinel as the stored handle's last line. Before the limit the cut
+        // was `MAX_INLINE_TOKENS * 4` (10 KB): a 100,000-line stream kept ~2,200 lines. Marker
+        // written by production in `attachments` from the `Truncation` that `store_capture` returns.
         id: "run_command.capture_store_bytes",
         coverage: Coverage::Probed {
             marker: Marker::JsonPath("$.unfiltered_truncated"),
             mutation: Mutation::Killed,
             cited_test: "a_capture_over_the_store_limit_is_cut_and_marked",
+        },
+    },
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test writes
+        // a capture file 2 MiB over `CAPTURE_READ_LIMIT_BYTES` (5 MiB) and asserts `read_capture`
+        // returns exactly that many bytes with `cut` set, then, through `handle_successful_output`,
+        // `unfiltered_truncated` and an `unfiltered_output_lines` equal to the lines READ (a lower
+        // bound of the file's). The mutant `file.take(u64::MAX)` (the whole file read, as
+        // `read_to_string` did) fails it (2026-10-22). Marker written by production in
+        // `attachments` from the `Truncation` that `store_capture` returns.
+        id: "run_command.capture_read_bytes",
+        coverage: Coverage::Probed {
+            marker: Marker::JsonPath("$.unfiltered_truncated"),
+            mutation: Mutation::Killed,
+            cited_test: "a_capture_file_over_the_read_limit_is_read_bounded_and_flagged",
         },
     },
     ProbeRow {

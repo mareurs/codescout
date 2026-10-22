@@ -883,8 +883,8 @@ pub fn refusal_predicate(err_family: &str) -> Option<&'static str> {
             "IL-3 gate condition: a pipe is refused only when its LEFT side is unbounded AND no capture \
                  can be kept. A FOREGROUND pipe whose last stage is a terminal filter (grep, egrep, \
                  fgrep, rg, head, tail, sed, awk, cut, wc, sort, uniq, tr) and whose first top-level \
-                 pipe is followed by one plain pipeline is run through a capture until it ends, the \
-                 capture limit (4 MiB) or the timeout, and returns \
+                 pipe is followed by one plain pipeline is run through a capture (kept up to 4 MiB) \
+                 and returns \
                  `unfiltered_output`, a handle to the first command's stdout. Still refused, for \
                  example: a last stage that is not a terminal filter, a `;`/`&&`/`||`/newline list, \
                  comment or heredoc after the first pipe, a nested or `|&` pipe, a buffer ref, and \
